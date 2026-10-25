@@ -21,6 +21,7 @@ import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import { SettingsPageHeader, SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
@@ -84,9 +85,10 @@ export function ProfileHeader({
             {actions}
             <Button
               variant="outline"
-              size="sm"
               onClick={() => router.push(EXECUTORS_ROUTE)}
-              className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
+              className={settingsActionClassName(
+                "w-full cursor-pointer text-sm md:w-auto md:text-xs",
+              )}
             >
               {t("executors:backToExecutors")}
             </Button>
@@ -98,16 +100,22 @@ export function ProfileHeader({
   );
 }
 
-export function ProfileFormActions({ onDelete }: { onDelete: () => void }) {
+export function ProfileFormActions({
+  onDelete,
+  disabled = false,
+}: {
+  onDelete: () => void;
+  disabled?: boolean;
+}) {
   const { t } = useTranslation();
   const router = useRouter();
   return (
     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
       <Button
         variant="destructive"
-        size="sm"
         onClick={onDelete}
-        className="min-h-11 cursor-pointer text-sm md:min-h-7 md:text-xs"
+        disabled={disabled}
+        className={settingsActionClassName("cursor-pointer text-sm md:text-xs")}
       >
         <IconTrash className="mr-1 h-4 w-4" />
         {t("executors:deleteProfile")}
@@ -115,7 +123,7 @@ export function ProfileFormActions({ onDelete }: { onDelete: () => void }) {
       <Button
         variant="outline"
         onClick={() => router.push(EXECUTORS_ROUTE)}
-        className="min-h-11 cursor-pointer text-sm md:min-h-7 md:text-xs"
+        className={settingsActionClassName("cursor-pointer text-sm md:text-xs")}
       >
         {t("common:cancel")}
       </Button>
@@ -173,7 +181,11 @@ export function DeleteProfileDialog({
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className={settingsActionClassName("cursor-pointer")}
+          >
             {t("common:cancel")}
           </Button>
           <Button
@@ -182,7 +194,7 @@ export function DeleteProfileDialog({
               onDelete({ removeRelatedDockerContainers: shouldRemoveRelatedContainers })
             }
             disabled={deleting}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>

@@ -1,28 +1,10 @@
-import type {
-  AgentUpdateJob,
-  AgentUpdateOperation,
-  AgentUpdatePreview,
-  AgentUpdateVersion,
-} from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdateOperation, AgentUpdatePreview } from "@/lib/api";
 import { t } from "@/lib/i18n";
-
-const MAX_VISIBLE_RUNTIME_VERSIONS = 10;
-
-export function latestRuntimeVersions(versions: AgentUpdateVersion[]): AgentUpdateVersion[] {
-  return versions.slice(0, MAX_VISIBLE_RUNTIME_VERSIONS);
-}
 
 export type RuntimeVersionPair = {
   /** Display copy — localized, and therefore never compared. */
   currentVersion: string;
-  /**
-   * Whether a real version was reported. The predicate this replaced was
-   * `currentVersion !== "Unknown"`, which compared against the English
-   * placeholder; once `currentVersion` became localized that test was true in
-   * every other locale, so a missing version read as known and the update
-   * gate opened. docs/i18n.md calls this out under "Do not translate" — the
-   * flag is the state, the string is only for the user.
-   */
+  /** Version availability is state; the localized display placeholder is not. */
   hasCurrentVersion: boolean;
   targetVersion?: string;
   versionsMatch: boolean;
@@ -43,14 +25,29 @@ export function resolveRuntimeActiveVersion(
   preview: AgentUpdatePreview,
   job?: AgentUpdateJob,
 ): string | undefined {
+  if (job?.status === "succeeded" && job.operation === "use_default" && !job.active_version) {
+    return undefined;
+  }
   return job?.active_version ?? preview.active_version;
+}
+
+export function resolveRuntimeEffectiveVersion(
+  preview: AgentUpdatePreview,
+  job?: AgentUpdateJob,
+): string {
+  return (
+    job?.effective_version ??
+    preview.effective_version ??
+    resolveRuntimeActiveVersion(preview, job) ??
+    resolveRuntimeVersionPair(preview, job).currentVersion
+  );
 }
 
 export function resolveRuntimeOperation(
   preview: AgentUpdatePreview | null,
   job?: AgentUpdateJob,
 ): AgentUpdateOperation | undefined {
-  return job?.operation ?? preview?.operation;
+  return job?.operation || preview?.operation;
 }
 
 export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undefined): string {
@@ -61,6 +58,10 @@ export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undef
       return "agents:repairRuntime";
     case "up_to_date":
       return "agents:upToDateRuntime";
+    case "use_default":
+      return "agents:useKandevDefault";
+    case "migrate":
+      return "agents:upgradeOpenCodeV2";
     case "update":
     default:
       return "agents:updateRuntime";
@@ -89,11 +90,18 @@ export function canApproveAgentRuntimeUpdate({
     job,
   );
   const operation = resolveRuntimeOperation(preview, job);
-  const operationAllowsApproval = operation
+  let operationAllowsApproval = operation
     ? operation !== "up_to_date"
     : hasCurrentVersion && !versionsMatch;
+  if (preview?.update_mode === "self_update") {
+    operationAllowsApproval = operation === "update" || operation === "repair";
+  }
   return (
-    Boolean(preview && targetVersion && operationAllowsApproval) &&
+    Boolean(
+      preview &&
+      (preview.update_mode === "self_update" || targetVersion) &&
+      operationAllowsApproval,
+    ) &&
     !previewError &&
     !loading &&
     !updateInFlight &&

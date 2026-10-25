@@ -82,9 +82,10 @@ func (r *Repository) insertRepositorySetItems(
 		items[i].UpdatedAt = now
 		_, err := tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO repository_set_items (
-				id, repository_set_id, repository_id, position, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?)
-		`), items[i].ID, setID, items[i].RepositoryID, items[i].Position, now, now)
+				id, repository_set_id, repository_id, position, base_branch, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+		`), items[i].ID, setID, items[i].RepositoryID, items[i].Position,
+			items[i].BaseBranch, now, now)
 		if err != nil {
 			return err
 		}
@@ -190,7 +191,8 @@ func (r *Repository) listRepositorySetItems(
 		return itemsBySet, nil
 	}
 	query, args, err := sqlx.In(`
-		SELECT i.id, i.repository_set_id, i.repository_id, i.position, i.created_at, i.updated_at
+		SELECT i.id, i.repository_set_id, i.repository_id, i.position, i.base_branch,
+			i.created_at, i.updated_at
 		FROM repository_set_items i
 		INNER JOIN repository_sets s ON s.id = i.repository_set_id
 		INNER JOIN repositories rep ON rep.id = i.repository_id
@@ -211,7 +213,7 @@ func (r *Repository) listRepositorySetItems(
 	for rows.Next() {
 		item := models.RepositorySetItem{}
 		if err := rows.Scan(&item.ID, &item.RepositorySetID, &item.RepositoryID,
-			&item.Position, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			&item.Position, &item.BaseBranch, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		itemsBySet[item.RepositorySetID] = append(itemsBySet[item.RepositorySetID], item)
@@ -244,18 +246,33 @@ func (r *Repository) ListRepositorySetIDsByRepository(
 	return ids, rows.Err()
 }
 
-// UpdateRepositorySet writes the set's own fields and, when repositoryIDs is
+// UpdateRepositorySet writes the set's own fields and, when repositoryItems is
 // non-nil, replaces its whole membership in the SAME transaction.
 //
 // The two must commit together: a name change that lands while the membership
 // replacement fails leaves the set renamed but still holding the old
 // repositories, with the API reporting failure and publishing nothing. A nil
-// repositoryIDs leaves membership untouched, which is how an update that only
+// repositoryItems leaves membership untouched, which is how an update that only
 // changes name or description is expressed.
 func (r *Repository) UpdateRepositorySet(
 	ctx context.Context,
 	set *models.RepositorySet,
-	repositoryIDs *[]string,
+	repositoryItems *[]models.RepositorySetItem,
+) error {
+	return r.patchRepositorySet(ctx, set.ID, &models.RepositorySetPatch{
+		Name: &set.Name, Description: &set.Description, Items: repositoryItems,
+	}, &set.UpdatedAt)
+}
+
+// PatchRepositorySet changes supplied fields without rewriting omitted values
+// from a prior read. The parent UPDATE locks the row before item replacement.
+func (r *Repository) PatchRepositorySet(ctx context.Context, id string, patch *models.RepositorySetPatch) error {
+	var updatedAt time.Time
+	return r.patchRepositorySet(ctx, id, patch, &updatedAt)
+}
+
+func (r *Repository) patchRepositorySet(
+	ctx context.Context, id string, patch *models.RepositorySetPatch, updatedAt *time.Time,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -263,10 +280,20 @@ func (r *Repository) UpdateRepositorySet(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	set.UpdatedAt = time.Now().UTC()
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE repository_sets SET name = ?, description = ?, updated_at = ? WHERE id = ?
-	`), set.Name, set.Description, set.UpdatedAt, set.ID)
+	*updatedAt = time.Now().UTC()
+	assignments := []string{"updated_at = ?"}
+	args := []any{*updatedAt}
+	if patch.Name != nil {
+		assignments = append(assignments, "name = ?")
+		args = append(args, *patch.Name)
+	}
+	if patch.Description != nil {
+		assignments = append(assignments, "description = ?")
+		args = append(args, *patch.Description)
+	}
+	args = append(args, id)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(
+		`UPDATE repository_sets SET `+strings.Join(assignments, ", ")+` WHERE id = ?`), args...)
 	if err != nil {
 		return err
 	}
@@ -280,8 +307,8 @@ func (r *Repository) UpdateRepositorySet(
 		return repoerrors.ErrRepositorySetNotFound
 	}
 
-	if repositoryIDs != nil {
-		if err := r.replaceItemsTx(ctx, tx, set.ID, *repositoryIDs, set.UpdatedAt); err != nil {
+	if patch.Items != nil {
+		if err := r.replaceItemsTx(ctx, tx, id, *patch.Items, *updatedAt); err != nil {
 			return err
 		}
 	}
@@ -295,18 +322,14 @@ func (r *Repository) replaceItemsTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	setID string,
-	repositoryIDs []string,
+	repositoryItems []models.RepositorySetItem,
 	now time.Time,
 ) error {
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(
 		`DELETE FROM repository_set_items WHERE repository_set_id = ?`), setID); err != nil {
 		return err
 	}
-	items := make([]models.RepositorySetItem, 0, len(repositoryIDs))
-	for _, repositoryID := range repositoryIDs {
-		items = append(items, models.RepositorySetItem{RepositoryID: repositoryID})
-	}
-	return r.insertRepositorySetItems(ctx, tx, setID, items, now)
+	return r.insertRepositorySetItems(ctx, tx, setID, repositoryItems, now)
 }
 
 // DeleteRepositorySet removes a set and, by cascade, its membership rows. It

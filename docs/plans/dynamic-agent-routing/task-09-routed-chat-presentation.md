@@ -5,7 +5,7 @@ status: in_progress
 wave: 7
 depends_on: ["06-logical-session-integration", "08-dynamic-profile-settings"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 09: Routed chat presentation

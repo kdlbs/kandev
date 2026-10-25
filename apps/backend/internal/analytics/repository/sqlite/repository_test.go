@@ -13,10 +13,34 @@ import (
 )
 
 // createTestDB sets up a SQLite database with all required schemas for analytics queries.
-func createTestDB(t *testing.T) *sqlx.DB {
+func createTestDB(t testing.TB) *sqlx.DB {
 	t.Helper()
 	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	return createTestDBAt(t, filepath.Join(tmpDir, "test.db"))
+}
+
+// createTestDBPair returns the production-shaped writer and read-only reader
+// pools used by availability tests. The writer owns schema setup and the
+// reader has the same four-connection limit as a running instance.
+func createTestDBPair(t testing.TB) (*sqlx.DB, *sqlx.DB) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	writer := createTestDBAt(t, dbPath)
+	rawReader, err := db.OpenSQLiteReader(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite reader: %v", err)
+	}
+	reader := sqlx.NewDb(rawReader, "sqlite3")
+	reader.SetMaxOpenConns(4)
+	reader.SetMaxIdleConns(4)
+	t.Cleanup(func() { _ = reader.Close() })
+	return writer, reader
+}
+
+func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(dbPath)
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
@@ -124,7 +148,7 @@ func createTestDB(t *testing.T) *sqlx.DB {
 	);
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
+		session_id TEXT,
 		snapshot_type TEXT NOT NULL DEFAULT '',
 		files TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL
@@ -676,12 +700,12 @@ func TestGetCompletedTaskActivity_ExcludesEphemeralTasks(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-done', 'board-1', 'Done', 1, ?, ?)`, nowStr, nowStr)
 
-	// Completed task on last step with session completed_at (NOT archived — isolates session path)
-	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', 'step-done', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+	// Committed completion with session completed_at isolates the session timestamp path.
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, state, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', 'step-done', 'Regular', 'COMPLETED', 0, ?, ?)`, nowStr, nowStr)
 	// Archived task WITHOUT session completed_at — should still count using archived_at
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-archived-no-session', 'ws-1', 'board-1', 'step-done', 'Archived No Session', 0, ?, ?, ?)`, nowStr, nowStr, nowStr)
-	// Task on last step with NO archived_at and NO session completed_at — should NOT count
-	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-last-step-no-dates', 'ws-1', 'board-1', 'step-done', 'No Dates', 0, ?, ?)`, nowStr, nowStr)
+	// Committed completion without either timestamp has no activity bucket.
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, state, is_ephemeral, created_at, updated_at) VALUES ('task-last-step-no-dates', 'ws-1', 'board-1', 'step-done', 'No Dates', 'COMPLETED', 0, ?, ?)`, nowStr, nowStr)
 	// Ephemeral completed task
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?, ?)`, nowStr, nowStr, nowStr)
 

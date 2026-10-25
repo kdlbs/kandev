@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,9 @@ import (
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	"go.uber.org/zap"
 )
+
+// ErrFileNotFound identifies a file-content response with HTTP 404 status.
+var ErrFileNotFound = errors.New("file not found")
 
 // RequestFileTree requests a file tree via HTTP GET
 func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
@@ -149,6 +153,9 @@ func (c *Client) RequestFileContent(ctx context.Context, path, repo string) (*Fi
 	}
 
 	if response.Error != "" {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: file content error: %s", ErrFileNotFound, response.Error)
+		}
 		return nil, fmt.Errorf("file content error: %s", response.Error)
 	}
 

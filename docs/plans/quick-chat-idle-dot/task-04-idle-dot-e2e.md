@@ -5,7 +5,7 @@ status: complete
 wave: 3
 depends_on: ["02-ws-marking-hooks", "03-entry-point-dots"]
 plan: "plan.md"
-spec: "../../specs/quick-chat-idle-dot/spec.md"
+spec: "../../specs/ui/requirements/quick-chat-idle-dot.md"
 ---
 
 # Task 04: Idle dot E2E

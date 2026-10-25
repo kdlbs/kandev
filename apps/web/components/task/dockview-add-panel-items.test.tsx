@@ -15,18 +15,22 @@ const {
   mockAddPRPanel,
   mockAddReviewPanel,
   mockAddTodosPanel,
-  mockAddPromptHistoryPanel,
+  mockListTaskCanvases,
+  mockAddCanvasPanel,
 } = vi.hoisted(() => ({
   mockAddMRPanel: vi.fn(),
   mockAddPRPanel: vi.fn(),
   mockAddReviewPanel: vi.fn(),
   mockAddTodosPanel: vi.fn(),
-  mockAddPromptHistoryPanel: vi.fn(),
+  mockListTaskCanvases: vi.fn(),
+  mockAddCanvasPanel: vi.fn(),
 }));
 
 const mockDockviewStore = vi.hoisted(() => ({
   api: null as null | {
     getPanel: (id: string) => { params?: Record<string, unknown> } | undefined;
+    addPanel: typeof mockAddCanvasPanel;
+    groups: Array<{ id: string }>;
   },
   centerGroupId: "group-center",
   addBrowserPanel: vi.fn(),
@@ -34,7 +38,6 @@ const mockDockviewStore = vi.hoisted(() => ({
   addPlanPanel: vi.fn(),
   addPluginPanel: vi.fn(),
   addTodosPanel: mockAddTodosPanel,
-  addPromptHistoryPanel: mockAddPromptHistoryPanel,
   addChangesPanel: vi.fn(),
   addFilesPanel: vi.fn(),
   addPRPanel: mockAddPRPanel,
@@ -48,22 +51,35 @@ const SECONDARY_GROUP_ID = "group-secondary";
 const mockNormalizedReviews = vi.hoisted(() => ({
   reviews: [] as ReviewItemSummary[],
 }));
+const mockCanvasFeature = vi.hoisted(() => ({ enabled: true }));
 
 const mockAppState = vi.hoisted(() => ({
+  auth: { mode: "disabled", authenticated: false, user: null },
+  workspaceId: "workspace-1",
   workspaces: { activeId: "workspace-1" },
   tasks: { activeSessionId: "session-1", activeTaskId: null },
+  kanban: { tasks: [] },
+  taskSessionsByTask: {
+    itemsByTaskId: { "task-1": [] },
+    loadingByTaskId: {},
+    loadedByTaskId: { "task-1": true },
+  },
+  connection: { status: "connected" },
   taskPRs: { byTaskId: {} },
   taskMRs: { byWorkspaceId: {} },
   taskSessions: { items: {} },
   repositories: { itemsByWorkspaceId: {} },
   userShells: { byEnvironmentId: {} },
+  setTaskSessionsLoading: vi.fn(),
   updateUserShell: vi.fn(),
   removeUserShell: vi.fn(),
   agentProfiles: { items: [] },
 }));
+const TEST_WORKSPACE_ID = mockAppState.workspaceId;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) => selector(mockAppState),
+  useAppStoreApi: () => ({ getState: () => mockAppState }),
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -76,6 +92,14 @@ vi.mock("@/hooks/use-environment-session-id", () => ({
 
 vi.mock("@/hooks/domains/workspace/use-repository-scripts", () => ({
   useRepositoryScripts: () => ({ scripts: [] }),
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => mockCanvasFeature.enabled,
+}));
+
+vi.mock("@/lib/api/domains/canvas-api", () => ({
+  listTaskCanvases: mockListTaskCanvases,
 }));
 
 vi.mock("./review-panel-provider", () => ({
@@ -92,6 +116,7 @@ const TEST_TIMESTAMP = "2026-07-31T00:00:00Z";
 function makePR(id: string, number: number, repo = "kandev"): TaskPR {
   return {
     id,
+    workspace_id: TEST_WORKSPACE_ID,
     task_id: "task-1",
     owner: "acme",
     repo,
@@ -169,6 +194,8 @@ function makeRegisteredReview(number: number): ReviewItemSummary {
 function setOpenPanels(panels: Record<string, Record<string, unknown>>) {
   mockDockviewStore.api = {
     getPanel: (id) => (Object.hasOwn(panels, id) ? { params: panels[id] } : undefined),
+    addPanel: mockAddCanvasPanel,
+    groups: [{ id: CENTER_GROUP_ID }, { id: SECONDARY_GROUP_ID }],
   };
 }
 
@@ -208,13 +235,20 @@ async function openPRSubmenu() {
 }
 
 beforeEach(() => {
-  mockDockviewStore.api = null;
+  mockCanvasFeature.enabled = true;
+  mockDockviewStore.api = {
+    getPanel: () => undefined,
+    addPanel: mockAddCanvasPanel,
+    groups: [{ id: CENTER_GROUP_ID }, { id: SECONDARY_GROUP_ID }],
+  };
   mockNormalizedReviews.reviews = [];
+  mockListTaskCanvases.mockReset();
+  mockListTaskCanvases.mockResolvedValue({ canvases: [] });
+  mockAddCanvasPanel.mockClear();
   mockAddMRPanel.mockClear();
   mockAddPRPanel.mockClear();
   mockAddReviewPanel.mockClear();
   mockAddTodosPanel.mockClear();
-  mockAddPromptHistoryPanel.mockClear();
 });
 
 afterEach(() => cleanup());
@@ -423,7 +457,7 @@ describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
       .forPlugin("kandev-plugin-notes")
       .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
 
-    renderMenu();
+    renderMenu({ taskId: "task-1" });
     const row = screen.getByTestId("add-panel-plugin-item-kandev-plugin-notes-notes");
     expect(row.textContent).toContain("Notes");
 
@@ -434,6 +468,95 @@ describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
       "Notes",
       { groupId: CENTER_GROUP_ID },
     );
+  });
+});
+
+describe("AddPanelMenuItems — task canvases", () => {
+  it("offers an applicable canvas and opens it in the invoking dockview group", async () => {
+    mockListTaskCanvases.mockResolvedValueOnce({
+      canvases: [
+        {
+          id: "canvas-1",
+          plugin_instance_id: "instance-1",
+          plugin_id: "plugin-1",
+          workspace_id: TEST_WORKSPACE_ID,
+          task_id: "task-1",
+          scope_kind: "task",
+          title: "Release board",
+          status: "active",
+          active_release_id: "release-1",
+          active_release_status: "valid",
+        },
+      ],
+    });
+
+    renderMenu({ taskId: "task-1" }, SECONDARY_GROUP_ID);
+
+    const item = await screen.findByTestId("add-panel-canvas-item-canvas-1");
+    expect(item.textContent).toContain("Release board");
+    fireEvent.click(item);
+
+    expect(mockAddCanvasPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "canvas:canvas-1",
+        component: "canvas",
+        title: "Release board",
+        params: { canvasId: "canvas-1" },
+        position: { referenceGroup: SECONDARY_GROUP_ID },
+      }),
+    );
+  });
+
+  it("shows pending and error task canvases and omits archived canvases", async () => {
+    mockListTaskCanvases.mockResolvedValueOnce({
+      canvases: [
+        {
+          id: "pending-canvas-1",
+          plugin_instance_id: "instance-2",
+          plugin_id: "plugin-1",
+          workspace_id: TEST_WORKSPACE_ID,
+          task_id: "task-1",
+          scope_kind: "task",
+          title: "Pending board",
+          status: "pending",
+        },
+        {
+          id: "error-canvas-1",
+          plugin_instance_id: "instance-3",
+          plugin_id: "plugin-1",
+          workspace_id: TEST_WORKSPACE_ID,
+          task_id: "task-1",
+          scope_kind: "task",
+          title: "Error board",
+          status: "error",
+        },
+        {
+          id: "archived-canvas-1",
+          plugin_instance_id: "instance-4",
+          plugin_id: "plugin-1",
+          workspace_id: TEST_WORKSPACE_ID,
+          task_id: "task-1",
+          scope_kind: "task",
+          title: "Archived board",
+          status: "archived",
+        },
+      ],
+    });
+
+    renderMenu({ taskId: "task-1" });
+
+    expect(await screen.findByTestId("add-panel-canvas-item-pending-canvas-1")).toBeTruthy();
+    expect(screen.getByTestId("add-panel-canvas-item-error-canvas-1")).toBeTruthy();
+    expect(screen.queryByTestId("add-panel-canvas-item-archived-canvas-1")).toBeNull();
+  });
+
+  it("does not load or render canvases while the feature is disabled", () => {
+    mockCanvasFeature.enabled = false;
+
+    renderMenu({ taskId: "task-1" });
+
+    expect(mockListTaskCanvases).not.toHaveBeenCalled();
+    expect(screen.queryByTestId(/^add-panel-canvas-item-/)).toBeNull();
   });
 });
 
@@ -479,22 +602,6 @@ describe("AddPanelMenuItems — port forwarding preference", () => {
     expect(row.getAttribute("data-disabled")).toBe("");
     fireEvent.click(row);
     expect(togglePortForwarding).not.toHaveBeenCalled();
-  });
-});
-
-describe("AddPanelMenuItems — Prompt history", () => {
-  it("renders a row that opens the panel in the invoking group", () => {
-    renderMenu();
-    const item = screen.getByTestId("add-panel-prompt-history-item");
-    expect(item.textContent).toBe("Prompt history");
-
-    fireEvent.click(item);
-    expect(mockAddPromptHistoryPanel).toHaveBeenCalledWith({ groupId: INVOKING_GROUP });
-  });
-
-  it("hides the Prompt history row for a passthrough session", () => {
-    renderMenu({ isPassthrough: true });
-    expect(screen.queryByTestId("add-panel-prompt-history-item")).toBeNull();
   });
 });
 

@@ -14,6 +14,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Combobox } from "@/components/combobox";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 const ALL_REPOSITORIES = "__all__";
 
@@ -66,7 +67,10 @@ function SavedQueryDetails({
             placeholder={t("integrations:allRepos")}
             searchPlaceholder={t("integrations:filterRepositories")}
             emptyMessage={t("integrations:noRepositoriesFound")}
-            triggerClassName="h-11 border border-input bg-background px-3 py-2 text-sm hover:bg-secondary/50 md:h-9 md:py-1.5"
+            triggerClassName={controlSizingClassName(
+              "standard",
+              "border border-input bg-background px-3 text-sm hover:bg-secondary/50",
+            )}
             testId="integration-save-query-repository-trigger"
             dropdownTestId="integration-save-query-repository-dropdown"
           />
@@ -145,11 +149,15 @@ function SaveQueryForm({
         ) : null}
       </div>
       <DialogFooter>
-        <Button variant="outline" className="h-11 cursor-pointer md:h-9" onClick={onClose}>
+        <Button
+          variant="outline"
+          className={controlSizingClassName("standard", "cursor-pointer")}
+          onClick={onClose}
+        >
           {t("common:cancel")}
         </Button>
         <Button
-          className="h-11 cursor-pointer md:h-9"
+          className={controlSizingClassName("standard", "cursor-pointer")}
           disabled={!trimmedLabel || saving}
           onClick={() => void handleSave()}
         >

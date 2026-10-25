@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/dev-preview-title-prefixes/spec.md"
+spec: "../../specs/platform/requirements/dev-preview-title-prefixes.md"
 ---
 
 # Task 01: Separate debug profile selector

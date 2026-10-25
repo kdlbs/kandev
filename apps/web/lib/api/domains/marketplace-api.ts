@@ -8,6 +8,7 @@ export type CatalogQuery = {
   q?: string;
   category?: string;
   sort?: "stars" | "name" | "recent";
+  kind?: "plugin" | "canvas";
 };
 
 function toQueryString(query?: CatalogQuery): string {
@@ -16,6 +17,7 @@ function toQueryString(query?: CatalogQuery): string {
   if (query.q) params.set("q", query.q);
   if (query.category) params.set("category", query.category);
   if (query.sort) params.set("sort", query.sort);
+  if (query.kind) params.set("kind", query.kind);
   const s = params.toString();
   return s ? `?${s}` : "";
 }
@@ -32,7 +34,11 @@ export async function getMarketplaceCatalog(
     ...options,
     cache: "no-store",
   });
-  return { plugins: res.plugins ?? [], sources: res.sources ?? [] };
+  return {
+    plugins: res.plugins ?? [],
+    ...(res.canvases ? { canvases: res.canvases } : {}),
+    sources: res.sources ?? [],
+  };
 }
 
 // listMarketplaceSources returns every configured source, built-in first

@@ -5,7 +5,7 @@ status: done
 wave: 9
 depends_on: ["08-dynamic-policy-settings-ui", "09-recovery-presentation"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 10: Policy end-to-end coverage

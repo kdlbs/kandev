@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["dynamic-routing-blockers-02", "dynamic-routing-blockers-03"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing-rollout-blockers.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing-rollout-blockers.md"
 ---
 
 # Task 04: Settings and picker contract

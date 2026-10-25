@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 01: Return the updated GitHub review watch
@@ -39,7 +39,7 @@ Sequential.
 
 ## Inputs
 
-- `docs/specs/ui/settings-manual-save.md`
+- `docs/specs/ui/requirements/settings-manual-save.md`
 - `docs/plans/integration-watcher-save-state/plan.md`
 - Existing `httpUpdateIssueWatch` response pattern
 

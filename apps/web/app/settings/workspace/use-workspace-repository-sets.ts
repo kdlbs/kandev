@@ -11,14 +11,21 @@ import type { RepositorySet } from "@/lib/types/http";
 /**
  * An in-progress set edit. `setId` is null while creating.
  *
- * `repositoryIds` is ordered, and that order is what applying the set will use,
- * so the editor's selection order is meaningful rather than incidental.
+ * `members` is ordered, and that order is what applying the set will use, so
+ * the editor's order is meaningful rather than incidental. A member's base is
+ * optional; an empty value means that task creation should use its normal
+ * default for that repository.
  */
+export type RepositorySetDraftMember = {
+  repositoryId: string;
+  baseBranch: string;
+};
+
 export type RepositorySetDraft = {
   setId: string | null;
   name: string;
   description: string;
-  repositoryIds: string[];
+  members: RepositorySetDraftMember[];
 };
 
 /**
@@ -39,7 +46,7 @@ export function useWorkspaceRepositorySets({ workspaceId }: { workspaceId: strin
 
   const startCreate = useCallback(() => {
     setError(null);
-    setDraft({ setId: null, name: "", description: "", repositoryIds: [] });
+    setDraft({ setId: null, name: "", description: "", members: [] });
   }, []);
 
   const startEdit = useCallback((set: RepositorySet) => {
@@ -48,7 +55,10 @@ export function useWorkspaceRepositorySets({ workspaceId }: { workspaceId: strin
       setId: set.id,
       name: set.name,
       description: set.description,
-      repositoryIds: set.repositories.map((member) => member.repository_id as string),
+      members: set.repositories.map((member) => ({
+        repositoryId: member.repository_id as string,
+        baseBranch: member.base_branch ?? "",
+      })),
     });
   }, []);
 
@@ -64,22 +74,26 @@ export function useWorkspaceRepositorySets({ workspaceId }: { workspaceId: strin
   const submitDraft = useCallback(async () => {
     if (!draft || saving) return;
     const name = draft.name.trim();
-    if (!name || draft.repositoryIds.length === 0) return;
+    if (!name || draft.members.length === 0) return;
     setSaving(true);
     setError(null);
     try {
-      // A supplied repository_ids replaces the whole membership list, which is
-      // also how the editor expresses a reorder.
+      // A supplied repositories list replaces the whole membership list, which
+      // is also how the editor expresses a reorder and base change.
+      const repositories = draft.members.map((member) => ({
+        repositoryId: member.repositoryId,
+        baseBranch: member.baseBranch,
+      }));
       const saved = draft.setId
         ? await updateRepositorySet(draft.setId, {
             name,
             description: draft.description.trim(),
-            repositoryIds: draft.repositoryIds,
+            repositories,
           })
         : await createRepositorySet(workspaceId, {
             name,
             description: draft.description.trim(),
-            repositoryIds: draft.repositoryIds,
+            repositories,
           });
       upsertRepositorySet(workspaceId, saved);
       setDraft(null);

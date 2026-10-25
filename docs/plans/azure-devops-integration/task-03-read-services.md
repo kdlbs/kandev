@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-workspace-configuration", "02-rest-client"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 03: Work-Item And PR Read Services

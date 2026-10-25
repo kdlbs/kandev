@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createGitLabSlice } from "./gitlab-slice";
 import type { GitLabSlice } from "./types";
-import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type { GitLabStatus, TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
@@ -49,12 +49,25 @@ function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAu
     review_reviewer_username: "",
     updated_at: "2026-01-01T00:00:00Z",
     mr_states: [],
+    mr_options: [],
+    ...overrides,
+  };
+}
+
+function makeStatus(overrides: Partial<GitLabStatus> = {}): GitLabStatus {
+  return {
+    authenticated: true,
+    username: "alice",
+    auth_method: "pat",
+    host: "https://gitlab.example",
+    token_configured: true,
+    required_scopes: [],
     ...overrides,
   };
 }
 
 function makeStore() {
-  return create<GitLabSlice>()(immer((...a) => createGitLabSlice(...a)));
+  return create<GitLabSlice>()(immer((set, get) => createGitLabSlice(set, get)));
 }
 
 function workspaceMRs(store: ReturnType<typeof makeStore>, workspaceId = "ws-1") {
@@ -191,6 +204,35 @@ describe("resetTaskMRs", () => {
   });
 });
 
+describe("GitLab status", () => {
+  it("keeps status and loading state isolated by workspace", () => {
+    const store = makeStore();
+    const workspaceAStatus = makeStatus();
+
+    store.getState().setGitLabStatus("ws-a", workspaceAStatus);
+    store.getState().setGitLabStatusLoading("ws-b", true);
+
+    expect(store.getState().gitlabStatus.byWorkspaceId).toEqual({
+      "ws-a": { data: workspaceAStatus, loading: false, loadedAt: expect.any(Number) },
+      "ws-b": { data: null, loading: true, loadedAt: null },
+    });
+  });
+
+  it("resets one workspace status without affecting another", () => {
+    const store = makeStore();
+    store.getState().setGitLabStatus("ws-a", makeStatus());
+    store.getState().setGitLabStatusLoading("ws-a", true);
+    store.getState().setGitLabStatus("ws-b", makeStatus());
+
+    store.getState().resetGitLabStatus("ws-a");
+
+    expect(store.getState().gitlabStatus.byWorkspaceId).toEqual({
+      "ws-a": { data: null, loading: false, loadedAt: null },
+      "ws-b": { data: expect.any(Object), loading: false, loadedAt: expect.any(Number) },
+    });
+  });
+});
+
 describe("removeTaskMR", () => {
   it("removes only the selected association", () => {
     const store = makeStore();
@@ -283,14 +325,6 @@ describe("action presets + stats", () => {
     };
     store.getState().setGitLabActionPresets("ws-1", presets);
     expect(store.getState().gitlabActionPresets.byWorkspaceId["ws-1"]).toEqual(presets);
-
-    store.getState().setGitLabStats({
-      open_mrs: 5,
-      mrs_awaiting_my_review: 2,
-      open_issues_assigned_me: 3,
-    });
-    expect(store.getState().gitlabStats.data?.open_mrs).toBe(5);
-    expect(store.getState().gitlabStats.loadedAt).not.toBeNull();
   });
 });
 

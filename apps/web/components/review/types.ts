@@ -1,10 +1,23 @@
 import { djb2Hash } from "@/lib/utils/hash";
 import { t } from "@/lib/i18n";
 import type { FileChangeStatus } from "@/lib/utils/file-change-status";
+import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
+
+export type ReviewChangeFacet = {
+  diff: string;
+  diff_state?: "pending" | "ready" | "unavailable";
+  status: FileChangeStatus;
+  additions: number;
+  deletions: number;
+  old_path?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  display_stale?: boolean;
+};
 
 export type ReviewFile = {
   path: string;
   diff: string;
+  diff_state?: "pending" | "ready" | "unavailable";
   status: FileChangeStatus;
   additions: number;
   deletions: number;
@@ -12,6 +25,14 @@ export type ReviewFile = {
   source: "uncommitted" | "committed" | "pr";
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  /** The rendered patch or counts come from the previous accepted snapshot. */
+  display_stale?: boolean;
+  /** Source target identity used to retire renderer state across replacement. */
+  display_scope_key?: string;
+  staged_change?: ReviewChangeFacet;
+  unstaged_change?: ReviewChangeFacet;
+  /** Frontend-only layer selected from a mixed uncommitted file. */
+  change_layer?: GitChangeLayer;
   /**
    * Repository this file belongs to. Set on multi-repo task changes so the
    * file tree groups files under per-repo top-level nodes. Optional for
@@ -26,6 +47,12 @@ export type ReviewFile = {
   is_submodule?: boolean;
 };
 
+export function isReviewFileDetailReady(
+  file: Pick<ReviewFile, "diff_state" | "display_stale">,
+): boolean {
+  return !file.display_stale && file.diff_state !== "pending" && file.diff_state !== "unavailable";
+}
+
 /**
  * Composite per-file key used by the review dialog's in-memory state
  * (reviewed set, stale set, file refs, selected file, comment counts) and
@@ -35,13 +62,22 @@ export type ReviewFile = {
  * keep the legacy bare-path key for backwards compatibility with existing
  * `session_file_reviews` rows. An explicit empty name represents the real
  * workspace root in a multi-repo payload and therefore keeps the separator.
+ * Layer-qualified mixed changes append a double-NUL marker plus the layer;
+ * the doubled marker cannot collide with a legacy repository/path key.
  */
 const FILE_KEY_SEP = "\u0000";
+const FILE_LAYER_KEY_SEP = `${FILE_KEY_SEP}${FILE_KEY_SEP}`;
 
-export function reviewFileKey(file: { path: string; repository_name?: string }): string {
-  return file.repository_name === undefined
-    ? file.path
-    : `${file.repository_name}${FILE_KEY_SEP}${file.path}`;
+export function reviewFileKey(file: {
+  path: string;
+  repository_name?: string;
+  change_layer?: GitChangeLayer;
+}): string {
+  const baseKey =
+    file.repository_name === undefined
+      ? file.path
+      : `${file.repository_name}${FILE_KEY_SEP}${file.path}`;
+  return file.change_layer ? `${baseKey}${FILE_LAYER_KEY_SEP}${file.change_layer}` : baseKey;
 }
 
 /** Mirrors backend `worktree.SanitizeRepoDirName`, which defines the
@@ -124,10 +160,21 @@ export function getCumulativeReviewRepositoryNames(
   return Array.from(names);
 }
 
-export function splitReviewFileKey(key: string): { repositoryName: string; path: string } {
-  const sep = key.indexOf(FILE_KEY_SEP);
-  if (sep < 0) return { repositoryName: "", path: key };
-  return { repositoryName: key.slice(0, sep), path: key.slice(sep + 1) };
+export function splitReviewFileKey(key: string): {
+  repositoryName: string;
+  path: string;
+  changeLayer?: GitChangeLayer;
+} {
+  const layerSep = key.lastIndexOf(FILE_LAYER_KEY_SEP);
+  const layer = layerSep < 0 ? undefined : key.slice(layerSep + FILE_LAYER_KEY_SEP.length);
+  const changeLayer = layer === "staged" || layer === "unstaged" ? layer : undefined;
+  const baseKey = changeLayer ? key.slice(0, layerSep) : key;
+  const sep = baseKey.indexOf(FILE_KEY_SEP);
+  const identity =
+    sep < 0
+      ? { repositoryName: "", path: baseKey }
+      : { repositoryName: baseKey.slice(0, sep), path: baseKey.slice(sep + 1) };
+  return changeLayer ? { ...identity, changeLayer } : identity;
 }
 
 export function diffSkipReasonLabel(reason?: string): string {

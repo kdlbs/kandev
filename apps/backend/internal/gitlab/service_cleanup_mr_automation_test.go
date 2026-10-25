@@ -18,11 +18,9 @@ func TestDeleteReviewMRTaskIfTerminal_RetainsWhenLifecyclePromptsEnabled(t *test
 	mock.SeedMR(project, &MR{IID: 7, State: gitlabStateMerged})
 	seedTask(t, svc.store, "task-subscribed", "")
 
-	if _, err := svc.store.UpdateTaskMRAutomationOptions(ctx, "task-subscribed", TaskMRAutomationPatch{
+	setMRSwitches(t, svc.store, "task-subscribed", mrIdentity(project, 7), TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch: %v", err)
-	}
+	})
 
 	rec := &recordingReasonDeleter{}
 	task := &ReviewMRTask{ID: "rmt-1", ProjectPath: project, MRIID: 7, TaskID: "task-subscribed"}
@@ -47,11 +45,9 @@ func TestDeleteReviewMRTaskIfTerminal_AlwaysPolicyIgnoresLifecyclePrompts(t *tes
 	mock.SeedMR(project, &MR{IID: 7, State: gitlabStateMerged})
 	seedTask(t, svc.store, "task-subscribed", "")
 
-	if _, err := svc.store.UpdateTaskMRAutomationOptions(ctx, "task-subscribed", TaskMRAutomationPatch{
+	setMRSwitches(t, svc.store, "task-subscribed", mrIdentity(project, 7), TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch: %v", err)
-	}
+	})
 
 	rec := &recordingReasonDeleter{}
 	task := &ReviewMRTask{ID: "rmt-1", ProjectPath: project, MRIID: 7, TaskID: "task-subscribed"}

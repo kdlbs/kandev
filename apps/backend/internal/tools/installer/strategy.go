@@ -7,10 +7,11 @@ const installSubcommand = "install"
 // CommandSpec describes a command that an install strategy needs to run.
 // The runner decides how the process tree is owned and reaped.
 type CommandSpec struct {
-	Path string
-	Args []string
-	Dir  string
-	Env  map[string]string
+	Path     string
+	Args     []string
+	Dir      string
+	Env      map[string]string
+	StripEnv []string
 }
 
 // CommandRunner exposes the task environment and runs installer subprocesses.

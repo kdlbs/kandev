@@ -5,6 +5,7 @@ const archiveTaskById = vi.fn();
 const deleteTaskById = vi.fn();
 const archiveAndSwitch = vi.fn();
 const removeTaskFromBoard = vi.fn();
+const runTaskRemovalBatch = vi.fn();
 const removeTasksFromStore = vi.fn();
 const getWorkflowIdForTask = vi.fn();
 const moveTasks = vi.fn();
@@ -15,7 +16,10 @@ vi.mock("./use-task-actions", () => ({
   useTaskActions: () => ({ archiveTaskById, deleteTaskById }),
   useArchiveAndSwitchTask: () => archiveAndSwitch,
 }));
-vi.mock("./use-task-removal", () => ({ useTaskRemoval: () => ({ removeTaskFromBoard }) }));
+vi.mock("./use-task-removal", () => ({
+  useTaskRemovalSuccessNotifier: () => vi.fn(),
+  useTaskRemoval: () => ({ removeTaskFromBoard, runTaskRemovalBatch }),
+}));
 vi.mock("./use-task-workflow-move", () => ({ useTaskWorkflowMove: () => moveTasks }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/components/state-provider", () => ({
@@ -39,6 +43,29 @@ beforeEach(() => {
   deleteTaskById.mockReset().mockResolvedValue(undefined);
   archiveAndSwitch.mockReset().mockResolvedValue(undefined);
   removeTaskFromBoard.mockReset().mockResolvedValue(undefined);
+  runTaskRemovalBatch
+    .mockReset()
+    .mockImplementation(
+      async (_action: string, requests: Array<{ taskId: string; mutate: () => Promise<void> }>) => {
+        const results = await Promise.allSettled(requests.map((request) => request.mutate()));
+        const errorsByTaskId: Record<string, unknown> = {};
+        results.forEach((result, index) => {
+          if (result.status === "rejected") errorsByTaskId[requests[index].taskId] = result.reason;
+        });
+        return {
+          skipped: false,
+          operationToken: "removal-1",
+          switchedTaskId: null,
+          succeededTaskIds: requests
+            .filter((_, index) => results[index].status === "fulfilled")
+            .map((request) => request.taskId),
+          failedTaskIds: requests
+            .filter((_, index) => results[index].status === "rejected")
+            .map((request) => request.taskId),
+          errorsByTaskId,
+        };
+      },
+    );
   removeTasksFromStore.mockReset();
   getWorkflowIdForTask.mockReset().mockReturnValue("wf1");
   moveTasks.mockReset().mockResolvedValue(undefined);
@@ -141,16 +168,23 @@ describe("useSidebarMultiSelect — bulk archive", () => {
     });
   });
 
-  it("bulkArchive routes the active task through the switch-aware path", async () => {
+  it("bulkArchive protects the active task in the shared batch", async () => {
     activeTaskId = "a";
     const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
     await act(async () => {
       await result.current.bulkArchive(["a", "b"]);
     });
-    expect(archiveAndSwitch).toHaveBeenCalledWith("a", undefined);
-    expect(archiveTaskById).toHaveBeenCalledTimes(1);
-    expect(archiveTaskById).toHaveBeenCalledWith("b", undefined);
-    expect(removeTasksFromStore).toHaveBeenCalledWith(new Set(["b"]));
+    expect(runTaskRemovalBatch).toHaveBeenCalledWith(
+      "archive",
+      expect.arrayContaining([
+        { taskId: "a", mutate: expect.any(Function) },
+        { taskId: "b", mutate: expect.any(Function) },
+      ]),
+      { cascade: undefined },
+    );
+    expect(archiveTaskById).toHaveBeenCalledTimes(2);
+    expect(archiveAndSwitch).not.toHaveBeenCalled();
+    expect(removeTasksFromStore).toHaveBeenCalledWith(new Set(["a", "b"]));
   });
 
   it("bulkArchive ignores an empty id list", async () => {
@@ -201,19 +235,23 @@ describe("useSidebarMultiSelect — bulk delete", () => {
     });
   });
 
-  it("bulkDelete routes the active task through the switch-aware removal", async () => {
+  it("bulkDelete protects the active task in the shared batch", async () => {
     activeTaskId = "a";
     const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
     await act(async () => {
       await result.current.bulkDelete(["a", "b"]);
     });
-    // 'b' deleted directly; 'a' (active) deleted then removed-from-board to switch.
+    expect(runTaskRemovalBatch).toHaveBeenCalledWith(
+      "delete",
+      expect.arrayContaining([
+        { taskId: "a", mutate: expect.any(Function) },
+        { taskId: "b", mutate: expect.any(Function) },
+      ]),
+      { cascade: undefined },
+    );
     expect(deleteTaskById).toHaveBeenCalledWith("b", undefined);
     expect(deleteTaskById).toHaveBeenCalledWith("a", undefined);
-    expect(removeTaskFromBoard).toHaveBeenCalledWith(
-      "a",
-      expect.objectContaining({ wasActiveTaskId: "a" }),
-    );
+    expect(removeTaskFromBoard).not.toHaveBeenCalled();
   });
 });
 

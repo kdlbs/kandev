@@ -53,6 +53,7 @@ type MR struct {
 	HeadBranch             string       `json:"head_branch"`
 	HeadSHA                string       `json:"head_sha"`
 	BaseBranch             string       `json:"base_branch"`
+	BaseSHA                string       `json:"base_sha"`
 	AuthorUsername         string       `json:"author_username"`
 	ProjectNamespace       string       `json:"project_namespace"`
 	ProjectPath            string       `json:"project_path"`
@@ -349,6 +350,7 @@ type Issue struct {
 	ProjectPath      string     `json:"project_path"`
 	Labels           []string   `json:"labels"`
 	Assignees        []string   `json:"assignees"`
+	Milestone        string     `json:"milestone,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`
@@ -379,7 +381,9 @@ type TaskMR struct {
 	MRURL             string `json:"mr_url" db:"mr_url"`
 	MRTitle           string `json:"mr_title" db:"mr_title"`
 	HeadBranch        string `json:"head_branch" db:"head_branch"`
+	HeadSHA           string `json:"head_sha" db:"head_sha"`
 	BaseBranch        string `json:"base_branch" db:"base_branch"`
+	BaseSHA           string `json:"base_sha" db:"base_sha"`
 	AuthorUsername    string `json:"author_username" db:"author_username"`
 	State             string `json:"state" db:"state"`                   // open, closed, merged, locked
 	ApprovalState     string `json:"approval_state" db:"approval_state"` // approved, pending, ""

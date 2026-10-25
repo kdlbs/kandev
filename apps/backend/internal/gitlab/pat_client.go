@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 const (
@@ -262,17 +264,17 @@ func (c *PATClient) SearchMRsPaged(ctx context.Context, filter, customQuery stri
 	}, nil
 }
 
-func (c *PATClient) ListIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
-	page, err := c.ListIssuesPaged(ctx, filter, customQuery, defaultPageStart, defaultPageSize)
+func (c *PATClient) ListIssues(ctx context.Context, filter, customQuery, milestone string) ([]*Issue, error) {
+	page, err := c.ListIssuesPaged(ctx, filter, customQuery, milestone, defaultPageStart, defaultPageSize)
 	if err != nil {
 		return nil, err
 	}
 	return page.Issues, nil
 }
 
-func (c *PATClient) ListIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
+func (c *PATClient) ListIssuesPaged(ctx context.Context, filter, customQuery, milestone string, page, perPage int) (*IssueSearchPage, error) {
 	page, perPage = clampSearchPage(page, perPage)
-	query := buildIssueSearchQuery(filter, customQuery)
+	query := buildIssueSearchQuery(filter, customQuery, milestone)
 	endpoint := fmt.Sprintf("/issues?%s&page=%d&per_page=%d", query, page, perPage)
 	var raw []rawIssue
 	total, err := c.getWithTotal(ctx, endpoint, &raw)
@@ -560,7 +562,7 @@ func (c *PATClient) ListMRFiles(ctx context.Context, projectPath string, iid int
 	}
 	files := make([]MRFile, len(raw.Changes))
 	for i, ch := range raw.Changes {
-		additions, deletions := countDiffLines(ch.Diff)
+		additions, deletions := unidiff.CountLines(ch.Diff)
 		files[i] = MRFile{
 			Filename:  ch.NewPath,
 			Status:    diffStatus(ch.NewFile, ch.DeletedFile, ch.RenamedFile),

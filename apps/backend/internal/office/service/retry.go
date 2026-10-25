@@ -6,8 +6,11 @@ import (
 	"math/rand"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -24,9 +27,14 @@ var retryDelays = []time.Duration{
 
 // HandleRunFailure handles a failed run by scheduling a retry or
 // marking it as permanently failed and escalating to the CEO agent.
+// A launch-validation failure is never retried: the next attempt would build
+// the same command and leave another failed session.
 func (s *Service) HandleRunFailure(
-	ctx context.Context, run *models.Run, runErr error,
+	ctx context.Context, run *runsmodels.Run, runErr error,
 ) error {
+	if routingerr.IsBuiltCommandValidationError(runErr) {
+		return s.escalateFailure(ctx, run, runErr)
+	}
 	if run.RetryCount < MaxRetryCount {
 		errMsg := ""
 		if runErr != nil {
@@ -43,7 +51,7 @@ func (s *Service) HandleRunFailure(
 }
 
 // scheduleRetry re-queues the run with exponential backoff + jitter.
-func (s *Service) scheduleRetry(ctx context.Context, run *models.Run) error {
+func (s *Service) scheduleRetry(ctx context.Context, run *runsmodels.Run) error {
 	if stale, reason := isRetryStale(run); stale {
 		return s.cancelRetry(ctx, run, reason)
 	}
@@ -65,7 +73,7 @@ func (s *Service) scheduleRetry(ctx context.Context, run *models.Run) error {
 // logging the source and the parsed reset time for observability.
 func (s *Service) scheduleRetryAt(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	retryAt time.Time,
 	source string,
 ) error {
@@ -88,21 +96,30 @@ func (s *Service) scheduleRetryAt(
 const retryMaxAge = 24 * time.Hour
 
 // isRetryStale returns (true, reason) when retrying the run would be pointless.
-func isRetryStale(run *models.Run) (bool, string) {
+func isRetryStale(run *runsmodels.Run) (bool, string) {
 	if time.Since(run.RequestedAt) > retryMaxAge {
 		return true, "run_too_old"
 	}
 	return false, ""
 }
 
-// cancelRetry cancels a run that is too stale to retry.
-func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason string) error {
+// cancelRetry cancels a run that is too stale to retry. Terminal-shape
+// recording and the OfficeRunProcessed broadcast only happen when the
+// cancel actually applied: a run another writer already finished or
+// failed must not be reported to subscribers as cancelled.
+func (s *Service) cancelRetry(ctx context.Context, run *runsmodels.Run, reason string) error {
 	s.logger.Info("cancelling stale run retry",
 		zap.String("run_id", run.ID),
 		zap.String("reason", reason))
-	if err := s.repo.CancelRun(ctx, run.ID, reason); err != nil {
+	cancelled, err := s.repo.CancelRun(ctx, run.ID, reason)
+	if err != nil {
 		return err
 	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if !cancelled {
+		return nil
+	}
+	s.recordTerminalShape(ctx, run, RunStatusCancelled, nil)
 	s.publishRunProcessed(ctx, run.ID, RunStatusCancelled, run)
 	return nil
 }
@@ -110,10 +127,18 @@ func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason strin
 // escalateFailure marks the run as permanently failed, logs an inbox
 // item, and queues an agent_error run for the CEO agent.
 func (s *Service) escalateFailure(
-	ctx context.Context, run *models.Run, runErr error,
+	ctx context.Context, run *runsmodels.Run, runErr error,
 ) error {
-	if err := s.FailRun(ctx, run.ID); err != nil {
+	wrote, err := s.FailRun(ctx, run.ID)
+	if err != nil {
 		return fmt.Errorf("fail run: %w", err)
+	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if !wrote {
+		// Already terminal via another writer (e.g. a concurrent cancel)
+		// between the retry decision and this write — nothing left to
+		// escalate (Review round 3, R3-1).
+		return nil
 	}
 
 	agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID)
@@ -146,23 +171,76 @@ func (s *Service) escalateFailure(
 	return nil
 }
 
-// queueCEOAgentError finds the CEO agent in the workspace and queues
-// an agent_error run for it.
+// failRunNoEscalation performs escalateFailure's non-escalating half for a
+// budget-admission fault (AC-OFFICE-BUDGET-001.17/-006.4): it marks the run
+// permanently failed and records one operator-visible activity entry
+// naming cause, but does not re-fetch the agent and does not call
+// queueCEOAgentError. A run failed by a budget-admission fault must not
+// queue any new run, by any path.
+func (s *Service) failRunNoEscalation(
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
+	cause budgetDeferralCause, policyID string,
+) error {
+	wrote, err := s.FailRun(ctx, run.ID)
+	if err != nil {
+		return fmt.Errorf("fail run: %w", err)
+	}
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if !wrote {
+		// Already terminal via another writer (e.g. a concurrent cancel)
+		// between the budget decision and this write — nothing left to
+		// report (Review round 3, R3-1).
+		return nil
+	}
+
+	fields := map[string]string{activityFieldCeiling: ceilingNotDetermined}
+	if policyID != "" {
+		fields["policy_id"] = policyID
+	}
+	s.LogActivityWithRun(ctx, agent.WorkspaceID, "system", "scheduler",
+		cause.failedAction(), "agent", run.AgentProfileID,
+		mustJSON(fields), run.ID, "")
+
+	s.logger.Warn("run permanently failed by budget admission fault",
+		zap.String("run_id", run.ID),
+		zap.String("agent", agent.Name),
+		zap.Int("retry_count", run.RetryCount))
+	return nil
+}
+
+// queueCEOAgentError finds the CEO agent in the workspace and queues an
+// agent_error run for it. When the failing run's agent IS the CEO, the
+// escalation is skipped rather than re-queuing the CEO to handle its own
+// failure — the run failure and inbox activity are already recorded by the
+// caller, so skipping here loses no visibility, only the self-escalation
+// loop.
 func (s *Service) queueCEOAgentError(
 	ctx context.Context, agent *models.AgentInstance,
-	run *models.Run, errMsg string,
+	run *runsmodels.Run, errMsg string,
 ) {
 	ceos, err := s.ListAgentInstancesFiltered(ctx, agent.WorkspaceID,
 		AgentListFilter{Role: string(models.AgentRoleCEO)})
 	if err != nil || len(ceos) == 0 {
 		return
 	}
+	if run.AgentProfileID == ceos[0].ID {
+		s.logger.Warn("skipped agent_error self-escalation for CEO's own failure",
+			zap.String("run_id", run.ID),
+			zap.String("ceo_agent_id", ceos[0].ID))
+		return
+	}
 	payload := mustJSON(map[string]string{
-		"agent_profile_id": run.AgentProfileID,
-		"run_id":           run.ID,
-		"error":            errMsg,
+		"failed_agent_id":   run.AgentProfileID,
+		"failed_session_id": run.SessionID,
+		"run_id":            run.ID,
+		"error":             errMsg,
 	})
-	_ = s.QueueRun(ctx, ceos[0].ID, RunReasonAgentError, payload, "")
+	// The failed run's own id makes this occurrence identity: one escalation
+	// per failed run per CEO, but a later run by the same agent that also
+	// fails escalates again instead of being silently swallowed by a
+	// permanently-unique-per-pair key.
+	key := fmt.Sprintf("agent_error:%s:%s", run.ID, ceos[0].ID)
+	_, _ = s.QueueRun(ctx, ceos[0].ID, RunReasonAgentError, payload, key)
 }
 
 // retryDelayWithJitter returns the base delay for a given retry index

@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -16,6 +18,15 @@ import (
 type processManager interface {
 	CloseAdmission()
 	StopForTeardown(context.Context) error
+	// WorkspaceSourceRoots returns the live, current source-root allowlist a
+	// rescan/rebind may have changed since creation (AC-EXECUTORS-SURVIVAL-
+	// 002.14's "workspace source roots" reconstruction row).
+	WorkspaceSourceRoots() []string
+	// GetSessionID returns the provider's own session identity, held by the
+	// live adapter (AC-EXECUTORS-SURVIVAL-002.14's "provider session
+	// identity" reconstruction row). Empty before the agent's session/new or
+	// session/load completes.
+	GetSessionID() string
 }
 
 // Instance represents a single agent instance running as a subprocess.
@@ -26,6 +37,11 @@ type Instance struct {
 
 	// Port is the HTTP port this instance is listening on
 	Port int
+
+	lease PortLease
+
+	listenerActive atomic.Bool
+	listenerDone   chan struct{}
 
 	// Status is the current status of the instance (e.g., "running", "stopped", "error")
 	Status string
@@ -41,6 +57,13 @@ type Instance struct {
 
 	// CreatedAt is the timestamp when this instance was created
 	CreatedAt time.Time
+
+	// SessionID is the task session ID this instance was created for, if any.
+	// Used to correlate a recovered instance back to its owning session.
+	SessionID string
+
+	// TaskID is the task ID this instance was created for, if any.
+	TaskID string
 
 	// manager is the process manager handling the agent subprocess (unexported)
 	manager processManager
@@ -64,6 +87,11 @@ type Instance struct {
 	stopMu           sync.Mutex
 	statusMu         sync.RWMutex
 	portReleased     bool
+
+	// turnOutcome holds this instance's single retained last-terminal-turn
+	// slot (AC-EXECUTORS-SURVIVAL-004.1/.6). Zero value is ready to use --
+	// no outcome retained.
+	turnOutcome turnOutcomeState
 }
 
 // MarkActivity stamps the current time as the most recent activity on this
@@ -103,13 +131,16 @@ func (i *Instance) IsIdle(now time.Time, timeout time.Duration) bool {
 
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
-	Name    string            `json:"name"`
-	URL     string            `json:"url,omitempty"`
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Name               string                          `json:"name"`
+	URL                string                          `json:"url,omitempty"`
+	Type               string                          `json:"type,omitempty"`
+	Command            string                          `json:"command,omitempty"`
+	Args               []string                        `json:"args,omitempty"`
+	Env                map[string]string               `json:"env,omitempty"`
+	Headers            map[string]string               `json:"headers,omitempty"`
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // CreateRequest contains the parameters for creating a new agent instance.
@@ -123,8 +154,13 @@ type CreateRequest struct {
 	// AgentCommand is an optional command to start the agent. If empty, a default is used.
 	AgentCommand string `json:"agent_command,omitempty"`
 
-	// Protocol is the protocol adapter to use (acp, codex, auggie). If empty, default is used.
+	// Protocol is the protocol adapter to use (acp). If empty, default is used.
 	Protocol string `json:"protocol,omitempty"`
+
+	// CodexAppServerEnabled is an explicit backend decision for native Codex
+	// instances. The control API defaults to disabled so callers cannot select
+	// this protocol by supplying only a protocol string.
+	CodexAppServerEnabled bool `json:"codex_app_server_enabled,omitempty"`
 
 	// AgentType identifies the agent (e.g., "auggie", "codex", "claude-code").
 	// Required for debug file naming. Typically matches the agent ID from the registry.
@@ -162,12 +198,17 @@ type CreateRequest struct {
 	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
 	AssumeMcpHttp bool `json:"assume_mcp_http,omitempty"`
 
-	// McpMode controls which MCP tools are registered: "task" (default), "config", or "office".
+	// McpMode controls which MCP tools are registered: "task" (default),
+	// "task-title-pending", "config", "office", or "automation".
 	McpMode string `json:"mcp_mode,omitempty"`
 
 	// McpProviders limits task-mode review automation tools to attached providers.
 	McpProviders []string            `json:"mcp_providers,omitempty"`
 	McpProfile   *mcpprofile.Context `json:"mcp_profile,omitempty"`
+
+	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
+	// clients that append the injected server name to every tool.
+	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
 
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
@@ -179,16 +220,24 @@ type CreateRequest struct {
 	// process environment entirely (not just set to empty).
 	StripEnv []string `json:"strip_env,omitempty"`
 
+	// ProviderGatewayAuth, when set, authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
 	// Each WorkspaceTracker reads its entry at startup and uses it as the
 	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
 	// disables the override.
-	BaseBranches             map[string]string                         `json:"base_branches,omitempty"`
-	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
-	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
-	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
-	WorkspaceSourceRoots     []string                                  `json:"workspace_source_roots,omitempty"`
+	BaseBranches              map[string]string                         `json:"base_branches,omitempty"`
+	ComparisonTargets         map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
+	RemoteContributions       map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
+	ContributionDestinations  map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
+	WorkspaceSourceRoots      []string                                  `json:"workspace_source_roots,omitempty"`
+	DurableJournalPath        string                                    `json:"durable_journal_path,omitempty"`
+	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.
@@ -209,6 +258,12 @@ type InstanceInfo struct {
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
 
+	// LeaseGeneration is the allocator-local generation for this instance's port.
+	LeaseGeneration uint64 `json:"lease_generation"`
+
+	// ListenerActive reports whether the instance HTTP server's Serve call is active.
+	ListenerActive bool `json:"listener_active"`
+
 	// Status is the current status of the instance
 	Status string `json:"status"`
 
@@ -223,6 +278,26 @@ type InstanceInfo struct {
 
 	// CreatedAt is the timestamp when this instance was created
 	CreatedAt time.Time `json:"created_at"`
+
+	// SessionID is the task session ID this instance was created for, if any.
+	SessionID string `json:"session_id,omitempty"`
+
+	// TaskID is the task ID this instance was created for, if any.
+	TaskID string `json:"task_id,omitempty"`
+
+	// WorkspaceSourceRoots is the live, current source-root allowlist this
+	// instance is enforcing right now -- a rescan or rebind can change it
+	// after creation, so this always reflects that, not a creation-time
+	// snapshot (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots"
+	// reconstruction row: read back, never pushed).
+	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+
+	// ProviderSessionID is the live agent CLI's own session identity, held by
+	// the adapter (AC-EXECUTORS-SURVIVAL-002.14's "provider session identity"
+	// reconstruction row: the adopted instance, which holds the provider
+	// session -- never the database). Distinct from SessionID above, which is
+	// this Kandev task session's identity, not the underlying agent's.
+	ProviderSessionID string `json:"provider_session_id,omitempty"`
 }
 
 // Info returns a safe copy of the instance data for API serialization.
@@ -240,14 +315,27 @@ func (i *Instance) Info() *InstanceInfo {
 		}
 	}
 
+	var sourceRoots []string
+	var providerSessionID string
+	if i.manager != nil {
+		sourceRoots = i.manager.WorkspaceSourceRoots()
+		providerSessionID = i.manager.GetSessionID()
+	}
+
 	return &InstanceInfo{
-		ID:            i.ID,
-		Port:          i.Port,
-		Status:        i.Status,
-		WorkspacePath: i.WorkspacePath,
-		AgentCommand:  i.AgentCommand,
-		Env:           envCopy,
-		CreatedAt:     i.CreatedAt,
+		ID:                   i.ID,
+		Port:                 i.Port,
+		LeaseGeneration:      i.lease.Generation,
+		ListenerActive:       i.listenerActive.Load(),
+		Status:               i.Status,
+		WorkspacePath:        i.WorkspacePath,
+		AgentCommand:         i.AgentCommand,
+		Env:                  envCopy,
+		CreatedAt:            i.CreatedAt,
+		SessionID:            i.SessionID,
+		TaskID:               i.TaskID,
+		WorkspaceSourceRoots: sourceRoots,
+		ProviderSessionID:    providerSessionID,
 	}
 }
 

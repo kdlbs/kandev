@@ -17,6 +17,10 @@ type fakeStore struct {
 	applied        map[string]bool
 	transitionFrom string
 	transitionTo   string
+	// callLog records ApplyTransition and MarkOperationApplied invocations in
+	// order, so tests can assert both whether a call happened and, for
+	// AC-EO-3, that the commit precedes the mark.
+	callLog []string
 }
 
 func (s *fakeStore) LoadState(_ context.Context, _, _ string) (MachineState, error) {
@@ -50,6 +54,7 @@ func (s *fakeStore) LoadPreviousStep(_ context.Context, _ string, currentPositio
 func (s *fakeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStepID string, _ Trigger) error {
 	s.transitionFrom = fromStepID
 	s.transitionTo = toStepID
+	s.callLog = append(s.callLog, "ApplyTransition")
 	return nil
 }
 
@@ -71,6 +76,10 @@ func (s *fakeStore) PersistData(_ context.Context, _ string, data map[string]any
 }
 
 func (s *fakeStore) IsOperationApplied(_ context.Context, operationID string) (bool, error) {
+	// Logged unconditionally (even for an empty operationID) so the AC-EO-7
+	// "no store calls at all" tests actually prove this method was never
+	// reached, rather than passing vacuously because this method never logs.
+	s.callLog = append(s.callLog, "IsOperationApplied")
 	if operationID == "" {
 		return false, nil
 	}
@@ -82,7 +91,16 @@ func (s *fakeStore) MarkOperationApplied(_ context.Context, operationID string) 
 		return nil
 	}
 	s.applied[operationID] = true
+	s.callLog = append(s.callLog, "MarkOperationApplied")
 	return nil
+}
+
+// erroringCallback always fails, for AC-EO-5: a processActions error must
+// short-circuit HandleTrigger before the mark is ever attempted.
+type erroringCallback struct{}
+
+func (c *erroringCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, error) {
+	return ActionResult{}, errors.New("callback failed")
 }
 
 type fakeCallback struct {
@@ -143,6 +161,48 @@ func TestHandleTrigger_SetSessionMode_InvokesCallback(t *testing.T) {
 	}
 	if got.SetSessionMode == nil || got.SetSessionMode.Mode != "acceptEdits" {
 		t.Fatalf("expected dispatched mode acceptEdits, got %+v", got.SetSessionMode)
+	}
+}
+
+// TestHandleTriggerSessionShapedOnly_ExecutesSessionShapedRunsSessionIndependent
+// covers the workflow-switch route's use of HandleTriggerSessionShapedOnly:
+// it must still execute the session-shaped kinds (auto_start_agent here) —
+// that is this route's actual production path for them — while skipping the
+// session-independent kinds DispatchStepEntry now owns exclusively.
+func TestHandleTriggerSessionShapedOnly_ExecutesSessionShapedRunsSessionIndependent(t *testing.T) {
+	compiled := CompileStep(&wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "wf1",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+				{Type: wfmodels.OnEnterClearDecisions},
+			},
+		},
+	})
+	store := &fakeStore{
+		state:     MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf1", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{"step-1": compiled},
+		applied:   map[string]bool{},
+	}
+
+	shaped := &recordingCallback{}
+	independent := &recordingCallback{}
+	eng := New(store, MapRegistry{
+		ActionAutoStartAgent: shaped,
+		ActionClearDecisions: independent,
+	})
+
+	if _, err := eng.HandleTriggerSessionShapedOnly(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnEnter,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(shaped.calls) != 1 {
+		t.Fatalf("expected auto_start_agent (session-shaped) to fire once, got %d", len(shaped.calls))
+	}
+	if len(independent.calls) != 0 {
+		t.Fatalf("expected clear_decisions (session-independent) not to fire, got %d calls", len(independent.calls))
 	}
 }
 
@@ -250,6 +310,87 @@ func TestHandleTrigger_IdempotentByOperationID(t *testing.T) {
 	}
 	if !second.Idempotent {
 		t.Fatalf("expected idempotent result on second call")
+	}
+}
+
+func TestHandleTrigger_OperationWithUnregisteredActionIsNotMarked(t *testing.T) {
+	store := &fakeStore{
+		state: MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{
+			"step-1": {
+				Events: map[Trigger][]Action{
+					TriggerOnAgentError: {{Kind: ActionClearDecisions}},
+				},
+			},
+		},
+		applied: map[string]bool{},
+	}
+	eng := New(store, MapRegistry{})
+
+	_, err := eng.HandleTrigger(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnAgentError, OperationID: "op-1",
+	})
+	if err == nil || !errors.Is(err, ErrActionNotYetWired) {
+		t.Fatalf("expected ErrActionNotYetWired, got %v", err)
+	}
+	if store.applied["op-1"] {
+		t.Fatal("operation was marked applied before its callback was wired")
+	}
+}
+
+func TestHandleTrigger_UnregisteredActionWithoutOperationIDRemainsNoOp(t *testing.T) {
+	store := &fakeStore{
+		state: MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{
+			"step-1": {
+				Events: map[Trigger][]Action{
+					TriggerOnEnter: {{Kind: ActionRunCodeReview}},
+				},
+			},
+		},
+		applied: map[string]bool{},
+	}
+	eng := New(store, MapRegistry{})
+
+	result, err := eng.HandleTrigger(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnEnter,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ActionCount != 1 {
+		t.Fatalf("ActionCount = %d, want 1", result.ActionCount)
+	}
+}
+
+func TestHandleTrigger_DeferOperationMark(t *testing.T) {
+	store := &fakeStore{
+		state: MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{
+			"step-1": {
+				Position: 1,
+				Events: map[Trigger][]Action{
+					TriggerOnChildrenCompleted: {{Kind: ActionMoveToNext}},
+				},
+			},
+		},
+		nextSteps: map[int]StepSpec{1: {ID: "step-2", Position: 2}},
+		applied:   map[string]bool{},
+	}
+	eng := New(store, MapRegistry{})
+
+	result, err := eng.HandleTrigger(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnChildrenCompleted,
+		OperationID: "op-1", EvaluateOnly: true, DeferOperationMark: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Transitioned || result.ToStepID != "step-2" {
+		t.Fatalf("expected deferred transition result, got %#v", result)
+	}
+	if store.applied["op-1"] {
+		t.Fatal("operation was marked applied before the outer transition committed")
 	}
 }
 

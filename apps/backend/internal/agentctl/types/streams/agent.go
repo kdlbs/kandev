@@ -1,5 +1,7 @@
 package streams
 
+import "time"
+
 // AgentEvent type constants define the types of events streamed from the agent.
 const (
 	// EventTypeMessageChunk indicates streaming text content from the agent.
@@ -13,6 +15,9 @@ const (
 
 	// EventTypeToolUpdate indicates a tool status update (running, completed, etc.).
 	EventTypeToolUpdate = "tool_update"
+
+	// EventTypeShellOutputUpdate carries a versioned bounded shell output patch.
+	EventTypeShellOutputUpdate = "shell_output_update"
 
 	// EventTypePlan indicates agent plan/task list updates.
 	EventTypePlan = "plan"
@@ -77,6 +82,10 @@ const (
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
+	// EventTypeResponseAttemptReset indicates that the provider abandoned its
+	// current response attempt and will continue the active prompt with a new one.
+	EventTypeResponseAttemptReset = "response_attempt_reset"
+
 	// EventTypeAuthRequired indicates the agent rejected session/new with an
 	// authentication-required error. The event carries the available auth
 	// methods (from ACP initialize); the client picks one and replays the
@@ -87,7 +96,47 @@ const (
 	// configuration delivery and observed use. It deliberately excludes raw
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
+
+	// EventTypeTurnStarted marks the single turn boundary this feature relies
+	// on: agentctl's own session/prompt dispatch, emitted on both a human
+	// prompt and a synthetic ScheduleWakeup self-resume. It carries only the
+	// session ID — the turn start itself stays in agentctl's memory and clock,
+	// never crossing the process boundary. The backend consumes it to clear
+	// the background-launch attestation for the turn that is starting.
+	EventTypeTurnStarted = "turn_started"
+
+	// EventTypeUsageObservation carries one provider-scoped native usage
+	// measurement. It is separate from turn completion because one turn can
+	// contain multiple model responses.
+	EventTypeUsageObservation = "usage_observation"
+
+	// EventTypeBackgroundWorkUpdated carries an update for an agent background workload.
+	EventTypeBackgroundWorkUpdated = "background_work_updated"
+
+	// EventTypeBackgroundWorkOutput carries a chunk of stdout/stderr from an active background workload.
+	EventTypeBackgroundWorkOutput = "background_work_output"
 )
+
+// PromptFailureDisposition identifies a host-validated outcome for a failed
+// prompt. Unknown values are invalid and must retain conservative terminal
+// failure behavior.
+type PromptFailureDisposition string
+
+const (
+	// PromptFailureDispositionRetainRuntime means the prompt failed after a
+	// tested provider error while the initialized ACP runtime remained usable.
+	PromptFailureDispositionRetainRuntime PromptFailureDisposition = "retain_runtime"
+)
+
+// Valid reports whether the optional disposition is omitted or recognized.
+func (d PromptFailureDisposition) Valid() bool {
+	switch d {
+	case "", PromptFailureDispositionRetainRuntime:
+		return true
+	default:
+		return false
+	}
+}
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
 // whose provider and transport have attested that the next human prompt may
@@ -101,21 +150,59 @@ const (
 )
 
 // AgentEvent is the message type streamed from the agent process.
-// This represents protocol-agnostic events from the agent, normalized from
-// various underlying protocols (ACP, Codex, Claude Code, etc.).
+// This represents agent-agnostic events. ACP session updates are normalized
+// into this shape; agentctl also synthesizes lifecycle and diagnostic events
+// (process exit, MCP attachment, permission cancellation) that never came from
+// the agent.
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
-	// Type identifies the event type. Use EventType* constants:
-	// "message_chunk", "reasoning", "tool_call", "tool_update", "plan", "complete", "error"
+	ContinuationSafety   *ContinuationSafetySnapshot   `json:"continuation_safety,omitempty"`
+	CapacityContinuation *CapacityContinuationSnapshot `json:"capacity_continuation,omitempty"`
+
+	// Type identifies the event type. Use the EventType* constants for supported
+	// values.
 	Type string `json:"type"`
+
+	// AttemptID identifies the recovery attempt that owns this callback. It is
+	// assigned by lifecycle at the startup stream boundary and is immutable for
+	// the lifetime of the callback.
+	AttemptID string `json:"attempt_id,omitempty"`
+
+	// SessionSettingsPolicy is host provenance for initial model/mode reports
+	// emitted as part of session/load. Later explicit selector reports omit it.
+	SessionSettingsPolicy     SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+	SessionSettingsGeneration uint64                `json:"session_settings_generation,omitempty"`
+	// SessionSettingsSourceGeneration is lifecycle-owned ordering for the
+	// process startup that produced this event. It is never accepted from the
+	// provider wire payload.
+	SessionSettingsSourceGeneration uint64 `json:"-"`
 
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 
-	// OperationID identifies the current in-flight operation (turn, prompt, etc.).
-	// Used to target specific operations for cancellation or status updates.
-	// For Codex this is the turn ID, for other protocols it may be empty.
+	// DeliveryStreamID identifies the durable agentctl event stream. It is
+	// present only when the event crossed the retained delivery journal.
+	DeliveryStreamID string `json:"delivery_stream_id,omitempty"`
+
+	// DeliveryIncarnationID identifies the Kandev session incarnation that owns
+	// the durable stream. It fences events from a replaced session owner.
+	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
+
+	// DeliveryHarnessGeneration identifies the native harness conversation that
+	// produced the durable event. It fences late events after continuation.
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+
+	// DeliverySequence is the committed sequence within DeliveryStreamID.
+	// Consumers use it as a reconnect cursor, never as a product message ID.
+	DeliverySequence uint64 `json:"delivery_sequence,omitempty"`
+
+	// DeliverySubmissionID links an event to the immutable prompt submission
+	// when agentctl can establish that association.
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
+
+	// OperationID identifies an operation when the agent exposes an operation ID.
+	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
 
 	// PromptGeneration is the lifecycle-owned identity assigned when this
@@ -129,14 +216,56 @@ type AgentEvent struct {
 	// ownership from cross-subject event ordering.
 	TurnID string `json:"turn_id,omitempty"`
 
+	// ControlTurnID is the control-server-assigned turn identifier
+	// (AC-EXECUTORS-SURVIVAL-004.1), stamped onto a terminal event at the
+	// same point the control server retains it as that instance's turn
+	// outcome (internal/agentctl/server/process.recordTerminalOutcome). Zero
+	// means "not retained" -- the sequence that assigns it starts at 1
+	// (instance.Manager.turnIDSeq). AC-EXECUTORS-SURVIVAL-004.4 requires the
+	// dedup decision between a retrieved outcome and a live-delivered event
+	// for the same turn to be made on this identifier, since it -- unlike
+	// PromptGeneration -- travels on both observations and survives a
+	// restart that resets the backend's own in-memory generation counter.
+	ControlTurnID int64 `json:"control_turn_id,omitempty"`
+
+	// Recovered marks an event re-applied from a retained outcome or durable
+	// journal. It is backend context and never part of the wire payload.
+	Recovered bool `json:"-"`
+
+	// ActivityAt is the observation time retained with a terminal outcome.
+	// Recovery uses it instead of treating replay as newly observed activity.
+	ActivityAt *time.Time `json:"activity_at,omitempty"`
+	// RecoveredActivityAt is replay context, excluded from durable payload identity.
+	RecoveredActivityAt *time.Time `json:"-"`
+
+	// CanonicalMessageID is assigned by the backend inbox projector for output
+	// events. It is stable across reconnects and is not a transport cursor.
+	CanonicalMessageID string `json:"canonical_message_id,omitempty"`
+
+	// CanonicalProjection marks an event whose canonical task message and inbox
+	// cursor were committed before the event was published to consumers.
+	CanonicalProjection bool `json:"canonical_projection,omitempty"`
+
+	// CanonicalMessageAppend tells lifecycle/UI consumers whether the stable
+	// canonical message already existed when this event was projected.
+	CanonicalMessageAppend bool `json:"canonical_message_append,omitempty"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.
 	Text string `json:"text,omitempty"`
+	// ProviderDiagnosticCandidate marks a high-confidence ACP provider
+	// diagnostic that remains visible but is not ordinary model progress until
+	// the terminal prompt error is correlated.
+	ProviderDiagnosticCandidate bool `json:"provider_diagnostic_candidate,omitempty"`
 
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.
 	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
+
+	// RetractedMessageIDs identifies Kandev transcript records owned by an
+	// abandoned response attempt. It is populated only on response-attempt resets.
+	RetractedMessageIDs []string `json:"retracted_message_ids,omitempty"`
 
 	// --- Reasoning fields (for "reasoning" type) ---
 
@@ -168,6 +297,14 @@ type AgentEvent struct {
 	// Provides typed access to tool parameters based on the Kind field.
 	NormalizedPayload *NormalizedPayload `json:"normalized,omitempty"`
 
+	// ShellOutput carries compact output only on a negotiated delivery stream.
+	ShellOutput *ShellOutputPatch `json:"shell_output,omitempty"`
+
+	// ShellOutputEligible is adapter-owned provenance for known output-only carriers.
+	ShellOutputEligible bool `json:"-"`
+	// ShellOutputHasContent preserves substantive output after duplicate carriers are removed.
+	ShellOutputHasContent bool `json:"shell_output_has_content,omitempty"`
+
 	// Diff contains unified diff content for file changes.
 	// Populated when tools modify files, providing the aggregated diff.
 	Diff string `json:"diff,omitempty"`
@@ -181,6 +318,11 @@ type AgentEvent struct {
 	PlanContent string `json:"plan_content,omitempty"`
 
 	// --- Error fields (for "error" type) ---
+
+	// PromptFailureDisposition is host-generated evidence that distinguishes a
+	// failed turn from a terminal execution failure. Provider payloads cannot
+	// set this field directly.
+	PromptFailureDisposition PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
 
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`
@@ -198,6 +340,9 @@ type AgentEvent struct {
 	MCPAttachmentAttempt *MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
 
 	// --- Permission request fields (for "permission_request" type) ---
+	// RequestID is the Kandev-generated identity for this exact request
+	// generation. It is distinct from the provider-controlled PendingID.
+	RequestID string `json:"request_id,omitempty"`
 
 	// PendingID uniquely identifies this pending permission request.
 	PendingID string `json:"pending_id,omitempty"`
@@ -207,6 +352,28 @@ type AgentEvent struct {
 
 	// PermissionOptions contains the available permission choices.
 	PermissionOptions []PermissionOption `json:"permission_options,omitempty"`
+
+	// RequestedModeID is set on a session_mode event only when Kandev asked for
+	// a mode the agent did not end up in, or could not confirm. It is what makes
+	// a clamped mode distinguishable from an applied one; empty means the
+	// reported mode is exactly what was asked for.
+	RequestedModeID string `json:"requested_mode_id,omitempty"`
+
+	// AutoApprovedOptionID names the option Kandev already selected on the
+	// user's behalf. When set, the request is a record rather than a prompt:
+	// nobody needs to answer it, and the consumer must not treat the session
+	// as waiting for input. Empty for a request that still needs an answer.
+	AutoApprovedOptionID string `json:"auto_approved_option_id,omitempty"`
+	// AutoApprovalPending means the selected option is only a proposal. The
+	// backend must persist it before resolving the live request.
+	AutoApprovalPending bool `json:"auto_approval_pending,omitempty"`
+
+	// AutoApprovedOptionKind preserves the provider's selected allow semantics
+	// alongside the option ID for durable permission history.
+	AutoApprovedOptionKind string `json:"auto_approved_option_kind,omitempty"`
+
+	// AutoApprovalSource identifies the Kandev policy that selected the option.
+	AutoApprovalSource string `json:"auto_approval_source,omitempty"`
 
 	// ActionType categorizes the action requiring approval.
 	// Use ActionType* constants: "command", "file_write", "file_read", "network", "mcp_tool", "other".
@@ -291,7 +458,7 @@ type AgentEvent struct {
 	// prompt while another prompt for the same session is still in flight. It is
 	// the negotiated precondition for prompt handoff and mid-turn steering, and
 	// does not by itself promise the agent will fold that prompt into the running
-	// turn. See docs/specs/platform/mid-turn-steering.md.
+	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
@@ -341,6 +508,35 @@ type AgentEvent struct {
 
 	// Usage contains token usage stats from the prompt response.
 	Usage *PromptUsage `json:"usage,omitempty"`
+
+	// UsageObservation is one immutable native response measurement or a
+	// documented estimated turn fallback.
+	UsageObservation *NativeUsageObservation `json:"usage_observation,omitempty"`
+
+	// --- Background work fields (for "background_work_updated" and "background_work_output") ---
+
+	// BackgroundWork contains a normalized workload observation.
+	BackgroundWork *WorkloadRunObservation `json:"background_work,omitempty"`
+
+	// BackgroundWorkOutput contains an incremental output stream chunk.
+	BackgroundWorkOutput *WorkloadOutputChunk `json:"background_work_output,omitempty"`
+}
+
+// NativeUsageObservation identifies the native protocol scope for one usage
+// row. Provider identifiers never replace Kandev task, session, or turn IDs.
+type NativeUsageObservation struct {
+	SchemaVersion            int    `json:"schema_version"`
+	Source                   string `json:"source"`
+	ProviderThreadID         string `json:"provider_thread_id"`
+	ProviderTurnID           string `json:"provider_turn_id"`
+	ProviderResponseID       string `json:"provider_response_id,omitempty"`
+	Scope                    string `json:"scope"`
+	Completeness             string `json:"completeness"`
+	Model                    string `json:"model,omitempty"`
+	ReasoningOutputTokens    *int64 `json:"reasoning_output_tokens,omitempty"`
+	ReportedCacheWriteTokens *int64 `json:"reported_cache_write_tokens,omitempty"`
+	ReportedTotalTokens      *int64 `json:"reported_total_tokens,omitempty"`
+	PriceSuppressed          bool   `json:"price_suppressed,omitempty"`
 }
 
 // ModelSelectionWarning is the structured, provider-neutral explanation for
@@ -374,11 +570,25 @@ type AvailableCommand struct {
 	// Name is the command name (e.g., "draftpr", "commit").
 	Name string `json:"name"`
 
+	// Kind identifies a command only when the provider contract supplies a known classification.
+	Kind string `json:"kind,omitempty"`
+
+	// Action carries a recognized provider action without exposing raw provider metadata.
+	Action *AvailableCommandAction `json:"action,omitempty"`
+
 	// Description is a human-readable description of the command.
 	Description string `json:"description,omitempty"`
 
 	// InputHint is a hint displayed when the command expects additional input.
 	InputHint string `json:"input_hint,omitempty"`
+}
+
+// AvailableCommandAction is a validated, provider-neutral action supported by the composer.
+type AvailableCommandAction struct {
+	Kind       string `json:"kind"`
+	ConfigID   string `json:"config_id"`
+	Value      string `json:"value"`
+	ResetValue string `json:"reset_value"`
 }
 
 // ContentBlock represents a multimodal content block from the agent.
@@ -449,6 +659,9 @@ type SessionModelState struct {
 	CurrentModelID string             `json:"current_model_id,omitempty"`
 	Models         []SessionModelInfo `json:"models,omitempty"`
 	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
+	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
+	// from the transient empty state sent before startup settles.
+	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
 }
 
 // AuthMethodInfo represents an authentication method from ACP initialize.
@@ -538,7 +751,7 @@ type ConfigOptionValue struct {
 // per-turn total — see normalizeCodexPromptUsage in
 // server/adapter/transport/acp/dialect_codex.go). Rows flagged estimated
 // still count toward budget totals at face value per
-// docs/specs/office/costs.md.
+// docs/specs/office/requirements/costs.md.
 type PromptUsage struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
@@ -560,6 +773,9 @@ type PromptUsage struct {
 	// estimation downstream.
 	ProviderReportedCostPresent bool `json:"provider_reported_cost_present,omitempty"`
 	Estimated                   bool `json:"estimated,omitempty"`
+	// PriceSuppressed marks a native measurement whose input categories do
+	// not map to the ledger's reviewed pricing components.
+	PriceSuppressed bool `json:"price_suppressed,omitempty"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

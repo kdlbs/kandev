@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-review-sync-and-opening"]
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 03: PR Details E2E, docs, and verification

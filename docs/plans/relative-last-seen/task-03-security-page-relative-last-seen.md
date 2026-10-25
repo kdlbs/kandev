@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-frontend-settings-contract"]
 plan: "plan.md"
-spec: "../../specs/relative-last-seen/spec.md"
+spec: "../../specs/ui/requirements/relative-last-seen.md"
 ---
 
 # Task 03: Security page option, relative column, tooltip, live update

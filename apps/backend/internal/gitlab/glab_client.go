@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -93,7 +94,7 @@ func (c *GLabClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
 
 // glabReadToken extracts the token glab uses for the given hostname. glab's
 // `auth status -t` prints the token to stderr; this function captures both
-// streams and parses the line "Token: <value>".
+// streams and parses the token status line.
 func glabReadToken(ctx context.Context, hostname string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, glabAuthTimeout)
 	defer cancel()
@@ -114,34 +115,47 @@ func glabReadToken(ctx context.Context, hostname string) (string, error) {
 	return parseGlabToken(stdout.String() + "\n" + stderr.String()), nil
 }
 
-// glabTokenLabels are the label variants `glab auth status -t` has used for
-// the token line. glab >= 1.x prints "Token found:"; older builds printed a
-// bare "Token:". Longest first so "Token found:" is not mis-split by "Token:".
-var glabTokenLabels = []string{"token found:", "token:"}
+// glabTokenLinePattern matches a token status line by structure, rather than
+// by exact wording. The token label must start the line after any status
+// marker, which prevents diagnostic text from becoming a credential.
+var glabTokenLinePattern = regexp.MustCompile(`(?i)^[^[:alnum:]_]*token\b([^:\n]*):\s*(\S.*)$`)
+
+func isGlabTokenMetadataLabel(label string) bool {
+	fields := strings.Fields(strings.ToLower(label))
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.Trim(fields[0], "():") {
+	case "scope", "scopes", "type", "endpoint", "permission", "permissions":
+		return true
+	default:
+		return false
+	}
+}
 
 // parseGlabToken finds the token line in the combined output of
 // `glab auth status -t` and returns the token (or "" if none).
 func parseGlabToken(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		lower := strings.ToLower(line)
-		idx, label := -1, ""
-		for _, candidate := range glabTokenLabels {
-			if at := strings.Index(lower, candidate); at >= 0 {
-				idx, label = at, candidate
-				break
-			}
-		}
-		if idx < 0 {
+		m := glabTokenLinePattern.FindStringSubmatch(line)
+		if m == nil {
 			continue
 		}
-		token := strings.TrimSpace(line[idx+len(label):])
+		if isGlabTokenMetadataLabel(m[1]) {
+			continue
+		}
+		token := strings.TrimSpace(m[2])
 		// glab sometimes prefixes lines with ANSI / arrows; strip leading
 		// non-alphanumerics until we hit token characters.
 		token = strings.TrimLeft(token, " \t-→>")
-		if token != "" && token != "<no token>" {
-			return token
+		// Without -t (or a masked display), the value is a run of asterisks
+		// rather than an absent line — reject that instead of "authenticating"
+		// with a redacted placeholder.
+		if token == "" || token == "<no token>" || strings.Trim(token, "*") == "" {
+			return ""
 		}
+		return token
 	}
 	return ""
 }

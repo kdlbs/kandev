@@ -3,7 +3,7 @@ package dashboard
 import "testing"
 
 // TestDeriveTaskTimestamps locks down the Started/Completed sidebar
-// derivation described in docs/specs/office/tasks.md: startedAt is the
+// derivation described in docs/specs/office/requirements/tasks.md: startedAt is the
 // earliest transition into in_progress, completedAt is the latest
 // transition into done. A regression here silently reverts the Office
 // task detail sidebar to permanently blank Started/Completed rows.

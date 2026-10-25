@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-add-session-capability"]
 plan: "plan.md"
-spec: "../../specs/ui/embedded-vscode-executor-availability.md"
+spec: "../../specs/ui/requirements/embedded-vscode-executor-availability.md"
 ---
 
 # Task 02: Wire Active-Session Editor Availability

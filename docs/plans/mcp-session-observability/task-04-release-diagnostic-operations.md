@@ -5,7 +5,7 @@ status: pending
 wave: 4
 depends_on: ["03-persist-attachment-reports"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 04: Add release diagnostic operations

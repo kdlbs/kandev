@@ -25,5 +25,10 @@ func (s *Service) CancelPendingRetriesForTask(ctx context.Context, taskID string
 		zap.String("task_id", taskID),
 		zap.Int("count", len(ids)))
 
-	return s.repo.BulkCancelRuns(ctx, ids, "task_reassigned")
+	cancelled, err := s.repo.BulkCancelRuns(ctx, ids, "task_reassigned")
+	if err != nil {
+		return err
+	}
+	s.recordTerminalShapesForCancelledRuns(ctx, cancelled)
+	return nil
 }

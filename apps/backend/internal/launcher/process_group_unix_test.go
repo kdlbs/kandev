@@ -32,6 +32,52 @@ func TestConfigureManagedProcessCreatesProcessGroup(t *testing.T) {
 	}
 }
 
+func TestManagedProcessKillTreatsNonzeroExitAsUnclean(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 23")
+	configureManagedProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start fixture: %v", err)
+	}
+
+	proc := &managedProcess{cmd: cmd, done: make(chan struct{})}
+	go func() {
+		err := cmd.Wait()
+		code := 0
+		if err != nil {
+			code = 1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				code = exitErr.ExitCode()
+			}
+		}
+		proc.mu.Lock()
+		proc.exitCode = code
+		proc.exited = true
+		proc.mu.Unlock()
+		close(proc.done)
+	}()
+	<-proc.done
+
+	supervisor := newSupervisor()
+	supervisor.add(proc)
+	backend := &restartableBackend{exitCh: make(chan int, 1)}
+	backend.exitCh <- 0
+	if got := waitForAppExit(supervisor, backend); got != 1 {
+		t.Fatalf("launcher exit code after unclean shutdown = %d, want 1", got)
+	}
+	exitCh, _ := captureLauncherExit(t)
+	supervisor.attachSignals()
+	sendLauncherTestSignal(t, os.Interrupt)
+	waitForLauncherExitCode(t, exitCh, 1)
+
+	result := proc.kill()
+	if !result.exitStatusKnown || result.exitCode != 23 {
+		t.Fatalf("managed child exit status known=%v code=%d, want true/23", result.exitStatusKnown, result.exitCode)
+	}
+	if got := shutdownExitCode([]managedProcessShutdownResult{result}); got == 0 {
+		t.Fatal("nonzero child exit was accepted as a clean shutdown")
+	}
+}
+
 func TestManagedProcessKillSendsGracefulSignalBeforeForceKill(t *testing.T) {
 	tempDir := t.TempDir()
 	readyFile := filepath.Join(tempDir, "ready")
@@ -222,6 +268,12 @@ func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
 
 	exitCh, output := captureLauncherExit(t)
 	supervisor := newSupervisor()
+	t.Cleanup(func() {
+		// The second signal can report exit before graceful shutdown finishes its
+		// final log writes. Join the sync.Once shutdown before captureLauncherExit
+		// restores the process-wide output target.
+		_ = supervisor.shutdown("test cleanup")
+	})
 	supervisor.add(proc)
 	supervisor.attachSignals()
 
@@ -231,9 +283,16 @@ func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
 
 	waitForLauncherExitCode(t, exitCh, 1)
 	waitForManagedProcessDone(t, proc, 5*time.Second)
+	if got := supervisor.shutdown("test completion"); got != 1 {
+		t.Fatalf("shutdown result after second signal = %d, want cached 1", got)
+	}
 	waitForOutputContains(t, output, "forced shutdown after second signal")
 	waitForOutputContains(t, output, "forced shutdown complete")
 	waitForOutputContains(t, output, "graceful shutdown complete")
+	// launcherExit is captured in this test, so the process does not exit when
+	// the second signal handler calls it. Wait for the graceful shutdown worker
+	// before captureLauncherExit restores the shared output writer.
+	supervisor.shutdown("wait for signal shutdown")
 }
 
 func TestLauncherSignalHelper(t *testing.T) {
@@ -296,12 +355,12 @@ func TestLauncherProcessTreeHelper(t *testing.T) {
 		t.Fatalf("write descendant pid file: %v", err)
 	}
 	waitForFile(t, descendantReadyFile)
-	if err := os.WriteFile(rootReadyFile, []byte("ready"), 0o600); err != nil {
-		t.Fatalf("write root ready file: %v", err)
-	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGUSR1)
 	defer signal.Stop(signals)
+	if err := os.WriteFile(rootReadyFile, []byte("ready"), 0o600); err != nil {
+		t.Fatalf("write root ready file: %v", err)
+	}
 	if got := <-signals; got != syscall.SIGTERM {
 		t.Fatalf("root received signal %v, want SIGTERM", got)
 	}
@@ -327,12 +386,12 @@ func TestLauncherProcessTreeDescendantHelper(t *testing.T) {
 	}
 	readyFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_READY_FILE")
 	termFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_TERM_FILE")
-	if err := os.WriteFile(readyFile, []byte("ready"), 0o600); err != nil {
-		t.Fatalf("write descendant ready file: %v", err)
-	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM)
 	defer signal.Stop(signals)
+	if err := os.WriteFile(readyFile, []byte("ready"), 0o600); err != nil {
+		t.Fatalf("write descendant ready file: %v", err)
+	}
 	for got := range signals {
 		if got == syscall.SIGTERM {
 			if err := os.WriteFile(termFile, []byte("term"), 0o600); err != nil {

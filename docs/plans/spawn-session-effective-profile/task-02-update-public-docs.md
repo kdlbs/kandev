@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-propagate-effective-profile"]
 plan: "plan.md"
-spec: "../../specs/spawn-session-effective-profile/spec.md"
+spec: "../../specs/agents/requirements/spawn-session-effective-profile.md"
 ---
 
 # Task 02: Update public MCP documentation

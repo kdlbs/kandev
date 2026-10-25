@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-negotiate-steer-capability", "05-orchestrator-steer-admission"]
 plan: "plan.md"
-spec: "../../specs/platform/mid-turn-steering.md"
+spec: "../../specs/platform/requirements/mid-turn-steering.md"
 ---
 
 # Task 06: Expose supports_steering on the session contract
@@ -26,7 +26,7 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Dependencies:** Tasks 01 and 05.
 - **Inputs:** Spec "API surface" and "Persistence guarantees". Mirror how
   `foreground_activity` and `active_subagent_count` are surfaced across the same
-  four payloads in `../../specs/platform/background-work-liveness.md` — same
+  four payloads in `../../specs/platform/requirements/background-work-liveness.md` — same
   shape, same publication points, so clients cannot observe an inconsistent
   pair.
 - **Risks:** Do not persist the flag or derive it from the persisted agent

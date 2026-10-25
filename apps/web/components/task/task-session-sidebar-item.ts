@@ -1,11 +1,16 @@
 import type { KanbanState } from "@/lib/state/slices";
-import type { TaskSessionState, TaskState } from "@/lib/types/http";
+import type { Repository, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { workflowStepTitle } from "./task-session-sidebar-aggregate";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
+import { taskPRInfoFromSummary } from "./task-pr-info";
+import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
+import { sidebarTaskColorDisplay } from "@/lib/sidebar/task-color-projection";
+import type { TaskColor } from "@/lib/task-colors";
 
-type SidebarItemContext = {
+export type SidebarItemContext = {
   repositorySlugById: Map<string, string | undefined>;
   titleById: Map<string, string>;
   workflowNameById: Map<string, string>;
@@ -13,7 +18,16 @@ type SidebarItemContext = {
   wipQueueByTaskId?: Map<string, WipQueueStatus>;
   acknowledgedAgentErrors?: Record<string, string>;
   dismissedAgentErrors?: Record<string, string>;
+  workspaceId?: string;
+  repositoriesById?: ReadonlyMap<string, Repository>;
+  stepColorById?: ReadonlyMap<string, string>;
+  automaticColorSettings?: SidebarTaskColorAutomation;
+  manualColors?: Record<string, TaskColor | null>;
+  pendingRemovalTaskIds?: ReadonlySet<string>;
 };
+
+const EMPTY_REPOSITORIES_BY_ID = new Map<string, Repository>();
+const EMPTY_STEP_COLORS = new Map<string, string>();
 
 function summaryDiffStats(
   summary: TaskStatusSummary | null | undefined,
@@ -23,22 +37,6 @@ function summaryDiffStats(
   const additions = git.additions ?? 0;
   const deletions = git.deletions ?? 0;
   return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
-}
-
-function capitalize(value: string): string {
-  return value.length > 0 ? value[0].toUpperCase() + value.slice(1) : value;
-}
-
-function summaryPRInfo(
-  summary: TaskStatusSummary | null | undefined,
-): { number: number; state: string; aggregateState?: string } | undefined {
-  const pullRequest = summary?.pull_request;
-  if (!pullRequest?.number) return undefined;
-  return {
-    number: pullRequest.number,
-    state: capitalize(pullRequest.state ?? pullRequest.aggregate_state ?? "open"),
-    aggregateState: pullRequest.aggregate_state,
-  };
 }
 
 function repositoryPathFromSummary(
@@ -85,6 +83,7 @@ function sidebarSessionStatus(
     sessionState: (hasSummary ? primarySession?.state : task.primarySessionState) as
       | TaskSessionState
       | undefined,
+    hasRunningSession: summary?.has_running_session,
     // The task-level MOST-ACTIVE-WINS activity aggregate (ADR-0049) is
     // authoritative for the sidebar row: when no status summary is available,
     // fall back to the task record's own aggregate so multi-session and
@@ -117,11 +116,19 @@ function sidebarStatus(
     comparisonUnavailable: summary?.git?.comparison_unavailable === true,
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
-    prInfo: summaryPRInfo(summary),
+    prInfo: taskPRInfoFromSummary(summary),
     issueInfo: issueInfoForTask(task),
     queuedCount: summary?.queued_prompt_count,
+    launchQueue: summary?.launch_queue,
     wipQueue: context.wipQueueByTaskId?.get(task.id),
   };
+}
+
+function isPendingRemoval(
+  task: KanbanState["tasks"][number],
+  context: SidebarItemContext,
+): boolean {
+  return context.pendingRemovalTaskIds?.has(task.id) === true;
 }
 
 /** Map a task-level status projection to a sidebar item without session streams. */
@@ -130,28 +137,49 @@ export function buildSidebarItem(
   context: SidebarItemContext,
 ) {
   const status = sidebarStatus(task, context);
+  const color = sidebarTaskColorDisplay(task, {
+    workspaceId: context.workspaceId,
+    repositoriesById: context.repositoriesById ?? EMPTY_REPOSITORIES_BY_ID,
+    stepColorById: context.stepColorById ?? EMPTY_STEP_COLORS,
+    settings: context.automaticColorSettings,
+    manualColor: context.manualColors?.[task.id],
+  });
 
   return {
     id: task.id,
     title: task.title,
     autopilot: task.autopilot,
+    priority: task.priority,
     state: task.state as TaskState | undefined,
     interrupted: task.interrupted,
+    parkedOnBackgroundWork: task.parkedOnBackgroundWork,
     ...status,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: context.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId as string | undefined,
     workflowStepTitle: workflowStepTitle(task, context.stepTitleById),
+    workspaceId: color.facts.workspaceId,
+    origin: task.origin,
+    primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
+    workflowStepColor: color.facts.workflowStepColor,
     isRemoteExecutor: task.isRemoteExecutor,
+    remoteExecutorId: task.primaryExecutorId ?? undefined,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     createdAt: task.createdAt,
     isArchived: task.isArchived === true,
+    isPendingRemoval: isPendingRemoval(task, context),
+    isFromOffice: task.isFromOffice,
     parentTaskTitle: task.parentTaskId ? context.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,
+    repositories: resolveTaskRepositorySlugs(task.repositories, context.repositorySlugById),
     repositoryLinks: task.repositories,
+    repositoryRuleIdentities: color.facts.repositories,
+    automaticColor: color.automaticColor?.color,
+    automaticColorSource: color.automaticColor?.source,
+    effectiveColorToken: color.effectiveColorToken,
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,
   };

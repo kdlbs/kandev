@@ -11,7 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // ListTaskWorkspaceFoldersByTaskIDs loads folders for a task batch in one query.
@@ -26,7 +28,7 @@ func (r *Repository) ListTaskWorkspaceFoldersByTaskIDs(ctx context.Context, task
 		placeholders[i], args[i] = "?", id
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(fmt.Sprintf(`
-		SELECT id, task_id, local_path, display_name, position, created_at, updated_at
+		SELECT id, task_id, local_path, display_name, workspace_relative_path, position, created_at, updated_at
 		FROM task_workspace_folders WHERE task_id IN (%s)
 		ORDER BY position ASC, created_at ASC
 	`, strings.Join(placeholders, ","))), args...)
@@ -47,7 +49,7 @@ func (r *Repository) ListTaskWorkspaceFoldersByTaskIDs(ctx context.Context, task
 // ListTaskWorkspaceFolders returns task-owned folders in durable source order.
 func (r *Repository) ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, local_path, display_name, position, created_at, updated_at
+		SELECT id, task_id, local_path, display_name, workspace_relative_path, position, created_at, updated_at
 		FROM task_workspace_folders
 		WHERE task_id = ?
 		ORDER BY position ASC, created_at ASC
@@ -89,6 +91,9 @@ func (r *Repository) CreateWorkspaceSourceBatch(ctx context.Context, batch *mode
 }
 
 func (r *Repository) createWorkspaceSourceBatchTx(ctx context.Context, tx *sqlx.Tx, batch *models.WorkspaceSourceBatch) error {
+	if err := r.guardWorkspaceSourceParentTx(ctx, tx, batch); err != nil {
+		return err
+	}
 	if err := r.updateWorkspaceSourceBranchesTx(ctx, tx, batch.RepositoryUpdates); err != nil {
 		return err
 	}
@@ -102,6 +107,38 @@ func (r *Repository) createWorkspaceSourceBatchTx(ctx context.Context, tx *sqlx.
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// guardWorkspaceSourceParentTx makes cross-task attachment authorization part
+// of the durable batch transaction. The no-op update takes the target task row
+// lock on PostgreSQL and SQLite's writer lock, so a reparent either commits
+// before this predicate (and is rejected) or after the source batch commits.
+//
+// A top-level task (ExpectedParentID == "") has no parent relation to
+// validate, but the batch still needs the same row lock: without it, a
+// folder attachment here and a concurrent runner switch's mutability read
+// could each proceed unaware of the other, letting the switch commit
+// against a task it had already judged eligible before the attachment
+// landed.
+func (r *Repository) guardWorkspaceSourceParentTx(ctx context.Context, tx *sqlx.Tx, batch *models.WorkspaceSourceBatch) error {
+	if batch.ExpectedParentID == "" {
+		return kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), batch.TaskID)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at
+		WHERE id = ? AND parent_id = ? AND workspace_id = ?
+	`), batch.TaskID, batch.ExpectedParentID, batch.ExpectedParentWorkspaceID)
+	if err != nil {
+		return fmt.Errorf("guard workspace source parent relation: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("guard workspace source parent relation rows affected: %w", err)
+	}
+	if changed == 0 {
+		return fmt.Errorf("%w: %s", repoerrors.ErrTaskParentMismatch, batch.TaskID)
 	}
 	return nil
 }
@@ -142,9 +179,9 @@ func (r *Repository) insertWorkspaceFolderTx(ctx context.Context, tx *sqlx.Tx, t
 	folder.CreatedAt, folder.UpdatedAt = now, now
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_workspace_folders
-			(id, task_id, local_path, display_name, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`), folder.ID, folder.TaskID, folder.LocalPath, folder.DisplayName, folder.Position, folder.CreatedAt, folder.UpdatedAt)
+			(id, task_id, local_path, display_name, workspace_relative_path, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), folder.ID, folder.TaskID, folder.LocalPath, folder.DisplayName, folder.WorkspaceRelativePath, folder.Position, folder.CreatedAt, folder.UpdatedAt)
 	return err
 }
 
@@ -160,9 +197,9 @@ func (r *Repository) insertWorkspaceRepositoryTx(ctx context.Context, tx *sqlx.T
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_repositories
-			(id, task_id, repository_id, base_branch, checkout_branch, position, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.CheckoutBranch, taskRepo.Position, string(metadata), taskRepo.CreatedAt, taskRepo.UpdatedAt)
+			(id, task_id, repository_id, workspace_relative_path, base_branch, checkout_branch, position, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.WorkspaceRelativePath, taskRepo.BaseBranch, taskRepo.CheckoutBranch, taskRepo.Position, string(metadata), taskRepo.CreatedAt, taskRepo.UpdatedAt)
 	return err
 }
 
@@ -223,6 +260,7 @@ func scanTaskWorkspaceFolder(scanner interface{ Scan(...any) error }) (*models.T
 		&folder.TaskID,
 		&folder.LocalPath,
 		&folder.DisplayName,
+		&folder.WorkspaceRelativePath,
 		&folder.Position,
 		&folder.CreatedAt,
 		&folder.UpdatedAt,

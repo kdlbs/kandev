@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-status-endpoint"]
 plan: "plan.md"
-spec: "../../specs/jira-status-filter/spec.md"
+spec: "../../specs/integrations/requirements/jira-status-filter.md"
 ---
 
 # Task 02: Frontend JiraStatus type + API client

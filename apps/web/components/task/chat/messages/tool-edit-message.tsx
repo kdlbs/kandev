@@ -18,6 +18,7 @@ import { ExpandableRow } from "./expandable-row";
 import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
+import { workspaceRelativeFilePath } from "@/lib/workspace-file-path";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -79,7 +80,7 @@ function FileActionButton({
   onCopyPath,
 }: FileActionButtonProps) {
   const { t } = useTranslation();
-  const isFileInWorktree = worktreePath && filePath.startsWith(worktreePath);
+  const isFileInWorktree = workspaceRelativeFilePath(filePath, worktreePath) !== null;
   if (onOpenFile && isFileInWorktree) {
     return (
       <button

@@ -12,9 +12,11 @@ package engine
 
 // OnCommentPayload accompanies TriggerOnComment.
 type OnCommentPayload struct {
-	CommentID string
-	AuthorID  string
-	Body      string
+	CommentID                     string
+	AuthorID                      string
+	Body                          string
+	RetryWorkflowStepID           string
+	RetryWorkflowStepTransitionID int64
 }
 
 // OnBlockerResolvedPayload accompanies TriggerOnBlockerResolved.
@@ -35,8 +37,16 @@ type ChildSummary struct {
 }
 
 // OnChildrenCompletedPayload accompanies TriggerOnChildrenCompleted.
+//
+// WaveKey and WaveString are the completion-wave identity
+// (parent-wake-wave-identity) the dispatching producer derived from its own
+// terminality-confirming wave-member read, before the trigger was raised.
+// Empty means the dispatcher could not derive one — QueueRunCallback
+// then queues without a wave identity, same as before this field existed.
 type OnChildrenCompletedPayload struct {
 	ChildSummaries []ChildSummary
+	WaveKey        string
+	WaveString     string
 }
 
 // OnApprovalResolvedPayload accompanies TriggerOnApprovalResolved.
@@ -61,4 +71,25 @@ type OnAgentErrorPayload struct {
 	FailedAgentID   string
 	FailedSessionID string
 	ErrorMessage    string
+}
+
+// LinkedPR identifies one pull request linked to a task.
+type LinkedPR struct {
+	Owner    string
+	Repo     string
+	PRNumber int
+	PRURL    string
+	State    string
+}
+
+// OnPRMergedPayload accompanies TriggerOnPRMerged. PRs lists every pull
+// request linked to the task; all of them are merged.
+type OnPRMergedPayload struct {
+	PRs []LinkedPR
+}
+
+// OnPRClosedPayload accompanies TriggerOnPRClosed. PR is the pull request
+// that was closed without merging.
+type OnPRClosedPayload struct {
+	PR LinkedPR
 }

@@ -7,10 +7,13 @@ import type { ExecutorProfile } from "@/lib/types/http";
 function toProfile(payload: ExecutorProfilePayload): ExecutorProfile {
   return {
     id: payload.id,
+    owner_user_id: payload.owner_user_id,
     executor_id: payload.executor_id,
     name: payload.name,
     mcp_policy: payload.mcp_policy,
     config: payload.config,
+    secret_fields: payload.secret_fields,
+    provider: payload.provider,
     prepare_script: payload.prepare_script,
     cleanup_script: payload.cleanup_script,
     created_at: payload.created_at ?? new Date().toISOString(),
@@ -42,7 +45,17 @@ export function registerExecutorProfileHandlers(store: StoreApi<AppState>): WsHa
             exec.id === profile.executor_id
               ? {
                   ...exec,
-                  profiles: (exec.profiles ?? []).map((p) => (p.id === profile.id ? profile : p)),
+                  profiles: (exec.profiles ?? []).map((p) =>
+                    p.id === profile.id
+                      ? {
+                          ...profile,
+                          owner_user_id:
+                            profile.owner_user_id === undefined
+                              ? p.owner_user_id
+                              : profile.owner_user_id,
+                        }
+                      : p,
+                  ),
                 }
               : exec,
           ),

@@ -1,7 +1,5 @@
 "use client";
 
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,58 +7,81 @@ import {
   SORT_OPTION_LABEL_KEYS,
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
-  type TasksListGroup,
-  type TasksListSort,
 } from "@/lib/tasks/tasks-list-options";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { TasksListFilters, type TasksListFilterProps } from "./tasks-list-filters";
+import { TasksListArchiveModes } from "./tasks-list-archive-modes";
+import type { TasksListArchiveMode } from "@/lib/tasks/tasks-list-query";
 
 export function TasksListControls({
-  showArchived,
-  onShowArchivedChange,
+  archiveMode,
+  onArchiveModeChange,
+  filters,
+  total = 0,
+  isLoading = false,
   tasksListSort,
   onTasksListSortChange,
   tasksListGroup,
   onTasksListGroupChange,
+  facetOptions,
 }: {
-  showArchived: boolean;
-  onShowArchivedChange: (show: boolean) => void;
-  tasksListSort: TasksListSort;
-  onTasksListSortChange: (sort: TasksListSort) => void;
-  tasksListGroup: TasksListGroup;
-  onTasksListGroupChange: (group: TasksListGroup) => void;
+  archiveMode: TasksListArchiveMode;
+  onArchiveModeChange: (mode: TasksListArchiveMode) => void;
+  filters?: TasksListFilterProps;
+  total?: number;
+  isLoading?: boolean;
+  tasksListSort: string;
+  onTasksListSortChange: (sort: string) => void;
+  tasksListGroup: string;
+  onTasksListGroupChange: (group: string) => void;
+  facetOptions?: ReadonlyArray<{ value: string; label: string }>;
 }) {
   const { t } = useTranslation();
-  const sortOptions = TASKS_LIST_SORT_OPTIONS.map((option) => ({
-    value: option.value,
-    label: t(SORT_OPTION_LABEL_KEYS[option.value]),
-  }));
-  const groupOptions = TASKS_LIST_GROUP_OPTIONS.map((option) => ({
-    value: option.value,
-    label: t(GROUP_OPTION_LABEL_KEYS[option.value]),
-  }));
-  return (
-    <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
+  const sortOptions = [
+    ...TASKS_LIST_SORT_OPTIONS.map((option) => ({
+      value: option.value,
+      label: t(SORT_OPTION_LABEL_KEYS[option.value]),
+    })),
+    ...(facetOptions ?? []),
+  ];
+  const groupOptions = [
+    ...TASKS_LIST_GROUP_OPTIONS.map((option) => ({
+      value: option.value,
+      label: t(GROUP_OPTION_LABEL_KEYS[option.value]),
+    })),
+    ...(facetOptions ?? []),
+  ];
+  const displayOptions = (
+    <div className="hidden flex-wrap items-center justify-end gap-3 md:flex">
       <ListOptionSelect
         label={t("tasks:sort")}
         value={tasksListSort}
         options={sortOptions}
-        onChange={(value) => onTasksListSortChange(value as TasksListSort)}
+        onChange={onTasksListSortChange}
         testId="tasks-list-sort"
       />
       <ListOptionSelect
         label={t("tasks:group")}
         value={tasksListGroup}
         options={groupOptions}
-        onChange={(value) => onTasksListGroupChange(value as TasksListGroup)}
+        onChange={onTasksListGroupChange}
         testId="tasks-list-group"
       />
-      <Label className="flex h-11 items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none lg:h-9">
-        <Checkbox
-          checked={showArchived}
-          onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
-          className="cursor-pointer"
-        />
-        {t("tasks:showArchived")}
-      </Label>
+    </div>
+  );
+  return filters ? (
+    <TasksListFilters
+      {...filters}
+      archiveMode={archiveMode}
+      onArchiveModeChange={onArchiveModeChange}
+      displayOptions={displayOptions}
+      total={total}
+      isLoading={isLoading}
+    />
+  ) : (
+    <div className="flex flex-wrap justify-between gap-3">
+      <TasksListArchiveModes value={archiveMode} onChange={onArchiveModeChange} />
+      {displayOptions}
     </div>
   );
 }
@@ -82,7 +103,10 @@ function ListOptionSelect<T extends string>({
     <div className="flex items-center gap-2">
       <span className="text-sm text-muted-foreground">{label}</span>
       <Select value={value} onValueChange={(next) => onChange(next as T)}>
-        <SelectTrigger data-testid={testId} className="h-10 w-[150px] cursor-pointer lg:h-9">
+        <SelectTrigger
+          data-testid={testId}
+          className={controlSizingClassName("standard", "w-auto min-w-[150px] cursor-pointer")}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

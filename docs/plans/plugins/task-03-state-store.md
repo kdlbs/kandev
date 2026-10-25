@@ -14,7 +14,7 @@ SQLite-backed plugin-scoped KV state store following the per-package
 `initSchema()` convention.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "`plugin_state` (SQLite)" and
+- Spec `docs/specs/plugins/requirements/plugins.md` → "`plugin_state` (SQLite)" and
   "Plugin state API". Table:
   ```sql
   CREATE TABLE plugin_state (

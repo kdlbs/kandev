@@ -45,6 +45,7 @@ export function useSessionTabDelete(
   }, [setConfirmDelete]);
 
   return {
+    deleteOrigin,
     handleCloseTab,
     handleDeleteDialogOpenChange,
     handleConfirmDelete,

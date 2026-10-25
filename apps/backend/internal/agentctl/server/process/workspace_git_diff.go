@@ -3,8 +3,11 @@ package process
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -15,14 +18,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// sha1HexPattern matches a full-length git SHA-1 (40 lowercase or
-// uppercase hex characters). Used inline at the few sinks that consume
+// gitObjectIDPattern matches a full-length SHA-1 or SHA-256 Git object ID.
+// Used inline at the few sinks that consume
 // `update.BaseCommit` so CodeQL's `go/command-injection` taint tracker
 // sees the allowlist barrier co-located with the subprocess call — the
 // taint flowed in through the merge-base/rev-parse call upstream whose
 // argument list contained a (sanitised) user-controlled branch ref, and
 // the analyser otherwise treats that command's output as still tainted.
-var sha1HexPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+var gitObjectIDPattern = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 const (
 	// maxDiffFileSize is the maximum file size for which we generate diffs.
@@ -60,6 +63,18 @@ func (wt *WorkspaceTracker) enrichWithDiffData(
 	update *types.GitStatusUpdate,
 	prior types.GitStatusUpdate,
 ) error {
+	return wt.enrichWithDiffDataAgainst(ctx, update, prior, "HEAD")
+}
+
+func (wt *WorkspaceTracker) enrichWithDiffDataAgainst(
+	ctx context.Context,
+	update *types.GitStatusUpdate,
+	prior types.GitStatusUpdate,
+	headCommit string,
+) error {
+	if headCommit == "" || (headCommit != "HEAD" && !gitObjectIDPattern.MatchString(headCommit)) {
+		return fmt.Errorf("invalid observed HEAD for git status enrichment")
+	}
 	budget, err := newDiffBudget(ctx, update)
 	if err != nil {
 		return err
@@ -67,16 +82,19 @@ func (wt *WorkspaceTracker) enrichWithDiffData(
 	// Always diff against HEAD for unstaged/staged content so that files committed
 	// locally (but not yet pushed) show only their uncommitted changes rather than
 	// the entire file as new. The remote branch is only relevant for ahead/behind counts.
-	if err := wt.enrichWithUnstagedDiffBudget(ctx, update, "HEAD", prior, &budget); err != nil {
+	if err := wt.enrichWithUnstagedDiffBudget(ctx, update, headCommit, prior, &budget); err != nil {
 		return err
 	}
-	if err := wt.enrichWithStagedDiffBudget(ctx, update, "HEAD", prior, &budget); err != nil {
+	if err := wt.enrichMixedUnstagedDiffsBudget(ctx, update, prior, &budget); err != nil {
+		return err
+	}
+	if err := wt.enrichWithStagedDiffBudget(ctx, update, headCommit, prior, &budget); err != nil {
 		return err
 	}
 	if err := wt.enrichUntrackedFileDiffsBudget(ctx, update, &budget); err != nil {
 		return err
 	}
-	return carryForwardFileDiffs(ctx, update, prior)
+	return carryForwardFileDiffsBudget(ctx, update, prior, &budget)
 }
 
 // enrichWithBranchDiff computes the total additions/deletions for the entire branch
@@ -103,7 +121,7 @@ func (wt *WorkspaceTracker) enrichWithBranchDiff(
 	// here so the sanitiser barrier sits in the same function as the
 	// downstream `wt.runGitOutput` call and the value flowing into the
 	// next `git` invocation is provably a hex SHA, not user input.
-	if !sha1HexPattern.MatchString(update.BaseCommit) {
+	if !gitObjectIDPattern.MatchString(update.BaseCommit) {
 		return nil
 	}
 
@@ -115,6 +133,7 @@ func (wt *WorkspaceTracker) enrichWithBranchDiff(
 		}
 		wt.logger.Debug("enrichWithBranchDiff: numstat failed, carrying forward", zap.Error(err))
 		carryBranchDiff(update, prior)
+		markGitStatusDetailsUnavailable(update)
 		return nil
 	}
 
@@ -168,6 +187,12 @@ func totalDiffBytes(ctx context.Context, update *types.GitStatusUpdate) (int64, 
 			return 0, err
 		}
 		total += int64(len(fi.Diff))
+		if fi.StagedChange != nil {
+			total += int64(len(fi.StagedChange.Diff))
+		}
+		if fi.UnstagedChange != nil {
+			total += int64(len(fi.UnstagedChange.Diff))
+		}
 	}
 	return total, nil
 }
@@ -212,6 +237,19 @@ func carryBranchDiff(update *types.GitStatusUpdate, prior types.GitStatusUpdate)
 // last known diff data visible until the next successful poll. HEAD is
 // required to be unchanged so we don't show stale diffs after a reset/commit.
 func carryForwardFileDiffs(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) error {
+	budget, err := newDiffBudget(ctx, update)
+	if err != nil {
+		return err
+	}
+	return carryForwardFileDiffsBudget(ctx, update, prior, &budget)
+}
+
+func carryForwardFileDiffsBudget(
+	ctx context.Context,
+	update *types.GitStatusUpdate,
+	prior types.GitStatusUpdate,
+	budget *diffBudget,
+) error {
 	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
 		return nil
 	}
@@ -219,35 +257,77 @@ func carryForwardFileDiffs(ctx context.Context, update *types.GitStatusUpdate, p
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// A non-empty Diff means an earlier enrichment pass already populated
-		// this entry (e.g. unstaged numstat succeeded, then staged numstat
-		// failed). Leave the freshly-computed entry alone — only fill in
-		// completely-missing diff data.
-		if fi.Diff != "" {
-			continue
-		}
-		// A skip reason set this poll (budget_exceeded, too_large, binary)
-		// is an intentional decision to not surface diff content; restoring
-		// a prior diff would defeat that skip and could show stale content
-		// for a file that has since grown past the size or budget cap.
-		if fi.DiffSkipReason != "" {
-			continue
-		}
 		priorFi, ok := prior.Files[path]
-		if !ok || priorFi.Diff == "" {
+		if !ok {
 			continue
 		}
-		fi.Diff = priorFi.Diff
-		fi.DiffSkipReason = priorFi.DiffSkipReason
-		if fi.Additions == 0 {
-			fi.Additions = priorFi.Additions
+		// A skip reason set this poll is intentional and must not be replaced by
+		// cached content. Otherwise fill each missing representation
+		// independently; a fresh combined diff must not suppress facet carry.
+		if fi.Diff == "" && fi.DiffSkipReason == "" && priorFi.Diff != "" {
+			if fi.Additions == 0 {
+				fi.Additions = priorFi.Additions
+			}
+			if fi.Deletions == 0 {
+				fi.Deletions = priorFi.Deletions
+			}
+			if budget.exhausted() {
+				fi.DiffSkipReason = diffSkipReasonBudgetExceeded
+			} else {
+				fi.Diff = priorFi.Diff
+				fi.DiffSkipReason = priorFi.DiffSkipReason
+				budget.replace("", fi.Diff)
+			}
 		}
-		if fi.Deletions == 0 {
-			fi.Deletions = priorFi.Deletions
-		}
+		fi.StagedChange = carryForwardChangeFacetBudget(fi.StagedChange, priorFi.StagedChange, budget)
+		fi.UnstagedChange = carryForwardChangeFacetBudget(fi.UnstagedChange, priorFi.UnstagedChange, budget)
 		update.Files[path] = fi
 	}
 	return nil
+}
+
+func carryForwardChangeFacetBudget(
+	current *types.FileChangeFacet,
+	previous *types.FileChangeFacet,
+	budget *diffBudget,
+) *types.FileChangeFacet {
+	if current == nil || previous == nil || current.Diff != "" || current.DiffSkipReason != "" || previous.Diff == "" {
+		return current
+	}
+	carried := *current
+	if carried.Additions == 0 {
+		carried.Additions = previous.Additions
+	}
+	if carried.Deletions == 0 {
+		carried.Deletions = previous.Deletions
+	}
+	if budget.exhausted() {
+		carried.DiffSkipReason = diffSkipReasonBudgetExceeded
+		return &carried
+	}
+	carried.Diff = previous.Diff
+	carried.DiffSkipReason = previous.DiffSkipReason
+	budget.replace("", carried.Diff)
+	return &carried
+}
+
+func carryForwardChangeFacet(
+	current *types.FileChangeFacet,
+	previous *types.FileChangeFacet,
+) *types.FileChangeFacet {
+	if current == nil || previous == nil || current.Diff != "" || current.DiffSkipReason != "" || previous.Diff == "" {
+		return current
+	}
+	carried := *current
+	carried.Diff = previous.Diff
+	carried.DiffSkipReason = previous.DiffSkipReason
+	if carried.Additions == 0 {
+		carried.Additions = previous.Additions
+	}
+	if carried.Deletions == 0 {
+		carried.Deletions = previous.Deletions
+	}
+	return &carried
 }
 
 // carryForwardFileDiff fills fi.Diff/DiffSkipReason from prior for a single
@@ -278,38 +358,53 @@ func carryForwardFileDiff(fi types.FileInfo, filePath string, update *types.GitS
 // — otherwise the throttle could be silently bypassed by switching to
 // pipe-based reads. Slot is acquired before Start; if Start fails we
 // release immediately, else release runs after Wait.
-func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool) {
-	release, err := subproc.AcquireGit(ctx, gitWorkClass(ctx))
-	if err != nil {
-		return "", false
-	}
-	defer release()
-	execCtx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
-	defer cancel()
-	cmd := subproc.NewGitCommand(execCtx, args...)
-	cmd.Dir = workDir
+func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool, error) {
+	return capDiffOutputWithEnvironment(ctx, workDir, nil, args...)
+}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", false
+func capDiffOutputWithEnvironment(ctx context.Context, workDir string, environment []string, args ...string) (string, bool, error) {
+	stream, runErr, execCtxErr := subproc.StartGitStreamAfterAcquire(
+		ctx,
+		gitWorkClass(ctx),
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = workDir
+			cmd.Env = environment
+			return cmd
+		},
+	)
+	if runErr != nil {
+		return "", false, runErr
 	}
-	if err := cmd.Start(); err != nil {
-		_ = stdout.Close()
-		return "", false
+	if execCtxErr != nil {
+		return "", false, execCtxErr
 	}
+	stdout := stream.Stdout()
 
 	limited := io.LimitReader(stdout, maxDiffOutputSize+1)
-	data, _ := io.ReadAll(limited)
+	data, readErr := io.ReadAll(limited)
 	truncated := len(data) > maxDiffOutputSize
 	if truncated {
 		data = data[:maxDiffOutputSize]
 	}
 
 	// Drain remaining stdout so the process doesn't hang on a full pipe.
-	_, _ = io.Copy(io.Discard, stdout)
-	_ = cmd.Wait()
+	_, drainErr := io.Copy(io.Discard, stdout)
+	waitErr, waitCtxErr := stream.Wait()
+	if readErr != nil || drainErr != nil || waitErr != nil || waitCtxErr != nil {
+		return string(data), truncated, errors.Join(readErr, drainErr, waitErr, waitCtxErr)
+	}
 
-	return string(data), truncated
+	return string(data), truncated, nil
+}
+
+func (wt *WorkspaceTracker) capDiffOutput(ctx context.Context, args ...string) (string, bool, error) {
+	if wt.gitStatusDiffOutput != nil {
+		return wt.gitStatusDiffOutput(ctx, wt.workDir, args...)
+	}
+	environment := withEnvironmentOverrides(wt.gitCommandEnv(ctx, false), map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"})
+	return capDiffOutputWithEnvironment(ctx, wt.workDir, environment, args...)
 }
 
 // resolveNumstatPath resolves a numstat path that may contain rename notation
@@ -363,7 +458,7 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiffBudget(ctx context.Context, up
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", baseRef)
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", "-z", baseRef)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -371,18 +466,25 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiffBudget(ctx context.Context, up
 		// Carry-forward happens once at the end of enrichWithDiffData so the
 		// staged phase can still populate fresh diffs for staged-only files.
 		wt.logger.Debug("enrichWithUnstagedDiff: numstat failed", zap.Error(err))
+		markGitStatusDetailsUnavailable(update)
+		for path, fileInfo := range update.Files {
+			fileInfo.DiffState = gitStatusDiffUnavailable
+			update.Files[path] = fileInfo
+		}
 		return nil
 	}
 
-	lines := strings.Split(string(numstatOut), "\n")
-	for _, line := range lines {
+	output := string(numstatOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			markGitStatusDetailsUnavailable(update)
+			break
 		}
+		output = rest
 		if err := wt.enrichUnstagedFileDiff(ctx, update, baseRef, prior, budget, entry); err != nil {
 			return err
 		}
@@ -402,17 +504,26 @@ func (wt *WorkspaceTracker) enrichUnstagedFileDiff(ctx context.Context, update *
 	fileInfo.Deletions = entry.deletions
 	if budget.exhausted() {
 		fileInfo.DiffSkipReason = diffSkipReasonBudgetExceeded
+		fileInfo.DiffState = gitStatusDiffReady
 		update.Files[entry.path] = fileInfo
 		return nil
 	}
 
 	previousDiff := fileInfo.Diff
-	diffOut, truncated := capDiffOutput(ctx, wt.workDir, "diff", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if diffErr != nil {
+		wt.logger.Debug("enrichUnstagedFileDiff: diff failed", zap.String("path", entry.path), zap.Error(diffErr))
+		fileInfo.DiffState = gitStatusDiffUnavailable
+		markGitStatusDetailsUnavailable(update)
+		update.Files[entry.path] = fileInfo
+		return nil
+	}
 	if diffOut != "" {
 		fileInfo.Diff = diffOut
+		fileInfo.DiffState = gitStatusDiffReady
 		if truncated {
 			fileInfo.DiffSkipReason = diffSkipReasonTruncated
 		}
@@ -420,6 +531,119 @@ func (wt *WorkspaceTracker) enrichUnstagedFileDiff(ctx context.Context, update *
 		fileInfo = carryForwardFileDiff(fileInfo, entry.path, update, prior)
 	}
 	budget.replace(previousDiff, fileInfo.Diff)
+	update.Files[entry.path] = fileInfo
+	return nil
+}
+
+// enrichMixedUnstagedDiffsBudget fills the index-to-working-tree facet for
+// paths whose porcelain status contains both layers. The flattened legacy diff
+// above remains HEAD-to-working-tree for compatibility.
+func (wt *WorkspaceTracker) enrichMixedUnstagedDiffsBudget(
+	ctx context.Context,
+	update *types.GitStatusUpdate,
+	prior types.GitStatusUpdate,
+	budget *diffBudget,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	hasMixedFacet := false
+	for _, fileInfo := range update.Files {
+		if fileInfo.UnstagedChange != nil {
+			hasMixedFacet = true
+			break
+		}
+	}
+	if !hasMixedFacet {
+		return nil
+	}
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", "-z")
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		wt.logger.Debug("enrichMixedUnstagedDiffs: numstat failed", zap.Error(err))
+		markGitStatusDetailsUnavailable(update)
+		for path, fileInfo := range update.Files {
+			if fileInfo.UnstagedChange != nil {
+				change := *fileInfo.UnstagedChange
+				change.DiffState = gitStatusDiffUnavailable
+				fileInfo.UnstagedChange = &change
+				update.Files[path] = fileInfo
+			}
+		}
+		return nil
+	}
+	output := string(numstatOut)
+	for output != "" {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
+		if !ok {
+			markGitStatusDetailsUnavailable(update)
+			break
+		}
+		output = rest
+		if err := wt.enrichMixedUnstagedFileDiff(ctx, update, prior, budget, entry); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func (wt *WorkspaceTracker) enrichMixedUnstagedFileDiff(
+	ctx context.Context,
+	update *types.GitStatusUpdate,
+	prior types.GitStatusUpdate,
+	budget *diffBudget,
+	entry numstatEntry,
+) error {
+	fileInfo, exists := update.Files[entry.path]
+	if !exists || fileInfo.UnstagedChange == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	change := *fileInfo.UnstagedChange
+	change.Additions = entry.additions
+	change.Deletions = entry.deletions
+	if budget.exhausted() {
+		change.DiffSkipReason = diffSkipReasonBudgetExceeded
+		change.DiffState = gitStatusDiffReady
+		fileInfo.UnstagedChange = &change
+		update.Files[entry.path] = fileInfo
+		return nil
+	}
+
+	previousDiff := change.Diff
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", "--", literalGitPathspec(entry.path))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if diffErr != nil {
+		wt.logger.Debug("enrichMixedUnstagedFileDiff: diff failed", zap.String("path", entry.path), zap.Error(diffErr))
+		change.DiffState = gitStatusDiffUnavailable
+		markGitStatusDetailsUnavailable(update)
+		fileInfo.UnstagedChange = &change
+		update.Files[entry.path] = fileInfo
+		return nil
+	}
+	if diffOut != "" {
+		change.Diff = diffOut
+		change.DiffState = gitStatusDiffReady
+		if truncated {
+			change.DiffSkipReason = diffSkipReasonTruncated
+		}
+	} else if prior.HeadCommit != "" && prior.HeadCommit == update.HeadCommit {
+		if priorFile, ok := prior.Files[entry.path]; ok {
+			carried := carryForwardChangeFacet(&change, priorFile.UnstagedChange)
+			change = *carried
+		}
+	}
+	budget.replace(previousDiff, change.Diff)
+	fileInfo.UnstagedChange = &change
 	update.Files[entry.path] = fileInfo
 	return nil
 }
@@ -448,7 +672,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiffBudget(ctx context.Context, upda
 	// For staged files that don't have unstaged changes, we need to get the diff from the index.
 	// The first diff (git diff baseRef) shows worktree vs baseRef, but if a file is staged
 	// and has no additional unstaged changes, its diff won't appear there.
-	stagedOut, err := wt.runGitOutput(ctx, "diff", "--cached", "--numstat", baseRef)
+	stagedOut, err := wt.runGitOutput(ctx, "diff", "--cached", "--numstat", "-z", baseRef)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -456,18 +680,31 @@ func (wt *WorkspaceTracker) enrichWithStagedDiffBudget(ctx context.Context, upda
 		// Carry-forward happens at the end of enrichWithDiffData; running it
 		// here would mask the unstaged phase's fresh data.
 		wt.logger.Debug("enrichWithStagedDiff: --cached numstat failed", zap.Error(err))
+		markGitStatusDetailsUnavailable(update)
+		for path, fileInfo := range update.Files {
+			if fileInfo.StagedChange != nil {
+				change := *fileInfo.StagedChange
+				change.DiffState = gitStatusDiffUnavailable
+				fileInfo.StagedChange = &change
+			} else if fileInfo.Staged {
+				fileInfo.DiffState = gitStatusDiffUnavailable
+			}
+			update.Files[path] = fileInfo
+		}
 		return nil
 	}
 
-	lines := strings.Split(string(stagedOut), "\n")
-	for _, line := range lines {
+	output := string(stagedOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			markGitStatusDetailsUnavailable(update)
+			break
 		}
+		output = rest
 		if err := wt.enrichStagedFileDiff(ctx, update, baseRef, prior, budget, entry); err != nil {
 			return err
 		}
@@ -483,6 +720,9 @@ func (wt *WorkspaceTracker) enrichStagedFileDiff(ctx context.Context, update *ty
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if fileInfo.StagedChange != nil {
+		return wt.enrichMixedStagedFileDiff(ctx, update, baseRef, prior, budget, entry, fileInfo)
+	}
 	if fileInfo.Additions == 0 && fileInfo.Deletions == 0 {
 		fileInfo.Additions = entry.additions
 		fileInfo.Deletions = entry.deletions
@@ -493,16 +733,25 @@ func (wt *WorkspaceTracker) enrichStagedFileDiff(ctx context.Context, update *ty
 	}
 	if budget.exhausted() {
 		fileInfo.DiffSkipReason = diffSkipReasonBudgetExceeded
+		fileInfo.DiffState = gitStatusDiffReady
 		update.Files[entry.path] = fileInfo
 		return nil
 	}
 
-	diffOut, truncated := capDiffOutput(ctx, wt.workDir, "diff", "--cached", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if diffErr != nil {
+		wt.logger.Debug("enrichStagedFileDiff: diff failed", zap.String("path", entry.path), zap.Error(diffErr))
+		fileInfo.DiffState = gitStatusDiffUnavailable
+		markGitStatusDetailsUnavailable(update)
+		update.Files[entry.path] = fileInfo
+		return nil
+	}
 	if diffOut != "" {
 		fileInfo.Diff = diffOut
+		fileInfo.DiffState = gitStatusDiffReady
 		if truncated {
 			fileInfo.DiffSkipReason = diffSkipReasonTruncated
 		}
@@ -512,6 +761,72 @@ func (wt *WorkspaceTracker) enrichStagedFileDiff(ctx context.Context, update *ty
 	budget.replace("", fileInfo.Diff)
 	update.Files[entry.path] = fileInfo
 	return nil
+}
+
+func (wt *WorkspaceTracker) enrichMixedStagedFileDiff(
+	ctx context.Context,
+	update *types.GitStatusUpdate,
+	baseRef string,
+	prior types.GitStatusUpdate,
+	budget *diffBudget,
+	entry numstatEntry,
+	fileInfo types.FileInfo,
+) error {
+	change := *fileInfo.StagedChange
+	change.Additions = entry.additions
+	change.Deletions = entry.deletions
+	if budget.exhausted() {
+		change.DiffSkipReason = diffSkipReasonBudgetExceeded
+		change.DiffState = gitStatusDiffReady
+		fileInfo.StagedChange = &change
+		update.Files[entry.path] = fileInfo
+		return nil
+	}
+
+	previousDiff := change.Diff
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if diffErr != nil {
+		wt.logger.Debug("enrichMixedStagedFileDiff: diff failed", zap.String("path", entry.path), zap.Error(diffErr))
+		change.DiffState = gitStatusDiffUnavailable
+		markGitStatusDetailsUnavailable(update)
+		fileInfo.StagedChange = &change
+		update.Files[entry.path] = fileInfo
+		return nil
+	}
+	if diffOut != "" {
+		change.Diff = diffOut
+		change.DiffState = gitStatusDiffReady
+	}
+	if diffOut != "" && truncated {
+		change.DiffSkipReason = diffSkipReasonTruncated
+	}
+	if diffOut == "" {
+		change = carryPriorStagedFacet(change, entry.path, update, prior)
+	}
+
+	budget.replace(previousDiff, change.Diff)
+	fileInfo.StagedChange = &change
+	update.Files[entry.path] = fileInfo
+	return nil
+}
+
+func carryPriorStagedFacet(
+	current types.FileChangeFacet,
+	path string,
+	update *types.GitStatusUpdate,
+	prior types.GitStatusUpdate,
+) types.FileChangeFacet {
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return current
+	}
+	priorFile, ok := prior.Files[path]
+	if !ok {
+		return current
+	}
+	return *carryForwardChangeFacet(&current, priorFile.StagedChange)
 }
 
 // isBinaryContent checks for null bytes in the data, same heuristic git uses.
@@ -555,6 +870,7 @@ func enrichUntrackedFileDiffs(
 
 		if budget.exhausted() {
 			fileInfo.DiffSkipReason = diffSkipReasonBudgetExceeded
+			fileInfo.DiffState = gitStatusDiffReady
 			update.Files[filePath] = fileInfo
 			continue
 		}
@@ -563,7 +879,16 @@ func enrichUntrackedFileDiffs(
 		var err error
 		fileInfo, err = enrichFile(ctx, filePath, fileInfo)
 		if err != nil {
-			return err
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			fileInfo.DiffState = gitStatusDiffUnavailable
+			markGitStatusDetailsUnavailable(update)
+			update.Files[filePath] = fileInfo
+			continue
+		}
+		if fileInfo.DiffState == "" {
+			fileInfo.DiffState = gitStatusDiffReady
 		}
 		budget.replace(previousDiff, fileInfo.Diff)
 		update.Files[filePath] = fileInfo
@@ -574,7 +899,7 @@ func enrichUntrackedFileDiffs(
 func (wt *WorkspaceTracker) enrichUntrackedFile(ctx context.Context, filePath string, fileInfo types.FileInfo) (types.FileInfo, error) {
 	safePath, err := wt.sanitizePath(filePath)
 	if err != nil {
-		return fileInfo, nil
+		return fileInfo, err
 	}
 	content, skipReason, err := readUntrackedFile(ctx, safePath)
 	if err != nil {
@@ -582,6 +907,7 @@ func (wt *WorkspaceTracker) enrichUntrackedFile(ctx context.Context, filePath st
 	}
 	if skipReason != "" {
 		fileInfo.DiffSkipReason = skipReason
+		fileInfo.DiffState = gitStatusDiffReady
 		return fileInfo, nil
 	}
 
@@ -590,6 +916,7 @@ func (wt *WorkspaceTracker) enrichUntrackedFile(ctx context.Context, filePath st
 		return fileInfo, err
 	}
 	fileInfo.Diff = diff
+	fileInfo.DiffState = gitStatusDiffReady
 	fileInfo.Additions = additions
 	fileInfo.Deletions = 0
 	if truncated {
@@ -604,7 +931,7 @@ func readUntrackedFile(ctx context.Context, safePath string) ([]byte, string, er
 	}
 	info, err := os.Stat(filepath.Clean(safePath))
 	if err != nil {
-		return nil, "", nil
+		return nil, "", err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
@@ -615,7 +942,7 @@ func readUntrackedFile(ctx context.Context, safePath string) ([]byte, string, er
 
 	f, err := os.Open(filepath.Clean(safePath))
 	if err != nil {
-		return nil, "", nil
+		return nil, "", err
 	}
 	defer func() { _ = f.Close() }()
 

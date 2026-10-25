@@ -64,6 +64,247 @@ func TestBuildLaunchMetadataExecutorConfigWinsForTrustedKeys(t *testing.T) {
 		"untrusted executor-config keys still fill in when the caller supplied nothing")
 }
 
+func TestBuildLaunchMetadataUsesTrustedCausingRunID(t *testing.T) {
+	metadata := buildLaunchMetadata(&LaunchRequest{
+		CausingRunID: "office-run-1",
+		Metadata:     map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
+	}, "", "", "")
+	require.Equal(t, "office-run-1", metadata[MetadataKeyCausingRunID])
+
+	metadata = buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
+	}, "", "", "")
+	require.NotContains(t, metadata, MetadataKeyCausingRunID)
+}
+
+func TestBuildLaunchMetadataExecutorConfigWinsForKubernetesConnectionKeys(t *testing.T) {
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeKubernetes),
+		Metadata: map[string]interface{}{
+			"auth_mode":               "in_cluster",
+			"kubeconfig_path":         "/tmp/attacker-kubeconfig",
+			"kube_context":            "attacker",
+			"namespace":               "attacker",
+			"request_timeout_seconds": "300",
+		},
+		ExecutorConfig: map[string]string{
+			"auth_mode":               "kubeconfig",
+			"kubeconfig_path":         "/etc/kandev/cluster.yaml",
+			"namespace":               "kandev-agents",
+			"request_timeout_seconds": "30",
+		},
+	}
+
+	metadata := buildLaunchMetadata(req, "", "", "")
+
+	require.Equal(t, "kubeconfig", metadata["auth_mode"])
+	require.Equal(t, "/etc/kandev/cluster.yaml", metadata["kubeconfig_path"])
+	require.Empty(t, metadata["kube_context"],
+		"an omitted trusted context must clear task metadata instead of selecting another context")
+	require.Equal(t, "kandev-agents", metadata["namespace"])
+	require.Equal(t, "30", metadata["request_timeout_seconds"])
+}
+
+func TestLaunchBuildExecutorRequestUsesAuthoritativeKubernetesProfileConfig(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+	registry.Register(backend)
+	reader := &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{
+		"profile-1": {
+			ID:         "profile-1",
+			ExecutorID: "executor-1",
+			Config: map[string]string{
+				MetadataKeyKubernetesProfilePlatform:      "linux/arm64",
+				MetadataKeyKubernetesProfileMainContainer: "trusted-main",
+				MetadataKeyKubernetesPodTemplateYAML:      "apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n    containers:\n      - name: trusted-main\n        image: example.test/agent:latest\n",
+				MetadataKeyKubernetesWorkspaceMode:        "existing_claim",
+				MetadataKeyKubernetesWorkspaceClaimName:   "trusted-claim",
+			},
+		},
+	}}
+	mgr := &Manager{
+		executorRegistry:       registry,
+		executorFallbackPolicy: ExecutorFallbackDeny,
+		executorProfileReader:  reader,
+		logger:                 log,
+	}
+	req := &LaunchRequest{
+		ExecutorType:         string(models.ExecutorTypeKubernetes),
+		EnvironmentFinalized: true,
+		SessionID:            "session-1",
+		TaskEnvironmentID:    "environment-1",
+		Metadata: map[string]interface{}{
+			"executor_id":                              "executor-1",
+			MetadataKeyExecutorProfileID:               "profile-1",
+			MetadataKeyKubernetesProfilePlatform:       "linux/amd64",
+			MetadataKeyKubernetesProfileMainContainer:  "attacker-main",
+			MetadataKeyKubernetesPodTemplateYAML:       "attacker-template",
+			MetadataKeyKubernetesWorkspaceMode:         "managed_pvc",
+			MetadataKeyKubernetesWorkspaceSize:         "1Ti",
+			MetadataKeyKubernetesWorkspaceStorageClass: "attacker-class",
+			MetadataKeyKubernetesWorkspaceAccessModes:  "ReadWriteOnce",
+			MetadataKeyKubernetesWorkspaceClaimName:    "attacker-claim",
+		},
+	}
+
+	_, _, _, err := mgr.launchBuildExecutorRequest(
+		context.Background(), "instance-1", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"profile-1"}, reader.profileArgs)
+	require.NotNil(t, backend.lastRequest)
+	require.Equal(t, "session-1", backend.lastRequest.DurableJournalOwnerID,
+		"sibling sessions sharing an environment must not contend on one bbolt journal")
+	metadata := backend.lastRequest.Metadata
+	require.Equal(t, "linux/arm64", metadata[MetadataKeyKubernetesProfilePlatform])
+	require.Equal(t, "trusted-main", metadata[MetadataKeyKubernetesProfileMainContainer])
+	require.Contains(t, metadata[MetadataKeyKubernetesPodTemplateYAML], "name: trusted-main")
+	require.Equal(t, "existing_claim", metadata[MetadataKeyKubernetesWorkspaceMode])
+	require.Equal(t, "trusted-claim", metadata[MetadataKeyKubernetesWorkspaceClaimName])
+	require.Empty(t, metadata[MetadataKeyKubernetesWorkspaceAccessModes])
+	require.Empty(t, metadata[MetadataKeyKubernetesWorkspaceStorageClass])
+	require.Empty(t, getMetadataString(metadata, MetadataKeyKubernetesWorkspaceSize),
+		"an omitted profile field must erase a task-supplied value")
+}
+
+func TestLaunchBuildExecutorRequestCanonicalizesLegacyKubernetesWorkspaceKeys(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+	registry.Register(backend)
+	reader := &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{
+		"profile-legacy": {
+			ID: "profile-legacy", ExecutorID: "executor-1",
+			Config: map[string]string{
+				"platform":                "linux/amd64",
+				"main_container":          "kandev-agent",
+				"pod_template_yaml":       validKubernetesProfilePodTemplate,
+				"workspace_mode":          "managed_pvc",
+				"workspace_size":          "8Gi",
+				"workspace_storage_class": "fast",
+				"workspace_access_modes":  `["ReadWriteOnce","ReadOnlyMany"]`,
+				"workspace.claim_name":    "",
+			},
+		},
+	}}
+	mgr := &Manager{
+		executorRegistry: registry, executorFallbackPolicy: ExecutorFallbackDeny,
+		executorProfileReader: reader, logger: log,
+	}
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeKubernetes), EnvironmentFinalized: true,
+		Metadata: map[string]interface{}{
+			"executor_id": "executor-1", MetadataKeyExecutorProfileID: "profile-legacy",
+			MetadataKeyKubernetesWorkspaceMode: "empty_dir",
+		},
+	}
+
+	_, _, _, err := mgr.launchBuildExecutorRequest(
+		context.Background(), "instance-legacy", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, backend.lastRequest)
+	metadata := backend.lastRequest.Metadata
+	require.Equal(t, "managed_pvc", metadata[MetadataKeyKubernetesWorkspaceMode])
+	require.Equal(t, "8Gi", metadata[MetadataKeyKubernetesWorkspaceSize])
+	require.Equal(t, "fast", metadata[MetadataKeyKubernetesWorkspaceStorageClass])
+	require.Equal(t, `["ReadWriteOnce","ReadOnlyMany"]`, metadata[MetadataKeyKubernetesWorkspaceAccessModes])
+}
+
+const validKubernetesProfilePodTemplate = "apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n    containers:\n      - name: kandev-agent\n        image: example.test/agent:latest\n"
+
+func TestLaunchBuildExecutorRequestUsesRecordedKubernetesSnapshotWhenProfileWasDeleted(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}}
+	registry.Register(backend)
+	reader := &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{}}
+	mgr := &Manager{
+		executorRegistry:       registry,
+		executorFallbackPolicy: ExecutorFallbackDeny,
+		executorProfileReader:  reader,
+		logger:                 log,
+	}
+	snapshot := `{"platform":"linux/amd64","main_container":"kandev-agent","pod_template_yaml":"apiVersion: v1\nkind: PodTemplate\ntemplate:\n  spec:\n    containers:\n      - name: kandev-agent\n        image: example.test/agent:latest\n","workspace":{"mode":"managed_pvc","size":"1Gi","access_modes":["ReadWriteOnce"]}}`
+	req := &LaunchRequest{
+		ExecutorType:         string(models.ExecutorTypeKubernetes),
+		EnvironmentFinalized: true,
+		PreviousExecutionID:  "previous-instance",
+		Metadata:             completeKubernetesRecordedResumeMetadata(snapshot),
+	}
+	req.Metadata[MetadataKeyExecutorProfileID] = "deleted-profile"
+	req.Metadata[MetadataKeyKubernetesProfilePlatform] = "linux/arm64"
+	req.Metadata[MetadataKeyKubernetesPodTemplateYAML] = "attacker-template"
+	req.Metadata[MetadataKeyKubernetesWorkspaceMode] = "empty_dir"
+
+	_, _, _, err := mgr.launchBuildExecutorRequest(
+		context.Background(), "instance-2", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+	)
+
+	require.NoError(t, err)
+	require.Empty(t, reader.profileArgs, "retained workloads must not depend on the current profile row")
+	require.NotNil(t, backend.lastRequest)
+	require.Equal(t, snapshot, backend.lastRequest.Metadata[MetadataKeyKubernetesProfileSnapshot])
+}
+
+func TestLaunchBuildExecutorRequestDoesNotBypassProfileForIncompleteKubernetesInventory(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameKubernetes}})
+	reader := &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{}}
+	mgr := &Manager{
+		executorRegistry:       registry,
+		executorFallbackPolicy: ExecutorFallbackDeny,
+		executorProfileReader:  reader,
+		logger:                 log,
+	}
+	req := &LaunchRequest{
+		ExecutorType:         string(models.ExecutorTypeKubernetes),
+		EnvironmentFinalized: true,
+		PreviousExecutionID:  "previous-instance",
+		Metadata: map[string]interface{}{
+			"executor_id":                        "executor-1",
+			MetadataKeyExecutorProfileID:         "missing-profile",
+			MetadataKeyKubernetesPodName:         "kandev-recorded",
+			MetadataKeyKubernetesProfileSnapshot: `{}`,
+		},
+	}
+
+	_, _, _, err := mgr.launchBuildExecutorRequest(
+		context.Background(), "instance-2", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+	)
+
+	require.Error(t, err)
+	require.Equal(t, []string{"missing-profile"}, reader.profileArgs)
+}
+
+func completeKubernetesRecordedResumeMetadata(snapshot string) map[string]interface{} {
+	return map[string]interface{}{
+		"executor_id":                              "executor-1",
+		MetadataKeyExecutorProfileID:               "profile-1",
+		MetadataKeyKubernetesNamespace:             "kandev-agents",
+		MetadataKeyKubernetesPodName:               "kandev-recorded",
+		MetadataKeyKubernetesPodUID:                "pod-uid",
+		MetadataKeyKubernetesMainContainer:         "kandev-agent",
+		MetadataKeyKubernetesRuntimeWorkspaceMode:  "empty_dir",
+		MetadataKeyKubernetesAgentctlRemotePort:    "41001",
+		MetadataKeyKubernetesAgentctlInstanceID:    "previous-instance",
+		MetadataKeyKubernetesResourceExecutorID:    "executor-1",
+		MetadataKeyKubernetesResourceProfileID:     "profile-1",
+		MetadataKeyKubernetesResourceInstanceID:    "previous-instance",
+		MetadataKeyKubernetesResourceTaskID:        "task-1",
+		MetadataKeyKubernetesResourceSessionID:     "session-1",
+		MetadataKeyKubernetesResourceEnvironmentID: "environment-1",
+		MetadataKeyKubernetesExecutorConfigHash:    "executor-hash",
+		MetadataKeyKubernetesProfileConfigHash:     "profile-hash",
+		MetadataKeyKubernetesTemplateHash:          "template-hash",
+		MetadataKeyKubernetesProfileSnapshot:       snapshot,
+	}
+}
+
 func TestIsTrustedExecutorConfigKey(t *testing.T) {
 	for _, key := range []string{
 		MetadataKeySSHHost, MetadataKeySSHHostAlias, MetadataKeySSHPort, MetadataKeySSHUser,
@@ -96,6 +337,46 @@ func TestBuildLaunchMetadataProjectsWorktreeAndRepoFields(t *testing.T) {
 	require.Equal(t, "main", metadata[MetadataKeyBaseBranch])
 	require.Equal(t, map[string]string{"": "main"}, metadata[MetadataKeyBaseBranches],
 		"the single-repo base branch is recorded under the empty key for single-repo trackers")
+}
+
+func TestBuildLaunchMetadataProjectsTrustedPrimaryRepositoryContext(t *testing.T) {
+	const repositoryConfiguredKey = "repository_configured"
+	metadata := buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{
+			repositoryConfiguredKey:   true,
+			MetadataKeyRepositoryPath: "/task-supplied/path",
+		},
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "primary", RepositoryPath: "/repos/primary"},
+			{RepositoryID: "secondary", RepositoryPath: "/repos/secondary"},
+		},
+	}, "", "", "")
+
+	require.Equal(t, true, metadata[repositoryConfiguredKey])
+	require.Equal(t, "/repos/primary", metadata[MetadataKeyRepositoryPath])
+
+	freeTask := buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{
+			repositoryConfiguredKey:   true,
+			MetadataKeyRepositoryPath: "/task-supplied/path",
+		},
+		ExecutorConfig:   map[string]string{MetadataKeyRepositoryPath: "/executor-supplied/path"},
+		WorkspaceFolders: []WorkspaceFolderSpec{{Name: "notes", LocalPath: "/folders/notes"}},
+	}, "", "", "")
+	require.Equal(t, false, freeTask[repositoryConfiguredKey])
+	require.NotContains(t, freeTask, MetadataKeyRepositoryPath)
+}
+
+func TestPromotionWithoutRepositorySpecsPreservesTrustedRepositoryContext(t *testing.T) {
+	primary := t.TempDir()
+	execution := &AgentExecution{metadata: map[string]interface{}{
+		MetadataKeyRepositoryConfigured: true,
+		MetadataKeyRepositoryPath:       primary,
+	}}
+	applyLaunchRepositoryContextToExecution(execution, &LaunchRequest{})
+	path, available := cursorMCPSourceRepository(execution)
+	require.True(t, available)
+	require.Equal(t, primary, path)
 }
 
 func TestBuildLaunchMetadataOmitsEmptyOptionalKeys(t *testing.T) {
@@ -139,6 +420,56 @@ func TestCollectRemoteContributionsMultiRepoKeysSiblings(t *testing.T) {
 		"the first repository owns the workspace root")
 	require.Equal(t, second.CanonicalURL, bindings["gadget-hotfix"].CanonicalURL,
 		"siblings use the same deterministic key as base-branch projection")
+}
+
+func TestPluginRemoteRepositoryMetadataUsesMaterializedWorkspacePaths(t *testing.T) {
+	firstContribution := validTestRemoteContribution(7, "contributor/widget")
+	secondContribution := validTestRemoteContribution(9, "contributor/gadget")
+	firstDestination := lifecycleTestContributionDestination("200")
+	secondDestination := lifecycleTestContributionDestination("201")
+	comparisonTarget := lifecycleTestQualifiedPRBase().Target
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypePluginRemote),
+		Repositories: []RepoLaunchSpec{
+			{
+				RepoName: "widget", BaseBranch: "main", RemoteContribution: &firstContribution,
+				ContributionDestination: &firstDestination, ComparisonTarget: &comparisonTarget,
+			},
+			{
+				RepoName: "gadget", BaseBranch: "main", CheckoutBranch: "feature/next",
+				RemoteContribution: &secondContribution, ContributionDestination: &secondDestination,
+				ComparisonTarget: &comparisonTarget,
+			},
+		},
+	}
+
+	wantKeys := []string{"widget-main", "gadget-feature-next"}
+	bindings, err := collectRemoteContributions(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, bindings, wantKeys)
+	destinations, err := collectContributionDestinations(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, destinations, wantKeys)
+	targets, err := collectComparisonTargets(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, targets, wantKeys)
+	require.Equal(t, map[string]string{"widget-main": "main", "gadget-feature-next": "main"}, collectBaseBranches(req))
+
+	workspaceTargets, err := comparisonTargetsFromWorkspaceRepositories([]WorkspaceRepositorySpec{
+		{RepoName: "widget", BaseBranch: "main", ComparisonTarget: &comparisonTarget},
+		{RepoName: "gadget", BaseBranch: "main", CheckoutBranch: "feature/next", ComparisonTarget: &comparisonTarget},
+	}, string(models.ExecutorTypePluginRemote))
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, workspaceTargets, wantKeys)
+}
+
+func assertLifecycleWorkspaceKeys[V any](t *testing.T, got map[string]V, want []string) {
+	t.Helper()
+	keys := make([]string, 0, len(got))
+	for key := range got {
+		keys = append(keys, key)
+	}
+	require.ElementsMatch(t, want, keys)
 }
 
 func TestCollectRemoteContributionsRejectsConflictingBindings(t *testing.T) {
@@ -200,10 +531,12 @@ func TestCollectRemoteContributionsEmptyInputs(t *testing.T) {
 // request-level one, and an entry with one keeps it.
 func TestBuildEnvPrepareRequestForwardsMultiRepoSpecs(t *testing.T) {
 	req := &LaunchRequest{
-		TaskID:      "task-1",
-		WorkspaceID: "ws-1",
-		SessionID:   "session-1",
-		TaskTitle:   "Fix the widget",
+		TaskID:                "task-1",
+		WorkspaceID:           "ws-1",
+		SessionID:             "session-1",
+		TaskTitle:             "Fix the widget",
+		WorkspaceLayout:       "repository",
+		WorkspaceRelativePath: "widget/kandev/gadget",
 		Metadata: map[string]interface{}{
 			MetadataKeyRepoSetupScript: "shared-setup.sh",
 			MetadataKeyWorktreeBranch:  "kandev/fix-widget",
@@ -221,6 +554,8 @@ func TestBuildEnvPrepareRequestForwardsMultiRepoSpecs(t *testing.T) {
 	require.Equal(t, "Fix the widget", prep.TaskTitle)
 	require.Equal(t, executor.NameStandalone, prep.ExecutorType)
 	require.Equal(t, "/work/task-1", prep.WorkspacePath)
+	require.Equal(t, "repository", prep.WorkspaceLayout)
+	require.Equal(t, "widget/kandev/gadget", prep.WorkspaceRelativePath)
 	require.Equal(t, "shared-setup.sh", prep.RepoSetupScript)
 	require.Equal(t, "kandev/fix-widget", prep.WorktreeBranch,
 		"the worktree branch is read out of launch metadata, not a request field")
@@ -236,17 +571,21 @@ func TestBuildEnvPrepareRequestForwardsMultiRepoSpecs(t *testing.T) {
 
 func TestBuildEnvPrepareRequestSingleRepoLeavesRepositoriesEmpty(t *testing.T) {
 	req := &LaunchRequest{
-		TaskID:         "task-1",
-		RepositoryPath: "/repos/widget",
-		UseWorktree:    true,
-		BaseBranch:     "main",
-		Env:            map[string]string{"FOO": "bar"},
+		TaskID:                "task-1",
+		RepositoryPath:        "/repos/widget",
+		WorkspaceLayout:       "repository",
+		WorkspaceRelativePath: "widget/gadget",
+		UseWorktree:           true,
+		BaseBranch:            "main",
+		Env:                   map[string]string{"FOO": "bar"},
 	}
 
 	prep := buildEnvPrepareRequest(req, "/work/task-1", executor.NameDocker)
 
 	require.Empty(t, prep.Repositories, "a legacy single-repo launch carries no per-repo spec list")
 	require.Equal(t, "/repos/widget", prep.RepositoryPath)
+	require.Equal(t, "repository", prep.WorkspaceLayout)
+	require.Equal(t, "widget/gadget", prep.WorkspaceRelativePath)
 	require.True(t, prep.UseWorktree)
 	require.Equal(t, map[string]string{"FOO": "bar"}, prep.Env)
 	require.Empty(t, prep.RepoSetupScript)
@@ -346,6 +685,18 @@ func TestSetExecutionDescriptionFeedsPassthroughPromptInjection(t *testing.T) {
 
 	require.Equal(t, "Ship the release", getTaskDescriptionFromMetadata(exec),
 		"the description set on a workspace-only execution is what the prompt path reads back")
+}
+
+func TestGetTaskDescriptionFromMetadataDoesNotReplayInitialPromptOnResume(t *testing.T) {
+	exec := &AgentExecution{
+		ID:               "exec-1",
+		SessionID:        "session-1",
+		isResumedSession: true,
+	}
+	exec.setMetadataValue("task_description", "original task prompt")
+
+	require.Empty(t, getTaskDescriptionFromMetadata(exec),
+		"a resumed execution must wait for its caller's prompt instead of replaying the original launch prompt")
 }
 
 func TestPrepareProgressRecorderMergeFillsOnlyBlankSlots(t *testing.T) {

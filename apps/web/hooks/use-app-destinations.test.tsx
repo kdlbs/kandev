@@ -2,6 +2,11 @@ import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 const availabilitySpy = vi.hoisted(() => vi.fn(() => ({ github: true })));
+const startupPage = vi.hoisted(() => ({ value: "task_overview" }));
+
+afterEach(() => {
+  startupPage.value = "task_overview";
+});
 
 vi.mock("@/hooks/use-nav-availability", () => ({
   useNavAvailability: availabilitySpy,
@@ -12,8 +17,14 @@ vi.mock("@/components/state-provider", () => ({
     selector: (state: {
       workspaces: { activeId: string | null };
       features: Record<string, boolean>;
+      userSettings: { startupPage: string };
     }) => unknown,
-  ) => selector({ workspaces: { activeId: "ws-1" }, features: { office: false } }),
+  ) =>
+    selector({
+      workspaces: { activeId: "ws-1" },
+      features: { office: false },
+      userSettings: { startupPage: startupPage.value },
+    }),
 }));
 
 vi.mock("@/lib/routing/client-router", () => ({
@@ -27,6 +38,17 @@ vi.mock("@/lib/plugins/registry", () => ({
 import { useAppDestinations, useStaticDestinations } from "./use-app-destinations";
 
 describe("useStaticDestinations", () => {
+  it("updates Home when the saved startup choice changes", () => {
+    const { result, rerender } = renderHook(() => useStaticDestinations("palette"));
+    expect(result.current.find((destination) => destination.id === "home")?.href).toBe(
+      "/?home=overview",
+    );
+    startupPage.value = "threads";
+    rerender();
+    expect(result.current.find((destination) => destination.id === "home")?.href).toBe(
+      "/threads?workspace=ws-1",
+    );
+  });
   beforeEach(() => availabilitySpy.mockClear());
   afterEach(() => vi.clearAllMocks());
 

@@ -25,12 +25,12 @@ export function useMarketplace(query: CatalogQuery) {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const { q, category, sort } = query;
+  const { q, category, sort, kind } = query;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getMarketplaceCatalog({ q, category, sort })
+    getMarketplaceCatalog({ q, category, sort, ...(kind ? { kind } : {}) })
       .then((result) => {
         if (cancelled) return;
         setCatalog(result);
@@ -46,7 +46,7 @@ export function useMarketplace(query: CatalogQuery) {
     return () => {
       cancelled = true;
     };
-  }, [q, category, sort, reloadKey]);
+  }, [q, category, sort, kind, reloadKey]);
 
   const softReload = useCallback(() => setReloadKey((key) => key + 1), []);
 

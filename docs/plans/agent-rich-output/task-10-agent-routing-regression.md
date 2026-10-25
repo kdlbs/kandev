@@ -5,7 +5,7 @@ status: complete
 wave: 10
 depends_on: ["09-compact-mcp-guidance"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 10: Agent routing regression

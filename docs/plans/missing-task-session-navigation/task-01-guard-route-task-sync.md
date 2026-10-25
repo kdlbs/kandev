@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/missing-task-route-recovery/spec.md"
+spec: "../../specs/tasks/requirements/missing-task-route-recovery.md"
 ---
 
 # Task 01: Guard Missing-Route Task Synchronization
@@ -68,7 +68,7 @@ None.
 
 ## Inputs
 
-- The session-backed regression scenario in `docs/specs/missing-task-route-recovery/spec.md`.
+- The session-backed regression scenario in `docs/specs/tasks/requirements/missing-task-route-recovery.md`.
 - The confirmed production-build failure in the current task conversation.
 - `syncActiveTaskSession` and `useTaskPageData` as the current route synchronization path.
 - `selectTaskWithLayout` and `replaceTaskUrl` as the current in-place switch path.

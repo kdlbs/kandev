@@ -187,6 +187,7 @@ export const cmEditorTheme = EditorView.theme({
 
 type UseCodeMirrorEditorStateOpts = {
   path: string;
+  repo?: string;
   originalContent: string;
   content: string;
   isDirty: boolean;
@@ -204,6 +205,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   const { t } = useTranslation();
   const {
     path,
+    repo,
     originalContent,
     isDirty,
     isSaving,
@@ -231,7 +233,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   const addComment = useCommentsStore((state) => state.addComment);
   const removeComment = useCommentsStore((state) => state.removeComment);
   const updateComment = useCommentsStore((state) => state.updateComment);
-  const comments = useDiffFileComments(sessionId ?? "", path);
+  const comments = useDiffFileComments(sessionId ?? "", path, undefined, repo ?? "");
   const langExt = getCodeMirrorExtensionFromPath(path);
 
   // Comment decorations plugin
@@ -449,6 +451,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
         source: "diff",
         sessionId,
         filePath: path,
+        repositoryName: repo ?? "",
         startLine: textSelection.startLine,
         endLine: textSelection.endLine,
         side: "additions",
@@ -465,7 +468,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
       }
       return comment;
     },
-    [textSelection, sessionId, path, addComment, editorRef],
+    [textSelection, sessionId, path, repo, addComment, editorRef],
   );
 
   const handleCommentSubmit = useCallback(

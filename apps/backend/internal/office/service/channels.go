@@ -54,7 +54,7 @@ func (s *Service) SetupChannel(ctx context.Context, channel *models.Channel) err
 	// the runner row is keyed against an empty step_id; the office
 	// repo's runner projection still resolves it because it joins
 	// step_id = task.workflow_step_id (also empty).
-	if err := s.repo.UpdateTaskAssignee(ctx, taskID, channel.AgentProfileID); err != nil {
+	if _, err := s.repo.UpdateTaskAssignee(ctx, taskID, channel.AgentProfileID); err != nil {
 		_ = s.repo.DeleteChannel(ctx, channel.ID)
 		return fmt.Errorf("set channel task assignee: %w", err)
 	}

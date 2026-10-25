@@ -49,6 +49,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/states", c.httpListStates)
 	api.GET("/labels", c.httpListLabels)
 	api.GET("/users", c.httpListUsers)
+	api.GET("/projects", c.httpListProjects)
 	api.GET("/issues", c.httpSearchIssues)
 	api.GET("/issues/:id", c.httpGetIssue)
 	api.POST("/issues/:id/state", c.httpSetIssueState)
@@ -201,6 +202,25 @@ func (c *Controller) httpListUsers(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"users": users})
+}
+
+func (c *Controller) httpListProjects(ctx *gin.Context) {
+	teamKey := ctx.Query(teamKeyParam)
+	if teamKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": teamKeyRequired})
+		return
+	}
+	client, err := c.service.clientFor(ctx.Request.Context(), c.workspaceID(ctx))
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	projects, err := client.ListProjects(ctx.Request.Context(), teamKey)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"projects": projects})
 }
 
 func (c *Controller) httpSearchIssues(ctx *gin.Context) {

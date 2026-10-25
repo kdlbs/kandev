@@ -158,6 +158,64 @@ func TestEnrichment_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestUpdateAgentProfile_DoesNotOverwriteWorkingOwner(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatalf("newSQLiteRepository: %v", err)
+	}
+	ctx := context.Background()
+	agent := &models.Agent{Name: "claude"}
+	if err := repo.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	profile := &models.AgentProfile{
+		AgentID:     agent.ID,
+		Name:        "worker",
+		Model:       "claude-sonnet-4-6",
+		WorkspaceID: "ws-1",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	snapshot, err := repo.GetAgentProfile(ctx, profile.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE agent_profiles SET status = 'working', working_run_id = ? WHERE id = ?`,
+		"run-settings", profile.ID); err != nil {
+		t.Fatalf("seed working owner: %v", err)
+	}
+	snapshot.Name = "renamed while working"
+	if err := repo.UpdateAgentProfile(ctx, snapshot); err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+
+	updated, err := repo.GetAgentProfile(ctx, profile.ID)
+	if err != nil {
+		t.Fatalf("get updated profile: %v", err)
+	}
+	if updated.Status != models.AgentStatusWorking {
+		t.Fatalf("status = %q, want working", updated.Status)
+	}
+	var owner string
+	if err := db.GetContext(ctx, &owner,
+		`SELECT working_run_id FROM agent_profiles WHERE id = ?`, profile.ID); err != nil {
+		t.Fatalf("read working owner: %v", err)
+	}
+	if owner != "run-settings" {
+		t.Fatalf("working_run_id = %q, want run-settings", owner)
+	}
+}
+
 func TestProfileConfigOptions_RoundTripInSettings(t *testing.T) {
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {

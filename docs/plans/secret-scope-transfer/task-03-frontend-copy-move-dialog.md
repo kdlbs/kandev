@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-copy-move-service", "02-backend-copy-move-handlers"]
 plan: "plan.md"
-spec: "../../specs/workspaces/secret-scope-transfer.md"
+spec: "../../specs/workspaces/requirements/secret-scope-transfer.md"
 ---
 
 # Task 03: Frontend Copy/Move Dialog and API

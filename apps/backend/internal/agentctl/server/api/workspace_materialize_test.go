@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -26,6 +27,25 @@ func TestContributionDestinationPushURLsMatchAcceptsRepeatedTarget(t *testing.T)
 	}
 	if contributionDestinationPushURLsMatch(targetURL+"\nhttps://github.com/other/kandev.git", targetURL) {
 		t.Fatal("mixed contribution push URLs were accepted")
+	}
+}
+
+func TestMaterializeGitTimeoutClassifiesNetworkVerbs(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{name: "clone", args: []string{"clone", "--no-checkout", "url", "path"}, want: 5 * time.Minute},
+		{name: "fetch after directory", args: []string{"-C", "/workspace", "fetch", "origin"}, want: 30 * time.Second},
+		{name: "push", args: []string{"push", "origin", "HEAD"}, want: 5 * time.Minute},
+		{name: "local status", args: []string{"-C", "/workspace", "status"}, want: 30 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := materializeGitTimeout(test.args); got != test.want {
+				t.Fatalf("materializeGitTimeout(%v) = %s, want %s", test.args, got, test.want)
+			}
+		})
 	}
 }
 
@@ -652,4 +672,28 @@ func materializeGitOutputForTest(t *testing.T, dir string, args ...string) strin
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
 	return string(output)
+}
+
+func materializeRepository(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, bindings ...*models.RemoteContribution) (bool, error) {
+	var binding *models.RemoteContribution
+	if len(bindings) > 0 {
+		binding = bindings[0]
+	}
+	return materializeRepositoryInternal(ctx, locator, destination, baseBranch, checkoutBranch, binding, nil)
+}
+
+func materializeRepositoryInternal(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination) (bool, error) {
+	return materializeRepositoryWithOptions(ctx, locator, destination, baseBranch, checkoutBranch, binding, contributionDestination, nil)
+}
+
+func materializeRepositoryWithOptions(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination, options *models.RepositoryCheckoutOptions) (bool, error) {
+	return materializeRepositoryWithQualifiedPRBase(ctx, locator, destination, baseBranch, checkoutBranch, 0, nil, binding, contributionDestination, options)
+}
+
+func materializeRepositoryWithQualifiedPRBase(
+	ctx context.Context, locator, destination, baseBranch, checkoutBranch string,
+	prNumber int, qualifiedPRBase *models.PRBase, binding *models.RemoteContribution,
+	contributionDestination *models.ContributionDestination, options *models.RepositoryCheckoutOptions,
+) (bool, error) {
+	return (materializeGitRunner{}).materializeRepositoryWithQualifiedPRBase(ctx, locator, destination, baseBranch, checkoutBranch, prNumber, qualifiedPRBase, binding, contributionDestination, options)
 }

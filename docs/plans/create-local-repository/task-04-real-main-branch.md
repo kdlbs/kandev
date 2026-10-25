@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-backend-initialization", "02-task-create-selector", "03-e2e-and-verification"]
 plan: "plan.md"
-spec: "../../specs/create-local-repository/spec.md"
+spec: "../../specs/workspaces/requirements/create-local-repository.md"
 ---
 
 # Task 04: Create a Real Main Branch
@@ -50,7 +50,7 @@ the bootstrap command is a no-op.
 - `apps/backend/internal/task/gitinit/helper.go`
 - `apps/web/e2e/tests/task/create-task-new-local-repository.spec.ts`
 - `apps/web/e2e/tests/task/mobile-create-task-new-local-repository.spec.ts`
-- `docs/specs/create-local-repository/spec.md`
+- `docs/specs/workspaces/requirements/create-local-repository.md`
 - `docs/plans/create-local-repository/plan.md`
 
 ## Dependencies

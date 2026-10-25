@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, fetchBlob, fetchJson, setOnUnauthorized } from "./client";
+import { ApiError, fetchBlob, fetchConditionalJson, fetchJson, setOnUnauthorized } from "./client";
+
+const reloadMocks = vi.hoisted(() => ({
+  signalBackendReloadRequired: vi.fn(),
+}));
+
+vi.mock("@/lib/platform/backend-reload-coordinator", () => ({
+  signalBackendReloadRequired: (...args: unknown[]) =>
+    reloadMocks.signalBackendReloadRequired(...args),
+}));
 
 const interlockToken = "replayable-per-boot-value";
 const BACKEND_URL = "http://backend.test";
@@ -107,6 +116,153 @@ describe("fetchJson", () => {
       message: "GitHub credentials are invalid",
     });
     expect(unauthorized).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchConditionalJson", () => {
+  const SESSION_ETAG = '"session-v1"';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns 304 and its validator without parsing a body", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 304, headers: { ETag: SESSION_ETAG } }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const result = await fetchConditionalJson<{ session: { id: string } }>(
+      "/api/v1/task-sessions/sess-1",
+      {
+        baseUrl: BACKEND_URL,
+        init: { headers: { "If-None-Match": SESSION_ETAG } },
+      },
+    );
+
+    expect(result).toEqual({ status: "not-modified", etag: SESSION_ETAG });
+    expect(fetcher).toHaveBeenCalledWith(
+      `${BACKEND_URL}/api/v1/task-sessions/sess-1`,
+      expect.objectContaining({ cache: "no-store", credentials: "include" }),
+    );
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("If-None-Match")).toBe(
+      '"session-v1"',
+    );
+  });
+
+  it("parses an updated response and returns its validator", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ session: { id: "sess-1" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ETag: '"session-v2"' },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchConditionalJson<{ session: { id: string } }>("/api/v1/task-sessions/sess-1", {
+        baseUrl: BACKEND_URL,
+      }),
+    ).resolves.toEqual({
+      status: "ok",
+      data: { session: { id: "sess-1" } },
+      etag: '"session-v2"',
+    });
+  });
+});
+
+describe("fetchJson response parsing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves the HTTP status when a successful response is not JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("not-json", { status: 200, statusText: "OK" })),
+    );
+
+    await expect(fetchJson("/ready", { baseUrl: BACKEND_URL })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 200,
+    });
+  });
+});
+
+describe("ApiError response classification", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    reloadMocks.signalBackendReloadRequired.mockReset();
+  });
+
+  it("preserves machine-readable error codes from the backend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ error: "invalid branch policy", error_code: "branch_policy_stale" }),
+            { status: 400, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+    );
+
+    await expect(fetchJson("/api/v1/tasks", { baseUrl: BACKEND_URL })).rejects.toMatchObject({
+      name: "ApiError",
+      errorCode: "branch_policy_stale",
+    });
+  });
+
+  it("handles only the stale settings interlock response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "interim settings interlock required",
+            error_code: "interim_settings_interlock_required",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      fetchJson("/api/v1/agent-profiles/p1", { baseUrl: BACKEND_URL }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      errorCode: "interim_settings_interlock_required",
+      handled: true,
+    });
+    expect(reloadMocks.signalBackendReloadRequired).toHaveBeenCalledWith(
+      "settings_interlock_rejected",
+    );
+  });
+
+  it("leaves other forbidden responses unhandled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "forbidden", error_code: "forbidden" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchJson("/api/v1/agent-profiles/p1", { baseUrl: BACKEND_URL }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      errorCode: "forbidden",
+      handled: false,
+    });
+    expect(reloadMocks.signalBackendReloadRequired).not.toHaveBeenCalled();
   });
 });
 

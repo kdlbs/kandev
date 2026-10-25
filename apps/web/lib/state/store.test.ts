@@ -18,6 +18,35 @@ describe("createAppStore", () => {
     expect(store.getState().agentRuntime).toEqual(available);
   });
 
+  it("ignores stale runtime revisions from the same backend boot", () => {
+    const recovering = {
+      status: "recovering" as const,
+      boot_id: "boot-1",
+      runtime_epoch: 5,
+      revision: 8,
+    };
+    const store = createAppStore({
+      agentRuntime: {
+        status: "unavailable",
+        boot_id: "boot-1",
+        runtime_epoch: 5,
+        revision: 7,
+      },
+    });
+
+    store.getState().setAgentRuntime(recovering);
+    store.getState().setAgentRuntime({
+      status: "unavailable",
+      boot_id: "boot-1",
+      runtime_epoch: 5,
+      revision: 7,
+    });
+
+    expect(store.getState().agentRuntime).toEqual(recovering);
+  });
+});
+
+describe("createAppStore boot settings", () => {
   it("retains sidebar boot settings after slice initialization", () => {
     const store = createAppStore({
       userSettings: {
@@ -43,6 +72,32 @@ describe("createAppStore", () => {
 
     expect(store.getState().sidebarViews.activeViewId).toBe("server");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["task-1"]);
+  });
+
+  it("retains Threads boot settings after UI slice initialization", () => {
+    const store = createAppStore({
+      userSettings: {
+        threadViews: [
+          {
+            id: "capped",
+            name: "Capped",
+            taskScope: { mode: "all", taskIds: [] },
+            filters: [],
+            sort: { key: "title", direction: "asc" },
+            maxColumns: 1,
+            layout: "columns",
+            autoHideComposer: false,
+          },
+        ],
+        threadActiveViewId: "capped",
+        threadViewDraft: null,
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(store.getState().threadViews.views).toHaveLength(1);
+    expect(store.getState().threadViews.activeViewId).toBe("capped");
+    expect(store.getState().threadViews.views[0]?.maxColumns).toBe(1);
   });
 
   it("starts with no task-scoped Review PR overrides", () => {

@@ -1,0 +1,166 @@
+"use client";
+
+import {
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from "@kandev/ui/context-menu";
+import {
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "@kandev/ui/dropdown-menu";
+import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
+import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
+
+function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
+  if (entry.kind === "separator") return <ContextMenuSeparator />;
+  if (entry.kind === "submenu") {
+    return (
+      <ContextMenuSub>
+        <ContextMenuSubTrigger
+          data-testid={entry.testId}
+          disabled={entry.disabled}
+          className="[@media(pointer:coarse)]:min-h-12"
+        >
+          {entry.icon}
+          {entry.label}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className={entry.className}>
+          {entry.stepTarget ? (
+            <DestinationStepItems target={entry.stepTarget} mode="context" />
+          ) : (
+            entry.children.map((child) => <ContextEntry key={child.key} entry={child} />)
+          )}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    );
+  }
+
+  return (
+    <ContextMenuItem
+      data-testid={entry.testId}
+      disabled={entry.disabled}
+      className={[
+        "[@media(pointer:coarse)]:min-h-12",
+        entry.destructive ? "text-destructive focus:text-destructive" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      // Portal events bubble through the React tree, so stop them before the card's click handler.
+      onClick={(event) => event.stopPropagation()}
+      onSelect={() => {
+        if (!entry.disabled) entry.onSelect?.();
+      }}
+    >
+      {entry.icon}
+      {entry.leading}
+      {entry.label}
+      {entry.trailing}
+    </ContextMenuItem>
+  );
+}
+
+function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
+  if (entry.kind === "separator") return <DropdownMenuSeparator />;
+  if (entry.kind === "submenu") {
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger
+          data-testid={entry.testId}
+          disabled={entry.disabled}
+          className="[@media(pointer:coarse)]:min-h-12"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {entry.icon}
+          {entry.label}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuPortal>
+          <DropdownMenuSubContent className={entry.className}>
+            {entry.stepTarget ? (
+              <DestinationStepItems target={entry.stepTarget} mode="dropdown" />
+            ) : (
+              entry.children.map((child) => <DropdownEntry key={child.key} entry={child} />)
+            )}
+          </DropdownMenuSubContent>
+        </DropdownMenuPortal>
+      </DropdownMenuSub>
+    );
+  }
+
+  return (
+    <DropdownMenuItem
+      data-testid={entry.testId}
+      disabled={entry.disabled}
+      className={[
+        "[@media(pointer:coarse)]:min-h-12",
+        entry.destructive ? "text-destructive focus:text-destructive" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      // Portal events bubble through the React tree, including to dnd-kit listeners.
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onSelect={(event) => {
+        event.stopPropagation();
+        if (!entry.disabled) entry.onSelect?.();
+      }}
+    >
+      {entry.icon}
+      {entry.leading}
+      {entry.label}
+      {entry.trailing}
+    </DropdownMenuItem>
+  );
+}
+
+export function KanbanCardContextMenuItems({ entries }: { entries: KanbanCardMenuEntry[] }) {
+  return (
+    <>
+      {entries.map((entry) => (
+        <ContextEntry key={entry.key} entry={entry} />
+      ))}
+    </>
+  );
+}
+
+export function KanbanCardDropdownMenuItems({ entries }: { entries: KanbanCardMenuEntry[] }) {
+  return (
+    <>
+      {entries.map((entry) => (
+        <DropdownEntry key={entry.key} entry={entry} />
+      ))}
+    </>
+  );
+}
+
+function DestinationStepItems({
+  target,
+  mode,
+}: {
+  target: { workflowId: string; onSelect: (stepId: string) => void };
+  mode: "context" | "dropdown";
+}) {
+  const { steps, loading } = useWorkflowSteps(target.workflowId);
+  const Item = mode === "context" ? ContextMenuItem : DropdownMenuItem;
+  if (steps.length === 0)
+    return <Item disabled>{stepPlaceholder(target.workflowId, loading, 0)}</Item>;
+  return steps.map((step) => (
+    <Item
+      key={step.id}
+      data-testid={`task-context-step-${step.id}`}
+      className="[@media(pointer:coarse)]:min-h-12"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onSelect={() => target.onSelect(step.id)}
+    >
+      {step.name}
+    </Item>
+  ));
+}

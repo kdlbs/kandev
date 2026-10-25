@@ -2,7 +2,7 @@
 
 import { IconGitMerge } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { useMRActions } from "@/hooks/domains/gitlab/use-mr-actions";
 import { mergeMR } from "@/lib/api/domains/gitlab-api";
 import type { TaskMR } from "@/lib/types/gitlab";
@@ -16,7 +16,7 @@ import { isMRReadyToMerge } from "./mr-task-icon";
  */
 export function MRMergeButton({ mr }: { mr: TaskMR }) {
   const { t } = useTranslation();
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(mr.task_id);
   const { pendingAction, run } = useMRActions(() => {});
 
   if (!isMRReadyToMerge(mr)) return null;

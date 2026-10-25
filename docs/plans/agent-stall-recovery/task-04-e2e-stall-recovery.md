@@ -7,7 +7,7 @@ depends_on:
   - "02-persist-stall-warning"
   - "03-render-running-warning"
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 04: Prove desktop and mobile stall recovery

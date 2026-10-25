@@ -14,7 +14,15 @@ import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/components/state-provider";
+import { ShowHiddenToggle } from "@/components/directory-browser/show-hidden-toggle";
 import { listDirectory, type DirectoryListing } from "@/lib/api/domains/fs-api";
+import {
+  isTauriWebview,
+  nativeFolderPicker,
+  NativeFolderPickerUnavailableError,
+} from "@/lib/desktop/folder-picker";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 type FolderPickerProps = {
@@ -25,6 +33,64 @@ type FolderPickerProps = {
   placeholder?: string;
 };
 
+type NativeFolderPickerTriggerProps = {
+  triggerClass: string;
+  hasValue: boolean;
+  triggerLabel: string;
+  loading: boolean;
+  error: string | null;
+  onChoose: () => void;
+};
+
+function NativeFolderPickerTrigger({
+  triggerClass,
+  hasValue,
+  triggerLabel,
+  loading,
+  error,
+  onChoose,
+}: NativeFolderPickerTriggerProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <button
+        type="button"
+        data-testid="folder-picker-trigger"
+        className={triggerClass}
+        disabled={loading}
+        aria-busy={loading}
+        onClick={onChoose}
+      >
+        {hasValue ? (
+          <IconFolder className="h-3.5 w-3.5 flex-shrink-0" />
+        ) : (
+          <IconBox className="h-3.5 w-3.5 flex-shrink-0" />
+        )}
+        <span className="truncate max-w-[260px]">
+          {loading ? t("common:loading") : triggerLabel}
+        </span>
+      </button>
+      {error && (
+        <p
+          role="alert"
+          data-testid="folder-picker-native-error"
+          className="text-xs text-destructive"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function nativePickerErrorMessage(error: unknown, t: TFunction): string {
+  if (error instanceof NativeFolderPickerUnavailableError) {
+    return t("common:nativeFolderPickerUnavailable");
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return t("common:nativeFolderPickerFailed");
+}
+
 /**
  * Folder picker for repo-less tasks. Drives GET /api/v1/fs/list-dir on the
  * local kandev backend (browsers can't enumerate the host filesystem). The
@@ -33,13 +99,16 @@ type FolderPickerProps = {
 export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const { listing, loading, error, load } = useDirectoryListing(open, value);
+  const [nativeLoading, setNativeLoading] = useState(false);
+  const [nativeError, setNativeError] = useState<string | null>(null);
+  const tauriWebview = isTauriWebview();
+  const { listing, loading, error, load } = useDirectoryListing(open && !tauriWebview, value);
   const leaf = leafName(value);
   const triggerLabel = leaf || placeholder || t("common:scratchWorkspace");
   const hasValue = !!value;
 
   const triggerClass = cn(
-    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs cursor-pointer",
+    "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs cursor-pointer [@media(pointer:coarse)]:h-11",
     "border border-border/60 transition-colors",
     hasValue
       ? "bg-primary/10 text-foreground hover:bg-primary/15"
@@ -56,6 +125,39 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
       <span className="truncate max-w-[260px]">{triggerLabel}</span>
     </button>
   );
+
+  const chooseNativeFolder = async () => {
+    setNativeError(null);
+    if (!nativeFolderPicker.isAvailable()) {
+      setNativeError(t("common:nativeFolderPickerUnavailable"));
+      return;
+    }
+    setNativeLoading(true);
+    try {
+      const outcome = await nativeFolderPicker.pickDirectory();
+      if (outcome.status === "selected") onChange(outcome.path);
+      if (outcome.status === "failed") {
+        setNativeError(outcome.message || t("common:nativeFolderPickerFailed"));
+      }
+    } catch (error) {
+      setNativeError(nativePickerErrorMessage(error, t));
+    } finally {
+      setNativeLoading(false);
+    }
+  };
+
+  if (tauriWebview) {
+    return (
+      <NativeFolderPickerTrigger
+        triggerClass={triggerClass}
+        hasValue={hasValue}
+        triggerLabel={triggerLabel}
+        loading={nativeLoading}
+        error={nativeError}
+        onChoose={() => void chooseNativeFolder()}
+      />
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -113,15 +215,27 @@ export function useDirectoryListing(open: boolean, value: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
+  // One shared preference, so every directory browser in the application agrees
+  // on whether hidden directories are revealed.
+  const showHidden = useAppStore((state) => state.directoryBrowserShowHidden);
+  // Read through a ref so the reveal stays out of `load`'s identity: browsing
+  // does not commit a value, and a new `load` would reset the browser to `value`
+  // and throw away wherever the user had descended to.
+  const showHiddenRef = useRef(showHidden);
+  showHiddenRef.current = showHidden;
+  const browsedPath = useRef<string | null>(null);
+  const listedVisibility = useRef<boolean | null>(null);
 
   const load = useCallback(
-    async (path: string) => {
+    async (path: string, { preserveListing = false }: { preserveListing?: boolean } = {}) => {
       const generation = ++requestGeneration.current;
+      browsedPath.current = path;
+      listedVisibility.current = showHiddenRef.current;
       setLoading(true);
       setError(null);
-      setListing(null);
+      if (!preserveListing) setListing(null);
       try {
-        const nextListing = await listDirectory(path);
+        const nextListing = await listDirectory(path, { includeHidden: showHiddenRef.current });
         if (generation !== requestGeneration.current) return;
         setListing(nextListing);
       } catch (err) {
@@ -141,6 +255,7 @@ export function useDirectoryListing(open: boolean, value: string) {
     // last-browsed directory instead of their picked folder (or the root).
     if (!open) {
       requestGeneration.current++;
+      browsedPath.current = null;
       setListing(null);
       setLoading(false);
       setError(null);
@@ -151,6 +266,16 @@ export function useDirectoryListing(open: boolean, value: string) {
       requestGeneration.current++;
     };
   }, [open, load, value]);
+
+  useEffect(() => {
+    // A display-only preference change re-lists the directory already on screen
+    // instead of the chosen one. The visibility guard keeps the first load from
+    // firing a second identical request. Keep the current listing while it
+    // refreshes so the path remains selectable and keyed toolbar state survives.
+    if (!open || browsedPath.current === null) return;
+    if (listedVisibility.current === showHidden) return;
+    void load(browsedPath.current, { preserveListing: true });
+  }, [open, showHidden, load]);
 
   return { listing, loading, error, load };
 }
@@ -194,6 +319,9 @@ function appendPathSegments(
   }
 }
 
+/** The breadcrumb's scrolling region. The row that hosts it owns the
+ * overflow boundary, so a deep path scrolls without moving the reveal control
+ * out of reach. */
 function Breadcrumb({
   path,
   onNavigate,
@@ -206,7 +334,7 @@ function Breadcrumb({
   const { t } = useTranslation();
   const segs = pathSegments(path);
   return (
-    <div className="flex items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30 px-2 py-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden py-1.5 pl-2">
       {segs.length === 0 && (
         <span className="text-[11px] text-muted-foreground italic">{t("common:loading")}</span>
       )}
@@ -265,7 +393,10 @@ export function DirectoryBrowserBody({
           touchRows={touchRows}
         />
       ) : null}
-      <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+      <div className="flex shrink-0 items-stretch border-b border-border bg-muted/30">
+        <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+        <ShowHiddenToggle touchRows={touchRows} />
+      </div>{" "}
       <Entries
         listing={listing}
         loading={loading}

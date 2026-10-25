@@ -1,6 +1,33 @@
 package github
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
+
+const httpsScheme = "https"
+
+// httpsCloneURLFromRepositoryURL converts GitHub GraphQL's Repository.url
+// field into the HTTPS clone identity used by task repository consumers. The
+// GraphQL schema exposes url, while cloneUrl is a gh CLI JSON field and is not
+// valid on Repository. An absent or malformed URL remains absent so nullable
+// head repository data is never replaced with an invented identity.
+func httpsCloneURLFromRepositoryURL(repositoryURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(repositoryURL))
+	if err != nil || parsed.Host == "" || strings.Trim(parsed.Path, "/") == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != httpsScheme) {
+		return ""
+	}
+	parsed.Scheme = httpsScheme
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	if !strings.HasSuffix(parsed.Path, ".git") {
+		parsed.Path += ".git"
+	}
+	parsed.RawPath = ""
+	return parsed.String()
+}
 
 // githubRepositoryResponse is the shared subset returned by GET and POST
 // repository endpoints. Keep the provider response private so only the
@@ -22,24 +49,25 @@ type githubRepositoryResponse struct {
 		FullName string `json:"full_name"`
 	} `json:"parent"`
 	Permissions struct {
-		Push  bool `json:"push"`
-		Admin bool `json:"admin"`
+		Push  *bool `json:"push"`
+		Admin bool  `json:"admin"`
 	} `json:"permissions"`
 }
 
 func projectGitHubRepository(raw githubRepositoryResponse) *GitHubRepository {
 	repository := &GitHubRepository{
-		ID:            raw.ID,
-		NodeID:        raw.NodeID,
-		FullName:      raw.FullName,
-		Owner:         raw.Owner.Login,
-		Name:          raw.Name,
-		CloneURL:      raw.CloneURL,
-		HTMLURL:       raw.HTMLURL,
-		DefaultBranch: raw.DefaultBranch,
-		Fork:          raw.Fork,
-		PushAccess:    raw.Permissions.Push,
-		AdminAccess:   raw.Permissions.Admin,
+		ID:              raw.ID,
+		NodeID:          raw.NodeID,
+		FullName:        raw.FullName,
+		Owner:           raw.Owner.Login,
+		Name:            raw.Name,
+		CloneURL:        raw.CloneURL,
+		HTMLURL:         raw.HTMLURL,
+		DefaultBranch:   raw.DefaultBranch,
+		Fork:            raw.Fork,
+		PushAccess:      raw.Permissions.Push != nil && *raw.Permissions.Push,
+		PushAccessKnown: raw.Permissions.Push != nil,
+		AdminAccess:     raw.Permissions.Admin,
 	}
 	if raw.Parent != nil {
 		repository.ParentID = raw.Parent.ID

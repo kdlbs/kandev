@@ -7,3 +7,5 @@ export { SSHConnectionCard } from "./ssh-connection-card";
 export type { SSHConnectionCardProps, SSHExecutorConfig } from "./ssh-connection-card";
 export { SSHSessionsCard } from "./ssh-sessions-card";
 export type { SSHSessionsCardProps } from "./ssh-sessions-card";
+export { SSHReachabilityCard } from "./ssh-reachability-card";
+export type { SSHReachabilityCardProps } from "./ssh-reachability-card";

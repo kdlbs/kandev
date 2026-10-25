@@ -31,6 +31,7 @@ type (
 	GitCommitNotification       = streams.GitCommitNotification
 	GitResetNotification        = streams.GitResetNotification
 	GitBranchSwitchNotification = streams.GitBranchSwitchNotification
+	FileChangeFacet             = streams.FileChangeFacet
 	FileInfo                    = streams.FileInfo
 
 	// File stream types
@@ -120,6 +121,14 @@ type PermissionRequest struct {
 	Title      string             `json:"title"`
 	Options    []PermissionOption `json:"options"`
 
+	// ToolName is the optional programmatic identity supplied by ACP. It is
+	// retained for internal permission policy decisions and is never serialized
+	// into public permission snapshots.
+	ToolName *string `json:"-"`
+	// ToolMeta contains provider-specific ACP metadata used by adapter dialects.
+	// It is internal and must not be exposed through permission snapshots.
+	ToolMeta map[string]any `json:"-"`
+
 	// PendingID is the unique identifier for this permission request.
 	// If set by the adapter (e.g., OpenCode's "per_xxx" ID or Claude Code's requestID),
 	// the process manager will use this ID instead of generating a new one.
@@ -165,6 +174,19 @@ type McpServer struct {
 	Type    string            `json:"type,omitempty"`    // "stdio", "sse", "http", or "streamable_http"
 	Env     map[string]string `json:"env,omitempty"`     // Environment variables (stdio transport)
 	Headers map[string]string `json:"headers,omitempty"` // HTTP headers (SSE/HTTP transport)
+	// The following fields are backend-only evidence metadata. They are
+	// intentionally omitted from protocol JSON sent to agentctl and providers.
+	DefinitionID       string            `json:"-"`
+	DefinitionRevision int64             `json:"-"`
+	Origins            []McpServerOrigin `json:"-"`
+}
+
+// McpServerOrigin is backend-owned scope metadata carried alongside an MCP
+// server until attachment evidence is created. It never enters protocol JSON.
+type McpServerOrigin struct {
+	Scope       string
+	WorkspaceID string
+	OwnerID     string
 }
 
 const (

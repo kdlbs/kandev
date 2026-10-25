@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,51 +95,90 @@ type PromptResolver interface {
 	ResolvePromptContent(ctx context.Context, name, fallback string) string
 }
 
+// TaskRepositoryBaseBranchUpdater projects provider base changes into tasks.
+type TaskRepositoryBaseBranchUpdater interface {
+	UpdateTaskRepositoryBaseBranch(
+		ctx context.Context, taskID, repositoryID, headBranch, baseBranch string,
+	) error
+}
+
+// WorkspaceGroupOwnerResolver resolves the workspace-group owner task for a
+// task that may be a non-owner member sharing another task's worktree
+// (inherit_parent / shared_group). It mirrors
+// internal/orchestrator.resolveEffectivePushTaskID's lookup so that a
+// watch-sourced association write is redirected to the same task an
+// orchestrator-side watch would have redirected to — see
+// resolveEffectiveAssociationTaskID for the full rationale.
+type WorkspaceGroupOwnerResolver interface {
+	GetWorkspaceGroupOwnerTaskID(ctx context.Context, taskID string) (string, error)
+}
+
+// WorkspaceGroupOwnerSessionResolver resolves the owner for the exact group
+// bound to an observing session. It prevents a task with multiple active group
+// memberships from selecting an unrelated owner by task ID alone.
+type WorkspaceGroupOwnerSessionResolver interface {
+	GetWorkspaceGroupOwnerTaskIDForSession(ctx context.Context, taskID, sessionID string) (string, error)
+}
+
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                       sync.Mutex
-	connectionMutationLocks  [64]sync.Mutex
-	client                   Client
-	authMethod               string
-	secrets                  SecretProvider
-	secretManager            SecretManager
-	connectionSecrets        ConnectionSecretStore
-	personalConnections      *StorePersonalConnectionRepository
-	resolver                 *CredentialResolver
-	appRegistrationRuntimes  map[string]*githubAppRuntime
-	appRegistrationLifecycle *AppRegistrationLifecycleService
-	credentialBroker         *CredentialBroker
-	store                    *Store
-	eventBus                 bus.EventBus
-	logger                   *logger.Logger
-	taskDeleter              TaskDeleter
-	comparisonTargetObserver ComparisonTargetObserver
-	taskIssueStore           TaskIssueStore
+	executorContext             func(context.Context, string, string) (context.Context, error)
+	mu                          sync.Mutex
+	connectionMutationLocks     [64]sync.Mutex
+	legacyCredentialMu          sync.Mutex
+	legacyCredentialRevision    string
+	client                      Client
+	authMethod                  string
+	secrets                     SecretProvider
+	secretManager               SecretManager
+	connectionSecrets           ConnectionSecretStore
+	personalConnections         *StorePersonalConnectionRepository
+	resolver                    *CredentialResolver
+	appRegistrationRuntimes     map[string]*githubAppRuntime
+	appRegistrationLifecycle    *AppRegistrationLifecycleService
+	credentialBroker            *CredentialBroker
+	store                       *Store
+	eventBus                    bus.EventBus
+	logger                      *logger.Logger
+	taskDeleter                 TaskDeleter
+	taskRepositoryUpdater       TaskRepositoryBaseBranchUpdater
+	comparisonTargetObserver    ComparisonTargetObserver
+	taskIssueStore              TaskIssueStore
+	workspaceGroupOwnerResolver WorkspaceGroupOwnerResolver
+	taskActivityProvider        TaskActivityProvider
+	clockMu                     sync.RWMutex
+	clock                       func() time.Time
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean
 	// up subtasks, runs, and worktrees too. Wired post-construction via
 	// SetCascadeTaskDeleter to avoid an import cycle with the task service.
-	cascadeTaskDeleter   watchreset.TaskDeleter
-	taskSessionChecker   TaskSessionChecker
-	syncGroup            singleflight.Group
-	taskEventSubs        []bus.Subscription
-	searchCache          *ttlCache
-	prStatusCache        *ttlCache
-	prFeedbackCache      *ttlCache
-	mergeMethodsCache    *ttlCache
-	accessibleReposCache *ttlCache
-	repoErrorCache       *ttlCache
-	forkParentCache      *ttlCache
-	protectionCache      *branchProtectionCache
-	rateTracker          *RateTracker
-	promptResolver       PromptResolver
-	tokenClientFactory   func(string) Client
-	ghAccountLister      func(context.Context) ([]GHAccount, error)
-	mockAuth             *MockAuthState
-	workspaceAuthorizer  func(context.Context, string) error
-	freshDefaultsMu      sync.Mutex
-	freshDefaultsDone    bool
+	cascadeTaskDeleter    watchreset.TaskDeleter
+	taskSessionChecker    TaskSessionChecker
+	syncGroup             singleflight.Group
+	taskEventSubs         []bus.Subscription
+	searchCache           *ttlCache
+	prStatusCache         *ttlCache
+	prFeedbackCache       *ttlCache
+	workflowRunsCache     *ttlCache
+	workflowJobsCache     *ttlCache
+	mergeMethodsCache     *ttlCache
+	accessibleReposCache  *ttlCache
+	repoErrorCache        *ttlCache
+	forkParentCache       *ttlCache
+	protectionCache       *branchProtectionCache
+	rateTracker           *RateTracker
+	rateCoordinator       *RateCoordinator
+	prDiscoveryHealth     *prDiscoveryHealthStore
+	prDiscoveryAttemptsMu sync.Mutex
+	prDiscoveryAttempts   map[string]*prDiscoveryAttemptResult
+	promptResolver        PromptResolver
+	tokenClientFactory    func(string) Client
+	ghAccountLister       func(context.Context) ([]GHAccount, error)
+	mockAuth              *MockAuthState
+	workspaceAuthorizer   func(context.Context, string) error
+	freshDefaultsMu       sync.Mutex
+	freshDefaultsDone     bool
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -154,6 +194,26 @@ type Service struct {
 	// here because keys are unbounded and short-lived and the hot path is a
 	// LoadOrStore guard, not iteration.
 	inflightWorkspaceRefreshes sync.Map
+
+	// passiveFallback* limits the legacy per-watch fallback used by passive
+	// workspace refreshes. The admission window is shared across workspaces so
+	// a batch outage cannot turn a single background tick into an unbounded CLI
+	// fan-out. Admissions are retained as timestamps to enforce a rolling
+	// minute instead of allowing a wall-clock boundary burst.
+	passiveFallbackMu            sync.Mutex
+	passiveFallbackAdmissions    []passiveFallbackAdmission
+	passiveFallbackTargetCursors map[string]int
+
+	// passiveWorkspaceRefreshAt suppresses repeated workspace reads that find
+	// no due watch. Stale-task refreshes bypass this admission and remain
+	// independent of the passive cooldown.
+	passiveWorkspaceRefreshMu sync.Mutex
+	passiveWorkspaceRefreshAt map[string]time.Time
+	watchProgressMu           sync.Mutex
+	watchFilterProgress       map[watchPollKey]*watchFilterCursor
+	batchedProgressMu         sync.Mutex
+	batchedPRProgress         map[string]*batchedPRProgressEntry
+	batchedBranchProgress     map[string]*batchedBranchProgressEntry
 
 	// stopCtx / stopCancel / bgWG own the lifecycle of background goroutines
 	// the service spawns lazily (currently refreshStaleWorkspaceWatches).
@@ -186,32 +246,42 @@ func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID stri
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	stopCtx, stopCancel := context.WithCancel(context.Background())
+	rateTracker := NewRateTracker(eventBus, log)
+	rateCoordinator := NewRateCoordinator(eventBus, log)
 	service := &Service{
-		client:                  client,
-		authMethod:              authMethod,
-		secrets:                 secrets,
-		store:                   store,
-		eventBus:                eventBus,
-		logger:                  log,
-		searchCache:             newTTLCache(),
-		prStatusCache:           newTTLCache(),
-		prFeedbackCache:         newPRFeedbackCache(),
-		mergeMethodsCache:       newMergeMethodsCache(),
-		accessibleReposCache:    newAccessibleReposCache(),
-		repoErrorCache:          newRepoErrorCache(),
-		forkParentCache:         newForkParentCache(),
-		protectionCache:         newBranchProtectionCache(),
-		rateTracker:             NewRateTracker(eventBus, log),
-		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
-		ghAccountLister:         ListGHAccounts,
-		cleanupFailureCounts:    make(map[string]int),
-		appRegistrationRuntimes: make(map[string]*githubAppRuntime),
-		stopCtx:                 stopCtx,
-		stopCancel:              stopCancel,
+		client:                       client,
+		authMethod:                   authMethod,
+		secrets:                      secrets,
+		store:                        store,
+		eventBus:                     eventBus,
+		logger:                       log,
+		searchCache:                  newTTLCache(),
+		prStatusCache:                newTTLCache(),
+		prFeedbackCache:              newPRFeedbackCache(),
+		workflowRunsCache:            newWorkflowAttentionCache(),
+		workflowJobsCache:            newWorkflowAttentionCache(),
+		mergeMethodsCache:            newMergeMethodsCache(),
+		accessibleReposCache:         newAccessibleReposCache(),
+		repoErrorCache:               newRepoErrorCache(),
+		forkParentCache:              newForkParentCache(),
+		protectionCache:              newBranchProtectionCache(),
+		rateTracker:                  rateTracker,
+		rateCoordinator:              rateCoordinator,
+		prDiscoveryHealth:            newPRDiscoveryHealth(eventBus, log),
+		prDiscoveryAttempts:          make(map[string]*prDiscoveryAttemptResult),
+		tokenClientFactory:           func(token string) Client { return NewPATClient(token) },
+		ghAccountLister:              ListGHAccounts,
+		cleanupFailureCounts:         make(map[string]int),
+		passiveFallbackTargetCursors: make(map[string]int),
+		passiveWorkspaceRefreshAt:    make(map[string]time.Time),
+		appRegistrationRuntimes:      make(map[string]*githubAppRuntime),
+		stopCtx:                      stopCtx,
+		stopCancel:                   stopCancel,
+		clock:                        time.Now,
 	}
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
-		service.resolver.SetRateTracker(service.rateTracker)
+		service.resolver.SetRateCoordinator(service.rateCoordinator)
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
 		})
@@ -219,7 +289,19 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 			return newLegacyGitTransportCredential(ctx, secrets, log)
 		})
 	}
+	// Construction must not perform provider I/O. Reuse an already-cached token
+	// login when available; explicit credential setup resolves unknown logins
+	// with a request context.
+	service.coordinateLegacyClientAtConstruction(client)
 	return service
+}
+
+func (s *Service) coordinateLegacyClientAtConstruction(client Client) {
+	login := ""
+	if tokenClient, ok := client.(*TokenClient); ok && tokenClient != nil {
+		login = strings.TrimSpace(tokenClient.username)
+	}
+	s.bindLegacyClient(client, login)
 }
 
 // ListGHAccounts returns the configured account source. Production uses the
@@ -242,12 +324,23 @@ func (s *Service) Stop() {
 	s.stopOnce.Do(func() {
 		s.stopCancel()
 		s.bgWG.Wait()
+		if s.prDiscoveryHealth != nil {
+			s.prDiscoveryHealth.clearAll()
+			s.invalidateAllPRDiscoveryAttempts("")
+		}
+		s.clearBatchedPRProgress()
+		s.clearWatchFilterProgress("")
 	})
 }
 
-// RateTracker exposes the service's rate-limit tracker so factory callers
-// can wire it into individual clients.
+// RateTracker returns the active legacy client's tracker for compatibility
+// status readers. Workspace requests use their resolved principal's tracker.
 func (s *Service) RateTracker() *RateTracker {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tracker := clientRateTracker(s.client); tracker != nil {
+		return tracker
+	}
 	return s.rateTracker
 }
 
@@ -264,18 +357,76 @@ func (s *Service) getPromptResolver() PromptResolver {
 	return s.promptResolver
 }
 
-// newPATClient builds a PATClient pre-wired with the service's shared rate
-// tracker. Centralizing this guards against forgetting the wiring on auth
-// flips (e.g. ConfigureToken), which would otherwise leave PAT calls
-// invisible to the rate-limit UI, health checks, and poller throttling.
-func (s *Service) newPATClient(token string) *PATClient {
+// newPATClient keeps unverified credential observations private until binding.
+func (s *Service) newPATClient(ctx context.Context, token string) *PATClient {
 	c := NewPATClient(token)
-	attachRateTracker(c, s.rateTracker, s.logger)
+	s.coordinateLegacyClient(ctx, c, "")
 	return c
+}
+
+func (s *Service) coordinateLegacyClient(ctx context.Context, client Client, login string) {
+	s.bindLegacyClient(client, login)
+	if client != nil && strings.TrimSpace(login) == "" {
+		if resolved := resolvedLegacyLogin(ctx, client); resolved != "" {
+			s.bindLegacyClient(client, resolved)
+		}
+	}
+}
+
+// bindLegacyClient runs before publication, with no provider I/O.
+func (s *Service) bindLegacyClient(client Client, login string) {
+	if client == nil {
+		return
+	}
+	if s.rateCoordinator == nil {
+		s.rateCoordinator = NewRateCoordinator(s.eventBus, s.logger)
+	}
+	principal := AuthPrincipal{Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared, Login: login}
+	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, clientRateTracker(client))
+	wireRateTracker(client, tracker)
+	wireRateAdmission(client, admission)
+}
+
+func resolvedLegacyLogin(ctx context.Context, client Client) string {
+	// Only startup clients with a real authenticated identity should make this
+	// probe. Test/fallback clients may embed nil implementations.
+	switch typedClient := client.(type) {
+	case *GHClient:
+		if typedClient == nil {
+			return ""
+		}
+		login, err := typedClient.GetAuthenticatedUser(ctx)
+		if err == nil {
+			return strings.TrimSpace(login)
+		}
+	case *TokenClient:
+		if typedClient == nil {
+			return ""
+		}
+		login, err := typedClient.GetAuthenticatedUser(ctx)
+		if err == nil {
+			return strings.TrimSpace(login)
+		}
+	}
+	return ""
 }
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
 func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
+
+// SetTaskRepositoryBaseBranchUpdater wires best-effort task base projection.
+func (s *Service) SetTaskRepositoryBaseBranchUpdater(updater TaskRepositoryBaseBranchUpdater) {
+	s.taskRepositoryUpdater = updater
+}
+
+// SetWorkspaceGroupOwnerResolver wires the workspace-group owner lookup used
+// by resolveEffectiveAssociationTaskID to redirect watch-sourced association
+// writes away from a non-owner shared-worktree member. Optional — when unset,
+// the redirect is a no-op and association writes keep their pre-existing
+// (potentially member-attributed) behavior.
+func (s *Service) SetWorkspaceGroupOwnerResolver(r WorkspaceGroupOwnerResolver) {
+	s.workspaceGroupOwnerResolver = r
+}
 
 // SetCascadeTaskDeleter wires the cascade-delete dependency used by the
 // watch reset flow (ResetIssueWatch / ResetReviewWatch). Optional — when
@@ -289,6 +440,24 @@ func (s *Service) SetCascadeTaskDeleter(d watchreset.TaskDeleter) {
 
 // SetTaskSessionChecker sets the session checker for cleanup operations.
 func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }
+
+// SetTaskActivityProvider wires the persisted task activity projection used
+// by passive adaptive searching-watch refreshes.
+func (s *Service) SetTaskActivityProvider(provider TaskActivityProvider) {
+	s.taskActivityProvider = provider
+}
+
+// SetClock installs the service clock used by passive refresh admission.
+// Production uses time.Now; tests can use a fixed clock.
+func (s *Service) SetClock(clock func() time.Time) {
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+	if clock == nil {
+		s.clock = time.Now
+		return
+	}
+	s.clock = clock
+}
 
 // SetSecretManager sets the secret manager for token configuration operations.
 func (s *Service) SetSecretManager(m SecretManager) { s.secretManager = m }
@@ -331,6 +500,17 @@ func (s *Service) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (m
 		return map[string][]*TaskPR{}, nil
 	}
 	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
+}
+
+// ListTaskPRAutomationOptionsByTaskIDs forwards bounded per-PR automation
+// hydration for task-summary projection without exposing the GitHub store.
+func (s *Service) ListTaskPRAutomationOptionsByTaskIDs(
+	ctx context.Context, taskIDs []string,
+) (map[string][]*TaskPRAutomationOptions, error) {
+	if s.store == nil {
+		return map[string][]*TaskPRAutomationOptions{}, nil
+	}
+	return s.store.ListTaskPRAutomationOptionsByTaskIDs(ctx, taskIDs)
 }
 
 // TestEventBus returns the event bus for test/mock use only.
@@ -440,4 +620,5 @@ func (s *Service) ClearPRCaches() {
 	if s.prFeedbackCache != nil {
 		s.prFeedbackCache.clear()
 	}
+	s.clearBatchedPRProgress()
 }

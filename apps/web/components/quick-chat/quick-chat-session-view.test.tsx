@@ -1,0 +1,474 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const sessionRows = vi.hoisted(
+  () =>
+    ({}) as Record<
+      string,
+      {
+        task_id?: string;
+        agent_profile_id?: string;
+        is_passthrough?: boolean;
+        metadata?: Record<string, unknown> | null;
+      }
+    >,
+);
+const quickChatSessions = vi.hoisted(
+  () => [] as Array<{ sessionId: string; taskId?: string; agentProfileId?: string }>,
+);
+const useEnsureTaskSession = vi.hoisted(() => vi.fn());
+const configChatRestarts = vi.hoisted(
+  () => ({}) as Record<string, { sessionId: string; status: string; source: string }>,
+);
+const useTask = vi.hoisted(() => vi.fn());
+const useSessionResumption = vi.hoisted(() =>
+  vi.fn(() => ({
+    resumptionState: "idle",
+    sessionStatus: null,
+    error: null,
+    notice: null,
+    recoveryFailure: null,
+    recoveryAttemptId: 0,
+    taskSessionState: null,
+    worktreePath: null,
+    worktreeBranch: null,
+    resumeSession: vi.fn(),
+  })),
+);
+const useTaskStatusSummary = vi.hoisted(() => vi.fn());
+const quickChatContentSpy = vi.hoisted(() => vi.fn());
+const TEST_IDS = vi.hoisted(() => ({
+  sessionRecoveryCard: "session-bootstrap-recovery-card",
+  quickChatContent: "quick-chat-content",
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => ({}) }),
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      taskSessions: { items: sessionRows },
+      quickChat: { sessions: quickChatSessions, configChatRestarts },
+      agentProfiles: { items: [] },
+    }),
+}));
+
+vi.mock("@/hooks/use-ensure-task-session", () => ({ useEnsureTaskSession }));
+vi.mock("@/hooks/use-task", () => ({ useTask }));
+vi.mock("@/hooks/domains/session/use-session-resumption", () => ({ useSessionResumption }));
+vi.mock("@/hooks/domains/task/use-task-status-summary", () => ({ useTaskStatusSummary }));
+vi.mock("@/components/task/passthrough-terminal", () => ({
+  PassthroughTerminal: () => <div data-testid="passthrough-terminal" />,
+}));
+vi.mock("./quick-chat-content", () => ({
+  QuickChatContent: (props: Record<string, unknown>) => {
+    quickChatContentSpy(props);
+    return <div data-testid={TEST_IDS.quickChatContent} />;
+  },
+}));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
+import { QuickChatSessionView } from "./quick-chat-session-view";
+
+const DESCRIPTOR_TASK_ID = "task-from-descriptor";
+const HYDRATED_TASK_ID = "task-from-hydrated-row";
+const WORKSPACE_ID = "workspace-1";
+const BOOTSTRAP_OCCURRED_AT = "2026-09-11T10:00:00Z";
+const BOOTSTRAP_PREVIEW = "The agent could not start.";
+const WORKSPACE_READ_ONLY_NOTICE = "workspace restored read-only";
+const RESUME_FAILURE = "resume failed";
+
+const session = {
+  kind: "chat" as const,
+  sessionId: "session-1",
+  workspaceId: WORKSPACE_ID,
+};
+
+afterEach(() => {
+  cleanup();
+  delete sessionRows[session.sessionId];
+  quickChatSessions.length = 0;
+  delete configChatRestarts[WORKSPACE_ID];
+  vi.clearAllMocks();
+  useTask.mockReset();
+  useTask.mockReturnValue(null);
+  useTaskStatusSummary.mockReset();
+  useTaskStatusSummary.mockReturnValue(undefined);
+});
+
+it("unmounts retired configuration content before hydration or automatic resumption can run", () => {
+  configChatRestarts[WORKSPACE_ID] = {
+    sessionId: session.sessionId,
+    status: "restarting",
+    source: "local",
+  };
+  render(<QuickChatSessionView session={{ ...session, kind: "config" }} />);
+  expect(useEnsureTaskSession).not.toHaveBeenCalled();
+  expect(useSessionResumption).not.toHaveBeenCalled();
+  expect(screen.queryByTestId(TEST_IDS.quickChatContent)).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("configChat:restartingSession");
+});
+
+// @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2
+// eslint-disable-next-line max-lines-per-function -- session ownership and recovery outcomes share one view harness.
+describe("QuickChatSessionView session resumption", () => {
+  it("prefers the descriptor task id over a conflicting hydrated row", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+
+    render(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId, null, {
+      preventAutoResume: false,
+      skipAutomaticRecovery: false,
+    });
+  });
+
+  it("waits for session hydration before resuming a descriptor task", () => {
+    const view = render(
+      <QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />,
+    );
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      preventAutoResume: false,
+      skipAutomaticRecovery: false,
+    });
+
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    view.rerender(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      DESCRIPTOR_TASK_ID,
+      session.sessionId,
+      null,
+      { preventAutoResume: false, skipAutomaticRecovery: false },
+    );
+  });
+
+  it("falls back to the hydrated task-session row when the descriptor has no task id", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      preventAutoResume: false,
+      skipAutomaticRecovery: false,
+    });
+  });
+
+  it("passes the hydrated task archive state to session recovery", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: true });
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true, {
+      preventAutoResume: false,
+      skipAutomaticRecovery: false,
+    });
+  });
+
+  it("uses hydrated Quick Chat ownership when the ephemeral task is absent from kanban tasks", () => {
+    const view = render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      preventAutoResume: false,
+      skipAutomaticRecovery: false,
+    });
+
+    quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
+    view.rerender(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { preventAutoResume: true, skipAutomaticRecovery: false },
+    );
+  });
+
+  it("passes a null task id until session hydration provides one", () => {
+    const view = render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      preventAutoResume: false,
+      skipAutomaticRecovery: false,
+    });
+
+    sessionRows[session.sessionId] = { task_id: "task-after-hydration" };
+    view.rerender(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      "task-after-hydration",
+      session.sessionId,
+      null,
+      { preventAutoResume: false, skipAutomaticRecovery: false },
+    );
+  });
+
+  it("does not treat a dismissed historical error as active", () => {
+    sessionRows[session.sessionId] = {
+      task_id: HYDRATED_TASK_ID,
+      metadata: {
+        last_agent_error: { message: "old failure", dismissed_at: BOOTSTRAP_OCCURRED_AT },
+      },
+    };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { preventAutoResume: false, skipAutomaticRecovery: false },
+    );
+  });
+
+  it("waits for the persisted session error before checking a WS-created tab", () => {
+    quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { preventAutoResume: true, skipAutomaticRecovery: false },
+    );
+  });
+
+  it("prevents automatic resumption when an active launch error is present", () => {
+    sessionRows[session.sessionId] = {
+      task_id: HYDRATED_TASK_ID,
+      metadata: { last_agent_error: { stamp: "err-1", message: "launch failed" } },
+    };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "err-1",
+        preview: "launch failed",
+      },
+    });
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, false, {
+      preventAutoResume: true,
+      skipAutomaticRecovery: false,
+    });
+  });
+
+  it("does not block resumption for another session's active error", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        scope: "session",
+        session_id: "other-session",
+        stamp: "other",
+        preview: "failed",
+      },
+    });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { preventAutoResume: false, skipAutomaticRecovery: false },
+    );
+  });
+
+  it("keeps a session bootstrap failure in the transcript-owned path", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "bootstrap-1",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
+        phase: "bootstrap",
+      },
+    });
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
+  });
+
+  it("does not move session recovery feedback into the transcript", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "bootstrap-read-only",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
+        phase: "bootstrap",
+      },
+    });
+    useSessionResumption.mockReturnValue({
+      resumptionState: "resumed",
+      sessionStatus: null,
+      error: null,
+      notice: WORKSPACE_READ_ONLY_NOTICE,
+      recoveryFailure: { outcome: "workspace_read_only", resumeError: RESUME_FAILURE },
+      taskSessionState: "FAILED",
+      worktreePath: null,
+      worktreeBranch: null,
+      resumeSession: vi.fn(),
+    } as never);
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
+  });
+
+  it("keeps session recovery failure out of the transcript", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "bootstrap-failed",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
+        phase: "bootstrap",
+      },
+    });
+    useSessionResumption.mockReturnValue({
+      resumptionState: "error",
+      sessionStatus: null,
+      error: "Session recovery failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed",
+        resumeError: "raw resume failure",
+        restoreError: "raw restore failure",
+      },
+      taskSessionState: "FAILED",
+      worktreePath: null,
+      worktreeBranch: null,
+      resumeSession: vi.fn(),
+    } as never);
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
+  });
+
+  it("does not pass a recovery reveal key to Quick Chat content", () => {
+    const view = render(<QuickChatSessionView session={session} />);
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
+
+    view.rerender(<QuickChatSessionView session={session} />);
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
+  });
+
+  it("keeps passthrough recovery feedback outside the terminal", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID, is_passthrough: true };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "bootstrap-passthrough",
+        occurred_at: BOOTSTRAP_OCCURRED_AT,
+        preview: BOOTSTRAP_PREVIEW,
+        phase: "bootstrap",
+      },
+    });
+    useSessionResumption.mockReturnValue({
+      resumptionState: "resumed",
+      sessionStatus: null,
+      error: null,
+      notice: WORKSPACE_READ_ONLY_NOTICE,
+      recoveryFailure: { outcome: "workspace_read_only", resumeError: "raw resume failure" },
+      taskSessionState: "FAILED",
+      worktreePath: null,
+      worktreeBranch: null,
+      resumeSession: vi.fn(),
+    } as never);
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId("session-recovery-notice").textContent).toContain(
+      WORKSPACE_READ_ONLY_NOTICE,
+    );
+    expect(screen.getByTestId("passthrough-terminal")).toBeTruthy();
+    expect(screen.queryByTestId(TEST_IDS.quickChatContent)).toBeNull();
+  });
+});
+
+// @covers task-05-popover-shell.md#build-decisions "automaticRecovery" "hideSessionSelectors" "taskArchiveState" "initialDraft" "transformOutgoing"
+describe("QuickChatSessionView new props", () => {
+  it("maps automaticRecovery false to skipAutomaticRecovery true", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+
+    render(<QuickChatSessionView session={session} automaticRecovery={false} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: true,
+      preventAutoResume: false,
+    });
+  });
+
+  it("keeps skipAutomaticRecovery false when automaticRecovery is left at its default", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+      preventAutoResume: false,
+    });
+  });
+
+  it("overrides resolveTaskArchiveState with an explicit taskArchiveState prop, null included", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: true });
+
+    render(<QuickChatSessionView session={session} taskArchiveState={null} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+      preventAutoResume: false,
+    });
+  });
+
+  it("forwards hideSessionSelectors to QuickChatContent's minimalToolbar", () => {
+    render(<QuickChatSessionView session={session} hideSessionSelectors />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ minimalToolbar: true }),
+    );
+  });
+
+  it("keeps kind config's minimal toolbar when hideSessionSelectors is left unset", () => {
+    render(<QuickChatSessionView session={{ ...session, kind: "config" }} />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ minimalToolbar: true }),
+    );
+  });
+
+  it("forwards initialDraft to QuickChatContent unchanged", () => {
+    render(<QuickChatSessionView session={session} initialDraft="why is KAN-418 here?" />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "why is KAN-418 here?" }),
+    );
+  });
+
+  it("forwards transformOutgoing to QuickChatContent unchanged", () => {
+    const transformOutgoing = (message: string) => `About t-1: ${message}`;
+
+    render(<QuickChatSessionView session={session} transformOutgoing={transformOutgoing} />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ transformOutgoing }),
+    );
+  });
+});

@@ -4,13 +4,28 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
+
+func TestShareSchemaRendersForPostgres(t *testing.T) {
+	rendered, err := dialect.RenderSchema(dialect.PGX, shareTableSchema)
+	if err != nil {
+		t.Fatalf("render share schema: %v", err)
+	}
+	if !strings.Contains(rendered, "TIMESTAMPTZ") {
+		t.Fatalf("rendered share schema = %q, want PostgreSQL timestamp type", rendered)
+	}
+	if strings.Contains(rendered, "DATETIME") || strings.Contains(rendered, "{{") {
+		t.Fatalf("rendered share schema contains SQLite or unresolved syntax: %q", rendered)
+	}
+}
 
 func newTestRepo(t *testing.T) *Repository {
 	t.Helper()

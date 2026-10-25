@@ -52,4 +52,23 @@ func TestExecutionAccessChecksGateBeforeCache(t *testing.T) {
 			t.Fatalf("nil checker must pass: %v", err)
 		}
 	})
+
+	t.Run("CheckTaskAccess delegates to the installed checker", func(t *testing.T) {
+		mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
+		if err := mgr.CheckTaskAccess(context.Background(), "task-x"); err != nil {
+			t.Fatalf("nil checker must pass: %v", err)
+		}
+		mgr.SetTaskAccessChecker(func(_ context.Context, taskID string) error {
+			if taskID == "task-1" {
+				return denied
+			}
+			return nil
+		})
+		if err := mgr.CheckTaskAccess(context.Background(), "task-1"); !errors.Is(err, denied) {
+			t.Fatalf("expected denial, got %v", err)
+		}
+		if err := mgr.CheckTaskAccess(context.Background(), "task-2"); err != nil {
+			t.Fatalf("unexpected denial: %v", err)
+		}
+	})
 }

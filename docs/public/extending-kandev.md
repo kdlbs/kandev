@@ -20,7 +20,7 @@ Use the smallest seam that owns the behavior, then follow the completion checkli
 
 ## Add an agent
 
-For a local passthrough-only CLI, users can choose **Settings → Agents → Add TUI Agent**. That path persists a custom definition and default profile; no source patch is required.
+For a local CLI, users can choose **Settings → Agents → Add custom agent** and pick Terminal or ACP. That path persists a custom definition and default profile; no source patch is required.
 
 To ship a built-in integration, add an `agents.Agent` implementation under `apps/backend/internal/agent/agents/` and register it in `internal/agent/registry/registry.go`. Structured agents currently need an ACP-speaking process. Optional interfaces add inference, CLI passthrough, native-binary preference, or interactive login.
 
@@ -73,7 +73,7 @@ A new relayed tool normally requires:
 4. server mode/count, handler, transport, and integration tests;
 5. an update to [Automation and MCP](automation-and-mcp.md) when capability changes.
 
-Inject task/session identity from server context instead of trusting arguments. Enforce task/workspace reachability, confirmation for destructive actions, pagination, concurrency behavior, and least-privilege credentials. The backend's external MCP routes currently have no Kandev user-auth middleware; deployment network controls are part of the security boundary.
+Inject task/session identity from server context instead of trusting arguments. Enforce task/workspace reachability, confirmation for destructive actions, pagination, concurrency behavior, and least-privilege credentials. External MCP remains open while authentication is disabled; when the experimental authentication feature is enabled, it requires an authenticated identity and carries that user into dispatch. External clients use personal access tokens, while same-origin browser tooling can use a session. Deployment network controls remain part of the security boundary.
 
 ## Build a plugin
 

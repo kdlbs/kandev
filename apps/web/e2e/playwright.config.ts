@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const CI = !!process.env.CI;
+const upgradeRun = ["upgrade-desktop", "upgrade-mobile"].includes(
+  process.env.KANDEV_UPGRADE_PROJECT ?? "",
+);
 
 export default defineConfig({
   testDir: "./tests",
@@ -24,7 +27,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: CI,
   failOnFlakyTests: !CI || process.env.E2E_FAIL_ON_FLAKY === "1",
-  retries: CI ? 2 : 0,
+  retries: CI ? 3 : 0,
   workers: 1,
   timeout: 60_000,
   // CI uses blob reporter for cross-shard merge-reports; local uses list.
@@ -38,6 +41,24 @@ export default defineConfig({
   },
 
   projects: [
+    ...(upgradeRun
+      ? [
+          {
+            name: "upgrade-desktop",
+            testMatch: /upgrade\/release-upgrade\.spec\.ts/,
+            retries: 0,
+            timeout: 600_000,
+            use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" as const },
+          },
+          {
+            name: "upgrade-mobile",
+            testMatch: /upgrade\/mobile-release-upgrade\.spec\.ts/,
+            retries: 0,
+            timeout: 600_000,
+            use: { ...devices["Pixel 5"], trace: "retain-on-failure" as const },
+          },
+        ]
+      : []),
     {
       // The office-routing-* specs call `backend.restart()` with
       // KANDEV_MOCK_PROVIDERS, which permanently mutates the backend's
@@ -66,12 +87,16 @@ export default defineConfig({
     {
       name: "chromium",
       testIgnore: [
+        /upgrade\/.*\.spec\.ts/,
         /mobile-.*\.spec\.ts/,
-        // Container-backed tests (Docker executor, SSH executor) live in the
+        // Container-backed tests (Docker, SSH, and Kubernetes executors) live in the
         // `containers` project and skip when Docker is not available locally.
         // See apps/web/e2e/README.md for what runs there.
         /docker\/.*\.spec\.ts/,
         /ssh\/.*\.spec\.ts/,
+        /kubernetes\/.*\.spec\.ts/,
+        /kubernetes-compat\/.*\.spec\.ts/,
+        /git\/turn-changed-files-executors\.spec\.ts/,
         /office-routing-.*\.spec\.ts/,
         // Auth specs run in the dedicated `auth` project (see above).
         /auth\/.*\.spec\.ts/,
@@ -81,6 +106,7 @@ export default defineConfig({
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
+      testIgnore: [/ssh\/.*\.spec\.ts/, /upgrade\/.*\.spec\.ts/],
       use: { ...devices["Pixel 5"] },
     },
     {
@@ -88,14 +114,21 @@ export default defineConfig({
       // Spawns the backend with KANDEV_E2E_CONTAINERS=1 (KANDEV_E2E_DOCKER=1
       // is honored as a deprecated alias for one release). Builds the
       // kandev-agent:e2e and kandev-sshd:e2e images and skips entirely on
-      // hosts without a Docker daemon — Docker is used as the runtime for
-      // both the Docker executor's own containers AND the sshd target the
-      // SSH executor connects to. Container-bound tests are slow (~10-30s
-      // each) so they live in their own project to keep the default CI fast.
+      // hosts without a Docker daemon. Docker is used as the runtime for the
+      // Docker executor's own containers, the sshd target the SSH executor
+      // connects to, and the pinned Kind cluster used by Kubernetes specs.
+      // Container-bound tests are slow, so they live in their own project to
+      // keep the default CI fast.
       //
       // See apps/web/e2e/README.md for context and how to run locally.
       name: "containers",
-      testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/],
+      testMatch: [
+        /docker\/.*\.spec\.ts/,
+        /remote-docker\/.*\.spec\.ts/,
+        /ssh\/.*\.spec\.ts/,
+        /kubernetes\/.*\.spec\.ts/,
+        /git\/turn-changed-files-executors\.spec\.ts/,
+      ],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
       // Local `--shard=N/6` runs can still split this project at test level.
@@ -104,10 +137,20 @@ export default defineConfig({
       // within a shard, so the worker-scoped backend remains safe.
       fullyParallel: true,
     },
+    {
+      // Small API-only Kubernetes compatibility smoke. CI runs this once for
+      // each supported server version; it intentionally does not multiply the
+      // full browser lifecycle matrix in the `containers` project.
+      name: "kubernetes-compat",
+      testMatch: /kubernetes-compat\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      timeout: 300_000,
+      fullyParallel: true,
+    },
   ],
 
   // No webServer — each Playwright worker spawns its own frontend
   // via the backend fixture (see fixtures/backend.ts)
 
-  globalSetup: "./global-setup.ts",
+  globalSetup: upgradeRun ? "./upgrade-global-setup.ts" : "./global-setup.ts",
 });

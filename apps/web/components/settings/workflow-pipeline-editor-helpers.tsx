@@ -1,11 +1,21 @@
 "use client";
 
 import { IconInfoCircle } from "@tabler/icons-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { cn } from "@/lib/utils";
 
 /**
  * Monaco completion entries for the step-prompt editor. `key` is the
@@ -28,26 +38,52 @@ export function HelpTip({
   text,
   testId,
   ariaLabel,
+  mobileTouchTarget = false,
 }: {
   text: ReactNode;
   testId?: string;
   ariaLabel?: string;
+  mobileTouchTarget?: boolean;
 }) {
   const { t } = useTranslation();
   const label = ariaLabel ?? t("workflows:moreInformation");
+  const touchDrawer = useTouchDrawer();
+  const usesTouchDrawer = mobileTouchTarget && touchDrawer;
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const button = (
+    <button
+      type="button"
+      className={cn(
+        "inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        mobileTouchTarget && "h-11 w-11 md:h-5 md:w-5",
+      )}
+      aria-label={label}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
+      data-testid={testId}
+    >
+      <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
+    </button>
+  );
+
+  if (usesTouchDrawer) {
+    return (
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerTrigger asChild>{button}</DrawerTrigger>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>{label}</DrawerTitle>
+            <DrawerDescription>{text}</DrawerDescription>
+          </DrawerHeader>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={label}
-            data-testid={testId}
-          >
-            <IconInfoCircle className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
         <TooltipContent className="max-w-xs">{text}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -244,11 +280,26 @@ export function getOnTurnStartTransitionType(step: WorkflowStep): string {
   return action?.type ?? "none";
 }
 
-export function getChildrenCompletedTransitionType(step: WorkflowStep): string {
-  const action = step.events?.on_children_completed?.find((a) =>
+/** Generic step events whose editor offers a single transition action. */
+export type TransitionEventKey = "on_children_completed" | "on_pr_merged" | "on_pr_closed";
+
+export function getEventTransitionType(step: WorkflowStep, eventKey: TransitionEventKey): string {
+  const action = step.events?.[eventKey]?.find((a) =>
     ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
   );
   return action?.type ?? "none";
+}
+
+export function getEventTransitionTargetStepId(
+  step: WorkflowStep,
+  eventKey: TransitionEventKey,
+): string {
+  const stepId = step.events?.[eventKey]?.find((a) => a.type === "move_to_step")?.config?.step_id;
+  return typeof stepId === "string" ? stepId : "";
+}
+
+export function getChildrenCompletedTransitionType(step: WorkflowStep): string {
+  return getEventTransitionType(step, "on_children_completed");
 }
 
 export function hasDisablePlanMode(step: WorkflowStep): boolean {

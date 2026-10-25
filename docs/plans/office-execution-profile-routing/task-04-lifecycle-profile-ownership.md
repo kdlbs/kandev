@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-resolution-and-routing-persistence", "03-dual-id-session-plumbing"]
 plan: "plan.md"
-spec: "../../specs/office/routing.md"
+spec: "../../specs/office/requirements/routing.md"
 ---
 
 # Task 04: Lifecycle profile ownership

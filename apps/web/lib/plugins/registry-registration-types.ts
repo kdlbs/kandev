@@ -9,6 +9,7 @@ import type {
   SlotComponent,
   TaskActionRegistration,
   TaskFilterRegistration,
+  TaskListFacetRegistration,
   TaskMenuActionRegistration,
   TaskPanelRegistration,
 } from "./types";
@@ -77,6 +78,17 @@ export interface PluginTaskMenuActionRegistration extends TaskMenuActionRegistra
 /** Task filter registration plus the owning pluginId. */
 export interface PluginTaskFilterRegistration extends TaskFilterRegistration {
   pluginId: string;
+}
+
+/** Task-list facet registration paired with the plugin that owns it. */
+export interface PluginTaskListFacetRegistration extends TaskListFacetRegistration {
+  pluginId: string;
+}
+
+export function pluginTaskListFacetRegistrationKey(
+  registration: Pick<PluginTaskListFacetRegistration, "pluginId" | "id">,
+): string {
+  return `${registration.pluginId}:${registration.id}`;
 }
 
 /** Stable UI/state identity for plugin-local task filter ids. */

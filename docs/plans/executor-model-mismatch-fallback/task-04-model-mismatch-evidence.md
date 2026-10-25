@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-remove-host-model-gates"]
 plan: "plan.md"
-spec: "../../specs/no-silent-model-fallback/spec.md"
+spec: "../../specs/agents/requirements/no-silent-model-fallback.md"
 ---
 
 # Task 04: Prove model-mismatch recovery

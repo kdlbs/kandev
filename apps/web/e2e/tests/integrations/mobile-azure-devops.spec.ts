@@ -1,4 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 
 const MOCK_STATE = {
   authenticated: true,
@@ -123,6 +126,102 @@ const MOCK_STATE = {
   },
 };
 
+// @covers AC-UI-COMPOSER-ACTION-WRAP-001.7
+test("composer PR links keep phone targets reachable and desktop sizing compact", async ({
+  apiClient,
+  seedData,
+  testPage,
+  desktopTestPage,
+}, testInfo) => {
+  const repository = await apiClient.getRepository(seedData.repositoryId);
+  const capture = new PrAssetCapture(testPage, testInfo.file, { captureKey: testInfo.title });
+  try {
+    await apiClient.mockAzureDevOpsSeed(MOCK_STATE);
+    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
+      organizationUrl: "https://dev.azure.com/acme",
+      pat: "azure-test-pat",
+    });
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "azure_devops",
+      provider_repo_id: "azure-repo-1",
+      provider_host: "dev.azure.com/acme",
+      provider_owner: "project-1",
+      provider_name: "azure-repo-1",
+    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Azure composer target",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.associateAzureDevOpsTaskPR(
+      seedData.workspaceId,
+      task.id,
+      seedData.repositoryId,
+      42,
+    );
+    const url = MOCK_STATE.pullRequests[0].webUrl;
+    for (const page of [testPage, desktopTestPage]) {
+      await page.setViewportSize({ width: 320, height: 851 });
+      await page.goto(`/t/${task.id}`);
+      const session = new SessionPage(page);
+      await session.waitForLoad();
+      await expect(session.activeChat()).toContainText(
+        "This is a simple mock response for e2e testing.",
+      );
+      const chip = session.chatStatusBar().getByRole("link", { name: /PR 42/ });
+      await expect(chip).toBeVisible();
+      await expect
+        .poll(async () => {
+          const box = await chip.boundingBox();
+          return box ? Math.min(box.width, box.height) : 0;
+        })
+        .toBeGreaterThanOrEqual(44);
+      expect(
+        await chip.evaluate((link) => {
+          const box = link.getBoundingClientRect();
+          return link.contains(
+            document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+          );
+        }),
+      ).toBe(true);
+      await page
+        .context()
+        .route(url, (route) => route.fulfill({ body: "Mock Azure pull request" }));
+      const opened = page.waitForEvent("popup");
+      if (page === testPage) await chip.tap();
+      else await chip.click();
+      const popup = await opened;
+      await expect(popup).toHaveURL(url);
+      await popup.close();
+      await page.mouse.move(0, 0);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("tooltip")).toBeHidden();
+      await waitForFiniteAnimations(session.chatStatusBar());
+      if (page === testPage) {
+        await capture.screenshot("mobile-azure-composer-target", {
+          caption: "Azure DevOps composer PR link keeps a 44px target on a 320px phone",
+        });
+      } else {
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await expect.poll(async () => (await chip.boundingBox())?.height ?? 100).toBeLessThan(44);
+        await capture.screenshot("desktop-azure-composer-target", {
+          page,
+          caption: "Azure DevOps composer PR link retains compact desktop sizing",
+        });
+      }
+    }
+    capture.flush();
+  } finally {
+    await apiClient.updateRepository(seedData.repositoryId, repository);
+  }
+});
+
 test("mobile settings explain PAT scopes and link to the organization token page", async ({
   seedData,
   testPage,
@@ -173,9 +272,69 @@ test("mobile board opens a focused column editor without horizontal overflow", a
     organizationUrl: "https://dev.azure.com/acme",
     pat: "azure-test-pat",
   });
+  const savedViewsSeed = await testPage.request.put(
+    `/api/v1/azure-devops/views?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    {
+      data: {
+        views: [
+          {
+            id: "mobile-security-queue",
+            kind: "work_item",
+            label: "Mobile security queue",
+            projectId: "project-1",
+            wiql: "SELECT [System.Id] FROM WorkItems",
+            createdAt: "2026-09-07T00:00:00Z",
+          },
+        ],
+      },
+    },
+  );
+  expect(savedViewsSeed.ok()).toBe(true);
   await testPage.goto("/azure-devops");
 
   await expect(testPage.getByTestId("azure-devops-board")).toBeVisible();
+  const savedViewsMenu = testPage.getByTestId("azure-devops-saved-views-menu");
+  await savedViewsMenu.tap();
+  const deleteSavedView = testPage.getByRole("menuitem", {
+    name: "Delete Mobile security queue saved query",
+  });
+  await expect
+    .poll(async () => (await deleteSavedView.boundingBox())?.height ?? 0)
+    .toBeGreaterThanOrEqual(44);
+  await expect
+    .poll(async () => (await deleteSavedView.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual(44);
+  await deleteSavedView.tap();
+  const deleteConfirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
+  await expect(deleteConfirmation).toHaveAccessibleName("Delete Mobile security queue?");
+  await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+  await expect(testPage.getByRole("menu")).toHaveCount(0);
+  for (const action of await deleteConfirmation.getByRole("button").all()) {
+    const box = await action.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  await deleteConfirmation.getByRole("button", { name: "Cancel" }).tap();
+  await expect(savedViewsMenu).toBeFocused();
+  await savedViewsMenu.tap();
+  await expect(deleteSavedView).toBeVisible();
+
+  await deleteSavedView.tap();
+  const deleteSavedViewResponse = testPage.waitForResponse(
+    (response) =>
+      response.ok() &&
+      response.request().method() === "PUT" &&
+      response.url().includes("/api/v1/azure-devops/views"),
+  );
+  await testPage
+    .getByTestId("saved-task-view-delete-confirmation")
+    .getByRole("button", { name: "Delete Mobile security queue" })
+    .tap();
+  await deleteSavedViewResponse;
+  await expect(deleteSavedView).toHaveCount(0);
+  await savedViewsMenu.tap();
+  await expect(deleteSavedView).toHaveCount(0);
+  await testPage.keyboard.press("Escape");
+  await expect(testPage.getByRole("menu")).toBeHidden();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
   await prCapture.screenshot("board-mobile", {
     caption: "Azure DevOps focused mobile board column",
@@ -211,7 +370,7 @@ test("mobile board opens a focused column editor without horizontal overflow", a
     "Implement: Handle token rotation",
   );
   await testPage.getByRole("button", { name: "Create only" }).click();
-  await expect(testPage).toHaveURL(/\/tasks\//);
+  await expect(testPage).toHaveURL(/\/(?:t|tasks)\//);
   await testPage.goto("/azure-devops");
   await testPage.getByTestId("azure-devops-work-items-mode").click();
   await testPage.getByTestId("azure-devops-mobile-filter-button").click();
@@ -254,7 +413,9 @@ test("mobile board opens a focused column editor without horizontal overflow", a
   await testPage.getByTestId("azure-watch-editor-close").click();
   await workItemWatch.getByRole("button", { name: "Run now" }).click();
   await expect(testPage.getByText(/\d+ new match/)).toBeVisible();
-  await testPage.once("dialog", (dialog) => dialog.accept());
   await workItemWatch.getByRole("button", { name: "Reset" }).click();
+  const resetDialog = testPage.getByTestId("reset-watch-dialog");
+  await expect(resetDialog).toBeVisible();
+  await resetDialog.getByTestId("reset-watch-dialog-confirm").tap();
   await expect(testPage.getByText("Watch reset.")).toBeVisible();
 });

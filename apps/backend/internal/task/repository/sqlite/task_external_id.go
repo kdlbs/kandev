@@ -16,7 +16,7 @@ import (
 // externalIDIndexName is the partial unique index enforcing at most one task
 // per (workspace_id, external_id). Naming it explicitly here keeps
 // isExternalIDUniqueViolation attributable to this constraint specifically —
-// see docs/specs/tasks/external-id-idempotency/spec.md, "Unique-violation
+// see docs/specs/tasks/system-design/external-id-idempotency.md, "Unique-violation
 // classification across dialects".
 const externalIDIndexName = "uniq_tasks_external_id"
 

@@ -122,7 +122,7 @@ func (a *DevinACP) RemoteAuth() *RemoteAuth {
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{
-				Type:  "files",
+				Type:  remoteAuthMethodTypeFiles,
 				Label: "Copy Devin CLI credentials",
 				SourceFiles: map[string][]string{
 					"darwin": {devinCredentialsRelPath},

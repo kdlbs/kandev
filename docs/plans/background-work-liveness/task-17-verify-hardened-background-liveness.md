@@ -8,7 +8,7 @@ depends_on:
   - "15-publish-active-subagent-counts"
   - "16-sidebar-background-spinner"
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 17: Verify hardened background liveness

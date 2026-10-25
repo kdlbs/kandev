@@ -1,35 +1,70 @@
-import { createRef, type ReactNode, useEffect, useImperativeHandle, useRef } from "react";
+/* eslint-disable max-lines -- dialog lifecycle cases share one provider and submit harness. */
+import {
+  createRef,
+  type ComponentProps,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskCreateDialog } from "./task-create-dialog";
 import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog-types";
+import {
+  TaskCreateDialogTaskCreatedContext,
+  type RegisterTaskCreatedHandler,
+} from "./task-create-dialog-task-created";
 
 const enhancePromptMock = vi.fn();
 const toastMock = vi.fn();
 const setHasDescriptionMock = vi.fn();
+const formInitializationSpy = vi.fn();
 const ORIGINAL_PROMPT = "Original prompt";
 const IMPROVED_PROMPT = "Improved prompt";
 const USER_EDIT = "User edit";
 const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
 const ENHANCE_PROMPT_BUTTON_TEST_ID = "enhance-prompt-button";
+const DEFAULT_WORKSPACE_ID = "workspace-1";
+const SECOND_WORKSPACE_ID = "workspace-second";
 
+const taskCreatedHandlerByWorkspace = new Map<
+  string,
+  (task: { id: string; workspace_id: string }) => void
+>();
+const taskCreatedRegistrationByWorkspace = new Map<string, RegisterTaskCreatedHandler | null>();
+const taskSubmitHarness = {
+  succeeds: false,
+  onSuccessByWorkspace: new Map<
+    string,
+    (task: { id: string; workspace_id: string }, mode: "create" | "edit" | "session") => void
+  >(),
+};
 type EscapeEvent = { preventDefault: () => void };
+
+type CloseAutoFocusEvent = { preventDefault: () => void };
 
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
 let dialogEscapeHandler: ((event: EscapeEvent) => void) | undefined;
+let autoFocusNewTasks = true;
+let dialogCloseAutoFocusHandler: ((event: CloseAutoFocusEvent) => void) | undefined;
 
 vi.mock("@kandev/ui/dialog", () => ({
   Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogContent: ({
     children,
     onEscapeKeyDown,
+    onCloseAutoFocus,
   }: {
     children: ReactNode;
     onEscapeKeyDown?: (event: EscapeEvent) => void;
+    onCloseAutoFocus?: (event: CloseAutoFocusEvent) => void;
   }) => {
     dialogEscapeHandler = onEscapeKeyDown;
+    dialogCloseAutoFocusHandler = onCloseAutoFocus;
     return <div>{children}</div>;
   },
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -96,6 +131,10 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
   RepoChipsRow: () => null,
 }));
 
+vi.mock("./task-edit-dialog-dependencies", () => ({
+  TaskEditDialogDependencies: () => null,
+}));
+
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
   useTaskCreateDialogPopoverContainer: () => null,
   TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (
@@ -107,31 +146,55 @@ vi.mock("@/components/task-create-dialog-handlers", () => ({
   resetTaskCreateLastUsedSync: () => undefined,
 }));
 
+function getDialogStoreState() {
+  return {
+    userSettings: { taskCreateLastUsed: null, autoFocusNewTasks },
+    repositorySets: {
+      itemsByWorkspaceId: { [DEFAULT_WORKSPACE_ID]: [], [SECOND_WORKSPACE_ID]: [] },
+      loadingByWorkspaceId: {},
+      loadedByWorkspaceId: { [DEFAULT_WORKSPACE_ID]: true, [SECOND_WORKSPACE_ID]: true },
+      revisionByWorkspaceId: {},
+    },
+    repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    setRepositorySets: () => undefined,
+    setRepositorySetsLoading: () => undefined,
+  };
+}
+
+const mockDialogStoreApi = { getState: getDialogStoreState };
+
 vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useAppStore: (selector: (state: any) => unknown) =>
-    selector({
-      userSettings: { taskCreateLastUsed: null },
-      repositorySets: {
-        itemsByWorkspaceId: {},
-        loadingByWorkspaceId: {},
-        loadedByWorkspaceId: {},
-        revisionByWorkspaceId: {},
-      },
-      setRepositorySets: () => undefined,
-      setRepositorySetsLoading: () => undefined,
-    }),
+  useAppStore: (selector: (state: any) => unknown) => selector(getDialogStoreState()),
+  useAppStoreApi: () => mockDialogStoreApi,
 }));
 
 vi.mock("@/components/task-create-dialog-submit", () => ({
-  useTaskSubmitHandlers: () => ({
-    handleSubmit: () => undefined,
-    handleCancel: () => undefined,
-    handleUpdateWithoutAgent: () => undefined,
-    handleCreateWithoutAgent: () => undefined,
-    handleCreateWithPlanMode: () => undefined,
-    pendingDiscard: null,
-  }),
+  useTaskSubmitHandlers: (deps: {
+    isEditMode: boolean;
+    isSessionMode: boolean;
+    workspaceId: string;
+    onSuccess: (
+      task: { id: string; workspace_id: string },
+      mode: "create" | "edit" | "session",
+    ) => void;
+  }) => {
+    taskSubmitHarness.onSuccessByWorkspace.set(deps.workspaceId, deps.onSuccess);
+    return {
+      handleSubmit: () => {
+        if (!taskSubmitHarness.succeeds) return;
+        let mode: "create" | "edit" | "session" = "create";
+        if (deps.isSessionMode) mode = "session";
+        else if (deps.isEditMode) mode = "edit";
+        deps.onSuccess({ id: `task-${deps.workspaceId}`, workspace_id: deps.workspaceId }, mode);
+      },
+      handleCancel: () => undefined,
+      handleUpdateWithoutAgent: () => undefined,
+      handleCreateWithoutAgent: () => undefined,
+      handleCreateWithPlanMode: () => undefined,
+      pendingDiscard: null,
+    };
+  },
 }));
 
 vi.mock("@/components/task-create-dialog-selectors", () => ({
@@ -139,16 +202,25 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
   AgentSelector: () => null,
   ExecutorProfileSelector: () => null,
   TaskFormInputs: ({
+    workspaceId,
     initialDescription,
     descriptionValueRef,
     onDescriptionChange,
     onEnhancePrompt,
   }: {
+    workspaceId: string;
     initialDescription: string;
     descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
     onDescriptionChange: (hasDescription: boolean) => void;
     onEnhancePrompt?: () => void;
   }) => {
+    const registerTaskCreatedHandler = useContext(TaskCreateDialogTaskCreatedContext);
+    const handler = taskCreatedHandlerByWorkspace.get(workspaceId);
+    taskCreatedRegistrationByWorkspace.set(workspaceId, registerTaskCreatedHandler);
+    useEffect(() => {
+      if (!handler || !registerTaskCreatedHandler) return;
+      return registerTaskCreatedHandler(handler);
+    }, [handler, registerTaskCreatedHandler]);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const latestValueRef = useRef(initialDescription);
 
@@ -197,7 +269,10 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
 }));
 
 vi.mock("@/components/task-create-dialog-state", () => ({
-  useDialogFormState: () => mockFs,
+  useDialogFormState: () => {
+    formInitializationSpy();
+    return mockFs;
+  },
   useTaskCreateDialogEffects: () => undefined,
   useDialogHandlers: () => ({
     handleTaskNameChange: () => undefined,
@@ -216,7 +291,13 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useTaskCreateDialogData: () => ({
     workflows: [],
     agentProfiles: [],
-    executors: [],
+    executors: [
+      {
+        id: "executor-1",
+        type: "local",
+        profiles: [{ id: "executor-profile-1", executor_id: "executor-1" }],
+      },
+    ],
     snapshots: {},
     repositories: [],
     repositoriesLoading: false,
@@ -257,9 +338,15 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
     blockedBy: [],
     setBlockedBy: () => undefined,
+    mcpServerIds: [],
+    setMcpServerIds: () => undefined,
+    mcpServerIdsDirty: false,
+    setMcpServerIdsDirty: () => undefined,
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,
+    priority: "medium",
+    setPriority: () => undefined,
     setTaskName: () => undefined,
     hasTitle: true,
     setHasTitle: () => undefined,
@@ -272,7 +359,9 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     currentDefaults: { name: "Task title", description: initialDescription },
     descriptionInputRef: createRef<TaskFormInputsHandle>(),
     repositories: [],
+    repositoriesDirty: false,
     setRepositories: () => undefined,
+    setRepositoriesDirty: () => undefined,
     addRepository: () => undefined,
     removeRepository: () => undefined,
     updateRepository: () => undefined,
@@ -282,6 +371,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setExecutorId: () => undefined,
     executorProfileId: "executor-profile-1",
     setExecutorProfileId: () => undefined,
+    setExecutorProfileIdFromSeed: () => undefined,
+    seededExecutorProfileId: null,
     discoveredRepositories: [],
     setDiscoveredRepositories: () => undefined,
     discoverReposLoading: false,
@@ -290,6 +381,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setDiscoverReposLoaded: () => undefined,
     selectedWorkflowId: null,
     setSelectedWorkflowId: () => undefined,
+    workflowAgentOverrides: {},
+    setWorkflowAgentOverrides: () => undefined,
     fetchedSteps: null,
     setFetchedSteps: () => undefined,
     isCreatingSession: false,
@@ -331,21 +424,27 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setCurrentLocalBranchLoading: () => undefined,
     noRepository: false,
     setNoRepository: () => undefined,
+    preferLocalExecutor: false,
+    setPreferLocalExecutor: () => undefined,
     workspacePath: "",
     setWorkspacePath: () => undefined,
   };
 }
 
-function renderDialog(mode: "create" | "edit" | "session" = "create") {
+function renderDialog(
+  mode: "create" | "edit" | "session" = "create",
+  extraProps: Partial<ComponentProps<typeof TaskCreateDialog>> = {},
+) {
   return render(
     <TaskCreateDialog
       open
       mode={mode}
       onOpenChange={() => undefined}
-      workspaceId="workspace-1"
+      workspaceId={DEFAULT_WORKSPACE_ID}
       workflowId={null}
       defaultStepId={null}
       steps={[]}
+      {...extraProps}
     />,
   );
 }
@@ -359,8 +458,77 @@ beforeEach(() => {
   enhancePromptMock.mockReset();
   toastMock.mockReset();
   setHasDescriptionMock.mockReset();
+  formInitializationSpy.mockReset();
   dialogEscapeHandler = undefined;
+  dialogCloseAutoFocusHandler = undefined;
+  autoFocusNewTasks = true;
   mockFs = buildMockFs();
+  taskCreatedHandlerByWorkspace.clear();
+  taskSubmitHarness.succeeds = false;
+  taskSubmitHarness.onSuccessByWorkspace.clear();
+  taskCreatedRegistrationByWorkspace.clear();
+});
+
+it("defers form initialization until first opening and retains the close lifecycle", () => {
+  const props = {
+    mode: "create" as const,
+    onOpenChange: () => undefined,
+    workspaceId: DEFAULT_WORKSPACE_ID,
+    workflowId: null,
+    defaultStepId: null,
+    steps: [],
+  };
+  const view = render(<TaskCreateDialog {...props} open={false} />);
+  expect(formInitializationSpy).not.toHaveBeenCalled();
+
+  view.rerender(<TaskCreateDialog {...props} open />);
+  expect(formInitializationSpy).toHaveBeenCalled();
+  expect(dialogCloseAutoFocusHandler).toBeTypeOf("function");
+  formInitializationSpy.mockClear();
+  view.rerender(<TaskCreateDialog {...props} open={false} />);
+  expect(formInitializationSpy).toHaveBeenCalled();
+  expect(dialogCloseAutoFocusHandler).toBeTypeOf("function");
+});
+
+describe("TaskCreateDialog focus return (AC-TASKS-TASK-ACTIONS-MENU-001.12)", () => {
+  it("returns focus to the given focusReturnRef target on close, overriding Radix's default", () => {
+    const target = document.createElement("button");
+    document.body.appendChild(target);
+    target.focus = vi.fn();
+    const focusReturnRef = { current: target };
+
+    renderDialog("edit", { focusReturnRef });
+    expect(dialogCloseAutoFocusHandler).toBeTypeOf("function");
+
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(target.focus).toHaveBeenCalled();
+
+    document.body.removeChild(target);
+  });
+
+  it("leaves Radix's default close-focus behavior alone when the target has left the document", () => {
+    const target = document.createElement("button");
+    target.focus = vi.fn();
+    const focusReturnRef = { current: target };
+
+    renderDialog("edit", { focusReturnRef });
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(target.focus).not.toHaveBeenCalled();
+  });
+
+  it("leaves Radix's default close-focus behavior alone when no focusReturnRef is given", () => {
+    renderDialog("edit");
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
 });
 
 describe("TaskCreateDialog Escape dismissal", () => {
@@ -476,5 +644,77 @@ describe("TaskCreateDialog prompt enhancement", () => {
 
     expect(setHasDescriptionMock).not.toHaveBeenCalled();
     expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
+  });
+});
+
+it("returns to the opening control after background task creation", () => {
+  autoFocusNewTasks = false;
+  const target = document.createElement("button");
+  document.body.appendChild(target);
+  try {
+    target.focus();
+    renderDialog();
+    target.blur();
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(document.activeElement).toBe(target);
+  } finally {
+    target.remove();
+  }
+});
+
+describe("TaskCreateDialog task-created plugin callback", () => {
+  it("scopes callbacks to a successful create dialog", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    taskCreatedHandlerByWorkspace.set(DEFAULT_WORKSPACE_ID, first);
+    taskCreatedHandlerByWorkspace.set(SECOND_WORKSPACE_ID, second);
+    taskSubmitHarness.succeeds = true;
+    const firstDialog = renderDialog();
+    const completeFirstOpening = taskSubmitHarness.onSuccessByWorkspace.get(DEFAULT_WORKSPACE_ID);
+    const secondDialog = renderDialog("create", { workspaceId: SECOND_WORKSPACE_ID });
+    fireEvent.submit(firstDialog.container.querySelector("form")!);
+    fireEvent.submit(secondDialog.container.querySelector("form")!);
+    expect(second).toHaveBeenCalledTimes(1);
+
+    taskSubmitHarness.succeeds = false;
+    fireEvent.submit(firstDialog.container.querySelector("form")!);
+    expect(first).toHaveBeenCalledTimes(1);
+    renderDialog("edit", { workspaceId: "workspace-edit" });
+    expect(taskCreatedRegistrationByWorkspace.get("workspace-edit")).toBeNull();
+
+    const firstDialogProps = {
+      mode: "create" as const,
+      onOpenChange: () => undefined,
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      workflowId: null,
+      defaultStepId: null,
+      steps: [],
+    };
+    firstDialog.rerender(<TaskCreateDialog {...firstDialogProps} open={false} />);
+    firstDialog.rerender(<TaskCreateDialog {...firstDialogProps} open />);
+    completeFirstOpening?.({ id: "late-task", workspace_id: DEFAULT_WORKSPACE_ID }, "create");
+    expect(first).toHaveBeenCalledTimes(1);
+    taskSubmitHarness.onSuccessByWorkspace.get(DEFAULT_WORKSPACE_ID)?.(
+      { id: "current-task", workspace_id: DEFAULT_WORKSPACE_ID },
+      "create",
+    );
+    expect(first).toHaveBeenCalledTimes(2);
+
+    const completeBeforeModeChange =
+      taskSubmitHarness.onSuccessByWorkspace.get(DEFAULT_WORKSPACE_ID);
+    firstDialog.rerender(<TaskCreateDialog {...firstDialogProps} mode="edit" open />);
+    firstDialog.rerender(<TaskCreateDialog {...firstDialogProps} open />);
+    completeBeforeModeChange?.(
+      { id: "late-edit-task", workspace_id: DEFAULT_WORKSPACE_ID },
+      "create",
+    );
+    expect(first).toHaveBeenCalledTimes(2);
+
+    cleanup();
+    const notifyAfterUnmount = taskSubmitHarness.onSuccessByWorkspace.get(DEFAULT_WORKSPACE_ID);
+    notifyAfterUnmount?.({ id: "late-task", workspace_id: DEFAULT_WORKSPACE_ID }, "create");
+    expect(first).toHaveBeenCalledTimes(2);
   });
 });

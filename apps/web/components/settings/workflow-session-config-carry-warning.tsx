@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { ConfigureSessionOperation } from "@/lib/types/workflow-actions";
 import type { SessionConfigCarryWarning } from "@/lib/workflows/session-config-carry-analysis";
+import { settingsActionClassName } from "./settings-control";
 
 export function SessionConfigCarryWarningPanel({
   warnings,
@@ -46,7 +47,7 @@ export function SessionConfigCarryWarningPanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="min-h-10 cursor-pointer"
+                className={settingsActionClassName("cursor-pointer")}
                 disabled={readOnly || disabled}
                 onClick={() => onChoose(warning, "keep")}
               >
@@ -56,7 +57,7 @@ export function SessionConfigCarryWarningPanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="min-h-10 cursor-pointer"
+                className={settingsActionClassName("cursor-pointer")}
                 disabled={readOnly || disabled}
                 onClick={() => onChoose(warning, "restore_original")}
               >
@@ -66,7 +67,7 @@ export function SessionConfigCarryWarningPanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="min-h-10 cursor-pointer"
+                className={settingsActionClassName("cursor-pointer")}
                 disabled={readOnly || disabled}
                 onClick={() => onChoose(warning, "set")}
               >

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-runtime-terminal-environment", "02-agentctl-shell-process-environment"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 03: Document and Verify Terminal Git Routing
@@ -29,7 +29,7 @@ node scripts/validate-public-docs.mjs
 
 - `docs/public/executors.md`
 - `docs/public/developer-tools.md`
-- `docs/specs/integrations/github-authentication.md`
+- `docs/specs/integrations/requirements/github-authentication.md`
 - `docs/plans/task-terminal-git-environment/plan.md`
 
 ## Dependencies
@@ -42,7 +42,7 @@ Sequential.
 
 ## Inputs
 
-- Spec: `docs/specs/integrations/github-authentication.md` — What and Scenarios.
+- Spec: `docs/specs/integrations/requirements/github-authentication.md` — What and Scenarios.
 - Plan: Public documentation section.
 - Existing docs: `docs/public/executors.md` and `docs/public/developer-tools.md`.
 

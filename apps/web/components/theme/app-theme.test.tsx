@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppThemeProvider, useTheme } from "./app-theme";
 
@@ -33,8 +34,28 @@ describe("AppThemeProvider settings preview", () => {
 
   afterEach(() => {
     cleanup();
+    document.documentElement.className = "";
     window.localStorage.clear();
     vi.unstubAllGlobals();
+  });
+
+  it("applies the initial resolved theme before descendant passive effects", () => {
+    const observedRootThemes: string[] = [];
+
+    function InitialThemeProbe() {
+      useEffect(() => {
+        observedRootThemes.push(document.documentElement.className);
+      }, []);
+      return null;
+    }
+
+    render(
+      <AppThemeProvider>
+        <InitialThemeProbe />
+      </AppThemeProvider>,
+    );
+
+    expect(observedRootThemes).toEqual(["dark"]);
   });
 
   it("previews without writing storage and restores the saved theme", () => {

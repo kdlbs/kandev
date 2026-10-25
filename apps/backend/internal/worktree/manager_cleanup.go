@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,12 @@ import (
 )
 
 func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.QuarantineEntry) error {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return retentionErr
+	}
+	defer releaseRetention()
+
 	worktrees, err := m.GetAllByTaskID(ctx, entry.TaskID)
 	if err != nil {
 		return err
@@ -41,6 +48,9 @@ func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.Q
 }
 
 func (m *Manager) pruneQuarantinedWorktree(ctx context.Context, wt *Worktree) error {
+	if err := m.checkWorkspaceRetention(ctx, wt.TaskID, wt.ID, wt.Path); err != nil {
+		return err
+	}
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
 	defer func() {
@@ -87,18 +97,38 @@ const (
 )
 
 type worktreeRegistration struct {
-	path   string
-	head   string
-	branch string
+	path     string
+	head     string
+	branch   string
+	locked   bool
+	prunable bool
+}
+
+type worktreeRegistrationOwnershipOptions struct {
+	allowAnyBranchAtPath bool
 }
 
 func inspectWorktreeRegistrationOwnership(
 	ctx context.Context, repoPath, worktreePath, branchRef, headOID string,
 ) (worktreeRegistrationOwnership, error) {
+	return inspectWorktreeRegistrationOwnershipWithOptions(
+		ctx, repoPath, worktreePath, branchRef, headOID,
+		worktreeRegistrationOwnershipOptions{},
+	)
+}
+
+func inspectWorktreeRegistrationOwnershipWithOptions(
+	ctx context.Context, repoPath, worktreePath, branchRef, headOID string,
+	options worktreeRegistrationOwnershipOptions,
+) (worktreeRegistrationOwnership, error) {
 	cmd := newGitCommand(ctx, "worktree", "list", "--porcelain", "-z")
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
+		outStr := strings.TrimSpace(string(output))
+		if outStr != "" {
+			return worktreeRegistrationAbsent, fmt.Errorf("git worktree list failed: %s: %w", outStr, err)
+		}
 		return worktreeRegistrationAbsent, err
 	}
 	wantPath, err := normalizedWorktreeTargetPath(worktreePath)
@@ -106,7 +136,7 @@ func inspectWorktreeRegistrationOwnership(
 		return worktreeRegistrationAbsent, err
 	}
 	return classifyWorktreeRegistrationOwnership(
-		parseWorktreeRegistrations(string(output)), wantPath, branchRef, headOID,
+		parseWorktreeRegistrations(string(output)), wantPath, branchRef, headOID, options,
 	)
 }
 
@@ -124,6 +154,10 @@ func parseWorktreeRegistrations(output string) []worktreeRegistration {
 			registrations[current].head = strings.TrimPrefix(field, "HEAD ")
 		case current >= 0 && strings.HasPrefix(field, "branch "):
 			registrations[current].branch = strings.TrimPrefix(field, "branch ")
+		case current >= 0 && (field == "locked" || strings.HasPrefix(field, "locked ")):
+			registrations[current].locked = true
+		case current >= 0 && (field == "prunable" || strings.HasPrefix(field, "prunable ")):
+			registrations[current].prunable = true
 		}
 	}
 	return registrations
@@ -131,7 +165,12 @@ func parseWorktreeRegistrations(output string) []worktreeRegistration {
 
 func classifyWorktreeRegistrationOwnership(
 	registrations []worktreeRegistration, wantPath, branchRef, headOID string,
+	options ...worktreeRegistrationOwnershipOptions,
 ) (worktreeRegistrationOwnership, error) {
+	ownershipOptions := worktreeRegistrationOwnershipOptions{}
+	if len(options) > 0 {
+		ownershipOptions = options[0]
+	}
 	var exactTarget, branchElsewhere, targetClaimed bool
 	for _, registration := range registrations {
 		if registration.path == "" {
@@ -142,12 +181,17 @@ func classifyWorktreeRegistrationOwnership(
 			return worktreeRegistrationAbsent, err
 		}
 		if currentPath != wantPath {
-			if registration.branch == branchRef {
+			if branchRef != "" && registration.branch == branchRef {
 				branchElsewhere = true
 			}
 			continue
 		}
-		if registration.branch == branchRef && registration.head == headOID {
+		matchesBranch := registration.branch == branchRef
+		if branchRef == "" && ownershipOptions.allowAnyBranchAtPath {
+			matchesBranch = true
+		}
+		matchesHead := registration.head == headOID
+		if matchesBranch && matchesHead && !exactTarget {
 			exactTarget = true
 			continue
 		}
@@ -168,11 +212,64 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 	if err != nil {
 		return err
 	}
-	return m.removeWorktree(ctx, wt, removeBranch)
+	wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
+	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, WorktreeCleanupOptions{})
+	if !removeBranch {
+		m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
+	}
+	return err
+}
+
+// RemoveByIDWithReceipt removes one terminal worktree and safely compacts an
+// eligible managed branch. It never force-deletes a branch.
+func (m *Manager) RemoveByIDWithReceipt(ctx context.Context, worktreeID string) (BranchCleanupReceipt, error) {
+	wt, err := m.GetByID(ctx, worktreeID)
+	if err != nil {
+		return newBranchCleanupReceipt(), err
+	}
+	wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
+	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, false, WorktreeCleanupOptions{})
+	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
+	return receipt, err
 }
 
 // removeWorktree performs the actual removal of a worktree.
-func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
+func (m *Manager) removeWorktree(
+	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
+) error {
+	_, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
+	return err
+}
+
+func (m *Manager) removeWorktreeWithReceipt(
+	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
+) (BranchCleanupReceipt, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return BranchCleanupReceipt{}, retentionErr
+	}
+	defer releaseRetention()
+
+	receipt := newBranchCleanupReceipt()
+	if wt == nil {
+		return receipt, errors.New("worktree cleanup requires a worktree")
+	}
+	// Cleanup runs after the inventory snapshot has been selected. Keep a
+	// private copy so a later session/path projection update cannot redirect
+	// the destructive operation or its reference release.
+	worktreeSnapshot := *wt
+	wt = &worktreeSnapshot
+	if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
+		return receipt, errors.New("worktree cleanup requires repository and worktree paths")
+	}
+	// Serialize cleanup with create/recreate operations that target the same
+	// path. The path lock is acquired before the repository lock to match the
+	// creation order and avoid a lock-order deadlock.
+	releasePath, err := acquireWorktreeTargetPath(ctx, wt.Path)
+	if err != nil {
+		return receipt, fmt.Errorf("lock worktree cleanup path: %w", err)
+	}
+	defer releasePath()
 	// Get repository lock
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
@@ -180,6 +277,15 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
+	if err := m.checkCleanupInventoryIdentity(ctx, wt.ID); err != nil {
+		return receipt, err
+	}
+
+	if options.ExpectedTaskID != "" {
+		if err := m.validateArchivedCleanupIdentity(ctx, wt, options); err != nil {
+			return receipt, err
+		}
+	}
 	// CountActiveWorktreeReferences already counts only sessions of OTHER
 	// tasks referencing the owning environment. No exclusions are passed:
 	// the worktree record returned by GetWorktreeByID carries an arbitrary
@@ -187,77 +293,91 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	// and authorize deletion of a workspace another task still holds.
 	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, nil)
 	if err != nil {
-		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
+		return receipt, fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
 	}
-	if activeReferences > 0 {
-		// The worktree is owned by a task environment that another task's
-		// session still references. The single environment-repository row is
-		// the only record, so there is no per-session reference to release —
-		// leave the row and directory untouched.
-		m.logger.Info("preserved worktree still referenced by another task session",
-			zap.String("worktree_id", wt.ID),
-			zap.String("session_id", wt.SessionID),
-			zap.Int("non_deleted_references", activeReferences))
-		return nil
+	if retainedReceipt, retained := m.retainReferencedWorktree(wt, removeBranch, activeReferences); retained {
+		return retainedReceipt, nil
 	}
 
-	// Execute cleanup script BEFORE removing directory
-	m.runWorktreeCleanupScript(ctx, wt)
-
-	// Remove worktree directory
-	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
-		m.logger.Warn("failed to remove worktree directory",
-			zap.String("path", wt.Path),
-			zap.Error(err))
+	if err := m.checkWorkspaceRetention(ctx, wt.TaskID, wt.ID, wt.Path); err != nil {
+		return receipt, err
 	}
-
-	// Optionally remove the branch from the main repository
-	if removeBranch {
-		m.logger.Info("deleting branch from main repository",
-			zap.String("branch", wt.Branch),
-			zap.String("repository_path", wt.RepositoryPath))
-
-		cmd := newGitCommand(ctx, "branch", "-D", wt.Branch)
-		cmd.Dir = wt.RepositoryPath
-		if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
-			m.logger.Warn("failed to delete branch from main repository",
-				zap.String("branch", wt.Branch),
-				zap.String("repository_path", wt.RepositoryPath),
-				zap.String("output", string(output)),
-				zap.Error(err))
-		} else {
-			m.logger.Info("successfully deleted branch from main repository",
-				zap.String("branch", wt.Branch),
-				zap.String("repository_path", wt.RepositoryPath))
+	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch, options)
+	if err != nil {
+		return receipt, fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
+	}
+	defer func() {
+		if audit.adoption != nil {
+			audit.adoption.Close()
 		}
-	}
-
-	// Update store
-	if m.store != nil {
-		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
-			// Record may already be deleted by another cleanup path (e.g. task deletion).
-			// This is expected and harmless - only log at debug level.
-			m.logger.Debug("failed to update worktree status (may already be deleted)",
-				zap.String("worktree_id", wt.ID),
-				zap.Error(err))
+		if audit.pathHandle != nil {
+			_ = audit.pathHandle.Close()
 		}
+	}()
+
+	// Run repository scripts only after the cleanup authority, path,
+	// Git registration, and branch identity pass the audit.
+	if !audit.adoptionAbsent {
+		m.runWorktreeCleanupScript(ctx, wt)
 	}
 
-	// Update cache: delete the (session, repo) entry. Removing a worktree only
-	// affects its own repo; siblings on other repos must remain cached.
-	m.mu.Lock()
-	if wt.SessionID != "" {
-		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	if err := m.completeAuditedWorktreeCleanup(ctx, wt, audit, removeBranch); err != nil {
+		return receipt, fmt.Errorf("complete worktree cleanup %s: %w", wt.ID, err)
 	}
-	m.mu.Unlock()
+	if err := m.finalizeRemovedWorktree(ctx, wt); err != nil {
+		return receipt, err
+	}
+	if !removeBranch && !audit.hasAdoption() {
+		receipt = m.compactManagedBranch(ctx, wt)
+	}
 
 	m.logger.Info("removed worktree",
 		zap.String("task_id", wt.TaskID),
 		zap.String("worktree_id", wt.ID),
 		zap.String("path", wt.Path),
-		zap.Bool("branch_removed", removeBranch))
+		zap.Bool("branch_removed", removeBranch || receipt.Deleted > 0),
+		zap.Bool("branch_force_removed", removeBranch))
 
+	return receipt, nil
+}
+
+func (m *Manager) finalizeRemovedWorktree(ctx context.Context, wt *Worktree) error {
+	if m.store != nil && wt.SessionID != "" {
+		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
+			return fmt.Errorf("release worktree reference %s: %w", wt.ID, err)
+		}
+	}
+
+	// Removing a worktree affects only its repository cache entry; sibling
+	// repositories in the same session remain cached.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if wt.SessionID != "" {
+		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	}
 	return nil
+}
+
+func (m *Manager) retainReferencedWorktree(
+	wt *Worktree, removeBranch bool, activeReferences int,
+) (BranchCleanupReceipt, bool) {
+	receipt := newBranchCleanupReceipt()
+	if activeReferences <= 0 {
+		return receipt, false
+	}
+	// The worktree is owned by a task environment that another task's session
+	// still references. Leave the single environment-repository row and
+	// directory untouched because there is no per-session reference to release.
+	m.logger.Info("preserved worktree still referenced by another task session",
+		zap.String("worktree_id", wt.ID),
+		zap.String("session_id", wt.SessionID),
+		zap.Int("non_deleted_references", activeReferences))
+	if !removeBranch {
+		receipt.Attempted = 1
+		branchCleanupMetrics.Add("attempted", 1)
+		receipt.retain(RetainedActiveReference)
+	}
+	return receipt, true
 }
 
 // ReleaseWorktreeReference marks one session's association deleted without
@@ -266,12 +386,28 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 	if wt == nil || wt.SessionID == "" {
 		return fmt.Errorf("session ID is required to release worktree reference")
 	}
+	if m.store != nil && wt.ID != "" {
+		current, err := m.store.GetWorktreeByID(ctx, wt.ID)
+		if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+			return err
+		}
+		if current != nil {
+			// The cleanup snapshot may be stale. Keep the latest branch policy
+			// and recovery state while changing only this association's status.
+			wt.BranchOwner = current.BranchOwner
+			wt.IntegrationRef = current.IntegrationRef
+			wt.RecoveryHeadSHA = current.RecoveryHeadSHA
+			wt.BranchCompactedAt = current.BranchCompactedAt
+		}
+	}
 	now := time.Now().UTC()
 	wt.Status = StatusDeleted
 	wt.DeletedAt = &now
 	wt.UpdatedAt = now
-	if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
-		return err
+	if m.store != nil {
+		if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+			return err
+		}
 	}
 	m.mu.Lock()
 	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
@@ -403,36 +539,180 @@ func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]strin
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.
 func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) error {
-	if len(worktrees) == 0 {
-		return nil
-	}
+	return m.cleanupWorktrees(ctx, worktrees, true, WorktreeCleanupOptions{})
+}
 
-	var lastErr error
-	for _, wt := range worktrees {
+// CleanupWorktreesWithOptions removes worktrees while retaining all cleanup
+// identity and branch-safety audits. Discard consent only changes the clean
+// checkout gate.
+func (m *Manager) CleanupWorktreesWithOptions(
+	ctx context.Context,
+	worktrees []*Worktree,
+	options WorktreeCleanupOptions,
+) error {
+	return m.cleanupWorktrees(ctx, worktrees, true, options)
+}
+
+// CleanupWorktreesPreservingBranches removes provided worktrees and compacts
+// only managed branches proven fully integrated. The historical name remains
+// for caller compatibility; unpublished and ambiguous branches are retained.
+func (m *Manager) CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*Worktree) error {
+	receipt, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, false, WorktreeCleanupOptions{})
+	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
+	return err
+}
+
+// CleanupArchivedWorktree reclaims one archived checkout only while its
+// persisted owner and paths still match the durable task cleanup intent.
+func (m *Manager) CleanupArchivedWorktree(
+	ctx context.Context,
+	wt *Worktree,
+	taskID, worktreePath, repositoryPath string,
+) error {
+	if wt == nil {
+		return errors.New("archived worktree cleanup requires a worktree")
+	}
+	receipt, err := m.cleanupWorktreesWithReceipt(ctx, []*Worktree{wt}, false, WorktreeCleanupOptions{
+		ExpectedTaskID:         taskID,
+		ExpectedWorktreePath:   worktreePath,
+		ExpectedRepositoryPath: repositoryPath,
+	})
+	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
+	return err
+}
+
+func (m *Manager) validateArchivedCleanupIdentity(
+	ctx context.Context,
+	wt *Worktree,
+	options WorktreeCleanupOptions,
+) error {
+	current, err := m.store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		return fmt.Errorf("reload archived worktree identity %s: %w", wt.ID, err)
+	}
+	if current == nil || current.Status != StatusActive || current.TaskID != options.ExpectedTaskID {
+		return ErrArchivedWorktreeIdentityChanged
+	}
+	if filepath.Clean(current.Path) != filepath.Clean(options.ExpectedWorktreePath) ||
+		filepath.Clean(current.RepositoryPath) != filepath.Clean(options.ExpectedRepositoryPath) ||
+		filepath.Clean(wt.Path) != filepath.Clean(options.ExpectedWorktreePath) ||
+		filepath.Clean(wt.RepositoryPath) != filepath.Clean(options.ExpectedRepositoryPath) {
+		return ErrArchivedWorktreeIdentityChanged
+	}
+	return nil
+}
+
+func (m *Manager) CleanupWorktreesWithReceipt(
+	ctx context.Context, worktrees []*Worktree,
+) (BranchCleanupReceipt, error) {
+	receipt, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, false, WorktreeCleanupOptions{})
+	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
+	return receipt, err
+}
+
+// MaintainArchivedBranches revisits a bounded set of managed branches retained
+// by archive cleanup. Candidate selection is durable metadata only; the normal
+// manager policy still owns repository locking, liveness, ancestry, recovery,
+// and ref deletion.
+func (m *Manager) MaintainArchivedBranches(
+	ctx context.Context, limit int,
+) (BranchCleanupReceipt, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return BranchCleanupReceipt{}, retentionErr
+	}
+	defer releaseRetention()
+
+	receipt := newBranchCleanupReceipt()
+	if limit <= 0 {
+		return receipt, nil
+	}
+	if limit > ArchivedBranchMaintenanceBatchLimit {
+		limit = ArchivedBranchMaintenanceBatchLimit
+	}
+	maintenanceStore, ok := m.store.(ArchivedBranchMaintenanceStore)
+	if !ok {
+		return receipt, nil
+	}
+	candidates, err := maintenanceStore.ListArchivedBranchCandidates(ctx, limit)
+	if err != nil {
+		return receipt, err
+	}
+	for _, wt := range candidates {
 		if wt == nil {
 			continue
 		}
-		if err := m.removeWorktree(ctx, wt, true); err != nil {
-			m.logger.Warn("failed to remove worktree on task deletion",
+		candidateReceipt, candidateErr := m.maintainArchivedBranchCandidate(ctx, maintenanceStore, wt)
+		receipt.merge(candidateReceipt)
+		if candidateErr != nil && err == nil {
+			err = candidateErr
+		}
+		if touchErr := maintenanceStore.TouchArchivedBranchCandidate(ctx, wt.ID); touchErr != nil && err == nil {
+			err = touchErr
+		}
+	}
+	m.logger.Info("archived managed branch maintenance receipt", receipt.reasonFields()...)
+	return receipt, err
+}
+
+func (m *Manager) maintainArchivedBranchCandidate(
+	ctx context.Context, maintenanceStore ArchivedBranchMaintenanceStore, wt *Worktree,
+) (BranchCleanupReceipt, error) {
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+
+	eligible, err := maintenanceStore.IsArchivedBranchCandidate(ctx, wt.ID)
+	if err == nil && eligible {
+		return m.compactArchivedManagedBranch(ctx, wt), nil
+	}
+	candidateReceipt := newBranchCleanupReceipt()
+	candidateReceipt.Attempted = 1
+	branchCleanupMetrics.Add("attempted", 1)
+	candidateReceipt.retain(RetainedArchiveStateChanged)
+	return candidateReceipt, err
+}
+
+func (m *Manager) cleanupWorktrees(
+	ctx context.Context, worktrees []*Worktree, removeBranch bool, options WorktreeCleanupOptions,
+) error {
+	_, err := m.cleanupWorktreesWithReceipt(ctx, worktrees, removeBranch, options)
+	return err
+}
+
+func (m *Manager) cleanupWorktreesWithReceipt(
+	ctx context.Context, worktrees []*Worktree, removeBranch bool, options WorktreeCleanupOptions,
+) (BranchCleanupReceipt, error) {
+	receipt := newBranchCleanupReceipt()
+	if len(worktrees) == 0 {
+		return receipt, nil
+	}
+
+	var errs []error
+	seen := make(map[string]struct{}, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil || strings.TrimSpace(wt.ID) == "" {
+			continue
+		}
+		if _, ok := seen[wt.ID]; ok {
+			continue
+		}
+		seen[wt.ID] = struct{}{}
+		wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
+		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
+		receipt.merge(branchReceipt)
+		if err != nil {
+			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),
 				zap.Error(err))
-			lastErr = err
+			errs = append(errs, fmt.Errorf("cleanup worktree %s: %w", wt.ID, err))
 		}
 	}
-
-	m.mu.Lock()
-	for _, wt := range worktrees {
-		if wt == nil {
-			continue
-		}
-		if wt.SessionID != "" {
-			delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
-		}
-	}
-	m.mu.Unlock()
-
-	return lastErr
+	return receipt, errors.Join(errs...)
 }
 
 // OnTaskDeleted cleans up all worktrees for a task when it is deleted.
@@ -446,12 +726,46 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 	return m.CleanupWorktrees(ctx, worktrees)
 }
 
-// removeWorktreeDir removes a worktree directory using git worktree remove.
-// After the inner directory is gone it tries to rmdir the parent task
-// directory left behind by the nested {tasksBase}/{taskDirName}/{repoName}
-// layout (see issue #1266). The rmdir is a best-effort no-op if the parent
-// still has siblings or contains workspace-scoped content.
-func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath string) error {
+// removeWorktreeDir removes a worktree directory. Audited paths are removed
+// through their pinned no-follow handle; un-audited callers use git worktree
+// remove with a safe filesystem fallback. After the inner directory is gone it
+// tries to rmdir the parent task directory left behind by the nested
+// {tasksBase}/{taskDirName}/{repoName} layout (see issue #1266). The rmdir is
+// a best-effort no-op if the parent still has siblings or contains
+// workspace-scoped content.
+func (m *Manager) removeWorktreeDir(
+	ctx context.Context,
+	worktreePath, repoPath string,
+	pathHandles ...storageworkspaces.DirectoryHandle,
+) error {
+	if len(pathHandles) > 0 && pathHandles[0] != nil {
+		// An audited handle pins the original directory identity. Remove through
+		// that handle instead of issuing a path-based Git command, which could
+		// follow a replacement after an external rename.
+		if verifyErr := pathHandles[0].VerifyPath(worktreePath); verifyErr != nil && !errors.Is(verifyErr, os.ErrNotExist) {
+			return fmt.Errorf("worktree path changed during cleanup: %w", verifyErr)
+		}
+		if err := pathHandles[0].RemoveDirectory(ctx); err != nil {
+			return fmt.Errorf("remove audited worktree directory: %w", err)
+		}
+		// The parent cleanup is a separate path-based fallback. Revalidate the
+		// audited target immediately before it so a replacement cannot turn an
+		// otherwise safe cleanup into recursive deletion of another directory.
+		if err := pathHandles[0].VerifyPath(worktreePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("worktree path changed before parent cleanup: %w", err)
+		}
+		pruneCmd := newGitCommand(ctx, "worktree", "prune")
+		pruneCmd.Dir = repoPath
+		if err := runGitCmd(ctx, pruneCmd); err != nil {
+			m.logger.Debug("git worktree prune failed", zap.Error(err))
+		}
+		m.tryRemoveEmptyTaskDir(worktreePath)
+		if err := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), repoPath, worktreePath); err != nil {
+			m.logger.Debug("failed to remove nested workspace exclusion", zap.String("path", worktreePath), zap.Error(err))
+		}
+		return nil
+	}
+
 	// First try git worktree remove
 	cmd := newGitCommand(ctx, "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = repoPath
@@ -460,8 +774,17 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 			zap.String("output", string(output)),
 			zap.Error(err))
 
-		if err := m.forceRemoveDir(ctx, worktreePath); err != nil {
-			return err
+		var removeErr error
+		if tasksBase, managed := m.cleanupWorktreeTasksBase(worktreePath); managed {
+			removeErr = storageworkspaces.RemoveDirectoryNoFollow(ctx, tasksBase, worktreePath)
+			if errors.Is(removeErr, os.ErrNotExist) {
+				removeErr = nil
+			}
+		} else {
+			removeErr = m.forceRemoveDir(ctx, worktreePath)
+		}
+		if removeErr != nil {
+			return removeErr
 		}
 
 		// Prune stale worktree entries
@@ -472,7 +795,23 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 		}
 	}
 	m.tryRemoveEmptyTaskDir(worktreePath)
+	if err := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), repoPath, worktreePath); err != nil {
+		m.logger.Debug("failed to remove nested workspace exclusion", zap.String("path", worktreePath), zap.Error(err))
+	}
 	return nil
+}
+
+func (m *Manager) cleanupWorktreeTasksBase(worktreePath string) (string, bool) {
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil || tasksBase == "" {
+		return "", false
+	}
+	tasksBase = filepath.Clean(tasksBase)
+	relativePath, err := filepath.Rel(tasksBase, filepath.Clean(worktreePath))
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return tasksBase, true
 }
 
 // tryRemoveEmptyTaskDir rmdirs the parent of a removed worktree if that

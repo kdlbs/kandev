@@ -1,6 +1,9 @@
 "use client";
 
+import type { TaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
+
 import { useState } from "react";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { IconAt } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { ModelSelector } from "@/components/task/model-selector";
@@ -29,7 +32,9 @@ type MobileToolbarProps = {
   hideSessionsDropdown: boolean;
   mcpServers: string[];
   mcpAttachmentHistory?: MCPAttachmentHistory;
+  mcpSelection?: TaskSessionMCPSelection | null;
   sessionId: string | null;
+  detailActive: boolean;
   taskId: string | null;
   taskTitle?: string;
   onAttachFiles?: () => void;
@@ -43,6 +48,7 @@ type MobileToolbarProps = {
   canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
+  planActionDisabledReason?: string;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt: boolean;
   isUtilityConfigured: boolean;
@@ -54,6 +60,7 @@ type MobileToolbarProps = {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   composerCapability?: PluginComposerCapability;
   composerSurface?: "task-chat" | "quick-chat";
+  presentation?: "desktop" | "mobile";
 };
 
 type MobileLeftActionsProps = MobileToolbarProps & {
@@ -61,13 +68,13 @@ type MobileLeftActionsProps = MobileToolbarProps & {
   onResetConfirmationOpenChange: (open: boolean) => void;
 };
 
-function mobileContextButton(contextCount: number) {
+function mobileContextButton(contextCount: number, presentation: "desktop" | "mobile") {
   return (
     <Button
       type="button"
       variant="ghost"
       size="sm"
-      className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
+      className={`${presentation === "mobile" ? "min-h-11 min-w-11" : "h-7"} gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative`}
       data-testid="chat-context-button"
       aria-label={t("task:sessionContext")}
     >
@@ -82,6 +89,7 @@ function mobileContextButton(contextCount: number) {
 }
 
 function MobileDefaultLeftActions(props: MobileToolbarProps) {
+  const presentation = props.presentation ?? "mobile";
   return (
     <>
       {!props.hidePlanMode && (
@@ -89,6 +97,7 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
           planModeEnabled={props.planModeEnabled}
           planModeAvailable={props.planModeAvailable}
           onPlanModeChange={props.onPlanModeChange}
+          presentation={presentation}
         />
       )}
       {!props.hideAgentControls && (
@@ -97,6 +106,7 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
             <McpIndicator
               mcpServers={props.mcpServers}
               attachmentHistory={props.mcpAttachmentHistory}
+              selection={props.mcpSelection}
             />
           </div>
           <div data-testid="toolbar-item-mode">
@@ -104,6 +114,7 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
           </div>
           <div data-testid="toolbar-item-model">
             <ModelSelector
+              showAgentIcon
               sessionId={props.sessionId}
               triggerClassName="max-w-[56vw] min-w-0 overflow-hidden"
             />
@@ -119,12 +130,14 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
           )}
         </>
       )}
-      {props.onAttachFiles && <AttachFilesButton onClick={props.onAttachFiles} />}
+      {props.onAttachFiles && (
+        <AttachFilesButton onClick={props.onAttachFiles} presentation={presentation} />
+      )}
       <div data-testid="toolbar-item-context">
         <ContextPopover
           open={props.contextPopoverOpen}
           onOpenChange={props.onContextPopoverOpenChange}
-          trigger={mobileContextButton(props.contextCount)}
+          trigger={mobileContextButton(props.contextCount, presentation)}
           sessionId={props.sessionId}
           planContextEnabled={props.planContextEnabled}
           contextFiles={props.contextFiles}
@@ -190,7 +203,10 @@ function MobileLeftActions(props: MobileLeftActionsProps) {
 }
 
 export function MobileChatInputToolbar(props: MobileToolbarProps) {
-  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
+  const [resetRequested, setResetConfirmationOpen] = useState(false);
+  const { isMobile } = useResponsiveBreakpoint();
+  const resetConfirmationOpen = resetRequested && !isMobile;
+  const presentation = props.presentation ?? "mobile";
 
   return (
     <div
@@ -207,9 +223,14 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
       />
       {!resetConfirmationOpen ? (
         <div className="flex shrink-0 items-center gap-1">
-          <TokenUsageDisplay sessionId={props.sessionId} />
+          <TokenUsageDisplay sessionId={props.sessionId} detailActive={props.detailActive} />
           {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
-            <ImplementPlanButton onClick={props.onImplementPlan} />
+            <ImplementPlanButton
+              onClick={props.onImplementPlan}
+              presentation={presentation}
+              disabled={Boolean(props.planActionDisabledReason)}
+              disabledReason={props.planActionDisabledReason}
+            />
           )}
           {!props.hideAgentControls && (
             <ChatInputPluginActions
@@ -228,6 +249,8 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
             isAgentBusy={props.isAgentBusy}
             canCancelAgent={props.canCancelAgent}
             sessionId={props.sessionId}
+            taskId={props.taskId}
+            taskTitle={props.taskTitle}
             hasContent={props.hasContent}
             isDisabled={props.isDisabled}
             submitDisabledReason={props.submitDisabledReason}
@@ -236,6 +259,7 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
             onCancel={props.onCancel}
             onSubmit={props.onSubmit}
             submitShortcut={props.submitShortcut}
+            presentation={presentation}
           />
         </div>
       ) : null}

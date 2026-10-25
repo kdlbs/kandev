@@ -1,0 +1,270 @@
+package lifecycle
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
+)
+
+func TestValidateWorkspaceInfoForExecutionRejectsRepoBackedNonGitPath(t *testing.T) {
+	path := t.TempDir()
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeLocal),
+		WorkspacePath: path,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: path, RepoName: "repository",
+		}},
+	})
+	if err == nil {
+		t.Fatal("validateWorkspaceInfoForExecution() error = nil, want rejection")
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionAcceptsCanonicalLocalRepository(t *testing.T) {
+	repository := initGitRepo(t)
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeLocal),
+		WorkspacePath: repository,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: repository, RepoName: "repository",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionAcceptsRepositoryInEstablishedFolderRoot(t *testing.T) {
+	root := t.TempDir()
+	repository := initGitRepo(t)
+	if err := linkDirectory(repository, filepath.Join(root, "repository")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:    string(models.ExecutorTypeLocal),
+		WorkspacePath:   root,
+		WorkspaceLayout: "current_root",
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: repository, RepoName: "repository",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() rejected established folder root: %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionAcceptsMatchingWorktree(t *testing.T) {
+	source := initGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked")
+	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath)
+	cmd.Dir = source
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, output)
+	}
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorkspacePath: worktreePath,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: source, RepoName: "repository",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionRejectsUnrelatedWorktree(t *testing.T) {
+	source := initGitRepo(t)
+	other := initGitRepo(t)
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorkspacePath: other,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: source, RepoName: "repository",
+		}},
+	})
+	if err == nil {
+		t.Fatal("validateWorkspaceInfoForExecution() accepted an unrelated Git repository")
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionRejectsUnadmittedManagedCloneMismatch(t *testing.T) {
+	info := newUnadmittedManagedCloneMismatchWorkspaceInfo(t)
+	if err := validateWorkspaceInfoForExecution(context.Background(), info); err == nil {
+		t.Fatal("execution validation accepted a worktree from the wrong clone without recovery admission")
+	}
+}
+
+func TestCreateExecutionRejectsManagedCloneMismatchWithoutRecoveryManager(t *testing.T) {
+	info := newUnadmittedManagedCloneMismatchWorkspaceInfo(t)
+	manager := &Manager{}
+	_, err := manager.createExecutionWithMode(context.Background(), "task-1", info, false)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("createExecutionWithMode() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForRecoveryPreflightDefersManagedCloneMismatch(t *testing.T) {
+	info := newUnadmittedManagedCloneMismatchWorkspaceInfo(t)
+	if err := validateWorkspaceInfoForRecoveryPreflight(context.Background(), info); err != nil {
+		t.Fatalf("preflight validation rejected a Git worktree before relocation admission: %v", err)
+	}
+}
+
+func newUnadmittedManagedCloneMismatchWorkspaceInfo(t *testing.T) *WorkspaceInfo {
+	t.Helper()
+	managedRoot := t.TempDir()
+	source := initGitRepo(t)
+	destination := initGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked")
+	cmd := exec.Command("git", "worktree", "add", "--detach", worktreePath)
+	cmd.Dir = source
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, output)
+	}
+	return &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorkspacePath: worktreePath,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: destination, WorktreePath: worktreePath,
+			RepoName: "repository", WorktreeID: "worktree-1",
+			CloneRelocation: &worktree.ManagedCloneRelocationProof{
+				ManagedRoot: managedRoot, ExpectedSourcePath: source, ExpectedDestinationPath: destination,
+				Identity: worktree.ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: "repository"},
+			},
+		}},
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionRequiresEnvironmentValidationMarker(t *testing.T) {
+	repository := initGitRepo(t)
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		TaskEnvironmentID: "env-1",
+		ExecutorType:      string(models.ExecutorTypeLocal),
+		WorkspacePath:     repository,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: repository, RepoName: "repository",
+		}},
+	})
+	if err == nil {
+		t.Fatal("validateWorkspaceInfoForExecution() accepted missing environment validation marker")
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionValidatesImplicitLocalEnvironment(t *testing.T) {
+	repository := initGitRepo(t)
+	info := &WorkspaceInfo{
+		TaskEnvironmentID:          "env-implicit-local",
+		ValidatedTaskEnvironmentID: "env-implicit-local",
+		WorkspacePath:              repository,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: repository, RepoName: "repository",
+		}},
+	}
+	if err := validateWorkspaceInfoForExecution(context.Background(), info); err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionRejectsUnrelatedImplicitLocalRepository(t *testing.T) {
+	selectedRepository := initGitRepo(t)
+	otherRepository := initGitRepo(t)
+	info := &WorkspaceInfo{
+		TaskEnvironmentID:          "env-implicit-local",
+		ValidatedTaskEnvironmentID: "env-implicit-local",
+		WorkspacePath:              otherRepository,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: selectedRepository, RepoName: "repository",
+		}},
+	}
+	if err := validateWorkspaceInfoForExecution(context.Background(), info); err == nil {
+		t.Fatal("validateWorkspaceInfoForExecution() accepted an unrelated Git checkout for the implicit local executor")
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionAcceptsMultiRepoTaskRoot(t *testing.T) {
+	root := t.TempDir()
+	first := initGitRepo(t)
+	second := initGitRepo(t)
+	if err := linkDirectory(first, filepath.Join(root, "first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkDirectory(second, filepath.Join(root, "second")); err != nil {
+		t.Fatal(err)
+	}
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeLocal),
+		WorkspacePath: root,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{
+			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "first"},
+			{RepositoryID: "repository-2", RepositoryPath: second, RepoName: "second"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionAcceptsIndependentImplicitLocalRepositories(t *testing.T) {
+	primary := initGitRepo(t)
+	additional := initGitRepo(t)
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		WorkspacePath: primary,
+		WorkspaceRepositories: []WorkspaceRepositorySpec{
+			{RepositoryID: "repository-1", RepositoryPath: primary, RepoName: "primary"},
+			{RepositoryID: "repository-2", RepositoryPath: additional, RepoName: "additional"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v, want each local repository validated at its selected checkout", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionUsesNestedRepositoryRelativePaths(t *testing.T) {
+	root := t.TempDir()
+	first := initGitRepo(t)
+	second := initGitRepo(t)
+	firstPath := filepath.Join(root, "first")
+	secondPath := filepath.Join(firstPath, "kandev", "second")
+	addLinkedWorktree(t, first, firstPath)
+	if err := os.MkdirAll(filepath.Dir(secondPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	addLinkedWorktree(t, second, secondPath)
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:    string(models.ExecutorTypeWorktree),
+		WorkspacePath:   root,
+		WorkspaceLayout: "task_root",
+		WorkspaceRepositories: []WorkspaceRepositorySpec{
+			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "first", WorkspaceRelativePath: "first"},
+			{RepositoryID: "repository-2", RepositoryPath: second, RepoName: "second", WorkspaceRelativePath: "first/kandev/second"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() rejected nested repository paths: %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionSkipsRepoLessWorkspace(t *testing.T) {
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:  string(models.ExecutorTypeLocal),
+		WorkspacePath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func linkDirectory(source, destination string) error {
+	return os.Symlink(source, destination)
+}

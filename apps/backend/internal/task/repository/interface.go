@@ -6,6 +6,8 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
+	"github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -15,30 +17,102 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTurnChangeSetNotFound = repoerrors.ErrTurnChangeSetNotFound
+var ErrTurnChangeSetIdentityConflict = repoerrors.ErrTurnChangeSetIdentityConflict
+var ErrTurnChangeRelationship = repoerrors.ErrTurnChangeRelationship
+var ErrTurnChangeContentNotFound = repoerrors.ErrTurnChangeContentNotFound
+var ErrTaskVersionConflict = repoerrors.ErrTaskVersionConflict
+var ErrTaskManagementClaimConflict = repoerrors.ErrTaskManagementClaimConflict
+var ErrTaskManagementClaimOwned = repoerrors.ErrTaskManagementClaimOwned
+var ErrTaskCompletionGateBlocked = repoerrors.ErrTaskCompletionGateBlocked
+var ErrTaskCompletionCriteriaConflict = repoerrors.ErrTaskCompletionCriteriaConflict
+var ErrTaskCompletionEvidenceChanged = repoerrors.ErrTaskCompletionEvidenceChanged
+var ErrTaskCompletionHumanConfirmationRequired = repoerrors.ErrTaskCompletionHumanConfirmationRequired
+var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
+var ErrTaskHierarchyConflict = repoerrors.ErrTaskHierarchyConflict
+var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
+var ErrTaskPreviewFeedbackChanged = repoerrors.ErrTaskPreviewFeedbackChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
+var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
+var ErrArchiveCleanupInProgress = repoerrors.ErrArchiveCleanupInProgress
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrStepChanged = repoerrors.ErrStepChanged
+var ErrInvalidReorder = repoerrors.ErrInvalidReorder
+var ErrAgentDeliverySubmissionConflict = repoerrors.ErrAgentDeliverySubmissionConflict
+var ErrAgentDeliverySubmissionNotFound = repoerrors.ErrAgentDeliverySubmissionNotFound
+var ErrAgentDeliveryEventConflict = repoerrors.ErrAgentDeliveryEventConflict
+var ErrAgentDeliveryEffectConflict = repoerrors.ErrAgentDeliveryEffectConflict
+var ErrAgentDeliveryEffectNotFound = repoerrors.ErrAgentDeliveryEffectNotFound
+var ErrAgentDeliveryReconstructionConflict = repoerrors.ErrAgentDeliveryReconstructionConflict
+var ErrAgentDeliveryReconstructionStale = repoerrors.ErrAgentDeliveryReconstructionStale
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
 	CreateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error
+	UpdateWorkspaceFields(ctx context.Context, id string, update models.WorkspaceFieldUpdate, expected *time.Time) (*models.Workspace, error)
 	DeleteWorkspace(ctx context.Context, id string) error
 	DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error)
 	DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error)
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
+
+	// Workspace membership. Membership is the exception path next to
+	// Workspace.Visibility: it populates a private workspace, admits a guest
+	// to one workspace, and narrows a member to viewer on an org-visible one.
+	ListWorkspaceMembers(ctx context.Context, workspaceID string) ([]*models.WorkspaceMember, error)
+	GetWorkspaceMember(ctx context.Context, workspaceID, userID string) (*models.WorkspaceMember, error)
+	// ListWorkspaceIDsForMember returns workspaceID -> role for one user in a
+	// single query, so a board render resolves access without an N+1.
+	ListWorkspaceIDsForMember(ctx context.Context, userID string) (map[string]string, error)
+	UpsertWorkspaceMember(ctx context.Context, member *models.WorkspaceMember) error
+	DeleteWorkspaceMember(ctx context.Context, workspaceID, userID string) error
+	DeleteWorkspaceMembersByWorkspace(ctx context.Context, workspaceID string) error
+	CountWorkspaceMembers(ctx context.Context) (map[string]int, error)
+	TransferWorkspaceOwnership(ctx context.Context, workspaceID, fromUserID, toUserID string) error
 }
 
 // TaskRepository handles task CRUD and workflow placement.
 // Note: models.TaskRepository is a struct in internal/task/models; no Go conflict exists.
 type TaskRepository interface {
+	managedconversation.Repository
+	// UpdateTaskGitHubIssue sets a complete issue link, or removes it for nil.
+	// It preserves current unrelated metadata and returns the committed candidate.
+	UpdateTaskGitHubIssue(ctx context.Context, id string, link *models.TaskGitHubIssueLink) (*models.Task, error)
+	// MergeTaskMetadata applies ordinary supplied keys to canonical current metadata.
+	// It writes metadata and its timestamp atomically without task-row effects.
+	MergeTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
+	// UpdateTaskFieldsWithParentAdmission applies request presence to the locked
+	// current row, admitting explicit parent intent through the existing policy.
+	UpdateTaskFieldsWithParentAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, validate TaskParentValidator) (*models.TaskFieldUpdateResult, error)
+	// UpdateTask writes the full task row, preserving the current parent and
+	// normalized materialized workspace mode/group unless parent intent was
+	// admitted through TaskHierarchyAdmission. It also preserves whatever position is
+	// currently persisted regardless of what task.Position holds — a
+	// pre-transaction read is not authoritative once a concurrent reorder or
+	// arrival may have moved the row (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/
+	// .31). Use UpdateTaskWithExplicitPosition for the one caller that must
+	// write a literal position.
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// UpdateTaskWithExplicitPosition is UpdateTask's counterpart that writes
+	// task.Position as given, for the generic task-update API's explicit
+	// position field (predates REQ-TASKS-KANBAN-TASK-REORDERING-001).
+	UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error
+	// UpdateTaskPreservingDeferredLaunch is UpdateTask for callers holding a
+	// task snapshot old enough to race the session ceiling's deferred_launch
+	// compare-and-set writers: deferred_launch in the write payload is
+	// replaced by the row's own current value at write time, so a stale
+	// snapshot can never resurrect or clobber a concurrent CAS write. Outside
+	// hierarchy-owned workspace identity and other server provenance guards,
+	// metadata keeps ordinary replacement/deletion semantics.
+	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
@@ -57,6 +131,14 @@ type TaskRepository interface {
 	// Returns whether the row was updated.
 	UnarchiveTask(ctx context.Context, id string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
+	// ListUnarchivedTasksWithActiveSessions returns the unarchived tasks
+	// (archived_at IS NULL) that still have at least one task_sessions row
+	// in an active DB state (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT).
+	// This is the candidate list for the session reconciliation sweep's
+	// active-task pass: unarchived tasks holding active sessions whose
+	// backing execution may be gone (e.g. after a backend restart). The
+	// archived counterpart is ListArchivedTasksWithActiveSessions.
+	ListUnarchivedTasksWithActiveSessions(ctx context.Context) ([]*models.Task, error)
 	// ListArchivedTasksWithActiveSessions returns the IDs of archived tasks
 	// (archived_at IS NOT NULL) that still have at least one task_sessions
 	// row in an active DB state (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT).
@@ -66,6 +148,12 @@ type TaskRepository interface {
 	ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error)
 	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
 	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
+	// ListCoordinatorOriginTasks returns every task with origin "coordinator"
+	// (all workspaces when workspaceID is empty), ordered by id
+	// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
+	// coordinator_id is read from the returned Metadata in Go; this query does
+	// no dialect-specific JSON extraction.
+	ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
 	// tasks for a single watch, identified by the integration's task-metadata
 	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived
@@ -79,6 +167,21 @@ type TaskRepository interface {
 	// counterpart to an atomic remove: an editor must never re-create a key a
 	// concurrent claim just consumed.
 	SetTaskMetadataKeyIfPresent(ctx context.Context, taskID, key string, value interface{}) (bool, error)
+	// GetTaskDeferredLaunch reads a task's deferred_launch record and the
+	// opaque prior-state token a subsequent SetTaskDeferredLaunchIfUnchanged
+	// compares against. Unlike SetTaskMetadataKeyIfPresent, the comparison is
+	// over the whole stored value, not just the key's presence, so an editor
+	// that reads, patches one field and writes back cannot silently clobber a
+	// concurrent writer's change to a different field.
+	GetTaskDeferredLaunch(ctx context.Context, taskID string) (map[string]interface{}, interface{}, error)
+	// SetTaskDeferredLaunchIfUnchanged writes the deferred_launch record only
+	// when the stored value still matches prior (from GetTaskDeferredLaunch).
+	// A lost comparison is reported through lostCompare with a nil error: it
+	// is an ordinary, expected race whose handling is to re-read and re-apply,
+	// not a failure.
+	SetTaskDeferredLaunchIfUnchanged(
+		ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
+	) (stored bool, lostCompare bool, err error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfSessionState atomically transitions task state only while
 	// the named session remains in expectedSessionState and the task is not
@@ -146,6 +249,113 @@ type TaskRepository interface {
 	// and bumps updated_at. Returns the task as it exists immediately after
 	// the update, or nil if no task held the identity.
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
+
+	// SwitchTaskRunner re-evaluates the ten ordered mutability conditions
+	// inside a single task-row-locked transaction, confirms the
+	// compatibility gate's pre-transaction repository snapshot
+	// (req.ResolvedRepositoryID / ResolvedRepositoryUpdatedAt) is still
+	// current, and — only when every check passes — writes
+	// req.ExecutorProfileID as the task's sole metadata change. It never
+	// evaluates the compatibility gate itself; that runs before this call,
+	// outside any transaction.
+	//
+	// Returns *repoerrors.ErrRunnerMutabilityConflict when the mutability
+	// gate fails, repoerrors.ErrRunnerCompatibilityConflict when the
+	// compatibility gate fails, and repoerrors.ErrRunnerEvaluationUnavailable
+	// for a failed read, a stale compatibility snapshot, a failed lock, a
+	// failed write, or a failed commit.
+	SwitchTaskRunner(ctx context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error)
+}
+
+// ExactTaskOperationRepository atomically couples a task update to a durable
+// operation identity. It is an optional extension so other repository
+// implementations can adopt exact commands independently of the broad CRUD
+// interface.
+type ExactTaskOperationRepository interface {
+	UpdateTaskExactOperation(
+		ctx context.Context,
+		task *models.Task,
+		workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+		fence ...TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+}
+
+// TaskManagementClaimRepository owns task management claims and their audit
+// history. Claim changes compare the task and claim resource versions in one
+// database transaction.
+type TaskManagementClaimRepository interface {
+	ChangeTaskManagementClaim(ctx context.Context, change models.TaskManagementClaimChange) (*models.TaskManagementClaim, error)
+	GetTaskManagementClaim(ctx context.Context, taskID string) (*models.TaskManagementClaim, error)
+	ListTaskManagementClaimHistory(ctx context.Context, taskID string) ([]*models.TaskManagementClaimHistory, error)
+}
+
+// TaskCompletionGateRepository owns criteria, typed evidence, and append-only
+// audit history. Completion writers call the same repository's transaction
+// guard so service-level previews cannot authorize stale evidence.
+type TaskCompletionGateRepository interface {
+	SetTaskCompletionCriteria(ctx context.Context, change models.TaskCompletionCriteriaChange) (*models.TaskCompletionGateSnapshot, error)
+	VerifyTaskCompletionCriterion(ctx context.Context, change models.TaskCompletionEvidenceChange) (*models.TaskCompletionGateSnapshot, error)
+	GetTaskCompletionGate(ctx context.Context, taskID string) (*models.TaskCompletionGateSnapshot, error)
+	ListTaskCompletionGateHistory(ctx context.Context, taskID string) ([]*models.TaskCompletionGateHistory, error)
+}
+
+// TaskCompletionGateSummaryReader batches compact gate observations for
+// navigation and status-summary repair. It does not return criterion text or
+// audit history.
+type TaskCompletionGateSummaryReader interface {
+	GetTaskCompletionGateSummaries(
+		ctx context.Context,
+		taskIDs []string,
+	) (models.TaskCompletionGateSummaryBatch, error)
+}
+
+// ExactTaskCompletionGateRepository atomically applies plugin completion
+// commands, claim fences, task resource versions, and replay receipts.
+type ExactTaskCompletionGateRepository interface {
+	SetTaskCompletionCriteriaExact(ctx context.Context, change models.TaskCompletionCriteriaChange) (*models.TaskCompletionGateSnapshot, bool, error)
+	VerifyTaskCompletionCriterionExact(ctx context.Context, change models.TaskCompletionEvidenceChange) (*models.TaskCompletionGateSnapshot, bool, error)
+}
+
+// TaskManagementClaimFence proves which manager generation authorized an
+// exact plugin task mutation. A zero-value fence is valid only when the task
+// has no active management claim.
+type TaskManagementClaimFence = models.TaskManagementClaimFence
+
+// ExactTaskMoveOperationRepository persists a workflow move operation in the
+// same transaction as WIP admission and the task row update.
+type ExactTaskMoveOperationRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionExact(
+		ctx context.Context,
+		task *models.Task,
+		sourceStepID, targetStepID string,
+		limit int,
+		admittedState *v1.TaskState,
+		queueExitPending bool,
+		expectedWorkflowID string,
+		workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+		claimFence ...TaskManagementClaimFence,
+	) (admitted bool, alreadyApplied bool, err error)
+}
+
+// ExactTaskArchiveRepository couples archive admission, queue purge, and its
+// durable exact operation identity in one task database transaction.
+type ExactTaskArchiveRepository interface {
+	ArchiveTaskExact(
+		ctx context.Context,
+		taskID, workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+		claimFence ...TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+	GetTaskCommandOperation(
+		ctx context.Context,
+		workspaceID, taskID, operationID, payloadDigest string,
+	) (resourceVersion string, found bool, err error)
+}
+
+// TaskPriorityRepository updates a task's priority without replacing the
+// complete task row. Implementations use this capability for priority-only
+// mutations so concurrent changes to other task fields are preserved.
+type TaskPriorityRepository interface {
+	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 }
 
 // TaskStatusSummaryRepository stores the bounded task-level projection used by
@@ -164,9 +374,19 @@ type TaskActivityRepository interface {
 	LoadTaskLastActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, error)
 }
 
+// PRWatchTaskActivityRepository loads the bounded activity projection for a
+// bulk set of task IDs.
+type PRWatchTaskActivityRepository interface {
+	LoadPRWatchTaskActivity(ctx context.Context, taskIDs []string) (map[string]models.PRWatchTaskActivity, error)
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {
+	// ReplaceTaskRepositories serializes before reading canonical associations. Build
+	// must be pure: it cannot perform database, provider, or filesystem operations.
+	// Only a successful commit returns rows; commit errors can be indeterminate.
+	ReplaceTaskRepositories(ctx context.Context, taskID string, build func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error)) ([]*models.TaskRepository, error)
 	CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
 	GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
@@ -175,10 +395,11 @@ type TaskRepoRepository interface {
 	// UpdateTaskRepositoryComparisonTarget atomically replaces or removes the
 	// provider-owned comparison target on one exact attachment. When target is
 	// nil, expected limits removal to the same provider change when supplied.
-	UpdateTaskRepositoryComparisonTarget(ctx context.Context, id string, target *models.ComparisonTarget, expected *models.ComparisonTarget) (*models.TaskRepository, bool, error)
-	// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget changes the manual
-	// base branch and clears any provider-owned comparison target in one write.
-	UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx context.Context, id, baseBranch string) (*models.TaskRepository, bool, error)
+	UpdateTaskRepositoryComparisonTarget(ctx context.Context, id string, target *models.ComparisonTarget, expected *models.ComparisonTarget, clearManualOverride bool) (*models.TaskRepository, bool, error)
+	// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget updates the base
+	// branch and clears provider-owned target metadata in one write. A manual
+	// selection also records that launch-time PR refresh must preserve it.
+	UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx context.Context, id, baseBranch string, manualSelection bool) (*models.TaskRepository, bool, error)
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
@@ -199,6 +420,7 @@ type WorkflowRepository interface {
 	CreateWorkflow(ctx context.Context, workflow *models.Workflow) error
 	GetWorkflow(ctx context.Context, id string) (*models.Workflow, error)
 	UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error
+	UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error)
 	DeleteWorkflow(ctx context.Context, id string) error
 	ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error)
 	ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error
@@ -208,6 +430,25 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// RehydrateMessagePayload loads and verifies the externally stored
+	// payload for a message whose large tool output (e.g. shell command
+	// stdout/stderr) was moved out of the metadata column at write time, and
+	// merges the restored content back into message.Metadata. No-op when the
+	// message has no external payload (message.PayloadDigest == "").
+	RehydrateMessagePayload(ctx context.Context, message *models.Message) error
+	// GetLastMessageTimeBySessionIDs returns the newest task_session_messages
+	// updated_at for each requested session, in one chunked query. Sessions
+	// with no messages are absent from the result; callers fall back to the
+	// session row's own timestamps. Used by the session reconciliation sweep
+	// to measure per-session event silence.
+	GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error)
+	// HasUserPromptHistory reports whether the session has ever accepted a user
+	// prompt. The durable prompt sequence remains after message deletion.
+	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
+	// ClaimInitialPromptFallback atomically admits the task-description fallback
+	// for the expected incarnation of a never-prompted session. It returns false
+	// when another prompt/fallback claimed the first slot or the session was replaced.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error)
 	// GetMessageWithPromptIndex retrieves a message by ID with its computed
 	// prompt_index (1-based ordinal among the session's user messages).
 	// Used by the idempotent WS replay/response path and user update-event
@@ -215,21 +456,62 @@ type MessageRepository interface {
 	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
+	GetPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
+	// ListPendingInteractions returns the durable request rows behind the
+	// compact pending-action projection, under the same turn/session authority
+	// (ADR 0052). Clarification bundles come back as one row per question.
+	ListPendingInteractions(ctx context.Context, filter models.PendingInteractionFilter) ([]*models.Message, error)
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
 	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
+	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
 	ListMessagesForPlugin(ctx context.Context, filter models.PluginMessageFilter) ([]*models.Message, error)
 	SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
+}
+
+// ConversationSourceRepository provides the current-state conversation reads
+// used by the Host-only v2 transport. It is separate from MessageRepository
+// so existing repository fakes can continue to model the broader message
+// surface without also implementing the consistency boundary.
+type ConversationSourceRepository interface {
+	ReadConversationRevision(context.Context, string) (models.ConversationRevision, error)
+	ReadConversationMessagesPage(context.Context, models.ConversationMessagePageRequest) (models.ConversationMessagePage, error)
+	ReadConversationTurnsPage(context.Context, models.ConversationTurnPageRequest) (models.ConversationTurnPage, error)
+}
+
+// MessageTurnWindowReader reads a paginated transcript and its required turn
+// context from one reader snapshot. It is optional during repository migration
+// so older implementations can retain the message-only path.
+type MessageTurnWindowReader interface {
+	ReadMessageTurnWindow(context.Context, string, models.ListMessagesOptions) (models.MessageTurnWindow, error)
+}
+
+// ConversationMutationWriter returns a transient receipt from the same
+// transaction as a source mutation. It is optional during the migration so
+// existing repository fakes and exceptional bulk writers remain operational.
+type ConversationMutationWriter interface {
+	CreateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	UpdateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	DeleteMessageWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+	CreateTurnWithConversationReceipt(context.Context, *models.Turn) (*models.ConversationMutationReceipt, error)
+	UpdateTurnWithConversationReceipt(context.Context, *models.Turn) (*models.ConversationMutationReceipt, error)
+	CompleteTurnWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+}
+
+type ConversationTurnStampWriter interface {
+	CreateTurnWithStepStampConversationReceipt(context.Context, *models.Turn) (bool, *models.ConversationMutationReceipt, error)
 }
 
 // AttachmentRepository stores file-backed prompt attachment descriptors.
@@ -239,11 +521,42 @@ type AttachmentRepository interface {
 	CreateMessageAttachment(ctx context.Context, attachment *models.TaskMessageAttachment) error
 	GetMessageAttachment(ctx context.Context, id string) (*models.TaskMessageAttachment, error)
 	ListMessageAttachments(ctx context.Context, ids []string) ([]*models.TaskMessageAttachment, error)
+	ListMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
 	ClaimMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID string) error
+	PrepareClaimedMessageAttachmentsForRelease(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
 	DeleteClaimedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
 	DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
+	DeleteMessageAttachmentsBySession(ctx context.Context, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
+	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// LaunchAttachmentRollbackRepository restores an unreferenced launch claim
+// when synchronous session admission fails before the task is accepted.
+type LaunchAttachmentRollbackRepository interface {
+	RestoreLaunchMessageAttachments(
+		ctx context.Context,
+		ids []string,
+		ownerID, taskID, sessionID string,
+		expiresAt time.Time,
+	) error
+}
+
+// PreviewFeedbackRepository stores one revisioned pending collection per task.
+type PreviewFeedbackRepository interface {
+	ListTaskPreviewFeedback(ctx context.Context, taskID string) (*models.TaskPreviewFeedbackSnapshot, error)
+	CreateTaskPreviewFeedback(ctx context.Context, item *models.TaskPreviewFeedback, ownerID, workspaceID string) (*models.TaskPreviewFeedbackSnapshot, error)
+	UpdateTaskPreviewFeedback(ctx context.Context, taskID, itemID, comment string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, error)
+	DeleteTaskPreviewFeedback(ctx context.Context, taskID, itemID string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
+	ClearTaskPreviewFeedback(ctx context.Context, taskID string, expectedRevision int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
+}
+
+// QueueAttachmentAdmissionRepository scopes provisional attachment claims to
+// one caller-owned queue admission so rollback can restore only that attempt.
+type QueueAttachmentAdmissionRepository interface {
+	ClaimQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, queueID string) error
+	RestoreQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, queueID string) error
 }
 
 // TurnRepository handles conversation turn persistence.
@@ -302,6 +615,20 @@ type TurnRepository interface {
 }
 
 // SessionRepository handles task session lifecycle and workflow-session relationships.
+// TaskSessionSummaryObservationReader reads compact session projections for
+// navigation. It remains optional so unrelated repositories and test doubles
+// can keep their full-session capabilities without widening their contracts.
+type TaskSessionSummaryObservationReader interface {
+	BatchGetTaskSessionSummaryObservations(
+		ctx context.Context,
+		taskIDs []string,
+	) (map[string][]*models.TaskSessionSummaryObservation, error)
+	ListTaskSessionSummaryObservations(
+		ctx context.Context,
+		taskID string,
+	) ([]*models.TaskSessionSummaryObservation, error)
+}
+
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
@@ -317,7 +644,30 @@ type SessionRepository interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	// ListLiveWorkspaceSessions returns every session across all tasks in one of
+	// the five live states (CREATED, STARTING, RUNNING, IDLE,
+	// WAITING_FOR_INPUT), each carrying its effective workspace_path. Unlike
+	// ListActiveTaskSessions it includes IDLE, because this method exists
+	// only for the orphan-reap workspace-ownership check, not for the
+	// several unrelated "active session" callers that must not change
+	// behavior by picking up IDLE sessions.
+	ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error)
 	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
+	// CancelActiveTaskSessionsByIDs transitions exactly the listed active
+	// sessions (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT) to CANCELLED,
+	// returning the full row of each session actually transitioned. It is
+	// the session-scoped counterpart of CancelActiveTaskSessionsByTaskID:
+	// sessions outside the ID list — including ones that became active
+	// after the caller classified its set — are never touched. Callers that
+	// classified a stale or partial snapshot use it so a mid-sweep
+	// registration of new live work cannot be cancelled by a bulk
+	// task-scoped write. Same RETURNING contract as the task-scoped method.
+	CancelActiveTaskSessionsByIDs(ctx context.Context, taskID string, sessionIDs []string, reason string) ([]*models.TaskSession, error)
+	// ActiveSessionCancellationCandidate captures the activity and current-turn
+	// identity observed by a reconciliation pass. Implementations must cancel a
+	// candidate only when the session row, message activity clock, and active
+	// turn still match this snapshot at the write boundary.
+	CancelActiveTaskSessionsByCandidates(ctx context.Context, taskID string, candidates []models.ActiveSessionCancellationCandidate, reason string) ([]*models.TaskSession, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)
 	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
@@ -325,7 +675,7 @@ type SessionRepository interface {
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error)
 	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
-	DeleteTaskSession(ctx context.Context, id string) error
+	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
@@ -339,10 +689,111 @@ type SessionRepository interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	// CommitWorkspaceRecoveryErrorIfCurrent projects a verified workspace
+	// recovery refusal only while the captured session, execution, environment,
+	// complete selected repository inventory, ownership generation, and current
+	// error stamp still match.
+	CommitWorkspaceRecoveryErrorIfCurrent(
+		ctx context.Context,
+		observation models.WorkspaceRecoveryErrorObservation,
+		errorValue models.LastAgentError,
+	) (stored bool, activeStamp string, err error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
 	UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error
+}
+
+// SessionContinuityRepository persists native harness generations and the
+// operator-visible recovery records associated with a task session.
+type SessionContinuityRepository interface {
+	CreateHarnessSessionGeneration(ctx context.Context, generation *models.HarnessSessionGeneration) error
+	GetCurrentHarnessSessionGeneration(ctx context.Context, sessionID, incarnationID string) (*models.HarnessSessionGeneration, error)
+	CommitHarnessSessionGeneration(ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64) (bool, error)
+	CreateRestoreAttempt(ctx context.Context, attempt *models.RestoreAttempt) error
+	CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error
+	CreateContinuationSnapshot(ctx context.Context, snapshot *models.ContinuationSnapshot) error
+	GetContinuationSnapshot(ctx context.Context, id string) (*models.ContinuationSnapshot, error)
+	CompleteContinuationSnapshot(ctx context.Context, id, status string, resolvedAt time.Time) error
+	UpsertSessionRecoveryBlock(ctx context.Context, block *models.SessionRecoveryBlock) error
+	GetOpenSessionRecoveryBlock(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) (*models.SessionRecoveryBlock, error)
+	ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error)
+}
+
+// SessionRecoveryBlockListRepository reads every open cause for one session
+// so delivery recovery can bind its own block without hiding independent ones.
+type SessionRecoveryBlockListRepository interface {
+	ListOpenSessionRecoveryBlocks(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) ([]*models.SessionRecoveryBlock, error)
+}
+
+// AgentDeliveryRecoveryRepository persists the revisioned session notice for
+// an uncertain durable prompt outcome.
+type AgentDeliveryRecoveryRepository interface {
+	UpsertAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, block *models.SessionRecoveryBlock) (bool, error)
+	ResolveAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, action string) (bool, error)
+	ClearAgentDeliveryRecovery(ctx context.Context, sessionID, incarnationID, submissionID string, harnessGeneration int64) (bool, error)
+}
+
+// AgentDeliveryReconstructionRepository restores one verified journal-backed
+// submission, its recovery projection, and the exact admission block atomically.
+type AgentDeliveryReconstructionRepository interface {
+	ReconstructAgentDeliverySubmission(
+		ctx context.Context,
+		request *models.AgentDeliveryReconstructionRequest,
+	) (*models.AgentDeliveryReconstructionResult, error)
+}
+
+// AgentDeliveryRepository owns the backend side of the durable agentctl
+// protocol. Inbox receipt and projection watermarks are deliberately separate.
+type AgentDeliveryRepository interface {
+	PrepareAgentDeliverySubmission(ctx context.Context, submission *models.AgentDeliverySubmission) (bool, error)
+	GetAgentDeliverySubmission(ctx context.Context, id string) (*models.AgentDeliverySubmission, error)
+	TransitionAgentDeliverySubmission(ctx context.Context, id string, from, to models.DeliverySubmissionState, outcome string, updatedAt time.Time) (bool, error)
+	ReceiveAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, remoteHighWater int64) (bool, error)
+	GetAgentDeliveryCursor(ctx context.Context, streamID string) (*models.AgentDeliveryCursor, error)
+	ListUnprojectedAgentDeliveryEvents(ctx context.Context, streamID string, limit int) ([]*models.AgentDeliveryEvent, error)
+	ProjectAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
+	PutAgentDeliveryEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
+	GetAgentDeliveryEffect(ctx context.Context, effectKey string) (*models.AgentDeliveryEffect, error)
+}
+
+// AgentDeliveryRetentionRepository executes one bounded, atomic retention
+// batch against the task-owned delivery journal.
+type AgentDeliveryRetentionRepository interface {
+	RunAgentDeliveryRetentionBatch(
+		ctx context.Context,
+		options models.AgentDeliveryRetentionBatchOptions,
+	) (models.AgentDeliveryRetentionBatchResult, error)
+}
+
+// AgentDeliveryRetirementRepository purges explicitly retired identities and
+// discovers attributable orphans in bounded transactions.
+type AgentDeliveryRetirementRepository interface {
+	RunAgentDeliveryRetirementBatch(
+		ctx context.Context,
+		options models.AgentDeliveryRetirementBatchOptions,
+	) (models.AgentDeliveryRetirementBatchResult, error)
+	RunAgentDeliveryOrphanBatch(
+		ctx context.Context,
+		options models.AgentDeliveryOrphanBatchOptions,
+	) (models.AgentDeliveryOrphanBatchResult, error)
+}
+
+// AgentDeliverySettlementRepository exposes the durable outbox used to finish
+// exact terminal submissions after ordered projection. Implementations retain
+// non-completed effects until queue-claim cleanup succeeds.
+type AgentDeliverySettlementRepository interface {
+	SettleAgentDeliveryTerminal(ctx context.Context, streamID string, sequence int64, outcome models.DeliverySubmissionState, settledAt time.Time) (bool, error)
+	ListPendingAgentDeliverySettlements(ctx context.Context, sessionID string) ([]*models.AgentDeliveryEffect, error)
+	CompleteAgentDeliveryTerminalSettlement(ctx context.Context, effectKey string, completedAt time.Time) (bool, error)
+}
+
+// AgentDeliveryWorkflowOutcomeRepository records a guarded workflow no-op for
+// a projected terminal. Applied transitions record their receipt in the
+// transition transaction instead.
+type AgentDeliveryWorkflowOutcomeRepository interface {
+	RecordAgentDeliveryWorkflowOutcome(ctx context.Context, taskID string, effect *models.AgentDeliveryEffect) (bool, error)
+	BackfillLegacyAgentDeliveryWorkflowEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
 }
 
 // SessionWorktreeRepository exposes session-scoped worktree projections over
@@ -360,6 +811,10 @@ type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
 	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error
+	// UpdateClaimedTaskResourceCleanupSnapshot persists outcomes produced by one
+	// exact running cleanup attempt. A newer retry or cancellation wins when
+	// the claim no longer matches.
+	UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error)
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error)
@@ -368,6 +823,13 @@ type TaskResourceCleanupRepository interface {
 	MarkTaskResourceCleanupJobRunning(ctx context.Context, id string) (bool, error)
 	CompleteClaimedTaskResourceCleanupJob(ctx context.Context, id string, attempt int, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) (bool, error)
 	CompleteTaskResourceCleanupJob(ctx context.Context, id string, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) error
+	// RestoreCancelledTaskResourceCleanupJobIfUnchanged re-prepares the exact
+	// cancelled cleanup generation observed by the caller. A newer lifecycle
+	// transition or worker claim leaves the row unchanged.
+	RestoreCancelledTaskResourceCleanupJobIfUnchanged(ctx context.Context, id string, attempts int, lastError string) (bool, error)
+	// CancelTaskResourceCleanupJobIfPending fences cancellation against a
+	// concurrent worker claim and only changes an eligible non-running state.
+	CancelTaskResourceCleanupJobIfPending(ctx context.Context, id string) (bool, error)
 	CancelArchiveTaskResourceCleanupJobs(ctx context.Context, taskID string) error
 	ResetRunningTaskResourceCleanupJobs(ctx context.Context) error
 }
@@ -377,6 +839,9 @@ type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error)
+	GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error)
+	GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
@@ -385,6 +850,9 @@ type GitSnapshotRepository interface {
 	DeleteSessionCommit(ctx context.Context, id string) error
 }
 
+// RepositoryCheckoutIntent preserves omission for the two checkout choices.
+type RepositoryCheckoutIntent = models.RepositoryCheckoutIntent
+
 // RepositoryEntityRepository handles git repository entity CRUD and repository scripts.
 // Named RepositoryEntityRepository to avoid conflation with the Repository interface itself;
 // mirrors the sqlite/repository_entity.go implementation file.
@@ -392,6 +860,7 @@ type RepositoryEntityRepository interface {
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	UpdateRepositoryWithCheckoutIntent(ctx context.Context, repository *models.Repository, intent RepositoryCheckoutIntent) error
 	DeleteRepository(ctx context.Context, id string) error
 	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
 	CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
@@ -412,6 +881,18 @@ type RepositoryEntityRepository interface {
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
 }
 
+// DesktopDiscoveryRootRepository stores install-wide desktop discovery roots
+// and one-time migration state. These records are not owned by a workspace.
+type DesktopDiscoveryRootRepository interface {
+	ListDesktopDiscoveryRoots(ctx context.Context) ([]*models.DesktopDiscoveryRoot, error)
+	GetDesktopDiscoveryRoot(ctx context.Context, path string) (*models.DesktopDiscoveryRoot, error)
+	CreateDesktopDiscoveryRoot(ctx context.Context, root *models.DesktopDiscoveryRoot) error
+	UpdateDesktopDiscoveryRoot(ctx context.Context, root *models.DesktopDiscoveryRoot) error
+	DeleteDesktopDiscoveryRoot(ctx context.Context, path string) error
+	GetDesktopDiscoveryMigration(ctx context.Context) (*models.DesktopDiscoveryMigration, error)
+	SetDesktopDiscoveryMigration(ctx context.Context, migration *models.DesktopDiscoveryMigration) error
+}
+
 // RepositorySetRepository stores named, reusable groups of workspace
 // repositories. Membership order is authoritative: writes assign contiguous
 // positions from the supplied order, and reads return items in that order with
@@ -426,11 +907,30 @@ type RepositorySetRepository interface {
 	// ListRepositorySetIDsByRepository reports which sets hold a repository, so a
 	// caller can publish their new shape after a deletion prunes membership.
 	ListRepositorySetIDsByRepository(ctx context.Context, repositoryID string) ([]string, error)
-	// UpdateRepositorySet writes the set's fields and, when repositoryIDs is
+	// UpdateRepositorySet writes the set's fields and, when repositoryItems is
 	// non-nil, replaces its whole membership in the same transaction so the two
-	// cannot land apart. A nil repositoryIDs leaves membership untouched.
-	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
+	// cannot land apart. A nil repositoryItems leaves membership untouched.
+	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
+	// PatchRepositorySet writes only supplied metadata and membership fields in
+	// one transaction. Omitted fields retain their current persisted values.
+	PatchRepositorySet(ctx context.Context, id string, patch *models.RepositorySetPatch) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
+}
+
+// RepositoryBranchPolicyRepository stores reusable branch workflows owned by
+// a repository. The batch method is an atomic, one-time Gitflow starter.
+type RepositoryBranchPolicyRepository interface {
+	CreateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	GetRepositoryBranchPolicy(ctx context.Context, id string) (*models.RepositoryBranchPolicy, error)
+	GetRepositoryBranchPolicyByName(ctx context.Context, repositoryID, name string) (*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPolicies(ctx context.Context, repositoryID string) ([]*models.RepositoryBranchPolicy, error)
+	ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error)
+	UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	PatchRepositoryBranchPolicy(ctx context.Context, id, repositoryID string, patch *models.RepositoryBranchPolicyPatch,
+		normalize func(*models.RepositoryBranchPolicy) (*models.RepositoryBranchPolicy, error),
+	) (*models.RepositoryBranchPolicy, error)
+	DeleteRepositoryBranchPolicy(ctx context.Context, id string) (bool, error)
+	CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, repositoryID string, policies []*models.RepositoryBranchPolicy) error
 }
 
 // RepositorySecretBindingRepository stores normalized repository environment
@@ -447,6 +947,7 @@ type RepositorySecretBindingMutator interface {
 	RepositorySecretBindingRepository
 	CreateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
 	UpdateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
+	UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding, intent RepositoryCheckoutIntent) error
 }
 
 // RepositoryCleanupRepository performs guarded deletion of repositories
@@ -464,15 +965,26 @@ type ExecutorRepository interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	UpdateExecutor(ctx context.Context, executor *models.Executor) error
 	DeleteExecutor(ctx context.Context, id string) error
+	DeleteExecutorIfOwnershipUnmodified(ctx context.Context, id, owner string) error
 	ListExecutors(ctx context.Context) ([]*models.Executor, error)
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
+	// UpdateExecutorProfileWithScriptIntent preserves omitted scripts and installs
+	// the committed script pair and timestamp in profile only after success.
+	UpdateExecutorProfileWithScriptIntent(ctx context.Context, profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent) error
+	UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
+	DeleteExecutorProfileIfOwnershipUnmodified(ctx context.Context, profile *models.ExecutorProfile, parentOwner *string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	// GetExecutorRunningExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any executors_running row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -496,6 +1008,33 @@ type ExecutorRepository interface {
 	// the resume-safety invariant instead of deleting a resumable row.
 	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
+
+	// ListSSHExecutorsForReachability returns every eligible SSH executor
+	// (type=ssh, not soft-deleted, status=active) ordered ascending by id —
+	// the poller's per-pass work list.
+	ListSSHExecutorsForReachability(ctx context.Context) ([]*models.Executor, error)
+	// GetExecutorReachability returns the stored record for one executor.
+	// Returns models.ErrExecutorReachabilityNotFound if none exists.
+	GetExecutorReachability(ctx context.Context, executorID string) (*models.ExecutorReachability, error)
+	// ListExecutorReachability returns every stored reachability record.
+	ListExecutorReachability(ctx context.Context) ([]*models.ExecutorReachability, error)
+	// UpsertExecutorReachability records a single probe (or launch dial)
+	// observation. The consecutive-failure counter and derived state are
+	// computed by the statement itself from the row's own prior values, and
+	// a write is discarded when obs.CheckedAt is not strictly later than the
+	// stored checked_at — see the system design's Persistence section.
+	UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error
+	// ResetExecutorReachability invalidates the stored record after a
+	// connection-configuration save when seenUpdatedAt still matches the
+	// executor row. The version guard prevents a delayed save callback from
+	// resetting a newer configuration. State becomes unknown, the counter and
+	// reason/message clear, host is set to the newly saved value, and both
+	// timestamps become NULL. A no-op (zero rows affected) when the executor
+	// is not an active SSH executor or the version is stale.
+	ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error
+	// DeleteExecutorReachability removes the stored record. DeleteExecutor
+	// calls this in the same transaction as the soft delete.
+	DeleteExecutorReachability(ctx context.Context, executorID string) error
 }
 
 // EnvironmentRepository handles environment CRUD.
@@ -513,6 +1052,11 @@ type TaskEnvironmentRepository interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	// GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any task_environments row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	DeleteTaskEnvironment(ctx context.Context, id string) error
 	DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error
@@ -521,6 +1065,37 @@ type TaskEnvironmentRepository interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	DeleteTaskEnvironmentRepo(ctx context.Context, id string) error
 	DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error
+}
+
+// TaskEnvironmentRecoveryRepository is the optional durable authority
+// capability required by automatic host worktree recovery. Keeping it
+// separate preserves lightweight repository adapters used by tests and by
+// non-worktree executors.
+type TaskEnvironmentRecoveryRepository interface {
+	AcquireTaskEnvironmentRecoveryClaim(context.Context, models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error)
+	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
+}
+
+// TaskEnvironmentRecoveryClaimReader reads the current environment authority
+// for startup reconciliation and status projection.
+type TaskEnvironmentRecoveryClaimReader interface {
+	GetTaskEnvironmentRecoveryClaim(context.Context, string) (*models.TaskEnvironmentRecoveryClaim, error)
+}
+
+// TaskEnvironmentRecoveryArtifactRepository is the optional exact-path
+// registry used by managed clone recovery and trusted workspace exclusions.
+type TaskEnvironmentRecoveryArtifactRepository interface {
+	RegisterTaskEnvironmentRecoveryArtifacts(context.Context, recoveryartifact.Registration) error
+	ListTaskEnvironmentRecoveryArtifacts(context.Context, string) ([]recoveryartifact.Registered, error)
+}
+
+// TaskEnvironmentRecoveryOperationRepository stores the latest durable recovery
+// projection independently of the exclusive environment claim.
+type TaskEnvironmentRecoveryOperationRepository interface {
+	BeginTaskEnvironmentRecoveryOperation(context.Context, models.TaskEnvironmentRecoveryOperation) (*models.TaskEnvironmentRecoveryOperation, error)
+	UpdateTaskEnvironmentRecoveryOperation(context.Context, models.TaskEnvironmentRecoveryOperationUpdate) (*models.TaskEnvironmentRecoveryOperation, error)
+	GetTaskEnvironmentRecoveryOperation(context.Context, string) (*models.TaskEnvironmentRecoveryOperation, error)
+	InterruptTaskEnvironmentRecoveryOperations(context.Context, string) (int, error)
 }
 
 // ReviewRepository handles session file review records.
@@ -558,6 +1133,10 @@ type PlanRepository interface {
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
+	ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error)
+	CreateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment) (*models.TaskPlanCommentSnapshot, error)
+	UpdateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
+	DeleteTaskPlanComment(ctx context.Context, taskID, planID, commentID string, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
 
 	// Revision history
 	InsertTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error
@@ -569,12 +1148,19 @@ type PlanRepository interface {
 	// WritePlanRevision atomically upserts the HEAD plan and writes/merges a revision in a
 	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
 	// otherwise a new revision is appended with revision_number computed inside the tx.
-	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
+	//
+	// preserveTitle and preserveCreatedBy gate the HEAD upsert's ON CONFLICT branch only: when
+	// true, an existing row keeps its stored title / created_by rather than taking head's value.
+	// They have no effect on a fresh insert, which always uses head's value. Callers set a flag
+	// only when the value they would otherwise overwrite with could not be read (see
+	// docs/specs/tasks/system-design/plan-write-consistency.md, "Existing behavior that must
+	// change"); every other caller passes false.
+	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string, preserveTitle, preserveCreatedBy bool) error
 }
 
 // SubagentContextRepository persists the durable, queryable record of a
 // subagent (Task tool) invocation. See
-// docs/specs/subagent-context-persistence/spec.md.
+// docs/specs/agents/requirements/subagent-context-persistence.md.
 type SubagentContextRepository interface {
 	// UpsertSubagentContext inserts or merges one subagent invocation row,
 	// keyed on (task_session_id, tool_call_id). A single atomic statement —
@@ -582,4 +1168,47 @@ type SubagentContextRepository interface {
 	UpsertSubagentContext(ctx context.Context, sc *models.SubagentContext) error
 	ListSubagentContextsBySession(ctx context.Context, sessionID string) ([]*models.SubagentContext, error)
 	ListSubagentContextsByTurn(ctx context.Context, turnID string) ([]*models.SubagentContext, error)
+}
+
+// UsageRepository serves the task-cost-ledger read surface
+// (docs/specs/task-cost-ledger/spec.md AC-18, AC-19, AC-20): per-task and
+// per-session aggregate totals over task_usage_events. The ledger write path
+// (CreateTaskUsageEvent, ListTaskUsageEvents) is deliberately not part of
+// this interface - it is consumed only by internal/task/usage's own narrow
+// Repository interface, never through the Service layer.
+type UsageRepository interface {
+	GetTaskUsageTotals(ctx context.Context, taskID string) (*models.TaskUsageTotals, error)
+	GetSessionUsageTotals(ctx context.Context, sessionID string) (*models.TaskUsageTotals, error)
+}
+
+// UsageEventReader exposes bounded per-turn ledger detail for the chat usage
+// projection. It is separate from UsageRepository so aggregate-only readers
+// remain compatible.
+type UsageEventReader interface {
+	ListSessionUsageTurnCursors(ctx context.Context, sessionID string, afterID int64, limit int) ([]models.TaskUsageTurnCursor, error)
+	ListSessionUsageEventsByTurn(ctx context.Context, sessionID, turnID string) ([]*models.TaskUsageEvent, error)
+}
+
+// UsageSpendReader sums ledger cost for the coordinator spend measurement. It
+// is separate from UsageRepository so aggregate-only readers remain
+// compatible.
+type UsageSpendReader interface {
+	SumUsageForTasks(ctx context.Context, taskIDs []string, from, to time.Time) (models.UsageSum, error)
+	SumUsageForTurn(ctx context.Context, sessionID, turnID string, notAfter time.Time) (int64, error)
+}
+
+// BackgroundWorkRepository stores the background workload and run inspection projection.
+type BackgroundWorkRepository interface {
+	SettleBackgroundWorkloads(ctx context.Context, sessionID string, finishedAt time.Time) ([]*models.BackgroundWorkload, error)
+	UpsertBackgroundWorkload(ctx context.Context, workload *models.BackgroundWorkload) error
+	GetBackgroundWorkload(ctx context.Context, sessionID, id string) (*models.BackgroundWorkload, error)
+	ListBackgroundWorkloadsBySession(ctx context.Context, sessionID string) ([]*models.BackgroundWorkload, error)
+	DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error
+	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
+	UpsertBackgroundRun(ctx context.Context, run *models.BackgroundRun) error
+	GetBackgroundRun(ctx context.Context, sessionID, id string) (*models.BackgroundRun, error)
+	ListBackgroundRunsByWorkload(ctx context.Context, sessionID, workloadID string) ([]*models.BackgroundRun, error)
+	ReserveBackgroundActionReceipt(ctx context.Context, receipt *models.BackgroundActionReceipt) error
+	RecordBackgroundActionReceipt(ctx context.Context, receipt *models.BackgroundActionReceipt) error
+	GetBackgroundActionReceipt(ctx context.Context, sessionID, operationID string) (*models.BackgroundActionReceipt, error)
 }

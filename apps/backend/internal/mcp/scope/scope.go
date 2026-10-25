@@ -44,6 +44,15 @@ type IdentityLookup interface {
 	IdentityForUser(ctx context.Context, userID string) (authn.Identity, bool)
 }
 
+// CoordinatorLookup resolves a coordinator conversation task to its owning
+// coordinator (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
+// Implemented by *coordinator.Service. ok is false when taskID is not the
+// current conversation_task_id of any coordinator — an orphaned or archived
+// conversation task must resolve to no coordinator and be refused.
+type CoordinatorLookup interface {
+	CoordinatorForConversationTask(ctx context.Context, taskID string) (coordinatorID string, ok bool, err error)
+}
+
 // unownedScopeUserID is the owner attached when the stream's own workspace has
 // no owner: workspaces created before auth was enabled, and any created since
 // by an internal (unscoped) caller, since CreateWorkspace only stamps an owner
@@ -67,6 +76,21 @@ type Resolver struct {
 	// rather than fixed at wiring time.
 	enforced func() bool
 	logger   *logger.Logger
+
+	// coordinators resolves a coordinator conversation task to its
+	// coordinator, for principalSurface. nil (unset) means the coordinator
+	// feature is off or this resolver instance was never wired with it — a
+	// coordinator-origin task then resolves to no coordinator and is refused
+	// (fail closed), set via SetCoordinatorLookup rather than a NewResolver
+	// parameter so existing callers are unaffected.
+	coordinators CoordinatorLookup
+}
+
+// SetCoordinatorLookup wires the coordinator lookup used by principalSurface.
+// Guarded by the caller on the coordinator feature flag; a Resolver with no
+// lookup set refuses every coordinator-origin task.
+func (r *Resolver) SetCoordinatorLookup(lookup CoordinatorLookup) {
+	r.coordinators = lookup
 }
 
 // NewResolver builds the resolver. enforced must report false while
@@ -103,14 +127,40 @@ func NewResolver(
 // identity-free context, which the task service reads as an internal caller and
 // serves unscoped — the exact bug this package closes. "We cannot tell who owns
 // this stream" must deny foreign data, not grant all of it.
+//
+// Scope preserves a pre-existing context identity (see scope's
+// preserveExistingIdentity below): this is correct specifically because
+// in-session MCP dispatch has no credential of its own, so any identity
+// already on the context there was put there by an earlier hop of this same
+// resolver, not by some unrelated credential. A caller with its own
+// credential must use ScopeOverridingIdentity instead.
 func (r *Resolver) Scope(ctx context.Context, taskID string) (context.Context, error) {
+	return r.scope(ctx, taskID, true)
+}
+
+// ScopeOverridingIdentity behaves like Scope, except it always derives and
+// installs the task owner's identity, even when ctx already carries one.
+//
+// Scope's "never replace an existing identity" rule assumes the caller has no
+// credential of its own (in-session MCP dispatch, relayed over an agent's
+// WebSocket stream). A caller that does have its own credential — for
+// example an HTTP route authenticated by its own signed token — must not
+// have its authorization decided by a different, unrelated identity the
+// global auth middleware may separately have attached to the same request
+// context (e.g. a session cookie or PAT belonging to whichever user happens
+// to be logged into the same browser). Use this method for that case.
+func (r *Resolver) ScopeOverridingIdentity(ctx context.Context, taskID string) (context.Context, error) {
+	return r.scope(ctx, taskID, false)
+}
+
+func (r *Resolver) scope(ctx context.Context, taskID string, preserveExistingIdentity bool) (context.Context, error) {
 	if r == nil || taskID == "" || r.enforced == nil || !r.enforced() {
 		return ctx, nil
 	}
-	// A context that already carries an identity came from a credentialed
-	// caller; never replace or widen it.
-	if _, ok := authn.IdentityFromContext(ctx); ok {
-		return ctx, nil
+	if preserveExistingIdentity {
+		if _, ok := authn.IdentityFromContext(ctx); ok {
+			return ctx, nil
+		}
 	}
 	ownerID, err := r.ownerOf(ctx, taskID)
 	if err != nil {

@@ -65,6 +65,12 @@ func (h *Handlers) httpUpdateProvider(c *gin.Context) {
 	}
 	resp, err := h.controller.UpdateProvider(c.Request.Context(), providerID, body)
 	if err != nil {
+		// A provider owned by another user reaches here as ErrProviderNotFound,
+		// so it is answered exactly like an ID that does not exist.
+		if errors.Is(err, service.ErrProviderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
+			return
+		}
 		h.logger.Error("failed to update notification provider", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -89,6 +95,10 @@ func (h *Handlers) httpTestProvider(c *gin.Context) {
 func (h *Handlers) httpDeleteProvider(c *gin.Context) {
 	providerID := c.Param("id")
 	if err := h.controller.DeleteProvider(c.Request.Context(), providerID); err != nil {
+		if errors.Is(err, service.ErrProviderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
+			return
+		}
 		h.logger.Error("failed to delete notification provider", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete notification provider"})
 		return

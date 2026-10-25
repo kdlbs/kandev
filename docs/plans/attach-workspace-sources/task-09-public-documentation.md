@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["05-remote-materialization", "07-files-panel-surface"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 09: Public Documentation

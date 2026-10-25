@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/integrations/external-mcp.md
+spec: docs/specs/integrations/requirements/external-mcp.md
 created: 2026-08-19
 status: done
 ---

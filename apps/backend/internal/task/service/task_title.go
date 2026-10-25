@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/task/contract"
 )
 
 // TaskTitleMaxLength is the maximum number of characters allowed in a new or
 // replacement task title.
-const TaskTitleMaxLength = 60
+const TaskTitleMaxLength = contract.TaskTitleMaxLength
 
 // ErrTaskTitleTooLong identifies a task title that exceeds TaskTitleMaxLength.
 var ErrTaskTitleTooLong = errors.New("task title is too long")

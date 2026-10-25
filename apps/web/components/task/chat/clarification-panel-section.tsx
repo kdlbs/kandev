@@ -5,9 +5,16 @@ import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/ico
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
+import { useComposerDisclosureContext } from "./composer-disclosure";
 import { ResizeHandle } from "./resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
+import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
+import type {
+  LateClarificationSnapshot,
+  LateClarificationState,
+} from "@/hooks/use-late-clarification-message";
+import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
 
 type ClarificationPanelSectionProps = {
   pending: boolean;
@@ -15,14 +22,23 @@ type ClarificationPanelSectionProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   /**
+   * True when the session no longer has a live clarification waiter.
+   * Detached requests remain answerable even if their row refresh lags.
+   */
+  agentDisconnected?: boolean;
+  /**
    * Caps the expanded overlay's height as a percentage of the viewport.
-   * Drives both the rendered CSS max-height and the resize hook's drag
-   * clamp — the two MUST agree, or the drag handle silently stops
-   * responding before its own visible ceiling.
+   * Drives both the rendered CSS max-height and the resize hook's drag clamp
+   * - the two MUST agree, or the drag handle silently stops responding before
+   * its own visible ceiling.
    */
   maxHeightVh: number;
+  // Shared late-message state keeps the recovery surface available when a
+  // host unmounts and the transcript mounts a new form for the same bundle.
+  onOutcome?: (outcome: ClarificationOutcome) => void;
+  onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  lateAnswerState?: LateClarificationState;
 };
-
 function pendingIdFromMessages(messages: readonly Message[] | null | undefined): string | null {
   const first = messages?.[0];
   if (!first) return null;
@@ -56,9 +72,14 @@ export function ClarificationPanelSection({
   messages,
   onResolved,
   shortcutScopeRef,
+  agentDisconnected = false,
   maxHeightVh,
+  onOutcome,
+  onLateAnswer,
+  lateAnswerState,
 }: ClarificationPanelSectionProps) {
   const { t } = useTranslation();
+  const disclosure = useComposerDisclosureContext();
   const pendingId = pendingIdFromMessages(messages);
   const [collapsed, setCollapsed] = useCollapsedForBundle(pendingId);
   const contentId = useId();
@@ -82,6 +103,73 @@ export function ClarificationPanelSection({
 
   const questionCount = messages?.length ?? 0;
   const actionLabel = collapsed ? t("chat:expandClarification") : t("chat:collapseClarification");
+
+  return (
+    <ClarificationPanelContent
+      actionLabel={actionLabel}
+      agentDisconnected={agentDisconnected}
+      collapsed={collapsed}
+      containerRef={containerRef}
+      contentId={contentId}
+      disclosure={disclosure}
+      height={height}
+      maxHeightVh={maxHeightVh}
+      messages={messages}
+      onCollapse={() => setCollapsed(true)}
+      onOutcome={onOutcome}
+      onLateAnswer={onLateAnswer}
+      lateAnswerState={lateAnswerState}
+      onResolved={onResolved}
+      onToggleCollapse={() => setCollapsed((current) => !current)}
+      questionCount={questionCount}
+      resizeHandleProps={resizeHandleProps}
+      shortcutScopeRef={shortcutScopeRef}
+    />
+  );
+}
+
+type ClarificationPanelContentProps = {
+  actionLabel: string;
+  agentDisconnected: boolean;
+  collapsed: boolean;
+  containerRef: RefObject<HTMLDivElement | null>;
+  contentId: string;
+  disclosure: ReturnType<typeof useComposerDisclosureContext>;
+  height: number | null;
+  maxHeightVh: number;
+  messages: readonly Message[] | null | undefined;
+  onCollapse: () => void;
+  onOutcome?: (outcome: ClarificationOutcome) => void;
+  onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  lateAnswerState?: LateClarificationState;
+  onResolved: () => void;
+  onToggleCollapse: () => void;
+  questionCount: number;
+  resizeHandleProps: Parameters<typeof ResizeHandle>[0];
+  shortcutScopeRef: RefObject<HTMLElement | null>;
+};
+
+function ClarificationPanelContent({
+  actionLabel,
+  agentDisconnected,
+  collapsed,
+  containerRef,
+  contentId,
+  disclosure,
+  height,
+  maxHeightVh,
+  messages,
+  onCollapse,
+  onOutcome,
+  onLateAnswer,
+  lateAnswerState,
+  onResolved,
+  onToggleCollapse,
+  questionCount,
+  resizeHandleProps,
+  shortcutScopeRef,
+}: ClarificationPanelContentProps) {
+  const { t } = useTranslation();
   const compact = collapsed || questionCount === 0;
 
   return (
@@ -96,7 +184,12 @@ export function ClarificationPanelSection({
         style={
           compact
             ? undefined
-            : { maxHeight: `${maxHeightVh}vh`, ...(height !== null ? { height } : {}) }
+            : {
+                maxHeight: `${maxHeightVh}vh`,
+                // Threads owns the outer vertical scroll boundary in its bounded footer.
+                overscrollBehaviorY: disclosure ? "auto" : undefined,
+                ...(height !== null ? { height } : {}),
+              }
         }
       >
         {compact && (
@@ -123,7 +216,7 @@ export function ClarificationPanelSection({
               aria-controls={contentId}
               title={actionLabel}
               data-testid="clarification-collapse-toggle"
-              onClick={() => setCollapsed((current) => !current)}
+              onClick={onToggleCollapse}
             >
               {collapsed ? (
                 <IconChevronUp className="h-4 w-4" />
@@ -141,10 +234,14 @@ export function ClarificationPanelSection({
           <ClarificationInputOverlay
             messages={messages}
             onResolved={onResolved}
+            onOutcome={onOutcome}
+            onLateAnswer={onLateAnswer}
+            lateAnswerState={lateAnswerState}
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
-            onDismiss={() => setCollapsed(true)}
-            onCollapse={() => setCollapsed(true)}
+            agentDisconnected={agentDisconnected}
+            onDismiss={onCollapse}
+            onCollapse={onCollapse}
             collapseContentId={contentId}
           />
         </div>

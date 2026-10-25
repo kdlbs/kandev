@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-frontend-types-and-selection-filtering"]
 plan: "plan.md"
-spec: "../../specs/agents/profile-disable.md"
+spec: "../../specs/agents/requirements/profile-disable.md"
 ---
 
 # Task 03: Settings toggle UI

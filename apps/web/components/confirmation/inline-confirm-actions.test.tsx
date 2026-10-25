@@ -104,6 +104,31 @@ describe("InlineConfirmActions", () => {
   });
 });
 
+describe("InlineConfirmActions disabled confirmation", () => {
+  afterEach(cleanup);
+
+  it("keeps a disabled confirmation inert", () => {
+    const onConfirm = vi.fn();
+    render(
+      <InlineConfirmActions
+        cancelLabel="Cancel"
+        confirmLabel="Delete"
+        confirmDisabled
+        onCancel={vi.fn()}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const confirm = screen.getByRole("button", { name: "Delete" });
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(confirm);
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("group")).toBeTruthy();
+  });
+});
+
 describe("InlineConfirmActions rejected callbacks", () => {
   afterEach(cleanup);
 

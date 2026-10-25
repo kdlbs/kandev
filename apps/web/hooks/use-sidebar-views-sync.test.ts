@@ -5,16 +5,19 @@ import { useSidebarViewsSync } from "./use-sidebar-views-sync";
 const mockToast = vi.fn();
 
 type MockState = {
-  sidebarViews: { syncError: string | null };
+  workspaces: { activeId: string };
+  sidebarViewsByWorkspace: { ws: { syncError: string | null } };
   sidebarTaskPrefs: { syncError?: string | null };
-  clearSidebarSyncError: () => void;
+  clearSidebarSyncError: (workspaceId?: string) => void;
   clearSidebarTaskPrefsSyncError: () => void;
 };
 
 let mockState: MockState;
+let currentWorkspaceId = "ws";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: MockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => ({ getState: () => ({ workspaces: { activeId: currentWorkspaceId } }) }),
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -24,8 +27,10 @@ vi.mock("@/components/toast-provider", () => ({
 describe("useSidebarViewsSync", () => {
   beforeEach(() => {
     mockToast.mockReset();
+    currentWorkspaceId = "ws";
     mockState = {
-      sidebarViews: { syncError: null },
+      workspaces: { activeId: "ws" },
+      sidebarViewsByWorkspace: { ws: { syncError: null } },
       sidebarTaskPrefs: { syncError: null },
       clearSidebarSyncError: vi.fn(),
       clearSidebarTaskPrefsSyncError: vi.fn(),
@@ -48,7 +53,7 @@ describe("useSidebarViewsSync", () => {
   });
 
   it("toasts and clears sidebar view sync errors", async () => {
-    mockState.sidebarViews.syncError = "boom";
+    mockState.sidebarViewsByWorkspace.ws.syncError = "boom";
 
     renderHook(() => useSidebarViewsSync());
 
@@ -58,7 +63,17 @@ describe("useSidebarViewsSync", () => {
         description: "boom",
         variant: "error",
       });
-      expect(mockState.clearSidebarSyncError).toHaveBeenCalled();
+      expect(mockState.clearSidebarSyncError).toHaveBeenCalledWith("ws");
     });
+  });
+
+  it("leaves an error alone when the active workspace changed before the effect runs", async () => {
+    mockState.sidebarViewsByWorkspace.ws.syncError = "boom";
+    currentWorkspaceId = "other";
+
+    renderHook(() => useSidebarViewsSync());
+
+    await waitFor(() => expect(mockToast).not.toHaveBeenCalled());
+    expect(mockState.clearSidebarSyncError).not.toHaveBeenCalled();
   });
 });

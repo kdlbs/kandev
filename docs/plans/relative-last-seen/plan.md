@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/relative-last-seen/spec.md
+spec: docs/specs/ui/requirements/relative-last-seen.md
 created: 2026-08-16
 status: done
 ---

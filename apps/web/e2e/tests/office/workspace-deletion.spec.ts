@@ -33,7 +33,6 @@ test.describe("Workspace deletion", () => {
       workflow_filter_id: "",
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
 
     await testPage.goto("/office/workspace/settings");
@@ -78,7 +77,6 @@ test.describe("Workspace deletion", () => {
       workflow_filter_id: "",
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
   });
 });

@@ -44,7 +44,7 @@ describe("PageShell", () => {
     expect(screen.getByTestId("tree")).not.toBeNull();
   });
 
-  it("keeps the nav sheet ahead of page-supplied leading content", () => {
+  it("keeps app navigation after page-supplied content", () => {
     render(
       <PageShell title="Office" leading={<span data-testid="slot" />}>
         content
@@ -55,7 +55,7 @@ describe("PageShell", () => {
     const order = [...header.querySelectorAll("[data-testid]")].map((el) =>
       el.getAttribute("data-testid"),
     );
-    expect(order.indexOf("nav-sheet-mock")).toBeLessThan(order.indexOf("slot"));
+    expect(order.indexOf("nav-sheet-mock")).toBeGreaterThan(order.indexOf("slot"));
   });
 
   it("applies the resolved home affordance to the topbar crumb", () => {

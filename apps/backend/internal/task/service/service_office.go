@@ -25,10 +25,57 @@ type BlockerRepository interface {
 	ListDependentsForTasks(ctx context.Context, blockerTaskIDs []string) (map[string][]string, error)
 }
 
+type exactTaskBlockerRepository interface {
+	AddTaskBlockerExact(
+		ctx context.Context,
+		taskID, blockerTaskID, workspaceID, taskVersion, relatedVersion string,
+		fence models.TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+	RemoveTaskBlockerExact(
+		ctx context.Context,
+		taskID, blockerTaskID, workspaceID, taskVersion, relatedVersion string,
+		fence models.TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+}
+
 // taskDependencyCleaner removes every edge touching a task. Optional on
 // BlockerRepository so existing test doubles keep compiling.
 type taskDependencyCleaner interface {
 	DeleteTaskBlockersForTask(ctx context.Context, taskID string) error
+}
+
+// taskDependencyReplacer is optional so existing repository test doubles and
+// integrations that only need one-edge operations keep compiling.
+type taskDependencyReplacer interface {
+	ReplaceTaskBlockers(ctx context.Context, taskID string, blockerTaskIDs []string) error
+}
+
+func changedDependencyIDs(existing []*orchmodels.TaskBlocker, desired []string) []string {
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, blocker := range existing {
+		if blocker != nil {
+			existingSet[blocker.BlockerTaskID] = struct{}{}
+		}
+	}
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, blockerTaskID := range desired {
+		desiredSet[blockerTaskID] = struct{}{}
+	}
+	changed := make([]string, 0)
+	for _, blocker := range existing {
+		if blocker == nil {
+			continue
+		}
+		if _, keep := desiredSet[blocker.BlockerTaskID]; !keep {
+			changed = append(changed, blocker.BlockerTaskID)
+		}
+	}
+	for _, blockerTaskID := range desired {
+		if _, alreadyExists := existingSet[blockerTaskID]; !alreadyExists {
+			changed = append(changed, blockerTaskID)
+		}
+	}
+	return changed
 }
 
 // CommentRepository provides access to task comment persistence.

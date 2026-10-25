@@ -1,22 +1,29 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupTaskStorage,
   clearGlobalSidebarWidth,
+  getEnvLayout,
+  getEnvLayoutProfile,
   getGlobalSidebarWidth,
   getManualRightWidth,
   getOpenFileTabs,
   getStoredAutoScrollEnabled,
   getStoredAutoScrollTop,
+  getChatDraftAttachments,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   markPRPanelOffered,
   restoreAttachmentPreview,
+  removeEnvLayoutProfile,
+  setEnvLayout,
   setGlobalSidebarWidth,
+  setEnvLayoutProfile,
   setManualRightWidth,
   clearManualRightWidth,
   setOpenFileTabs,
   setStoredAutoScrollEnabled,
   setStoredAutoScrollTop,
+  setChatDraftAttachments,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
   wasPRPanelOffered,
@@ -194,6 +201,65 @@ describe("manual right width storage", () => {
   });
 });
 
+describe("dockview environment layout storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("reports whether an environment layout write reached session storage", () => {
+    const layout = { panels: {} };
+    expect(setEnvLayout("env-a", layout)).toBe(true);
+    expect(getEnvLayout("env-a")).toEqual(layout);
+
+    const setItem = vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    try {
+      expect(setEnvLayout("env-b", layout)).toBe(false);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+});
+
+describe("dockview layout profile storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("round-trips profile identity per environment", () => {
+    setEnvLayoutProfile("env-a", { kind: "custom", id: "layout-copied-default" });
+
+    expect(getEnvLayoutProfile("env-a")).toEqual({
+      kind: "custom",
+      id: "layout-copied-default",
+    });
+    expect(getEnvLayoutProfile("env-b")).toBeNull();
+  });
+
+  it("ignores malformed profile identity and supports explicit removal", () => {
+    window.sessionStorage.setItem(
+      "kandev.dockview.env-layout-profile-v1.env-a",
+      JSON.stringify({ kind: "custom" }),
+    );
+    expect(getEnvLayoutProfile("env-a")).toBeNull();
+
+    setEnvLayoutProfile("env-a", { kind: "built-in", id: "default" });
+    removeEnvLayoutProfile("env-a");
+    expect(getEnvLayoutProfile("env-a")).toBeNull();
+  });
+
+  it("cleans profile identity with the deleted environment", () => {
+    setEnvLayoutProfile("env-a", { kind: "built-in", id: "default" });
+    setEnvLayoutProfile("env-b", { kind: "custom", id: "other" });
+
+    cleanupTaskStorage("task-a", [], ["env-a"]);
+
+    expect(getEnvLayoutProfile("env-a")).toBeNull();
+    expect(getEnvLayoutProfile("env-b")).toEqual({ kind: "custom", id: "other" });
+  });
+});
+
 describe("task-scoped artifact notification storage", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -216,39 +282,106 @@ describe("task-scoped artifact notification storage", () => {
 });
 
 describe("open file tabs storage", () => {
+  const sourcePath = "README.md";
+
   beforeEach(() => {
     window.sessionStorage.clear();
   });
 
-  it("round-trips the multi-repo repo subpath so a restored tab refetches under the right repo", () => {
+  it("round-trips generic rendered preview state with the multi-repo repo subpath", () => {
     setOpenFileTabs("sess-1", [
       {
-        path: "src/foo.ts",
-        name: "foo.ts",
+        path: sourcePath,
+        name: "README.md",
         repo: "enrichment-commons",
-        markdownPreview: true,
+        renderedPreview: true,
         pinned: true,
       },
     ]);
 
+    expect(JSON.parse(window.sessionStorage.getItem("kandev.openFiles.sess-1") ?? "null")).toEqual([
+      {
+        path: sourcePath,
+        name: "README.md",
+        repo: "enrichment-commons",
+        renderedPreview: true,
+        pinned: true,
+      },
+    ]);
     const tabs = getOpenFileTabs("sess-1");
     expect(tabs).toHaveLength(1);
     expect(tabs[0]).toEqual({
-      path: "src/foo.ts",
-      name: "foo.ts",
+      path: sourcePath,
+      name: "README.md",
       repo: "enrichment-commons",
-      markdownPreview: true,
+      renderedPreview: true,
       pinned: true,
     });
   });
 
+  it("normalizes legacy Markdown preview state when reading session storage", () => {
+    window.sessionStorage.setItem(
+      "kandev.openFiles.sess-1",
+      JSON.stringify([
+        {
+          path: "README.md",
+          name: "README.md",
+          markdownPreview: true,
+          pinned: true,
+        },
+      ]),
+    );
+
+    expect(getOpenFileTabs("sess-1")).toEqual([
+      {
+        path: "README.md",
+        name: "README.md",
+        renderedPreview: true,
+        pinned: true,
+      },
+    ]);
+  });
+
   it("leaves repo undefined for single-repo tabs", () => {
-    setOpenFileTabs("sess-1", [{ path: "src/foo.ts", name: "foo.ts", pinned: true }]);
+    setOpenFileTabs("sess-1", [{ path: sourcePath, name: "foo.ts", pinned: true }]);
     expect(getOpenFileTabs("sess-1")[0].repo).toBeUndefined();
+  });
+
+  it("drops obsolete in-place preview state for HTML tabs", () => {
+    setOpenFileTabs("sess-1", [
+      { path: "reports/index.html", name: "index.html", renderedPreview: true, pinned: true },
+    ]);
+
+    expect(getOpenFileTabs("sess-1")[0]).toEqual({
+      path: "reports/index.html",
+      name: "index.html",
+      pinned: true,
+    });
   });
 });
 
 describe("chat draft attachment storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("does not persist file bytes while an upload is incomplete", () => {
+    const file = new File(["pending"], "pending.txt", { type: "text/plain" });
+    setChatDraftAttachments("session-a", [
+      {
+        id: "pending-file",
+        file,
+        data: "cGVuZGluZw==",
+        mimeType: "text/plain",
+        fileName: file.name,
+        size: file.size,
+        isImage: false,
+      },
+    ]);
+
+    expect(getChatDraftAttachments("session-a")).toEqual([]);
+  });
+
   it("normalizes invalid restored image delivery modes to prompt", () => {
     const restored = restoreAttachmentPreview({
       id: "att-1",

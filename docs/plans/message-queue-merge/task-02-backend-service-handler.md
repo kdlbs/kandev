@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["message-queue-merge-01"]
 plan: plan.md
-spec: ../../specs/ui/message-queue-merge.md
+spec: ../../specs/ui/requirements/message-queue-merge.md
 ---
 
 # Task 02: Backend service and WS handler

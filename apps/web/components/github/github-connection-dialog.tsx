@@ -25,6 +25,7 @@ import type { GitHubStatus } from "@/lib/types/github";
 import type { GitHubAutomationMethod } from "./github-auth-method-list";
 import { GitHubConnectionSettingsForm } from "./github-connection-settings-form";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
   if (status.automation?.source === "github_app_installation") return "app";
@@ -65,7 +66,10 @@ export function GitHubConnectionDialog({
     [status],
   );
   const trigger = (
-    <Button variant={connected ? "outline" : "default"} className="h-11 cursor-pointer">
+    <Button
+      variant={connected ? "outline" : "default"}
+      className={controlSizingClassName("standard", "cursor-pointer")}
+    >
       <IconPlug className="mr-2 h-4 w-4" />
       {connected ? t("github:changeConnection") : t("github:connectGithub")}
     </Button>

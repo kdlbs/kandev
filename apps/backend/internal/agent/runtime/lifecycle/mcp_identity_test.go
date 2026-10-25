@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -17,6 +19,22 @@ import (
 type recordingMCPHandler struct {
 	gotCtx context.Context
 	calls  int
+}
+
+func TestMCPHandlerForRestoresTrustedInternalAuditAttestation(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	message := mcpRequest(t, nil)
+	mcporigin.AttachTrustedInternalCall(message)
+
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
+	_, err := handler.Dispatch(context.Background(), message)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if !mcporigin.IsTrustedInternalCall(inner.gotCtx) {
+		t.Fatal("trusted internal audit attestation was not restored")
+	}
 }
 
 func (h *recordingMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -32,7 +50,7 @@ func newMCPStreamManager(t *testing.T, inner *recordingMCPHandler, scoper MCPIde
 		t.Fatalf("logger: %v", err)
 	}
 	sm := NewStreamManager(log, StreamCallbacks{}, inner, nil)
-	sm.mcpIdentityScoper = scoper
+	sm.setMCPIdentityScoper(scoper)
 	return sm
 }
 
@@ -163,6 +181,46 @@ func TestMCPHandlerForCarriesExecutionWithoutScoper(t *testing.T) {
 	}
 }
 
+func TestMCPHandlerForRestoresManagedPolicyFromTrustedExecutionMetadata(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	policy := mcpprofile.ManagedToolPolicy{
+		PluginID: "coordinator.v1", InstallationID: "installation-1", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", ConversationRevision: 4, ApprovalRevision: 7,
+		ManifestDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		AgentToolNames: []string{"read_task"},
+	}
+	encoded, err := mcpprofile.MarshalManagedToolPolicy(policy)
+	if err != nil {
+		t.Fatalf("MarshalManagedToolPolicy: %v", err)
+	}
+	execution := &AgentExecution{ID: "exec-current", TaskID: "task-1", SessionID: "session-1"}
+	execution.setMetadataValue(mcpprofile.ManagedToolPolicyMetadataKey, encoded)
+	handler := sm.mcpHandlerFor(execution)
+	if _, err := handler.Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{"execution_id": "forged"})); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	executionContext, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
+	if !ok || executionContext.ExecutionID != "exec-current" || !executionContext.ManagedToolPolicyRequired || executionContext.ManagedToolPolicy == nil {
+		t.Fatalf("managed execution context = %+v, present=%t", executionContext, ok)
+	}
+	if executionContext.ManagedToolPolicy.PluginID != policy.PluginID || executionContext.ManagedToolPolicy.ApprovalRevision != policy.ApprovalRevision ||
+		len(executionContext.ManagedToolPolicy.AgentToolNames) != 1 || executionContext.ManagedToolPolicy.AgentToolNames[0] != "read_task" {
+		t.Fatalf("managed tool policy = %+v", executionContext.ManagedToolPolicy)
+	}
+
+	invalid := &AgentExecution{ID: "exec-invalid", TaskID: "task-1", SessionID: "session-1"}
+	invalid.setMetadataValue(mcpprofile.ManagedToolPolicyMetadataKey, map[string]any{"forged": true})
+	invalidHandler := sm.mcpHandlerFor(invalid)
+	if _, err := invalidHandler.Dispatch(context.Background(), mcpRequest(t, nil)); err != nil {
+		t.Fatalf("invalid metadata Dispatch: %v", err)
+	}
+	invalidContext, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
+	if !ok || !invalidContext.ManagedToolPolicyRequired || invalidContext.ManagedToolPolicy != nil {
+		t.Fatalf("invalid managed execution context = %+v, present=%t", invalidContext, ok)
+	}
+}
+
 // TestMCPHandlerForPassesThroughWithoutTaskID covers executions with no task
 // (there is no owner to resolve, so wrapping would deny every call).
 func TestMCPHandlerForPassesThroughWithoutTaskID(t *testing.T) {
@@ -171,8 +229,12 @@ func TestMCPHandlerForPassesThroughWithoutTaskID(t *testing.T) {
 		return ctx, nil
 	})
 
-	if got := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1"}); got != inner {
-		t.Errorf("handler = %T, want the unwrapped inner handler", got)
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1"})
+	if _, err := handler.Dispatch(context.Background(), mcpRequest(t, nil)); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if inner.calls != 1 {
+		t.Errorf("dispatcher calls = %d, want 1", inner.calls)
 	}
 }
 
@@ -185,7 +247,8 @@ func TestSetMCPIdentityScoperReachesStreamManager(t *testing.T) {
 
 	m.SetMCPIdentityScoper(func(ctx context.Context, _ string) (context.Context, error) { return ctx, nil })
 
-	if m.streamManager.mcpIdentityScoper == nil {
+	_, scoper, _ := m.streamManager.mcpDispatchState()
+	if scoper == nil {
 		t.Error("SetMCPIdentityScoper did not reach the stream manager")
 	}
 }

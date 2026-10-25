@@ -16,6 +16,7 @@ import (
 	gorillaws "github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/lsp/protocol"
 	"github.com/kandev/kandev/internal/user/models"
@@ -23,6 +24,7 @@ import (
 
 type staticLSPUserService struct {
 	settings *models.UserSettings
+	err      error
 }
 
 type recordingLSPLifecycleManager struct {
@@ -31,6 +33,11 @@ type recordingLSPLifecycleManager struct {
 	resolveErr  error
 	ensureErr   error
 	ensureCalls int
+	accessErr   error
+}
+
+func (m *recordingLSPLifecycleManager) CheckSessionAccess(context.Context, string) error {
+	return m.accessErr
 }
 
 func (m *recordingLSPLifecycleManager) ResolveSessionRuntime(context.Context, string) (agentruntime.Runtime, error) {
@@ -62,7 +69,36 @@ func (w *recordingLSPMessageWriter) WriteMessage(messageType int, payload []byte
 }
 
 func (s staticLSPUserService) GetUserSettings(context.Context) (*models.UserSettings, error) {
-	return s.settings, nil
+	return s.settings, s.err
+}
+
+func TestContinuityUserSettingsFailureKeepsAuthenticatedOwner(t *testing.T) {
+	handler := &LSPHandler{userService: staticLSPUserService{err: errors.New("settings unavailable")}, logger: testLogger()}
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1"})
+	userID, configuration, autoInstall := handler.continuityUserSettings(ctx, "go")
+	if userID != "user-1" {
+		t.Fatalf("settings owner = %q, want authenticated user", userID)
+	}
+	if len(configuration) != 0 || autoInstall {
+		t.Fatalf("settings fallback = (%#v, %v), want empty configuration and auto-install disabled", configuration, autoInstall)
+	}
+}
+
+func TestResolveContinuityExecutionRequiresSessionAccess(t *testing.T) {
+	manager := &recordingLSPLifecycleManager{
+		runtimeName: agentruntime.RuntimeStandalone,
+		execution:   &lifecycle.AgentExecution{ID: "execution-1", SessionID: "session-1"},
+		accessErr:   errors.New("not authorized"),
+	}
+	handler := &LSPHandler{lifecycleMgr: manager, leases: newLSPLeaseManager(1, testLogger())}
+
+	execution, closeCode, _ := handler.resolveContinuityExecution(context.Background(), "session-1")
+	if execution != nil || closeCode != lspCloseSessionNotFound {
+		t.Fatalf("continuity execution = (%v, %d), want access denied", execution, closeCode)
+	}
+	if manager.ensureCalls != 0 {
+		t.Fatalf("GetOrEnsureExecution calls = %d, want none after access denial", manager.ensureCalls)
+	}
 }
 
 func TestReadLSPMessage_Valid(t *testing.T) {

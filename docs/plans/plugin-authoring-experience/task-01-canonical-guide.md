@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/plugins/authoring-experience.md"
+spec: "../../specs/plugins/requirements/authoring-experience.md"
 ---
 
 # Task 01: Canonical plugin guide

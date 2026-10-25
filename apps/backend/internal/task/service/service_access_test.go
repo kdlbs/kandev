@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -112,6 +113,19 @@ func TestWorkspaceScopingListAndGet(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopingDiscoveryRejectsForeignWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	svc.discoveryConfig = RepositoryDiscoveryConfig{Roots: []string{t.TempDir()}, MaxDepth: 2}
+
+	if _, err := svc.GetLocalRepositoryDiscoveryForWorkspace(ctxAs("user-a"), "ws-b", ""); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("get foreign discovery snapshot: %v", err)
+	}
+	if _, err := svc.RefreshLocalRepositoryDiscoveryForWorkspace(ctxAs("user-a"), "ws-b", ""); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("refresh foreign discovery snapshot: %v", err)
+	}
+}
+
 func TestWorkspaceScopingMutations(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedScopedWorkspaces(t, repo)
@@ -139,7 +153,7 @@ func TestWorkspaceScopingTasksAndWorkflows(t *testing.T) {
 	if _, err := svc.GetTask(ctxAs("user-b"), "task-b"); err != nil {
 		t.Fatalf("owner get task: %v", err)
 	}
-	if _, err := svc.ListTasks(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if _, err := svc.ListTasks(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("list foreign workflow tasks: %v", err)
 	}
 	if _, _, err := svc.ListTasksByWorkspace(ctxAs("user-a"), "ws-b", "", "", "", 1, 10, "", false, false, false, false); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
@@ -148,7 +162,7 @@ func TestWorkspaceScopingTasksAndWorkflows(t *testing.T) {
 	if _, err := svc.ListWorkflows(ctxAs("user-a"), "ws-b", false); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		t.Fatalf("list foreign workflows: %v", err)
 	}
-	if _, err := svc.GetWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if _, err := svc.GetWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("get foreign workflow: %v", err)
 	}
 	if err := svc.ArchiveTask(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -177,6 +191,105 @@ func TestCreateWorkspaceStampsOwner(t *testing.T) {
 	if created.OwnerID != "" {
 		t.Fatalf("synthetic-created owner = %q, want empty", created.OwnerID)
 	}
+}
+
+// TestAuthorizeWorkflowAccess covers the public wrapper the workflow service
+// authorizes its step, export and import surface through. The workflow package
+// owns those routes but not the permission: a workflow is visible exactly when
+// its workspace is.
+func TestAuthorizeWorkflowAccess(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	if err := repo.CreateWorkflow(context.Background(), &models.Workflow{
+		ID: "wf-legacy", WorkspaceID: "ws-legacy", Name: "Pre-auth flow",
+	}); err != nil {
+		t.Fatalf("create legacy workflow: %v", err)
+	}
+
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Fatalf("foreign workflow access: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); err != nil {
+		t.Fatalf("owner workflow access: %v", err)
+	}
+	// Identity-less internal callers and the synthetic auth-disabled identity
+	// keep the pre-auth see-everything behavior.
+	if err := svc.AuthorizeWorkflowAccess(context.Background(), "wf-b"); err != nil {
+		t.Fatalf("internal workflow access: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxSynthetic(), "wf-b"); err != nil {
+		t.Fatalf("synthetic workflow access: %v", err)
+	}
+	// An unowned workspace stays visible until the setup wizard claims it.
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-legacy"); err != nil {
+		t.Fatalf("legacy workflow access: %v", err)
+	}
+	// So does a workflow carrying no workspace at all (schema default, never
+	// backfilled). This is the pre-auth row the orphan branch above must not
+	// swallow: it names no owner rather than naming a missing one.
+	if err := repo.CreateWorkflow(context.Background(), &models.Workflow{
+		ID: "wf-no-workspace", Name: "Pre-auth, workspaceless",
+	}); err != nil {
+		t.Fatalf("create workspaceless workflow: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-no-workspace"); err != nil {
+		t.Fatalf("workspaceless workflow access: %v", err)
+	}
+	// A failed workspace lookup is not an answer. The dangling-reference
+	// fallback below it returns nil, so a transient database error used to
+	// read as "authorized" and hand a guessed workflow ID to whoever asked.
+	broken := errors.New("database is locked")
+	svc.workspaces = &brokenWorkspaceReader{WorkspaceRepository: repo, err: broken}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, broken) {
+		t.Fatalf("failed workspace lookup: %v, want the lookup error", err)
+	}
+	// A workspace row that is genuinely gone is a different answer from a
+	// failed lookup, and it is still not "authorized": the workflow names an
+	// owner that does not exist, so nobody sees it. (An unowned pre-auth row
+	// is the workspace_id == "" case below, not this one.) It collapses to
+	// the same ErrWorkflowNotFound as the reachable-but-denied branch above,
+	// not ErrWorkspaceNotFound: a caller distinguishing the two sentinels
+	// could tell an orphaned workflow id from a foreign-but-reachable one.
+	svc.workspaces = &brokenWorkspaceReader{WorkspaceRepository: repo, err: repoerrors.ErrWorkspaceNotFound}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Fatalf("orphaned workflow: %v, want the not-found denial", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Fatalf("orphaned workflow for its former owner: %v, want the not-found denial", err)
+	}
+	// Unscoped callers are unaffected: they never reach the lookup.
+	if err := svc.AuthorizeWorkflowAccess(context.Background(), "wf-b"); err != nil {
+		t.Fatalf("internal caller hit the orphan branch: %v", err)
+	}
+	if err := svc.AuthorizeWorkflowAccess(ctxSynthetic(), "wf-b"); err != nil {
+		t.Fatalf("synthetic caller hit the orphan branch: %v", err)
+	}
+	svc.workspaces = repo
+
+	// A workflow that does not exist is reported as the repository reports it,
+	// which the workflow service classifies as not-visible so a missing
+	// workflow and a foreign one answer identically.
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-missing"); err == nil {
+		t.Fatal("missing workflow access: want an error")
+	}
+
+	// A reader returning (nil, nil) for an unknown id (never true of the real
+	// repository, which always wraps ErrWorkflowNotFound, but must still be
+	// handled defensively) denies with the workflow's own sentinel, not the
+	// workspace one: a caller must not be able to tell this apart from any
+	// other not-found case above.
+	svc.workflows = &nilWorkflowReader{WorkflowRepository: repo}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-anything"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Fatalf("nil workflow row: %v, want ErrWorkflowNotFound", err)
+	}
+}
+
+type nilWorkflowReader struct {
+	repository.WorkflowRepository
+}
+
+func (r *nilWorkflowReader) GetWorkflow(context.Context, string) (*models.Workflow, error) {
+	return nil, nil
 }
 
 func TestAuthorizeSessionAccess(t *testing.T) {
@@ -266,6 +379,12 @@ func TestPlanAndWalkthroughScoping(t *testing.T) {
 	if _, err := plan.GetPlan(ctxAs("user-b"), "task-b"); errors.Is(err, repoerrors.ErrTaskNotFound) {
 		t.Fatalf("owner plan get must pass the auth gate: %v", err)
 	}
+	if _, err := plan.GetLatestRevision(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign latest revision get: %v", err)
+	}
+	if _, err := plan.GetLatestRevision(ctxAs("user-b"), "task-b"); errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("owner latest revision get must pass the auth gate: %v", err)
+	}
 
 	wt := NewWalkthroughService(repo, nil, log)
 	wt.SetTaskAuthorizer(svc.AuthorizeTaskAccess)
@@ -331,4 +450,15 @@ func TestRepositoryScriptScoping(t *testing.T) {
 	if _, err := svc.GetRepositoryScript(ctxAs("user-a"), created.ID); !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
 		t.Fatalf("foreign GetRepositoryScript: %v", err)
 	}
+}
+
+// brokenWorkspaceReader answers every workspace lookup with a fixed error,
+// standing in for a database that is failing rather than empty.
+type brokenWorkspaceReader struct {
+	repository.WorkspaceRepository
+	err error
+}
+
+func (r *brokenWorkspaceReader) GetWorkspace(context.Context, string) (*models.Workspace, error) {
+	return nil, r.err
 }

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/runtime-updates.md
+spec: docs/specs/agents/requirements/runtime-updates.md
 decision: docs/decisions/2026-08-12-validated-managed-runtime-version-selection.md
 created: 2026-08-12
 updated: 2026-08-12

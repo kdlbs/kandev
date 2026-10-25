@@ -3,6 +3,8 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LspStatusItem } from "./lsp-status-item";
 
+const APP_STATUS_LSP_TEST_ID = "app-status-lsp";
+
 const lsp = vi.hoisted(() => ({
   status: { state: "starting" } as const,
   progress: {
@@ -41,8 +43,11 @@ describe("LspStatusItem", () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByTestId("app-status-lsp").textContent).toContain("Kotlin");
-    expect(screen.getByTestId("app-status-lsp").textContent).toContain(
+    expect(screen.getByTestId(APP_STATUS_LSP_TEST_ID).getAttribute("data-slot")).toBe(
+      "surface-action",
+    );
+    expect(screen.getByTestId(APP_STATUS_LSP_TEST_ID).textContent).toContain("Kotlin");
+    expect(screen.getByTestId(APP_STATUS_LSP_TEST_ID).textContent).toContain(
       "Server process started · 1 min 05 sec",
     );
   });
@@ -54,7 +59,7 @@ describe("LspStatusItem", () => {
       </TooltipProvider>,
     );
 
-    fireEvent.click(screen.getByTestId("app-status-lsp"));
+    fireEvent.click(screen.getByTestId(APP_STATUS_LSP_TEST_ID));
     expect(screen.getByTestId("lsp-progress-details")).toBeTruthy();
     fireEvent.click(screen.getByTestId("lsp-lifecycle-action"));
     expect(lsp.toggle).toHaveBeenCalledOnce();

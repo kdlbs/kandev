@@ -1,0 +1,24 @@
+{
+  "gateway": "claude-direct",
+  "agentId": "claude-acp",
+  "classifying": true,
+  "case": "matched",
+  "capture": "reconstructed",
+  "source": "internal/orchestrator/dynamic_evidence_test.go",
+  "identity": {
+    "sessionId": "claude-direct-matched",
+    "executionId": "exec-claude-direct-matched",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "API Error: Repeated 529 Overloaded errors. The API is at capacity."},
+    {"kind": "prompt_error", "code": -32603, "message": "API Error: Repeated 529 Overloaded errors. The API is at capacity."}
+  ],
+  "expect": {
+    "events": ["message_chunk:diagnostic", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "providerId": "claude-acp"},
+    "diagnosticCode": "provider_overloaded",
+    "preResultSafe": true,
+    "recordedDiagnosticCode": "provider_overloaded"
+  }
+}

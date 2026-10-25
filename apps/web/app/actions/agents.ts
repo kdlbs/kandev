@@ -1,8 +1,7 @@
 "use client";
 
 import { getBackendConfig } from "@/lib/config";
-import { fetchJson } from "@/lib/api/client";
-import { readInterimSettingsInterlockToken } from "@/src/boot-payload";
+import { ApiError, fetchJson } from "@/lib/api/client";
 import type {
   Agent,
   AgentProfile,
@@ -16,11 +15,12 @@ import type {
 import type { PermissionKey } from "@/lib/agent-permissions";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
+import type { AgentMcpDiscoveryResponse } from "@/lib/types/agent-mcp-discovery";
+import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
 const { apiBaseUrl } = getBackendConfig();
-const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
 
 type DynamicProfilePayload = {
   version: number;
@@ -55,9 +55,30 @@ export async function listAgentDiscoveryAction(): Promise<ListAgentDiscoveryResp
   return agentSettingsRequest<ListAgentDiscoveryResponse>(`${apiBaseUrl}/api/v1/agents/discovery`);
 }
 
+export async function getAgentMcpDiscoveryAction(
+  agentId: string,
+): Promise<AgentMcpDiscoveryResponse> {
+  return agentSettingsRequest<AgentMcpDiscoveryResponse>(
+    `${apiBaseUrl}/api/v1/agents/${encodeURIComponent(agentId)}/mcp-discovery`,
+  );
+}
+
 export async function listAgentsAction(): Promise<ListAgentsResponse> {
   const res = await agentSettingsRequest<ListAgentsResponse>(`${apiBaseUrl}/api/v1/agents`);
   return { ...res, agents: (res.agents ?? []).map(normalizeAgentInPlace) };
+}
+export async function reorderAgentProfilesAction(
+  agentId: string,
+  profileIds: string[],
+): Promise<{ agent_id: string; profile_ids: string[]; revision: number }> {
+  return agentSettingsRequest<{ agent_id: string; profile_ids: string[]; revision: number }>(
+    `${apiBaseUrl}/api/v1/agents/${encodeURIComponent(agentId)}/profiles/order`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ profile_ids: profileIds }),
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
 }
 
 export async function createAgentAction(payload: {
@@ -70,6 +91,10 @@ export async function createAgentAction(payload: {
       kind?: AgentProfileKind;
       mode?: string;
       cli_passthrough: boolean;
+      cursor_mcp_auth_enabled?: boolean;
+      cursor_plugins_mcp_enabled?: boolean;
+      mcp_selection_mode?: MCPSelectionMode;
+      mcp_selected_servers?: string[];
       cli_flags?: CLIFlag[];
       command_prefix?: string;
       env_vars?: ProfileEnvVar[];
@@ -111,11 +136,19 @@ export async function createAgentProfileAction(
     kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
+    require_exact_model?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
+    cursor_mcp_auth_enabled?: boolean;
+    cursor_plugins_mcp_enabled?: boolean;
+    mcp_selection_mode?: MCPSelectionMode;
+    mcp_selected_servers?: string[];
     cli_flags?: CLIFlag[];
     command_prefix?: string;
+    provider_kind?: string;
+    provider_base_url?: string;
+    provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
     dynamic?: DynamicProfilePayload;
   } & ProfilePermissions,
@@ -138,14 +171,22 @@ export async function updateAgentProfileAction(
     kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
+    require_exact_model?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     allow_indexing?: boolean;
     auto_approve?: boolean;
     cli_passthrough?: boolean;
+    cursor_mcp_auth_enabled?: boolean;
+    cursor_plugins_mcp_enabled?: boolean;
+    mcp_selection_mode?: MCPSelectionMode;
+    mcp_selected_servers?: string[];
     enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
+    provider_kind?: string;
+    provider_base_url?: string;
+    provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
     dynamic?: DynamicProfilePayload;
   },
@@ -193,60 +234,76 @@ export type DeleteProfileResult =
       automations: AutomationReference[];
       utilityAgents: UtilityAgentReference[];
     }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; handled?: boolean };
 
-// eslint-disable-next-line complexity
 export async function deleteAgentProfileAction(
   id: string,
   force?: boolean,
 ): Promise<DeleteProfileResult> {
   const url = `${apiBaseUrl}/api/v1/agent-profiles/${id}${force ? "?force=true" : ""}`;
-  const token = readInterimSettingsInterlockToken();
-  const response = await fetch(url, {
-    method: "DELETE",
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { [interimSettingsInterlockHeader]: token } : {}),
-    },
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    // A 409 is active sessions, referencing watchers, routing tier mappings, or a mix.
-    // Treat any non-empty list as the conflict signal — a watcher-only
-    // conflict (the new self-heal path) must still pop the dialog.
-    if (
-      response.status === 409 &&
-      (body.active_sessions ||
-        body.watchers ||
-        body.routing_tiers ||
-        body.automations ||
-        body.utility_agents)
-    ) {
-      return {
-        status: "conflict",
-        activeSessions: body.active_sessions ?? [],
-        watchers: body.watchers ?? [],
-        routingTiers: body.routing_tiers ?? [],
-        automations: body.automations ?? [],
-        utilityAgents: body.utility_agents ?? [],
-      };
-    }
-    // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
-    // the server sent none. The toast title around it is translated.
+  try {
+    await agentSettingsRequest<void>(url, { method: "DELETE" });
+    return { status: "ok" };
+  } catch (error) {
+    return deleteAgentProfileError(error);
+  }
+}
+
+type DeleteProfileErrorBody = {
+  error?: string;
+  active_sessions?: ActiveSessionInfo[];
+  watchers?: WatcherReference[];
+  routing_tiers?: RoutingTierReference[];
+  automations?: AutomationReference[];
+  utility_agents?: UtilityAgentReference[];
+};
+
+function readDeleteProfileErrorBody(value: unknown): DeleteProfileErrorBody {
+  return value && typeof value === "object" ? (value as DeleteProfileErrorBody) : {};
+}
+
+function hasDeleteProfileConflict(body: DeleteProfileErrorBody): boolean {
+  return Boolean(
+    body.active_sessions ||
+    body.watchers ||
+    body.routing_tiers ||
+    body.automations ||
+    body.utility_agents,
+  );
+}
+
+function deleteAgentProfileError(error: unknown): DeleteProfileResult {
+  const apiError = error instanceof ApiError ? error : undefined;
+  const body = apiError ? readDeleteProfileErrorBody(apiError.body) : {};
+  // A 409 is active sessions, referencing watchers, routing tier mappings, or a mix.
+  // Treat any non-empty list as the conflict signal — a watcher-only
+  // conflict (the new self-heal path) must still pop the dialog.
+  if (apiError?.status === 409 && hasDeleteProfileConflict(body)) {
     return {
-      status: "error",
-      message: body?.error || `Request failed: ${response.status} ${response.statusText}`,
+      status: "conflict",
+      activeSessions: body.active_sessions ?? [],
+      watchers: body.watchers ?? [],
+      routingTiers: body.routing_tiers ?? [],
+      automations: body.automations ?? [],
+      utilityAgents: body.utility_agents ?? [],
     };
   }
-  return { status: "ok" };
+  // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
+  // the server sent none. The toast title around it is translated.
+  return {
+    status: "error",
+    message: error instanceof Error ? error.message : "Request failed",
+    ...(apiError?.handled ? { handled: true } : {}),
+  };
 }
 
 export async function getAgentProfileMcpConfigAction(
   profileId: string,
+  init?: RequestInit,
 ): Promise<AgentProfileMcpConfig> {
   return agentSettingsRequest<AgentProfileMcpConfig>(
     `${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`,
+    init,
   );
 }
 
@@ -279,6 +336,11 @@ export type CommandPreviewResponse = {
   supported: boolean;
   command: string[];
   command_string: string;
+  /**
+   * Which process the profile's CLI flags are appended to. Over ACP that is the
+   * bridge, not the agent CLI it wraps.
+   */
+  flag_destination?: "agent_cli" | "acp_bridge";
 };
 
 export async function previewAgentCommandAction(

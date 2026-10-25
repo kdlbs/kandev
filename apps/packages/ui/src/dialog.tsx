@@ -7,41 +7,10 @@ import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
-import {
-  DIALOG_CLOSE_RECOVERY_MS,
-  finishClosingDialogAnimations,
-  subscribeDialogCloseRecovery,
-} from "./lib/dialog-body-lock";
+import { useDialogBodyLockRecovery } from "./lib/dialog-body-lock";
 
 function Dialog({ onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  const finishClosingAnimations = React.useCallback(
-    () => finishClosingDialogAnimations(document),
-    [],
-  );
-
-  // Unmount is one way to strand the lock — Radix's animation-based cleanup
-  // never runs when the dialog disappears mid-close.
-  React.useEffect(
-    () => () => {
-      finishClosingAnimations();
-    },
-    [finishClosingAnimations],
-  );
-
-  // Becoming visible again is the other. Dialog roots share one document-level
-  // listener because the body lock and closing portals are document-global.
-  React.useEffect(() => subscribeDialogCloseRecovery(document), []);
-
-  // And the general case: once a close has been requested, the page must be
-  // usable shortly afterwards whether or not animationend ever arrives.
-  const handleOpenChange = React.useCallback(
-    (open: boolean) => {
-      onOpenChange?.(open);
-      if (!open) window.setTimeout(finishClosingAnimations, DIALOG_CLOSE_RECOVERY_MS);
-    },
-    [finishClosingAnimations, onOpenChange],
-  );
-
+  const handleOpenChange = useDialogBodyLockRecovery(props.open, onOpenChange);
   return <DialogPrimitive.Root data-slot="dialog" onOpenChange={handleOpenChange} {...props} />;
 }
 
@@ -151,7 +120,7 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-sm font-medium", className)}
+      className={cn("min-w-0 text-sm font-medium text-balance wrap-anywhere", className)}
       {...props}
     />
   );
@@ -165,7 +134,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-muted-foreground *:[a]:hover:text-foreground text-xs/relaxed *:[a]:underline *:[a]:underline-offset-3",
+        "text-muted-foreground min-w-0 *:[a]:hover:text-foreground text-xs/relaxed text-pretty wrap-anywhere *:[a]:underline *:[a]:underline-offset-3",
         className,
       )}
       {...props}

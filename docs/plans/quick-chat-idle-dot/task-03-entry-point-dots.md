@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-unseen-idle-state"]
 plan: "plan.md"
-spec: "../../specs/quick-chat-idle-dot/spec.md"
+spec: "../../specs/ui/requirements/quick-chat-idle-dot.md"
 ---
 
 # Task 03: Entry-point dot rendering

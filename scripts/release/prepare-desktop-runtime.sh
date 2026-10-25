@@ -7,10 +7,15 @@ usage() {
 Usage: prepare-desktop-runtime.sh [--bundle-dir DIR] [--output-dir DIR] [--platform PLATFORM]
 
 Prepare apps/desktop/src-tauri/resources/kandev from an existing release
-runtime bundle. The input bundle must contain:
+runtime bundle. The input may contain the standard manifest layout or the
+legacy complete helper layout.
 
   bin/kandev[.exe]
   bin/agentctl[.exe]
+  remote-helpers.json (standard layout)
+
+or, for a legacy complete bundle:
+
   bin/agentctl-linux-amd64
   bin/agentctl-linux-arm64
   bin/agentctl-darwin-arm64
@@ -115,9 +120,13 @@ copy_one() {
 
 copy_one "Kandev launcher binary" "$BUNDLE_DIR/bin/kandev" "$BUNDLE_DIR/bin/kandev.exe"
 copy_one "agentctl binary" "$BUNDLE_DIR/bin/agentctl" "$BUNDLE_DIR/bin/agentctl.exe"
-for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
-  copy_one "remote agentctl helper $helper" "$BUNDLE_DIR/bin/$helper"
-done
+if [ -f "$BUNDLE_DIR/remote-helpers.json" ]; then
+  cp "$BUNDLE_DIR/remote-helpers.json" "$OUTPUT_DIR/remote-helpers.json"
+else
+  for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+    copy_one "remote agentctl helper $helper" "$BUNDLE_DIR/bin/$helper"
+  done
+fi
 
 "$VERIFY_SCRIPT" "${VERIFY_ARGS[@]}" "$OUTPUT_DIR" >/dev/null
 if [ -n "$PLATFORM" ]; then

@@ -90,7 +90,8 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 	}
 }
 
-func TestHandleAgentStalled_NeverStartedFailsSessionAndTask(t *testing.T) {
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.12
+func TestHandleAgentStalled_NoOutputPreservesSessionAndTask(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-1", "session-1", "step-1")
@@ -129,35 +130,41 @@ func TestHandleAgentStalled_NeverStartedFailsSessionAndTask(t *testing.T) {
 		t.Fatalf("session messages = %d, want 1", len(messages.sessionMessages))
 	}
 	message := messages.sessionMessages[0]
-	if message.messageType != string(v1.MessageTypeError) {
-		t.Fatalf("message type = %q, want error", message.messageType)
+	if message.messageType != string(v1.MessageTypeStatus) {
+		t.Fatalf("message type = %q, want status", message.messageType)
 	}
-	if message.content != neverStartedNoticeContent {
-		t.Fatalf("notice content = %q, want the never-started condition named", message.content)
+	if message.content != "Still waiting for the agent." {
+		t.Fatalf("notice content = %q, want the waiting notice", message.content)
 	}
 	if message.turnID != activeTurn.ID {
 		t.Fatalf("notice turn ID = %q, want active turn %q", message.turnID, activeTurn.ID)
 	}
-	if _, hasVisibility := message.metadata["action_visibility"]; hasVisibility {
-		t.Fatalf("terminal notice has running visibility metadata: %#v", message.metadata)
+	if message.metadata["action_visibility"] != actionVisibilityRunning {
+		t.Fatalf("notice must remain running-only: %#v", message.metadata)
 	}
-	if _, hasActions := message.metadata["actions"]; hasActions {
-		t.Fatalf("terminal notice has a running cancel action: %#v", message.metadata)
+	if actions, ok := message.metadata["actions"].([]map[string]interface{}); !ok || len(actions) != 1 {
+		t.Fatalf("notice must retain Cancel turn: %#v", message.metadata)
 	}
 
 	after, err := repo.GetTaskSession(ctx, "session-1")
 	if err != nil {
 		t.Fatalf("get session after handling stall: %v", err)
 	}
-	if after.State != models.TaskSessionStateFailed {
-		t.Fatalf("session state = %q, want FAILED", after.State)
+	if after.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING", after.State)
+	}
+	agentMgr.mu.Lock()
+	stopCalls := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if stopCalls != 0 {
+		t.Fatalf("silent turn triggered %d process stops", stopCalls)
 	}
 
 	taskRepo.mu.Lock()
-	taskState := taskRepo.updatedStates["task-1"]
+	taskState := taskRepo.tasks["task-1"].State
 	taskRepo.mu.Unlock()
-	if taskState != v1.TaskStateFailed {
-		t.Fatalf("task state = %q, want FAILED", taskState)
+	if taskState != v1.TaskStateInProgress {
+		t.Fatalf("task state = %q, want IN_PROGRESS", taskState)
 	}
 }
 
@@ -219,15 +226,58 @@ func TestHandleAgentStalled_RejectsSettledOrStalePrompt(t *testing.T) {
 	}
 }
 
+// TestHandleAgentStalled_AdvisoryStallStopsNothing covers
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.7: an advisory stall (agent
+// produced output before stalling) must not tear down the execution.
+func TestHandleAgentStalled_AdvisoryStallStopsNothing(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		ToolName:         "shell",
+		ToolTitle:        "Start dev server",
+	})
+
+	agentMgr.mu.Lock()
+	stopCalls := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if stopCalls != 0 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 0 for an advisory stall", stopCalls)
+	}
+}
+
 func TestStallNoticeContentFallsBackWithoutTool(t *testing.T) {
 	if got := stallNoticeContent(lifecycle.AgentStalledPayload{}); got != "Still waiting for the agent." {
 		t.Fatalf("stallNoticeContent() = %q, want generic fallback", got)
 	}
 }
 
-func TestStallNoticeContentNamesNeverStartedCondition(t *testing.T) {
+func TestStallNoticeContentIgnoresHistoricalTerminalClassification(t *testing.T) {
 	payload := lifecycle.AgentStalledPayload{NeverStarted: true, ToolName: "shell", ToolTitle: "Start dev server"}
-	if got := stallNoticeContent(payload); got != neverStartedNoticeContent {
-		t.Fatalf("stallNoticeContent() = %q, want the never-started message regardless of tool info", got)
+	if got := stallNoticeContent(payload); got != "Still waiting on Start dev server." {
+		t.Fatalf("stallNoticeContent() = %q, want the advisory tool message", got)
 	}
 }

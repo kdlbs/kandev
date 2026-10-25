@@ -20,7 +20,7 @@ func init() { gin.SetMode(gin.TestMode) }
 func newHandlersForTest(t *testing.T, reader TaskReader, backend Backend, authed bool) (*HTTPHandlers, *Service) {
 	t.Helper()
 	repo := newTestRepo(t)
-	svc := New(repo, reader, backend, nil, "v-test")
+	svc := New(repo, reader, pairShareAccess{}, backend, nil, "v-test")
 	if mock, ok := backend.(*mockBackend); ok && !authed {
 		mock.accessErr = errors.New("connect a GitHub account to share tasks publicly")
 	}
@@ -58,6 +58,48 @@ func TestHTTP_Create_HappyPath(t *testing.T) {
 	}
 	if len(backend.accessWorkspaces) != 1 || backend.accessWorkspaces[0] != "workspace-1" {
 		t.Fatalf("access workspaces = %v, want workspace-1", backend.accessWorkspaces)
+	}
+}
+
+func TestHTTP_Create_RejectsMismatchedTaskSession(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{nextID: "gist-mismatch"}
+	handlers, _ := newHandlersForTest(t, reader, backend, true)
+	router := newGinRouter(handlers)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/other-task/sessions/s-1/shares", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404 for mismatched task/session, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if backend.uploads != 0 || len(backend.accessWorkspaces) != 0 {
+		t.Fatalf("mismatched request reached backend: uploads=%d access=%v", backend.uploads, backend.accessWorkspaces)
+	}
+}
+
+func TestHTTP_List_RejectsMismatchedTaskSession(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{nextID: "gist-list"}
+	handlers, svc := newHandlersForTest(t, reader, backend, true)
+	router := newGinRouter(handlers)
+
+	share, err := svc.CreateShare(context.Background(), "t-1", "s-1", "en")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/other-task/sessions/s-1/shares", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404 for mismatched task/session, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), share.ID) || strings.Contains(rec.Body.String(), "gist-list") {
+		t.Fatalf("mismatched list exposed share metadata: %s", rec.Body.String())
 	}
 }
 
@@ -104,6 +146,96 @@ func TestHTTP_Create_BlocksWhenGitHubUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestHTTP_Create_HidesAuthorizationInfrastructureErrors(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{}
+	handlers, svc := newHandlersForTest(t, reader, backend, true)
+	svc.authorizer = &recordingShareAccess{taskSessionErr: errors.New("db transient")}
+	router := newGinRouter(handlers)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t-1/sessions/s-1/shares", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != "failed to authorize share access" || body.Code != "" {
+		t.Fatalf("unexpected authorization error body: %+v", body)
+	}
+	if strings.Contains(rec.Body.String(), "db transient") {
+		t.Fatalf("authorization infrastructure error leaked: %s", rec.Body.String())
+	}
+	if backend.uploads != 0 || len(backend.accessWorkspaces) != 0 {
+		t.Fatalf("authorization infrastructure error reached backend: uploads=%d access=%v", backend.uploads, backend.accessWorkspaces)
+	}
+}
+
+func TestHTTP_Create_DryRun_HidesAuthorizationInfrastructureErrors(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{}
+	handlers, svc := newHandlersForTest(t, reader, backend, true)
+	svc.authorizer = &recordingShareAccess{taskSessionErr: errors.New("db transient")}
+	router := newGinRouter(handlers)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t-1/sessions/s-1/shares?dry_run=true", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != "failed to authorize share access" || body.Code != "" {
+		t.Fatalf("unexpected authorization error body: %+v", body)
+	}
+	if strings.Contains(rec.Body.String(), "db transient") {
+		t.Fatalf("authorization infrastructure error leaked: %s", rec.Body.String())
+	}
+	if backend.uploads != 0 || len(backend.accessWorkspaces) != 0 {
+		t.Fatalf("authorization infrastructure error reached backend: uploads=%d access=%v", backend.uploads, backend.accessWorkspaces)
+	}
+}
+
+func TestHTTP_Create_SecondAuthorization_HidesInfrastructureErrors(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{}
+	handlers, svc := newHandlersForTest(t, reader, backend, true)
+	svc.authorizer = &recordingShareAccess{taskSessionErrs: []error{nil, errors.New("db transient")}}
+	router := newGinRouter(handlers)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t-1/sessions/s-1/shares", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != "failed to authorize share access" || body.Code != "" {
+		t.Fatalf("unexpected authorization error body: %+v", body)
+	}
+	if strings.Contains(rec.Body.String(), "db transient") {
+		t.Fatalf("authorization infrastructure error leaked: %s", rec.Body.String())
+	}
+	if backend.uploads != 0 {
+		t.Fatalf("second authorization failure reached backend Upload: %d", backend.uploads)
+	}
+}
+
 func TestHTTP_Create_DryRunReturnsSnapshotWithoutUpload(t *testing.T) {
 	t.Parallel()
 	reader := completedSession()
@@ -138,7 +270,7 @@ func TestHTTP_List_ReturnsSharesNewestFirst(t *testing.T) {
 	handlers, svc := newHandlersForTest(t, reader, backend, true)
 	router := newGinRouter(handlers)
 
-	if _, err := svc.CreateShare(context.Background(), "s-1", "en"); err != nil {
+	if _, err := svc.CreateShare(context.Background(), "t-1", "s-1", "en"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/t-1/sessions/s-1/shares", nil)
@@ -164,7 +296,7 @@ func TestHTTP_Revoke_Success(t *testing.T) {
 	handlers, svc := newHandlersForTest(t, reader, backend, true)
 	router := newGinRouter(handlers)
 
-	share, err := svc.CreateShare(context.Background(), "s-1", "en")
+	share, err := svc.CreateShare(context.Background(), "t-1", "s-1", "en")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -177,6 +309,80 @@ func TestHTTP_Revoke_Success(t *testing.T) {
 	}
 	if len(backend.deletes) != 1 {
 		t.Fatalf("expected 1 backend delete, got %d", len(backend.deletes))
+	}
+}
+
+func TestHTTP_Revoke_RejectsUnauthorizedShare(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{nextID: "gist-denied"}
+	handlers, svc := newHandlersForTest(t, reader, backend, true)
+	router := newGinRouter(handlers)
+
+	share, err := svc.CreateShare(context.Background(), "t-1", "s-1", "en")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	svc.authorizer = &recordingShareAccess{sessionErr: ErrNotFound}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/shares/"+share.ID, nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404 for unauthorized revoke, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(backend.deletes) != 0 {
+		t.Fatalf("unauthorized revoke called backend Delete: %v", backend.deletes)
+	}
+	row, err := svc.GetByID(context.Background(), share.ID)
+	if err != nil {
+		t.Fatalf("get share: %v", err)
+	}
+	if row.RevokedAt != nil {
+		t.Fatal("unauthorized revoke mutated the share row")
+	}
+}
+
+func TestHTTP_Revoke_HidesAuthorizationInfrastructureErrors(t *testing.T) {
+	t.Parallel()
+	reader := completedSession()
+	backend := &mockBackend{nextID: "gist-infra"}
+	handlers, svc := newHandlersForTest(t, reader, backend, true)
+	router := newGinRouter(handlers)
+
+	share, err := svc.CreateShare(context.Background(), "t-1", "s-1", "en")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	svc.authorizer = &recordingShareAccess{sessionErr: errors.New("db transient")}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/shares/"+share.ID, nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != "failed to authorize share access" || body.Code != "" {
+		t.Fatalf("unexpected authorization error body: %+v", body)
+	}
+	if strings.Contains(rec.Body.String(), "db transient") {
+		t.Fatalf("authorization infrastructure error leaked: %s", rec.Body.String())
+	}
+	if len(backend.deletes) != 0 {
+		t.Fatalf("authorization infrastructure error reached backend Delete: %v", backend.deletes)
+	}
+	row, err := svc.GetByID(context.Background(), share.ID)
+	if err != nil {
+		t.Fatalf("get share: %v", err)
+	}
+	if row.RevokedAt != nil {
+		t.Fatal("authorization infrastructure error mutated the share row")
 	}
 }
 

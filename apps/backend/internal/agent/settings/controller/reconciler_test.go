@@ -49,6 +49,8 @@ type fakeStore struct {
 	nextAgentID          int
 	nextProfID           int
 	getByNameErr         error
+	createAgentErr       error
+	createAgentHook      func()
 	listAgentsErr        error
 	listProfErr          map[string]error
 	duplicateProfErr     error
@@ -146,6 +148,12 @@ func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	if a.ID == "" {
 		f.nextAgentID++
 		a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	}
+	if f.createAgentHook != nil {
+		f.createAgentHook()
+	}
+	if f.createAgentErr != nil {
+		return f.createAgentErr
 	}
 	stored := copyAgent(a)
 	f.agents[a.ID] = stored
@@ -293,6 +301,34 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 	return nil
 }
 
+func (f *fakeStore) UpdateAgentProfileWithEnabledIntent(ctx context.Context, p *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := f.GetAgentProfile(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		p.Enabled = current.Enabled
+	} else {
+		p.Enabled = *enabled
+	}
+	return f.UpdateAgentProfile(ctx, p)
+}
+
+func (f *fakeStore) UpdateAgentProfileModelIfEmpty(
+	ctx context.Context,
+	profileID, model string,
+) (bool, error) {
+	profile, err := f.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.Model != "" {
+		return false, err
+	}
+	profile.Model = model
+	if err := f.UpdateAgentProfile(ctx, profile); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (f *fakeStore) UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error) {
 	profile, err := f.GetAgentProfile(ctx, id)
 	if err != nil {
@@ -378,6 +414,17 @@ func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*mod
 	}
 	return out, nil
 }
+func (f *fakeStore) ReorderAgentProfiles(context.Context, string, []string) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (f *fakeStore) GetAgentProfileOrderSnapshots(_ context.Context, agentIDs []string) (map[string]store.AgentProfileOrderSnapshot, error) {
+	result := make(map[string]store.AgentProfileOrderSnapshot, len(agentIDs))
+	for _, id := range agentIDs {
+		result[id] = store.AgentProfileOrderSnapshot{Profiles: f.profiles[id], Revision: 0}
+	}
+	return result, nil
+}
 
 func (f *fakeStore) Close() error { return nil }
 
@@ -461,6 +508,52 @@ func TestProfileReconciler_SeedsDefaultProfile(t *testing.T) {
 	}
 	if p.Mode != "default" {
 		t.Errorf("mode = %q, want default", p.Mode)
+	}
+}
+
+// Existing-behavior contract coverage for AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.7.
+func TestProfileReconciler_PreservesProfileRouteWhenProbeFails(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "opencode-acp"}
+	if err := st.CreateAgent(context.Background(), dbAgent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	existing := &models.AgentProfile{
+		AgentID:       dbAgent.ID,
+		Name:          "OpenCode custom",
+		Model:         "provider/model",
+		FallbackModel: "provider/fallback",
+		Mode:          "plan",
+		Enabled:       true,
+	}
+	if err := st.CreateAgentProfile(context.Background(), existing); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	st.created = nil
+
+	ag := &mockInferenceAgent{id: "opencode-acp", displayName: "OpenCode", enabled: true}
+	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{
+		"opencode-acp": {
+			AgentType: "opencode-acp",
+			Status:    hostutility.StatusFailed,
+			Error:     "managed runtime recovery failed",
+		},
+	}}
+	reconciler := newReconciler(t, st, caps, ag)
+
+	if err := reconciler.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 0 {
+		t.Fatalf("failed probe rewrote profile: %+v", st.updated)
+	}
+	stored, err := st.GetAgentProfile(context.Background(), existing.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if stored.Model != existing.Model || stored.FallbackModel != existing.FallbackModel ||
+		stored.Mode != existing.Mode || stored.Enabled != existing.Enabled {
+		t.Fatalf("profile route changed: got %+v, want %+v", stored, existing)
 	}
 }
 
@@ -858,6 +951,38 @@ func TestProfileReconciler_CleansOrphanProfiles(t *testing.T) {
 	}
 	if len(st.softDeleted) != 1 || st.softDeleted[0] != orphanProfile.ID {
 		t.Fatalf("expected orphan profile to be soft-deleted, got %v", st.softDeleted)
+	}
+}
+
+func TestProfileReconcilerPreservesDisabledCodexAppServerProfiles(t *testing.T) {
+	st := newFakeStore()
+	native := &models.Agent{Name: "codex-app-server"}
+	if err := st.CreateAgent(context.Background(), native); err != nil {
+		t.Fatalf("create native agent: %v", err)
+	}
+	profile := &models.AgentProfile{AgentID: native.ID, Name: "Native Codex", Model: "gpt-5", Enabled: true}
+	if err := st.CreateAgentProfile(context.Background(), profile); err != nil {
+		t.Fatalf("create native profile: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	if err := reg.Register(&mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}); err != nil {
+		t.Fatalf("register Claude: %v", err)
+	}
+	if err := reg.Register(agents.NewCodexAppServer(false)); err != nil {
+		t.Fatalf("register disabled native agent: %v", err)
+	}
+	reg.MarkLoaded()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	r.cleanupOrphans(context.Background())
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("disabled native profile was orphan-cleaned: %v", st.softDeleted)
+	}
+	if got := len(st.profiles[native.ID]); got != 1 {
+		t.Fatalf("stored native profiles = %d, want 1", got)
 	}
 }
 

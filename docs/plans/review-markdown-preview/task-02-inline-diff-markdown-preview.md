@@ -5,7 +5,12 @@ status: done
 wave: 2
 depends_on: ["01-review-markdown-preview"]
 plan: "plan.md"
-spec: "../../specs/ui/review-markdown-preview.md"
+requirements:
+  - REQ-UI-REVIEW-MARKDOWN-PREVIEW-001
+acceptance_criteria:
+  - AC-UI-REVIEW-MARKDOWN-PREVIEW-001.9
+system_design:
+  - ../../specs/ui/system-design/review-markdown-preview.md
 ---
 
 # Task 02: Render changed Markdown inside Review
@@ -42,6 +47,11 @@ Completed 2026-07-29:
   Playwright, and `mobile-chrome` Playwright all passed.
 - Full verification passed: `make fmt`, then `make typecheck test lint`.
 
+October 2026 CI fixup: AC-UI-REVIEW-MARKDOWN-PREVIEW-001.9 keeps preview
+selection in the dialog while a transient diff refresh unmounts its file row.
+The existing mobile Review E2E caught the lost preview in E2E shard 14. Focused
+Review component tests and the mobile Playwright scenario verify the fix.
+
 ## Files likely touched
 
 - `apps/web/components/review/review-markdown-diff-preview.tsx`
@@ -72,7 +82,7 @@ share one component contract.
 
 ## Inputs
 
-- `docs/specs/ui/review-markdown-preview.md`
+- `docs/specs/ui/requirements/review-markdown-preview.md`
 - `docs/plans/review-markdown-preview/plan.md`
 - `apps/web/AGENTS.md`
 - `.agents/skills/tdd/SKILL.md`

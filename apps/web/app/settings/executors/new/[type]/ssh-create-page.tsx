@@ -1,17 +1,20 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
+import { ExecutorOwnerChoice } from "@/components/settings/executor-ownership";
 import { useAppStoreApi } from "@/components/state-provider";
 import { createExecutor, createExecutorProfile } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { buildSSHExecutorConfig } from "./ssh-config";
 import type { Executor } from "@/lib/types/http";
 
@@ -32,11 +35,13 @@ const EXECUTORS_ROUTE = "/settings/executors";
 export function SSHCreatePage() {
   const router = useRouter();
   const store = useAppStoreApi();
+  const [owner, setOwner] = useState("");
 
   const handleSave = useCallback(
     async (cfg: SSHExecutorConfig) => {
       const created = await createExecutor({
         name: cfg.name,
+        ...(owner ? { owner_user_id: owner } : {}),
         type: "ssh",
         config: buildSSHExecutorConfig(cfg),
       });
@@ -55,6 +60,7 @@ export function SSHCreatePage() {
         status: "active",
         is_system: false,
         config: created.config,
+        ...(owner ? { owner_user_id: owner } : {}),
         profiles: [profile],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -67,14 +73,15 @@ export function SSHCreatePage() {
       const current = store.getState().executors.items;
       const merged = current.some((e) => e.id === next.id) ? current : [...current, next];
       store.getState().setExecutors(merged);
-      router.push(`/settings/executors/${profile.id}`);
+      router.push(executorProfileSettingsPath(profile.id));
     },
-    [router, store],
+    [router, store, owner],
   );
 
   return (
     <div className="space-y-8">
       <SSHCreateHeader />
+      <ExecutorOwnerChoice value={owner} onChange={setOwner} creating baseline="" />
       <SSHConnectionCard onSave={handleSave} />
     </div>
   );
@@ -102,9 +109,8 @@ function SSHCreateHeader() {
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
           {t("executors:backToExecutors")}
         </Button>

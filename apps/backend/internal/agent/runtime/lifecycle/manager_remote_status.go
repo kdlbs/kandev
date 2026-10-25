@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const remoteStatusAttemptTimeout = 5 * time.Second
+
 func (m *Manager) remoteStatusLoop(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(m.remoteStatusPollInterval)
@@ -26,7 +28,14 @@ func (m *Manager) remoteStatusLoop(ctx context.Context) {
 }
 
 func (m *Manager) pollRemoteStatuses(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	m.retryPendingRemoteRecoveries(ctx)
 	for _, execution := range m.executionStore.List() {
+		if ctx.Err() != nil {
+			return
+		}
 		m.pollOneRemoteStatus(ctx, execution)
 	}
 }
@@ -44,19 +53,27 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		return
 	}
 
-	instance := &ExecutorInstance{
-		InstanceID:           execution.ID,
-		TaskID:               execution.TaskID,
-		SessionID:            execution.SessionID,
-		RuntimeName:          execution.RuntimeName,
-		ContainerID:          execution.ContainerID,
-		ContainerIP:          execution.ContainerIP,
-		WorkspacePath:        execution.WorkspacePath,
-		StandaloneInstanceID: execution.standaloneInstanceID,
-		StandalonePort:       execution.standalonePort,
-		Metadata:             execution.MetadataSnapshot(),
+	instance := m.remoteStatusInstance(ctx, execution)
+	if refresher, refreshable := rt.(RemoteInstanceRefresher); refreshable {
+		refreshCtx, cancel := context.WithTimeout(ctx, remoteStatusAttemptTimeout)
+		refreshErr := m.refreshTrackedRemoteInstance(refreshCtx, execution, refresher)
+		cancel()
+		if refreshErr != nil {
+			m.storeRemoteStatus(execution.SessionID, &RemoteStatus{
+				RuntimeName: execution.RuntimeName, LastCheckedAt: time.Now().UTC(),
+				ErrorMessage: refreshErr.Error(),
+			})
+			m.logger.Debug("remote control refresh failed",
+				zap.String("session_id", execution.SessionID),
+				zap.String("execution_id", execution.ID),
+				zap.Error(refreshErr))
+			return
+		}
+		instance = m.remoteStatusInstance(ctx, execution)
 	}
-	status, statusErr := provider.GetRemoteStatus(ctx, instance)
+	statusCtx, cancel := context.WithTimeout(ctx, remoteStatusAttemptTimeout)
+	status, statusErr := provider.GetRemoteStatus(statusCtx, instance)
+	cancel()
 	if statusErr != nil {
 		m.storeRemoteStatus(execution.SessionID, &RemoteStatus{
 			RuntimeName:   execution.RuntimeName,
@@ -74,6 +91,11 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 	if status == nil {
 		return
 	}
+	// Providers may reuse a cached status object across concurrent polls. Copy it
+	// before filling lifecycle-owned defaults so polling never mutates provider
+	// state (or races with another caller holding the same result pointer).
+	statusCopy := *status
+	status = &statusCopy
 	if status.RuntimeName == "" {
 		status.RuntimeName = execution.RuntimeName
 	}
@@ -81,6 +103,24 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		status.LastCheckedAt = time.Now().UTC()
 	}
 	m.storeRemoteStatus(execution.SessionID, status)
+}
+
+func (m *Manager) remoteStatusInstance(ctx context.Context, execution *AgentExecution) *ExecutorInstance {
+	metadata := execution.MetadataSnapshot()
+	return &ExecutorInstance{
+		InstanceID:           execution.ID,
+		TaskID:               execution.TaskID,
+		SessionID:            execution.SessionID,
+		RuntimeName:          execution.RuntimeName,
+		ContainerID:          execution.ContainerID,
+		ContainerIP:          execution.ContainerIP,
+		WorkspacePath:        execution.WorkspacePath,
+		StandaloneInstanceID: execution.standaloneInstanceID,
+		StandalonePort:       execution.standalonePort,
+		Metadata:             metadata,
+		AuthToken:            m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:       m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+	}
 }
 
 func (m *Manager) storeRemoteStatus(sessionID string, status *RemoteStatus) {
@@ -126,6 +166,7 @@ func (m *Manager) GetRemoteStatusBySessionID(ctx context.Context, sessionID stri
 // RemoteStatusPollRecord contains the minimal information needed to poll remote status
 // for a session that is not currently tracked in the in-memory execution store.
 type RemoteStatusPollRecord struct {
+	TaskID           string
 	SessionID        string
 	Runtime          agentruntime.Runtime
 	AgentExecutionID string
@@ -155,12 +196,15 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 
 		instance := &ExecutorInstance{
 			InstanceID:  rec.AgentExecutionID,
+			TaskID:      rec.TaskID,
 			SessionID:   rec.SessionID,
 			RuntimeName: rec.Runtime,
 			ContainerID: rec.ContainerID,
 			Metadata:    rec.Metadata,
 		}
-		status, statusErr := provider.GetRemoteStatus(ctx, instance)
+		statusCtx, cancel := context.WithTimeout(ctx, remoteStatusAttemptTimeout)
+		status, statusErr := provider.GetRemoteStatus(statusCtx, instance)
+		cancel()
 		if statusErr != nil {
 			m.storeRemoteStatus(rec.SessionID, &RemoteStatus{
 				RuntimeName:   rec.Runtime,

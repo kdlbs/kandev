@@ -92,3 +92,48 @@ func TestEmitTurnComplete_closes_firstIdle_only_once(t *testing.T) {
 		t.Fatalf("firstIdleCh was not closed after emitTurnComplete")
 	}
 }
+
+func TestEmitTurnComplete_callsCallbackBeforeReleasingFirstIdle(t *testing.T) {
+	runner, proc := newRunnerWithProcess(t, "proc-order")
+	callbackCalled := make(chan struct{})
+	runner.SetTurnCompleteCallback(func(_, _ string) {
+		select {
+		case <-proc.firstIdleCh:
+			t.Fatal("firstIdleCh released before turn-complete callback")
+		default:
+		}
+		close(callbackCalled)
+	})
+
+	runner.emitTurnComplete(proc)
+
+	select {
+	case <-callbackCalled:
+	default:
+		t.Fatal("turn-complete callback was not called")
+	}
+	select {
+	case <-proc.firstIdleCh:
+	default:
+		t.Fatal("firstIdleCh was not released after turn-complete callback")
+	}
+}
+
+func TestHasObservedFirstIdleWaitsForCallbackCompletion(t *testing.T) {
+	runner, proc := newRunnerWithProcess(t, "observed-idle")
+	if runner.HasObservedFirstIdle(proc.info.ID) || runner.HasObservedFirstIdle("missing") {
+		t.Fatal("idle must not be inferred before observation")
+	}
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	runner.SetTurnCompleteCallback(func(string, string) { close(entered); <-release })
+	go func() { runner.emitTurnComplete(proc); close(done) }()
+	<-entered
+	if runner.HasObservedFirstIdle(proc.info.ID) {
+		t.Error("idle callback is still active")
+	}
+	close(release)
+	<-done
+	if !runner.HasObservedFirstIdle(proc.info.ID) {
+		t.Fatal("completed idle observation was lost")
+	}
+}

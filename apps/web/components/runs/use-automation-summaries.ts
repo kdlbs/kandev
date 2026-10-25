@@ -42,7 +42,11 @@ export function useAutomationSummaries(workspaceId: string | undefined) {
       })
       .catch((err: unknown) => {
         if (requestRef.current !== requestId) return;
-        setLoaded({ workspaceId, summaries: EMPTY_SUMMARIES });
+        setLoaded((current) =>
+          current.workspaceId === workspaceId
+            ? current
+            : { workspaceId, summaries: EMPTY_SUMMARIES },
+        );
         setError(
           err instanceof Error ? err.message : t("automations:failedToLoadAutomationActivity"),
         );

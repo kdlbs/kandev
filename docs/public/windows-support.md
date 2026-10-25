@@ -14,19 +14,19 @@ Kandev has native Windows x64 desktop and npm/npx releases. WSL 2 remains useful
 3. Keep repositories, agents, Docker, and credentials in the same environment as Kandev.
 4. Use the troubleshooting section for path, shell, and browser differences.
 
-| Path | Best for | Main limitations |
-|---|---|---|
-| [Desktop app](./desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode |
-| [npm/npx CLI](./cli.md) | Browser UI, terminal operation, headless use | Node.js with npm 7+ is needed for the package shim |
-| WSL 2 CLI | Linux-only agent tools and shell scripts | Browser launch and Windows/WSL path interop are dependency-bound |
-| Native source checkout | Contributors testing Windows-specific code | Manual toolchain and curated Windows test subset; not the simplest product install |
+| Path                          | Best for                                                   | Main limitations                                                                   |
+| ----------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [Desktop app](desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode                               |
+| [npm/npx CLI](cli.md)         | Browser UI, terminal operation, headless use               | Node.js with npm 7+ is needed for the package shim                                 |
+| WSL 2 CLI                     | Linux-only agent tools and shell scripts                   | Browser launch and Windows/WSL path interop are dependency-bound                   |
+| Native source checkout        | Contributors testing Windows-specific code                 | Manual toolchain and curated Windows test subset; not the simplest product install |
 
 ## Native desktop installation
 
 The recommended Windows product path is the x64 NSIS installer from [GitHub Releases](https://github.com/kdlbs/kandev/releases):
 
 1. Download the file whose name begins `kandev-desktop-windows-x64-` and ends in `.exe`, plus its `.sha256` file.
-2. Verify its SHA-256 value as shown in [Desktop App](./desktop-app.md).
+2. Verify its SHA-256 value as shown in [Desktop App](desktop-app.md).
 3. Run the installer and launch Kandev from the Start menu.
 
 The desktop app bundles Kandev and `agentctl`; Node.js is not required. It uses Microsoft WebView2 and binds its owned backend to `127.0.0.1`. Current Windows normally includes WebView2; repair or install the runtime if the app cannot create its window.
@@ -65,7 +65,7 @@ $env:KANDEV_SERVER_HOST = '127.0.0.1'
 kandev
 ```
 
-Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. See [Configuration](./configuration.md).
+Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. The core `agentctl` service does not listen on all interfaces by default: it listens on `agent.standaloneHost`, which is `127.0.0.1` by default, so it should not need an inbound firewall rule. See [Configuration](configuration.md).
 
 ## Windows paths and command discovery
 
@@ -111,9 +111,9 @@ Kandev supports native Git repositories and worktrees. Windows still imposes fil
 
 Windows long-path policy and each application's long-path awareness still apply. External Git clients and tools do not inherit Kandev's command-scoped setting. If Kandev still reports `Filename too long`, enable Win32 long paths when allowed by local policy or use a shorter `KANDEV_HOME_DIR`. Configure `core.longpaths` separately only when an external Git client needs it.
 
-Kandev uses Windows Job Objects and process-tree termination for managed child cleanup. An abruptly killed terminal or externally launched child can still outlive a session; inspect Task Manager and executor resources before deleting a worktree.
+Kandev uses Windows Job Objects and process-tree termination for managed child cleanup. These managed helpers, including Git commands, agentctl, and the agent and script processes it starts, keep their console windows hidden when they run in the background. An abruptly killed terminal or externally launched child can still outlive a session; inspect Task Manager and executor resources before deleting a worktree.
 
-See [Git operations](./git-operations.md) for branch/worktree lifecycle and [Executors](./executors.md) for prepare scripts and copied files.
+See [Git operations](git-operations.md) for branch/worktree lifecycle and [Executors](executors.md) for prepare scripts and copied files.
 
 ## Docker Desktop
 
@@ -130,7 +130,7 @@ docker version
 docker info
 ```
 
-The local Docker executor creates its client lazily, so Kandev can start even when Docker Desktop is stopped; the executor fails when first used and retries on a later attempt. Windows drive sharing, bind mounts, corporate Docker policies, and WSL-backed Docker Desktop are external dependencies. Do not expose an unauthenticated Docker TCP endpoint. See [Docker](./docker.md).
+The local Docker executor creates its client lazily, so Kandev can start even when Docker Desktop is stopped; the executor fails when first used and retries on a later attempt. Windows drive sharing, bind mounts, corporate Docker policies, and WSL-backed Docker Desktop are external dependencies. Do not expose an unauthenticated Docker TCP endpoint. See [Docker](docker.md).
 
 <details>
 <summary>Run Kandev in WSL 2</summary>
@@ -184,13 +184,18 @@ When Docker Desktop WSL integration is enabled for the distribution, verify `doc
 
 ## Remote executor limitation
 
-The release bundle carries remote `agentctl` helpers for Linux `amd64`/`arm64` and macOS `amd64`/`arm64`. It does not carry a Windows remote helper. Consequently, a Windows desktop/CLI host can control supported Linux/macOS SSH targets, but a Windows machine is not a supported destination for the SSH executor. Remote Docker behavior depends on the target daemon and configured Linux container image; it does not add a Windows `agentctl` remote target.
+Stable standard Windows installs include the host binaries and a manifest. They download a verified
+Linux or macOS helper when a remote task needs one and no cached copy exists. Allow outbound HTTPS to
+`github.com` and `release-assets.githubusercontent.com`; GitHub redirects release-asset downloads to
+the second host. Windows has no remote helper, so it cannot be an SSH destination. Remote Docker
+still needs a reachable daemon and a compatible Linux image. For offline CLI use, download
+`kandev-windows-x64-full.zip`. Desktop has no full offline installer or updater.
 
 ## Services and background operation
 
 `kandev service` supports systemd on Linux and launchd on macOS only. Native Windows Service Control Manager integration is not implemented. For interactive Windows use, choose Desktop or keep the CLI process in a terminal. Do not wrap it in an arbitrary service manager without designing user profile, `PATH`, network, process-tree, update, and data permissions explicitly.
 
-WSL systemd availability depends on the distribution and WSL configuration. Even when systemd works inside WSL, its service lifecycle is tied to the WSL VM and is not the same as a native Windows service. Treat this as deployment-specific and follow [Run as a service](./run-as-a-service.md) only after verifying systemd in that distribution.
+WSL systemd availability depends on the distribution and WSL configuration. Even when systemd works inside WSL, its service lifecycle is tied to the WSL VM and is not the same as a native Windows service. Treat this as deployment-specific and follow [Run as a service](run-as-a-service.md) only after verifying systemd in that distribution.
 
 ## Build from source on Windows
 
@@ -201,6 +206,10 @@ winget install ezwinports.make
 ```
 
 The repository bootstrap script is Bash/package-manager oriented and does not provision a native Windows toolchain automatically. Use Git Bash or another compatible shell for Unix-oriented root recipes, install the pinned tools manually, and follow the contributor guide. `make dev` builds a `winjob.exe` helper so `Ctrl+C` can close a native development process tree.
+
+To debug without touching a live installation, use the PowerShell equivalents of the Unix `scripts/dev-isolated` and `scripts/kandev-kill` helpers. `scripts\dev-isolated.ps1` selects non-colliding ports, gives each default launch a distinct `%USERPROFILE%\.kandev-test-<port>-<id>` home and SQLite database, builds stale backend binaries, and waits for health. Pass `-HomeDir` to intentionally reuse a safe isolated home. The launcher refuses paths inside a production Kandev home, paths through junctions, and paths inside a Git workspace. It does not pass host database or config settings to the child processes. `-Install` requires Git Bash for the repository's Unix-oriented root recipes.
+
+The backend, agentctl, and Vite dev server bind `127.0.0.1` by default. With `-Web`, open the printed backend URL; it proxies the Vite development server. Pass `-WebHost` only when a different web bind address is required; it accepts an IP address or hostname. The launcher detaches the backend and Vite, records only its own listener processes, and prints a pidfile path. A startup failure stops the launched process trees without adopting or stopping another listener on the selected port. `-NoBuild` requires `kandev.exe`, `agentctl.exe`, `mock-agent.exe`, and `winjob.exe` from the current build. `scripts\kandev-kill.ps1 -Pidfile <path>` or `scripts\kandev-kill.ps1 <backend-port>` stops the verified backend, agentctl children, and matching Vite process tree. It verifies recorded process start times to avoid stopping an unrelated process after PID reuse, and can still stop Vite if the backend has already exited. Guarded production ports require `-Force`. A non-interactive caller must tear down the detached instance when finished.
 
 ### CGO link failure with a non-ASCII toolchain path
 

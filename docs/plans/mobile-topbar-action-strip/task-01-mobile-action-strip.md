@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/mobile-quick-chat-topbar/spec.md"
+spec: "../../specs/ui/requirements/mobile-quick-chat-topbar.md"
 ---
 
 # Task 01: Build the mobile action strip
@@ -53,7 +53,7 @@ None.
 ## Inputs
 
 - Spec: `What`, `Scenarios`, and `Out of scope` in
-  `docs/specs/mobile-quick-chat-topbar/spec.md`.
+  `docs/specs/ui/requirements/mobile-quick-chat-topbar.md`.
 - Plan: `Confirmed root cause`, `Frontend`, `Mobile design contract`, and `Tests` in `plan.md`.
 - Fade exemplar: `apps/web/components/task/chat/chat-input-toolbar-mobile.tsx`.
 - Resize exemplar: `apps/web/components/task/task-sidebar-scroll-area.tsx`.

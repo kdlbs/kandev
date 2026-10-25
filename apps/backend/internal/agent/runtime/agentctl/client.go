@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -15,7 +18,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -32,6 +37,8 @@ type Client struct {
 	executionID           string
 	sessionID             string
 	authToken             string // shared secret for Bearer auth
+	processGeneration     uint64
+	runtimeGuard          *runtimeBindingGuard
 
 	// Optional trace context for session-scoped spans in background goroutines.
 	// When set, stream read loops use this as parent context for tracing instead of context.Background().
@@ -39,6 +46,8 @@ type Client struct {
 
 	// WebSocket connections for streaming
 	agentStreamConn     *websocket.Conn
+	updatesDial         *updatesStreamDial
+	updatesDialSequence uint64
 	workspaceStreamConn *websocket.Conn
 	// workspaceStream is the most-recent workspace stream returned by
 	// StreamWorkspace, retained so Client.Close can wait for its read/write
@@ -50,8 +59,12 @@ type Client struct {
 	// stream is not gated on this flag because the cascade flow legitimately
 	// stops + restarts the agent stream on the same client; gating it would
 	// strand workflow step transitions on a closed client.
-	closed bool
-	mu     sync.RWMutex
+	closed       bool
+	mu           sync.RWMutex
+	runtimeConns map[*websocket.Conn]func() bool
+	// endpointTransport is present only for plugin-managed remote environments.
+	// It resolves a short-lived connection lease for every new request.
+	endpointTransport *endpointRoundTripper
 
 	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
 	streamWriteMu sync.Mutex
@@ -61,10 +74,50 @@ type Client struct {
 	pendingRequestConns map[string]*websocket.Conn
 	pendingMu           sync.Mutex
 
-	// lastSessionModelState is populated synchronously by session/new,
-	// session/reset, or session/load responses. Lifecycle policy evaluation can
-	// use it before the corresponding session_models event reaches its handler.
+	// lastSessionModelState is populated by session/new, session/reset, and
+	// session/load responses and by asynchronous session_models events. Lifecycle
+	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
+
+	// Session capabilities are populated by the ACP initialize response and
+	// used by idle-session MCP reconfiguration to choose resume versus load.
+	supportsSessionResume bool
+	supportsSessionLoad   bool
+
+	// lastAttachmentAttemptID is returned by session/load and session/resume
+	// after the backend starts its evidence timeline.
+	lastAttachmentAttemptID string
+	// durableDelivery records the agentctl transport capability returned during
+	// initialize. It is separate from ACP capabilities because it describes the
+	// retained agentctl-to-backend journal rather than the native harness.
+	durableDelivery *DurableDeliveryInfo
+	// deliveryStatus is populated by authenticated recovery discovery. It lets
+	// a newly constructed client carry the adopted owner's capability and
+	// identity before any prompt or ACP operation is considered.
+	deliveryStatus *DeliveryStatus
+
+	// lastDeliverySubmissionID is the immutable agentctl record returned for
+	// the most recent accepted prompt. It lets lifecycle reconcile a disconnect
+	// even when no terminal event reached the backend yet.
+	lastDeliverySubmissionID string
+}
+
+type updatesStreamDial struct {
+	sequence     uint64
+	ctx          context.Context
+	streamCtx    context.Context
+	cancel       context.CancelFunc
+	streamCancel context.CancelFunc
+	conn         net.Conn
+	stopConn     func() bool
+	retired      bool
+}
+
+type updatesStreamDialCleanup struct {
+	cancel       context.CancelFunc
+	streamCancel context.CancelFunc
+	conn         net.Conn
+	stopConn     func() bool
 }
 
 func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
@@ -73,12 +126,52 @@ func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
 	c.lastSessionModelState = cloneSessionModelState(state)
 }
 
-// GetLastSessionModelState returns the model catalog included in the most
-// recent session creation or load response.
+// GetLastSessionModelState returns the latest session model catalog observed
+// in a session response or asynchronous session_models event.
 func (c *Client) GetLastSessionModelState() *streams.SessionModelState {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return cloneSessionModelState(c.lastSessionModelState)
+}
+
+// SupportsSessionResume reports the capability negotiated by initialize.
+func (c *Client) SupportsSessionResume() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.supportsSessionResume
+}
+
+// SupportsSessionLoad reports the capability negotiated by initialize.
+func (c *Client) SupportsSessionLoad() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.supportsSessionLoad
+}
+
+// GetLastAttachmentAttemptID returns the most recent backend-owned MCP
+// attachment attempt returned by an agentctl session operation.
+func (c *Client) GetLastAttachmentAttemptID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastAttachmentAttemptID
+}
+
+func (c *Client) setSessionCapabilities(info *AgentInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if info == nil {
+		c.supportsSessionResume = false
+		c.supportsSessionLoad = false
+		return
+	}
+	c.supportsSessionResume = info.SupportsSessionResume
+	c.supportsSessionLoad = info.SupportsSessionLoad
+}
+
+func (c *Client) setLastAttachmentAttemptID(attemptID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastAttachmentAttemptID = attemptID
 }
 
 func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionModelState {
@@ -86,9 +179,10 @@ func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionMo
 		return nil
 	}
 	cloned := &streams.SessionModelState{
-		CurrentModelID: state.CurrentModelID,
-		Models:         append([]streams.SessionModelInfo(nil), state.Models...),
-		ConfigOptions:  append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		CurrentModelID:       state.CurrentModelID,
+		Models:               append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:        append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		ConfigOptionsSettled: state.ConfigOptionsSettled,
 	}
 	for i, model := range cloned.Models {
 		if model.Meta == nil {
@@ -137,6 +231,13 @@ func (c *Client) SetTraceContext(ctx context.Context) {
 	c.traceCtx = ctx
 }
 
+// ProcessGeneration returns the most recent child generation started by this client.
+func (c *Client) ProcessGeneration() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.processGeneration
+}
+
 // getTraceCtx returns the trace context for background operations.
 // Returns context.Background() when no trace context is set.
 func (c *Client) getTraceCtx() context.Context {
@@ -150,6 +251,11 @@ func (c *Client) getTraceCtx() context.Context {
 
 // StatusResponse from agentctl
 type StatusResponse struct {
+	DeliveryHealth struct {
+		State               string `json:"state"`
+		CancellationPending bool   `json:"cancellation_pending"`
+		ProducerPaused      bool   `json:"producer_paused"`
+	} `json:"delivery_health"`
 	AgentStatus string                 `json:"agent_status"`
 	ProcessInfo map[string]interface{} `json:"process_info"`
 }
@@ -162,8 +268,12 @@ func (s *StatusResponse) IsAgentRunning() bool {
 
 // NewClient creates a new agentctl client
 func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) *Client {
+	return newClient(fmt.Sprintf("http://%s:%d", host, port), log, opts...)
+}
+
+func newClient(baseURL string, log *logger.Logger, opts ...ClientOption) *Client {
 	c := &Client{
-		baseURL: fmt.Sprintf("http://%s:%d", host, port),
+		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -192,7 +302,253 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 		c.httpClient.Transport = &instanceIDTransport{instanceID: c.executionID, base: c.httpClient.Transport}
 		c.longRunningHTTPClient.Transport = &instanceIDTransport{instanceID: c.executionID, base: c.longRunningHTTPClient.Transport}
 	}
+	if c.runtimeGuard != nil {
+		c.httpClient.Transport = &runtimeBindingTransport{guard: c.runtimeGuard, base: c.httpClient.Transport}
+		c.longRunningHTTPClient.Transport = &runtimeBindingTransport{guard: c.runtimeGuard, base: c.longRunningHTTPClient.Transport}
+	}
 	return c
+}
+
+// RuntimeEpoch returns the local agentctl generation bound to this client, or
+// zero for executor-owned clients that do not use the backend local runtime.
+func (c *Client) RuntimeEpoch() uint64 {
+	if c == nil || c.runtimeGuard == nil || c.runtimeGuard.binding == nil {
+		return 0
+	}
+	return c.runtimeGuard.binding.epoch
+}
+
+// RuntimeProcessID reports the local agentctl process identity bound to this
+// client, or zero when the client belongs to another executor.
+func (c *Client) RuntimeProcessID() int {
+	if c == nil || c.runtimeGuard == nil || c.runtimeGuard.binding == nil {
+		return 0
+	}
+	return c.runtimeGuard.binding.processID
+}
+
+// RuntimeProcessIdentity retains the authenticated local runtime's birth identity.
+func (c *Client) RuntimeProcessIdentity() processidentity.Identity {
+	if c == nil || c.runtimeGuard == nil || c.runtimeGuard.binding == nil {
+		return processidentity.Identity{}
+	}
+	return c.runtimeGuard.binding.processIdentity
+}
+
+// RuntimeCurrent reports whether this client still targets the published
+// local runtime generation. Clients owned by remote executors are unbound and
+// remain current for this purpose.
+func (c *Client) RuntimeCurrent() bool {
+	return c == nil || c.runtimeGuard == nil || c.runtimeGuard.current()
+}
+
+// RuntimeBoundContext returns a context canceled when this client's local
+// runtime generation is retired. The caller must invoke the returned cancel
+// function when the operation ends.
+func (c *Client) RuntimeBoundContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if c == nil {
+		return nil, func() {}, errors.New("agentctl client is nil")
+	}
+	return c.runtimeGuard.bindContext(ctx)
+}
+
+func (c *Client) beginUpdatesStreamDial(ctx context.Context) (*updatesStreamDial, context.Context, error) {
+	streamCtx, streamCancel, err := c.RuntimeBoundContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	dialCtx, dialCancel := context.WithCancel(streamCtx)
+	attempt := &updatesStreamDial{
+		ctx:          dialCtx,
+		streamCtx:    streamCtx,
+		cancel:       dialCancel,
+		streamCancel: streamCancel,
+	}
+
+	c.mu.Lock()
+	c.updatesDialSequence++
+	attempt.sequence = c.updatesDialSequence
+	previous := c.takeUpdatesStreamDialLocked()
+	c.updatesDial = attempt
+	c.mu.Unlock()
+	closeUpdatesStreamDial(previous)
+
+	return attempt, streamCtx, nil
+}
+
+func (c *Client) takeUpdatesStreamDialLocked() updatesStreamDialCleanup {
+	attempt := c.updatesDial
+	if attempt == nil {
+		return updatesStreamDialCleanup{}
+	}
+	c.updatesDial = nil
+	attempt.retired = true
+	cleanup := updatesStreamDialCleanup{
+		cancel:       attempt.cancel,
+		streamCancel: attempt.streamCancel,
+		conn:         attempt.conn,
+		stopConn:     attempt.stopConn,
+	}
+	attempt.conn = nil
+	attempt.stopConn = nil
+	return cleanup
+}
+
+func closeUpdatesStreamDial(cleanup updatesStreamDialCleanup) {
+	if cleanup.stopConn != nil {
+		cleanup.stopConn()
+	}
+	if cleanup.cancel != nil {
+		cleanup.cancel()
+	}
+	if cleanup.streamCancel != nil {
+		cleanup.streamCancel()
+	}
+	if cleanup.conn != nil {
+		_ = cleanup.conn.Close()
+	}
+}
+
+func (c *Client) registerUpdatesStreamDialConn(attempt *updatesStreamDial, conn net.Conn) error {
+	stopConn := context.AfterFunc(attempt.ctx, func() { _ = conn.Close() })
+	c.mu.Lock()
+	if attempt.retired || c.updatesDial != attempt || c.updatesDialSequence != attempt.sequence || attempt.ctx.Err() != nil {
+		err := attempt.ctx.Err()
+		c.mu.Unlock()
+		stopConn()
+		_ = conn.Close()
+		if err != nil {
+			return err
+		}
+		return context.Canceled
+	}
+	attempt.conn = conn
+	attempt.stopConn = stopConn
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Client) retireUpdatesStreamDial(attempt *updatesStreamDial) {
+	c.mu.Lock()
+	var cleanup updatesStreamDialCleanup
+	if c.updatesDial == attempt {
+		c.updatesDialSequence++
+		cleanup = c.takeUpdatesStreamDialLocked()
+	}
+	c.mu.Unlock()
+	closeUpdatesStreamDial(cleanup)
+}
+
+func (c *Client) completeUpdatesStreamDial(
+	attempt *updatesStreamDial,
+	conn *websocket.Conn,
+) (context.CancelFunc, error) {
+	stopStream := context.AfterFunc(attempt.streamCtx, func() { _ = conn.Close() })
+	c.mu.Lock()
+	if attempt.retired || c.updatesDial != attempt || c.updatesDialSequence != attempt.sequence || attempt.ctx.Err() != nil || attempt.streamCtx.Err() != nil {
+		err := updatesStreamDialContextError(attempt)
+		if err == nil {
+			err = context.Canceled
+		}
+		var cleanup updatesStreamDialCleanup
+		if c.updatesDial == attempt {
+			c.updatesDialSequence++
+			cleanup = c.takeUpdatesStreamDialLocked()
+		}
+		c.mu.Unlock()
+		return rejectCompletedUpdatesStreamDial(stopStream, cleanup, conn, err)
+	}
+
+	stopConn := attempt.stopConn
+	if stopConn != nil && !stopConn() {
+		c.updatesDialSequence++
+		cleanup := c.takeUpdatesStreamDialLocked()
+		c.mu.Unlock()
+		return rejectCompletedUpdatesStreamDial(stopStream, cleanup, conn, context.Canceled)
+	}
+	if err := updatesStreamDialContextError(attempt); err != nil {
+		c.updatesDialSequence++
+		cleanup := c.takeUpdatesStreamDialLocked()
+		c.mu.Unlock()
+		return rejectCompletedUpdatesStreamDial(stopStream, cleanup, conn, err)
+	}
+
+	attempt.stopConn = nil
+	attempt.conn = nil
+	attempt.retired = true
+	c.updatesDial = nil
+	c.agentStreamConn = conn
+	streamCancel := attempt.streamCancel
+	dialCancel := attempt.cancel
+	c.mu.Unlock()
+
+	if err := updatesStreamDialContextError(attempt); err != nil {
+		c.mu.Lock()
+		if c.agentStreamConn == conn {
+			c.agentStreamConn = nil
+		}
+		c.mu.Unlock()
+		stopStream()
+		_ = conn.Close()
+		dialCancel()
+		streamCancel()
+		return nil, err
+	}
+	dialCancel()
+	return func() {
+		stopStream()
+		streamCancel()
+	}, nil
+}
+
+func rejectCompletedUpdatesStreamDial(
+	stopStream func() bool,
+	cleanup updatesStreamDialCleanup,
+	conn *websocket.Conn,
+	err error,
+) (context.CancelFunc, error) {
+	stopStream()
+	closeUpdatesStreamDial(cleanup)
+	_ = conn.Close()
+	return nil, err
+}
+
+func updatesStreamDialContextError(attempt *updatesStreamDial) error {
+	if err := attempt.ctx.Err(); err != nil {
+		return err
+	}
+	if err := attempt.streamCtx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) takeUpdatesStreamLocked() (updatesStreamDialCleanup, *websocket.Conn) {
+	c.updatesDialSequence++
+	cleanup := c.takeUpdatesStreamDialLocked()
+	conn := c.agentStreamConn
+	c.agentStreamConn = nil
+	return cleanup, conn
+}
+
+func closeUpdatesStream(cleanup updatesStreamDialCleanup, conn *websocket.Conn) {
+	closeUpdatesStreamDial(cleanup)
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+// ProxyTransport returns the same authenticated upstream transport used by
+// agentctl HTTP requests. Gateway proxies use it so provider leases, host
+// authentication, and instance fencing are applied to HTTP and upgrades alike.
+func (c *Client) ProxyTransport() http.RoundTripper {
+	if c.endpointTransport != nil {
+		return c.endpointTransport
+	}
+	if c.httpClient.Transport != nil {
+		return c.httpClient.Transport
+	}
+	return http.DefaultTransport
 }
 
 // authTransport is an http.RoundTripper that injects an Authorization header.
@@ -231,10 +587,8 @@ func (t *instanceIDTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 // wsAuthHeaders returns HTTP headers for WebSocket dial calls.
 func (c *Client) wsAuthHeaders() http.Header {
-	if c.authToken == "" && c.executionID == "" {
-		return nil
-	}
 	h := http.Header{}
+	h.Set("X-Kandev-Delivery-Version", "2")
 	if c.authToken != "" {
 		h.Set("Authorization", "Bearer "+c.authToken)
 	}
@@ -303,24 +657,45 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 	return &status, nil
 }
 
-// ConfigureAgent configures the agent command and optional approval policy. Must be called before Start().
+// ConfigureAgent configures the agent command. Must be called before Start().
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string) error {
+func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, wrapper ...launchwrapper.Spec) error {
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false, wrapper...)
+}
+
+// ConfigureAgentWithEnvironment configures the agent with a complete effective
+// environment. The agentctl instance replaces its indexed Git configuration
+// block while preserving ordinary instance variables. Use this when the
+// caller has already composed inherited and generated environment sources.
+func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, wrapper ...launchwrapper.Spec) error {
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, true, wrapper...)
+}
+
+func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, replaceEnv bool, wrapper ...launchwrapper.Spec) error {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/configure", c.executionID)
 	defer span.End()
 
+	spec := launchwrapper.Spec{}
+	if len(wrapper) > 0 {
+		spec = wrapper[0]
+	}
+	if err := c.requireLaunchWrapper(ctx, spec); err != nil {
+		return err
+	}
 	payload := struct {
-		Command         string            `json:"command"`
-		AgentArgs       *[]string         `json:"agent_args,omitempty"`
-		ContinueCommand string            `json:"continue_command,omitempty"`
-		ContinueArgs    *[]string         `json:"continue_args,omitempty"`
-		Env             map[string]string `json:"env,omitempty"`
-		ApprovalPolicy  string            `json:"approval_policy,omitempty"`
+		LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+		Command         string             `json:"command"`
+		AgentArgs       *[]string          `json:"agent_args,omitempty"`
+		ContinueCommand string             `json:"continue_command,omitempty"`
+		ContinueArgs    *[]string          `json:"continue_args,omitempty"`
+		Env             map[string]string  `json:"env,omitempty"`
+		ReplaceEnv      bool               `json:"replace_env,omitempty"`
 	}{
+		LaunchWrapper:   spec,
 		Command:         command,
 		ContinueCommand: continueCommand,
 		Env:             env,
-		ApprovalPolicy:  approvalPolicy,
+		ReplaceEnv:      replaceEnv,
 	}
 	if agentArgs != nil {
 		payload.AgentArgs = &agentArgs
@@ -482,8 +857,50 @@ func (c *Client) SetPluginTools(ctx context.Context, snapshot plugintools.Snapsh
 	return nil
 }
 
+// StreamCanvasSource requests the assigned canvas source root from agentctl.
+// The response is a bounded tar stream and must be closed by the caller. The
+// route is deliberately kept in the agentctl client so every executor type
+// uses the same authenticated transfer contract.
+func (c *Client) StreamCanvasSource(ctx context.Context, root string) (io.ReadCloser, error) {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", types.CanvasSourceTransferPath, c.executionID)
+	defer span.End()
+
+	body, err := json.Marshal(types.CanvasSourceTransferRequest{Root: root})
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+types.CanvasSourceTransferPath, bytes.NewReader(body))
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			tracing.TraceHTTPResponse(span, resp.StatusCode, readErr)
+			return nil, fmt.Errorf("canvas source request failed with status %d: %w", resp.StatusCode, readErr)
+		}
+		httpErr := fmt.Errorf("canvas source request failed with status %d: %s", resp.StatusCode, string(responseBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return nil, httpErr
+	}
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return resp.Body, nil
+}
+
 // Start starts the agent process and returns the full command that was executed.
 func (c *Client) Start(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	c.processGeneration = 0
+	c.mu.Unlock()
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/start", c.executionID)
 	defer span.End()
 
@@ -513,9 +930,10 @@ func (c *Client) Start(ctx context.Context) (string, error) {
 	}
 
 	var result struct {
-		Success bool   `json:"success"`
-		Command string `json:"command,omitempty"`
-		Error   string `json:"error,omitempty"`
+		Success           bool   `json:"success"`
+		Command           string `json:"command,omitempty"`
+		ProcessGeneration uint64 `json:"process_generation,omitempty"`
+		Error             string `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
@@ -526,6 +944,9 @@ func (c *Client) Start(ctx context.Context) (string, error) {
 		tracing.TraceHTTPResponse(span, resp.StatusCode, startErr)
 		return "", startErr
 	}
+	c.mu.Lock()
+	c.processGeneration = result.ProcessGeneration
+	c.mu.Unlock()
 
 	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return result.Command, nil
@@ -750,6 +1171,9 @@ func (c *Client) BaseURL() string {
 // AuthToken returns the Bearer token used for authenticating requests to agentctl.
 // Returns empty string if no token is configured.
 func (c *Client) AuthToken() string {
+	if c.endpointTransport != nil {
+		return c.endpointTransport.authTokenValue()
+	}
 	return c.authToken
 }
 
@@ -796,10 +1220,24 @@ type (
 func (c *Client) Close() {
 	c.mu.Lock()
 	c.closed = true
+	updatesDial, agentConn := c.takeUpdatesStreamLocked()
 	ws := c.workspaceStream
+	connections := make([]*websocket.Conn, 0, len(c.runtimeConns))
+	stops := make([]func() bool, 0, len(c.runtimeConns))
+	for conn, stop := range c.runtimeConns {
+		connections = append(connections, conn)
+		stops = append(stops, stop)
+	}
+	c.runtimeConns = nil
 	c.mu.Unlock()
+	closeUpdatesStream(updatesDial, agentConn)
+	for _, stop := range stops {
+		stop()
+	}
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
 
-	c.CloseUpdatesStream()
 	// CloseWorkspaceStream closes the raw conn to wake the blocked read loop.
 	// ws.Close (below) is needed to close the writeLoop's closeCh; closeOnce
 	// makes ws.Close idempotent so the duplicate conn.Close it issues just

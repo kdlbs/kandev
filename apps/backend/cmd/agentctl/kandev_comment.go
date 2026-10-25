@@ -71,7 +71,7 @@ func commentAdd(args []string) int {
 func commentList(args []string) int {
 	fs := flag.NewFlagSet("comment list", flag.ContinueOnError)
 	taskFlag := fs.String("task", "", "Task ID (defaults to $KANDEV_TASK_ID)")
-	limitFlag := fs.Int("limit", 0, "Max number of comments (0 = all)")
+	limitFlag := fs.Int("limit", 0, "Max number of comments (0 = server default)")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1

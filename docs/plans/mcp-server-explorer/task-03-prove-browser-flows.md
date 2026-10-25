@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-build-responsive-explorer"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 03: Prove Browser Flows

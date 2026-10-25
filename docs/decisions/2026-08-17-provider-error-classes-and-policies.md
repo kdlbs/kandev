@@ -54,7 +54,8 @@ failures are outside provider policy.
 
 Unknown, low-confidence, stale, or conflicting evidence is `unclassified`.
 This is an internal classification state, not a third configurable class. It
-always fails closed to manual recovery. A new semantic code without an explicit
+fails closed to manual recovery except for the narrowly scoped
+[repeated-failure extension](2026-09-28-repeated-unclassified-fallback.md). A new semantic code without an explicit
 class assignment also classifies as unclassified until exhaustive tests and
 the catalogue are updated.
 
@@ -196,5 +197,5 @@ for dynamic profiles. Concrete-profile interactive retry can retain that
 decision's defaults while consuming the shared classification contract.
 
 Product behavior is specified in
-[Provider Error Recovery](../specs/platform/provider-error-recovery.md) and
-[Dynamic Agent Routing](../specs/agents/dynamic-agent-routing.md).
+[Provider Error Recovery](../specs/platform/requirements/provider-error-recovery.md) and
+[Dynamic Agent Routing](../specs/agents/requirements/dynamic-agent-routing.md).

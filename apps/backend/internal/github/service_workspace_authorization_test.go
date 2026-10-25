@@ -190,6 +190,25 @@ func TestGetPRForWorkspaceWithoutConnectionUsesAnonymousClient(t *testing.T) {
 	}
 }
 
+func TestGetPRForAutomationUsesWorkspaceCredential(t *testing.T) {
+	ambient := &stubClient{getPRFunc: func(context.Context, string, string, int) (*PR, error) {
+		return &PR{Title: "ambient credential"}, nil
+	}}
+	workspace := &stubClient{getPRFunc: func(context.Context, string, string, int) (*PR, error) {
+		return &PR{Title: "workspace credential", BaseBranch: "main"}, nil
+	}}
+	svc := NewService(ambient, AuthMethodPAT, nil, nil, nil, testLogger(t))
+	configureTestWorkspaceAuth(t, svc, workspace, "workspace-1")
+
+	pr, err := svc.GetPRForAutomation(context.Background(), "workspace-1", "acme", "widgets", 42)
+	if err != nil {
+		t.Fatalf("GetPRForAutomation() error: %v", err)
+	}
+	if pr.Title != "workspace credential" {
+		t.Fatalf("PR title = %q, want workspace credential", pr.Title)
+	}
+}
+
 func TestListAllReviewWatchesRetainsIdentitylessInternalUse(t *testing.T) {
 	store := newTestStore(t)
 	svc := NewService(nil, AuthMethodNone, nil, store, nil, testLogger(t))

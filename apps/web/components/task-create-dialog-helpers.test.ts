@@ -1,12 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  activatePlanMode,
   autoSelectBranch,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
+  computeRunnerEditable,
+  computeRunnerIneligibleReason,
   findUnresolvedProviderRemote,
+  resolveInitialWorkspaceLayout,
+  resolveInitialWorkspaceLayoutMode,
+  resolveSelectedExecutorType,
   shouldShowTaskTitleField,
   validateCreateInputs,
 } from "./task-create-dialog-helpers";
+import { createAppStore } from "@/lib/state/store";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
 import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
@@ -24,6 +32,8 @@ const AGENT_PAYLOAD_DEFAULTS = {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
+  useContextFilesStore.setState({ filesBySessionId: {} });
 });
 
 describe("autoSelectBranch", () => {
@@ -106,6 +116,39 @@ describe("autoSelectBranch", () => {
     autoSelectBranch([], setBranch, { lastUsedBranch: "main", userSettingsLoaded: true });
 
     expect(setBranch).not.toHaveBeenCalled();
+  });
+});
+
+describe("computeRunnerEditable", () => {
+  it("is always editable in create mode, regardless of any editingTask", () => {
+    expect(computeRunnerEditable(false)).toBe(true);
+    expect(computeRunnerEditable(false, { runnerEditable: false })).toBe(true);
+  });
+
+  it("defers to the projected verdict in edit mode", () => {
+    expect(computeRunnerEditable(true, { runnerEditable: true })).toBe(true);
+    expect(computeRunnerEditable(true, { runnerEditable: false })).toBe(false);
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.3: never decide editability from workflow
+  // state — computeRunnerEditable doesn't even accept a `state` field.
+  it("fails closed when the projection is absent", () => {
+    expect(computeRunnerEditable(true, {})).toBe(false);
+    expect(computeRunnerEditable(true, null)).toBe(false);
+    expect(computeRunnerEditable(true, undefined)).toBe(false);
+  });
+});
+
+describe("computeRunnerIneligibleReason", () => {
+  it("returns the projected reason", () => {
+    expect(computeRunnerIneligibleReason({ runnerIneligibleReason: "session_exists" })).toBe(
+      "session_exists",
+    );
+  });
+
+  it("falls back to evaluation_unavailable when absent", () => {
+    expect(computeRunnerIneligibleReason({})).toBe("evaluation_unavailable");
+    expect(computeRunnerIneligibleReason(null)).toBe("evaluation_unavailable");
   });
 });
 
@@ -279,4 +322,192 @@ describe("buildCreateTaskPayload dependencies", () => {
     expect(buildCreateTaskPayload({ ...base, blockedBy: [] }).blocked_by).toBeUndefined();
     expect(buildCreateTaskPayload(base).blocked_by).toBeUndefined();
   });
+});
+
+describe("buildCreateTaskPayload priority", () => {
+  const base = {
+    ...AGENT_PAYLOAD_DEFAULTS,
+    trimmedTitle: "Fix the bug",
+    trimmedDescription: "",
+  };
+
+  it("submits the selected priority token", () => {
+    expect(buildCreateTaskPayload({ ...base, priority: "critical" }).priority).toBe("critical");
+  });
+
+  it("defaults to medium when no priority is selected", () => {
+    expect(buildCreateTaskPayload(base).priority).toBe("medium");
+  });
+
+  it("sends task-only workflow profile replacements and omits an empty map", () => {
+    expect(
+      buildCreateTaskPayload({
+        ...base,
+        workflowAgentOverrides: { "profile-luna": "profile-terra" },
+      }).workflow_agent_overrides,
+    ).toEqual({ "profile-luna": "profile-terra" });
+    expect(buildCreateTaskPayload(base).workflow_agent_overrides).toBeUndefined();
+  });
+  it("submits MCP selections together with the selected initial workspace layout", () => {
+    expect(
+      buildCreateTaskPayload({
+        ...base,
+        initialWorkspaceLayout: "task_root",
+        mcpServerIds: ["mcp-selected"],
+      }),
+    ).toMatchObject({
+      initial_workspace_layout: "task_root",
+      mcp_server_ids: ["mcp-selected"],
+    });
+  });
+});
+
+describe("initial workspace layout", () => {
+  it("shows the opt-in for one worktree repository and preserves its choice", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 1,
+      executorType: "worktree",
+    });
+
+    expect(mode).toBe("single-repository");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBe("task_root");
+    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("repository");
+  });
+
+  it("offers a parent layout for multi-repository Worktree tasks", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 2,
+      executorType: "worktree",
+    });
+
+    expect(mode).toBe("multiple-repositories");
+    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("task_root");
+  });
+
+  it("omits the parent layout for multi-repository remote tasks", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 2,
+      executorType: "ssh",
+    });
+
+    expect(mode).toBe("unavailable");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "repositoryless",
+      { noRepository: true, repositoryCount: 0, executorType: "worktree" as const },
+    ],
+    [
+      "unsupported executor",
+      { noRepository: false, repositoryCount: 1, executorType: "local" as const },
+    ],
+    [
+      "editing",
+      {
+        noRepository: false,
+        repositoryCount: 1,
+        executorType: "worktree" as const,
+        isCreateMode: false,
+      },
+    ],
+  ])("omits the layout for %s tasks", (_name, input) => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      ...input,
+    });
+
+    expect(mode).toBe("unavailable");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBeUndefined();
+  });
+
+  it("resolves a profile's executor type from its containing executor", () => {
+    expect(
+      resolveSelectedExecutorType(
+        [
+          {
+            id: "executor-1",
+            name: "Worktree",
+            type: "worktree",
+            status: "available",
+            is_system: true,
+            profiles: [{ id: "profile-1" }],
+          } as never,
+        ],
+        "profile-1",
+      ),
+    ).toBe("worktree");
+    expect(
+      resolveSelectedExecutorType(
+        [
+          {
+            id: "executor-1",
+            name: "Worktree",
+            type: "worktree",
+            status: "available",
+            is_system: true,
+            profiles: [],
+          } as never,
+        ],
+        "missing-profile",
+      ),
+    ).toBeNull();
+  });
+});
+
+it("initializes a planning session without navigating when auto-focus is off", () => {
+  const currentSessionId = "current-session";
+  const backgroundSessionId = "session-plan";
+  const store = createAppStore();
+  const { setActiveDocument, setPlanMode, setActiveSession } = store.getState();
+  setActiveSession("current-task", currentSessionId);
+  setActiveDocument(currentSessionId, { type: "plan", taskId: "current-task" });
+  setPlanMode(currentSessionId, false);
+  useContextFilesStore.getState().addFile(currentSessionId, { path: "notes.md", name: "notes.md" });
+  const currentTasks = store.getState().tasks;
+  const currentDocument =
+    store.getState().documentPanel.activeDocumentBySessionId[currentSessionId];
+  const currentContext = useContextFilesStore.getState().filesBySessionId[currentSessionId];
+  const router = {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  };
+  activatePlanMode({
+    taskId: "task-plan",
+    sessionId: backgroundSessionId,
+    autoFocus: false,
+    setActiveDocument,
+    setPlanMode,
+    router,
+  });
+  expect(store.getState().chatInput.planModeBySessionId[backgroundSessionId]).toBe(true);
+  expect(store.getState().documentPanel.activeDocumentBySessionId[backgroundSessionId]).toEqual({
+    type: "plan",
+    taskId: "task-plan",
+  });
+  expect(useContextFilesStore.getState().filesBySessionId[backgroundSessionId]).toEqual([
+    { path: "plan:context", name: "Plan" },
+  ]);
+  expect(store.getState().tasks).toBe(currentTasks);
+  expect(store.getState().documentPanel.activeDocumentBySessionId[currentSessionId]).toBe(
+    currentDocument,
+  );
+  expect(store.getState().chatInput.planModeBySessionId[currentSessionId]).toBe(false);
+  expect(useContextFilesStore.getState().filesBySessionId[currentSessionId]).toBe(currentContext);
+  expect(router.push).not.toHaveBeenCalled();
 });

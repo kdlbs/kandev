@@ -14,6 +14,7 @@ type Service struct {
 	logger              *logger.Logger
 	workspaceAuthorizer func(context.Context, string) error
 	workspaceExistence  func(context.Context, string) error
+	referenceChecker    func(context.Context, string) ([]Reference, error)
 }
 
 // NewService creates a new secrets service.
@@ -24,7 +25,7 @@ func NewService(store SecretStore, log *logger.Logger) *Service {
 	}
 }
 
-// SetWorkspaceAuthorizer wires the workspace visibility check used by the
+// SetWorkspaceAuthorizer wires the workspace reach check used by the
 // workspace-scoped API. The callback is intentionally a function so the
 // secrets package does not depend on the task service package.
 func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
@@ -118,6 +119,11 @@ func (s *Service) GetForWorkspace(ctx context.Context, id, workspaceID string) (
 	if err := s.authorizeScope(ctx, ScopeWorkspace, workspaceID); err != nil {
 		return nil, err
 	}
+	return s.getStoredForWorkspace(ctx, id, workspaceID)
+}
+
+// getStoredForWorkspace applies store visibility after the caller authorizes access.
+func (s *Service) getStoredForWorkspace(ctx context.Context, id, workspaceID string) (*Secret, error) {
 	if scoped, ok := s.store.(ScopedSecretStore); ok {
 		return scoped.GetForWorkspace(ctx, id, workspaceID)
 	}
@@ -179,6 +185,25 @@ func (s *Service) RevealWorkspaceSecret(ctx context.Context, id, workspaceID str
 	return s.store.Reveal(ctx, id)
 }
 
+// updateStored routes a workspace write through the workspace-aware update
+// surface when the store provides one; the UserVisibleStore's global Update
+// accepts Global secrets only.
+func (s *Service) updateStored(ctx context.Context, id, workspaceID string, req *UpdateSecretRequest) error {
+	if scoped, ok := s.store.(WorkspaceSecretUpdater); ok && workspaceID != "" {
+		return scoped.UpdateForWorkspace(ctx, id, workspaceID, req)
+	}
+	return s.store.Update(ctx, id, req)
+}
+
+// getStored reads back a write using the authorized scope. Its caller already
+// authorized workspace access; only store visibility is checked again.
+func (s *Service) getStored(ctx context.Context, id, workspaceID string) (*Secret, error) {
+	if workspaceID != "" {
+		return s.getStoredForWorkspace(ctx, id, workspaceID)
+	}
+	return s.Get(ctx, id)
+}
+
 // Update validates and updates a secret.
 func (s *Service) Update(ctx context.Context, id string, req *UpdateSecretRequest) (*SecretListItem, error) {
 	if err := s.validateUpdate(req); err != nil {
@@ -209,10 +234,10 @@ func (s *Service) UpdateForWorkspace(ctx context.Context, id, workspaceID string
 	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
 		return nil, err
 	}
-	if err := s.store.Update(ctx, id, req); err != nil {
+	if err := s.updateStored(ctx, id, workspaceID, req); err != nil {
 		return nil, fmt.Errorf("update secret: %w", err)
 	}
-	secret, err := s.store.Get(ctx, id)
+	secret, err := s.getStored(ctx, id, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -228,10 +253,10 @@ func (s *Service) UpdateWorkspaceSecret(ctx context.Context, id, workspaceID str
 	if _, err := s.GetWorkspaceSecret(ctx, id, workspaceID); err != nil {
 		return nil, err
 	}
-	if err := s.store.Update(ctx, id, req); err != nil {
+	if err := s.updateStored(ctx, id, workspaceID, req); err != nil {
 		return nil, fmt.Errorf("update secret: %w", err)
 	}
-	secret, err := s.store.Get(ctx, id)
+	secret, err := s.getStored(ctx, id, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -239,28 +264,49 @@ func (s *Service) UpdateWorkspaceSecret(ctx context.Context, id, workspaceID str
 }
 
 // Delete removes a secret.
-func (s *Service) Delete(ctx context.Context, id string) error {
+func (s *Service) Delete(ctx context.Context, id string, force ...bool) error {
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
 	}
-	return s.store.Delete(ctx, id)
+	forceDelete := len(force) > 0 && force[0]
+	return s.deleteChecked(ctx, id, "", forceDelete)
 }
 
 // DeleteForWorkspace deletes a Global or same-workspace secret.
-func (s *Service) DeleteForWorkspace(ctx context.Context, id, workspaceID string) error {
+func (s *Service) DeleteForWorkspace(ctx context.Context, id, workspaceID string, force ...bool) error {
 	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
 		return err
 	}
-	return s.store.Delete(ctx, id)
+	forceDelete := len(force) > 0 && force[0]
+	return s.deleteChecked(ctx, id, workspaceID, forceDelete)
 }
 
 // DeleteWorkspaceSecret deletes a Workspace secret after checking the
 // caller's workspace access.
-func (s *Service) DeleteWorkspaceSecret(ctx context.Context, id, workspaceID string) error {
+func (s *Service) DeleteWorkspaceSecret(ctx context.Context, id, workspaceID string, force ...bool) error {
 	if _, err := s.GetWorkspaceSecret(ctx, id, workspaceID); err != nil {
 		return err
 	}
-	return s.store.Delete(ctx, id)
+	forceDelete := len(force) > 0 && force[0]
+	return s.deleteChecked(ctx, id, workspaceID, forceDelete)
+}
+
+// References returns the environment bindings for a Global secret without
+// exposing the secret value or changing stored state.
+func (s *Service) References(ctx context.Context, id string) ([]Reference, error) {
+	if _, err := s.Get(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.listReferences(ctx, id)
+}
+
+// WorkspaceSecretReferences returns the environment bindings for a Workspace
+// secret after checking the caller's workspace access.
+func (s *Service) WorkspaceSecretReferences(ctx context.Context, id, workspaceID string) ([]Reference, error) {
+	if _, err := s.GetWorkspaceSecret(ctx, id, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.listReferences(ctx, id)
 }
 
 // List returns all secrets without values.

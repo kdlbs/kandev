@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow/task-step-transition-ledger/spec.md"
+spec: "../../specs/tasks/requirements/workflow-task-step-transition-ledger.md"
 ---
 
 # Task 01: Telemetry contract activation registry

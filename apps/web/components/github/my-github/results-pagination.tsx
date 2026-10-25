@@ -1,6 +1,9 @@
 "use client";
 
 import { Fragment } from "react";
+import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { MobileResultsPagination } from "./mobile-results-pagination";
 import {
   Pagination,
   PaginationContent,
@@ -29,6 +32,8 @@ function pageWindow(page: number, totalPages: number): number[] {
 }
 
 export function ResultsPagination({ page, pageSize, total, onPageChange }: ResultsPaginationProps) {
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const effectiveTotal = Math.min(total, GITHUB_MAX_RESULTS);
   const totalPages = Math.max(1, Math.ceil(effectiveTotal / pageSize));
   if (totalPages <= 1) return null;
@@ -36,12 +41,24 @@ export function ResultsPagination({ page, pageSize, total, onPageChange }: Resul
   const windowPages = pageWindow(page, totalPages);
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, effectiveTotal);
+  const range = t("github:resultRange", {
+    start,
+    end,
+    total: total > GITHUB_MAX_RESULTS ? `${GITHUB_MAX_RESULTS}+` : total,
+  });
+  if (isMobile)
+    return (
+      <MobileResultsPagination
+        page={page}
+        totalPages={totalPages}
+        range={range}
+        onPageChange={onPageChange}
+      />
+    );
 
   return (
     <div className="flex items-center justify-between px-6 py-3 border-t shrink-0">
-      <div className="text-xs text-muted-foreground tabular-nums">
-        {start}–{end} of {total > GITHUB_MAX_RESULTS ? `${GITHUB_MAX_RESULTS}+` : total}
-      </div>
+      <div className="text-xs text-muted-foreground tabular-nums">{range}</div>
       <Pagination className="mx-0 w-auto justify-end">
         <PaginationContent>
           <PaginationItem>

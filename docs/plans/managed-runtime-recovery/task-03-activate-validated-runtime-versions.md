@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-build-exact-version-foundation", "02-route-active-host-runtime"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 03: Activate validated runtime versions

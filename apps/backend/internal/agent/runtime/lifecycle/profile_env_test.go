@@ -7,6 +7,7 @@ import (
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -70,6 +71,33 @@ func TestMergeEnvFillMissingComposesIndexedGitConfigMismatchedCount(t *testing.T
 	}
 	if got := dst["GIT_CONFIG_KEY_2"]; got != "credential.https://github.com.helper" {
 		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want request entry", got)
+	}
+}
+
+func TestComposeExecutionRuntimeEnvironmentRemovesObsoleteManagedCredentials(t *testing.T) {
+	base := map[string]string{
+		githubauth.CredentialBrokerURLEnv: "https://broker.example/old",
+		githubauth.CredentialLeaseEnv:     "old-lease",
+		"GIT_CONFIG_COUNT":                "2",
+		"GIT_CONFIG_KEY_0":                "core.hooksPath",
+		"GIT_CONFIG_VALUE_0":              "/user/hooks",
+		"GIT_CONFIG_KEY_1":                "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_1":              "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; '/old/gh' auth git-credential \"$@\"; }; f",
+	}
+
+	got, err := composeExecutionRuntimeEnvironment(base, map[string]string{"CURRENT": "yes"})
+	if err != nil {
+		t.Fatalf("composeExecutionRuntimeEnvironment() error = %v", err)
+	}
+	if _, present := got[githubauth.CredentialBrokerURLEnv]; present {
+		t.Fatalf("obsolete broker URL remained: %#v", got)
+	}
+	if _, present := got[githubauth.CredentialLeaseEnv]; present {
+		t.Fatalf("obsolete credential lease remained: %#v", got)
+	}
+	if got["CURRENT"] != "yes" || got["GIT_CONFIG_COUNT"] != "1" ||
+		got["GIT_CONFIG_KEY_0"] != "core.hooksPath" || got["GIT_CONFIG_VALUE_0"] != "/user/hooks" {
+		t.Fatalf("composed runtime environment = %#v, want current value and inherited user config", got)
 	}
 }
 

@@ -6,7 +6,7 @@ wave: 7
 depends_on:
   - "06-shared-source-picker"
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 11: Tab-free repository source chooser

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/github-saved-query-defaults.md
+spec: docs/specs/ui/requirements/github-saved-query-defaults.md
 created: 2026-08-07
 status: completed
 ---

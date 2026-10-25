@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -64,6 +65,22 @@ type cancelingRejectStatusSummaryRepository struct {
 	summary      *statussummary.TaskStatusSummary
 	cancel       context.CancelFunc
 	compareCalls int
+}
+
+type cancelAfterSummaryWriteRepository struct {
+	repository.TaskStatusSummaryRepository
+	cancel context.CancelFunc
+}
+
+func (r cancelAfterSummaryWriteRepository) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	accepted, err := r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+	if accepted && err == nil {
+		r.cancel()
+	}
+	return accepted, err
 }
 
 type exhaustingStatusSummaryRepository struct {
@@ -201,11 +218,18 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	createTaskWithoutRepositories(t, ctx, repo)
 
 	now := time.Date(2026, 8, 1, 18, 0, 0, 0, time.UTC)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "environment-1", TaskID: "task-1", WorkspacePath: "/workspace/task-1",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
 	session := &models.TaskSession{
-		ID:        "session-1",
-		TaskID:    "task-1",
-		State:     models.TaskSessionStateRunning,
-		IsPrimary: true,
+		ID:                "session-1",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "environment-1",
+		State:             models.TaskSessionStateRunning,
+		IsPrimary:         true,
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyLastAgentError: map[string]interface{}{
 				"message":     "agent failed to complete the turn",
@@ -316,6 +340,159 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	}
 	if published = eventBus.GetPublishedEvents(); len(published) != 1 {
 		t.Fatalf("events after no-op reconcile = %+v, want no duplicate", published)
+	}
+}
+
+func TestReconcileTaskStatusSummaryPublishesCommittedWriteAfterCancellation(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	createTaskWithoutRepositories(t, context.Background(), repo)
+	svc.statusSummaries = cancelAfterSummaryWriteRepository{TaskStatusSummaryRepository: repo, cancel: cancel}
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+
+	summaries, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, summaries[task.ID], "the committed summary remains reflected in the result map")
+	persisted, loadErr := repo.LoadTaskStatusSummaries(context.Background(), []string{task.ID})
+	require.NoError(t, loadErr)
+	require.NotNil(t, persisted[task.ID], "the summary write completed before the request was canceled")
+	published := eventBus.GetPublishedEvents()
+	require.Len(t, published, 1)
+	require.Equal(t, events.TaskStatusSummaryUpdated, published[0].Type)
+}
+
+func TestReconcileTaskStatusSummariesRebuildsCompletionGate(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	task, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if _, err := repo.SetTaskCompletionCriteria(ctx, models.TaskCompletionCriteriaChange{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, ActorKind: "human", ActorID: "user-1",
+		Criteria: []models.TaskCompletionCriterion{{
+			ID: "tests", Description: "Required tests pass",
+			EvidenceSubject: models.TaskCompletionEvidenceSubject{Kind: models.TaskCompletionEvidenceArtifact, ID: "run-1"},
+		}},
+	}); err != nil {
+		t.Fatalf("set completion criteria: %v", err)
+	}
+	svc.statusSummaries = repo
+
+	summaries, err := svc.ReconcileTaskStatusSummaries(ctx, []*models.Task{task}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	got := summaries[task.ID]
+	if got == nil || got.CompletionGate == nil {
+		t.Fatalf("repaired completion gate summary is missing: %+v", got)
+	}
+	if *got.CompletionGate != (statussummary.CompletionGateSummary{
+		Revision: 1, CriteriaCount: 1, VerifiedCount: 0, BlockerCount: 1, Blocked: true,
+	}) {
+		t.Fatalf("completion gate summary = %+v", got.CompletionGate)
+	}
+	persisted, err := repo.LoadTaskStatusSummaries(ctx, []string{task.ID})
+	if err != nil || persisted[task.ID] == nil || persisted[task.ID].CompletionGate == nil || *persisted[task.ID].CompletionGate != *got.CompletionGate {
+		t.Fatalf("persisted completion gate = %+v err=%v", persisted[task.ID], err)
+	}
+}
+
+func TestReconcileTaskStatusSummariesUsesNewestSnapshotOncePerSharedEnvironment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.statusSummaries = repo
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	const environmentID = "environment-summary-shared"
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: "task-1", WorkspacePath: "/workspace/summary-shared",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	oldAt := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	newAt := oldAt.Add(time.Minute)
+	sessions := make([]*models.TaskSession, 0, 2)
+	for _, session := range []*models.TaskSession{
+		{ID: "summary-shared-old", TaskID: "task-1", TaskEnvironmentID: environmentID, State: models.TaskSessionStateCompleted, StartedAt: oldAt, UpdatedAt: oldAt},
+		{ID: "summary-shared-new", TaskID: "task-1", TaskEnvironmentID: environmentID, State: models.TaskSessionStateCompleted, StartedAt: newAt, UpdatedAt: newAt},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
+		}
+		sessions = append(sessions, session)
+	}
+	for _, snapshot := range []*models.GitSnapshot{
+		{ID: "summary-snapshot-old", SessionID: sessions[0].ID, TaskEnvironmentID: environmentID, Files: map[string]interface{}{"old.go": true}, CreatedAt: oldAt, Metadata: map[string]interface{}{"repository_name": "shared", "branch_additions": 1}},
+		{ID: "summary-snapshot-new", SessionID: sessions[1].ID, TaskEnvironmentID: environmentID, Files: map[string]interface{}{"new.go": true}, CreatedAt: newAt, Metadata: map[string]interface{}{"repository_name": "shared", "branch_additions": 9}},
+	} {
+		if err := repo.CreateGitSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("CreateGitSnapshot(%s): %v", snapshot.ID, err)
+		}
+	}
+
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx, []*models.Task{task}, map[string][]*models.TaskSession{task.ID: sessions},
+		map[string]models.TaskPendingAction{}, map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	if got[task.ID] == nil || got[task.ID].Git == nil {
+		t.Fatalf("summary = %+v, want Git summary", got[task.ID])
+	}
+	if got[task.ID].Git.Additions != 9 {
+		t.Fatalf("Git additions = %d, want newest shared-environment value 9", got[task.ID].Git.Additions)
+	}
+}
+
+func TestReconcileTaskStatusSummariesUsesTaskEnvironmentWithoutSessions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.statusSummaries = repo
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	const environmentID = "environment-summary-without-sessions"
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: "task-1", WorkspacePath: "/workspace/summary-without-sessions",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		ID:                "snapshot-without-session",
+		TaskEnvironmentID: environmentID,
+		Files:             map[string]interface{}{"main.go": true},
+		Metadata:          map[string]interface{}{"repository_name": "root", "branch_additions": 4},
+		CreatedAt:         time.Date(2026, 8, 31, 13, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("CreateGitSnapshot: %v", err)
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	if got["task-1"] == nil || got["task-1"].Git == nil {
+		t.Fatalf("summary = %+v, want Git summary from task-owned environment", got["task-1"])
+	}
+	if got["task-1"].Git.Additions != 4 || got["task-1"].Git.ChangedFiles != 1 {
+		t.Fatalf("Git summary = %+v, want additions=4 and changed_files=1", got["task-1"].Git)
 	}
 }
 
@@ -490,8 +667,11 @@ func TestStatusSummaryActivityRebuildBackfillsAndPreservesNewerStoredValue(t *te
 		t.Fatalf("reconcile newer status summary: %v", err)
 	}
 	preserved := got["task-1"]
-	if preserved == nil || preserved.Revision != stored.Revision || preserved.LastActivityAt == nil || !preserved.LastActivityAt.Equal(newer) {
-		t.Fatalf("newer stored activity = %+v, want revision %d at %v", preserved, stored.Revision, newer)
+	if preserved == nil || preserved.Revision != stored.Revision+1 || preserved.LastActivityAt == nil || !preserved.LastActivityAt.Equal(newer) {
+		t.Fatalf("repaired newer summary = %+v, want revision %d preserving activity at %v", preserved, stored.Revision+1, newer)
+	}
+	if preserved.HasRunningSession == nil || *preserved.HasRunningSession {
+		t.Fatalf("repaired running flag = %v, want explicit false", preserved.HasRunningSession)
 	}
 }
 
@@ -588,6 +768,7 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 			WorkspaceID: "ws-1",
 			Summary: statussummary.TaskStatusSummary{
 				Revision:          5,
+				HasRunningSession: summaryBoolPtr(false),
 				PendingAction:     string(models.TaskPendingActionClarification),
 				QueuedPromptCount: 9,
 			},
@@ -635,6 +816,8 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 	}
 }
 
+func summaryBoolPtr(value bool) *bool { return &value }
+
 func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -666,6 +849,7 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 		"",
 		time.Time{},
 		false,
+		runningSessionObservation{},
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("reconcileExistingSummary error = %v, want context canceled", err)

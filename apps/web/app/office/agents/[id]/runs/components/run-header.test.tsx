@@ -55,6 +55,12 @@ describe("RunHeader", () => {
     );
   });
 
+  it("renders the captured agent name independently from invocation details", () => {
+    render(<RunHeader run={{ ...baseRun, agent_name: "CEO" }} />);
+    expect(screen.getByTestId("run-agent-name").textContent).toBe("CEO");
+    expect(screen.getByTestId("run-adapter").textContent).toContain("claude_local");
+  });
+
   it("formats the duration in human-readable units", () => {
     render(<RunHeader run={baseRun} />);
     expect(screen.getByTestId("run-duration").textContent).toContain("30s");
@@ -156,5 +162,23 @@ describe("RunHeader routing strip", () => {
     };
     render(<RunHeader run={blocked} />);
     expect(screen.getByTestId("run-routing-blocked")).toBeTruthy();
+  });
+
+  it("renders an actionable session recovery route for parked runs", () => {
+    const parked: RunDetail = {
+      ...withRouting({
+        logical_provider_order: [],
+        blocked_status: "session_recovery_required",
+        session_recovery_block_id: "block-1",
+        session_recovery_reason: "native_state_missing",
+        attempts: [],
+      }),
+      status: "queued",
+    };
+    render(<RunHeader run={parked} />);
+    expect(screen.getByTestId("run-session-recovery-required")).toBeTruthy();
+    const link = screen.getByTestId("run-session-recovery-link");
+    expect(link.getAttribute("href")).toBe("/office/tasks/task-1?advanced&session_id=sess-1");
+    expect(link.textContent).toContain("Open session recovery");
   });
 });

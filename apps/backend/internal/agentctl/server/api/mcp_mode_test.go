@@ -10,9 +10,27 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 )
+
+// modeSurfaces pins each wire mode to the tool surface it must resolve to.
+// handleSetMcpMode echoes the request field regardless of what SetMode
+// actually resolved (docs/specs/coordinator/system-design/copilot.md
+// #attended-only): TestHandleSetMcpMode_AcceptsSupportedModes previously only
+// checked that echo, so a coordinator instance silently kept the full
+// task-mode catalog and the test stayed green. This map lets that test also
+// assert the live server's resolved surface.
+var modeSurfaces = map[string]mcpprofile.Surface{
+	mcpmode.Task:             mcpprofile.SurfaceKanbanTask,
+	mcpmode.TaskTitlePending: mcpprofile.SurfaceKanbanTask,
+	mcpmode.Config:           mcpprofile.SurfaceConfiguration,
+	mcpmode.Office:           mcpprofile.SurfaceOfficeTask,
+	mcpmode.Automation:       mcpprofile.SurfaceAutomation,
+	mcpmode.Coordinator:      mcpprofile.SurfaceCoordinator,
+}
 
 func newTestServerWithMCP(t *testing.T) *Server {
 	t.Helper()
@@ -57,7 +75,7 @@ func setMcpProviders(t *testing.T, s *Server, providers []string) *httptest.Resp
 func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 	s := newTestServerWithMCP(t)
 
-	for _, mode := range []string{mcpserver.ModeTask, mcpserver.ModeTaskTitlePending, mcpserver.ModeConfig, mcpserver.ModeOffice} {
+	for _, mode := range mcpmode.InstanceModes() {
 		t.Run(mode, func(t *testing.T) {
 			rec := setMcpMode(t, s, mode)
 			if rec.Code != http.StatusOK {
@@ -72,6 +90,39 @@ func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 			}
 			if body.Mode != mode {
 				t.Fatalf("mode = %q, want %q", body.Mode, mode)
+			}
+
+			wantSurface, ok := modeSurfaces[mode]
+			if !ok {
+				t.Fatalf("no expected surface registered for mode %q", mode)
+			}
+			if gotSurface := s.mcpServer.Profile().Surface; gotSurface != wantSurface {
+				t.Fatalf("resolved surface = %q, want %q", gotSurface, wantSurface)
+			}
+		})
+	}
+}
+
+// orchestratorEmittableModes is every non-default value the backend's
+// orchestrator/executor resolveTaskSessionMCPMode can put on this route. The
+// values come from the shared wire contract. The producer half of the pin is
+// executor.TestMcpModeConstants_MatchTheAgentctlWireValues.
+//
+// handleSetMcpMode and that resolver are two allowlists over one field.
+// v0.92.1 taught the resolver "automation" and left this one alone; the
+// existing-workspace launch path calls SetMcpMode before starting the agent,
+// so every automation-origin task failed with HTTP 400 at launch.
+var orchestratorEmittableModes = []string{
+	mcpmode.Config, mcpmode.Office, mcpmode.TaskTitlePending, mcpmode.Automation,
+}
+
+func TestHandleSetMcpMode_AcceptsEveryModeTheOrchestratorCanEmit(t *testing.T) {
+	s := newTestServerWithMCP(t)
+
+	for _, mode := range orchestratorEmittableModes {
+		t.Run(mode, func(t *testing.T) {
+			if rec := setMcpMode(t, s, mode); rec.Code != http.StatusOK {
+				t.Fatalf("mode %q: status = %d, want %d; body=%s", mode, rec.Code, http.StatusOK, rec.Body.String())
 			}
 		})
 	}

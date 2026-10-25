@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/prompts/controller"
@@ -19,6 +21,12 @@ import (
 )
 
 func newTestRouter(t *testing.T) (*gin.Engine, func()) {
+	return newTestRouterForIdentity(t, authn.Identity{
+		UserID: "test-admin", Role: authn.RoleAdmin, Synthetic: true,
+	})
+}
+
+func newTestRouterForIdentity(t *testing.T, identity authn.Identity) (*gin.Engine, func()) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -37,6 +45,10 @@ func newTestRouter(t *testing.T) (*gin.Engine, func()) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, identity)
+		c.Next()
+	})
 	RegisterRoutes(router, ctrl, log)
 
 	cleanup := func() {
@@ -110,5 +122,20 @@ func TestHTTPCreatePrompt_BuiltinName_Returns409(t *testing.T) {
 	})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHTTPCreatePrompt_AllowsValidContentWithJSONEnvelope(t *testing.T) {
+	router, cleanup := newTestRouter(t)
+	defer cleanup()
+
+	// JSON syntax and escaping make a valid one-megabyte field larger than the
+	// field limit. The request cap must allow the complete envelope through to
+	// service-level validation.
+	rec := postJSON(t, router, "/api/v1/prompts", map[string]string{
+		"name": "large", "content": strings.Repeat("x", (1<<20)-32),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body %s", rec.Code, rec.Body.String())
 	}
 }

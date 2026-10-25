@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/bitbucket-plugin/spec.md
+spec: docs/specs/integrations/requirements/bitbucket-plugin.md
 created: 2026-07-31
 status: in_progress
 ---

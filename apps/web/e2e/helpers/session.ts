@@ -1,7 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
-import { SessionPage } from "../pages/session-page";
+import type { SessionPage } from "../pages/session-page";
+import type { AppState } from "../../lib/state/store";
+import type { StoreApi } from "zustand";
+import { pollUntil } from "./poll-until";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const FAILED_STATES = ["FAILED", "CANCELLED"];
@@ -23,18 +26,18 @@ export async function waitForLatestSessionDone(
   message: string,
   timeout = 120_000,
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        if (sessions.length < expectedCount) return false;
-        // API returns sessions newest-first.
-        const latest = sessions[0];
-        return sessionDoneOrThrow(latest);
-      },
-      { timeout, message },
-    )
-    .toBe(true);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      if (sessions.length < expectedCount) return false;
+      // API returns sessions newest-first.
+      const latest = sessions[0];
+      return sessionDoneOrThrow(latest);
+    },
+    (done) => done,
+    timeout,
+    message,
+  );
 }
 
 export async function waitForSessionDone(
@@ -44,16 +47,94 @@ export async function waitForSessionDone(
   message: string,
   timeout = 120_000,
 ): Promise<void> {
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      const session = sessions.find((s) => s.id === sessionId);
+      return sessionDoneOrThrow(session);
+    },
+    (done) => done,
+    timeout,
+    message,
+  );
+}
+
+export async function waitForWorkspacePath(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  timeout = 30_000,
+): Promise<string> {
+  return pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      const session = sessions.find((candidate) => candidate.id === sessionId);
+      return session?.workspace_path ?? session?.worktree_path ?? "";
+    },
+    (workspacePath) => workspacePath.length > 0,
+    timeout,
+    "Waiting for task workspace path",
+  );
+}
+
+export async function waitForWorkspaceFile(
+  apiClient: ApiClient,
+  sessionId: string,
+  filePath: string,
+  timeout = 30_000,
+): Promise<void> {
   await expect
     .poll(
       async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        const session = sessions.find((s) => s.id === sessionId);
-        return sessionDoneOrThrow(session);
+        try {
+          const response = await apiClient.wsRequest<{
+            root?: { children?: Array<{ path?: string }> } | null;
+          }>("workspace.tree.get", { session_id: sessionId, path: "", depth: 1 });
+          return response.root?.children?.some((child) => child.path === filePath) ?? false;
+        } catch {
+          return false;
+        }
       },
-      { timeout, message },
+      { timeout, message: `Waiting for ${filePath} in the task workspace` },
     )
     .toBe(true);
+}
+
+export async function waitForAgentMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  content: string,
+  timeout = 60_000,
+): Promise<void> {
+  await pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.some(
+        (message) => message.author_type === "agent" && message.content.includes(content),
+      );
+    },
+    (found) => found,
+    timeout,
+    `Waiting for agent message containing ${JSON.stringify(content)}`,
+  );
+}
+
+/** Cancellation is persisted before runtime teardown makes the workspace restorable. */
+export async function waitForRestorableSessionWorkspace(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      () => apiClient.wsRequest("task.session.status", { task_id: taskId, session_id: sessionId }),
+      { timeout: 30_000, message: "Waiting for stopped runtime teardown before workspace restore" },
+    )
+    .toMatchObject({
+      is_agent_running: false,
+      needs_workspace_restore: true,
+      auto_resume_allowed: true,
+    });
 }
 
 export async function waitForSessionState(
@@ -66,15 +147,37 @@ export async function waitForSessionState(
     timeout?: number;
   },
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(options.taskId);
-        return sessions.find((session) => session.id === options.sessionId)?.state ?? null;
-      },
-      { timeout: options.timeout ?? 120_000, message: options.message },
-    )
-    .toBe(options.expectedState);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(options.taskId);
+      return sessions.find((session) => session.id === options.sessionId)?.state ?? null;
+    },
+    (state) => state === options.expectedState,
+    options.timeout ?? 120_000,
+    options.message,
+  );
+}
+
+export async function waitForArchiveCancelledSession(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  message: string,
+  timeout = 30_000,
+): Promise<void> {
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      const session = sessions.find((candidate) => candidate.id === sessionId);
+      return {
+        state: session?.state ?? null,
+        errorMessage: session?.error_message ?? null,
+      };
+    },
+    (result) => result.state === "CANCELLED" && result.errorMessage === "task tree archived",
+    timeout,
+    message,
+  );
 }
 
 export async function waitForSessionEnvironment(
@@ -87,21 +190,22 @@ export async function waitForSessionEnvironment(
     timeout?: number;
   },
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(options.taskId);
-        const session = sessions.find((s) => s.id === options.sessionId);
-        return session?.task_environment_id ?? "";
-      },
-      { timeout: options.timeout ?? 60_000, message: options.message },
-    )
-    .toBe(options.expectedEnvironmentId);
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(options.taskId);
+      const session = sessions.find((s) => s.id === options.sessionId);
+      return session?.task_environment_id ?? "";
+    },
+    (environmentId) => environmentId === options.expectedEnvironmentId,
+    options.timeout ?? 60_000,
+    options.message,
+  );
 }
 
 export async function openTaskSession(page: Page, taskId: string): Promise<SessionPage> {
+  const { SessionPage: SessionPageClass } = await import("../pages/session-page");
   await page.goto(`/t/${taskId}`);
-  const session = new SessionPage(page);
+  const session = new SessionPageClass(page);
   await session.waitForLoad();
   return session;
 }
@@ -129,8 +233,35 @@ export async function seedIdleSession(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  await waitForAgentMessage(apiClient, task.session_id, "simple mock response", 30_000);
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the initial fixture turn to finish",
+    30_000,
+  );
   const session = await openTaskSession(testPage, task.id);
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.composerReady();
   return session;
+}
+
+export async function waitForSessionGitHydration(page: Page, sessionId: string) {
+  // Initial commit discovery can activate Changes. Select Files after both Git reads settle.
+  await expect
+    .poll(() =>
+      page.evaluate((sessionId) => {
+        const state = (
+          window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
+        ).__KANDEV_E2E_STORE__.getState();
+        const env = state.environmentIdBySessionId[sessionId] ?? sessionId;
+        return (
+          state.gitStatus.byEnvironmentRepo[env] !== undefined &&
+          state.sessionCommits.byEnvironmentId[env] !== undefined &&
+          state.sessionCommits.loading[env] !== true
+        );
+      }, sessionId),
+    )
+    .toBe(true);
 }

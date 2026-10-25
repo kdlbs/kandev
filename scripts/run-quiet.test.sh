@@ -27,6 +27,36 @@ printf '%s\n' 'goleak: Errors on successful test run: found unexpected goroutine
 EOF
 chmod +x "$TMP_DIR/success-with-go-failure"
 
+summary_output="$(KANDEV_RUN_QUIET_DIR="$TMP_DIR" "$SCRIPT" e2e --summary -- bash -c 'printf "\033[32m  12 passed (2.0s)\033[0m\n  3 skipped\n  1 flaky\n"')"
+grep -q '^exit=0 log=' <<<"$summary_output" || fail "E2E summary preserves exit and log path"
+for counts in '12 passed' '3 skipped' '1 flaky'; do
+  grep -q "$counts" <<<"$summary_output" || fail "E2E summary preserves $counts"
+done
+[[ "$(wc -l <<<"$summary_output" | tr -d ' ')" == 4 ]] || fail "E2E summary stays bounded"
+pass "optional E2E summary reports counts including flaky results"
+
+missing_summary="$(KANDEV_RUN_QUIET_DIR="$TMP_DIR" "$SCRIPT" playwright --summary -- bash -c 'printf "build complete\n"')"
+grep -q '^summary=unavailable$' <<<"$missing_summary" || fail "missing E2E summary cannot imply zero failures"
+pass "missing E2E summary is explicit"
+
+if summary_failure="$(KANDEV_RUN_QUIET_DIR="$TMP_DIR" "$SCRIPT" e2e --summary -- bash -c 'printf "Error: assertion failed\n"; exit 7')"; then
+  fail "E2E summary must preserve a failing exit code"
+else
+  summary_rc=$?
+  [[ "$summary_rc" == 7 ]] || fail "E2E summary changed the underlying exit code"
+  grep -q 'Error: assertion failed' <<<"$summary_failure" || fail "E2E summary hides failure context"
+fi
+pass "optional E2E summary preserves failure context and exit code"
+
+default_e2e="$(KANDEV_RUN_QUIET_DIR="$TMP_DIR" "$SCRIPT" e2e -- bash -c 'printf "12 passed (2.0s)\n"')"
+[[ "$(wc -l <<<"$default_e2e" | tr -d ' ')" == 1 ]] || fail "default E2E output must remain one line"
+pass "E2E counts are opt-in"
+
+if "$SCRIPT" ordinary --summary -- bash -c 'exit 0' >/dev/null 2>&1; then
+  fail "E2E summary must reject unsupported tags"
+fi
+pass "E2E summaries reject unsupported tags"
+
 for tag in gh-run ci gh-run-view; do
   gh_output="$("$SCRIPT" "$tag" -- "$TMP_DIR/success-with-go-failure")"
   if grep -q '"Action":"fail"' <<<"$gh_output" && grep -q -- '--- FAIL: TestLeaky' <<<"$gh_output" && grep -q 'goleak:' <<<"$gh_output"; then

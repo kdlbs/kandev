@@ -3,6 +3,12 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
 
+const isMacTauriWebview = vi.hoisted(() => vi.fn(() => false));
+vi.mock("@/lib/desktop/window-chrome", () => ({
+  isMacTauriWebview,
+  macTauriDragRegionProps: () => (isMacTauriWebview() ? { "data-tauri-drag-region": "deep" } : {}),
+}));
+
 const setWorkspacePickerOpen = vi.fn();
 
 const state = {
@@ -14,6 +20,7 @@ const state = {
     ],
   },
   features: { office: true },
+  userSettings: { startupPage: "task_overview" },
   appSidebar: { workspacePickerOpen: false },
   setWorkspacePickerOpen,
 };
@@ -53,6 +60,7 @@ function renderHeader(collapsed = false) {
 
 describe("AppSidebarHeader", () => {
   beforeEach(() => {
+    isMacTauriWebview.mockReturnValue(false);
     state.workspaces.activeId = "kanban-1";
     state.appSidebar.workspacePickerOpen = false;
     setWorkspacePickerOpen.mockClear();
@@ -94,4 +102,38 @@ describe("AppSidebarHeader", () => {
 
     expect(setWorkspacePickerOpen).toHaveBeenCalledWith(false);
   });
+
+  it("marks the expanded header as a native drag region on macOS Tauri", () => {
+    isMacTauriWebview.mockReturnValue(true);
+
+    renderHeader();
+
+    const header = screen.getByTestId("app-sidebar-header");
+    expect(header.getAttribute("data-tauri-drag-region")).toBe("deep");
+    expect(header.getAttribute("data-sidebar-header-collapsed")).toBe("false");
+  });
+
+  it("keeps the collapsed brand and expand control below the native controls", () => {
+    isMacTauriWebview.mockReturnValue(true);
+
+    renderHeader(true);
+
+    const header = screen.getByTestId("app-sidebar-header");
+    expect(header.getAttribute("data-sidebar-header-collapsed")).toBe("true");
+    expect(header.getAttribute("data-tauri-drag-region")).toBe("deep");
+  });
+});
+
+it("offers permanent expansion while displaying the hover-revealed workspace picker", () => {
+  const toggle = vi.fn();
+  render(
+    <TooltipProvider>
+      <WorkspaceScopeProvider>
+        <AppSidebarHeader collapsed={false} hoverRevealed onToggleCollapse={toggle} />
+      </WorkspaceScopeProvider>
+    </TooltipProvider>,
+  );
+  expect(screen.getByTestId("workspace-picker")).toBeTruthy();
+  screen.getByRole("button", { name: "Expand sidebar" }).click();
+  expect(toggle).toHaveBeenCalledOnce();
 });

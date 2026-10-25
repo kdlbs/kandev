@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/dev-preview-title-prefixes/spec.md
+spec: docs/specs/platform/requirements/dev-preview-title-prefixes.md
 created: 2026-08-09
 status: complete
 ---

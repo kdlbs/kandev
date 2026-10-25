@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-wire-editor-availability"]
 plan: "plan.md"
-spec: "../../specs/ui/embedded-vscode-executor-availability.md"
+spec: "../../specs/ui/requirements/embedded-vscode-executor-availability.md"
 ---
 
 # Task 03: Prove Executor-Specific Behavior

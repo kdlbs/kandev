@@ -1,6 +1,6 @@
 # Plan: No Silent Model Fallback
 
-**Spec**: `docs/specs/no-silent-model-fallback/spec.md`
+**Spec**: `docs/specs/agents/requirements/no-silent-model-fallback.md`
 **Status**: implemented (all tasks done, gate green; PR pending)
 **Date**: 2026-08-04
 

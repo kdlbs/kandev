@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/quick-chat-elevation.md"
+spec: "../../specs/ui/requirements/quick-chat-elevation.md"
 ---
 
 # Task 01: Add Quick Chat elevation
@@ -50,7 +50,7 @@ be verified together.
 
 ## Inputs
 
-- `docs/specs/ui/quick-chat-elevation.md`
+- `docs/specs/ui/requirements/quick-chat-elevation.md`
 - `docs/plans/quick-chat-elevation/plan.md`
 - `apps/web/AGENTS.md`
 - `.agents/skills/tdd/SKILL.md`

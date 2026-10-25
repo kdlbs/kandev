@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import type { Window as HappyDOMWindow } from "happy-dom";
 import { loadPlugins, unloadPlugin } from "./host";
 import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
@@ -29,6 +28,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     pluginId,
     React: {} as PluginHostApi["React"],
     jsx: {} as PluginHostApi["jsx"],
+    conversation: {} as PluginHostApi["conversation"],
     store,
     context: buildPluginContextApi(store),
     api: {
@@ -143,10 +143,6 @@ describe("loadPlugins — bundle lifecycle", () => {
   afterEach(cleanupBasePluginLoads);
 
   it("injects styleUrls as <link> elements before importing the bundle", async () => {
-    // happy-dom eagerly loads real <link rel="stylesheet"> hrefs over the network;
-    // disable that for this test so it doesn't attempt (and 404-log) a real fetch.
-    const happyDOMWindow = window as unknown as HappyDOMWindow;
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
     const importer = fakeImporterFor({
       [BUNDLE_JS_URL]: (win) =>
         (win as unknown as FakeWindow).registerKandevPlugin("plugin-style-a", {
@@ -168,7 +164,6 @@ describe("loadPlugins — bundle lifecycle", () => {
 
     const link = document.head.querySelector("link[href='/plugin-a.css']");
     expect(link).not.toBeNull();
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
   });
 
   it("isolates a throwing plugin: logs and does not stop other plugins from loading", async () => {
@@ -201,9 +196,13 @@ describe("loadPlugins — bundle lifecycle", () => {
     errorSpy.mockRestore();
   });
 
-  it("keeps registrations made before an initialize failure (spec.md:816)", async () => {
+  it("discards a failed generation without publishing partial registrations", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const pluginId = "plugin-partial-initialize";
+    const observedNavIds: string[][] = [];
+    const unsubscribe = pluginRegistry.subscribe(() => {
+      observedNavIds.push(pluginRegistry.getNavItems().map((item) => item.id));
+    });
     const importer = fakeImporterFor({
       "/partial-bundle.js": (win) =>
         (win as unknown as FakeWindow).registerKandevPlugin(pluginId, {
@@ -220,12 +219,12 @@ describe("loadPlugins — bundle lifecycle", () => {
       importer,
     );
 
-    expect(pluginRegistry.getNavItems()).toContainEqual({
-      id: "partial-nav",
-      label: "Partial",
-      path: "/partial",
-    });
-    pluginRegistry.unregisterPlugin(pluginId);
+    expect(pluginRegistry.getNavItems()).not.toContainEqual(
+      expect.objectContaining({ id: "partial-nav" }),
+    );
+    expect(observedNavIds.every((ids) => !ids.includes("partial-nav"))).toBe(true);
+    expect(pluginRegistry.getPluginLifecycle(pluginId)?.status).toBe("failed");
+    unsubscribe();
     errorSpy.mockRestore();
   });
 
@@ -253,8 +252,6 @@ describe("loadPlugins — asset URL prefixing", () => {
 
   it("prefixes a root-relative bundleUrl and style href with the backend apiBaseUrl when set (split-origin dev, Tauri)", async () => {
     mockApiBaseUrl = "http://localhost:38429";
-    const happyDOMWindow = window as unknown as HappyDOMWindow;
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
     const importedUrls: string[] = [];
     const importer = async (url: string) => {
       importedUrls.push(url);
@@ -279,7 +276,6 @@ describe("loadPlugins — asset URL prefixing", () => {
       "link[href='http://localhost:38429/api/plugins/plugin-prefix-a/ui/style.css']",
     );
     expect(link).not.toBeNull();
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
   });
 
   it("leaves a root-relative bundleUrl unprefixed when apiBaseUrl is empty (same-origin production)", async () => {
@@ -368,8 +364,6 @@ describe("unloadPlugin", () => {
   });
 
   it("removes the plugin's injected <link> stylesheet tags so disable/enable cycles don't accumulate duplicates", async () => {
-    const happyDOMWindow = window as unknown as HappyDOMWindow;
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
     const importer = fakeImporterFor({
       [BUNDLE_JS_URL]: (win) =>
         (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_UNLOAD_STYLE_A_ID, {
@@ -392,7 +386,6 @@ describe("unloadPlugin", () => {
     unloadPlugin(PLUGIN_UNLOAD_STYLE_A_ID);
 
     expect(document.head.querySelector("link[href='/plugin-unload-style-a.css']")).toBeNull();
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
   });
 });
 
@@ -534,7 +527,7 @@ describe("generation fence forwards every registry method, not just the slot one
   });
 });
 
-describe("overlapping loads for the same plugin: newest-initiated load wins", () => {
+describe("same-plugin loads serialize bundle registration and fence initialization", () => {
   const PLUGIN_CONC_A_ID = "plugin-conc-a";
   const PLUGIN_CONC_B_ID = "plugin-conc-b";
   const SLOT = "chat-input-actions";
@@ -560,7 +553,7 @@ describe("overlapping loads for the same plugin: newest-initiated load wins", ()
     const NewWidget = () => null;
     const oldImportGate = deferred();
 
-    // The older boot import resolves only after the gate — i.e. last.
+    // The older import parks on the gate.
     const oldImporter = async (_url: string) => {
       await oldImportGate.promise;
       registerFake(PLUGIN_CONC_A_ID, {
@@ -575,22 +568,17 @@ describe("overlapping loads for the same plugin: newest-initiated load wins", ()
       return {};
     };
 
-    // Older load starts first (claims the earlier generation) but parks on its
-    // import; the newer load then runs to completion.
+    // Same-plugin registration is serialized so each global callback has one
+    // unambiguous staging owner.
     const oldLoad = loadPlugins(
       [activePlugin({ id: PLUGIN_CONC_A_ID })],
       makeHostFactory,
       oldImporter,
     );
-    await loadPlugins([activePlugin({ id: PLUGIN_CONC_A_ID })], makeHostFactory, newImporter);
-    expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
-    expect(pluginRegistry.getPluginLifecycle(PLUGIN_CONC_A_ID)?.status).toBe("ready");
-
-    // The stale import finally resolves — it must bail before touching the
-    // registry, leaving the newer registration intact (no unregister, no OldWidget).
     oldImportGate.resolve();
     await oldLoad;
-
+    unloadPlugin(PLUGIN_CONC_A_ID, { evictCache: true });
+    await loadPlugins([activePlugin({ id: PLUGIN_CONC_A_ID })], makeHostFactory, newImporter);
     expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
     expect(pluginRegistry.getPluginLifecycle(PLUGIN_CONC_A_ID)?.status).toBe("ready");
   });

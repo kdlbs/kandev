@@ -1,9 +1,8 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconBolt, IconListDetails } from "@tabler/icons-react";
+import { IconBolt, IconListDetails, IconLoader2 } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import {
   STATE_DOT_CLASS,
@@ -12,10 +11,13 @@ import {
 } from "@/components/runs/automation-rows";
 import type { AutomationRow } from "@/components/runs/automation-rows";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
+import { useLiveRefresh } from "@/components/runs/use-live-refresh";
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { usePathname } from "@/lib/routing/client-router";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useNow } from "@/hooks/use-now";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
   APP_SIDEBAR_SECTION_IDS,
@@ -26,27 +28,21 @@ import { AppSidebarSection } from "../app-sidebar-section";
 
 const NEW_AUTOMATION_HREF = "/settings/automations";
 
-/**
- * The full list, reachable from the section header. These rows carry a name and
- * a dot; the list page adds the next firing and what each one last said, which
- * is more than a sidebar row should try to hold.
- */
-function OpenListShortcut() {
+function OpenAutomationsLink({ active }: { active: boolean }) {
   const { t } = useTranslation();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Link
-          href={AUTOMATIONS_HREF}
-          aria-label={t("automations:openAutomations")}
-          data-testid="automations-all-runs"
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
-        >
-          <IconListDetails className="h-3.5 w-3.5" />
-        </Link>
-      </TooltipTrigger>
-      <TooltipContent side="right">{t("automations:openAutomations")}</TooltipContent>
-    </Tooltip>
+    <Link
+      href={AUTOMATIONS_HREF}
+      aria-current={active ? "page" : undefined}
+      data-testid="automations-all-runs"
+      className={cn(
+        "flex min-h-8 items-center gap-2.5 px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-11 text-[13px] font-medium rounded-md cursor-pointer",
+        active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
+      )}
+    >
+      <IconListDetails className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="flex-1 truncate">{t("automations:openAutomations")}</span>
+    </Link>
   );
 }
 
@@ -78,10 +74,18 @@ function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolea
         active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
       )}
     >
-      <span
-        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[state])}
-        aria-hidden="true"
-      />
+      {state === "running" ? (
+        <IconLoader2
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500"
+          aria-hidden="true"
+          data-testid={`sidebar-automation-running-${automation.id}`}
+        />
+      ) : (
+        <span
+          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[state])}
+          aria-hidden="true"
+        />
+      )}
       {/* The dot is decorative, so the state reaches a screen reader here. */}
       <span className="sr-only">{`${t(STATE_LABEL_KEY[state])}.`}</span>
       <span className="min-w-0 flex-1 truncate">{automation.name}</span>
@@ -118,6 +122,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { isMobile } = useResponsiveBreakpoint();
   // Folded until asked for. Automations are a background concern — they run
   // whether or not anyone is looking — so they should not push the tasks
   // someone came here to work on off the bottom of the rail.
@@ -130,21 +135,30 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   // has to say how many it is hiding — a section that starts shut and shows
   // nothing reads as empty, and nobody opens it. Health summaries are the
   // heavier read and buy nothing until the rows themselves are on screen.
-  const showing = !collapsed && expanded;
-  const listScope = collapsed ? undefined : (workspaceId ?? undefined);
+  const showing = !collapsed && expanded && !isMobile;
+  const listScope = collapsed || isMobile ? undefined : (workspaceId ?? undefined);
   const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
-  const { automations } = useWorkspaceAutomations(listScope);
-  const { summaries } = useAutomationSummaries(summaryScope);
+  const {
+    automations,
+    loading: definitionsLoading,
+    refresh: refreshDefinitions,
+  } = useWorkspaceAutomations(listScope, {
+    active: !isMobile,
+  });
+  const canRefreshDefinitions = Boolean(listScope) && !definitionsLoading;
+  useLiveRefresh(canRefreshDefinitions, refreshDefinitions);
+  useForegroundRefresh(refreshDefinitions, canRefreshDefinitions, listScope);
+  const { summaries, refresh } = useAutomationSummaries(summaryScope);
+  useLiveRefresh(showing, refresh);
   const rows = buildAutomationRows(automations, summaries);
 
   return (
     <AppSidebarSection
+      presentation="navigation"
       id={APP_SIDEBAR_SECTION_IDS.automations}
       label={t("automations:automations")}
       collapsed={collapsed}
       icon={IconBolt}
-      headerAction={<OpenListShortcut />}
-      headerActionVisibility="always"
       defaultExpanded={false}
       collapsedSummary={rows.length > 0 ? rows.length : undefined}
     >
@@ -159,6 +173,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
           />
         ))
       )}
+      <OpenAutomationsLink active={pathname === AUTOMATIONS_HREF} />
     </AppSidebarSection>
   );
 }

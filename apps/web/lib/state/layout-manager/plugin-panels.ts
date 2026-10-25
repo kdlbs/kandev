@@ -7,6 +7,10 @@
  * (rather than one per plugin) and lets a saved layout round-trip even when
  * the plugin that registered the panel is no longer installed.
  */
+import type { i18n as I18n } from "i18next";
+import { i18n } from "@/lib/i18n";
+import { pluginTranslationNamespace } from "@/lib/plugins/plugin-translations";
+import type { PluginTaskPanelRegistration } from "@/lib/plugins/registry-registration-types";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { KNOWN_PANEL_IDS, STRUCTURAL_COMPONENTS } from "./constants";
 import type { LayoutPanel } from "./types";
@@ -60,6 +64,23 @@ export function isStructuralComponent(component: string): boolean {
   return STRUCTURAL_COMPONENTS.has(component) || component === PLUGIN_PANEL_COMPONENT;
 }
 
+/** Resolves plugin-owned copy in its generation namespace with a saved-layout-safe fallback. */
+export function resolveTaskPanelTitle(
+  registration: PluginTaskPanelRegistration,
+  translator: Pick<I18n, "t"> = i18n,
+): string {
+  if (!registration.titleKey) return registration.title;
+  return translator.t(registration.titleKey, {
+    ns: pluginTranslationNamespace(registration.pluginId),
+    defaultValue: registration.title,
+  });
+}
+export function canonicalPluginPanelTitle(id: string): string | undefined {
+  const parsed = parsePluginPanelId(id);
+  if (!parsed) return undefined;
+  return pluginRegistry.getTaskPanel(parsed.pluginId, parsed.panelKey)?.title;
+}
+
 /**
  * Resolves a `plugin:<pluginId>:<panelKey>` id to a full `LayoutPanel`
  * definition using the plugin's current registration (title/icon), or
@@ -74,7 +95,7 @@ export function resolvePluginPanelDefinition(id: string): LayoutPanel | undefine
   return {
     id,
     component: PLUGIN_PANEL_COMPONENT,
-    title: registration.title,
+    title: resolveTaskPanelTitle(registration),
     tabComponent: PLUGIN_PANEL_TAB_COMPONENT,
     params: { pluginId: parsed.pluginId, panelKey: parsed.panelKey },
   };

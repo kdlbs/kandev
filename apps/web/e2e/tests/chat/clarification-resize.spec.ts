@@ -23,8 +23,6 @@ function seedTaskAndWaitForIdle(
 }
 
 test.describe("Mock agent clarification slash commands", () => {
-  test.describe.configure({ retries: 1 });
-
   // Smoke test that the /ask-single alias routes to the clarification scenario.
   // The underlying clarification behaviour (option click, multi-question carousel,
   // submit, etc.) is exhaustively covered by clarification.spec.ts — this only

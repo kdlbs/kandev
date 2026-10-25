@@ -102,4 +102,18 @@ describe("settings menu shape", () => {
     // And the row set is unique: one page, one row.
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
+
+  it("exposes Data & Logs and Storage as direct System destinations", () => {
+    const system = SETTINGS_MENU_SECTIONS.find((section) => section.id === "system");
+
+    expect(system?.items.map((item) => item.href)).toEqual([
+      "/settings/system/status",
+      "/settings/system/data-storage",
+      "/settings/system/storage",
+      "/settings/system/feature-toggles",
+      "/settings/system/updates",
+      "/settings/system/about",
+    ]);
+    expect(system?.items[2]?.labelKey).toBe("system:storageTitle");
+  });
 });

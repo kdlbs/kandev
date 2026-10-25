@@ -39,11 +39,7 @@ function ActionError({ message }: { message: string }) {
 function NewWatchButton({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation();
   return (
-    <Button
-      size="sm"
-      onClick={onClick}
-      className="min-h-11 w-full cursor-pointer sm:min-h-8 sm:w-auto"
-    >
+    <Button onClick={onClick} className="w-full cursor-pointer sm:w-auto">
       <IconPlus className="mr-1 h-4 w-4" />
       {t("gitlab:newWatch")}
     </Button>

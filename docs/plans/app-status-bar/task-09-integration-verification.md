@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-Tasks 01–08; [feature spec](../../specs/ui/app-status-bar.md); task reports and changed-file map.
+Tasks 01–08; [feature spec](../../specs/ui/requirements/app-status-bar.md); task reports and changed-file map.
 
 ## Files
 

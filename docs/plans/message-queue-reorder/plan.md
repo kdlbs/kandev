@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-queue-reorder.md
+spec: docs/specs/ui/requirements/message-queue-reorder.md
 created: 2026-08-07
 status: draft
 ---

@@ -137,7 +137,7 @@ func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+	if _, _, err := svc.TriggerPRSyncAllPermanentWithOptions(ctx, "t1", false); err != nil {
 		t.Fatalf("first TriggerPRSyncAll: %v", err)
 	}
 	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
@@ -145,7 +145,7 @@ func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
 	}
 
 	// Second sync immediately after — well within PRSyncFreshnessWindow.
-	if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+	if _, _, err := svc.TriggerPRSyncAllPermanentWithOptions(ctx, "t1", false); err != nil {
 		t.Fatalf("second TriggerPRSyncAll: %v", err)
 	}
 	if got := mockClient.FindPRByBranchCallCount(); got != 1 {

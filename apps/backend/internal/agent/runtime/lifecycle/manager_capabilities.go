@@ -17,3 +17,9 @@ func (m *Manager) ShouldApplyPreferredShell(executorType string) bool {
 	}
 	return backend.ShouldApplyPreferredShell()
 }
+
+// SupportsRepositoryCheckoutOptions advertises only managed preparation paths.
+func (m *Manager) SupportsRepositoryCheckoutOptions(executorType, prepareScript string) (bool, bool) {
+	supported := (executorType == "worktree" || executorType == "local_docker") && (prepareScript == "" || prepareScript == DefaultPrepareScript(executorType))
+	return supported, supported
+}

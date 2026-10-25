@@ -1,0 +1,371 @@
+[
+  {
+    "route": "/?workflowId=journey-workflow-0",
+    "run": 0,
+    "ms": 372.04244267195463,
+    "html_bytes": 2994471,
+    "boot_bytes": 2993184,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "kanban",
+      "kanbanMulti",
+      "needsYouInboxBoot",
+      "quickChat",
+      "repositories",
+      "repositoryBranchPolicies",
+      "repositorySets",
+      "userSettings",
+      "workflows",
+      "workspaces"
+    ],
+    "detail_session": null,
+    "board_tasks": 495,
+    "snapshot_tasks": 1000,
+    "detail_session_rows": 0,
+    "message_rows": 0,
+    "turn_rows": 0
+  },
+  {
+    "route": "/?workflowId=journey-workflow-0",
+    "run": 1,
+    "ms": 180.26605062186718,
+    "html_bytes": 2994471,
+    "boot_bytes": 2993184,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "kanban",
+      "kanbanMulti",
+      "needsYouInboxBoot",
+      "quickChat",
+      "repositories",
+      "repositoryBranchPolicies",
+      "repositorySets",
+      "userSettings",
+      "workflows",
+      "workspaces"
+    ],
+    "detail_session": null,
+    "board_tasks": 495,
+    "snapshot_tasks": 1000,
+    "detail_session_rows": 0,
+    "message_rows": 0,
+    "turn_rows": 0
+  },
+  {
+    "route": "/?workflowId=journey-workflow-0",
+    "run": 2,
+    "ms": 184.60611905902624,
+    "html_bytes": 2994471,
+    "boot_bytes": 2993184,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "kanban",
+      "kanbanMulti",
+      "needsYouInboxBoot",
+      "quickChat",
+      "repositories",
+      "repositoryBranchPolicies",
+      "repositorySets",
+      "userSettings",
+      "workflows",
+      "workspaces"
+    ],
+    "detail_session": null,
+    "board_tasks": 495,
+    "snapshot_tasks": 1000,
+    "detail_session_rows": 0,
+    "message_rows": 0,
+    "turn_rows": 0
+  },
+  {
+    "route": "/tasks/journey-task-0000",
+    "run": 0,
+    "ms": 107.95554891228676,
+    "html_bytes": 2107914,
+    "boot_bytes": 2106627,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0000-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 1,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0000",
+    "run": 1,
+    "ms": 113.14165126532316,
+    "html_bytes": 2107914,
+    "boot_bytes": 2106627,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0000-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 1,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0000",
+    "run": 2,
+    "ms": 110.45171041041613,
+    "html_bytes": 2107914,
+    "boot_bytes": 2106627,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0000-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 1,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0001",
+    "run": 0,
+    "ms": 121.79969903081656,
+    "html_bytes": 2174386,
+    "boot_bytes": 2173099,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0001-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 8,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0001",
+    "run": 1,
+    "ms": 112.58470546454191,
+    "html_bytes": 2174386,
+    "boot_bytes": 2173099,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0001-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 8,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0001",
+    "run": 2,
+    "ms": 112.88867052644491,
+    "html_bytes": 2174386,
+    "boot_bytes": 2173099,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0001-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 8,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0001?sessionId=journey-task-0001-session-3",
+    "run": 0,
+    "ms": 122.94976785779,
+    "html_bytes": 2174386,
+    "boot_bytes": 2173099,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0001-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 8,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0001?sessionId=journey-task-0001-session-3",
+    "run": 1,
+    "ms": 132.04102218151093,
+    "html_bytes": 2174386,
+    "boot_bytes": 2173099,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0001-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 8,
+    "message_rows": 50,
+    "turn_rows": 200
+  },
+  {
+    "route": "/tasks/journey-task-0001?sessionId=journey-task-0001-session-3",
+    "run": 2,
+    "ms": 172.65770304948092,
+    "html_bytes": 2174386,
+    "boot_bytes": 2173099,
+    "boot_keys": [
+      "version",
+      "route",
+      "runtime",
+      "initialState",
+      "routeData",
+      "interimSettingsInterlockToken"
+    ],
+    "state_keys": [
+      "agentProfileRecentUse",
+      "agentRuntime",
+      "auth",
+      "features",
+      "needsYouInboxBoot",
+      "quickChat"
+    ],
+    "detail_session": "journey-task-0001-session-0",
+    "board_tasks": 495,
+    "snapshot_tasks": 495,
+    "detail_session_rows": 8,
+    "message_rows": 50,
+    "turn_rows": 200
+  }
+]

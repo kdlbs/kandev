@@ -6,7 +6,7 @@ wave: 13
 depends_on:
   - "20-role-aware-automation-controls"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 21: Composer tray PR events badge
@@ -83,7 +83,7 @@ one focused vertical slice.
 ## Inputs
 
 - Spec: `What`, the lifecycle badge and narrow-tray `Scenarios`, and `Out of
-scope` in `../../specs/ui/ci-pr-automation.md`.
+scope` in `../../specs/ui/requirements/ci-pr-automation.md`.
 - Plan: `Composer tray automation summary`, `Tests`, `E2E Tests`, and `Risks`
   in `plan.md`.
 - Patterns: `AutomationFlagBadges`, `automationForPR`, and

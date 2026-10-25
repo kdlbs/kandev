@@ -64,6 +64,7 @@ function renderWithStore(initialState: Partial<AppState>, ui: ReactNode) {
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "demo",
@@ -142,7 +143,9 @@ function makeCIPrState(roundCount: number, exhausted = false) {
     auto_fix_exhausted_at: exhausted ? "2026-06-18T11:00:00Z" : null,
     last_merge_signature: "",
     last_merge_attempt_at: null,
+    last_merge_result: "" as const,
     last_error: exhausted ? "CI auto-fix paused after 10 rounds for this PR" : null,
+    last_error_kind: "",
     created_at: "2026-06-18T10:00:00Z",
     updated_at: "2026-06-18T10:00:00Z",
   };
@@ -221,13 +224,20 @@ describe("PRStatusChip auto-fix round display", () => {
     const [explanation] = await screen.findAllByTestId(ROUND_EXPLANATION_TESTID);
     expect(explanation.textContent).toContain("Auto-fix has used 1 of 10 rounds");
     expect(explanation.textContent).toContain(
-      "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+      "Kandev waits for all PR checks before starting the next fix",
+    );
+    expect(explanation.textContent).toContain("Updating a queued message uses no extra round");
+    expect(explanation.textContent).toContain(
+      "auto-fix pauses once no queued message remains to update",
     );
     expect(explanation.textContent).toContain(
-      "Updating an already queued auto-fix message does not use another round",
+      "If the agent reports no outcome, Kandev may retry the same feedback",
     );
     expect(explanation.textContent).toContain(
-      "pauses auto-fix for this PR so it cannot loop forever",
+      "After the agent makes a change, Kandev waits for GitHub to update before retrying",
+    );
+    expect(explanation.textContent).toContain(
+      "Feedback marked blocked or requiring no action is not retried while unchanged",
     );
   });
 
@@ -246,7 +256,10 @@ describe("PRStatusChip auto-fix round display", () => {
     const explanation = await screen.findByTestId(ROUND_EXPLANATION_TESTID);
     expect(explanation.textContent).toContain("Auto-fix has used 2 of 10 rounds");
     expect(explanation.textContent).toContain(
-      "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+      "Kandev waits for all PR checks before starting the next fix",
+    );
+    expect(explanation.textContent).toContain(
+      "If the agent reports no outcome, Kandev may retry the same feedback",
     );
   });
 });

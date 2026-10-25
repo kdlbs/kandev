@@ -3,6 +3,8 @@ package state
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -80,6 +82,60 @@ func TestStoreSetUpsertsOnRepeatedWrite(t *testing.T) {
 	}
 }
 
+// TestStoreClaimIsAtomicAcrossConnections is QA contract coverage for the
+// occurrence-key primitive. Two backend connections sharing one database must
+// not both win the same claim.
+func TestStoreClaimIsAtomicAcrossConnections(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "plugin-state.db") + "?_busy_timeout=5000&_journal_mode=WAL"
+	stores := make([]*Store, 2)
+	for i := range stores {
+		conn, err := sqlx.Open("sqlite3", dsn)
+		if err != nil {
+			t.Fatalf("open connection %d: %v", i, err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		stores[i], err = NewStore(db.NewPool(conn, conn))
+		if err != nil {
+			t.Fatalf("new store %d: %v", i, err)
+		}
+	}
+
+	start := make(chan struct{})
+	claimed := make([]bool, len(stores))
+	errs := make([]error, len(stores))
+	var wg sync.WaitGroup
+	for i, store := range stores {
+		wg.Add(1)
+		go func(index int, candidate *Store) {
+			defer wg.Done()
+			<-start
+			claimed[index], errs[index] = candidate.Claim(
+				context.Background(),
+				"kandev-plugin-coordinator",
+				"agent_conversation_occurrence",
+				"workspace/conversation",
+				"wake:cycle",
+				json.RawMessage(`{"claimed":true}`),
+			)
+		}(i, store)
+	}
+	close(start)
+	wg.Wait()
+
+	winners := 0
+	for i := range stores {
+		if errs[i] != nil {
+			t.Fatalf("claim %d: %v", i, errs[i])
+		}
+		if claimed[i] {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("winning claims = %d, want 1 (%v)", winners, claimed)
+	}
+}
+
 // TestStoreInstanceScopeUpsertsWithEmptyScopeID pins scope_id NULL handling
 // for instance-scoped state (scope_id == ""). SQLite's UNIQUE index treats
 // each NULL as distinct, so a naive INSERT ... ON CONFLICT with a literal
@@ -135,7 +191,7 @@ func TestStoreDeleteRemovesEntry(t *testing.T) {
 }
 
 // TestStoreDeleteAllRemovesEveryRowForPlugin pins the Uninstall cleanup
-// contract (docs/specs/plugins/spec.md "plugin_state"): a plugin's entire
+// contract (docs/specs/plugins/requirements/plugins.md "plugin_state"): a plugin's entire
 // state footprint — across every scope and scope_id — must be removable in
 // one call, so a reinstalled or id-reused plugin never inherits stale state.
 func TestStoreDeleteAllRemovesEveryRowForPlugin(t *testing.T) {
@@ -248,7 +304,7 @@ func TestStoreListReturnsOnlyMatchingScope(t *testing.T) {
 }
 
 // TestStorePluginsCannotReadEachOthersState pins the spec invariant that
-// plugin state is always filtered by plugin_id (docs/specs/plugins/spec.md
+// plugin state is always filtered by plugin_id (docs/specs/plugins/requirements/plugins.md
 // "Plugins cannot read others' state").
 func TestStorePluginsCannotReadEachOthersState(t *testing.T) {
 	store := newTestStore(t)

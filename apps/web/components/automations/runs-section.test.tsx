@@ -12,6 +12,8 @@ const RUN_ARCHIVED = "run-archived";
 const RUN_CANCELLED = "run-cancelled";
 const ARCHIVED = "Archived";
 const CANCELLED = "Cancelled";
+const RUN_OUTCOME = "run-outcome";
+const RUN_OUTCOME_REASON = "run-outcome-reason";
 
 const mockPush = vi.fn();
 vi.mock("@/lib/routing/client-router", () => ({
@@ -43,6 +45,7 @@ type RunsSectionHook = {
   refresh: () => void;
   deleteRun: (id: string) => void;
   deleteAllRuns: (runIds?: string[]) => void;
+  stopRun: (id: string) => Promise<void>;
 };
 
 function setup(
@@ -56,6 +59,7 @@ function setup(
     refresh: vi.fn(),
     deleteRun: vi.fn(),
     deleteAllRuns: vi.fn(),
+    stopRun: vi.fn(),
     ...overrides,
   });
   const view = render(<RunsSection automationId="auto-1" workspaceId="ws-1" />);
@@ -99,6 +103,25 @@ describe("RunsSection status badges", () => {
     expect(badgeOf(RUN_ARCHIVED)).toBe(ARCHIVED);
     expect(badgeOf(RUN_CANCELLED)).toBe(CANCELLED);
   });
+  it("shows the scheduled retry badge and lets users stop it", () => {
+    const stopRun = vi.fn().mockResolvedValue(undefined);
+    setup(
+      [
+        mkRun({
+          id: "run-retry",
+          status: "scheduled_retry",
+          retry_state: "scheduled",
+          retry_scheduled_at: "2026-01-01T00:05:00Z",
+          attempt_number: 2,
+        }),
+      ],
+      { stopRun },
+    );
+
+    expect(badgeOf("run-retry")).toBe("Retry scheduled");
+    fireEvent.click(screen.getByTestId("stop-retry"));
+    expect(stopRun).toHaveBeenCalledWith("run-retry");
+  });
 });
 
 describe("RunsSection run log", () => {
@@ -114,7 +137,7 @@ describe("RunsSection run log", () => {
 
     fireEvent.click(screen.getByTestId("run-row-run-x"));
 
-    expect(mockPush).toHaveBeenCalledWith("/tasks/task-hidden");
+    expect(mockPush).toHaveBeenCalledWith("/t/task-hidden");
   });
 
   it("does not link a run that never produced a task", () => {
@@ -130,7 +153,24 @@ describe("RunsSection run log", () => {
       mkRun({ id: "run-s", status: "succeeded", summary: "Sweep complete across all 32 specs." }),
     ]);
 
-    expect(screen.getByTestId("run-outcome").textContent).toContain("Sweep complete");
+    expect(screen.getByTestId(RUN_OUTCOME).textContent).toContain("Sweep complete");
+  });
+
+  it("shows delivery acceptance separately from the eventual conversation outcome", () => {
+    setup([
+      mkRun({
+        id: "run-managed-accepted",
+        task_id: "",
+        status: "triggered",
+        delivery_status: "accepted",
+      }),
+    ]);
+
+    expect(screen.getByTestId("run-delivery-status").textContent).toBe("Accepted");
+    expect(
+      screen.getByTestId("run-row-run-managed-accepted").querySelector("[data-slot='badge']")
+        ?.textContent,
+    ).toContain("Triggered");
   });
 
   it("prefers the error over the summary when a run failed", () => {
@@ -143,7 +183,7 @@ describe("RunsSection run log", () => {
       }),
     ]);
 
-    expect(screen.getByTestId("run-outcome").textContent).toContain("max_concurrent_runs=1");
+    expect(screen.getByTestId(RUN_OUTCOME).textContent).toContain("max_concurrent_runs=1");
   });
 
   it("can filter down to skipped runs, which are otherwise silent", () => {
@@ -163,6 +203,92 @@ describe("RunsSection run log", () => {
 
     expect(screen.queryByTestId("run-filter-failed")).toBeNull();
     expect(screen.getByTestId("run-filter-succeeded")).toBeTruthy();
+  });
+  it("treats triggered and task-created runs as Running", () => {
+    const deleteAllRuns = vi.fn();
+    setup(
+      [
+        mkRun({ id: "run-triggered", status: "triggered" }),
+        mkRun({ id: "run-task-created", status: "task_created" }),
+        mkRun({ id: "run-succeeded", status: "succeeded" }),
+      ],
+      { deleteAllRuns },
+    );
+
+    const runningFilter = screen.getByTestId("run-filter-task_created");
+    expect(runningFilter.textContent).toContain("2");
+    fireEvent.click(runningFilter);
+
+    expect(screen.getByTestId("run-row-run-triggered")).toBeTruthy();
+    expect(screen.getByTestId("run-row-run-task-created")).toBeTruthy();
+    expect(screen.queryByTestId("run-row-run-succeeded")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("delete-all-runs"));
+    fireEvent.click(screen.getByTestId("delete-all-runs-confirm"));
+    expect(deleteAllRuns).toHaveBeenCalledWith(["run-triggered", "run-task-created"]);
+  });
+});
+
+describe("RunsSection outcome reason suffix", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("appends no suffix when a run has an error and no disposition reasons", () => {
+    setup([mkRun({ id: "run-err", status: "failed", error_message: "dispatch failed" })]);
+
+    expect(screen.getByTestId(RUN_OUTCOME).textContent).toContain("dispatch failed");
+    expect(screen.queryByTestId(RUN_OUTCOME_REASON)).toBeNull();
+  });
+
+  it("appends the repository reason as a muted suffix after the summary", () => {
+    setup([
+      mkRun({
+        id: "run-repo",
+        status: "triggered",
+        summary: "Alert admitted",
+        repository_reason: "repository_none_configured",
+      }),
+    ]);
+
+    const outcome = screen.getByTestId(RUN_OUTCOME);
+    expect(outcome.textContent).toContain("Alert admitted");
+    const reason = screen.getByTestId(RUN_OUTCOME_REASON);
+    expect(reason.textContent).toContain("No repository is configured for this automation");
+  });
+
+  it("renders the repository reason before the dedup reason when both are present", () => {
+    setup([
+      mkRun({
+        id: "run-both",
+        status: "triggered",
+        summary: "Alert admitted",
+        repository_reason: "repository_none_configured",
+        dedup_reason: "dedup_unresolved",
+      }),
+    ]);
+
+    const reason = screen.getByTestId(RUN_OUTCOME_REASON).textContent ?? "";
+    const repoIndex = reason.indexOf("No repository is configured for this automation");
+    const dedupIndex = reason.indexOf("Duplicate check did not resolve a value for this delivery");
+    expect(repoIndex).toBeGreaterThanOrEqual(0);
+    expect(dedupIndex).toBeGreaterThan(repoIndex);
+  });
+
+  it("never renders dedup_not_configured, leaving a bare dash with no stray separator", () => {
+    setup([
+      mkRun({
+        id: "run-not-configured",
+        status: "triggered",
+        summary: "",
+        error_message: "",
+        dedup_reason: "dedup_not_configured",
+      }),
+    ]);
+
+    expect(screen.getByTestId(RUN_OUTCOME).textContent).toBe("-");
+    expect(screen.queryByTestId(RUN_OUTCOME_REASON)).toBeNull();
   });
 });
 

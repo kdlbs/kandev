@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetSessionMetadataKeyIfStampIsAtomicAndPreservesOtherKeys(t *testing.T) {
@@ -87,4 +88,152 @@ func TestRemoveSessionMetadataKeyIfStampDoesNotEraseNewerError(t *testing.T) {
 	if !removed {
 		t.Fatal("current stamp did not remove the session error")
 	}
+}
+
+func TestCommitBootstrapFailureIfCurrentExecutionGuardsStateExecutionAndStamp(t *testing.T) {
+	tests := []struct {
+		name          string
+		seedError     *models.LastAgentError
+		expectedStamp string
+		seedExecution string
+		commitExec    string
+		expectedState models.TaskSessionState
+		wantChanged   bool
+	}{
+		{
+			name:          "absent error",
+			seedExecution: "exec-current",
+			commitExec:    "exec-current",
+			expectedState: models.TaskSessionStateStarting,
+			wantChanged:   true,
+		},
+		{
+			name:          "unchanged stamp",
+			seedError:     &models.LastAgentError{Message: "old", OccurredAt: time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC), StampValue: "old-stamp"},
+			expectedStamp: "old-stamp",
+			seedExecution: "exec-current",
+			commitExec:    "exec-current",
+			expectedState: models.TaskSessionStateStarting,
+			wantChanged:   true,
+		},
+		{
+			name:          "successor execution",
+			seedExecution: "exec-successor",
+			commitExec:    "exec-old",
+			expectedState: models.TaskSessionStateStarting,
+			wantChanged:   false,
+		},
+		{
+			name:          "state changed",
+			seedExecution: "exec-current",
+			commitExec:    "exec-current",
+			expectedState: models.TaskSessionStateRunning,
+			wantChanged:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			seedForMsgTest(t, repo, "task-bootstrap-atomic", "session-bootstrap-atomic", "turn-bootstrap-atomic")
+			ctx := context.Background()
+			if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE task_sessions SET state = ?, metadata = ? WHERE id = ?`),
+				string(models.TaskSessionStateStarting), `{}`, "session-bootstrap-atomic"); err != nil {
+				t.Fatalf("seed session state: %v", err)
+			}
+			if tt.seedError != nil {
+				if err := repo.SetSessionMetadataKey(ctx, "session-bootstrap-atomic", models.SessionMetaKeyLastAgentError, *tt.seedError); err != nil {
+					t.Fatalf("seed session error: %v", err)
+				}
+			}
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: "session-bootstrap-atomic", SessionID: "session-bootstrap-atomic", TaskID: "task-bootstrap-atomic",
+				AgentExecutionID: tt.seedExecution,
+			}); err != nil {
+				t.Fatalf("seed execution: %v", err)
+			}
+
+			changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
+				ctx,
+				"task-bootstrap-atomic",
+				"session-bootstrap-atomic",
+				tt.commitExec,
+				tt.expectedState,
+				tt.expectedStamp,
+				models.LastAgentError{Message: "new", OccurredAt: time.Date(2026, 9, 11, 11, 0, 0, 0, time.UTC), StampValue: "new-stamp"},
+			)
+			if err != nil {
+				t.Fatalf("commit bootstrap failure: %v", err)
+			}
+			if changed != tt.wantChanged {
+				t.Fatalf("changed = %t, want %t", changed, tt.wantChanged)
+			}
+			session, err := repo.GetTaskSession(ctx, "session-bootstrap-atomic")
+			if err != nil {
+				t.Fatalf("load session: %v", err)
+			}
+			if tt.wantChanged {
+				if session.State != models.TaskSessionStateFailed || session.ErrorMessage != "new" {
+					t.Fatalf("committed session = %+v, want FAILED/new", session)
+				}
+				value, ok := models.LoadLastAgentError(session.Metadata)
+				if !ok || value.Stamp() != "new-stamp" {
+					t.Fatalf("committed error = %+v, found=%t", value, ok)
+				}
+				return
+			}
+			if session.State != models.TaskSessionStateStarting {
+				t.Fatalf("rejected session state = %q, want STARTING", session.State)
+			}
+			if value, ok := models.LoadLastAgentError(session.Metadata); ok && value.Stamp() == "new-stamp" {
+				t.Fatal("rejected bootstrap failure replaced session error")
+			}
+		})
+	}
+}
+
+func TestCommitBootstrapFailureIfCurrentAttemptRejectsSameExecutionRetry(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-bootstrap-attempt", "session-bootstrap-attempt", "turn-bootstrap-attempt")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-bootstrap-attempt", models.TaskSessionStateStarting, ""))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "runtime-bootstrap-attempt", SessionID: "session-bootstrap-attempt", TaskID: "task-bootstrap-attempt",
+		AgentExecutionID: "execution-shared",
+	}))
+	oldAttempt, err := repo.GetTaskSession(ctx, "session-bootstrap-attempt")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, oldAttempt.ID, map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID: "attempt-old",
+	}))
+
+	// A retry can keep the same executor identity and STARTING state while it
+	// replaces the persisted start-attempt identity.
+	newAttempt, err := repo.GetTaskSession(ctx, oldAttempt.ID)
+	require.NoError(t, err)
+	newAttempt.ErrorMessage = "new start attempt owns this session"
+	require.NoError(t, repo.UpdateTaskSession(ctx, newAttempt))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, newAttempt.ID, map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID: "attempt-new",
+	}))
+
+	changed, _, err := repo.CommitBootstrapFailureIfCurrentAttempt(
+		ctx,
+		"task-bootstrap-attempt",
+		"session-bootstrap-attempt",
+		"execution-shared",
+		models.TaskSessionStateStarting,
+		"",
+		"attempt-old",
+		models.LastAgentError{Message: "stale attempt failed", StampValue: "stale-attempt"},
+	)
+	require.NoError(t, err)
+	require.False(t, changed, "execution equality must not admit a stale same-execution failure")
+
+	stored, err := repo.GetTaskSession(ctx, oldAttempt.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, stored.State)
+	require.Equal(t, "new start attempt owns this session", stored.ErrorMessage)
+	_, found := models.LoadLastAgentError(stored.Metadata)
+	require.False(t, found, "stale attempt must not persist its failure projection")
 }

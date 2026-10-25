@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   IconChevronRight,
   IconChevronDown,
@@ -8,6 +9,7 @@ import {
   IconFolderOpen,
   IconRefresh,
   IconDotsVertical,
+  IconTrash,
 } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -18,13 +20,18 @@ import {
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
+import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import type { FileBrowserRow } from "./file-browser-hooks";
+import { labelFileBrowserPath } from "./file-browser-repository-labels";
+import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
+import { measureFileTreeElement, observeFileTreeRect } from "./file-tree-measurement";
 import { InlineFileInput } from "./inline-file-input";
-import { renderSessionOrLoadState } from "./file-browser-load-state";
 import {
   FileContextMenu,
+  useFileDeleteAction,
   useFileRename,
   TreeNodeName,
   getGitStatusTextClass,
@@ -40,33 +47,9 @@ export {
 
 type GitFileStatus = FileInfo["status"] | undefined;
 
-type TreeNodeRowProps = {
-  row: FileBrowserRow;
-  activeFolderPath: string;
-  activeFilePath?: string | null;
-  visibleLoadingPaths: Set<string>;
-  fileStatuses: Map<string, GitFileStatus>;
-  tree: FileTreeNode | null;
-  onToggleExpand: (node: FileTreeNode) => void;
-  onOpenFile: (path: string) => void;
-  onDeleteFile?: (path: string) => Promise<boolean>;
-  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
-  onDownloadFile?: (path: string) => Promise<boolean>;
-  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
-  isSelectedFn?: (path: string) => boolean;
-  onSelect?: (path: string, e: React.MouseEvent) => boolean;
-  isDragging?: boolean;
-  dragOverPath?: string | null;
-  onDragStart?: (path: string, e: React.DragEvent) => void;
-  onDragEnd?: () => void;
-  onDragOver?: (path: string, e: React.DragEvent) => void;
-  onDragLeave?: (e: React.DragEvent) => void;
-  onDrop?: (targetPath: string, e: React.DragEvent) => void;
-  selectedCount?: number;
-  selectedPaths?: Set<string>;
-  showTouchActions?: boolean;
-  onAddToChatContext?: (node: FileTreeNode) => void;
-};
+export function shouldShowFileTreeTouchActions(isMobile: boolean, isFinePointer: boolean) {
+  return isMobile || !isFinePointer;
+}
 
 function treeNodePaddingLeft(depth: number, isDir: boolean): string {
   return `${depth * 12 + 8 + (isDir ? 0 : 20)}px`;
@@ -82,6 +65,16 @@ function handleTreeNodeClick(
     return;
   }
   onOpenFile(node.path);
+}
+
+function handleFileTreeRowClick(
+  event: React.MouseEvent,
+  node: FileTreeNode,
+  handlers: Pick<TreeNodeRowProps, "onSelect" | "onToggleExpand" | "onOpenFile">,
+) {
+  if (event.button === 2) return;
+  const consumed = handlers.onSelect?.(node.path, event);
+  if (!consumed) handleTreeNodeClick(node, handlers.onToggleExpand, handlers.onOpenFile);
 }
 
 /** Expand/collapse chevron for directory nodes. */
@@ -108,6 +101,7 @@ function TreeNodeFileIcon({
   isExpanded: boolean;
   isActive: boolean;
 }) {
+  if (node.is_symlink) return <SymlinkIndicator isSymlink />;
   if (node.is_dir) {
     return isExpanded ? (
       <IconFolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
@@ -151,8 +145,10 @@ export function FileTreeNodeTouchActions({
   showTouchActions?: boolean;
   onAddToChatContext?: (node: FileTreeNode) => void;
 }) {
-  const { t } = useTranslation("chat");
-  if (!showTouchActions || !onAddToChatContext) return null;
+  const { t } = useTranslation();
+  const deleteAction = useFileDeleteAction();
+  const deletePendingRef = React.useRef(false);
+  if (!showTouchActions || (!onAddToChatContext && !deleteAction)) return null;
 
   const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
 
@@ -160,11 +156,12 @@ export function FileTreeNodeTouchActions({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
+          ref={deleteAction?.triggerRef}
           type="button"
           data-testid="file-tree-node-actions"
           data-path={node.path}
           aria-label={t("chat:fileTreeActions")}
-          className="ml-auto flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+          className="absolute top-1/2 right-0 z-10 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
           onPointerDown={stopRowInteraction}
           onMouseDown={stopRowInteraction}
           onClick={stopRowInteraction}
@@ -177,29 +174,52 @@ export function FileTreeNodeTouchActions({
         align="end"
         data-testid="file-tree-touch-menu"
         onClick={stopRowInteraction}
+        onCloseAutoFocus={(event) => {
+          if (!deletePendingRef.current) return;
+          event.preventDefault();
+          deletePendingRef.current = false;
+          deleteAction?.onDelete();
+        }}
       >
-        <DropdownMenuItem
-          data-testid="file-tree-touch-add-to-chat"
-          className="min-h-11 cursor-pointer"
-          onSelect={() => onAddToChatContext(node)}
-        >
-          {t("chat:addToChatContext")}
-        </DropdownMenuItem>
+        {onAddToChatContext && (
+          <DropdownMenuItem
+            data-testid="file-tree-touch-add-to-chat"
+            className="min-h-11 cursor-pointer"
+            onSelect={() => onAddToChatContext(node)}
+          >
+            {t("chat:addToChatContext")}
+          </DropdownMenuItem>
+        )}
+        {deleteAction && (
+          <DropdownMenuItem
+            data-testid="file-tree-touch-delete"
+            variant="destructive"
+            className="min-h-11 cursor-pointer"
+            onSelect={() => {
+              if (!deleteAction.isBulk) deletePendingRef.current = true;
+              else deleteAction.onDelete();
+            }}
+          >
+            <IconTrash className="h-3.5 w-3.5" />
+            {deleteAction.isBulk
+              ? t("task:deleteItemsLabel", { count: deleteAction.selectedCount })
+              : t("task:delete")}
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-export function TreeNodeItem(props: TreeNodeRowProps) {
+export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowProps) {
   const { row, activeFolderPath, activeFilePath, visibleLoadingPaths } = props;
   const {
     fileStatuses,
     tree,
-    onToggleExpand,
-    onOpenFile,
     onDeleteFile,
     onRenameFile,
     onDownloadFile,
+    onUploadFilesHere,
     setTree,
     showTouchActions,
     onAddToChatContext,
@@ -210,21 +230,17 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
   const isActive = !node.is_dir && activeFilePath === node.path;
   const isActiveFolder = node.is_dir && activeFolderPath === node.path;
   const gitStatus = node.is_dir ? undefined : fileStatuses.get(node.path);
-  const rename = useFileRename(node, tree, setTree, onRenameFile);
+  const rename = useFileRename(node, tree, setTree, onRenameFile, props.treeRef);
   const isSelected = props.isSelectedFn?.(node.path) ?? false;
   const isDropTarget = node.is_dir && props.dragOverPath === node.path;
+  const rowAnchorRef = React.useRef<HTMLDivElement>(null);
 
-  const handleClick = (e: React.MouseEvent) => {
-    if (e.button === 2) return;
-    const consumed = props.onSelect?.(node.path, e);
-    if (!consumed) {
-      handleTreeNodeClick(node, onToggleExpand, onOpenFile);
-    }
-  };
+  const handleClick = (event: React.MouseEvent) => handleFileTreeRowClick(event, node, props);
 
   // Inline the row JSX so ContextMenuTrigger asChild can attach directly to the DOM div
   const rowContent = (
     <div
+      ref={rowAnchorRef}
       data-testid="file-tree-node"
       data-path={node.path}
       data-is-dir={node.is_dir ? "true" : "false"}
@@ -232,12 +248,10 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       data-selected={isSelected ? "true" : "false"}
       aria-selected={isSelected}
       role="treeitem"
-      className={getTreeNodeRowClass(
-        isActive,
-        isActiveFolder,
-        isSelected,
-        props.isDragging,
-        isDropTarget,
+      className={cn(
+        getTreeNodeRowClass(isActive, isActiveFolder, isSelected, props.isDragging, isDropTarget),
+        showTouchActions &&
+          "relative min-h-11 pr-11 has-[[data-testid=file-delete-inline-confirmation]]:flex-wrap has-[[data-testid=file-delete-inline-confirmation]]:pr-2",
       )}
       style={{ paddingLeft: treeNodePaddingLeft(row.depth, node.is_dir) }}
       onClick={handleClick}
@@ -261,7 +275,13 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
         </span>
       )}
       <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
-      <TreeNodeName node={node} isActive={isActive} gitStatus={gitStatus} rename={rename} />
+      <TreeNodeName
+        node={node}
+        displayName={row.displayName}
+        isActive={isActive}
+        gitStatus={gitStatus}
+        rename={rename}
+      />
       <FileTreeNodeTouchActions
         node={node}
         showTouchActions={showTouchActions}
@@ -274,22 +294,26 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
     <FileContextMenu
       node={node}
       tree={tree}
+      treeRef={props.treeRef}
       setTree={setTree}
       onDeleteFile={onDeleteFile}
       onRenameFile={onRenameFile}
       onDownloadFile={onDownloadFile}
+      onUploadFilesHere={onUploadFilesHere}
       onStartRename={rename.handleStartRename}
       onAddToChatContext={onAddToChatContext}
       selectedCount={props.selectedCount}
       selectedPaths={props.selectedPaths}
+      anchorRef={rowAnchorRef}
     >
       {rowContent}
     </FileContextMenu>
   );
-}
+}, areTreeNodeRowPropsEqual);
 
 type SearchResultsListProps = {
   searchResults: string[] | null;
+  repositoryDisplayLabels?: Record<string, string>;
   fileStatuses: Map<string, GitFileStatus>;
   onOpenFile: (path: string) => void;
   showTouchActions?: boolean;
@@ -307,6 +331,7 @@ function searchResultNode(path: string): FileTreeNode {
 
 export function SearchResultsList({
   searchResults,
+  repositoryDisplayLabels = {},
   fileStatuses,
   onOpenFile,
   showTouchActions,
@@ -327,6 +352,7 @@ export function SearchResultsList({
         const node = searchResultNode(path);
         const name = node.name;
         const folder = path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : "";
+        const displayFolder = labelFileBrowserPath(folder, repositoryDisplayLabels);
         const gitStatus = fileStatuses.get(path);
         const row = (
           <div
@@ -335,6 +361,7 @@ export function SearchResultsList({
             className={cn(
               "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
               "hover:bg-muted",
+              showTouchActions && "relative min-h-11 pr-11",
             )}
             onClick={() => onOpenFile(path)}
           >
@@ -346,11 +373,11 @@ export function SearchResultsList({
             />
             <span
               className={cn(
-                "truncate group-hover:text-foreground",
+                "min-w-0 flex-1 truncate group-hover:text-foreground",
                 getGitStatusTextClass(gitStatus) || "text-muted-foreground",
               )}
             >
-              {folder && <span>{folder}/</span>}
+              {displayFolder && <span>{displayFolder}/</span>}
               <span>{name}</span>
             </span>
             <FileTreeNodeTouchActions
@@ -380,9 +407,11 @@ export function SearchResultsList({
 
 export { FileBrowserToolbar } from "./file-browser-toolbar";
 
-type FileBrowserContentAreaProps = {
+export type FileBrowserContentAreaProps = {
+  sessionId?: string;
   isSearchActive: boolean;
   searchResults: string[] | null;
+  repositoryDisplayLabels?: Record<string, string>;
   isSessionFailed: boolean;
   sessionError?: string | null;
   loadState: string;
@@ -392,6 +421,8 @@ type FileBrowserContentAreaProps = {
   creatingInPath: string | null;
   fileStatuses: Map<string, GitFileStatus>;
   visibleRows: FileBrowserRow[];
+  scrollViewportRef?: React.RefObject<HTMLDivElement | null>;
+  treeRef?: React.RefObject<FileTreeNode | null>;
   activeFolderPath: string;
   activeFilePath?: string | null;
   visibleLoadingPaths: Set<string>;
@@ -400,9 +431,13 @@ type FileBrowserContentAreaProps = {
   onDeleteFile?: (path: string) => Promise<boolean>;
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
+  onUploadFilesHere?: (path: string) => void;
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   onRetry: () => void;
+  workspaceRestoration?: WorkspaceRestorationAttempt | null;
+  onRestoreWorkspace?: () => void;
+  restoreWorkspaceDisabled?: boolean;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   isSelectedFn?: (path: string) => boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
@@ -419,19 +454,26 @@ type FileBrowserContentAreaProps = {
   onAddToChatContext?: (node: FileTreeNode) => void;
 };
 
-function rowToItemProps(props: FileBrowserContentAreaProps, row: FileBrowserRow): TreeNodeRowProps {
+function rowToItemProps(
+  props: FileBrowserContentAreaProps,
+  row: FileBrowserRow,
+  treeRef: React.RefObject<FileTreeNode | null> | undefined = props.treeRef,
+): TreeNodeRowProps {
+  const repositoryLabel = props.repositoryDisplayLabels?.[row.path];
   return {
-    row,
+    row: repositoryLabel ? { ...row, displayName: repositoryLabel } : row,
     activeFolderPath: props.activeFolderPath,
     activeFilePath: props.activeFilePath,
     visibleLoadingPaths: props.visibleLoadingPaths,
     fileStatuses: props.fileStatuses,
     tree: props.tree,
+    treeRef,
     onToggleExpand: props.onToggleExpand,
     onOpenFile: props.onOpenFile,
     onDeleteFile: props.onDeleteFile,
     onRenameFile: props.onRenameFile,
     onDownloadFile: props.onDownloadFile,
+    onUploadFilesHere: props.onUploadFilesHere,
     setTree: props.setTree,
     isSelectedFn: props.isSelectedFn,
     onSelect: props.onSelect,
@@ -449,57 +491,117 @@ function rowToItemProps(props: FileBrowserContentAreaProps, row: FileBrowserRow)
   };
 }
 
-function FileTreeView(props: FileBrowserContentAreaProps) {
-  const { tree, visibleRows, creatingInPath, onCreateFileSubmit, onCancelCreate } = props;
-  if (!tree) return null;
-  return (
-    <div className="pb-2">
-      {creatingInPath === "" && (
-        <InlineFileInput
-          depth={0}
-          onSubmit={(name) => onCreateFileSubmit("", name)}
-          onCancel={onCancelCreate}
-        />
-      )}
-      {visibleRows.map((row) => (
-        <React.Fragment key={row.path}>
-          <TreeNodeItem {...rowToItemProps(props, row)} />
-          {creatingInPath === row.path && row.isDir && row.isExpanded && (
-            <InlineFileInput
-              depth={row.depth + 1}
-              onSubmit={(name) => onCreateFileSubmit(row.path, name)}
-              onCancel={onCancelCreate}
-            />
-          )}
-        </React.Fragment>
-      ))}
-    </div>
-  );
+type FileTreeVirtualRow =
+  | { type: "node"; row: FileBrowserRow }
+  | { type: "create"; parentPath: string; depth: number };
+
+function scheduleVirtualRowReveal(reveal: () => void): () => void {
+  let settleFrame: number | null = null;
+  const frame = requestAnimationFrame(() => {
+    reveal();
+    settleFrame = requestAnimationFrame(reveal);
+  });
+  return () => {
+    cancelAnimationFrame(frame);
+    if (settleFrame !== null) cancelAnimationFrame(settleFrame);
+  };
 }
 
-export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
-  const { t } = useTranslation();
-  if (props.isSearchActive && props.searchResults !== null) {
-    return (
-      <SearchResultsList
-        searchResults={props.searchResults}
-        fileStatuses={props.fileStatuses}
-        onOpenFile={props.onOpenFile}
-        showTouchActions={props.showTouchActions}
-        onAddToChatContext={props.onAddToChatContext}
-      />
-    );
-  }
-  const loadStateResult = renderSessionOrLoadState({
-    isSessionFailed: props.isSessionFailed,
-    sessionError: props.sessionError,
-    loadState: props.loadState,
-    isLoadingTree: props.isLoadingTree,
-    tree: props.tree,
-    loadError: props.loadError,
-    onRetry: props.onRetry,
+export function FileTreeView(props: FileBrowserContentAreaProps) {
+  if (!props.tree) return null;
+  return <VirtualizedFileTreeView {...props} />;
+}
+
+function VirtualizedFileTreeView(props: FileBrowserContentAreaProps) {
+  const { tree, visibleRows, creatingInPath, onCreateFileSubmit, onCancelCreate } = props;
+  const internalScrollViewportRef = React.useRef<HTMLDivElement>(null);
+  const scrollViewportRef = props.scrollViewportRef ?? internalScrollViewportRef;
+  const treeRef = React.useRef(tree);
+  treeRef.current = tree;
+  const virtualRows = React.useMemo<FileTreeVirtualRow[]>(() => {
+    const rows: FileTreeVirtualRow[] = [];
+    if (creatingInPath === "") rows.push({ type: "create", parentPath: "", depth: 0 });
+    for (const row of visibleRows) {
+      rows.push({ type: "node", row });
+      if (creatingInPath === row.path && row.isDir && row.isExpanded) {
+        rows.push({ type: "create", parentPath: row.path, depth: row.depth + 1 });
+      }
+    }
+    return rows;
+  }, [creatingInPath, visibleRows]);
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: virtualRows.length,
+    getScrollElement: () => scrollViewportRef.current,
+    estimateSize: (index) => {
+      const row = virtualRows[index];
+      if (row?.type === "create") return 44;
+      return props.showTouchActions ? 48 : 28;
+    },
+    getItemKey: (index) => {
+      const row = virtualRows[index];
+      return row?.type === "create" ? `create:${row.parentPath}` : (row?.row.path ?? index);
+    },
+    measureElement: measureFileTreeElement,
+    observeElementRect: observeFileTreeRect,
+    overscan: 5,
   });
-  if (loadStateResult) return loadStateResult;
-  if (props.tree) return <FileTreeView {...props} />;
-  return <div className="p-4 text-sm text-muted-foreground">{t("task:noFilesFound")}</div>;
+
+  const revealedActiveFileRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (revealedActiveFileRef.current !== props.activeFilePath) {
+      revealedActiveFileRef.current = null;
+    }
+    if (!props.activeFilePath || revealedActiveFileRef.current === props.activeFilePath) return;
+    const index = virtualRows.findIndex(
+      (row) => row.type === "node" && row.row.path === props.activeFilePath,
+    );
+    if (index < 0) return;
+    revealedActiveFileRef.current = props.activeFilePath;
+    return scheduleVirtualRowReveal(() => virtualizer.scrollToIndex(index, { align: "auto" }));
+  }, [props.activeFilePath, virtualRows, virtualizer]);
+
+  const revealedCreatePathRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (revealedCreatePathRef.current !== creatingInPath) {
+      revealedCreatePathRef.current = null;
+    }
+    if (creatingInPath === null || revealedCreatePathRef.current === creatingInPath) return;
+    const index = virtualRows.findIndex(
+      (row) => row.type === "create" && row.parentPath === creatingInPath,
+    );
+    if (index < 0) return;
+    revealedCreatePathRef.current = creatingInPath;
+    return scheduleVirtualRowReveal(() => virtualizer.scrollToIndex(index, { align: "auto" }));
+  }, [creatingInPath, virtualRows, virtualizer]);
+
+  return (
+    <div
+      className="relative w-full min-w-0 max-w-full pb-2"
+      style={{ height: `${virtualizer.getTotalSize()}px` }}
+    >
+      {virtualizer.getVirtualItems().map((virtualItem) => {
+        const row = virtualRows[virtualItem.index];
+        if (!row) return null;
+        return (
+          <div
+            key={virtualItem.key}
+            ref={virtualizer.measureElement}
+            data-index={virtualItem.index}
+            className="absolute left-0 top-0 w-full"
+            style={{ transform: `translateY(${virtualItem.start}px)` }}
+          >
+            {row.type === "node" ? (
+              <TreeNodeItem {...rowToItemProps(props, row.row, treeRef)} />
+            ) : (
+              <InlineFileInput
+                depth={row.depth}
+                onSubmit={(name) => onCreateFileSubmit(row.parentPath, name)}
+                onCancel={onCancelCreate}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }

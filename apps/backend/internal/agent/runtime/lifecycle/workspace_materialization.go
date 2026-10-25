@@ -16,43 +16,93 @@ import (
 // prepared for a running remote workspace. It deliberately carries only a
 // credential-free locator; executor launch environments provide Git auth.
 type WorkspaceRepositoryMaterialization struct {
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	RepositoryURL           string
 	Destination             string
 	BaseBranch              string
 	CheckoutBranch          string
+	PRNumber                int
+	QualifiedPRBase         *models.PRBase
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
 }
 
 const workspaceMaterializationRollbackTimeout = 10 * time.Second
 
-func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceRepositoryMaterialization, error) {
+// remoteWorkspaceProjectionFromLaunch returns the repositories agentctl must
+// materialize. Executors with a prepare script establish the first repository at
+// the workspace root themselves; includePrimary asks for it too, for executors
+// that have none.
+func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest, includePrimary bool) ([]WorkspaceRepositoryMaterialization, error) {
 	if req == nil {
 		return nil, fmt.Errorf("launch request is required")
 	}
 	specs := req.RepoSpecs()
 	projection := make([]WorkspaceRepositoryMaterialization, 0, len(specs))
-	// The first durable repository is established at the workspace root by
-	// each remote executor's prepare path. Only sibling repositories belong in
-	// agentctl-managed workspace subdirectories.
 	for index, spec := range specs {
-		if index == 0 {
+		if index == 0 && !includePrimary {
 			continue
+		}
+		if index == 0 && spec.RepositoryURL == "" && len(req.Repositories) == 0 {
+			spec.RepositoryURL = getMetadataString(req.Metadata, "repository_clone_url")
 		}
 		if spec.RepositoryURL == "" {
 			return nil, fmt.Errorf("remote repository %q has no clone URL", spec.RepoName)
 		}
-		branch := spec.CheckoutBranch
-		if branch == "" {
-			branch = spec.BaseBranch
-		}
-		name, branchSlug := worktree.SanitizeRepoDirName(spec.RepoName), worktree.SanitizeBranchSlug(branch)
-		if name == "" || branchSlug == "" {
+		destination, err := remoteWorkspaceRepositoryDestination(spec)
+		if err != nil {
 			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
 		}
-		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution, ContributionDestination: spec.ContributionDestination})
+		projection = append(projection, WorkspaceRepositoryMaterialization{
+			RepositoryURL: spec.RepositoryURL, Destination: destination,
+			BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch,
+			PRNumber: spec.PRNumber, QualifiedPRBase: spec.QualifiedPRBase,
+			RemoteContribution: spec.RemoteContribution, CheckoutOptions: spec.CheckoutOptions,
+			ContributionDestination: spec.ContributionDestination,
+		})
 	}
 	return projection, nil
+}
+
+func remoteWorkspaceRepositoryDirectory(spec RepoLaunchSpec) string {
+	branch := spec.CheckoutBranch
+	if branch == "" {
+		branch = spec.BaseBranch
+	}
+	name, branchSlug := worktree.SanitizeRepoDirName(spec.RepoName), worktree.SanitizeBranchSlug(branch)
+	if name == "" || branchSlug == "" {
+		return ""
+	}
+	return name + "-" + branchSlug
+}
+
+func remoteWorkspaceRepositoryDestination(spec RepoLaunchSpec) (string, error) {
+	if destination := remoteWorkspaceRepositoryDirectory(spec); destination != "" {
+		return destination, nil
+	}
+	return "", fmt.Errorf("repository %q has no safe branch-scoped workspace directory", spec.RepoName)
+}
+
+func usesRemoteWorkspaceMaterialization(req *LaunchRequest) bool {
+	return req != nil && models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType))
+}
+
+// launchRepositoryProjectionKey returns the workspace key used by agentctl
+// for a repository in this launch. Remote executors materialize secondary
+// repositories in branch-scoped directories. Plugin executors also materialize
+// the primary repository there, while other remote executors keep the primary
+// checkout at the workspace root.
+func launchRepositoryProjectionKey(req *LaunchRequest, spec RepoLaunchSpec, index int) (string, error) {
+	if usesRemoteWorkspaceMaterialization(req) {
+		if req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0 {
+			return remoteWorkspaceRepositoryDestination(spec)
+		}
+		return "", nil
+	}
+	if index == 0 {
+		return "", nil
+	}
+	return baseBranchMetadataKey(spec), nil
 }
 
 type workspaceRepositoryClient interface {
@@ -71,6 +121,7 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 		return nil, err
 	}
 	clients := distinctWorkspaceRepositoryClients(executions)
+	defer releaseWorkspaceRepositoryClients(clients)
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("workspace execution has no agentctl client")
 	}
@@ -112,6 +163,7 @@ func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepos
 type workspaceRepositoryExecution struct {
 	sessionID   string
 	client      workspaceRepositoryClient
+	release     func()
 	sourceRoots []string
 }
 
@@ -121,7 +173,12 @@ func (m *Manager) liveWorkspaceExecutionsForEnvironment(ctx context.Context, tas
 	}
 	executions := make([]*AgentExecution, 0)
 	for _, execution := range m.executionStore.List() {
-		if execution != nil && execution.TaskEnvironmentID == taskEnvironmentID && execution.GetAgentCtlClient() != nil {
+		if execution == nil || execution.TaskEnvironmentID != taskEnvironmentID {
+			continue
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		releaseClient()
+		if client != nil {
 			executions = append(executions, execution)
 		}
 	}
@@ -130,7 +187,12 @@ func (m *Manager) liveWorkspaceExecutionsForEnvironment(ctx context.Context, tas
 		if err != nil {
 			return nil, fmt.Errorf("ensure workspace execution: %w", err)
 		}
-		if execution == nil || execution.GetAgentCtlClient() == nil {
+		if execution == nil {
+			return nil, fmt.Errorf("workspace execution has no agentctl client")
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		releaseClient()
+		if client == nil {
 			return nil, fmt.Errorf("workspace execution has no agentctl client")
 		}
 		executions = append(executions, execution)
@@ -143,21 +205,31 @@ func distinctWorkspaceRepositoryClients(executions []*AgentExecution) []workspac
 	clients := make([]workspaceRepositoryExecution, 0, len(executions))
 	seen := make(map[*agentctl.Client]struct{}, len(executions))
 	for _, execution := range executions {
-		client := execution.GetAgentCtlClient()
+		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			continue
 		}
 		if _, exists := seen[client]; exists {
+			releaseClient()
 			continue
 		}
 		seen[client] = struct{}{}
 		clients = append(clients, workspaceRepositoryExecution{
 			sessionID:   execution.SessionID,
 			client:      client,
+			release:     releaseClient,
 			sourceRoots: append([]string(nil), execution.WorkspaceSourceRoots...),
 		})
 	}
 	return clients
+}
+
+func releaseWorkspaceRepositoryClients(executions []workspaceRepositoryExecution) {
+	for _, execution := range executions {
+		if execution.release != nil {
+			execution.release()
+		}
+	}
 }
 
 func workspaceRepositorySessionIDs(executions []*AgentExecution) []string {
@@ -186,7 +258,10 @@ func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client w
 			Destination:             repository.Destination,
 			BaseBranch:              repository.BaseBranch,
 			CheckoutBranch:          repository.CheckoutBranch,
+			PRNumber:                repository.PRNumber,
+			QualifiedPRBase:         repository.QualifiedPRBase,
 			RemoteContribution:      repository.RemoteContribution,
+			CheckoutOptions:         repository.CheckoutOptions,
 			ContributionDestination: repository.ContributionDestination,
 		})
 		if err != nil {

@@ -39,7 +39,8 @@ export function WorkspaceSwitcher({
   }
 
   return (
-    <DropdownMenu>
+    // The task picker owns modality across workspace changes that unmount this menu.
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"

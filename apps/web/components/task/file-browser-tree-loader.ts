@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type React from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -7,7 +7,11 @@ import {
   completeRestoredTree,
   fetchRestoredTree,
   removeFailedExpansions,
+  mergeLoadedFolder,
 } from "./file-browser-restore";
+import { mergeTreeNodes } from "./file-tree-utils";
+import { readOwnedTree } from "./file-browser-tree-reader";
+import type { FileTreeCacheBinding } from "./file-browser-tree-cache";
 import type { LoadState } from "./file-browser-hooks";
 import { t } from "@/lib/i18n";
 
@@ -15,7 +19,12 @@ const debugLoad = createDebugLogger("file-browser:load");
 const MAX_RETRY_ATTEMPTS = 4;
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
 
-export type TreeLoadOwner = { sessionId: string; resetKey: string; generation: number };
+export type TreeLoadOwner = {
+  sessionId: string;
+  resetKey: string;
+  generation: number;
+  context?: object;
+};
 export type TreeLoaderContext = {
   sessionId: string;
   effectiveResetKey: string;
@@ -29,17 +38,33 @@ export type TreeLoaderContext = {
   setIsLoadingTree: React.Dispatch<React.SetStateAction<boolean>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
   setLoadError: React.Dispatch<React.SetStateAction<string | null>>;
+  cacheBinding?: FileTreeCacheBinding;
 };
 
 function logLoad(event: string, data: Record<string, unknown>) {
   if (isDebug()) debugLoad(event, data);
 }
 
-function useTreeLoadOwner(sessionId: string, resetKey: string) {
-  const ownerRef = useRef<TreeLoadOwner>({ sessionId, resetKey, generation: 0 });
-  if (ownerRef.current.sessionId !== sessionId || ownerRef.current.resetKey !== resetKey) {
-    ownerRef.current = { sessionId, resetKey, generation: ownerRef.current.generation + 1 };
+function useTreeLoadOwner(sessionId: string, resetKey: string, context?: object) {
+  const ownerRef = useRef<TreeLoadOwner>({ sessionId, resetKey, context, generation: 0 });
+  if (
+    ownerRef.current.sessionId !== sessionId ||
+    ownerRef.current.resetKey !== resetKey ||
+    ownerRef.current.context !== context
+  ) {
+    ownerRef.current = {
+      sessionId,
+      resetKey,
+      context,
+      generation: ownerRef.current.generation + 1,
+    };
   }
+  useEffect(
+    () => () => {
+      ownerRef.current = { ...ownerRef.current, generation: ownerRef.current.generation + 1 };
+    },
+    [],
+  );
   return ownerRef;
 }
 
@@ -91,26 +116,242 @@ function scheduleRetry({
   retryTimerRef.current = setTimeout(retry, delay);
 }
 
+function scheduleEmptyTreeRetry({
+  isCurrentLoad,
+  owner,
+  retryAttemptRef,
+  retryTimerRef,
+  clearRetryTimer,
+  setLoadState,
+  retry,
+}: {
+  isCurrentLoad: () => boolean;
+  owner: TreeLoadOwner;
+  retryAttemptRef: React.MutableRefObject<number>;
+  retryTimerRef: React.MutableRefObject<NodeJS.Timeout | null>;
+  clearRetryTimer: () => void;
+  setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
+  retry: () => void;
+}): boolean {
+  if (!isCurrentLoad()) return false;
+  if (retryAttemptRef.current >= MAX_RETRY_ATTEMPTS) {
+    logLoad("empty-loaded", { sessionId: owner.sessionId, attempts: retryAttemptRef.current });
+    return false;
+  }
+
+  const delay = RETRY_DELAYS_MS[Math.min(retryAttemptRef.current, RETRY_DELAYS_MS.length - 1)];
+  retryAttemptRef.current += 1;
+  setLoadState("waiting");
+  clearRetryTimer();
+  logLoad("empty-retry", {
+    sessionId: owner.sessionId,
+    attempt: retryAttemptRef.current,
+    delayMs: delay,
+  });
+  retryTimerRef.current = setTimeout(retry, delay);
+  return true;
+}
+
+type LoadTreeOptions = { resetRetry?: boolean; restoreExpandedPaths?: string[] };
+type RestoredTree = Awaited<ReturnType<typeof restoreTree>>;
+
+function applyCompletedTree({
+  completed,
+  isCurrentLoad,
+  owner,
+  retryAttemptRef,
+  retryTimerRef,
+  clearRetryTimer,
+  hasInitializedExpandedRef,
+  setTree,
+  setLoadState,
+  retry,
+}: {
+  completed: RestoredTree;
+  isCurrentLoad: () => boolean;
+  owner: TreeLoadOwner;
+  retryAttemptRef: React.MutableRefObject<number>;
+  retryTimerRef: React.MutableRefObject<NodeJS.Timeout | null>;
+  clearRetryTimer: () => void;
+  hasInitializedExpandedRef: React.MutableRefObject<string | null>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
+  retry: () => void;
+}): boolean {
+  if (!completed) return false;
+  // An executor workspace can briefly expose an existing root with no
+  // children while its repository is materializing. A null root is a valid
+  // empty workspace result and must settle immediately.
+  if (completed.root && (completed.root.children?.length ?? 0) === 0) {
+    const retryScheduled = scheduleEmptyTreeRetry({
+      isCurrentLoad,
+      owner,
+      retryAttemptRef,
+      retryTimerRef,
+      clearRetryTimer,
+      setLoadState,
+      retry,
+    });
+    if (retryScheduled) return false;
+  }
+
+  hasInitializedExpandedRef.current = owner.resetKey;
+  if (!completed.root?.children?.length) setTree(completed.tree);
+  setLoadState("loaded");
+  retryAttemptRef.current = 0;
+  clearRetryTimer();
+  logLoad("loaded", {
+    sessionId: owner.sessionId,
+    rootPath: completed.root?.path ?? null,
+    children: completed.root?.children?.length ?? 0,
+  });
+  return true;
+}
+
 async function restoreTree({
   owner,
   paths,
   isCurrentLoad,
   setExpandedPaths,
+  setTree,
 }: {
   owner: TreeLoadOwner;
   paths: string[];
   isCurrentLoad: () => boolean;
   setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
 }) {
+  const client = requireWebSocketClient();
   const hydrated = await fetchRestoredTree({
-    client: requireWebSocketClient(),
+    client,
     owner,
     paths,
     isCurrentLoad,
+    readPath: (path) => readOwnedTree(client, owner, path, isCurrentLoad),
+    onTree: (incoming, root) => {
+      if (!isCurrentLoad()) return;
+      setTree((current) => {
+        if (!isCurrentLoad()) return current;
+        if (!incoming) return null;
+        if (root) return current ? mergeTreeNodes(current, incoming) : incoming;
+        return current ? mergeLoadedFolder(current, incoming) : current;
+      });
+    },
   });
   return completeRestoredTree(hydrated, isCurrentLoad, (failedPaths) =>
     setExpandedPaths((previous) => removeFailedExpansions(Array.from(previous), failedPaths)),
   );
+}
+
+type TreeLoaderRuntime = {
+  clearRetryTimer: () => void;
+  retryAttemptRef: React.MutableRefObject<number>;
+  retryTimerRef: React.MutableRefObject<NodeJS.Timeout | null>;
+  restoreExpandedPathsRef: React.MutableRefObject<string[]>;
+  hasInitializedExpandedRef: React.MutableRefObject<string | null>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setIsLoadingTree: React.Dispatch<React.SetStateAction<boolean>>;
+  setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
+  setLoadError: React.Dispatch<React.SetStateAction<string | null>>;
+  ownerRef: React.MutableRefObject<TreeLoadOwner>;
+  loadInFlightGenerationRef: React.MutableRefObject<number | null>;
+  loadRequestRef: React.MutableRefObject<number>;
+  cacheBinding?: FileTreeCacheBinding;
+};
+
+async function loadTreeRequest(runtime: TreeLoaderRuntime, options?: LoadTreeOptions) {
+  const {
+    clearRetryTimer,
+    retryAttemptRef,
+    retryTimerRef,
+    restoreExpandedPathsRef,
+    hasInitializedExpandedRef,
+    setTree,
+    setExpandedPaths,
+    setIsLoadingTree,
+    setLoadState,
+    setLoadError,
+    ownerRef,
+    loadInFlightGenerationRef,
+    loadRequestRef,
+  } = runtime;
+  const owner = ownerRef.current;
+  if (runtime.cacheBinding && !runtime.cacheBinding.isCurrent()) {
+    setIsLoadingTree(false);
+    return;
+  }
+  if (loadInFlightGenerationRef.current === owner.generation) {
+    logLoad("skip-in-flight", { sessionId: owner.sessionId, resetKey: owner.resetKey });
+    return;
+  }
+  const requestId = ++loadRequestRef.current;
+  const isCurrentLoad = () =>
+    loadRequestRef.current === requestId &&
+    ownerRef.current.generation === owner.generation &&
+    (!runtime.cacheBinding || runtime.cacheBinding.isCurrent());
+  const restorePaths = options?.restoreExpandedPaths ?? restoreExpandedPathsRef.current;
+  loadInFlightGenerationRef.current = owner.generation;
+  setIsLoadingTree(true);
+  setLoadState("loading");
+  setLoadError(null);
+  if (options?.resetRetry) {
+    retryAttemptRef.current = 0;
+    clearRetryTimer();
+  }
+  logLoad("start", {
+    sessionId: owner.sessionId,
+    resetKey: owner.resetKey,
+    resetRetry: options?.resetRetry === true,
+    retryAttempt: retryAttemptRef.current,
+  });
+  try {
+    const completed = await restoreTree({
+      owner,
+      paths: restorePaths,
+      isCurrentLoad,
+      setExpandedPaths,
+      setTree,
+    });
+    if (completed?.errors?.length) throw completed.errors[0];
+    applyCompletedTree({
+      completed,
+      isCurrentLoad,
+      owner,
+      retryAttemptRef,
+      retryTimerRef,
+      clearRetryTimer,
+      hasInitializedExpandedRef,
+      setTree,
+      setLoadState,
+      retry: () => {
+        retryTimerRef.current = null;
+        if (!isCurrentLoad()) return;
+        void loadTreeRequest(runtime, { restoreExpandedPaths: restorePaths });
+      },
+    });
+  } catch (error) {
+    scheduleRetry({
+      error,
+      isCurrentLoad,
+      owner,
+      retryAttemptRef,
+      retryTimerRef,
+      clearRetryTimer,
+      setLoadError,
+      setLoadState,
+      retry: () => {
+        retryTimerRef.current = null;
+        if (!isCurrentLoad()) return;
+        void loadTreeRequest(runtime, { restoreExpandedPaths: restorePaths });
+      },
+    });
+  } finally {
+    if (isCurrentLoad()) {
+      setIsLoadingTree(false);
+      loadInFlightGenerationRef.current = null;
+    }
+  }
 }
 
 export function useTreeLoader(ctx: TreeLoaderContext) {
@@ -126,75 +367,43 @@ export function useTreeLoader(ctx: TreeLoaderContext) {
     setLoadState,
     setLoadError,
   } = ctx;
-  const ownerRef = useTreeLoadOwner(ctx.sessionId, ctx.effectiveResetKey);
+  const ownerRef = useTreeLoadOwner(ctx.sessionId, ctx.effectiveResetKey, ctx.cacheBinding);
+  const cacheBinding = ctx.cacheBinding;
+  const readTree = useCallback(
+    (path: string) => {
+      const owner = ownerRef.current;
+      return readOwnedTree(
+        requireWebSocketClient(),
+        owner,
+        path,
+        () => ownerRef.current === owner && (!cacheBinding || cacheBinding.isCurrent()),
+      );
+    },
+    [ownerRef, cacheBinding],
+  );
   const loadInFlightGenerationRef = useRef<number | null>(null);
   const loadRequestRef = useRef(0);
   const loadTree = useCallback(
-    async (options?: { resetRetry?: boolean; restoreExpandedPaths?: string[] }) => {
-      const owner = ownerRef.current;
-      if (loadInFlightGenerationRef.current === owner.generation) {
-        logLoad("skip-in-flight", { sessionId: owner.sessionId, resetKey: owner.resetKey });
-        return;
-      }
-      const requestId = ++loadRequestRef.current;
-      const isCurrentLoad = () =>
-        loadRequestRef.current === requestId && ownerRef.current.generation === owner.generation;
-      const restorePaths = options?.restoreExpandedPaths ?? restoreExpandedPathsRef.current;
-      loadInFlightGenerationRef.current = owner.generation;
-      setIsLoadingTree(true);
-      setLoadState("loading");
-      setLoadError(null);
-      if (options?.resetRetry) {
-        retryAttemptRef.current = 0;
-        clearRetryTimer();
-      }
-      logLoad("start", {
-        sessionId: owner.sessionId,
-        resetKey: owner.resetKey,
-        resetRetry: options?.resetRetry === true,
-        retryAttempt: retryAttemptRef.current,
-      });
-      try {
-        const completed = await restoreTree({
-          owner,
-          paths: restorePaths,
-          isCurrentLoad,
-          setExpandedPaths,
-        });
-        if (!completed) return;
-        hasInitializedExpandedRef.current = owner.resetKey;
-        setTree(completed.tree);
-        setLoadState("loaded");
-        retryAttemptRef.current = 0;
-        clearRetryTimer();
-        logLoad("loaded", {
-          sessionId: owner.sessionId,
-          rootPath: completed.root?.path ?? null,
-          children: completed.root?.children?.length ?? 0,
-        });
-      } catch (error) {
-        scheduleRetry({
-          error,
-          isCurrentLoad,
-          owner,
+    (options?: LoadTreeOptions) =>
+      loadTreeRequest(
+        {
+          clearRetryTimer,
           retryAttemptRef,
           retryTimerRef,
-          clearRetryTimer,
-          setLoadError,
+          restoreExpandedPathsRef,
+          hasInitializedExpandedRef,
+          setTree,
+          setExpandedPaths,
+          setIsLoadingTree,
           setLoadState,
-          retry: () => {
-            retryTimerRef.current = null;
-            if (!isCurrentLoad()) return;
-            void loadTree({ restoreExpandedPaths: restorePaths });
-          },
-        });
-      } finally {
-        if (isCurrentLoad()) {
-          setIsLoadingTree(false);
-          loadInFlightGenerationRef.current = null;
-        }
-      }
-    },
+          setLoadError,
+          ownerRef,
+          loadInFlightGenerationRef,
+          loadRequestRef,
+          cacheBinding,
+        },
+        options,
+      ),
     [
       clearRetryTimer,
       retryAttemptRef,
@@ -206,7 +415,8 @@ export function useTreeLoader(ctx: TreeLoaderContext) {
       setIsLoadingTree,
       setLoadError,
       setLoadState,
+      cacheBinding,
     ],
   );
-  return loadTree;
+  return { loadTree, readTree };
 }

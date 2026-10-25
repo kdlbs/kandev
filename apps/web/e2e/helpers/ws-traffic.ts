@@ -3,7 +3,9 @@ import type { Page } from "@playwright/test";
 export type GatewayTrafficFrame = {
   direction: "sent" | "received";
   action?: string;
+  activationSource?: string;
   type?: string;
+  eventType?: string;
   sessionId?: string;
   taskId?: string;
   bytes: number;
@@ -33,6 +35,7 @@ type WireMessage = {
   payload?: unknown;
 };
 
+/** Decodes a text or binary WebSocket frame as UTF-8. */
 function decodePayload(payload: string | Buffer | Uint8Array): string | null {
   if (typeof payload === "string") return payload;
   try {
@@ -42,10 +45,12 @@ function decodePayload(payload: string | Buffer | Uint8Array): string | null {
   }
 }
 
+/** Counts encoded bytes for text and binary WebSocket frames. */
 function payloadBytes(payload: string | Buffer | Uint8Array): number {
   return typeof payload === "string" ? Buffer.byteLength(payload, "utf8") : payload.byteLength;
 }
 
+/** Returns parsed JSON metadata, or null for malformed frame contents. */
 function parseMessage(payload: string | Buffer | Uint8Array): WireMessage | null {
   const decoded = decodePayload(payload);
   if (!decoded) return null;
@@ -57,10 +62,12 @@ function parseMessage(payload: string | Buffer | Uint8Array): WireMessage | null
   }
 }
 
+/** Retains only nonempty string identifiers from protocol fields. */
 function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+/** Extracts gateway metadata without retaining message contents. */
 function frameFromPayload(
   direction: GatewayTrafficFrame["direction"],
   payload: string | Buffer | Uint8Array,
@@ -74,6 +81,8 @@ function frameFromPayload(
   return {
     direction,
     action: stringField(message?.action),
+    activationSource: stringField(messagePayload?.activation_source),
+    eventType: stringField((message as Record<string, unknown> | null)?.event_type),
     type: stringField(message?.type),
     sessionId:
       stringField(messagePayload?.session_id) ??
@@ -105,6 +114,7 @@ export function attachGatewayTrafficCapture(page: Page): { frames: GatewayTraffi
   return { frames };
 }
 
+/** Tallies frame counts and bytes by direction and action. */
 export function summarizeGatewayTraffic(
   frames: readonly GatewayTrafficFrame[],
 ): GatewayTrafficSummary {

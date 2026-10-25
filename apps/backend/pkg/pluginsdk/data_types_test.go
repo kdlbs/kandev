@@ -1,12 +1,19 @@
 package pluginsdk
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func strPtr(s string) *string { return &s }
+
+func TestTaskRetainsReleasedLabelsSourceField(t *testing.T) {
+	field, ok := reflect.TypeOf(Task{}).FieldByName("Labels")
+	require.True(t, ok, "Task.Labels shipped in v0.93.0 and must remain source-compatible in API v1")
+	require.Equal(t, reflect.TypeOf([]string{}), field.Type)
+}
 
 func TestPageProtoRoundTrip(t *testing.T) {
 	p := Page{Limit: 25, Cursor: "cursor-1"}
@@ -50,7 +57,30 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 			{ID: "tr-2", RepositoryID: "repo-2", BaseBranch: "develop", Position: 1},
 		},
-		Metadata: map[string]any{"source": "plugin:agent-stats", "count": float64(3)},
+		Metadata:   map[string]any{"source": "plugin:agent-stats", "count": float64(3)},
+		ArchivedAt: strPtr("2026-07-16T12:00:00Z"),
+		PullRequests: []TaskPullRequest{{
+			Number: 42, URL: "https://example.test/pulls/42", Title: "Fix the bug",
+			State: "open", HeadBranch: "feature/fix", BaseBranch: "main", IsDraft: true,
+			Provider: "github", MergedAt: strPtr("2026-07-16T11:00:00Z"),
+			ClosedAt: strPtr("2026-07-16T11:30:00Z"), ReviewState: "approved",
+			ChecksState: "success", MergeableState: "clean", UnresolvedReviewThreads: 1,
+			ChecksTotal: 5, ChecksPassing: 5, Additions: 12, Deletions: 3, AuthorLogin: "nova28",
+		}},
+		WorkflowStepID: "step-review", Position: 4, AssigneeAgentProfileID: "agent-1",
+		Labels:    []string{"bug", "customer"},
+		Autopilot: true, WIPAdmitted: true,
+		QueuedForStepID: "step-build", QueuedAt: strPtr("2026-07-16T10:00:00Z"),
+		ProjectID: "project-1", ExternalID: "external-1",
+
+		Blocked: true, BlockedReason: "pending",
+		DependsOn: []TaskDependencyRef{
+			{ID: "task-0", Title: "Blocking task", State: "in_progress", Status: "pending"},
+		},
+		Blocks: []TaskDependencyRef{
+			{ID: "task-9", Title: "Dependent task", State: "not_started", Status: ""},
+		},
+		DependsOnTruncated: true, BlocksTruncated: false, StartWhenUnblocked: false,
 	}
 
 	proto, err := task.toProto()
@@ -60,10 +90,47 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 	require.Nil(t, proto.CompletedAt)
 	require.Equal(t, "feature/fix", proto.GetRepositories()[0].GetCheckoutBranch())
 	require.Empty(t, proto.GetRepositories()[1].GetCheckoutBranch(), "empty checkout branches remain wire-compatible")
+	require.Equal(t, "step-review", proto.GetWorkflowStepId())
+	require.Equal(t, []string{"bug", "customer"}, proto.GetLabels()) //nolint:staticcheck // verifies deprecated API v1 compatibility
+	require.True(t, proto.GetAutopilot())
+	require.Len(t, proto.GetPullRequests(), 1)
+	require.Equal(t, int64(42), proto.GetPullRequests()[0].GetNumber())
+	require.True(t, proto.GetBlocked())
+	require.Equal(t, "pending", proto.GetBlockedReason())
+	require.Len(t, proto.GetDependsOn(), 1)
+	require.Equal(t, "task-0", proto.GetDependsOn()[0].GetId())
+	require.Equal(t, "pending", proto.GetDependsOn()[0].GetStatus())
+	require.Len(t, proto.GetBlocks(), 1)
+	require.Empty(t, proto.GetBlocks()[0].GetStatus(), "blocks entries never carry a status")
+	require.True(t, proto.GetDependsOnTruncated())
+	require.False(t, proto.GetBlocksTruncated())
 
 	back, err := taskFromProto(proto)
 	require.NoError(t, err)
 	require.Equal(t, task, back)
+}
+
+func TestTaskDependencyRefProtoRoundTrip(t *testing.T) {
+	ref := TaskDependencyRef{ID: "task-5", Title: "Dependency", State: "in_progress", Status: "resolved"}
+
+	proto := ref.toProto()
+	require.Equal(t, ref, taskDependencyRefFromProto(proto))
+}
+
+func TestTaskDependencyRefWorkspaceIDNeverReachesTheWire(t *testing.T) {
+	ref := TaskDependencyRef{ID: "task-5", Title: "Dependency", WorkspaceID: "ws-secret"}
+
+	proto := ref.toProto()
+	require.NotContains(t, proto.String(), "ws-secret", "WorkspaceID must never be serialized onto the wire")
+
+	back := taskDependencyRefFromProto(proto)
+	require.Empty(t, back.WorkspaceID, "a decoded ref never recovers a WorkspaceID; the proto has no field for it")
+}
+
+func TestTaskDependencyRefsSliceProtoRoundTrip_EmptyIsNil(t *testing.T) {
+	require.Nil(t, taskDependencyRefsToProto(nil))
+	require.Nil(t, taskDependencyRefsToProto([]TaskDependencyRef{}))
+	require.Nil(t, taskDependencyRefsFromProto(nil))
 }
 
 func TestTaskProtoRoundTrip_NilOptionalsAndEmptyMetadata(t *testing.T) {
@@ -82,6 +149,21 @@ func TestTaskProtoRoundTrip_NilOptionalsAndEmptyMetadata(t *testing.T) {
 	require.Equal(t, task, back)
 }
 
+func TestTaskPullRequestProtoRoundTrip(t *testing.T) {
+	pr := TaskPullRequest{
+		Number: 42, URL: "https://example.test/pulls/42", Title: "Fix the bug",
+		State: "merged", HeadBranch: "feature/fix", BaseBranch: "main", IsDraft: false,
+		Provider: "github", MergedAt: strPtr("2026-07-16T11:00:00Z"), ClosedAt: nil,
+		ReviewState: "approved", ChecksState: "success", MergeableState: "clean",
+		UnresolvedReviewThreads: 0, ChecksTotal: 5, ChecksPassing: 5,
+		Additions: 12, Deletions: 3, AuthorLogin: "nova28",
+	}
+
+	proto := pr.toProto()
+	require.Equal(t, pr, taskPullRequestFromProto(proto))
+	require.Nil(t, proto.ClosedAt)
+}
+
 func TestTaskFilterProtoRoundTrip(t *testing.T) {
 	filter := TaskFilter{
 		WorkspaceIDs:     []string{"ws-1", "ws-2"},
@@ -89,6 +171,7 @@ func TestTaskFilterProtoRoundTrip(t *testing.T) {
 		States:           []string{"todo", "in_progress"},
 		ParentID:         strPtr("task-0"),
 		IncludeEphemeral: true,
+		IncludeArchived:  true,
 	}
 	proto := filter.toProto()
 	require.Equal(t, filter, taskFilterFromProto(proto))
@@ -129,11 +212,28 @@ func TestWorkflowProtoRoundTrip(t *testing.T) {
 
 func TestWorkflowStepProtoRoundTrip(t *testing.T) {
 	step := WorkflowStep{
-		ID:         "step-1",
-		WorkflowID: "wf-1",
-		Name:       "Review",
-		Position:   1,
-		StageType:  "review",
+		ID:             "step-1",
+		WorkflowID:     "wf-1",
+		Name:           "Review",
+		Position:       1,
+		StageType:      "review",
+		Color:          "bg-indigo-500",
+		IsStartStep:    true,
+		WIPLimit:       3,
+		AgentProfileID: "agent-1",
+	}
+	proto := step.toProto()
+	require.Equal(t, step, workflowStepFromProto(proto))
+}
+
+func TestWorkflowStepProtoRoundTrip_OnEnterActionTypes(t *testing.T) {
+	step := WorkflowStep{
+		ID:                 "step-1",
+		WorkflowID:         "wf-1",
+		Name:               "Work",
+		Position:           1,
+		StageType:          "work",
+		OnEnterActionTypes: []string{"auto_start_agent", "run_code_review", "set_session_mode"},
 	}
 	proto := step.toProto()
 	require.Equal(t, step, workflowStepFromProto(proto))
@@ -168,6 +268,7 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Plugin-created task",
+		Priority:    "high",
 		Repositories: []PluginTaskRepository{{
 			Remote: &RemoteRepositoryDescriptor{
 				ProviderID: "example", ProviderHost: "code.example.test", OwnerOrProject: "team",
@@ -185,6 +286,30 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 	back, err := createTaskInputFromProto(proto)
 	require.NoError(t, err)
 	require.Equal(t, input, back)
+}
+
+func TestCreateTaskInputProtoRoundTripPreservesPriority(t *testing.T) {
+	input := CreateTaskInput{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "plugin task",
+		Priority:    "critical",
+	}
+	proto, err := input.toProto()
+	require.NoError(t, err)
+	require.Equal(t, "critical", proto.GetPriority())
+
+	back, err := createTaskInputFromProto(proto)
+	require.NoError(t, err)
+	require.Equal(t, input, back)
+}
+
+func TestUpdateTaskInputProtoRoundTripPreservesPriority(t *testing.T) {
+	priority := "low"
+	input := UpdateTaskInput{ID: "task-1", Priority: &priority}
+
+	proto := input.toProto()
+	require.Equal(t, input, updateTaskInputFromProto(proto))
 }
 
 func TestRepositoryProtoRoundTrip(t *testing.T) {

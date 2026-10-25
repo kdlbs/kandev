@@ -268,6 +268,20 @@ func TestHTTP_SearchIssues_RejectsMultipleProjectSlugs(t *testing.T) {
 	}
 }
 
+func TestHTTP_SearchIssues_RejectsInvalidStatsPeriod(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
+	client.searchIssuesFn = func(_ SearchFilter, _ string) (*SearchResult, error) {
+		t.Fatal("client must not be called for an invalid lookback")
+		return nil, nil
+	}
+	target := "/api/v1/sentry/issues?workspace_id=ws-1&instanceId=" + inst.ID +
+		"&orgSlug=acme&projectSlug=frontend&statsPeriod=nonsense"
+	if w := do(router, http.MethodGet, target, ""); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestHTTP_GetIssue_ForwardsID(t *testing.T) {
 	ctrl, router, client := newTestController(t)
 	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")

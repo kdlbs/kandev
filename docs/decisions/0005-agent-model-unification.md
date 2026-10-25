@@ -421,5 +421,5 @@ ADR 0004 are resolved.
 ## References
 
 - ADR 0004 — task-model-unification.
-- `docs/specs/task-model-unification/plan.md` Phase 4 deferred items.
+- `docs/specs/tasks/requirements/model-unification.md` Phase 4 deferred items.
 - Wave-9 / Wave-10 agent scope surveys (in PR commit messages).

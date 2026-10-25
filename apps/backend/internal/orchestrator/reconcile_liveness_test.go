@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 )
 
@@ -133,6 +134,71 @@ func TestStopRuntimeForStartupCleanupPreservesUnknownRowsWithoutHandle(t *testin
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sessionUnknown"); err != nil {
 		t.Fatalf("unknown row without a stop handle must be preserved: %v", err)
 	}
+}
+
+func TestRepairDeadRowLivenessLogSeverity(t *testing.T) {
+	t.Run("rotated execution is expected", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		seedSession(t, repo, "task-rotated", "session-rotated", "")
+		if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "session-rotated", SessionID: "session-rotated", TaskID: "task-rotated",
+			AgentExecutionID: "new-execution", Status: models.ExecutorRunningStatusRunning,
+		}); err != nil {
+			t.Fatalf("UpsertExecutorRunning: %v", err)
+		}
+		current, err := repo.GetExecutorRunningBySessionID(ctx, "session-rotated")
+		if err != nil {
+			t.Fatalf("GetExecutorRunningBySessionID: %v", err)
+		}
+		stale := *current
+		stale.AgentExecutionID = "old-execution"
+
+		service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		core, logs := observer.New(zapcore.DebugLevel)
+		log, err := logger.NewFromZap(zap.New(core))
+		if err != nil {
+			t.Fatalf("NewFromZap: %v", err)
+		}
+		service.logger = log
+
+		if err := service.repairDeadRowLiveness(ctx, &stale); err != nil {
+			t.Fatalf("repairDeadRowLiveness: %v", err)
+		}
+		if entries := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(entries) != 0 {
+			t.Fatalf("rotated repair warning count = %d, want 0", len(entries))
+		}
+		current, err = repo.GetExecutorRunningBySessionID(ctx, "session-rotated")
+		if err != nil {
+			t.Fatalf("GetExecutorRunningBySessionID after repair: %v", err)
+		}
+		if current.AgentExecutionID != "new-execution" || current.Status != models.ExecutorRunningStatusRunning {
+			t.Fatalf("rotated row = %+v, want newer running execution unchanged", current)
+		}
+	})
+
+	t.Run("unrelated repair error remains warning", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		core, logs := observer.New(zapcore.DebugLevel)
+		log, err := logger.NewFromZap(zap.New(core))
+		if err != nil {
+			t.Fatalf("NewFromZap: %v", err)
+		}
+		service.logger = log
+
+		err = service.repairDeadRowLiveness(context.Background(), &models.ExecutorRunning{})
+		if err == nil {
+			t.Fatal("repairDeadRowLiveness returned nil for an invalid repair request")
+		}
+		entries := logs.FilterMessage("failed to repair executor row liveness during reconciliation").All()
+		if len(entries) != 1 {
+			t.Fatalf("unrelated repair warning count = %d, want 1", len(entries))
+		}
+		if entries[0].Level != zapcore.WarnLevel {
+			t.Fatalf("unrelated repair log level = %s, want warn", entries[0].Level)
+		}
+	})
 }
 
 func containsAll(value string, needles ...string) bool {

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/settings-manual-save.md
+spec: docs/specs/ui/requirements/settings-manual-save.md
 decision: docs/decisions/0046-settings-route-save-coordinator.md
 created: 2026-08-09
 status: complete

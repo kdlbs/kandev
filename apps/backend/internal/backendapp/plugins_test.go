@@ -96,7 +96,10 @@ func newTestPluginsService(t *testing.T) *plugins.Service {
 		t.Fatalf("load registry: %v", err)
 	}
 	svc := plugins.NewService(fsStore, registry, nil, testPluginsLogger(t))
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	svc.SetRuntime(alwaysUpRuntime{})
 	return svc
 }

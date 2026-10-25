@@ -72,7 +72,7 @@ describe("GitLab QuickTaskLauncher", () => {
     pushMock.mockReset();
   });
 
-  it("prefills the matching GitLab repository and links the created task", async () => {
+  it.each([true, false])("links the created task with auto-focus %s", async (autoFocus) => {
     render(
       <StateProvider>
         <ToastProvider>
@@ -125,10 +125,20 @@ describe("GitLab QuickTaskLauncher", () => {
     });
 
     await act(async () => {
-      await (dialogProps?.onSuccess as (task: Task) => Promise<void>)({
-        id: "task-1",
-        repositories: [{ repository_id: "repo-1" }],
-      } as Task);
+      await (
+        dialogProps?.onSuccess as (
+          task: Task,
+          mode: "create",
+          meta: { autoFocus: boolean },
+        ) => Promise<void>
+      )(
+        {
+          id: "task-1",
+          repositories: [{ repository_id: "repo-1" }],
+        } as Task,
+        "create",
+        { autoFocus },
+      );
     });
     expect(createTaskMRMock).toHaveBeenCalledWith(
       {
@@ -138,7 +148,8 @@ describe("GitLab QuickTaskLauncher", () => {
       },
       WORKSPACE_ID,
     );
-    expect(pushMock).toHaveBeenCalledWith("/t/task-1");
+    expect(pushMock).toHaveBeenCalledTimes(autoFocus ? 1 : 0);
+    if (autoFocus) expect(pushMock).toHaveBeenCalledWith("/t/task-1");
   });
 });
 
@@ -167,6 +178,7 @@ describe("GitLab QuickTaskLauncher recovery", () => {
         project_path: "group/project",
         labels: [],
         assignees: [],
+        milestone: "",
         created_at: FIXED_DATE,
         updated_at: FIXED_DATE,
       },

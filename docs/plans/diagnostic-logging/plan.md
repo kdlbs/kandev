@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/diagnostic-logging.md
+spec: docs/specs/platform/requirements/diagnostic-logging.md
 created: 2026-07-30
 status: implemented
 ---

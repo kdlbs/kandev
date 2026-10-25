@@ -26,7 +26,7 @@ vi.mock("@/components/task/plan-selection-popover", () => ({
     onClose: () => void;
     errorMessage?: string | null;
   }) => (
-    <div data-testid="comment-popover">
+    <div data-testid={COMMENT_POPOVER_TEST_ID}>
       <span>{selectedText}</span>
       {errorMessage ? <p role="alert">{errorMessage}</p> : null}
       <button
@@ -41,6 +41,8 @@ vi.mock("@/components/task/plan-selection-popover", () => ({
   ),
 }));
 
+const COMMENT_TRIGGER_TEST_ID = "agent-message-comment-trigger";
+const COMMENT_POPOVER_TEST_ID = "comment-popover";
 const SESSION_ID = "session-1";
 const MESSAGE_TEXT_TEST_ID = "message-text";
 const SELECTED_QUOTE = "settled answer";
@@ -90,6 +92,121 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("MessageCommentSurface selection capture", () => {
+  it.each(["outside", "cross-message", "active turn", "missing session"])(
+    "does not offer a comment for an invalid selection: %s",
+    (scenario) => {
+      const content = "A settled answer.";
+      render(
+        <>
+          <MessageCommentSurface
+            message={message(content)}
+            sessionId={scenario === "missing session" ? null : SESSION_ID}
+            isTurnActive={scenario === "active turn"}
+          >
+            <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+          </MessageCommentSurface>
+          <MessageCommentSurface
+            message={{ ...message(content), id: "message-2" }}
+            sessionId={SESSION_ID}
+            isTurnActive={false}
+          >
+            <span data-testid="second-message">{content}</span>
+          </MessageCommentSurface>
+          <span data-testid="outside-text">Outside the messages.</span>
+        </>,
+      );
+      const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
+      const range = document.createRange();
+      range.setStart(text, 0);
+      range.setEnd(text, content.length);
+      if (scenario === "outside") range.selectNodeContents(screen.getByTestId("outside-text"));
+      if (scenario === "cross-message")
+        range.setEnd(screen.getByTestId("second-message").firstChild!, content.length);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
+      fireEvent.mouseUp(document.body);
+
+      expect(screen.queryByTestId(COMMENT_TRIGGER_TEST_ID)).toBeNull();
+    },
+  );
+
+  it("captures a message selection when the mouse is released in surrounding padding", () => {
+    const content = "The settled answer includes context.";
+    render(
+      <div data-testid="message-padding">
+        <MessageCommentSurface
+          message={message(content)}
+          sessionId={SESSION_ID}
+          isTurnActive={false}
+        >
+          <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+        </MessageCommentSurface>
+      </div>,
+    );
+
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID).firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 18);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
+    fireEvent.mouseUp(screen.getByTestId("message-padding"));
+
+    fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
+    // Releasing the mouse in the editor must preserve its open state and quote.
+    fireEvent.mouseUp(screen.getByTestId(COMMENT_POPOVER_TEST_ID));
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    const saved = Object.values(useCommentsStore.getState().byId)[0];
+    expect(saved).toMatchObject({
+      messageId: "message-1",
+      selectedText: "The settled answer",
+      text: COMMENT_TEXT,
+    });
+  });
+});
+
+describe("MessageCommentSurface selection dismissal", () => {
+  it("does not restore a dismissed trigger after an unrelated mouse click", () => {
+    const content = "The settled answer includes context.";
+    render(
+      <>
+        <MessageCommentSurface
+          message={message(content)}
+          sessionId={SESSION_ID}
+          isTurnActive={false}
+        >
+          <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+        </MessageCommentSurface>
+        <button onMouseDown={(event) => event.preventDefault()}>Unrelated control</button>
+      </>,
+    );
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseDown(text);
+    fireEvent.mouseUp(text);
+    expect(screen.getByTestId(COMMENT_TRIGGER_TEST_ID)).not.toBeNull();
+
+    const control = screen.getByRole("button", { name: "Unrelated control" });
+    fireEvent.pointerDown(control);
+    expect(screen.queryByTestId(COMMENT_TRIGGER_TEST_ID)).toBeNull();
+    fireEvent.mouseDown(control);
+    fireEvent.mouseUp(control);
+    fireEvent.click(control);
+
+    expect(selection.toString()).toBe(content);
+    expect(screen.queryByTestId(COMMENT_TRIGGER_TEST_ID)).toBeNull();
+  });
+});
+
 describe("MessageCommentSurface", () => {
   it("anchors a pending selection to the same quote when message text shifts", () => {
     const original = "The settled answer contains detail.";
@@ -112,8 +229,9 @@ describe("MessageCommentSurface", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
     fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
-    fireEvent.click(screen.getByTestId("agent-message-comment-trigger"));
+    fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
 
     rerender(
       <MessageCommentSurface message={message(updated)} sessionId={SESSION_ID} isTurnActive={false}>
@@ -167,8 +285,9 @@ describe("MessageCommentSurface", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
     fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
-    fireEvent.click(screen.getByTestId("agent-message-comment-trigger"));
+    fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
 
     rerender(
       <MessageCommentSurface message={message(updated)} sessionId={SESSION_ID} isTurnActive={false}>
@@ -177,7 +296,7 @@ describe("MessageCommentSurface", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
 
-    expect(screen.getByTestId("comment-popover")).not.toBeNull();
+    expect(screen.getByTestId(COMMENT_POPOVER_TEST_ID)).not.toBeNull();
     expect(Object.values(useCommentsStore.getState().byId)).toHaveLength(0);
     expect(screen.getByRole("alert").textContent).toBe(
       "The agent response changed. Select the text again.",
@@ -203,6 +322,7 @@ describe("MessageCommentSurface layering", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
     fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
 
     expect(
@@ -236,8 +356,8 @@ describe("MessageCommentSurface mobile drawer", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
-    fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
-    fireEvent.click(screen.getByTestId("agent-message-comment-trigger"));
+    fireEvent.touchEnd(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
+    fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
     const input = screen.getByTestId("agent-message-comment-input");
     fireEvent.change(input, { target: { value: COMMENT_TEXT } });
 
@@ -294,7 +414,7 @@ describe("MessageCommentSurface highlighted interactions", () => {
       clientY: 10,
     });
 
-    expect(screen.queryByTestId("comment-popover")).toBeNull();
+    expect(screen.queryByTestId(COMMENT_POPOVER_TEST_ID)).toBeNull();
   });
 
   it("preserves native link clicks inside a highlighted range", () => {
@@ -311,6 +431,6 @@ describe("MessageCommentSurface highlighted interactions", () => {
     );
 
     expect(fireEvent.click(screen.getByRole("link"), { clientX: 10, clientY: 10 })).toBe(true);
-    expect(screen.queryByTestId("comment-popover")).toBeNull();
+    expect(screen.queryByTestId(COMMENT_POPOVER_TEST_ID)).toBeNull();
   });
 });

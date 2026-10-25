@@ -1,9 +1,12 @@
+//revive:disable:file-length-limit // PR watch orchestration shares one provider-state boundary.
+
 package github
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,12 +50,19 @@ func (s *Service) createPRWatch(
 	// from a prior auth failure should be re-probed immediately rather
 	// than held for the rest of the 10-min TTL.
 	s.evictRepoNegative(owner, repo)
-	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
+	// Task-owned identity (ADR 2026-08-31-task-owned-pr-watch-identity):
+	// look up the canonical watch by task/repository, not by session, so a
+	// resumed or concurrent session on the same task/branch reuses the
+	// existing watch instead of creating a duplicate. A non-zero prNumber
+	// (e.g. AssociatePRByURL, which already knows the PR) checks discovered
+	// identity; otherwise it checks searching identity.
+	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+	existing, err := s.getExistingCanonicalPRWatch(ctx, taskID, repositoryID, prNumber, branch)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return existing, nil // already watching this (session, repo, branch)
+		return existing, nil // already watching this (task, repo, branch/PR)
 	}
 	w := &PRWatch{
 		WorkspaceID:  workspaceID,
@@ -67,12 +77,28 @@ func (s *Service) createPRWatch(
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("create PR watch: %w", err)
 	}
+	s.resetPassiveWorkspaceRefreshAdmission(workspaceID)
 	s.logger.Info("created PR watch",
 		zap.String("session_id", sessionID),
 		zap.String("repository_id", repositoryID),
 		zap.String("branch", branch),
 		zap.Int("pr_number", prNumber))
 	return w, nil
+}
+
+// getExistingCanonicalPRWatch resolves the task-owned canonical watch for a
+// prospective (task, repository, branch/PR) target: discovered identity
+// (task_id, repository_id, pr_number) when prNumber is known, otherwise
+// searching identity (task_id, repository_id, branch). Shared by
+// createPRWatch and ensurePRWatch so both dedupe against the same canonical
+// row regardless of which session is asking.
+func (s *Service) getExistingCanonicalPRWatch(
+	ctx context.Context, taskID, repositoryID string, prNumber int, branch string,
+) (*PRWatch, error) {
+	if prNumber != 0 {
+		return s.store.GetPRWatchByTaskRepoPRNumber(ctx, taskID, repositoryID, prNumber)
+	}
+	return s.store.GetPRWatchByTaskRepoBranch(ctx, taskID, repositoryID, branch)
 }
 
 // GetPRWatch returns one PR watch after authorizing its stored workspace.
@@ -114,6 +140,12 @@ func (s *Service) ListActivePRWatches(ctx context.Context) ([]*PRWatch, error) {
 	return s.store.ListActivePRWatches(ctx)
 }
 
+// PRWatchCardinality returns aggregate watch-health gauges without exposing
+// watch identities.
+func (s *Service) PRWatchCardinality(ctx context.Context) (PRWatchCardinality, error) {
+	return s.store.PRWatchCardinality(ctx)
+}
+
 // ListActivePRWatchesForWorkspace returns active PR watches for one authorized
 // workspace. The all-workspaces variant is reserved for identity-less pollers.
 func (s *Service) ListActivePRWatchesForWorkspace(ctx context.Context, workspaceID string) ([]*PRWatch, error) {
@@ -134,12 +166,27 @@ func (s *Service) DeletePRWatch(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	return s.store.DeletePRWatch(ctx, id)
+	if err := s.store.DeletePRWatch(ctx, id); err != nil {
+		return err
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0.
 func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
-	return s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch)
+	watch, err := s.store.GetPRWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch); err != nil {
+		return err
+	}
+	if watch != nil {
+		s.resetPassiveWorkspaceRefreshAdmission(watch.WorkspaceID)
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
@@ -172,7 +219,18 @@ func (s *Service) rebindPRWatchRepository(ctx context.Context, watch *PRWatch, p
 // ResetPRWatch atomically resets a watch's branch and clears its pr_number so
 // the poller re-searches for a PR on the new branch. See Store.ResetPRWatch.
 func (s *Service) ResetPRWatch(ctx context.Context, id, branch string) error {
-	return s.store.ResetPRWatch(ctx, id, branch)
+	watch, err := s.store.GetPRWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.ResetPRWatch(ctx, id, branch); err != nil {
+		return err
+	}
+	if watch != nil {
+		s.resetPassiveWorkspaceRefreshAdmission(watch.WorkspaceID)
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // CheckPRWatch fetches lightweight PR status for a watch and determines if there are changes.
@@ -180,7 +238,7 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 	if s.client == nil {
 		return nil, false, fmt.Errorf("github client not available")
 	}
-	return s.checkPRWatchWithClient(ctx, s.client, watch)
+	return s.checkPRWatchWithClient(ctx, s.client, "legacy", watch)
 }
 
 func (s *Service) CheckPRWatchForWorkspace(ctx context.Context, watch *PRWatch) (*PRStatus, bool, error) {
@@ -191,29 +249,57 @@ func (s *Service) CheckPRWatchForWorkspace(ctx context.Context, watch *PRWatch) 
 	if err != nil {
 		return nil, false, err
 	}
-	return s.checkPRWatchWithClient(ctx, resolved.Client, watch)
+	return s.checkPRWatchWithClient(ctx, resolved.Client, resolved.CacheScope, watch)
 }
 
 func (s *Service) checkPRWatchWithClient(
-	ctx context.Context, client Client, watch *PRWatch,
+	ctx context.Context, client Client, cacheScope string, watch *PRWatch,
 ) (*PRStatus, bool, error) {
+	ctx = withWorkflowAttentionCollector(ctx, func(
+		collectorCtx context.Context, collectorClient Client, owner, repo string, pr *PR,
+	) (*workflowObservation, error) {
+		return s.collectWorkflowObservation(collectorCtx, collectorClient, cacheScope, owner, repo, pr)
+	})
 	status, err := client.GetPRStatus(ctx, watch.Owner, watch.Repo, watch.PRNumber)
 	if err != nil {
 		return nil, false, err
 	}
 
-	// Check for check status or review state changes
-	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
-	commentAt := prWatchFeedbackWatermark(watch, status)
-	hasNew = hasNew || prWatchFeedbackUpdatedSinceWatch(watch, status)
-
-	// Update watch timestamps
-	now := time.Now().UTC()
-	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
-		s.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
+	hasNew, updateErr := s.applyPRWatchStatus(ctx, watch, status)
+	if updateErr != nil {
+		s.logSyncError("failed to update PR watch timestamps", updateErr, zap.String("id", watch.ID))
 	}
 
 	return status, hasNew, nil
+}
+
+func (s *Service) applyPRWatchStatus(
+	ctx context.Context, watch *PRWatch, status *PRStatus,
+) (bool, error) {
+	if watch == nil || status == nil {
+		return false, nil
+	}
+	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
+	commentAt := prWatchFeedbackWatermark(watch, status)
+	hasNew = hasNew || prWatchFeedbackUpdatedSinceWatch(watch, status)
+	now := time.Now().UTC()
+	err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState)
+	return hasNew, err
+}
+
+// logSyncError logs a PR-watch synchronization failure at ERROR, except when
+// the error is a context cancellation. That happens when the poll/sync cycle is
+// interrupted by backend shutdown, which is expected teardown rather than a
+// fault, so it is downgraded to DEBUG to keep shutdown logs quiet. Mirrors
+// Poller.logCleanupError, and like it leaves context.DeadlineExceeded at the
+// higher level because a timeout is a real fault.
+func (s *Service) logSyncError(msg string, err error, fields ...zap.Field) {
+	fields = append(fields, zap.Error(err))
+	if errors.Is(err, context.Canceled) {
+		s.logger.Debug(msg+" (context canceled during shutdown)", fields...)
+		return
+	}
+	s.logger.Error(msg, fields...)
 }
 
 func prWatchFeedbackUpdatedSinceWatch(watch *PRWatch, status *PRStatus) bool {
@@ -264,9 +350,20 @@ func (s *Service) ensurePRWatch(
 	// rationale. The existing-watch early-return path must not inherit a
 	// stale "missing" verdict from a prior incarnation.
 	s.evictRepoNegative(owner, repo)
-	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
+	// Task-owned identity — see createPRWatch's getExistingCanonicalPRWatch
+	// comment. Reusing the canonical searching watch here is what stops a
+	// resumed/concurrent session from multiplying watches for the same
+	// task/repository/branch (ADR 2026-08-31-task-owned-pr-watch-identity).
+	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+	existing, err := s.store.GetPRWatchByTaskRepoBranch(ctx, taskID, repositoryID, branch)
 	if err != nil {
 		return nil, err
+	}
+	if existing == nil {
+		existing, err = s.store.GetPRWatchByTaskRepoBranchAny(ctx, taskID, repositoryID, branch)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if existing != nil {
 		return existing, nil
@@ -284,8 +381,10 @@ func (s *Service) ensurePRWatch(
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("ensure PR watch: %w", err)
 	}
-	s.logger.Info("created PR watch for session (will search for PR)",
+	s.resetPassiveWorkspaceRefreshAdmission(workspaceID)
+	s.logger.Info("created PR watch for task (will search for PR)",
 		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
 		zap.String("repository_id", repositoryID),
 		zap.String("branch", branch))
 	return w, nil
@@ -294,24 +393,150 @@ func (s *Service) ensurePRWatch(
 // --- Task-PR association ---
 
 // AssociatePRWithTask creates a task-PR association scoped to a specific
-// repository. `repositoryID` is the per-task repository_id (from
-// task_repositories); empty preserves legacy single-repo behavior. Multi-repo
-// callers MUST pass it — empty causes ReplaceTaskPR to wipe the entire task's
-// PR rows (legacy "delete all" branch), which is what older code relied on.
+// repository. `repositoryID` is repositories.ID — the repository_id COLUMN
+// value stored on the task's task_repositories row, NOT that row's own id.
+// Passing the row id instead lets two writers disagree on repository_id for
+// the same task+PR, so both pass the UNIQUE(task_id, repository_id,
+// pr_number) constraint and the PR is associated twice. Empty preserves
+// legacy single-repo behavior. Multi-repo callers MUST pass it — empty
+// causes ReplaceTaskPR to wipe the entire task's PR rows (legacy "delete
+// all" branch), which is what older code relied on.
 func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
 	// pr here comes from branch-search discovery (poller.detectPRForWatch) or
 	// a batched status result of unknown populated-ness — never assert
 	// outcomeFieldsPopulated for this wrapper's callers (AC-11).
-	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false)
+	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false, TaskPRSourceWatch)
 }
 
+// AssociatePRWithTaskForWorkspace is the workspace-scoped variant of
+// AssociatePRWithTask; `repositoryID` is repositories.ID, same as there.
 func (s *Service) AssociatePRWithTaskForWorkspace(
 	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
 ) (*TaskPR, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false)
+	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false, TaskPRSourceWatch)
+}
+
+// resolveEffectiveAssociationTaskID redirects a watch-sourced association
+// write to the workspace-group owner task, independently of whatever
+// producer called in. It exists as defense-in-depth alongside
+// internal/orchestrator's resolveEffectivePushTaskID: that helper redirects
+// every watch/association call site the orchestrator package controls, but
+// Review Round 2 (F4) found a fifth orchestrator producer it had missed, and
+// F5 found that redirect alone does nothing for github_pr_watches rows that
+// already carry a member task_id from before the fix existed — those stale
+// watches keep feeding poller.go's AssociatePRWithTask(watch.TaskID, ...)
+// forever, since nothing ever rewrites a watch's task_id. Applying the same
+// redirect again at this single private write funnel closes both gaps at
+// once: it does not matter which orchestrator producer supplied taskID, or
+// whether the watch driving it predates this fix, because every watch-sourced
+// write is re-checked here before it lands.
+//
+// Only applied to source == TaskPRSourceWatch. TaskPRSourceURLLink
+// (AssociateExistingPRByURL/ForWorkspace) is a deliberate cross-task action —
+// the user explicitly chose to link a specific PR to the task whose card they
+// were viewing, independent of worktree sharing — and must never be
+// silently rerouted to a different task.
+//
+// Falls back to taskID unchanged (matching the orchestrator resolver's
+// fallback semantics) whenever the redirect can't be safely applied: no
+// resolver wired, taskID empty, no group/no distinct owner, the lookup
+// errors, the owner task can't be loaded or is archived, or the owner
+// doesn't hold repositoryID itself (redirecting would just make
+// validateTaskRepositoryID reject the owner and drop the association, which
+// is worse than leaving it under the observing task — the same reasoning
+// Round 2 applied to resolveEffectivePushTaskID's own repository check).
+func (s *Service) resolveEffectiveAssociationTaskIDForSession(
+	ctx context.Context, sessionID, taskID, repositoryID string,
+) string {
+	if taskID == "" {
+		return taskID
+	}
+	resolver := s.workspaceGroupOwnerResolver
+	if resolver == nil {
+		return taskID
+	}
+	var ownerTaskID string
+	var err error
+	if sessionID != "" {
+		if sessionResolver, ok := any(resolver).(WorkspaceGroupOwnerSessionResolver); ok {
+			ownerTaskID, err = sessionResolver.GetWorkspaceGroupOwnerTaskIDForSession(ctx, taskID, sessionID)
+		} else {
+			// Keep compatibility with older adapters and focused test doubles.
+			ownerTaskID, err = resolver.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+		}
+	} else {
+		ownerTaskID, err = resolver.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	}
+	if err != nil || ownerTaskID == "" || ownerTaskID == taskID {
+		return taskID
+	}
+	store := s.getTaskIssueStore()
+	if store == nil {
+		return taskID
+	}
+	ownerTask, err := store.GetTask(ctx, ownerTaskID)
+	if err != nil || ownerTask == nil || ownerTask.ArchivedAt != nil {
+		return taskID
+	}
+	if repositoryID != "" && !s.associationOwnerHoldsRepository(ctx, store, ownerTaskID, repositoryID) {
+		return taskID
+	}
+	s.logger.Info("redirecting watch-sourced PR association to workspace group owner",
+		zap.String("from_task_id", taskID),
+		zap.String("to_task_id", ownerTaskID),
+		zap.String("repository_id", repositoryID))
+	return ownerTaskID
+}
+
+// associationOwnerHoldsRepository reports whether taskID has a
+// task_repositories row for repositoryID. Used by
+// resolveEffectiveAssociationTaskID to avoid redirecting into a write that
+// validateTaskRepositoryID would reject and associatePRWithTask would then
+// silently drop.
+func (s *Service) associationOwnerHoldsRepository(ctx context.Context, store TaskIssueStore, taskID, repositoryID string) bool {
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return false
+	}
+	for _, tr := range taskRepos {
+		if tr != nil && tr.RepositoryID == repositoryID {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileTaskPROwnership repairs an active member-owned row before a
+// watch-sourced sync writes the effective owner. The store operation is
+// atomic and does not publish an intermediate member event, so one upstream
+// observation produces one owner-scoped update.
+func (s *Service) reconcileTaskPROwnership(
+	ctx context.Context, sessionID, memberTaskID, repositoryID string, prNumber int,
+) string {
+	ownerTaskID := s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, memberTaskID, repositoryID)
+	if ownerTaskID == "" || ownerTaskID == memberTaskID || prNumber == 0 || s.store == nil {
+		return ownerTaskID
+	}
+	reconciler, ok := any(s.store).(TaskPROwnershipReconciler)
+	if !ok {
+		return ownerTaskID
+	}
+	if _, err := reconciler.ReconcileTaskPROwnership(
+		ctx, memberTaskID, ownerTaskID, repositoryID, prNumber,
+	); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to reconcile legacy member task PR",
+				zap.String("member_task_id", memberTaskID),
+				zap.String("owner_task_id", ownerTaskID),
+				zap.String("repository_id", repositoryID),
+				zap.Int("pr_number", prNumber),
+				zap.Error(err))
+		}
+	}
+	return ownerTaskID
 }
 
 // associatePRWithTask creates the task-PR association. outcomeFieldsPopulated
@@ -319,10 +544,34 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 // direct GetPR-based callers in this file set it true; the two public
 // wrappers above always pass false, preserving their existing callers'
 // behavior exactly, because a branch-search or batched-status pr may not
-// carry real observations for these fields (AC-11).
+// carry real observations for these fields (AC-11). source is only applied
+// when this call creates a brand-new row (see TaskPRSourceWatch /
+// TaskPRSourceURLLink) — an existing or restored row keeps its original
+// source classification (no backfill). taskID is redirected to the
+// workspace-group owner before anything else runs when source is
+// TaskPRSourceWatch — see resolveEffectiveAssociationTaskID.
 func (s *Service) associatePRWithTask(
-	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached, outcomeFieldsPopulated bool,
+	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
+	restoreDetached, outcomeFieldsPopulated bool, source string,
 ) (*TaskPR, error) {
+	return s.associatePRWithTaskForSession(ctx, workspaceID, "", taskID, repositoryID, pr,
+		restoreDetached, outcomeFieldsPopulated, source)
+}
+
+func (s *Service) associatePRWithTaskForSession(
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID string, pr *PR,
+	restoreDetached, outcomeFieldsPopulated bool, source string,
+) (*TaskPR, error) {
+	originalTaskID := taskID
+	if source == TaskPRSourceWatch {
+		taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+		if taskID != originalTaskID {
+			s.reconcileTaskPROwnership(ctx, sessionID, originalTaskID, repositoryID, pr.Number)
+		}
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
+	}
 	// Multi-branch: scope the "already-current" short-circuit by exact
 	// pr_number too. A task can hold multiple PR rows per (task, repo) on
 	// different branches; the legacy by-repo lookup returns whichever row
@@ -361,23 +610,26 @@ func (s *Service) associatePRWithTask(
 		return existing, nil
 	}
 	tp := &TaskPR{
-		WorkspaceID:  workspaceID,
-		TaskID:       taskID,
-		RepositoryID: repositoryID,
-		Owner:        pr.RepoOwner,
-		Repo:         pr.RepoName,
-		PRNumber:     pr.Number,
-		PRURL:        pr.HTMLURL,
-		PRTitle:      pr.Title,
-		HeadBranch:   pr.HeadBranch,
-		BaseBranch:   pr.BaseBranch,
-		AuthorLogin:  pr.AuthorLogin,
-		State:        pr.State,
-		Additions:    pr.Additions,
-		Deletions:    pr.Deletions,
-		CreatedAt:    pr.CreatedAt,
-		MergedAt:     pr.MergedAt,
-		ClosedAt:     pr.ClosedAt,
+		WorkspaceID:       workspaceID,
+		TaskID:            taskID,
+		RepositoryID:      repositoryID,
+		Owner:             pr.RepoOwner,
+		Repo:              pr.RepoName,
+		PRNumber:          pr.Number,
+		PRURL:             pr.HTMLURL,
+		PRTitle:           pr.Title,
+		HeadBranch:        pr.HeadBranch,
+		BaseBranch:        pr.BaseBranch,
+		HeadSHA:           pr.HeadSHA,
+		AuthorLogin:       pr.AuthorLogin,
+		State:             pr.State,
+		Additions:         pr.Additions,
+		Deletions:         pr.Deletions,
+		CreatedAt:         pr.CreatedAt,
+		MergedAt:          pr.MergedAt,
+		ClosedAt:          pr.ClosedAt,
+		Source:            source,
+		HasMergeConflicts: observedTaskPRMergeConflict(nil, pr, pr.MergeableState),
 	}
 	// ReplaceTaskPR upserts the row matching (task, repository, pr_number)
 	// and resolves the five outcome-attribution columns itself, inside its
@@ -420,7 +672,8 @@ func (s *Service) associatePRWithTask(
 //
 // Returns the persisted TaskPR row so callers can confirm the association
 // and react to errors synchronously, in contrast to AssociatePRByURL's
-// fire-and-forget logging.
+// fire-and-forget logging. `repositoryID` is repositories.ID, same id space
+// as AssociatePRWithTask.
 func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, repositoryID, prURL string) (*TaskPR, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
@@ -429,23 +682,31 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
 	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
+	}
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true)
+	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
 	return tp, nil
 }
 
+// AssociateExistingPRByURLForWorkspace is the workspace-scoped variant of
+// AssociateExistingPRByURL; `repositoryID` is repositories.ID, same as there.
 func (s *Service) AssociateExistingPRByURLForWorkspace(
 	ctx context.Context, workspaceID, userID, taskID, repositoryID, prURL string,
 ) (*TaskPR, error) {
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return nil, err
 	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return nil, err
@@ -458,7 +719,7 @@ func (s *Service) AssociateExistingPRByURLForWorkspace(
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true)
+	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -480,6 +741,11 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 		s.logger.Error("failed to parse PR URL", zap.String("url", prURL), zap.Error(err))
 		return
 	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		s.logger.Error("invalid task repository for PR association",
+			zap.String("task_id", taskID), zap.String("repository_id", repositoryID), zap.Error(err))
+		return
+	}
 
 	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {
@@ -492,15 +758,20 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 	if branch == "" {
 		branch = pr.HeadBranch
 	}
-	if _, watchErr := s.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch); watchErr != nil {
+	// Resolved once and reused for both writes below: the watch's task_id is
+	// its only sync handle (get-or-create, never re-pointed on a hit), so it
+	// must agree with the association's task_id or the redirected owner's
+	// row never syncs.
+	effectiveTaskID := s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+	if _, watchErr := s.CreatePRWatch(ctx, sessionID, effectiveTaskID, repositoryID, owner, repo, prNumber, branch); watchErr != nil {
 		s.logger.Error("failed to create PR watch after PR creation",
 			zap.String("session_id", sessionID), zap.Error(watchErr))
 	}
 
 	// Associate PR with task (persists + publishes WS event)
-	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true); assocErr != nil {
+	if _, assocErr := s.associatePRWithTaskForSession(ctx, "", sessionID, taskID, repositoryID, pr, true, true, TaskPRSourceWatch); assocErr != nil {
 		s.logger.Error("failed to associate PR with task after creation",
-			zap.String("task_id", taskID), zap.Error(assocErr))
+			zap.String("task_id", effectiveTaskID), zap.Error(assocErr))
 	}
 }
 
@@ -510,6 +781,9 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	owner, repo, prNumber, err := parsePRURL(prURL)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+	}
+	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
+		return err
 	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return err
@@ -525,12 +799,17 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	if branch == "" {
 		branch = pr.HeadBranch
 	}
+	// Resolved once and reused for both writes below: the watch's task_id is
+	// its only sync handle (get-or-create, never re-pointed on a hit), so it
+	// must agree with the association's task_id or the redirected owner's
+	// row never syncs.
+	effectiveTaskID := s.resolveEffectiveAssociationTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	if _, err := s.CreatePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repo, prNumber, branch,
 	); err != nil {
 		return fmt.Errorf("create PR watch: %w", err)
 	}
-	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true); err != nil {
+	if _, err := s.associatePRWithTaskForSession(ctx, workspaceID, sessionID, taskID, repositoryID, pr, true, true, TaskPRSourceWatch); err != nil {
 		return fmt.Errorf("associate PR with task: %w", err)
 	}
 	return nil
@@ -623,16 +902,55 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 	staleTasks := make(map[string]struct{})
 	for taskID, prs := range result {
 		for _, tp := range prs {
-			if tp.LastSyncedAt == nil || time.Since(*tp.LastSyncedAt) >= PRSyncFreshnessWindow {
+			if tp.LastSyncedAt == nil || s.now().Sub(*tp.LastSyncedAt) >= PRSyncFreshnessWindow {
 				staleTasks[taskID] = struct{}{}
 				break
 			}
 		}
 	}
-	if len(staleTasks) > 0 {
+	refreshNeeded := len(staleTasks) > 0
+	if refreshNeeded || s.admitPassiveWorkspaceRefresh(workspaceID, s.now()) {
+		if activeWatches, watchErr := s.store.ListActivePRWatchesForWorkspace(ctx, workspaceID); watchErr != nil {
+			s.logger.Debug("list active PR watches for passive refresh failed", zap.Error(watchErr))
+		} else {
+			for _, watch := range activeWatches {
+				if watch != nil && watch.PRNumber == 0 {
+					refreshNeeded = true
+					break
+				}
+			}
+		}
+	}
+	if refreshNeeded {
 		s.refreshStaleWorkspaceWatches(workspaceID, staleTasks)
 	}
 	return result, nil
+}
+
+func (s *Service) admitPassiveWorkspaceRefresh(workspaceID string, now time.Time) bool {
+	if s == nil || strings.TrimSpace(workspaceID) == "" {
+		return false
+	}
+	s.passiveWorkspaceRefreshMu.Lock()
+	defer s.passiveWorkspaceRefreshMu.Unlock()
+	if last, ok := s.passiveWorkspaceRefreshAt[workspaceID]; ok && !now.Before(last) &&
+		now.Sub(last) < searchFastPollInterval {
+		return false
+	}
+	if s.passiveWorkspaceRefreshAt == nil {
+		s.passiveWorkspaceRefreshAt = make(map[string]time.Time)
+	}
+	s.passiveWorkspaceRefreshAt[workspaceID] = now
+	return true
+}
+
+func (s *Service) resetPassiveWorkspaceRefreshAdmission(workspaceID string) {
+	if s == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	s.passiveWorkspaceRefreshMu.Lock()
+	delete(s.passiveWorkspaceRefreshAt, workspaceID)
+	s.passiveWorkspaceRefreshMu.Unlock()
 }
 
 // refreshStaleWorkspaceWatches fans in all stale watches across the stale
@@ -662,24 +980,34 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 		defer s.inflightWorkspaceRefreshes.Delete(workspaceID)
 		syncCtx, cancel := context.WithTimeout(s.stopCtx, 60*time.Second)
 		defer cancel()
-		allWatches, unwatched := s.collectStaleWorkspaceSyncTargets(syncCtx, staleTasks)
+		allWatches, unwatched := s.collectStaleWorkspaceSyncTargets(syncCtx, workspaceID, staleTasks)
+		allWatches = selectDuePRWatches(syncCtx, allWatches, s.taskActivityProvider, s.now(), s.logger)
 		// PRs left behind by a branch handover have no watch to fan in, so
 		// they would stay stale on every workspace load. Reconcile them in
 		// one batched call for the whole workspace; once a row reaches a
 		// terminal state it drops out of this set permanently.
 		if len(unwatched) > 0 {
-			s.syncUnwatchedTaskPRs(syncCtx, unwatched, workspaceID)
+			s.syncUnwatchedTaskPRs(syncCtx, unwatched, workspaceID, false)
 		}
 		if len(allWatches) == 0 {
 			return
 		}
 		if _, err := s.SyncWorkspaceWatchesBatched(syncCtx, workspaceID, allWatches); err != nil {
 			// Batched fetch failed (noop client, auth blip, GraphQL error).
-			// Fall back to per-task sync with bounded concurrency so we
-			// don't spawn one gh per watch in lockstep.
+			// Classify the failure before fallback. Authentication and rate
+			// failures are workspace-wide, so another provider call cannot
+			// improve the result and would consume the same exhausted budget.
 			s.logger.Debug("batched workspace PR sync failed; falling back per-task",
 				zap.Int("watches", len(allWatches)), zap.Error(err))
-			s.refreshStaleTasksPerTask(syncCtx, staleTasks)
+			if !prWatchBatchFallbackAllowed(err) {
+				s.logger.Debug("skipping workspace PR fallback after provider admission failure",
+					zap.String("workspace_id", workspaceID), zap.Error(err))
+				return
+			}
+			if fallbackErr := s.refreshWatchesPerWatch(syncCtx, workspaceID, allWatches); fallbackErr != nil {
+				s.logger.Debug("workspace PR fallback stopped after provider admission failure",
+					zap.String("workspace_id", workspaceID), zap.Error(fallbackErr))
+			}
 		}
 	}()
 }
@@ -709,13 +1037,247 @@ func (s *Service) refreshStaleTasksPerTask(ctx context.Context, staleTasks map[s
 		go func(id string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if _, syncErr := s.TriggerPRSyncAll(ctx, id); syncErr != nil {
+			if _, _, syncErr := s.TriggerPRSyncAllPermanentWithOptions(ctx, id, false); syncErr != nil {
 				s.logger.Debug("background PR sync failed",
 					zap.String("task_id", id), zap.Error(syncErr))
 			}
 		}(taskID)
 	}
 	wg.Wait()
+}
+
+// refreshWatchesPerWatch is the passive fallback when a workspace batch is
+// unavailable. The caller has already applied adaptive due admission, so this
+// path checks only the selected watches and cannot turn a slow searching watch
+// into an immediate provider call through TriggerPRSyncAll.
+func (s *Service) refreshWatchesPerWatch(ctx context.Context, workspaceID string, watches []*PRWatch) error {
+	selected := s.selectPassiveFallbackTargets(workspaceID, watches)
+	groups := groupPRWatchFallbackTargets(watches)
+	// The target budget is deliberately admitted before this loop. Running the
+	// small set serially makes the stop rule precise: a rate/auth failure never
+	// has more than the current provider call in flight when the remaining
+	// targets are abandoned.
+	for _, watch := range selected {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := s.refreshPassiveFallbackTarget(ctx, groups[prWatchFallbackTargetKey(watch)])
+		if err == nil {
+			continue
+		}
+		s.logger.Debug("background PR watch fallback failed",
+			zap.String("watch_id", watch.ID), zap.Error(err))
+		if prWatchFallbackShouldStopWorkspace(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) refreshPassiveFallbackTarget(ctx context.Context, watches []*PRWatch) error {
+	if len(watches) == 0 || watches[0] == nil {
+		return nil
+	}
+	representative := watches[0]
+	var snapshot *TaskPR
+	var err error
+	if representative.PRNumber == 0 {
+		snapshot, err = s.triggerPRDetection(ctx, representative, representative.TaskID)
+	} else {
+		snapshot, err = s.triggerPRStatusSync(ctx, representative, representative.TaskID)
+	}
+	if err != nil {
+		return err
+	}
+	for _, watch := range watches[1:] {
+		if err := s.applyPassiveFallbackSnapshot(ctx, watch, snapshot); err != nil {
+			s.logger.Debug("background PR watch fallback apply failed",
+				zap.String("watch_id", watch.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func (s *Service) applyPassiveFallbackSnapshot(ctx context.Context, watch *PRWatch, snapshot *TaskPR) error {
+	if watch == nil {
+		return nil
+	}
+	if snapshot == nil {
+		return s.store.UpdatePRWatchTimestamps(ctx, watch.ID, time.Now().UTC(), nil, "", "")
+	}
+	status := prStatusFromTaskPRSnapshot(snapshot)
+	effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
+	if watch.PRNumber == 0 {
+		if err := s.rebindPRWatchRepository(ctx, watch, status.PR); err != nil {
+			return err
+		}
+		watch.PRNumber = status.PR.Number
+		if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, status.PR.Number); err != nil {
+			return err
+		}
+	}
+	existing, err := s.loadTaskPRForWatch(ctx, effectiveTaskID, watch)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		if _, err := s.associatePRWithTaskForSession(
+			ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, status.PR,
+			false, false, TaskPRSourceWatch,
+		); err != nil {
+			return err
+		}
+	}
+	if _, err := s.applyPRWatchStatus(ctx, watch, status); err != nil {
+		return err
+	}
+	if err := s.SyncTaskPR(ctx, effectiveTaskID, status); err != nil {
+		return err
+	}
+	if status.PR.State == prStateMerged || status.PR.State == prStateClosed {
+		hold, err := s.ShouldHoldTerminalPRWatch(ctx, effectiveTaskID, watch.RepositoryID, watch.PRNumber, status.PR.State)
+		if err != nil {
+			return err
+		}
+		if !hold {
+			return s.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0)
+		}
+	}
+	return nil
+}
+
+func prStatusFromTaskPRSnapshot(snapshot *TaskPR) *PRStatus {
+	pr := &PR{
+		Number:                                snapshot.PRNumber,
+		Title:                                 snapshot.PRTitle,
+		URL:                                   snapshot.PRURL,
+		State:                                 snapshot.State,
+		HeadBranch:                            snapshot.HeadBranch,
+		HeadSHA:                               snapshot.HeadSHA,
+		BaseBranch:                            snapshot.BaseBranch,
+		AuthorLogin:                           snapshot.AuthorLogin,
+		RepoOwner:                             snapshot.Owner,
+		RepoName:                              snapshot.Repo,
+		MergeableState:                        snapshot.MergeableState,
+		MergeQueueState:                       snapshot.MergeQueueState,
+		MergeQueuePosition:                    snapshot.MergeQueuePosition,
+		MergeQueueEntryID:                     snapshot.MergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                snapshot.MergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: snapshot.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               snapshot.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               snapshot.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           snapshot.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        snapshot.MergeQueueLastRemovalBeforeSHA,
+		Additions:                             snapshot.Additions,
+		Deletions:                             snapshot.Deletions,
+		CreatedAt:                             snapshot.CreatedAt,
+		MergedAt:                              snapshot.MergedAt,
+		ClosedAt:                              snapshot.ClosedAt,
+	}
+	if snapshot.IsDraft != nil {
+		pr.Draft = *snapshot.IsDraft
+		pr.IsDraftObserved = true
+	}
+	pr.HasMergeConflicts = snapshot.HasMergeConflicts
+	pr.HasMergeConflictsObserved = true
+	return &PRStatus{
+		PR:                                    pr,
+		WorkflowAttention:                     snapshot.WorkflowAttention,
+		ReviewState:                           snapshot.ReviewState,
+		ChecksState:                           snapshot.ChecksState,
+		MergeableState:                        snapshot.MergeableState,
+		MergeQueueState:                       snapshot.MergeQueueState,
+		MergeQueuePosition:                    snapshot.MergeQueuePosition,
+		MergeQueueEntryID:                     snapshot.MergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                snapshot.MergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: snapshot.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               snapshot.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               snapshot.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           snapshot.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        snapshot.MergeQueueLastRemovalBeforeSHA,
+		ReviewCount:                           snapshot.ReviewCount,
+		PendingReviewCount:                    snapshot.PendingReviewCount,
+		RequiredReviews:                       snapshot.RequiredReviews,
+		ChecksTotal:                           snapshot.ChecksTotal,
+		ChecksPassing:                         snapshot.ChecksPassing,
+		ChecksPopulated:                       true,
+		ReviewCountsPopulated:                 true,
+		UnresolvedReviewThreads:               snapshot.UnresolvedReviewThreads,
+		UnresolvedReviewThreadsPopulated:      true,
+		OutcomeFieldsPopulated:                snapshot.IsDraft != nil || snapshot.ChangedFiles != nil || snapshot.MergedByLogin != nil,
+		WorkflowAttentionPopulated:            snapshot.WorkflowAttention != nil,
+	}
+}
+
+type passiveFallbackAdmission struct {
+	at          time.Time
+	workspaceID string
+}
+
+func (s *Service) selectPassiveFallbackTargets(workspaceID string, watches []*PRWatch) []*PRWatch {
+	if len(watches) == 0 || workspaceID == "" {
+		return nil
+	}
+	byTarget := make(map[string]*PRWatch, len(watches))
+	for _, watch := range watches {
+		if watch != nil {
+			key := prWatchFallbackTargetKey(watch)
+			if _, exists := byTarget[key]; !exists {
+				byTarget[key] = watch
+			}
+		}
+	}
+	ordered := make([]*PRWatch, 0, len(byTarget))
+	for _, watch := range byTarget {
+		ordered = append(ordered, watch)
+	}
+	if len(ordered) == 0 {
+		return nil
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return prWatchFallbackTargetKey(ordered[i]) < prWatchFallbackTargetKey(ordered[j])
+	})
+
+	now := s.now()
+	s.passiveFallbackMu.Lock()
+	defer s.passiveFallbackMu.Unlock()
+	if s.passiveFallbackTargetCursors == nil {
+		s.passiveFallbackTargetCursors = make(map[string]int)
+	}
+	cutoff := now.Add(-time.Minute)
+	retained := s.passiveFallbackAdmissions[:0]
+	workspaceUsed := 0
+	for _, admission := range s.passiveFallbackAdmissions {
+		if !admission.at.After(cutoff) {
+			continue
+		}
+		retained = append(retained, admission)
+		if admission.workspaceID == workspaceID {
+			workspaceUsed++
+		}
+	}
+	s.passiveFallbackAdmissions = retained
+	remaining := minInt(
+		prWatchFallbackWorkspaceBudget-workspaceUsed,
+		prWatchFallbackCycleBudget-len(s.passiveFallbackAdmissions),
+	)
+	if remaining <= 0 {
+		return nil
+	}
+	if remaining > len(ordered) {
+		remaining = len(ordered)
+	}
+	cursor := s.passiveFallbackTargetCursors[workspaceID] % len(ordered)
+	selected := make([]*PRWatch, 0, remaining)
+	for offset := 0; offset < remaining; offset++ {
+		selected = append(selected, ordered[(cursor+offset)%len(ordered)])
+		s.passiveFallbackAdmissions = append(s.passiveFallbackAdmissions, passiveFallbackAdmission{
+			at:          now,
+			workspaceID: workspaceID,
+		})
+	}
+	s.passiveFallbackTargetCursors[workspaceID] = (cursor + remaining) % len(ordered)
+	return selected
 }
 
 // findTaskPRForStatus locates the TaskPR row matching the (task, owner, repo,
@@ -737,15 +1299,86 @@ func (s *Service) findTaskPRForStatus(ctx context.Context, taskID string, pr *PR
 }
 
 type taskPRSyncState struct {
-	checksTotal, checksPassing                  int
-	unresolved, reviewCount, pendingReviewCount int
-	requiredReviews                             *int
-	baseBranch, mergeableState, state           string
-	mergedAt, closedAt                          *time.Time
-	isDraft                                     *bool
-	changedFiles                                *int
-	mergedByLogin, closedByLogin                *string
-	autoMergeObservedAt                         *time.Time
+	checksTotal, checksPassing                           int
+	unresolved, reviewCount, pendingReviewCount          int
+	requiredReviews                                      *int
+	baseBranch, mergeableState, state                    string
+	hasMergeConflicts                                    *bool
+	mergeQueueState                                      string
+	mergeQueuePosition, mergeQueueEstimate               *int
+	mergeQueueEntryID, mergeQueueEntryHeadSHA            string
+	mergeQueueLastRemovalID, mergeQueueLastRemovalReason string
+	mergeQueueLastRemovalBeforeSHA                       string
+	mergeQueueLastRemovedAt                              *time.Time
+	headSHA                                              string
+	mergedAt, closedAt                                   *time.Time
+	isDraft                                              *bool
+	changedFiles                                         *int
+	mergedByLogin, closedByLogin                         *string
+	autoMergeObservedAt                                  *time.Time
+	workflowAttention                                    *WorkflowAttention
+}
+
+type taskPRMergeQueueState struct {
+	state, entryID, entryHeadSHA                           string
+	position, estimate                                     *int
+	lastRemovalID, lastRemovalReason, lastRemovalBeforeSHA string
+	lastRemovedAt                                          *time.Time
+}
+
+func resolveTaskPRMergeQueueState(tp *TaskPR, status *PRStatus) taskPRMergeQueueState {
+	var queue taskPRMergeQueueState
+	if tp != nil {
+		queue.state = tp.MergeQueueState
+		queue.position = tp.MergeQueuePosition
+		queue.estimate = tp.MergeQueueEstimatedTimeToMergeSeconds
+		queue.entryID = tp.MergeQueueEntryID
+		queue.entryHeadSHA = tp.MergeQueueEntryHeadSHA
+		queue.lastRemovalID = tp.MergeQueueLastRemovalID
+		queue.lastRemovedAt = tp.MergeQueueLastRemovedAt
+		queue.lastRemovalReason = tp.MergeQueueLastRemovalReason
+		queue.lastRemovalBeforeSHA = tp.MergeQueueLastRemovalBeforeSHA
+	}
+	if status == nil || status.PR == nil {
+		return queue
+	}
+	if strings.EqualFold(status.PR.State, prStateMerged) || strings.EqualFold(status.PR.State, prStateClosed) {
+		queue.state, queue.position, queue.estimate = "", nil, nil
+		queue.entryID, queue.entryHeadSHA = "", ""
+	} else if status.mergeQueuePopulated {
+		queue.state = normalizeMergeQueueState(status.MergeQueueState)
+		queue.position = positiveIntPtr(status.MergeQueuePosition)
+		queue.estimate = nonNegativeIntPtr(status.MergeQueueEstimatedTimeToMergeSeconds)
+		queue.entryID = status.MergeQueueEntryID
+		queue.entryHeadSHA = status.MergeQueueEntryHeadSHA
+	} else {
+		// REST and gh CLI status reads do not expose merge-queue fields. They
+		// are still authoritative for the absence of an active entry once the
+		// PR itself was fetched, so do not let an old GraphQL entry identifier
+		// keep auto-merge blocked indefinitely.
+		queue.state, queue.position, queue.estimate = "", nil, nil
+		queue.entryID, queue.entryHeadSHA = "", ""
+	}
+	if status.mergeQueueRecoveryPopulated && shouldApplyTaskPRMergeQueueRemoval(queue, status) {
+		queue.lastRemovalID = status.MergeQueueLastRemovalID
+		queue.lastRemovedAt = status.MergeQueueLastRemovedAt
+		queue.lastRemovalReason = status.MergeQueueLastRemovalReason
+		queue.lastRemovalBeforeSHA = status.MergeQueueLastRemovalBeforeSHA
+	}
+	return queue
+}
+
+func shouldApplyTaskPRMergeQueueRemoval(current taskPRMergeQueueState, status *PRStatus) bool {
+	if status == nil || status.MergeQueueLastRemovalID == "" || current.lastRemovalID == status.MergeQueueLastRemovalID {
+		return false
+	}
+	if current.lastRemovalID == "" || current.lastRemovedAt == nil {
+		return true
+	}
+	if status.MergeQueueLastRemovedAt == nil {
+		return false
+	}
+	return status.MergeQueueLastRemovedAt.After(*current.lastRemovedAt)
 }
 
 // resolveTaskPROutcomeFields applies the populated/preserve dance for the
@@ -873,18 +1506,63 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	if status.PR.Draft {
 		nextMergeableState = "draft"
 	}
+	queue := resolveTaskPRMergeQueueState(tp, status)
 	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
+	nextHeadSHA := tp.HeadSHA
+	if status.PR.HeadSHA != "" {
+		nextHeadSHA = status.PR.HeadSHA
+	}
+	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, nextHeadSHA)
 	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)
 	return taskPRSyncState{
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
 		requiredReviews: nextRequiredReviews, baseBranch: nextBaseBranch, mergeableState: nextMergeableState,
-		state: nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
+		hasMergeConflicts: observedTaskPRMergeConflict(tp.HasMergeConflicts, status.PR, status.MergeableState),
+		mergeQueueState:   queue.state, mergeQueuePosition: queue.position, mergeQueueEstimate: queue.estimate,
+		mergeQueueEntryID: queue.entryID, mergeQueueEntryHeadSHA: queue.entryHeadSHA,
+		mergeQueueLastRemovalID: queue.lastRemovalID, mergeQueueLastRemovalReason: queue.lastRemovalReason,
+		mergeQueueLastRemovalBeforeSHA: queue.lastRemovalBeforeSHA, mergeQueueLastRemovedAt: queue.lastRemovedAt,
+		headSHA: nextHeadSHA,
+		state:   nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
 		isDraft: nextIsDraft, changedFiles: nextChangedFiles,
 		mergedByLogin: nextMergedByLogin, closedByLogin: nextClosedByLogin,
 		autoMergeObservedAt: nextAutoMergeObservedAt,
+		workflowAttention:   nextWorkflowAttention,
 	}
+}
+
+func observedPRMergeConflict(previous *bool, mergeableState string) *bool {
+	switch strings.ToLower(strings.TrimSpace(mergeableState)) {
+	case "dirty":
+		value := true
+		return &value
+	case "", "unknown":
+		return previous
+	default:
+		value := false
+		return &value
+	}
+}
+
+// observedTaskPRMergeConflict prefers independent snapshot evidence over effective mergeability.
+func observedTaskPRMergeConflict(previous *bool, pr *PR, mergeableState string) *bool {
+	if pr != nil && pr.HasMergeConflictsObserved {
+		if pr.HasMergeConflicts == nil {
+			return previous
+		}
+		value := *pr.HasMergeConflicts
+		return &value
+	}
+	return observedPRMergeConflict(previous, mergeableState)
+}
+
+func effectivePRMergeableState(pr *PR) string {
+	if pr.Draft {
+		return "draft"
+	}
+	return pr.MergeableState
 }
 
 func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []string {
@@ -892,6 +1570,7 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 		return nil
 	}
 	changed := make([]string, 0, 16)
+	changed = appendChangedField(changed, "head_sha", tp.HeadSHA != next.headSHA)
 	changed = appendChangedField(changed, "state", tp.State != next.state)
 	changed = appendChangedField(changed, "pr_title", tp.PRTitle != status.PR.Title)
 	changed = appendChangedField(changed, "additions", tp.Additions != status.PR.Additions)
@@ -899,6 +1578,16 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 	changed = appendChangedField(changed, "review_state", tp.ReviewState != status.ReviewState)
 	changed = appendChangedField(changed, "checks_state", tp.ChecksState != status.ChecksState)
 	changed = appendChangedField(changed, "mergeable_state", tp.MergeableState != next.mergeableState)
+	changed = appendChangedField(changed, "has_merge_conflicts", !boolPtrEqual(tp.HasMergeConflicts, next.hasMergeConflicts))
+	changed = appendChangedField(changed, "merge_queue_state", tp.MergeQueueState != next.mergeQueueState)
+	changed = appendChangedField(changed, "merge_queue_position", !intPtrEqual(tp.MergeQueuePosition, next.mergeQueuePosition))
+	changed = appendChangedField(changed, "merge_queue_entry_id", tp.MergeQueueEntryID != next.mergeQueueEntryID)
+	changed = appendChangedField(changed, "merge_queue_entry_head_sha", tp.MergeQueueEntryHeadSHA != next.mergeQueueEntryHeadSHA)
+	changed = appendChangedField(changed, "merge_queue_estimated_time_to_merge_seconds", !intPtrEqual(tp.MergeQueueEstimatedTimeToMergeSeconds, next.mergeQueueEstimate))
+	changed = appendChangedField(changed, "merge_queue_last_removal_id", tp.MergeQueueLastRemovalID != next.mergeQueueLastRemovalID)
+	changed = appendChangedField(changed, "merge_queue_last_removed_at", !timeEqual(tp.MergeQueueLastRemovedAt, next.mergeQueueLastRemovedAt))
+	changed = appendChangedField(changed, "merge_queue_last_removal_reason", tp.MergeQueueLastRemovalReason != next.mergeQueueLastRemovalReason)
+	changed = appendChangedField(changed, "merge_queue_last_removal_before_sha", tp.MergeQueueLastRemovalBeforeSHA != next.mergeQueueLastRemovalBeforeSHA)
 	changed = appendChangedField(changed, "review_count", tp.ReviewCount != next.reviewCount)
 	changed = appendChangedField(
 		changed,
@@ -929,6 +1618,11 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 		"auto_merge_observed_at",
 		!timeEqual(tp.AutoMergeObservedAt, next.autoMergeObservedAt),
 	)
+	changed = appendChangedField(
+		changed,
+		"workflow_attention",
+		!workflowAttentionSemanticEqual(tp.WorkflowAttention, next.workflowAttention),
+	)
 	return changed
 }
 
@@ -956,11 +1650,14 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		return err
 	}
 	next := s.prepareTaskPRSyncState(ctx, tp, status)
+	nextLastSyncedAt := taskPRStatusSyncTimestamp(tp, status, next.headSHA, next.baseBranch)
+	baseBranchChanged := tp.BaseBranch != next.baseBranch && strings.TrimSpace(next.baseBranch) != ""
 
 	changedFields := taskPRChangedFields(tp, status, next)
 	changed := len(changedFields) > 0
 
 	tp.State = next.state
+	tp.HeadSHA = next.headSHA
 	tp.PRTitle = status.PR.Title
 	tp.Additions = status.PR.Additions
 	tp.Deletions = status.PR.Deletions
@@ -969,6 +1666,16 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ReviewState = status.ReviewState
 	tp.ChecksState = status.ChecksState
 	tp.MergeableState = next.mergeableState
+	tp.HasMergeConflicts = next.hasMergeConflicts
+	tp.MergeQueueState = next.mergeQueueState
+	tp.MergeQueuePosition = next.mergeQueuePosition
+	tp.MergeQueueEntryID = next.mergeQueueEntryID
+	tp.MergeQueueEntryHeadSHA = next.mergeQueueEntryHeadSHA
+	tp.MergeQueueEstimatedTimeToMergeSeconds = next.mergeQueueEstimate
+	tp.MergeQueueLastRemovalID = next.mergeQueueLastRemovalID
+	tp.MergeQueueLastRemovedAt = next.mergeQueueLastRemovedAt
+	tp.MergeQueueLastRemovalReason = next.mergeQueueLastRemovalReason
+	tp.MergeQueueLastRemovalBeforeSHA = next.mergeQueueLastRemovalBeforeSHA
 	tp.ReviewCount = next.reviewCount
 	tp.PendingReviewCount = next.pendingReviewCount
 	tp.RequiredReviews = next.requiredReviews
@@ -981,9 +1688,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.MergedByLogin = next.mergedByLogin
 	tp.ClosedByLogin = next.closedByLogin
 	tp.AutoMergeObservedAt = next.autoMergeObservedAt
+	tp.WorkflowAttention = next.workflowAttention
+	tp.WorkflowAttentionJSON = marshalWorkflowAttention(next.workflowAttention)
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
-	now := time.Now().UTC()
-	tp.LastSyncedAt = &now
+	tp.LastSyncedAt = nextLastSyncedAt
 	if len(changedFields) > 0 && s.logger != nil {
 		s.logger.Debug("task PR semantic state changed",
 			zap.String("task_id", taskID),
@@ -994,7 +1702,25 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		)
 	}
 
-	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated)
+	return s.persistAndPublishTaskPRSync(
+		ctx, taskID, status.PR, tp, changed, status.OutcomeFieldsPopulated, baseBranchChanged,
+	)
+}
+
+func (s *Service) propagateTaskRepositoryBaseBranch(ctx context.Context, tp *TaskPR, changed bool) {
+	if !changed || s.taskRepositoryUpdater == nil || tp == nil {
+		return
+	}
+	if err := s.taskRepositoryUpdater.UpdateTaskRepositoryBaseBranch(
+		ctx, tp.TaskID, tp.RepositoryID, tp.HeadBranch, tp.BaseBranch,
+	); err != nil && s.logger != nil {
+		s.logger.Warn("failed to propagate pull request base branch to task repository",
+			zap.String("task_id", tp.TaskID),
+			zap.String("repository_id", tp.RepositoryID),
+			zap.Int("pr_number", tp.PRNumber),
+			zap.String("base_branch", tp.BaseBranch),
+			zap.Error(err))
+	}
 }
 
 // persistAndPublishTaskPRSync writes the reconciled sync state and, on
@@ -1009,7 +1735,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 // what a subsequent read of the row returns (codex [P2]). Split out of
 // SyncTaskPR to keep that function within the repo's complexity limits and
 // to make the re-read-before-publish behavior directly testable.
-func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, changed, outcomeFieldsPopulated bool) error {
+func (s *Service) persistAndPublishTaskPRSync(
+	ctx context.Context, taskID string, pr *PR, tp *TaskPR,
+	changed, outcomeFieldsPopulated, baseBranchChanged bool,
+) error {
 	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
 	// before the write is attempted, and survives write failure — it
 	// measures what the sync observed, not whether the store call happened
@@ -1018,10 +1747,11 @@ func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, c
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
+	s.propagateTaskRepositoryBaseBranch(ctx, tp, baseBranchChanged)
 	// Provider payloads carry the authoritative head/base repository identity
 	// and branch. Reconcile after the TaskPR write so a malformed or
 	// unmatchable payload never prevents the review association from persisting.
-	s.reconcileComparisonTargetFromSync(ctx, taskID, status.PR)
+	s.reconcileComparisonTargetFromSync(ctx, taskID, pr)
 
 	if changed && s.eventBus != nil {
 		published, err := s.store.GetTaskPRByID(ctx, tp.ID)
@@ -1065,7 +1795,7 @@ func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, er
 		return s.triggerPRDetection(ctx, watch, taskID)
 	}
 
-	return s.triggerPRStatusSync(ctx, watch, taskID)
+	return s.triggerPRStatusSyncWithOptions(ctx, watch, taskID, true)
 }
 
 // TriggerPRSyncAll performs an immediate PR status sync for every PR watch
@@ -1081,7 +1811,7 @@ func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, er
 // when the batched fetch itself fails; in those cases we fan out one
 // subprocess per watch as before.
 func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskPR, error) {
-	prs, _, err := s.triggerPRSyncAllPermanent(ctx, taskID)
+	prs, _, err := s.triggerPRSyncAllPermanent(ctx, taskID, true)
 	return prs, err
 }
 
@@ -1093,10 +1823,23 @@ func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskP
 // pointing at a deleted repo doesn't keep hammering the gh throttle for
 // the lifetime of the task.
 func (s *Service) TriggerPRSyncAllPermanent(ctx context.Context, taskID string) ([]*TaskPR, bool, error) {
-	return s.triggerPRSyncAllPermanent(ctx, taskID)
+	return s.triggerPRSyncAllPermanent(ctx, taskID, true)
 }
 
-func (s *Service) triggerPRSyncAllPermanent(ctx context.Context, taskID string) ([]*TaskPR, bool, error) {
+// TriggerPRSyncAllPermanentWithOptions runs the task PR sync with an explicit
+// refresh decision supplied by the request boundary. Automatic task views use
+// passive admission so an idle searching watch does not become a provider
+// request; a user refresh can bypass that admission and invalidate cached
+// observations.
+func (s *Service) TriggerPRSyncAllPermanentWithOptions(
+	ctx context.Context, taskID string, explicitRefresh bool,
+) ([]*TaskPR, bool, error) {
+	return s.triggerPRSyncAllPermanent(ctx, taskID, explicitRefresh)
+}
+
+func (s *Service) triggerPRSyncAllPermanent(
+	ctx context.Context, taskID string, explicitRefresh bool,
+) ([]*TaskPR, bool, error) {
 	watches, err := s.store.ListPRWatchesByTask(ctx, taskID)
 	if err != nil {
 		return nil, false, fmt.Errorf("list PR watches: %w", err)
@@ -1107,35 +1850,45 @@ func (s *Service) triggerPRSyncAllPermanent(ctx context.Context, taskID string) 
 		// sync path at all, so reconcile them here rather than returning the
 		// stored snapshot verbatim. Empty slice if none. permanent=false (the
 		// task can still acquire a watch later via push detection).
-		existing, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, nil)
+		existing, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, nil, explicitRefresh)
 		if listErr != nil {
 			return nil, false, listErr
 		}
 		return existing, false, nil
 	}
-	prs, syncErr := s.runBatchedOrPerWatchSync(ctx, taskID, watches)
+	allWatches := watches
+	watchesToSync := watches
+	if !explicitRefresh {
+		watchesToSync = selectDuePRWatches(ctx, watches, s.taskActivityProvider, s.now(), s.logger)
+	}
+	prs, syncErr := s.runBatchedOrPerWatchSync(ctx, taskID, watchesToSync, explicitRefresh)
 	// PRs the task linked from an earlier branch are no longer covered by any
 	// watch — the loop above cannot see them, and without this they keep their
 	// last-observed state (open, green, mergeable) forever.
-	if reconciled, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, watches); listErr != nil {
+	if reconciled, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, allWatches, explicitRefresh); listErr != nil {
 		s.logger.Debug("unwatched task PR reconciliation failed",
 			zap.String("task_id", taskID), zap.Error(listErr))
 	} else {
 		prs = reconciled
 	}
-	return prs, s.areAllWatchesPermanentlyMissing(ctx, watches), syncErr
+	return prs, s.areAllWatchesPermanentlyMissing(ctx, allWatches), syncErr
 }
 
 // runBatchedOrPerWatchSync is the shared "try batched, fall back to
 // per-watch" body of triggerPRSyncAllPermanent. Split out so the
 // permanent-flag computation can wrap the result without duplicating
 // the batched / fallback branches inline.
-func (s *Service) runBatchedOrPerWatchSync(ctx context.Context, taskID string, watches []*PRWatch) ([]*TaskPR, error) {
+func (s *Service) runBatchedOrPerWatchSync(
+	ctx context.Context, taskID string, watches []*PRWatch, explicitRefresh bool,
+) ([]*TaskPR, error) {
+	if len(watches) == 0 {
+		return s.store.ListTaskPRsByTask(ctx, taskID)
+	}
 	workspaceID := watches[0].WorkspaceID
-	if _, batchErr := s.SyncWorkspaceWatchesBatched(ctx, workspaceID, watches); batchErr != nil {
+	if _, batchErr := s.syncWorkspaceWatchesBatched(ctx, workspaceID, watches, explicitRefresh); batchErr != nil {
 		s.logger.Debug("batched PR sync failed; falling back to per-watch",
 			zap.String("task_id", taskID), zap.Error(batchErr))
-		return s.triggerPRSyncAllPerWatch(ctx, taskID, watches)
+		return s.triggerPRSyncAllPerWatch(ctx, taskID, watches, explicitRefresh)
 	}
 	// Batched path applied all DB updates inline; reload so the WS caller
 	// sees the freshest TaskPR rows.
@@ -1165,16 +1918,18 @@ func (s *Service) areAllWatchesPermanentlyMissing(ctx context.Context, watches [
 // per watch. Kept as a fallback for the NoopClient and for the rare case
 // where the batched GraphQL call fails (auth glitch, network blip) so a
 // single bad cycle doesn't leave the UI staring at stale data.
-func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, watches []*PRWatch) ([]*TaskPR, error) {
+func (s *Service) triggerPRSyncAllPerWatch(
+	ctx context.Context, taskID string, watches []*PRWatch, explicitRefresh bool,
+) ([]*TaskPR, error) {
 	results := make([]*TaskPR, 0, len(watches))
 	var syncErrs []error
 	for _, w := range watches {
 		var tp *TaskPR
 		var syncErr error
 		if w.PRNumber == 0 {
-			tp, syncErr = s.triggerPRDetection(ctx, w, taskID)
+			tp, syncErr = s.triggerPRDetectionWithOptions(ctx, w, taskID, explicitRefresh)
 		} else {
-			tp, syncErr = s.triggerPRStatusSync(ctx, w, taskID)
+			tp, syncErr = s.triggerPRStatusSyncWithOptions(ctx, w, taskID, explicitRefresh)
 		}
 		if syncErr != nil {
 			// Debug, not Warn: this is best-effort background reconciliation and
@@ -1225,6 +1980,12 @@ func (e *PartialPRSyncError) Unwrap() error {
 }
 
 func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
+	return s.triggerPRDetectionWithOptions(ctx, watch, taskID, false)
+}
+
+func (s *Service) triggerPRDetectionWithOptions(
+	ctx context.Context, watch *PRWatch, taskID string, explicitRefresh bool,
+) (*TaskPR, error) {
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
@@ -1240,8 +2001,11 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 	// two never collide. singleflight only blocks same-key calls, so the nested
 	// triggerPRStatusSync (different key) below cannot deadlock.
 	key := scopedCacheKey(resolved.CacheScope, "pr-detect:"+watch.ID)
+	if explicitRefresh {
+		key += prSyncExplicitRefreshKeySuffix
+	}
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
-		return s.detectPRForWatchOnce(ctx, resolved, watch, taskID)
+		return s.detectPRForWatchOnce(ctx, resolved, watch, taskID, explicitRefresh)
 	})
 	if err != nil {
 		return nil, err
@@ -1257,6 +2021,7 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 // singleflight so only one probe per watch is in flight at a time.
 func (s *Service) detectPRForWatchOnce(
 	ctx context.Context, resolved *resolvedServiceClient, watch *PRWatch, taskID string,
+	explicitRefresh bool,
 ) (*TaskPR, error) {
 	// Short-circuit when this repo is already in the 10-min negative
 	// cache. Without this, an unresolvable repo gets a fresh per-watch
@@ -1271,8 +2036,9 @@ func (s *Service) detectPRForWatchOnce(
 	// Without this, a branch whose PR never appears (e.g. an unresolvable repo)
 	// re-hits `gh` on every on-demand sync, and the frontend re-syncs every 5s
 	// while no PR is found — flooding the logs with identical failures.
-	if watch.LastCheckedAt != nil && time.Since(*watch.LastCheckedAt) < PRSyncFreshnessWindow {
-		return s.store.GetTaskPRByRepository(ctx, taskID, watch.RepositoryID)
+	if !explicitRefresh && watch.LastCheckedAt != nil && time.Since(*watch.LastCheckedAt) < PRSyncFreshnessWindow {
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
+		return s.store.GetTaskPRByRepository(ctx, effectiveTaskID, watch.RepositoryID)
 	}
 
 	// Snapshot the negative-cache generation BEFORE the fetch so an
@@ -1280,15 +2046,52 @@ func (s *Service) detectPRForWatchOnce(
 	// fires WHILE FindPRByBranch is running wins over our post-fetch
 	// classification — see Service.markRepoAsMissing for the rationale.
 	repoErrGen := s.repoErrorGenSnapshot()
-	pr, err := s.findPRByBranchInForkNetwork(
-		ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
+	credentialGeneration := int64(0)
+	if resolved.credential != nil {
+		credentialGeneration = resolved.credential.CredentialGeneration
+	}
+	attempt, admitted := s.beginPRDiscoveryWatchWithOptions(
+		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch, explicitRefresh,
 	)
-	if err != nil && isRepoNotResolvableErr(err) {
-		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
-		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
-		// to flag the WS response as permanent without re-running the
-		// classifier on the raw upstream error string.
-		err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
+	if !admitted {
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
+		return s.store.GetTaskPRByRepository(ctx, effectiveTaskID, watch.RepositoryID)
+	}
+	var pr *PR
+	var err error
+	if attempt.joined {
+		pr, err = sharedPRDiscoveryResult(ctx, attempt)
+	} else {
+		pr, err = s.findPRByBranchInForkNetwork(
+			ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
+		)
+		if err != nil && isRepoNotResolvableErr(err) {
+			s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
+			// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
+			// to flag the WS response as permanent without re-running the
+			// classifier on the raw upstream error string.
+			err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
+		}
+		if err != nil {
+			category := classifyPRDiscoveryError(err)
+			s.completePRDiscoveryWatchAttempt(
+				attempt, nil, false, true, err,
+				category == PRDiscoveryHealthInvalidQuery || category == PRDiscoveryHealthRateLimited,
+			)
+			s.finishPRDiscoveryWatchFailure(
+				watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt, err,
+			)
+		} else {
+			s.completePRDiscoveryWatchAttempt(
+				attempt, &PRStatus{PR: pr}, true, false, nil, false,
+			)
+			s.finishPRDiscoveryWatchSuccess(
+				watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt,
+			)
+		}
+		s.forgetPRDiscoveryWatchAttempt(
+			watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt,
+		)
 	}
 	// Stamp last_checked_at regardless of outcome — including on error. The
 	// flood this fixes IS the error path (an unresolvable repo makes `gh` exit
@@ -1314,49 +2117,65 @@ func (s *Service) detectPRForWatchOnce(
 		return nil, rebindErr
 	}
 	if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
-		s.logger.Error("failed to update PR watch number during sync",
-			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		s.logSyncError("failed to update PR watch number during sync", err,
+			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number))
 		return nil, fmt.Errorf("update PR watch: %w", err)
 	}
-	if _, assocErr := s.AssociatePRWithTaskForWorkspace(ctx, watch.WorkspaceID, taskID, watch.RepositoryID, pr); assocErr != nil {
-		s.logger.Error("failed to associate PR with task during sync",
-			zap.String("task_id", taskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
+	if _, assocErr := s.associatePRWithTaskForSession(
+		ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, pr,
+		false, false, TaskPRSourceWatch,
+	); assocErr != nil {
+		s.logSyncError("failed to associate PR with task during sync", assocErr,
+			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number))
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
 	}
+	s.trackPRDiscoveryWatchTarget(
+		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch,
+		prDiscoveryHealthTarget{
+			Owner: watch.Owner, Repo: watch.Repo, Branch: watch.Branch, PRNumber: pr.Number,
+		},
+	)
 	// Also fetch status so the first response includes review/check state
 	watch.PRNumber = pr.Number
-	return s.triggerPRStatusSync(ctx, watch, taskID)
+	return s.triggerPRStatusSyncWithOptions(ctx, watch, taskID, explicitRefresh)
 }
 
 func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
+	return s.triggerPRStatusSyncWithOptions(ctx, watch, taskID, false)
+}
+
+func (s *Service) triggerPRStatusSyncWithOptions(
+	ctx context.Context, watch *PRWatch, taskID string, explicitRefresh bool,
+) (*TaskPR, error) {
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	// taskID is derived from the watch (callers fetch watches by task_id), so
+	// a numbered watch that found its PR before this fix existed still carries
+	// the observing member's task_id — watches are never re-pointed once they
+	// have a PR (see apps/backend/CLAUDE.md's "PR status sync coverage").
+	// Resolve the effective owner the same way associatePRWithTask does for
+	// the association write, so an on-demand sync keeps landing on the
+	// owner's github_task_prs row instead of silently updating nothing.
+	rawTaskID := taskID
+	if watch.TaskID != "" {
+		rawTaskID = watch.TaskID
+	}
+	taskID = s.reconcileTaskPROwnership(ctx, watch.SessionID, rawTaskID, watch.RepositoryID, watch.PRNumber)
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
 	if err != nil {
 		return nil, err
 	}
-	// Freshness check: skip GitHub API if this exact PR row was recently
-	// synced. Multi-branch tasks can have multiple PRs in the same repo, so a
-	// repo-only lookup would let a fresh sibling suppress this PR's sync.
-	loadTaskPR := func(c context.Context) (*TaskPR, error) {
-		tp, err := s.store.GetTaskPRByRepoAndNumber(c, taskID, watch.RepositoryID, watch.PRNumber)
-		if err != nil {
-			return nil, err
-		}
-		if tp != nil {
-			return tp, nil
-		}
-		// Fall back to the legacy untagged row for single-repo tasks that
-		// haven't been re-associated under the multi-repo schema yet.
-		if watch.RepositoryID != "" {
-			return nil, nil
-		}
-		return s.store.GetTaskPR(c, taskID)
+	if explicitRefresh {
+		s.invalidateWorkflowAttentionForResolvedPR(
+			resolved, watch.Owner, watch.Repo, watch.PRNumber, "",
+		)
 	}
-	if tp, _ := loadTaskPR(ctx); tp != nil && tp.LastSyncedAt != nil {
-		if time.Since(*tp.LastSyncedAt) < PRSyncFreshnessWindow {
-			return tp, nil
+	if !explicitRefresh {
+		if tp, _ := s.loadTaskPRForWatch(ctx, taskID, watch); tp != nil && tp.LastSyncedAt != nil {
+			if time.Since(*tp.LastSyncedAt) < PRSyncFreshnessWindow {
+				return tp, nil
+			}
 		}
 	}
 
@@ -1366,16 +2185,39 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 	if s.isRepoCachedAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo) {
 		return nil, ErrRepoNotResolvable
 	}
+	return s.runPRStatusSync(ctx, resolved, watch, taskID, rawTaskID, explicitRefresh)
+}
 
-	// Coalesce concurrent syncs for the same PR
+// loadTaskPRForWatch reads the exact repository row first, then preserves the
+// legacy single-repository fallback for older associations.
+func (s *Service) loadTaskPRForWatch(
+	ctx context.Context, taskID string, watch *PRWatch,
+) (*TaskPR, error) {
+	tp, err := s.store.GetTaskPRByRepoAndNumber(ctx, taskID, watch.RepositoryID, watch.PRNumber)
+	if err != nil || tp != nil || watch.RepositoryID != "" {
+		return tp, err
+	}
+	return s.store.GetTaskPR(ctx, taskID)
+}
+
+func (s *Service) runPRStatusSync(
+	ctx context.Context,
+	resolved *resolvedServiceClient,
+	watch *PRWatch,
+	taskID, rawTaskID string,
+	explicitRefresh bool,
+) (*TaskPR, error) {
 	key := scopedCacheKey(resolved.CacheScope, fmt.Sprintf("%s/%s/%d", watch.Owner, watch.Repo, watch.PRNumber))
+	if explicitRefresh {
+		key += prSyncExplicitRefreshKeySuffix
+	}
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		// Snapshot cache generation BEFORE the per-watch probe so a
 		// concurrent eviction wins; see Service.markRepoAsMissing.
 		repoErrGen := s.repoErrorGenSnapshot()
-		status, _, checkErr := s.checkPRWatchWithClient(bgCtx, resolved.Client, watch)
+		status, _, checkErr := s.checkPRWatchWithClient(bgCtx, resolved.Client, resolved.CacheScope, watch)
 		if checkErr != nil {
 			if isRepoNotResolvableErr(checkErr) {
 				s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
@@ -1384,23 +2226,19 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 			return nil, checkErr
 		}
 		if status == nil {
-			return loadTaskPR(bgCtx)
+			return s.loadTaskPRForWatch(bgCtx, taskID, watch)
 		}
-		if existing, loadErr := loadTaskPR(bgCtx); loadErr != nil {
+		existing, loadErr := s.loadTaskPRForWatch(bgCtx, taskID, watch)
+		if loadErr != nil {
 			return nil, loadErr
-		} else if existing == nil && status.PR != nil {
-			// Gap-fill a numbered watch whose exact task_pr row was never
-			// created. AssociatePRWithTask publishes the creation event; the
-			// following SyncTaskPR may publish again if status fields changed.
-			// That double event is harmless because clients re-fetch state.
-			if _, assocErr := s.AssociatePRWithTask(bgCtx, taskID, watch.RepositoryID, status.PR); assocErr != nil {
-				return nil, assocErr
-			}
+		}
+		if err := s.ensurePRStatusAssociation(bgCtx, watch, rawTaskID, existing, status); err != nil {
+			return nil, err
 		}
 		if syncErr := s.SyncTaskPR(bgCtx, taskID, status); syncErr != nil {
 			return nil, syncErr
 		}
-		return loadTaskPR(bgCtx)
+		return s.loadTaskPRForWatch(bgCtx, taskID, watch)
 	})
 	if err != nil {
 		return nil, err
@@ -1409,4 +2247,25 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 		return nil, nil
 	}
 	return v.(*TaskPR), nil
+}
+
+func (s *Service) ensurePRStatusAssociation(
+	ctx context.Context,
+	watch *PRWatch,
+	rawTaskID string,
+	existing *TaskPR,
+	status *PRStatus,
+) error {
+	if existing != nil || status.PR == nil {
+		return nil
+	}
+	// Gap-fill a numbered watch whose exact task_pr row was never created.
+	// AssociatePRWithTask publishes the creation event; the following
+	// SyncTaskPR may publish again if status fields changed. That double event
+	// is harmless because clients re-fetch state.
+	_, assocErr := s.associatePRWithTaskForSession(
+		ctx, watch.WorkspaceID, watch.SessionID, rawTaskID, watch.RepositoryID, status.PR,
+		false, false, TaskPRSourceWatch,
+	)
+	return assocErr
 }

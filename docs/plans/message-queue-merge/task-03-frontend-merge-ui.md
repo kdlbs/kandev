@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["message-queue-merge-02"]
 plan: plan.md
-spec: ../../specs/ui/message-queue-merge.md
+spec: ../../specs/ui/requirements/message-queue-merge.md
 ---
 
 # Task 03: Frontend merge control

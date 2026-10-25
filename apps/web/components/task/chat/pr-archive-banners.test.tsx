@@ -4,6 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 const archiveAndSwitchMock = vi.fn();
 const toastMock = vi.fn();
 const mockGetSubtaskCount = vi.fn();
+const viewport = vi.hoisted(() => ({ isMobile: false }));
+vi.mock("@/hooks/use-responsive-breakpoint", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/use-responsive-breakpoint")>()),
+  useResponsiveBreakpoint: () => ({ isMobile: viewport.isMobile, isFinePointer: true }),
+}));
 const taskPRsByTaskId = vi.hoisted(() => ({
   value: {
     "task-1": [{ pr_number: 42, state: "merged" }],
@@ -49,10 +54,19 @@ vi.mock("@/lib/local-storage", async (importOriginal) => ({
 
 import { PRClosedBanner, PRMergedBanner } from "./pr-archive-banners";
 
+const MERGED_BANNER = "pr-merged-banner";
+const CLOSED_BANNER = "pr-closed-banner";
 const MERGED_ARCHIVE_BUTTON = "pr-merged-archive-button";
 const MERGED_ARCHIVE_CONFIRM = "pr-merged-archive-confirm";
 
+async function findEnabledConfirm(testId: string) {
+  await screen.findByTestId<HTMLButtonElement>(testId);
+  await waitFor(() => expect(screen.getByTestId<HTMLButtonElement>(testId).disabled).toBe(false));
+  return screen.getByTestId<HTMLButtonElement>(testId);
+}
+
 beforeEach(() => {
+  viewport.isMobile = false;
   archiveAndSwitchMock.mockResolvedValue(undefined);
   mockGetSubtaskCount.mockResolvedValue({ count: 0 });
   taskPRsByTaskId.value = {
@@ -67,13 +81,33 @@ afterEach(() => {
 });
 
 describe("PRMergedBanner", () => {
+  it("uses a concise localized terminal message on phones", () => {
+    viewport.isMobile = true;
+    render(<PRMergedBanner taskId="task-1" />);
+    expect(screen.getByTestId(MERGED_BANNER).textContent).toContain("PR #42 merged");
+  });
+
+  it("uses the count-aware phone message once all PRs are merged", () => {
+    viewport.isMobile = true;
+    taskPRsByTaskId.value = {
+      "task-1": [
+        { pr_number: 42, state: "merged" },
+        { pr_number: 43, state: "merged" },
+      ],
+    };
+    render(<PRMergedBanner taskId="task-1" />);
+    expect(screen.getByTestId(MERGED_BANNER).textContent).toContain("All 2 PRs merged");
+  });
+
   it("opens the confirmation dialog instead of archiving directly", async () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
 
     expect(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM)).toBeTruthy();
-    expect(screen.getByText(/Are you sure you want to archive "Task One"\?/)).toBeTruthy();
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
+      /Archive [“"]?Task One[”"]?\./i,
+    );
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();
   });
 
@@ -81,7 +115,7 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
+    fireEvent.click(await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM));
 
     await waitFor(() =>
       expect(archiveAndSwitchMock).toHaveBeenCalledWith("task-1", { cascade: false }),
@@ -93,11 +127,12 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByText("Cancel"));
+    await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM);
+    fireEvent.click(screen.getByText("Cancel"));
 
     await waitFor(() => expect(screen.queryByTestId(MERGED_ARCHIVE_CONFIRM)).toBeNull());
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("pr-merged-banner")).toBeTruthy();
+    expect(screen.getByTestId(MERGED_BANNER)).toBeTruthy();
   });
 
   it("keeps the failure toast when archive fails", async () => {
@@ -105,7 +140,7 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
+    fireEvent.click(await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM));
 
     await waitFor(() =>
       expect(toastMock).toHaveBeenCalledWith({
@@ -136,7 +171,7 @@ describe("PRMergedBanner", () => {
     render(<PRMergedBanner taskId="task-1" />);
 
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
-    fireEvent.click(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM));
+    fireEvent.click(await findEnabledConfirm(MERGED_ARCHIVE_CONFIRM));
     await waitFor(() => expect(archiveAndSwitchMock).toHaveBeenCalledTimes(1));
 
     // Reopen while the async archive is still pending: confirm must be disabled.
@@ -161,11 +196,36 @@ describe("PRMergedBanner", () => {
     fireEvent.click(screen.getByTestId(MERGED_ARCHIVE_BUTTON));
 
     expect(await screen.findByTestId(MERGED_ARCHIVE_CONFIRM)).toBeTruthy();
-    expect(screen.getByText(/Are you sure you want to archive "this task"\?/)).toBeTruthy();
+    expect(screen.getByTestId("task-confirmation-outcome").textContent).toMatch(
+      /Archive [“"]?this task[”"]?\./i,
+    );
   });
 });
 
 describe("PRClosedBanner", () => {
+  it("distinguishes the concise closed notice from a merged PR", () => {
+    viewport.isMobile = true;
+    taskPRsByTaskId.value = { "task-1": [{ pr_number: 42, state: "closed" }] };
+    render(<PRClosedBanner taskId="task-1" />);
+    expect(screen.getByTestId(CLOSED_BANNER).textContent).toContain(
+      "PR #42 closed without merging",
+    );
+  });
+
+  it("counts all closed PRs without describing them as merged", () => {
+    viewport.isMobile = true;
+    taskPRsByTaskId.value = {
+      "task-1": [
+        { pr_number: 42, state: "closed" },
+        { pr_number: 43, state: "closed" },
+      ],
+    };
+    render(<PRClosedBanner taskId="task-1" />);
+    expect(screen.getByTestId(CLOSED_BANNER).textContent).toContain(
+      "All 2 PRs closed without merging",
+    );
+  });
+
   it("archives through the confirmation dialog", async () => {
     taskPRsByTaskId.value = {
       "task-1": [{ pr_number: 42, state: "closed" }],
@@ -174,10 +234,34 @@ describe("PRClosedBanner", () => {
 
     fireEvent.click(screen.getByTestId("pr-closed-archive-button"));
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByTestId("pr-closed-archive-confirm"));
+    fireEvent.click(await findEnabledConfirm("pr-closed-archive-confirm"));
 
     await waitFor(() =>
       expect(archiveAndSwitchMock).toHaveBeenCalledWith("task-1", { cascade: false }),
     );
+  });
+});
+
+describe("terminal notice eligibility", () => {
+  it.each([
+    { label: "absent", prs: [] },
+    { label: "open", prs: [{ pr_number: 42, state: "open" }] },
+    {
+      label: "mixed",
+      prs: [
+        { pr_number: 42, state: "merged" },
+        { pr_number: 43, state: "closed" },
+      ],
+    },
+  ])("does not offer terminal archive for $label PRs", ({ prs }) => {
+    taskPRsByTaskId.value = { "task-1": prs };
+    render(
+      <>
+        <PRMergedBanner taskId="task-1" />
+        <PRClosedBanner taskId="task-1" />
+      </>,
+    );
+    expect(screen.queryByTestId(MERGED_BANNER)).toBeNull();
+    expect(screen.queryByTestId(CLOSED_BANNER)).toBeNull();
   });
 });

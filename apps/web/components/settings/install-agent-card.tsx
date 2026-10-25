@@ -70,6 +70,27 @@ function InstallButton({
  * job is queued/running it shows a live log streamed via the agent.install.*
  * WS events. On failure it surfaces the install script's output + error.
  */
+/**
+ * The Install button, or nothing.
+ *
+ * Installing an agent is an org.config.manage write, so a caller without the
+ * scope is offered no button; an agent with no install script has nothing to
+ * run. Its own component so the two branches do not count against
+ * InstallAgentCard's complexity ceiling.
+ */
+function InstallAction({
+  agent,
+  status,
+  onInstall,
+}: {
+  agent: AvailableAgent;
+  status: InstallStatus;
+  onInstall?: (name: string) => void;
+}) {
+  if (!agent.install_script || !onInstall) return null;
+  return <InstallButton agentName={agent.name} status={status} onInstall={onInstall} />;
+}
+
 export function InstallAgentCard({
   agent,
   job,
@@ -80,8 +101,13 @@ export function InstallAgentCard({
   job: InstallJob | undefined;
   /** The copy-and-script row, rendered above the Install button by the parent. */
   scriptSlot?: React.ReactNode;
-  onInstall: (name: string) => void;
+  /** Absent for a caller without org.config.manage. Installing an agent is a
+   *  write; the card still renders so they can see what is available. */
+  onInstall?: (name: string) => void;
 }) {
+  const { t } = useTranslation();
+  const description =
+    agent.name === "minimax-acp" ? t("agents:minimaxDescription") : agent.description;
   const status: InstallStatus = job?.status ?? "idle";
   const failed = status === "failed";
   const showLog = Boolean(job?.output) && (status === "queued" || status === "running" || failed);
@@ -93,13 +119,9 @@ export function InstallAgentCard({
           <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
           <h4 className="font-medium">{agent.display_name}</h4>
         </div>
-        {agent.description && (
-          <p className="text-xs text-muted-foreground line-clamp-2">{agent.description}</p>
-        )}
+        {description && <p className="text-xs text-muted-foreground line-clamp-2">{description}</p>}
         {scriptSlot}
-        {agent.install_script && (
-          <InstallButton agentName={agent.name} status={status} onInstall={onInstall} />
-        )}
+        <InstallAction agent={agent} status={status} onInstall={onInstall} />
         {showLog && (
           <pre
             data-testid={`install-log-${agent.name}`}

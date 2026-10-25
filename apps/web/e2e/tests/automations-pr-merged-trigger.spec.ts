@@ -4,7 +4,7 @@ import { AutomationsPage } from "../pages/automations-page";
 /**
  * E2E coverage for the github_pr_merged ("Pull request merged") trigger type.
  *
- * Spec: docs/specs/automations-pr-merged-trigger/spec.md
+ * Spec: docs/specs/office/requirements/automations-pr-merged-trigger.md
  * Decisions pinned here:
  *  - Picker shows "Pull request merged" under GitHub group, immediately after "New pull requests"
  *  - Config round-trip: all_repos, repos, base_branches survive save/reopen
@@ -76,7 +76,6 @@ test.describe("automations — Pull request merged trigger", () => {
 
     await automations.nameInput.fill("PR Merged Round-trip");
     await automations.selectWorkflow("E2E Workflow");
-    await automations.selectWorkflowStep(seedData.steps[0].name);
 
     // Add the condition
     await automations.addConditionButton.click();
@@ -89,7 +88,8 @@ test.describe("automations — Pull request merged trigger", () => {
       .click();
 
     // The panel should show "All repositories" checked by default (all_repos:true from registry default)
-    const allReposSwitch = testPage.getByRole("switch", {
+    const triggerCard = testPage.getByTestId("trigger-card-github_pr_merged");
+    const allReposSwitch = triggerCard.getByRole("switch", {
       name: /All repositories allowed/i,
     });
     await expect(allReposSwitch).toBeChecked({ timeout: 5_000 });
@@ -371,7 +371,8 @@ test.describe("automations — Pull request merged trigger", () => {
       .click();
 
     // Uncheck "All repositories" to show the repo selector
-    const allReposSwitch = testPage.getByRole("switch", {
+    const triggerCard = testPage.getByTestId("trigger-card-github_pr_merged");
+    const allReposSwitch = triggerCard.getByRole("switch", {
       name: /All repositories allowed/i,
     });
     await expect(allReposSwitch).toBeChecked({ timeout: 5_000 });
@@ -379,7 +380,7 @@ test.describe("automations — Pull request merged trigger", () => {
 
     // The "Add repository" button appears when all_repos=false and must NOT be disabled.
     // (For github_pr the picker is disabled; for github_pr_merged it must be enabled.)
-    const addRepoButton = testPage.getByRole("button", { name: /Add repository/i });
+    const addRepoButton = triggerCard.getByRole("button", { name: /Add repository/i });
     await expect(addRepoButton).toBeVisible({ timeout: 5_000 });
     await expect(addRepoButton).not.toBeDisabled();
   });

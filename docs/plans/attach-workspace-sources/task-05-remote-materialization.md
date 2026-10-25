@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-protocol-surfaces", "04-host-materialization"]
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 05: Remote Materialization

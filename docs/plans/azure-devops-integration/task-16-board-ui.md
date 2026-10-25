@@ -5,7 +5,7 @@ status: done
 wave: 9
 depends_on: ["14-board-discovery", "15-board-mutations"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 16: Editable Desktop And Mobile Board

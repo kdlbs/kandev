@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/walkthrough-feedback-controls/spec.md
+spec: docs/specs/ui/requirements/walkthrough-feedback-controls.md
 created: 2026-08-03
 status: done
 ---

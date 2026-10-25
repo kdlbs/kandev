@@ -1,6 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import {
+  seedWorkflowResetFailure,
+  WORKFLOW_RESET_ERROR_DETAILS,
+  WORKFLOW_RESET_ERROR_MESSAGE,
+} from "./workflow-reset-error-helpers";
 
 const ERROR_MESSAGE = "peer disconnected before response";
 
@@ -90,5 +95,35 @@ test.describe("Task agent error indicator", () => {
     await expect(
       session.activeSidebarTaskItem(taskTitle).getByTestId("task-agent-error-icon"),
     ).toBeHidden();
+  });
+
+  test("keeps a workflow reset failure visible after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task } = await seedWorkflowResetFailure(
+      apiClient,
+      seedData,
+      `Workflow Reset Failure ${Date.now()}`,
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const notice = session.activeChat().getByTestId("last-agent-error-notice");
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await expect(notice).toContainText("Previous agent error");
+    await expect(notice).toContainText(WORKFLOW_RESET_ERROR_MESSAGE);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    const reloadedNotice = session.activeChat().getByTestId("last-agent-error-notice");
+    await expect(reloadedNotice).toBeVisible({ timeout: 15_000 });
+    await expect(reloadedNotice).toContainText("Context reset failed");
+    await expect(reloadedNotice).toContainText("workflow step prompt did not start");
+    await reloadedNotice.locator("summary").click();
+    await expect(reloadedNotice).toContainText(WORKFLOW_RESET_ERROR_DETAILS);
   });
 });

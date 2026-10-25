@@ -36,7 +36,7 @@ func (s *Store) UpsertTaskWorkItem(ctx context.Context, row *TaskWorkItem) error
 
 func (s *Store) ListTaskWorkItemsByWorkspace(ctx context.Context, workspaceID string) (map[string][]*TaskWorkItem, error) {
 	var rows []TaskWorkItem
-	if err := s.ro.SelectContext(ctx, &rows, `SELECT `+taskWorkItemColumns+` FROM azure_devops_task_work_items WHERE workspace_id = ? ORDER BY created_at ASC`, workspaceID); err != nil {
+	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`SELECT `+taskWorkItemColumns+` FROM azure_devops_task_work_items WHERE workspace_id = ? ORDER BY created_at ASC`), workspaceID); err != nil {
 		return nil, err
 	}
 	result := make(map[string][]*TaskWorkItem)
@@ -58,7 +58,7 @@ func (s *Store) DeleteTaskWorkItemsByWorkspace(ctx context.Context, workspaceID 
 
 func (s *Store) TaskBelongsToWorkspace(ctx context.Context, taskID, workspaceID string) (bool, error) {
 	var found string
-	err := s.ro.GetContext(ctx, &found, `SELECT workspace_id FROM tasks WHERE id = ?`, taskID)
+	err := s.ro.GetContext(ctx, &found, s.ro.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`), taskID)
 	if err != nil {
 		return false, err
 	}

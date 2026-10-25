@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/rich-task-title-previews.md"
+spec: "../../specs/tasks/requirements/rich-task-title-previews.md"
 ---
 
 # Task 01: Preview and hierarchy

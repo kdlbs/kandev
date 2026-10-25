@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { fetchTaskSession } from "@/lib/api/domains/session-api";
+import { sessionModelsEntryFromTaskSession } from "@/lib/state/slices/session-runtime/session-model-hydration";
 
 /**
  * Guarantees the store holds the session row for `sessionId`.
@@ -19,26 +20,41 @@ export function useEnsureTaskSession(sessionId: string | null): void {
     sessionId ? Boolean(state.taskSessions.items[sessionId]) : true,
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const setSessionModels = useAppStore((state) => state.setSessionModels);
   // Never re-request a session id this hook has already asked for; a chat whose
   // task was deleted elsewhere would otherwise refetch on every render.
   const requested = useRef<Set<string>>(new Set());
+  const hasSessionRef = useRef(hasSession);
+  hasSessionRef.current = hasSession;
 
   useEffect(() => {
-    if (!sessionId || hasSession || requested.current.has(sessionId)) return;
+    if (!sessionId || hasSessionRef.current || requested.current.has(sessionId)) return;
     requested.current.add(sessionId);
 
     let cancelled = false;
+    let settled = false;
     fetchTaskSession(sessionId)
       .then((response) => {
-        if (!cancelled && response.session) setTaskSession(response.session);
+        if (!cancelled && response.session) {
+          setTaskSession(response.session);
+          const sessionModels = sessionModelsEntryFromTaskSession(response.session);
+          if (sessionModels) setSessionModels(response.session.id, sessionModels);
+        }
       })
       .catch(() => {
         // The session may be genuinely gone (deleted on another device); the
         // tab strip drops it on the next event or resync.
+      })
+      .finally(() => {
+        settled = true;
       });
 
     return () => {
       cancelled = true;
+      // If the active tab changed while this request was in flight, allow a
+      // later visit to retry. Keep settled failures marked as requested so a
+      // deleted session does not refetch on every tab switch.
+      if (!settled) requested.current.delete(sessionId);
     };
-  }, [sessionId, hasSession, setTaskSession]);
+  }, [sessionId, setSessionModels, setTaskSession]);
 }

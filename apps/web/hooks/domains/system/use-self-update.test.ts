@@ -5,12 +5,20 @@ const mocks = vi.hoisted(() => ({
   applyUpdate: vi.fn(),
   fetchSystemInfo: vi.fn(),
   fetchSystemJob: vi.fn(),
+  registerBackendReloadOwner: vi.fn(),
+  releaseBackendReloadOwner: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/system-api", () => ({
   applyUpdate: mocks.applyUpdate,
   fetchSystemInfo: mocks.fetchSystemInfo,
   fetchSystemJob: mocks.fetchSystemJob,
+}));
+vi.mock("@/lib/platform/backend-reload-coordinator", () => ({
+  registerBackendReloadOwner: () => {
+    mocks.registerBackendReloadOwner();
+    return mocks.releaseBackendReloadOwner;
+  },
 }));
 
 import { useSelfUpdate } from "./use-self-update";
@@ -29,6 +37,8 @@ beforeEach(() => {
   mocks.applyUpdate.mockReset();
   mocks.fetchSystemInfo.mockReset();
   mocks.fetchSystemJob.mockReset();
+  mocks.registerBackendReloadOwner.mockReset();
+  mocks.releaseBackendReloadOwner.mockReset();
   mocks.fetchSystemJob.mockResolvedValue({ state: "succeeded" });
   localStorage.clear();
 });
@@ -51,6 +61,7 @@ function registerUpdateLifecycleTests() {
     expect(result.current.phase).toBe("installing");
     expect(result.current.isUpdating).toBe(true);
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) as string).target).toBe("v1.0.1");
+    expect(mocks.registerBackendReloadOwner).toHaveBeenCalledTimes(1);
   });
 
   it("finishes when the version flips to the target", async () => {
@@ -99,6 +110,7 @@ function registerUpdateLifecycleTests() {
     expect(result.current.phase).toBe("error");
     expect(result.current.errorMessage).toBe("rate limited");
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(mocks.releaseBackendReloadOwner).toHaveBeenCalledTimes(1);
   });
 
   it("errors when the launch job reports failure", async () => {

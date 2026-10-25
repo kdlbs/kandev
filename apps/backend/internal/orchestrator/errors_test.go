@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 )
@@ -48,4 +49,26 @@ func TestErrorsAreClassifiable(t *testing.T) {
 			t.Errorf("untyped lookalike must no longer classify")
 		}
 	})
+
+	t.Run("isSessionRecoveryRequiredError uses the recovery sentinel", func(t *testing.T) {
+		if !isSessionRecoveryRequiredError(ErrSessionRecoveryRequired) {
+			t.Errorf("exact sentinel must classify")
+		}
+		if !isSessionRecoveryRequiredError(fmt.Errorf("wrap: %w", ErrSessionRecoveryRequired)) {
+			t.Errorf("wrapped sentinel must classify")
+		}
+		if isSessionRecoveryRequiredError(errors.New("native session recovery required")) {
+			t.Errorf("untyped lookalike must not classify")
+		}
+	})
+}
+
+func TestIsTransientPromptError_PendingCompletionTimeout(t *testing.T) {
+	err := fmt.Errorf("prompt admission: %w", &lifecycle.PendingDispatchedPromptTimeoutError{
+		ExecutionID: "execution-1",
+		Timeout:     time.Second,
+	})
+	if !isTransientPromptError(err) {
+		t.Fatal("pending dispatched prompt timeout must be transient")
+	}
 }

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 01: Disable same-version approval
@@ -73,7 +73,7 @@ the task is one focused behavior slice.
 
 ## Inputs
 
-- Equal-version behavior in `docs/specs/agents/runtime-updates.md`
+- Equal-version behavior in `docs/specs/agents/requirements/runtime-updates.md`
 - Shared body presentation and footer state in
   `apps/web/components/settings/agent-runtime-update-control.tsx`
 - Existing desktop and mobile runtime-update fixtures and scenarios

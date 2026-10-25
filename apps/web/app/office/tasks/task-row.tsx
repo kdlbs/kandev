@@ -3,6 +3,7 @@
 import { useRouter } from "@/lib/routing/client-router";
 import { IconChevronRight, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { formatRelativeTime } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
@@ -70,10 +71,12 @@ export function TaskRow({
         <span className="w-3.5 shrink-0" />
       )}
       {isRunning ? (
-        <IconLoader2
-          className="h-4 w-4 shrink-0 animate-spin text-yellow-500"
+        <CompositorSpin
+          className="h-4 w-4 shrink-0 text-yellow-500"
           data-testid="task-row-running-spinner"
-        />
+        >
+          <IconLoader2 className="size-full" />
+        </CompositorSpin>
       ) : (
         <StatusIcon status={task.status} className="h-4 w-4 shrink-0" />
       )}

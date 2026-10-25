@@ -648,3 +648,62 @@ func TestHandleTaskMRCIAutomation_ExhaustedAutoFixStillBlocksUnreadyMerge(t *tes
 		t.Fatalf("MergeMRForAutomation calls = %d, want 0 — a failing pipeline must still block auto-merge", fake.mergeCalls.Load())
 	}
 }
+
+// TestHandleTaskMRLifecycleAutomation_AutoMergeOnOneMRDoesNotMergeAnother is
+// the orchestrator-level statement of the whole per-MR change: auto-merge
+// enabled on one linked MR must not merge a sibling MR on the same task.
+//
+// It deliberately enters through handleTaskMRLifecycleAutomation rather than
+// calling handleTaskMRCIAutomation with hand-built options, because the
+// per-MR resolution being verified happens in GetTaskMRAutomationEvaluation —
+// options passed in directly would assume away the thing under test.
+func TestHandleTaskMRLifecycleAutomation_AutoMergeOnOneMRDoesNotMergeAnother(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	mergeableSnapshot := func(iid int) *gitlab.MRAutomationSnapshot {
+		return &gitlab.MRAutomationSnapshot{
+			MR: &gitlab.MR{
+				State: gitlabMRStateOpen, IID: iid, ProjectPath: "group/widget",
+				MergeStatus: "can_be_merged", DetailedMergeStatus: "mergeable",
+			},
+			PipelineStatus:        "success",
+			UnresolvedDiscussions: 0,
+		}
+	}
+	// Auto-merge is on for MR !1 only; !2 is left all-off.
+	fake := &mockGitLabMRAutomationService{
+		optionsByMRIID: map[int]*gitlab.TaskMRAutomationResponse{
+			1: {TaskID: "task-1", AutoMergeEnabled: true, WorkspaceID: "ws-1"},
+			2: {TaskID: "task-1", WorkspaceID: "ws-1"},
+		},
+		snapshot: mergeableSnapshot(2),
+	}
+	svc.SetGitLabMRAutomationService(fake)
+
+	mrTwo := &gitlab.TaskMR{
+		TaskID: "task-1", Host: "https://gitlab.example.com",
+		ProjectPath: "group/widget", MRIID: 2, State: gitlabMRStateOpen,
+	}
+	if err := svc.handleTaskMRLifecycleAutomation(ctx, mrTwo); err != nil {
+		t.Fatalf("evaluate MR !2: %v", err)
+	}
+	if got := fake.mergeCalls.Load(); got != 0 {
+		t.Fatalf("MergeMRForAutomation calls for MR !2 = %d, want 0 — a sibling MR's auto-merge must not merge this one", got)
+	}
+
+	// Same task, same fully-mergeable state, but this MR owns the switch.
+	fake.snapshot = mergeableSnapshot(1)
+	mrOne := &gitlab.TaskMR{
+		TaskID: "task-1", Host: "https://gitlab.example.com",
+		ProjectPath: "group/widget", MRIID: 1, State: gitlabMRStateOpen,
+	}
+	if err := svc.handleTaskMRLifecycleAutomation(ctx, mrOne); err != nil {
+		t.Fatalf("evaluate MR !1: %v", err)
+	}
+	if got := fake.mergeCalls.Load(); got != 1 {
+		t.Fatalf("MergeMRForAutomation calls after MR !1 = %d, want 1 — the MR that owns the switch must still merge", got)
+	}
+}

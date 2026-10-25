@@ -1,14 +1,55 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
+export function useAutoDisableUnsupportedPlanMode({
+  planModeEnabled,
+  hasAgentProfile,
+  planModeAvailable,
+  resolvedSessionId,
+}: {
+  planModeEnabled: boolean;
+  hasAgentProfile: boolean;
+  planModeAvailable: boolean;
+  resolvedSessionId: string | null;
+}) {
+  const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const removeContextFile = useContextFilesStore((state) => state.removeFile);
+  const hasAutoDisabled = useRef(false);
+
+  useEffect(() => {
+    if (
+      planModeEnabled &&
+      hasAgentProfile &&
+      !planModeAvailable &&
+      resolvedSessionId &&
+      !hasAutoDisabled.current
+    ) {
+      hasAutoDisabled.current = true;
+      setPlanMode(resolvedSessionId, false);
+      removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
+    }
+    if (!planModeEnabled) hasAutoDisabled.current = false;
+  }, [
+    planModeEnabled,
+    hasAgentProfile,
+    planModeAvailable,
+    resolvedSessionId,
+    setPlanMode,
+    removeContextFile,
+  ]);
+}
+
 // --- Auto-disable plan mode ---
 
 type AutoDisablePlanOpts = {
+  enabled?: boolean;
   resolvedSessionId: string | null;
   taskId: string | null;
   sessionMetaPlanMode: boolean;
@@ -31,6 +72,7 @@ type AutoDisablePlanOpts = {
  */
 export function useAutoDisablePlanMode(opts: AutoDisablePlanOpts) {
   const {
+    enabled = true,
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
@@ -48,7 +90,7 @@ export function useAutoDisablePlanMode(opts: AutoDisablePlanOpts) {
     const wasPlanMode = prevSessionMetaPlanRef.current;
     prevSessionMetaPlanRef.current = sessionMetaPlanMode;
 
-    if (!resolvedSessionId || !taskId) return;
+    if (!enabled || !resolvedSessionId || !taskId) return;
 
     if (wasPlanMode && !sessionMetaPlanMode && planModeFromStore) {
       applyBuiltInPreset("default");
@@ -60,6 +102,7 @@ export function useAutoDisablePlanMode(opts: AutoDisablePlanOpts) {
   }, [
     resolvedSessionId,
     taskId,
+    enabled,
     sessionMetaPlanMode,
     planModeFromStore,
     applyBuiltInPreset,
@@ -73,6 +116,7 @@ export function useAutoDisablePlanMode(opts: AutoDisablePlanOpts) {
 // --- Plan layout handlers ---
 
 type PlanLayoutHandlersOpts = {
+  enabled?: boolean;
   resolvedSessionId: string | null;
   taskId: string | null;
   setActiveDocument: (sid: string, doc: ActiveDocument | null) => void;
@@ -87,6 +131,7 @@ type PlanLayoutHandlersOpts = {
 /** Returns togglePlanLayout and handlePlanModeChange callbacks. */
 export function usePlanLayoutHandlers(opts: PlanLayoutHandlersOpts) {
   const {
+    enabled: layoutEnabled = true,
     resolvedSessionId,
     taskId,
     setActiveDocument,
@@ -100,7 +145,7 @@ export function usePlanLayoutHandlers(opts: PlanLayoutHandlersOpts) {
 
   const togglePlanLayout = useCallback(
     (show: boolean) => {
-      if (!resolvedSessionId || !taskId) return;
+      if (!layoutEnabled || !resolvedSessionId || !taskId) return;
       if (show) {
         setActiveDocument(resolvedSessionId, { type: "plan", taskId });
         applyBuiltInPreset("plan");
@@ -114,6 +159,7 @@ export function usePlanLayoutHandlers(opts: PlanLayoutHandlersOpts) {
     [
       resolvedSessionId,
       taskId,
+      layoutEnabled,
       setActiveDocument,
       applyBuiltInPreset,
       closeDocument,
@@ -123,7 +169,7 @@ export function usePlanLayoutHandlers(opts: PlanLayoutHandlersOpts) {
 
   const handlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      if (!resolvedSessionId || !taskId) return;
+      if (!layoutEnabled || !resolvedSessionId || !taskId) return;
       if (enabled) {
         setActiveDocument(resolvedSessionId, { type: "plan", taskId });
         applyBuiltInPreset("plan");
@@ -141,6 +187,7 @@ export function usePlanLayoutHandlers(opts: PlanLayoutHandlersOpts) {
     [
       resolvedSessionId,
       taskId,
+      layoutEnabled,
       setActiveDocument,
       applyBuiltInPreset,
       closeDocument,

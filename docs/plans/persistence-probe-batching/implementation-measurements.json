@@ -1,0 +1,494 @@
+{
+  "source_commit": "595df36ed5c1cf02fd90cb972b623ad6edc53df8",
+  "command": "python3 .kandev/diagnostics/stress-503/replay.py --candidate current --rounds 3 --seconds 35",
+  "source_sha256": {
+    ".kandev/diagnostics/stress-503/replay-sources/baseline.go": "100cb85696302ab72e6816982846e8f0279d17b9398ae5bc4806848231f95299",
+    "apps/backend/internal/persistence/requiredstores/health.go": "310a63968440fc7aa776f8bdf0f44e0b602ea76cd9d51c1a719ceca3f1ede7af",
+    "apps/backend/internal/db/schema_tables.go": "2e83a7cd844038be049161a4f435c0eafca44f5eb84a1c0ca185e3d0e842f992"
+  },
+  "raw_evidence": ".kandev/diagnostics/stress-503/replay-20261020T091747/",
+  "workload": {
+    "write_endpoint": "PATCH /api/v1/tasks/:id",
+    "writers": 8,
+    "description_bytes": 16384,
+    "synthetic_tasks": 16,
+    "sample_seconds": 35,
+    "rejected_write_backoff_ms": 100,
+    "read_sampling_interval_ms": 200,
+    "order": [
+      "pair1-baseline",
+      "pair1-batched",
+      "pair2-batched",
+      "pair2-baseline",
+      "pair3-baseline",
+      "pair3-batched"
+    ],
+    "data": "Fresh copy of the same synthetic SQLite seed per paired run",
+    "runtime": "Full backend, dev profile, mocked providers, no agent sessions, existing 15-second probe interval and 2-second deadline"
+  },
+  "runs": [
+    {
+      "label": "pair1-baseline",
+      "at": "2026-10-20T09:19:28.004697+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.18410220000078,
+      "write": {
+        "count": 1897,
+        "status": {
+          "200": 866,
+          "503": 1031
+        },
+        "p50_ms": 1.055,
+        "p95_ms": 359.404,
+        "p99_ms": 680.698
+      },
+      "successful_write": {
+        "count": 866,
+        "status": {
+          "200": 866
+        },
+        "p50_ms": 160.77,
+        "p95_ms": 475.416,
+        "p99_ms": 866.201
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.335,
+          "p95_ms": 0.635,
+          "p99_ms": 1.14
+        },
+        "/api/v1/workspaces": {
+          "count": 175,
+          "status": {
+            "200": 111,
+            "503": 64
+          },
+          "p50_ms": 0.383,
+          "p95_ms": 0.793,
+          "p99_ms": 1.317
+        },
+        "/ready": {
+          "count": 175,
+          "status": {
+            "200": 111,
+            "503": 64
+          },
+          "p50_ms": 0.412,
+          "p95_ms": 1.163,
+          "p99_ms": 1.469
+        }
+      },
+      "sampled_persistence_states": [
+        "healthy",
+        "unhealthy"
+      ],
+      "observed_probe_timestamps": [
+        "2026-10-20T09:18:52.633465115Z",
+        "2026-10-20T09:19:09.605282242Z",
+        "2026-10-20T09:19:22.609890434Z"
+      ],
+      "probe_failure_diagnostics": [
+        {
+          "stage": "table_probe",
+          "elapsed_ms": 1857.756126,
+          "error_class": "deadline_exceeded",
+          "writer_open_connections": 1,
+          "writer_in_use": 1,
+          "writer_wait_count": 1482,
+          "writer_wait_duration_ms": 125518.623142,
+          "reader_open_connections": 4,
+          "reader_in_use": 1,
+          "reader_wait_count": 21,
+          "reader_wait_duration_ms": 5.596596,
+          "store_id": "task"
+        }
+      ]
+    },
+    {
+      "label": "pair1-batched",
+      "at": "2026-10-20T09:20:05.243042+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.10023476200149,
+      "write": {
+        "count": 1268,
+        "status": {
+          "200": 1268
+        },
+        "p50_ms": 181.004,
+        "p95_ms": 533.703,
+        "p99_ms": 724.379
+      },
+      "successful_write": {
+        "count": 1268,
+        "status": {
+          "200": 1268
+        },
+        "p50_ms": 181.004,
+        "p95_ms": 533.703,
+        "p99_ms": 724.379
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.309,
+          "p95_ms": 1.091,
+          "p99_ms": 1.772
+        },
+        "/api/v1/workspaces": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.381,
+          "p95_ms": 1.352,
+          "p99_ms": 1.626
+        },
+        "/ready": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.37,
+          "p95_ms": 1.203,
+          "p99_ms": 1.421
+        }
+      },
+      "sampled_persistence_states": [
+        "healthy"
+      ],
+      "observed_probe_timestamps": [
+        "2026-10-20T09:19:29.752549546Z",
+        "2026-10-20T09:19:45.209899121Z",
+        "2026-10-20T09:19:59.804779981Z"
+      ],
+      "probe_failure_diagnostics": []
+    },
+    {
+      "label": "pair2-batched",
+      "at": "2026-10-20T09:20:42.007582+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.11772820199985,
+      "write": {
+        "count": 1606,
+        "status": {
+          "200": 1606
+        },
+        "p50_ms": 150.224,
+        "p95_ms": 377.536,
+        "p99_ms": 547.844
+      },
+      "successful_write": {
+        "count": 1606,
+        "status": {
+          "200": 1606
+        },
+        "p50_ms": 150.224,
+        "p95_ms": 377.536,
+        "p99_ms": 547.844
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.335,
+          "p95_ms": 1.337,
+          "p99_ms": 1.973
+        },
+        "/api/v1/workspaces": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.439,
+          "p95_ms": 1.478,
+          "p99_ms": 1.775
+        },
+        "/ready": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.474,
+          "p95_ms": 1.287,
+          "p99_ms": 1.501
+        }
+      },
+      "sampled_persistence_states": [
+        "healthy"
+      ],
+      "observed_probe_timestamps": [
+        "2026-10-20T09:20:06.784762026Z",
+        "2026-10-20T09:20:21.914747491Z",
+        "2026-10-20T09:20:36.907274564Z"
+      ],
+      "probe_failure_diagnostics": []
+    },
+    {
+      "label": "pair2-baseline",
+      "at": "2026-10-20T09:21:18.835561+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.17744012900221,
+      "write": {
+        "count": 2032,
+        "status": {
+          "200": 1011,
+          "503": 1021
+        },
+        "p50_ms": 2.486,
+        "p95_ms": 315.755,
+        "p99_ms": 454.632
+      },
+      "successful_write": {
+        "count": 1011,
+        "status": {
+          "200": 1011
+        },
+        "p50_ms": 146.47,
+        "p95_ms": 380.07,
+        "p99_ms": 550.684
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.828,
+          "p95_ms": 1.413,
+          "p99_ms": 1.695
+        },
+        "/api/v1/workspaces": {
+          "count": 174,
+          "status": {
+            "200": 110,
+            "503": 64
+          },
+          "p50_ms": 0.744,
+          "p95_ms": 1.434,
+          "p99_ms": 2.07
+        },
+        "/ready": {
+          "count": 174,
+          "status": {
+            "200": 110,
+            "503": 64
+          },
+          "p50_ms": 0.888,
+          "p95_ms": 1.339,
+          "p99_ms": 1.778
+        }
+      },
+      "sampled_persistence_states": [
+        "healthy",
+        "unhealthy"
+      ],
+      "observed_probe_timestamps": [
+        "2026-10-20T09:20:43.570277756Z",
+        "2026-10-20T09:21:00.541657183Z",
+        "2026-10-20T09:21:13.548820844Z"
+      ],
+      "probe_failure_diagnostics": [
+        {
+          "stage": "table_probe",
+          "elapsed_ms": 110.809599,
+          "error_class": "deadline_exceeded",
+          "writer_open_connections": 1,
+          "writer_in_use": 1,
+          "writer_wait_count": 1670,
+          "writer_wait_duration_ms": 121110.589881,
+          "reader_open_connections": 4,
+          "reader_in_use": 1,
+          "reader_wait_count": 30,
+          "reader_wait_duration_ms": 7.812929,
+          "store_id": "analytics"
+        }
+      ]
+    },
+    {
+      "label": "pair3-baseline",
+      "at": "2026-10-20T09:21:55.703493+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.212470851001854,
+      "write": {
+        "count": 2044,
+        "status": {
+          "200": 1023,
+          "503": 1021
+        },
+        "p50_ms": 32.022,
+        "p95_ms": 316.454,
+        "p99_ms": 450.554
+      },
+      "successful_write": {
+        "count": 1023,
+        "status": {
+          "200": 1023
+        },
+        "p50_ms": 148.502,
+        "p95_ms": 374.429,
+        "p99_ms": 506.708
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.846,
+          "p95_ms": 1.209,
+          "p99_ms": 1.797
+        },
+        "/api/v1/workspaces": {
+          "count": 174,
+          "status": {
+            "200": 110,
+            "503": 64
+          },
+          "p50_ms": 0.828,
+          "p95_ms": 1.432,
+          "p99_ms": 1.756
+        },
+        "/ready": {
+          "count": 174,
+          "status": {
+            "200": 110,
+            "503": 64
+          },
+          "p50_ms": 0.874,
+          "p95_ms": 1.425,
+          "p99_ms": 2.101
+        }
+      },
+      "sampled_persistence_states": [
+        "healthy",
+        "unhealthy"
+      ],
+      "observed_probe_timestamps": [
+        "2026-10-20T09:21:20.38727186Z",
+        "2026-10-20T09:21:37.358237818Z",
+        "2026-10-20T09:21:50.362337116Z"
+      ],
+      "probe_failure_diagnostics": [
+        {
+          "stage": "table_probe",
+          "elapsed_ms": 59.718477,
+          "error_class": "deadline_exceeded",
+          "writer_open_connections": 1,
+          "writer_in_use": 1,
+          "writer_wait_count": 1666,
+          "writer_wait_duration_ms": 121226.470811,
+          "reader_open_connections": 4,
+          "reader_in_use": 1,
+          "reader_wait_count": 31,
+          "reader_wait_duration_ms": 7.626616,
+          "store_id": "editor"
+        }
+      ]
+    },
+    {
+      "label": "pair3-batched",
+      "at": "2026-10-20T09:22:32.490994+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.134589383000275,
+      "write": {
+        "count": 1510,
+        "status": {
+          "200": 1510
+        },
+        "p50_ms": 154.849,
+        "p95_ms": 411.598,
+        "p99_ms": 649.736
+      },
+      "successful_write": {
+        "count": 1510,
+        "status": {
+          "200": 1510
+        },
+        "p50_ms": 154.849,
+        "p95_ms": 411.598,
+        "p99_ms": 649.736
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.339,
+          "p95_ms": 1.21,
+          "p99_ms": 1.554
+        },
+        "/api/v1/workspaces": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.404,
+          "p95_ms": 1.432,
+          "p99_ms": 1.686
+        },
+        "/ready": {
+          "count": 174,
+          "status": {
+            "200": 174
+          },
+          "p50_ms": 0.43,
+          "p95_ms": 1.279,
+          "p99_ms": 1.873
+        }
+      },
+      "sampled_persistence_states": [
+        "healthy"
+      ],
+      "observed_probe_timestamps": [
+        "2026-10-20T09:21:57.246487093Z",
+        "2026-10-20T09:22:12.393335966Z",
+        "2026-10-20T09:22:27.302534751Z"
+      ],
+      "probe_failure_diagnostics": []
+    }
+  ],
+  "totals": {
+    "baseline": {
+      "successful_writes": 2900,
+      "write_503s": 3073,
+      "workspace_read_503s": 192,
+      "readiness_503s": 192,
+      "probe_failures": 3
+    },
+    "batched": {
+      "successful_writes": 4384,
+      "write_503s": 0,
+      "workspace_read_503s": 0,
+      "readiness_503s": 0,
+      "probe_failures": 0
+    }
+  },
+  "limits": [
+    "Shared host; other user workloads may vary. No task-owned compilation or other load ran during measurement.",
+    "The baseline retains the previous total-duration logging overlay. The current candidate has no success instrumentation; sampled last_checked_at timestamps prove periodic probes ran.",
+    "This workload measures availability under synthetic task updates, not the exact historical incident or unlimited write capacity.",
+    "PostgreSQL integration cases were skipped because KANDEV_TEST_POSTGRES_DSN was not configured."
+  ]
+}

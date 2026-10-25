@@ -58,6 +58,14 @@ describe("client router adapter", () => {
     });
   });
 
+  it("derives the Kubernetes executor settings route parameter", () => {
+    setLocation("/settings/executors/k8s/executor-123");
+
+    expect(renderHook(() => useParams()).result.current).toMatchObject({
+      executorId: "executor-123",
+    });
+  });
+
   it("refreshes by reloading the document", () => {
     const reload = vi.fn();
     vi.stubGlobal("location", { ...window.location, reload });

@@ -5,7 +5,7 @@ status: pending
 wave: 3
 depends_on: ["02-repository-upsert"]
 plan: "plan.md"
-spec: "../../specs/subagent-context-persistence/spec.md"
+spec: "../../specs/agents/requirements/subagent-context-persistence.md"
 ---
 
 > **Amendment 1 update:** the writer's request/identity-gate shape carries an

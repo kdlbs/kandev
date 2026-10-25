@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow/cancelled-turn-completion/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cancelled-turn-completion.md"
 ---
 
 # Task 01: Break the cancellation stream cycle

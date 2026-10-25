@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 01: Clear Stale Dispatch Gate
@@ -45,7 +45,7 @@ None.
 ## Inputs
 
 - The cancel recovery scenario in
-  `docs/specs/agent-stall-recovery/spec.md`.
+  `docs/specs/agents/requirements/agent-stall-recovery.md`.
 - The root-cause analysis in
   `docs/plans/lost-turn-completion-cancel-recovery/plan.md`.
 - Existing cancel escalation tests in

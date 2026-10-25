@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-scoop-publisher"]
 plan: "plan.md"
-spec: "../../specs/scoop-release-automation/spec.md"
+spec: "../../specs/release/requirements/scoop-release-automation.md"
 ---
 
 # Task 02: Wire Scoop release publication

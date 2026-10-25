@@ -1,50 +1,13 @@
-import type { StateCreator } from "zustand";
-import type { Draft } from "immer";
-import type { SessionSlice } from "./types";
-import type { Turn, TaskSession } from "@/lib/types/http";
+import type { SliceCreator } from "@/lib/state/slice-creator";
 
-type ImmerSet = Parameters<
-  StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
->[0];
+import type { Draft } from "immer";
+import type { ActiveTurnWindowObservation, SessionSlice } from "./types";
+import type { Turn, TaskSession } from "@/lib/types/http";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
+
+type ImmerSet = Parameters<SliceCreator<SessionSlice>>[0];
 
 type TurnReconciliationDraft = Pick<Draft<SessionSlice>, "turns" | "taskSessions">;
-
-// Strict wire format: full RFC3339 with explicit offset/UTC marker. JS
-// Date.parse is permissive (e.g. "0" parses as 2000-01-01, partial dates as
-// midnight, timezone-less values in the local zone), so shape validation must
-// come first or malformed rows would win freshness comparisons.
-const RFC3339_PATTERN =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-](\d{2}):(\d{2}))$/;
-
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
-/** Whether the year is a leap year (proleptic Gregorian calendar). */
-function isLeapYear(year: number): boolean {
-  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-}
-
-/** Whether the day exists in the month (leap-year aware). */
-function validDayForMonth(year: number, month: number, day: number): boolean {
-  if (day < 1) return false;
-  const maxDay = month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1];
-  return day <= maxDay;
-}
-
-/**
- * Returns the UTC-offset delta in SECONDS for a matched zone, or null when
- * the offset components are out of range.
- */
-function parseOffsetSeconds(
-  zone: string,
-  offsetHourText: string | undefined,
-  offsetMinuteText: string | undefined,
-): number | null {
-  if (zone === "Z") return 0;
-  const hour = Number(offsetHourText);
-  const minute = Number(offsetMinuteText);
-  if (hour > 23 || minute > 59) return null;
-  return (zone.startsWith("-") ? -1 : 1) * (hour * 60 + minute) * 60;
-}
 
 /**
  * Whether `incoming` is not newer than `existing`. A malformed incoming
@@ -204,6 +167,19 @@ export function mergeTurnRows(target: Draft<Turn[]>, incoming: Turn[]): void {
   }
 }
 
+/** Replaces a complete turn snapshot while preserving newer rows by id. */
+export function replaceTurnRows(target: Draft<Turn[]>, incoming: Turn[]): void {
+  const existingById = new Map(target.map((turn) => [turn.id, turn]));
+  const nextRows = incoming.map((turn) => {
+    const existing = existingById.get(turn.id);
+    if (!existing) return turn;
+    if (!shouldApplyTurnUpdate(existing as Turn, turn)) return existing as Turn;
+    return { ...turn, completed_at: existing.completed_at ?? turn.completed_at };
+  });
+  target.length = 0;
+  target.push(...nextRows);
+}
+
 /** Applies active-turn reconciliation to a draft owned by a hydration path. */
 export function reconcileActiveTurnAfterHydrationDraft(
   draft: TurnReconciliationDraft,
@@ -211,6 +187,132 @@ export function reconcileActiveTurnAfterHydrationDraft(
   hydrationEpoch: number,
 ): void {
   applyActiveTurnReconciliation(draft, sessionId, hydrationEpoch);
+}
+
+export function captureActiveTurnWindowObservation(
+  state: Pick<SessionSlice, "turns">,
+  sessionId: string,
+): ActiveTurnWindowObservation {
+  const activeTurnId = state.turns.activeBySession[sessionId] ?? null;
+  return {
+    activeTurnId,
+    reconcileEpoch: state.turns.reconcileEpochBySession[sessionId] ?? 0,
+    updatedAt: state.turns.bySession[sessionId]?.find((turn) => turn.id === activeTurnId)
+      ?.updated_at,
+  };
+}
+
+export function captureActiveTurnWindowObservations(
+  state: Pick<SessionSlice, "turns">,
+): Readonly<Record<string, ActiveTurnWindowObservation>> {
+  return Object.fromEntries(
+    Object.keys(state.turns.activeBySession).map((sessionId) => [
+      sessionId,
+      captureActiveTurnWindowObservation(state, sessionId),
+    ]),
+  );
+}
+
+/** Applies a window-scoped active-turn observation without clearing newer live state. */
+export function reconcileActiveTurnWindowDraft(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  activeTurnId: string | null,
+  hydrationEpoch: number,
+  observations?: {
+    atRequestStart?: ActiveTurnWindowObservation;
+    beforeMerge?: ActiveTurnWindowObservation;
+  },
+): void {
+  const turns = draft.turns.bySession[sessionId] ?? [];
+  const currentId = draft.turns.activeBySession[sessionId];
+  const current = turns.find((turn) => turn.id === currentId);
+  retireCompletedWindowMarker(draft, sessionId, current);
+  if (!activeTurnId) {
+    clearUnchangedWindowMarker(draft, sessionId, observations);
+    return;
+  }
+  if ((draft.turns.reconcileEpochBySession[sessionId] ?? 0) !== hydrationEpoch) return;
+  const candidate = turns.find((turn) => turn.id === activeTurnId);
+  if (
+    !candidate ||
+    candidate.completed_at ||
+    isAtOrBeforeBoundary(draft, sessionId, candidate.started_at)
+  )
+    return;
+
+  if (!current || current.completed_at) {
+    draft.turns.activeBySession[sessionId] = activeTurnId;
+    return;
+  }
+  if (current.id === activeTurnId) return;
+  if (isNewerActiveTurnCandidate(candidate, current)) {
+    draft.turns.activeBySession[sessionId] = activeTurnId;
+  }
+}
+
+function retireCompletedWindowMarker(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  current: Turn | undefined,
+): void {
+  if (
+    current &&
+    (current.completed_at || isAtOrBeforeBoundary(draft, sessionId, current.started_at))
+  ) {
+    draft.turns.activeBySession[sessionId] = null;
+  }
+}
+
+function clearUnchangedWindowMarker(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  observations?: {
+    atRequestStart?: ActiveTurnWindowObservation;
+    beforeMerge?: ActiveTurnWindowObservation;
+  },
+): void {
+  if (
+    canClearWindowMarker(
+      draft,
+      sessionId,
+      observations?.atRequestStart,
+      observations?.beforeMerge ?? captureActiveTurnWindowObservation(draft, sessionId),
+    )
+  ) {
+    draft.turns.activeBySession[sessionId] = null;
+  }
+}
+
+function canClearWindowMarker(
+  draft: TurnReconciliationDraft,
+  sessionId: string,
+  observation: ActiveTurnWindowObservation | undefined,
+  beforeMerge: ActiveTurnWindowObservation,
+): boolean {
+  if (!observation) return false;
+  if ((draft.turns.reconcileEpochBySession[sessionId] ?? 0) !== observation.reconcileEpoch)
+    return false;
+  if ((draft.turns.activeBySession[sessionId] ?? null) !== observation.activeTurnId) return false;
+  if (!beforeMerge.activeTurnId) return true;
+  if (beforeMerge.activeTurnId !== observation.activeTurnId) return false;
+  const currentUpdated = parseTurnTimestamp(beforeMerge.updatedAt);
+  const observedUpdated = parseTurnTimestamp(observation.updatedAt);
+  return currentUpdated !== null && observedUpdated !== null && currentUpdated <= observedUpdated;
+}
+
+function isNewerActiveTurnCandidate(candidate: Turn, current: Turn): boolean {
+  const candidateStarted = parseTurnTimestamp(candidate.started_at);
+  const currentStarted = parseTurnTimestamp(current.started_at);
+  if (candidateStarted === null || currentStarted === null) return false;
+  if (candidateStarted !== currentStarted) return candidateStarted > currentStarted;
+
+  const candidateCreated = parseTurnTimestamp(candidate.created_at);
+  const currentCreated = parseTurnTimestamp(current.created_at);
+  if (candidateCreated !== null && currentCreated !== null && candidateCreated !== currentCreated) {
+    return candidateCreated > currentCreated;
+  }
+  return candidate.id > current.id;
 }
 
 /**
@@ -224,30 +326,7 @@ export function reconcileActiveTurnAfterHydrationDraft(
  * would collapse legitimate sub-100ns differences and misorder rows.
  */
 export function parseTurnTimestamp(value: string | undefined): bigint | null {
-  if (!value) return null;
-  const match = RFC3339_PATTERN.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  if (month < 1 || month > 12) return null;
-  if (!validDayForMonth(year, month, Number(match[3]))) return null;
-  if (Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 59) {
-    return null;
-  }
-  const offsetSeconds = parseOffsetSeconds(match[8], match[9], match[10]);
-  if (offsetSeconds === null) return null;
-  // RFC3339Nano caps the fraction at 9 digits; longer fractions would
-  // overflow into the seconds component (padEnd does not cap).
-  if (match[7] !== undefined && match[7].length > 9) return null;
-  // setUTCFullYear handles years 0-99 correctly (Date.UTC maps them to
-  // 1900+year); the components are validated above, so no normalization can
-  // occur here.
-  const utc = new Date(0);
-  utc.setUTCFullYear(year, month - 1, Number(match[3]));
-  utc.setUTCHours(Number(match[4]), Number(match[5]), Number(match[6]), 0);
-  const wholeSeconds = BigInt(Math.floor(utc.getTime() / 1000)) - BigInt(offsetSeconds);
-  const fractionNs = BigInt((match[7] ?? "").padEnd(9, "0"));
-  return wholeSeconds * BigInt(1_000_000_000) + fractionNs;
+  return parseStrictRfc3339Timestamp(value);
 }
 
 /**
@@ -275,13 +354,55 @@ export function shouldApplyTurnUpdate(existing: Turn, incoming: Turn): boolean {
 
 /** Store action: merges a complete REST turn snapshot and reconciles its marker atomically. */
 function mergeTurnsSnapshotAction(set: ImmerSet) {
-  return (sessionId: string, turns: Turn[], hydrationEpoch: number) =>
+  return (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) =>
     set((draft) => {
       if (!draft.taskSessions.items[sessionId]) return;
       const target = (draft.turns.bySession[sessionId] ??= []);
-      mergeTurnRows(target, turns);
+      if (options?.replace) replaceTurnRows(target, turns);
+      else mergeTurnRows(target, turns);
       applyActiveTurnReconciliation(draft, sessionId, hydrationEpoch);
       draft.turns.loadedBySession[sessionId] = true;
+    });
+}
+
+function mergeTurnsWindowAction(set: ImmerSet) {
+  return (
+    sessionId: string,
+    turns: Turn[],
+    coverage: { message_ids: string[]; active_turn_id: string | null },
+    hydrationEpoch: number,
+    observationAtRequestStart?: ActiveTurnWindowObservation,
+  ) =>
+    set((draft) => {
+      if (!draft.taskSessions.items[sessionId]) return;
+      const beforeMerge = captureActiveTurnWindowObservation(draft, sessionId);
+      const target = (draft.turns.bySession[sessionId] ??= []);
+      mergeTurnRows(target, turns);
+
+      const retainedMessageIds = new Set(
+        (draft.messages.bySession[sessionId] ?? []).map((message) => message.id),
+      );
+      const previous = draft.turns.windowCoverageBySession?.[sessionId];
+      const coveredMessageIds = new Set(
+        (previous?.messageIds ?? []).filter((id) => retainedMessageIds.has(id)),
+      );
+      for (const id of coverage.message_ids) {
+        if (retainedMessageIds.has(id)) coveredMessageIds.add(id);
+      }
+      const bySession = (draft.turns.windowCoverageBySession ??= {});
+      bySession[sessionId] = {
+        messageIds: [...coveredMessageIds],
+        activeTurnObserved: true,
+      };
+      reconcileActiveTurnWindowDraft(draft, sessionId, coverage.active_turn_id, hydrationEpoch, {
+        atRequestStart: observationAtRequestStart,
+        beforeMerge,
+      });
     });
 }
 
@@ -315,6 +436,8 @@ export function buildTurnActions(set: ImmerSet) {
       }),
     /** Merges a complete turn snapshot and reconciles its marker atomically. */
     mergeTurnsSnapshot: mergeTurnsSnapshotAction(set),
+    /** Merges a message-window turn snapshot without marking full history loaded. */
+    mergeTurnsWindow: mergeTurnsWindowAction(set),
     completeTurn: (
       sessionId: Parameters<SessionSlice["completeTurn"]>[0],
       turnId: Parameters<SessionSlice["completeTurn"]>[1],

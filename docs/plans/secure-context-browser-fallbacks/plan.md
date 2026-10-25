@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/secure-context-browser-fallbacks/spec.md
+spec: docs/specs/auth/requirements/secure-context-browser-fallbacks.md
 created: 2026-08-02
 status: implemented
 ---

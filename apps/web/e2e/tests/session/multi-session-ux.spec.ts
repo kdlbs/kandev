@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { waitForStableActiveSession } from "../../helpers/session-store";
 
 const fsExists = (p: string) => existsSync(p);
 
@@ -19,6 +20,7 @@ async function createTaskAndNavigate(
   apiClient: import("../../helpers/api-client").ApiClient,
   seedData: import("../../fixtures/test-base").SeedData,
   title: string,
+  navigateViaKanban = true,
 ) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -42,11 +44,15 @@ async function createTaskAndNavigate(
     )
     .toBe(true);
 
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
+  if (navigateViaKanban) {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardByTitle(title);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+  } else {
+    await testPage.goto(`/t/${task.id}`);
+  }
   await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
   const session = new SessionPage(testPage);
@@ -67,6 +73,7 @@ test.describe("Multi-session UX", () => {
       apiClient,
       seedData,
       "Tab Naming Task",
+      false,
     );
 
     // Create a second session
@@ -92,6 +99,214 @@ test.describe("Multi-session UX", () => {
     const tab2 = session.sessionTabByText("2");
     await expect(tab1).toBeVisible({ timeout: 10_000 });
     await expect(tab2).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("command panel navigation renders all existing session tabs", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const title = "Command panel multi-session task";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const primary = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: `command-panel-primary-${task.id}`,
+      agentProfileId: seedData.agentProfileId,
+      startedAt: "2026-08-26T00:00:00Z",
+    });
+    const secondary = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: `command-panel-secondary-${task.id}`,
+      agentProfileId: seedData.agentProfileId,
+      startedAt: "2026-08-26T00:01:00Z",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardByTitle(title)).toBeVisible({ timeout: 10_000 });
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+k`);
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("combobox").fill(title);
+    const option = dialog.getByRole("option").filter({ hasText: title });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
+    const session = new SessionPage(testPage);
+    await expect(session.sessionTabBySessionId(primary.session_id)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.sessionTabBySessionId(secondary.session_id)).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  // @covers AC-TASKS-PLAN-COMMENTS-001.2
+  // @covers AC-TASKS-PLAN-COMMENTS-002.1
+  test("shows task-owned plan comments across session switches", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, session } = await createTaskAndNavigate(
+      testPage,
+      apiClient,
+      seedData,
+      "Plan comment session task",
+      false,
+    );
+    const { sessions: primarySessions } = await apiClient.listTaskSessions(task.id);
+    const primarySessionId = primarySessions[0]?.id;
+    if (!primarySessionId) throw new Error("expected a primary session");
+    await apiClient.wsRequest("task.plan.create", {
+      task_id: task.id,
+      title: "Plan",
+      content: "## Plan\n\nKeep this primary-session step",
+      created_by: "user",
+    });
+
+    await session.openNewSessionDialog();
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.filter((item) => DONE_STATES.includes(item.state)).length;
+        },
+        { timeout: 60_000, message: "Waiting for the secondary session" },
+      )
+      .toBe(2);
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const secondarySessionId = sessions.find((item) => item.id !== primarySessionId)?.id;
+    if (!secondarySessionId) throw new Error("expected a secondary session");
+
+    const primaryTab = session.sessionTabBySessionId(primarySessionId);
+    const secondaryTab = session.sessionTabBySessionId(secondarySessionId);
+    await expect(primaryTab).toBeVisible({ timeout: 10_000 });
+    await expect(secondaryTab).toBeVisible({ timeout: 10_000 });
+    await primaryTab.click();
+    await waitForStableActiveSession(testPage, primarySessionId);
+
+    const planToggle = session.activeChat().getByTestId("plan-mode-toggle-button");
+    await expect(planToggle).toBeVisible({ timeout: 10_000 });
+    await expect(planToggle).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
+    await planToggle.click();
+    await expect(session.planPanel.getByText("Keep this primary-session step")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const editor = session.planPanel.locator(".ProseMirror");
+    await editor.click();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+a`);
+    await testPage.keyboard.press(`${modifier}+Shift+c`);
+
+    const commentText = "Preserve this exact feedback";
+    const textarea = testPage.locator('textarea[placeholder="Add your comment or instruction..."]');
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill(commentText);
+    await testPage.getByRole("button", { name: "Add", exact: true }).click();
+
+    const badge = session.planPanel.locator(".comment-badge[data-comment-id]");
+    await expect(badge).toHaveCount(1);
+
+    await secondaryTab.click();
+    await waitForStableActiveSession(testPage, secondarySessionId);
+    await expect(badge).toHaveCount(1);
+    await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
+    await testPage.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+
+    await primaryTab.click();
+    await waitForStableActiveSession(testPage, primarySessionId);
+    await expect(badge).toHaveCount(1, { timeout: 10_000 });
+    await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
+    await badge.locator("svg").click();
+    await expect(textarea).toHaveValue(commentText);
+  });
+
+  // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-001.6
+  test("reload restores the selected Agent tab", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, session } = await createTaskAndNavigate(
+      testPage,
+      apiClient,
+      seedData,
+      "Agent Tab Reload Focus Task",
+    );
+    const { sessions: initialSessions } = await apiClient.listTaskSessions(task.id);
+    const primarySessionId = initialSessions[0]?.id;
+    if (!primarySessionId) throw new Error("expected a primary session");
+
+    await session.openNewSessionDialog();
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.find((item) => item.id !== primarySessionId)?.id ?? "";
+        },
+        { message: "Waiting for the secondary session" },
+      )
+      .not.toBe("");
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const secondarySessionId = sessions.find((item) => item.id !== primarySessionId)?.id;
+    if (!secondarySessionId) throw new Error("expected a secondary session");
+
+    const secondaryTab = session.sessionTabBySessionId(secondarySessionId);
+    await expect(secondaryTab).toBeVisible();
+    await secondaryTab.click();
+    const secondaryTabWrapper = testPage.locator(".dv-tab", { has: secondaryTab });
+    await expect(secondaryTabWrapper).toHaveClass(/dv-active-tab/);
+
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => {
+          const persist = (window as Window & { __persistDockviewLayout__?: () => void })
+            .__persistDockviewLayout__;
+          if (!persist) return false;
+          persist();
+          return true;
+        }),
+      )
+      .toBe(true);
+
+    await testPage.reload();
+    await session.waitForLoad();
+
+    const restoredSecondaryTab = session.sessionTabBySessionId(secondarySessionId);
+    await expect(restoredSecondaryTab).toBeVisible();
+    await expect(testPage.locator(".dv-tab", { has: restoredSecondaryTab })).toHaveClass(
+      /dv-active-tab/,
+    );
+    await expect(session.activeChat()).toBeVisible();
+    await prCapture.screenshot("agent-tab-reload-focus", {
+      caption: "The selected secondary Agent tab remains active after a full page reload",
+    });
   });
 
   test("+ dropdown shows sessions with correct numbering", async ({
@@ -275,15 +490,16 @@ test.describe("Multi-session UX", () => {
     await expect(deleteItem).toBeVisible({ timeout: 5_000 });
     await deleteItem.click();
 
-    // Confirmation dialog should appear
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog).toContainText("Delete session?");
+    // The context-menu action uses an anchored, non-modal confirmation.
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).toContainText("Delete session?");
+    await expect(session.alertDialog()).toHaveCount(0);
 
     // Cancel the deletion
-    const cancelBtn = dialog.getByRole("button", { name: "Cancel" });
+    const cancelBtn = confirmation.getByRole("button", { name: "Cancel" });
     await cancelBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).not.toBeVisible({ timeout: 5_000 });
 
     // Verify session still exists
     const { sessions } = await apiClient.listTaskSessions(task.id);
@@ -325,18 +541,19 @@ test.describe("Multi-session UX", () => {
     );
     const session1Id = sorted[0].id;
 
-    // Right-click on session #1 tab → Delete → Confirm
-    const tab1 = session.sessionTabByText("1");
+    // Use the captured identity for both the action and removal assertion.
+    const tab1 = session.sessionTabBySessionId(session1Id);
     await expect(tab1).toBeVisible({ timeout: 10_000 });
     await tab1.click({ button: "right" });
 
     await session.contextMenuItem("Delete").click();
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(session.alertDialog()).toHaveCount(0);
 
-    const confirmBtn = dialog.getByRole("button", { name: "Delete" });
+    const confirmBtn = confirmation.getByTestId("session-delete-confirm");
     await confirmBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).not.toBeVisible({ timeout: 5_000 });
 
     // Wait for the deleted session's tab to disappear (identified by session ID,
     // not display number, because the remaining session gets renumbered to #1).
@@ -435,15 +652,15 @@ test.describe("Multi-session UX", () => {
         .toBe(true);
     }
 
-    // Navigate to task 1
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card1 = kanban.taskCardByTitle("Task Switch A");
-    await expect(card1).toBeVisible({ timeout: 10_000 });
-    await card1.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The Kanban snapshot can lag behind a just-completed session. Open the
+    // known task directly; this test covers sidebar switching, not board refresh.
+    await testPage.goto(`/t/${task1.id}`);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task1.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
 
     const session = new SessionPage(testPage);
+    await session.waitForLoad();
 
     // After the AppSidebar overhaul, switching tasks via the sidebar restores
     // each task's dockview env layout. The restored layout can land the chat
@@ -467,7 +684,9 @@ test.describe("Multi-session UX", () => {
     await session.clickTaskInSidebar("Task Switch B");
 
     // Wait for URL to change to task 2's session
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task2.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
 
     // Verify chat loads for task 2
     await session.showSessionContext();
@@ -479,6 +698,9 @@ test.describe("Multi-session UX", () => {
 
     // Switch back to task 1
     await session.clickTaskInSidebar("Task Switch A");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task1.id}(?:[/?#]|$)`), {
+      timeout: 15_000,
+    });
     await session.showSessionContext();
     await expect(
       session.activeChat().getByText("simple mock response", { exact: false }),
@@ -533,10 +755,11 @@ test.describe("Session deletion preserves the task workspace", () => {
     await expect(tab).toBeVisible({ timeout: 10_000 });
     await tab.click({ button: "right" });
     await session.contextMenuItem("Delete").click();
-    const dialog = session.alertDialog();
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog).toContainText("task workspace and its files are kept");
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).toContainText("task workspace and its files are kept");
+    await expect(session.alertDialog()).toHaveCount(0);
+    await confirmation.getByTestId("session-delete-confirm").click();
 
     // The task workspace and its uncommitted marker survive session deletion.
     await expect

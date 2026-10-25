@@ -2,11 +2,13 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // mockSecretStore implements secrets.SecretStore for testing resolveTokenFromMetadata.
@@ -82,6 +84,17 @@ func TestSpritesShouldReconnectWhenSpriteNameMetadataExists(t *testing.T) {
 	}
 }
 
+func TestSpritesCreateInstance_ReuseRequiredWithoutHandleFailsClosed(t *testing.T) {
+	r := newTestSpritesExecutor(nil)
+
+	_, err := r.CreateInstance(context.Background(), &ExecutorCreateRequest{
+		WorkspaceReuseRequired: true,
+	})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("CreateInstance() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
 // TestSpritesStopInstancePreservesSandboxOnSessionStop locks in the resume-fast
 // invariant: a plain agent stop must not destroy the upstream sandbox.
 // Otherwise the next resume always falls into the missing-sandbox fallback,
@@ -95,6 +108,7 @@ func TestSpritesStopInstancePreservesSandboxOnSessionStop(t *testing.T) {
 		"stopped via API",
 		"agent crashed",
 		"user requested",
+		StopReasonIdleSuspension,
 	}
 
 	for _, reason := range preserveReasons {
@@ -125,6 +139,7 @@ func TestShouldRunExecutorCleanupIncludesCascadeTerminalReasons(t *testing.T) {
 		StopReasonCascadeDelete,
 		StopReasonTaskTreeArchived,
 		StopReasonTaskTreeDeleted,
+		StopReasonLaunchRollback,
 	} {
 		t.Run(reason, func(t *testing.T) {
 			if !shouldRunExecutorCleanup(reason) {

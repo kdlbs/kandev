@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -35,9 +36,11 @@ func approvalsList(args []string) int {
 	}
 	wsID := os.Getenv("KANDEV_WORKSPACE_ID")
 	path := fmt.Sprintf("/api/v1/office/workspaces/%s/approvals", wsID)
-	return getWithParams(path, "KANDEV_WORKSPACE_ID", wsID, map[string]string{
-		"status": *status,
-	})
+	values := url.Values{}
+	if *status != "" {
+		values.Set("status", *status)
+	}
+	return getWithParams(path, "KANDEV_WORKSPACE_ID", wsID, values)
 }
 
 // approvalsDecide flips an approval to approved or rejected. The

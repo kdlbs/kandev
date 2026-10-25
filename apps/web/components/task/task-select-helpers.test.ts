@@ -598,6 +598,27 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, LAST, "sess-other-task");
   });
 
+  it("puts a remembered non-primary session in the task route", () => {
+    const LAST = "sess-gpt";
+    const navigateToTask = vi.fn();
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { primarySessionId: PRIMARY },
+      store: makeKanbanStore({
+        activeSessionId: "sess-other-task",
+        envIds: { "sess-other-task": "env-B", [PRIMARY]: "env-A", [LAST]: "env-A" },
+        lastSessionByTaskId: { [TASK_ID]: LAST },
+      }),
+      switchToSession: vi.fn(),
+      loadTaskSessionsForTask: vi.fn(async () => []),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+      navigateToTask,
+    });
+
+    expect(navigateToTask).toHaveBeenCalledWith(TASK_ID, LAST);
+  });
+
   it("falls back to primarySessionId when the remembered session has no env mapping", () => {
     const switchToSession = runSelect(
       makeKanbanStore({
@@ -643,37 +664,5 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     );
 
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
-  });
-});
-
-describe("selectTaskWithLayout — archived tasks", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("navigates directly without loading or preparing a session", () => {
-    const store = makeKanbanStore({
-      activeSessionId: "sess-old",
-      envIds: { "sess-old": "env-old" },
-    });
-    const loadTaskSessionsForTask = vi.fn(async () => []);
-    const switchToSession = vi.fn();
-    const setActiveTask = vi.fn();
-
-    selectTaskWithLayout({
-      taskId: "archived-task",
-      task: { isArchived: true, primarySessionId: "archived-session" },
-      store,
-      switchToSession,
-      loadTaskSessionsForTask,
-      setActiveTask,
-      setPreparingTaskId: vi.fn(),
-    });
-
-    expect(setActiveTask).toHaveBeenCalledWith("archived-task");
-    expect(replaceTaskUrl).toHaveBeenCalledWith("archived-task");
-    expect(loadTaskSessionsForTask).not.toHaveBeenCalled();
-    expect(switchToSession).not.toHaveBeenCalled();
-    expect(launchSession).not.toHaveBeenCalled();
   });
 });

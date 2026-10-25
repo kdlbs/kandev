@@ -14,38 +14,46 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
 
 // InteractiveStartRequest contains parameters for starting an interactive passthrough process.
 type InteractiveStartRequest struct {
-	SessionID            string            `json:"session_id"`                       // Required: Agent session owning this process
-	Command              []string          `json:"command"`                          // Required: Command and args to execute
-	LogCommand           []string          `json:"log_command,omitempty"`            // Optional: redacted copy of Command for logging (e.g. MCP `-c` overrides with tokens); falls back to Command when unset
-	WorkingDir           string            `json:"working_dir"`                      // Working directory
-	ScopeID              string            `json:"scope_id,omitempty"`               // User-shell scope (task environment ID) when applicable
-	TerminalID           string            `json:"terminal_id,omitempty"`            // User-shell terminal ID when applicable
-	Label                string            `json:"label,omitempty"`                  // User-facing terminal label when applicable
-	Env                  map[string]string `json:"env,omitempty"`                    // Additional environment variables
-	StripEnv             []string          `json:"strip_env,omitempty"`              // Environment variable keys to remove from the inherited environment
-	PromptPattern        string            `json:"prompt_pattern,omitempty"`         // Regex pattern to detect agent prompt for turn completion
-	IdleTimeout          time.Duration     `json:"idle_timeout,omitempty"`           // Idle timeout for turn detection
-	BufferMaxBytes       int64             `json:"buffer_max_bytes,omitempty"`       // Max output buffer size
-	StatusDetector       string            `json:"status_detector,omitempty"`        // Status detector type: "claude_code", "codex", ""
-	CheckInterval        time.Duration     `json:"check_interval,omitempty"`         // How often to check state (default 100ms)
-	StabilityWindow      time.Duration     `json:"stability_window,omitempty"`       // State stability window (default 0)
-	ImmediateStart       bool              `json:"immediate_start,omitempty"`        // Start immediately with default dimensions (don't wait for resize)
-	DefaultCols          int               `json:"default_cols,omitempty"`           // Default columns if ImmediateStart (default 120)
-	DefaultRows          int               `json:"default_rows,omitempty"`           // Default rows if ImmediateStart (default 40)
-	InitialCommand       string            `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
-	DisableTurnDetection bool              `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
-	IsUserShell          bool              `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
+	LaunchWrapper        launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	InitialPromptChunks  int                `json:"-"`
+	ProcessID            string             `json:"-"`
+	OwnProcessGroup      bool               `json:"-"`
+	SessionID            string             `json:"session_id"`                       // Required: Agent session owning this process
+	Command              []string           `json:"command"`                          // Required: Command and args to execute
+	LogCommand           []string           `json:"log_command,omitempty"`            // Optional: redacted copy of Command for logging (e.g. MCP `-c` overrides with tokens); falls back to Command when unset
+	WorkingDir           string             `json:"working_dir"`                      // Working directory
+	ScopeID              string             `json:"scope_id,omitempty"`               // User-shell scope (task environment ID) when applicable
+	TerminalID           string             `json:"terminal_id,omitempty"`            // User-shell terminal ID when applicable
+	Label                string             `json:"label,omitempty"`                  // User-facing terminal label when applicable
+	Env                  map[string]string  `json:"env,omitempty"`                    // Additional environment variables
+	StripEnv             []string           `json:"strip_env,omitempty"`              // Environment variable keys to remove from the inherited environment
+	PromptPattern        string             `json:"prompt_pattern,omitempty"`         // Regex pattern to detect agent prompt for turn completion
+	IdleTimeout          time.Duration      `json:"idle_timeout,omitempty"`           // Idle timeout for turn detection
+	BufferMaxBytes       int64              `json:"buffer_max_bytes,omitempty"`       // Max output buffer size
+	StatusDetector       string             `json:"status_detector,omitempty"`        // Status detector type: "claude_code", "codex", ""
+	CheckInterval        time.Duration      `json:"check_interval,omitempty"`         // How often to check state (default 100ms)
+	StabilityWindow      time.Duration      `json:"stability_window,omitempty"`       // State stability window (default 0)
+	ImmediateStart       bool               `json:"immediate_start,omitempty"`        // Start immediately with default dimensions (don't wait for resize)
+	DefaultCols          int                `json:"default_cols,omitempty"`           // Default columns if ImmediateStart (default 120)
+	DefaultRows          int                `json:"default_rows,omitempty"`           // Default rows if ImmediateStart (default 40)
+	InitialCommand       string             `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
+	DisableTurnDetection bool               `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
+	IsUserShell          bool               `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
 }
 
 // commandForLog returns the command to log: the redacted LogCommand when the
 // caller supplied one, otherwise the raw Command.
 func (r InteractiveStartRequest) commandForLog() []string {
+	if !r.LaunchWrapper.IsZero() {
+		return []string{"[wrapped agent]"}
+	}
 	if len(r.LogCommand) > 0 {
 		return r.LogCommand
 	}
@@ -184,5 +192,19 @@ func (r *InteractiveRunner) WaitForFirstIdle(ctx context.Context, processID stri
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// HasObservedFirstIdle reports completed first-idle notification, not current inactivity.
+func (r *InteractiveRunner) HasObservedFirstIdle(processID string) bool {
+	proc, ok := r.get(processID)
+	if !ok {
+		return false
+	}
+	select {
+	case <-proc.firstIdleCh:
+		return true
+	default:
+		return false
 	}
 }

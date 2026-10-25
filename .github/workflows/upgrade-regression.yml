@@ -1,0 +1,145 @@
+name: Release upgrade regression
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Published Stable tag, or latest
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-upgrade-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+      - name: Pin candidate identity
+        id: identity
+        run: echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Acquire one verified baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE: ${{ inputs.baseline || 'latest' }}
+        run: |
+          node --test scripts/upgrade/ci-only.test.mjs scripts/upgrade/prepare-release.test.mjs
+          node scripts/upgrade/prepare-release.mjs --tag "$BASELINE" --out .cache/upgrade/baseline
+          tar -czf .cache/upgrade/baseline.tar.gz -C .cache/upgrade/baseline manifest.json runtime
+      - name: Publish upgrade summary
+        if: always()
+        env:
+          UPGRADE_CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha || github.sha }}
+          UPGRADE_JOB_OUTCOME: ${{ job.status }}
+        run: node scripts/upgrade/summary.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upgrade-baseline
+          path: .cache/upgrade/baseline.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  rehearse:
+    if: github.ref == 'refs/heads/main'
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: sqlite
+            project: upgrade-desktop
+          - engine: postgres
+            project: upgrade-desktop
+          - engine: sqlite
+            project: upgrade-mobile
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: upgrade-baseline
+          path: .cache/upgrade
+      - name: Restore verified runtime with executable permissions
+        run: |
+          mkdir -p .cache/upgrade/baseline
+          tar -xzf .cache/upgrade/baseline.tar.gz -C .cache/upgrade/baseline
+      - name: Install test dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+      - name: Install browser
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Check harness contracts
+        if: matrix.engine == 'sqlite' && matrix.project == 'upgrade-desktop'
+        run: |
+          node --test scripts/upgrade/ci-only.test.mjs scripts/upgrade/prepare-release.test.mjs scripts/upgrade/run.test.mjs scripts/upgrade/workflow-contract.test.mjs scripts/upgrade/summary.test.mjs
+          (cd apps/web && pnpm exec vitest run --config e2e/upgrade.vitest.config.ts)
+          (cd apps/web && pnpm exec eslint e2e/fixtures/upgrade-backend.ts e2e/fixtures/upgrade-backend.test.ts e2e/helpers/upgrade-*.ts e2e/tests/upgrade/*.ts e2e/upgrade-global-setup.ts e2e/upgrade.vitest.config.ts e2e/playwright.config.ts e2e/playwright.config.test.ts)
+          bash -n scripts/upgrade/run.sh apps/web/e2e/scripts/run-e2e.sh
+          python3 .github/scripts/lint-action-pinning_test.py
+          python3 scripts/list-docs.py validate
+          python3 scripts/lint-spec-files.py --all
+      - name: Rehearse upgrade
+        id: rehearsal
+        env:
+          KANDEV_UPGRADE_MANIFEST: .cache/upgrade/baseline/manifest.json
+          UPGRADE_ENGINE: ${{ matrix.engine }}
+          UPGRADE_PROJECT: ${{ matrix.project }}
+        run: bash scripts/upgrade/run.sh --engine "$UPGRADE_ENGINE" --project "$UPGRADE_PROJECT"
+      - name: Publish upgrade summary
+        if: always()
+        env:
+          UPGRADE_CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
+          UPGRADE_ENGINE: ${{ matrix.engine }}
+          UPGRADE_PROJECT: ${{ matrix.project }}
+          UPGRADE_JOB_OUTCOME: ${{ job.status }}
+        run: node scripts/upgrade/summary.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: upgrade-${{ matrix.engine }}-${{ matrix.project }}
+          path: |
+            .cache/upgrade/run-*/playwright.json
+            .cache/upgrade/run-*/junit.xml
+            apps/web/e2e/test-results
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

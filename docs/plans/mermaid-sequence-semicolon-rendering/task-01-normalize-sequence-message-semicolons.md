@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/mermaid-rendering.md"
+spec: "../../specs/ui/requirements/mermaid-rendering.md"
 ---
 
 # Task 01: Normalize sequence-message semicolons
@@ -47,7 +47,7 @@ Sequential. The production helper and its regression tests are one focused TDD c
 
 ## Inputs
 
-- `docs/specs/ui/mermaid-rendering.md`
+- `docs/specs/ui/requirements/mermaid-rendering.md`
 - `docs/plans/mermaid-sequence-semicolon-rendering/plan.md`
 - `apps/web/AGENTS.md`
 - `.agents/skills/tdd/SKILL.md`

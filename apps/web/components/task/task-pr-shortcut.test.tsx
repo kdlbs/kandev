@@ -35,6 +35,7 @@ import { TaskPRShortcut } from "./task-pr-shortcut";
 function makePR(id: string, number: number): TaskPR {
   return {
     id,
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "kandev",

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
+import TaskLink from "@/components/routing/task-link";
 import {
   IconCopy,
   IconPlayerPause,
@@ -33,6 +34,8 @@ import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { ActiveSessionRefProvider } from "./components/active-session-ref-context";
 import { TopbarWorkingIndicator } from "./components/topbar-working-indicator";
+import { TaskTitleEditable } from "./components/task-title-editable";
+import { TaskDescriptionEditable } from "./components/task-description-editable";
 import { TreeCancelDialog } from "@/components/task/TreeCancelDialog";
 import {
   cancelTaskTree,
@@ -139,13 +142,13 @@ function useSimplePaneTopbar(task: Task, onToggleAdvanced?: () => void) {
             />
           </div>
         )}
-        <Link
-          href={`/t/${task.id}`}
+        <TaskLink
+          taskId={task.id}
           className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer whitespace-nowrap"
           data-testid="task-cross-link"
         >
           {t("task:openInAdvancedView")}
-        </Link>
+        </TaskLink>
       </>
     ),
   });
@@ -507,12 +510,12 @@ export function OfficeSimplePane({
               executionState={task.executionState}
             />
           )}
-          <h1 className="text-xl font-semibold mt-4">{task.title}</h1>
-          {task.description && (
-            <div className="prose prose-sm mt-4 max-w-none text-sm whitespace-pre-wrap">
-              {task.description}
-            </div>
-          )}
+          <TaskTitleEditable taskId={task.id} title={task.title} />
+          <TaskDescriptionEditable
+            taskId={task.id}
+            description={task.description}
+            sessions={sessions}
+          />
           <TaskActionRow
             task={task}
             treePreview={treePreview}

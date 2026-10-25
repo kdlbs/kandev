@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 01: Mark selected workspace repositories
@@ -31,7 +31,7 @@ spec: "../../specs/tasks/multi-branch/spec.md"
 
 ## Inputs
 
-- `docs/specs/tasks/multi-branch/spec.md`, Frontend and Task-creation scenarios.
+- `docs/specs/tasks/requirements/multi-branch.md`, Frontend and Task-creation scenarios.
 - `docs/plans/mark-selected-task-repositories/plan.md`, Workspace and discovered repositories plus Mobile design contract.
 - Existing `WorkspaceRepoChips` duplicate policy used by quick chat.
 

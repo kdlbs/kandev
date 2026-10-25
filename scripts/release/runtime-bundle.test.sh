@@ -11,6 +11,8 @@ fail() {
   exit 1
 }
 
+node --test "$ROOT_DIR/scripts/release/remote-helper-assets.test.mjs"
+
 write_macho() {
   local path="$1"
   local signature="$2"
@@ -64,15 +66,47 @@ NODE
 make_complete_bundle() {
   local bundle_dir="$1"
   mkdir -p "$bundle_dir/bin"
-  touch \
-    "$bundle_dir/bin/kandev" \
-    "$bundle_dir/bin/agentctl" \
-    "$bundle_dir/bin/agentctl-linux-amd64" \
-    "$bundle_dir/bin/agentctl-linux-arm64" \
-    "$bundle_dir/bin/agentctl-darwin-arm64" \
-    "$bundle_dir/bin/agentctl-darwin-amd64"
+  printf 'launcher\n' > "$bundle_dir/bin/kandev"
+  printf 'native agentctl\n' > "$bundle_dir/bin/agentctl"
+  printf 'linux amd64 helper\n' > "$bundle_dir/bin/agentctl-linux-amd64"
+  printf 'linux arm64 helper\n' > "$bundle_dir/bin/agentctl-linux-arm64"
+  printf 'darwin amd64 helper\n' > "$bundle_dir/bin/agentctl-darwin-amd64"
   chmod +x "$bundle_dir/bin/"*
   write_macho "$bundle_dir/bin/agentctl-darwin-arm64" signed
+}
+
+write_remote_helper_manifest() {
+  local source_bundle="$1"
+  local variant="$2"
+  local manifest_path="$3"
+  node - "$source_bundle" "$variant" "$manifest_path" <<'NODE'
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [bundle, variant, output] = process.argv.slice(2);
+const helpers = [
+  ["agentctl-linux-amd64", "linux/amd64"],
+  ["agentctl-linux-arm64", "linux/arm64"],
+  ["agentctl-darwin-amd64", "darwin/amd64"],
+  ["agentctl-darwin-arm64", "darwin/arm64"],
+].map(([name, platform]) => {
+  const bytes = fs.readFileSync(path.join(bundle, "bin", name));
+  return {
+    platform,
+    asset: `${name}.gz`,
+    sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+    size_bytes: bytes.length,
+  };
+});
+fs.writeFileSync(output, `${JSON.stringify({
+  schema_version: 1,
+  version: "v1.2.3",
+  commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  variant,
+  helpers,
+}, null, 2)}\n`);
+NODE
 }
 
 custom_bundle="$TMP_DIR/custom bundle"
@@ -84,6 +118,48 @@ fi
 
 grep -Fq "Bundle assembled at $custom_bundle" "$TMP_DIR/out" ||
   fail "validator did not report the custom bundle path"
+
+full_manifest_bundle="$TMP_DIR/full manifest bundle"
+make_complete_bundle "$full_manifest_bundle"
+write_remote_helper_manifest "$full_manifest_bundle" full "$full_manifest_bundle/remote-helpers.json"
+if ! bash "$PACKAGE_SCRIPT" --bundle-dir "$full_manifest_bundle" --variant full >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator rejected a manifest-bearing full bundle: $(cat "$TMP_DIR/err")"
+fi
+
+standard_bundle="$TMP_DIR/standard bundle"
+make_complete_bundle "$standard_bundle"
+write_remote_helper_manifest "$standard_bundle" standard "$TMP_DIR/standard-manifest.json"
+for helper in agentctl-linux-amd64 agentctl-linux-arm64 agentctl-darwin-arm64 agentctl-darwin-amd64; do
+  rm "$standard_bundle/bin/$helper"
+done
+cp "$TMP_DIR/standard-manifest.json" "$standard_bundle/remote-helpers.json"
+if ! bash "$PACKAGE_SCRIPT" --variant standard --bundle-dir "$standard_bundle" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator rejected a standard bundle: $(cat "$TMP_DIR/err")"
+fi
+
+missing_standard_manifest="$TMP_DIR/standard without manifest"
+cp -R "$standard_bundle" "$missing_standard_manifest"
+rm "$missing_standard_manifest/remote-helpers.json"
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$missing_standard_manifest" --variant standard >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted a standard bundle without its manifest"
+fi
+grep -Fq "manifest is required" "$TMP_DIR/err" || fail "missing-manifest error was not actionable"
+
+standard_with_helper="$TMP_DIR/standard with helper"
+cp -R "$standard_bundle" "$standard_with_helper"
+printf 'unexpected helper\n' > "$standard_with_helper/bin/agentctl-linux-amd64"
+chmod +x "$standard_with_helper/bin/agentctl-linux-amd64"
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$standard_with_helper" --variant standard >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted a standard bundle containing a remote helper"
+fi
+
+mismatched_full_manifest="$TMP_DIR/full with mismatched helper"
+cp -R "$full_manifest_bundle" "$mismatched_full_manifest"
+printf 'changed helper bytes\n' > "$mismatched_full_manifest/bin/agentctl-linux-amd64"
+chmod +x "$mismatched_full_manifest/bin/agentctl-linux-amd64"
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$mismatched_full_manifest" --variant full >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted a full bundle with helper bytes that differ from its manifest"
+fi
 
 extra_bundle="$TMP_DIR/extra artifact"
 cp -R "$custom_bundle" "$extra_bundle"

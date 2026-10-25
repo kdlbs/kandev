@@ -6,7 +6,7 @@ wave: 11
 depends_on:
   - "18-lifecycle-prompt-security-remediation"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 19: Final review remediation
@@ -120,7 +120,7 @@ rg -n -i 'lifecycle.*override|override.*lifecycle|archive.*retry|retry.*archive'
 - `apps/web/lib/types/github.ts`
 - `apps/web/lib/api/domains/github-api.test.ts`
 - `docs/decisions/0051-pr-agent-notifications-extend-task-pr-automation.md`
-- `docs/specs/ui/ci-pr-automation.md`
+- `docs/specs/ui/requirements/ci-pr-automation.md`
 - `docs/plans/ci-pr-automation/`
 
 ## Dependencies

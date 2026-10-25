@@ -1,7 +1,8 @@
 import { type Page } from "@playwright/test";
-import { test as base, expect } from "../../fixtures/test-base";
+import { runWithBackendRecovery, test as base, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 import { waitForOfficeTaskSessionLive } from "../../helpers/office-launch";
+import { SessionPage } from "../../pages/session-page";
 
 /**
  * E2E tests for the office advanced mode dockview layout.
@@ -19,8 +20,15 @@ type AdvancedModeFixtures = {
   advancedSeed: {
     workspaceId: string;
     agentId: string;
+    workflowId: string;
     taskId: string;
   };
+};
+
+type OnboardingResult = {
+  workspaceId: string;
+  agentId: string;
+  taskId?: string;
 };
 
 const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
@@ -30,63 +38,80 @@ const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
     },
     { scope: "worker" },
   ],
+  advancedSeed: async ({ officeApi, apiClient, backend, testPage, seedData }, use) => {
+    // Ensure the normal per-test reset has completed before creating a fresh
+    // Office workspace for this test.
+    void testPage;
+    const result = (await officeApi.completeOnboarding({
+      workspaceName: "Advanced Mode Workspace",
+      taskPrefix: "AM",
+      agentName: "CEO",
+      agentProfileId: seedData.agentProfileId,
+      executorPreference: "local_pc",
+      taskTitle: "present yourself",
+      taskDescription: "say your name",
+    })) as OnboardingResult;
 
-  advancedSeed: [
-    async ({ officeApi, apiClient, seedData }, use) => {
-      const result = (await officeApi.completeOnboarding({
-        workspaceName: "Advanced Mode Workspace",
-        taskPrefix: "AM",
-        agentName: "CEO",
-        agentProfileId: seedData.agentProfileId,
-        executorPreference: "local_pc",
-        taskTitle: "present yourself",
-        taskDescription: "say your name",
-      })) as { workspaceId: string; agentId: string; projectId: string; taskId?: string };
+    let workflowId: string | undefined;
+    try {
+      const taskId = result.taskId;
+      if (!taskId) throw new Error("completeOnboarding did not return a taskId");
 
-      if (!result.taskId) {
-        throw new Error("completeOnboarding did not return a taskId");
-      }
+      await runWithBackendRecovery(backend, async () => {
+        const { workspaces } = await apiClient.listWorkspaces();
+        workflowId = workspaces.find(
+          (workspace) => workspace.id === result.workspaceId,
+        )?.office_workflow_id;
+        if (!workflowId) {
+          throw new Error(`Advanced mode workspace ${result.workspaceId} has no office workflow`);
+        }
 
-      // Wait for the agent runtime to come up. We only need it to have
-      // *started* — the test pages exercise the live session once the
-      // dockview mounts, they don't require a finished turn.
-      await waitForOfficeTaskSessionLive(apiClient, result.taskId);
+        await apiClient.saveUserSettings({
+          workspace_id: result.workspaceId,
+          workflow_filter_id: seedData.workflowId,
+          keyboard_shortcuts: {},
+          enable_preview_on_click: false,
+        });
+
+        // Wait for the initial launch and turn to settle before advanced mode
+        // asks the runtime to ensure the execution again.
+        await waitForOfficeTaskSessionLive(apiClient, taskId);
+        await expect
+          .poll(async () => (await apiClient.getTaskEnvironment(taskId))?.status, {
+            timeout: 30_000,
+            message: "Waiting for the Office task environment to become ready",
+          })
+          .toBe("ready");
+      });
+      if (!workflowId) throw new Error("Office onboarding workflow was not resolved");
 
       await use({
         workspaceId: result.workspaceId,
         agentId: result.agentId,
-        taskId: result.taskId,
+        workflowId,
+        taskId,
       });
-    },
-    { scope: "worker" },
-  ],
-
-  testPage: async ({ testPage: basePage, apiClient, advancedSeed, seedData }, use) => {
-    await apiClient.saveUserSettings({
-      workspace_id: advancedSeed.workspaceId,
-      workflow_filter_id: seedData.workflowId,
-      keyboard_shortcuts: {},
-      enable_preview_on_click: false,
-      sidebar_views: [],
-    });
-    await use(basePage);
+    } finally {
+      await runWithBackendRecovery(backend, () =>
+        apiClient.e2eReset(result.workspaceId, [
+          seedData.workflowId,
+          ...(workflowId ? [workflowId] : []),
+        ]),
+      );
+    }
   },
 });
 
-/**
- * Navigate to issue simple mode first (so sessions load), then switch to
- * advanced mode. Direct navigation to ?mode=advanced can race with session
- * loading, causing the page to render in simple mode.
- */
+/** Open the advanced layout after task-session hydration. */
 async function enterAdvancedMode(testPage: Page, taskId: string) {
   // Navigate directly to ?mode=advanced. The page initially renders in simple
   // mode while sessions load async. Once hasSession becomes true, React
   // re-renders into TaskAdvancedMode with dockview.
   await testPage.goto(`/office/tasks/${taskId}?mode=advanced`);
 
-  // Wait for dockview to render. The page may briefly show simple mode while
-  // sessions load — dockview appears once hasSession becomes true.
-  // The session-chat test-id comes from the dockview chat panel.
+  // A session-chat panel can also be present in simple mode. Wait for the
+  // layout boundary itself before asserting on its dockview panels.
+  await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 30_000 });
   await expect(testPage.getByTestId("session-chat")).toBeVisible({ timeout: 30_000 });
 }
 
@@ -130,7 +155,7 @@ test.describe("Office advanced mode", () => {
   });
 
   test("files panel shows workspace content", async ({ testPage, advancedSeed }) => {
-    test.setTimeout(45_000);
+    test.setTimeout(120_000);
 
     await enterAdvancedMode(testPage, advancedSeed.taskId);
 
@@ -138,8 +163,11 @@ test.describe("Office advanced mode", () => {
     const filesPanel = testPage.getByTestId("files-panel");
     await expect(filesPanel).toBeVisible({ timeout: 15_000 });
 
-    // Quick-chat workspaces have a .gitkeep file — the tree should show it
-    await expect(filesPanel.getByText(".gitkeep")).toBeVisible({ timeout: 15_000 });
+    // Repository-free Office workspaces contain .gitkeep.
+    // The tree virtualizes rows, so a text locator can miss a file that is
+    // present but not mounted in the current viewport.
+    const session = new SessionPage(testPage);
+    await session.fileTree.waitForFileTreeNode(".gitkeep", 30_000);
   });
 
   test("terminal connects to agent execution workspace", async ({ testPage, advancedSeed }) => {
@@ -180,6 +208,7 @@ test.describe("Office advanced mode", () => {
 
     // Navigate to advanced mode again — session should still be there
     await testPage.goto(`/office/tasks/${advancedSeed.taskId}?mode=advanced`);
+    await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 20_000 });
     await expect(testPage.getByTestId("session-chat")).toBeVisible({ timeout: 20_000 });
   });
 });

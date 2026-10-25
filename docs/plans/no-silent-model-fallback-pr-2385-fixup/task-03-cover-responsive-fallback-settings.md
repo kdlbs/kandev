@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-build-fallback-settings-disclosure"]
 plan: "plan.md"
-spec: "../../specs/no-silent-model-fallback/spec.md"
+spec: "../../specs/agents/requirements/no-silent-model-fallback.md"
 ---
 
 # Task 03: Cover responsive fallback settings

@@ -7,13 +7,17 @@ description: "Install Kandev under systemd or launchd and operate it safely."
 
 The native Kandev launcher can install itself as a systemd service on Linux or a launchd service on macOS. Use this for a persistent workstation or server. Windows Service Control Manager, OpenRC, and SysV init are not supported.
 
+A Stable standard install downloads a verified remote helper the first time a remote task needs one.
+The service account needs outbound HTTPS to `github.com` and `release-assets.githubusercontent.com`.
+Use a full CLI archive when that account cannot reach those hosts. See [Stable remote helpers](executors.md#stable-remote-helpers).
+
 For the simplest path, install Kandev persistently before creating the service; see [CLI installation](cli.md#install). A plain `npx -y kandev@...` launch is ephemeral, but `npx -y kandev@latest service install` can create a managed npx user service. That service depends on the cached npx package remaining present: reinstall it after upgrades, and expect npm cache cleanup to invalidate its recorded absolute paths. Prefer global npm for a durable service. Do not hand-write a long-lived service around an npx command.
 
 Stable is the default release channel. A verified Kandev-managed npm/npx user service can opt into
 the npm Nightly channel from **Settings → System → Updates**. Desktop, Homebrew, and system services
 remain Stable-only.
 
-> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy; authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
+> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. For one trusted user, use the narrow private-network boundary in [Mobile Remote Access](mobile-remote-access.md). For shared access, enable [opt-in authentication](authentication.md) and terminate TLS in a protected proxy. Authentication does not replace HTTPS. A non-loopback server without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
 ## Quick path
 
@@ -24,15 +28,15 @@ remain Stable-only.
 
 ## Choose a service mode
 
-| | User service (default) | System service (`--system`) |
-| --- | --- | --- |
-| Manager | `systemctl --user` or the user's launchd domain | system systemd or launchd domain |
-| Privilege to install | Normal user | Root; normally invoke through `sudo` |
-| Linux unit | `~/.config/systemd/user/kandev.service` | `/etc/systemd/system/kandev.service` |
-| macOS plist | `~/Library/LaunchAgents/com.kdlbs.kandev.plist` | `/Library/LaunchDaemons/com.kdlbs.kandev.plist` |
-| Default Kandev home | The installer process's `KANDEV_HOME_DIR` when set; otherwise `~/.kandev` | `/var/lib/kandev` |
-| Process user | Current user | Existing Kandev-managed unit/plist account on reinstall; otherwise non-root `$SUDO_USER` when installed through `sudo`. A root login must choose `--run-as` explicitly. |
-| Best fit | Personal workstation; single-user Linux host with lingering enabled | Boot-time service independent of a login session |
+|                      | User service (default)                                                    | System service (`--system`)                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Manager              | `systemctl --user` or the user's launchd domain                           | system systemd or launchd domain                                                                                                                                        |
+| Privilege to install | Normal user                                                               | Root; normally invoke through `sudo`                                                                                                                                    |
+| Linux unit           | `~/.config/systemd/user/kandev.service`                                   | `/etc/systemd/system/kandev.service`                                                                                                                                    |
+| macOS plist          | `~/Library/LaunchAgents/com.kdlbs.kandev.plist`                           | `/Library/LaunchDaemons/com.kdlbs.kandev.plist`                                                                                                                         |
+| Default Kandev home  | The installer process's `KANDEV_HOME_DIR` when set; otherwise `~/.kandev` | `/var/lib/kandev`                                                                                                                                                       |
+| Process user         | Current user                                                              | Existing Kandev-managed unit/plist account on reinstall; otherwise non-root `$SUDO_USER` when installed through `sudo`. A root login must choose `--run-as` explicitly. |
+| Best fit             | Personal workstation; single-user Linux host with lingering enabled       | Boot-time service independent of a login session                                                                                                                        |
 
 On Linux, an enabled user service starts at boot only if that user's systemd manager runs at boot. Enable lingering once if that is the desired lifecycle:
 
@@ -52,13 +56,13 @@ kandev service status
 kandev service logs
 ```
 
-The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/health`; for example, if the log reports port `43127`:
+The installer writes the managed unit or plist and starts the process. It does **not** poll `/health`; use `status` and `logs` first. The logs print the actual listener URL because the launcher selects a free fallback port when `38429` is unavailable. Copy that URL and append `/ready`; for example, if the log reports port `43127`:
 
 ```bash
-curl --fail http://127.0.0.1:43127/health
+curl --fail http://127.0.0.1:43127/ready
 ```
 
-`/health` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. It is not a deep health check of the database, message bus, executors, or remote providers.
+`/ready` reports backend readiness after routes and the agent registry are initialized and the HTTP listener is accepting connections. While it returns 503, its `startup` object reports the current phase and elapsed time for database opening, backup, migrations, service initialization, or session recovery. It is not a deep health check of the database, message bus, executors, or remote providers.
 
 ### System service
 
@@ -86,6 +90,29 @@ Use `--run-as root` only when a root service is intentional. `--run-as` is valid
 already exists, is not a symlink, and is owned by the selected account before replacing or
 restarting the service. Missing or mismatched ownership fails with guidance; Kandev does not
 recursively chown the data tree or add a broad Git `safe.directory` exception.
+
+## Agent lifetime on Linux
+
+Generated Linux user and system units use `KillMode=process`: systemd stops the
+native launcher, which owns the backend child process. If the launcher dies
+abruptly, the backend receives a termination signal; Kandev manages agent lifetime.
+With experimental
+`features.agentSurvival` enabled, eligible local and worktree agents can remain
+running across a backend stop or restart. The feature remains off by default;
+normal disabled shutdown, explicit task Stop, and launch rollback still terminate
+the affected agents.
+
+A stopped service can therefore still have retained agents consuming resources
+in its cgroup. systemd does not perform a final sweep of all descendants;
+application cleanup and parent-liveness guards remain responsible for ordinary
+agent termination. A host reboot or host-level cgroup kill still ends
+those processes.
+
+Existing generated units acquire this policy only when regenerated through the
+normal install or managed update flow. After upgrading, reinstall with the same
+service scope and account options you used originally; a backend restart alone
+does not rewrite an old unit. See [Install](#install). macOS service behavior is
+unchanged.
 
 ## Bind safely
 
@@ -118,7 +145,7 @@ To access a loopback-only instance remotely, use SSH port forwarding:
 ssh -L 38429:127.0.0.1:38429 user@server
 ```
 
-Then open `http://127.0.0.1:38429` locally. For shared access, terminate TLS and enforce authentication in a reverse proxy or private access layer.
+Then open `http://127.0.0.1:38429` locally. For private phone access, follow [Mobile Remote Access](mobile-remote-access.md). For shared access, terminate TLS and enforce authentication in a proxy or private access layer.
 
 ## Commands and flags
 
@@ -165,7 +192,7 @@ On Linux, installation writes the unit, runs `daemon-reload`, and normally runs 
 
 - executes the absolute native `kandev --headless` path;
 - records `KANDEV_HOME_DIR`, `KANDEV_LOG_LEVEL=info`, a service `PATH`, the release bundle, and package version;
-- uses `Restart=on-failure`, a five-second restart delay, `KillMode=mixed`, and a 30-second stop timeout;
+- uses `Restart=on-failure`, a five-second restart delay, `KillMode=process`, and a 30-second stop timeout;
 - orders startup after `network-online.target`.
 
 On macOS, installation writes the plist, removes an already loaded job, bootstraps the new plist, and enables it. Standard output and error go to `<KANDEV_HOME_DIR>/logs/service.out` and `service.err`. The plist always has `KeepAlive=true`; `--no-boot-start` changes only `RunAtLoad` and adds an immediate kick-start.
@@ -340,3 +367,20 @@ Reinstall using the upgraded `kandev` binary, preserve the original `--system` a
 ### Service starts but agents fail
 
 Read service logs first. A service has a smaller `PATH` and no interactive shell environment, so tools or credentials visible in a terminal may be absent. Configure executor credentials through Kandev's profile/settings paths, use stable executable paths, and verify Docker/SSH/Sprites connectivity as described in [Executors](executors.md#troubleshooting).
+
+If a remote task cannot download its helper, allow outbound HTTPS to `github.com` and
+`release-assets.githubusercontent.com` for the service account. Use a full CLI archive when the
+service host cannot reach those sites.
+
+Linux user services include `~/.npm-global/bin` in their generated `PATH` for
+agent CLIs installed with that npm prefix. After upgrading an existing user
+service, regenerate its unit and restart it to apply the updated `PATH`:
+
+```bash
+# Repeat your original install-time flags when used.
+kandev service install
+kandev service restart
+```
+
+Restarting alone does not update an older unit's `PATH`. Other custom npm
+prefixes are not automatically added to the service environment.

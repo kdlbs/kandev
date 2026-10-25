@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/mobile-task-navigation.md
+spec: docs/specs/ui/requirements/mobile-task-navigation.md
 created: 2026-07-17
 status: completed
 ---

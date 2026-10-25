@@ -1,6 +1,8 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, useState, type PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSession } from "@/lib/types/http";
+import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
 
 const mockMarkSessionRead = vi.fn();
 const mockUpdateSessionReadCursor = vi.fn();
@@ -47,6 +49,31 @@ beforeEach(() => {
     updateSessionReadCursor: mockUpdateSessionReadCursor,
   };
   mockMarkSessionRead.mockResolvedValue({ session_id: "session-1", last_read_message_id: "m2" });
+});
+
+describe("useSessionReadTracking route hydration", () => {
+  it("waits for route session hydration before capturing or marking a read cursor", async () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    let setRouteReady!: (ready: boolean) => void;
+    function Wrapper({ children }: PropsWithChildren) {
+      const [isReady, setReady] = useState(false);
+      setRouteReady = setReady;
+      return createElement(TaskRouteSessionHydrationProvider, { isReady, children });
+    }
+
+    const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m3"), {
+      wrapper: Wrapper,
+    });
+    expect(result.current).toBeNull();
+    expect(mockMarkSessionRead).not.toHaveBeenCalled();
+
+    act(() => setRouteReady(true));
+
+    await waitFor(() => {
+      expect(result.current).toBe("m1");
+      expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m3");
+    });
+  });
 });
 
 describe("useSessionReadTracking", () => {
@@ -198,6 +225,23 @@ describe("useSessionReadTracking", () => {
 });
 
 describe("useSessionReadTracking — mark-read dispatch", () => {
+  it("logs the session-scoped mark-read lifecycle", async () => {
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+
+    try {
+      renderHook(() => useSessionReadTracking("session-1", true, "m2"));
+      await waitFor(() =>
+        expect(mockUpdateSessionReadCursor).toHaveBeenCalledWith("session-1", "m2"),
+      );
+
+      const output = consoleDebug.mock.calls.flat().join("\n");
+      expect(output).toContain("[messages:read-tracking] response applied sessionId=session-1");
+    } finally {
+      consoleDebug.mockRestore();
+    }
+  });
+
   it("does not call markSessionRead again once the cursor already matches the latest message", async () => {
     mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m2" });
     renderHook(() => useSessionReadTracking("session-1", true, "m2"));
@@ -252,7 +296,9 @@ describe("useSessionReadTracking — mark-read dispatch", () => {
     await waitFor(() => expect(consoleError).toHaveBeenCalled());
     consoleError.mockRestore();
   });
+});
 
+describe("useSessionReadTracking — response ordering", () => {
   it("discards a stale mark-read response that resolves after a newer one, so the local cursor never regresses", async () => {
     mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
 
@@ -292,6 +338,70 @@ describe("useSessionReadTracking — mark-read dispatch", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    expect(mockUpdateSessionReadCursor).not.toHaveBeenCalled();
+  });
+
+  // @covers AC-OFFICE-UNREAD-DIVIDER-001.3
+  // @covers AC-OFFICE-UNREAD-DIVIDER-001.4
+  it("applies a session response after another session dispatches", async () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    mockState.taskSessions.items["session-2"] = session({ last_read_message_id: "n1" });
+
+    type MarkReadResult = { session_id: string; last_read_message_id: string };
+    let resolveSessionOne: ((value: MarkReadResult) => void) | undefined;
+    const sessionOneResponse = new Promise<MarkReadResult>((resolve) => {
+      resolveSessionOne = resolve;
+    });
+    mockMarkSessionRead.mockImplementation((sessionId: string, messageId: string) => {
+      if (sessionId === "session-1") return sessionOneResponse;
+      return Promise.resolve({ session_id: sessionId, last_read_message_id: messageId });
+    });
+
+    const { rerender } = renderHook(
+      ({ sessionId, latest }: { sessionId: string; latest: string }) =>
+        useSessionReadTracking(sessionId, true, latest),
+      { initialProps: { sessionId: "session-1", latest: "m2" } },
+    );
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m2"));
+
+    rerender({ sessionId: "session-2", latest: "n2" });
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-2", "n2"));
+    await waitFor(() =>
+      expect(mockUpdateSessionReadCursor).toHaveBeenCalledWith("session-2", "n2"),
+    );
+    mockUpdateSessionReadCursor.mockClear();
+
+    resolveSessionOne?.({ session_id: "session-1", last_read_message_id: "m2" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateSessionReadCursor).toHaveBeenCalledWith("session-1", "m2");
+  });
+
+  it("discards a response when an external hydration advances the cached cursor", async () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+
+    type MarkReadResult = { session_id: string; last_read_message_id: string };
+    let resolveSessionOne: ((value: MarkReadResult) => void) | undefined;
+    const sessionOneResponse = new Promise<MarkReadResult>((resolve) => {
+      resolveSessionOne = resolve;
+    });
+    mockMarkSessionRead.mockReturnValue(sessionOneResponse);
+
+    renderHook(() => useSessionReadTracking("session-1", true, "m2"));
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m2"));
+
+    // A reconnect or another tab can hydrate a newer cursor while the HTTP
+    // response is in flight. The delayed response must not regress that cache.
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m3" });
+    resolveSessionOne?.({ session_id: "session-1", last_read_message_id: "m2" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
     expect(mockUpdateSessionReadCursor).not.toHaveBeenCalled();
   });
 });

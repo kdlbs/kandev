@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/run-scheduling.md"
+spec: "../../specs/tasks/requirements/run-scheduling.md"
 ---
 
 # Task 01: Own scheduler loop lifecycles

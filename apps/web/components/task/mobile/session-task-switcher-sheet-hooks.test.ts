@@ -7,6 +7,7 @@ import {
   selectTaskFromSheet,
 } from "./session-task-switcher-sheet-selection";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
+import { loadWorkspaceTaskSessions } from "./session-task-switcher-sheet-hooks";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
@@ -38,6 +39,16 @@ function task(overrides: Partial<SheetTask> = {}): SheetTask {
   } as SheetTask;
 }
 
+function taskWithRunningSummary(hasRunningSession: boolean): SheetTask {
+  return task({
+    statusSummary: {
+      revision: 4,
+      updated_at: UPDATED_AT,
+      has_running_session: hasRunningSession,
+    },
+  });
+}
+
 describe("toSheetItem", () => {
   it("carries the autopilot marker onto the mobile sheet row", () => {
     expect(toSheetItem(task({ autopilot: true }), emptyCtx()).autopilot).toBe(true);
@@ -64,7 +75,9 @@ describe("toSheetItem", () => {
   it("preserves the archived marker for projected rows", () => {
     expect(toSheetItem(task({ isArchived: true }), emptyCtx()).isArchived).toBe(true);
   });
+});
 
+describe("toSheetItem status", () => {
   it("reads pending permission from the task status summary", () => {
     const item = toSheetItem(
       task({
@@ -118,11 +131,23 @@ describe("toSheetItem", () => {
 
     expect(item.hasPendingPermission).toBe(false);
     expect(item.sessionState).toBeUndefined();
+    expect(item.hasRunningSession).toBeUndefined();
     expect(item.primarySessionId).toBeNull();
     expect(item.foregroundActivity).toBeUndefined();
     expect(item.updatedAt).toBe(UPDATED_AT);
   });
+});
 
+describe("toSheetItem task running summary", () => {
+  it("preserves task-wide running evidence on the phone task row", () => {
+    const running = toSheetItem(taskWithRunningSummary(true), emptyCtx());
+    const settled = toSheetItem(taskWithRunningSummary(false), emptyCtx());
+    expect(running.hasRunningSession).toBe(true);
+    expect(settled.hasRunningSession).toBe(false);
+  });
+});
+
+describe("toSheetItem error acknowledgements", () => {
   it("hides only the acknowledged error stamp and shows a newer one", () => {
     const base = task({
       statusSummary: {
@@ -149,6 +174,36 @@ describe("toSheetItem", () => {
         dismissedAgentErrors: { "session-1": "older-error" },
       }).agentErrorMessage,
     ).toBe(ERROR_PREVIEW);
+  });
+});
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+describe("toSheetItem automation indicators", () => {
+  it("carries bounded automation indicators onto the mobile sheet row", () => {
+    const item = toSheetItem(
+      task({
+        statusSummary: {
+          revision: 1,
+          updated_at: UPDATED_AT,
+          pull_request: {
+            number: 42,
+            state: "open",
+            auto_fix_enabled: true,
+            auto_merge_enabled: true,
+          },
+        },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.prInfo).toEqual({
+      number: 42,
+      state: "Open",
+      aggregateState: undefined,
+      autoFixEnabled: true,
+      autoMergeEnabled: true,
+      statusSummaryUpdatedAt: UPDATED_AT,
+    });
   });
 });
 
@@ -208,6 +263,9 @@ describe("selectPendingTaskFromSheet", () => {
     const setActiveSession = vi.fn((_taskId: string, sessionId: string) => {
       order.push(`session:${sessionId}`);
     });
+    const navigate = vi.fn((_taskId: string, sessionId?: string) => {
+      order.push(`navigate:${sessionId ?? ""}`);
+    });
     await selectPendingTaskFromSheet({
       taskId: "task-1",
       preferredSessionId: "primary",
@@ -215,13 +273,14 @@ describe("selectPendingTaskFromSheet", () => {
       loadTaskSessionsForTask,
       setActiveSession,
       setActiveTask: vi.fn(),
-      navigate: () => order.push("navigate"),
+      navigate,
       onOpenChange: () => order.push("close"),
     });
 
     expect(setActiveSession).toHaveBeenCalledWith("task-1", "secondary");
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith("task-1", { force: true });
-    expect(order).toEqual(["session:secondary", "navigate", "close"]);
+    expect(order).toEqual(["session:secondary", "navigate:secondary", "close"]);
+    expect(navigate).toHaveBeenCalledWith("task-1", "secondary");
   });
 
   it("falls back safely when session loading fails", async () => {
@@ -271,6 +330,19 @@ describe("selectPendingTaskFromSheet", () => {
     expect(setActiveTask).toHaveBeenCalledWith(taskId);
     expect(navigate).toHaveBeenCalledWith(taskId);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("loadWorkspaceTaskSessions", () => {
+  it("keeps workspace recovery successful when task-session loading fails", async () => {
+    const sessions = await loadWorkspaceTaskSessions(
+      vi.fn(async () => {
+        throw new Error("session read failed");
+      }),
+      "task-1",
+    );
+
+    expect(sessions).toEqual([]);
   });
 });
 
@@ -374,7 +446,7 @@ describe("selectTaskFromSheet races", () => {
     expect(setActiveSession).toHaveBeenCalledTimes(1);
     expect(setActiveSession).toHaveBeenCalledWith("task-b", "owner-b");
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith("task-b");
+    expect(navigate).toHaveBeenCalledWith("task-b", "owner-b");
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

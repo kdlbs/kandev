@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
@@ -23,19 +24,24 @@ type templateYAML struct {
 
 // stepDefYAML is the YAML-friendly representation of a step definition.
 type stepDefYAML struct {
-	ID                         string         `yaml:"id"`
-	Name                       string         `yaml:"name"`
-	Position                   int            `yaml:"position"`
-	Color                      string         `yaml:"color"`
-	Prompt                     string         `yaml:"prompt,omitempty"`
-	StageType                  string         `yaml:"stage_type,omitempty"`
-	IsStartStep                bool           `yaml:"is_start_step,omitempty"`
-	ShowInCommandPanel         bool           `yaml:"show_in_command_panel,omitempty"`
-	AllowManualMove            bool           `yaml:"allow_manual_move,omitempty"`
-	AutoArchiveAfterHours      int            `yaml:"auto_archive_after_hours,omitempty"`
-	AutoAdvanceRequiresSignal  bool           `yaml:"auto_advance_requires_signal,omitempty"`
-	CancelTriggersTurnComplete bool           `yaml:"cancel_triggers_turn_complete,omitempty"`
-	Events                     stepEventsYAML `yaml:"events,omitempty"`
+	ID                         string                                       `yaml:"id"`
+	Name                       string                                       `yaml:"name"`
+	Position                   int                                          `yaml:"position"`
+	Color                      string                                       `yaml:"color"`
+	Prompt                     string                                       `yaml:"prompt,omitempty"`
+	StageType                  string                                       `yaml:"stage_type,omitempty"`
+	IsStartStep                bool                                         `yaml:"is_start_step,omitempty"`
+	ShowInCommandPanel         bool                                         `yaml:"show_in_command_panel,omitempty"`
+	AllowManualMove            bool                                         `yaml:"allow_manual_move,omitempty"`
+	AutoArchiveAfterHours      int                                          `yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfileID             string                                       `yaml:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy  taskmodels.WorkflowProfileSessionStartPolicy `yaml:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy    taskmodels.WorkflowProfileSessionEndPolicy   `yaml:"profile_session_end_policy,omitempty"`
+	SessionTarget              *models.WorkflowSessionTarget                `yaml:"session_target,omitempty"`
+	AutoAdvanceRequiresSignal  bool                                         `yaml:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete bool                                         `yaml:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter        bool                                         `yaml:"complete_task_on_enter,omitempty"`
+	Events                     stepEventsYAML                               `yaml:"events,omitempty"`
 }
 
 // stepEventsYAML is the YAML-friendly representation of step events.
@@ -55,6 +61,8 @@ type stepEventsYAML struct {
 	OnHeartbeat         []actionYAML `yaml:"on_heartbeat,omitempty"`
 	OnBudgetAlert       []actionYAML `yaml:"on_budget_alert,omitempty"`
 	OnAgentError        []actionYAML `yaml:"on_agent_error,omitempty"`
+	OnPRMerged          []actionYAML `yaml:"on_pr_merged,omitempty"`
+	OnPRClosed          []actionYAML `yaml:"on_pr_closed,omitempty"`
 }
 
 // actionYAML is the YAML-friendly representation of a step action.
@@ -163,6 +171,11 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 	if err != nil {
 		return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
 	}
+	if s.SessionTarget != nil {
+		if err := models.ValidateWorkflowSessionTarget(s.SessionTarget); err != nil {
+			return models.StepDefinition{}, fmt.Errorf("step %q: %w", s.ID, err)
+		}
+	}
 	return models.StepDefinition{
 		ID:                         s.ID,
 		Name:                       s.Name,
@@ -174,8 +187,13 @@ func convertStep(s stepDefYAML) (models.StepDefinition, error) {
 		IsStartStep:                s.IsStartStep,
 		ShowInCommandPanel:         s.ShowInCommandPanel,
 		AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
+		AgentProfileID:             s.AgentProfileID,
+		ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
+		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
+		SessionTarget:              models.CloneWorkflowSessionTarget(s.SessionTarget),
 		AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        s.CompleteTaskOnEnter,
 		StageType:                  stage,
 	}, nil
 }
@@ -213,6 +231,7 @@ var (
 		string(models.OnEnterClearDecisions):             true,
 		string(models.OnEnterQueueRunForEachParticipant): true,
 		string(models.OnEnterQueueRun):                   true,
+		string(models.OnEnterEnsureParticipantSeat):      true,
 	}
 	validOnTurnStart = map[string]bool{
 		string(models.OnTurnStartMoveToNext):     true,
@@ -284,8 +303,8 @@ func convertEvents(e stepEventsYAML) (models.StepEvents, error) {
 	return events, nil
 }
 
-// convertGenericTriggers translates the YAML actions under the seven
-// Phase 2 (ADR-0004) event-driven triggers into models.GenericAction lists.
+// convertGenericTriggers translates the YAML actions under the generic
+// event-driven triggers into models.GenericAction lists.
 func convertGenericTriggers(e stepEventsYAML, events *models.StepEvents) error {
 	mappings := []struct {
 		name string
@@ -299,6 +318,8 @@ func convertGenericTriggers(e stepEventsYAML, events *models.StepEvents) error {
 		{"on_heartbeat", e.OnHeartbeat, &events.OnHeartbeat},
 		{"on_budget_alert", e.OnBudgetAlert, &events.OnBudgetAlert},
 		{"on_agent_error", e.OnAgentError, &events.OnAgentError},
+		{"on_pr_merged", e.OnPRMerged, &events.OnPRMerged},
+		{"on_pr_closed", e.OnPRClosed, &events.OnPRClosed},
 	}
 	for _, m := range mappings {
 		for _, a := range m.in {

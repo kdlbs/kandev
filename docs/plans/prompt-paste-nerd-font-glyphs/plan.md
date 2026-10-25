@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/prompt-paste-nerd-font-glyphs/spec.md
+spec: docs/specs/ui/requirements/prompt-paste-nerd-font-glyphs.md
 created: 2026-08-19
 status: done
 ---

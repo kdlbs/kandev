@@ -12,8 +12,10 @@ import (
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -43,6 +45,24 @@ func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
 	}
 	if len(launchReq.Repositories) != 1 || launchReq.Repositories[0].RemoteContribution != binding {
 		t.Fatalf("per-repository remote contribution was not forwarded: %#v", launchReq.Repositories)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestForwardsCausingRunID(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		CausingRunID: "office-run-1",
+	}, "/workspace", "office-profile")
+	if got.CausingRunID != "office-run-1" {
+		t.Fatalf("CausingRunID = %q, want office-run-1", got.CausingRunID)
+	}
+}
+
+func TestOrchestratorLaunchContextForwardsCausingRunID(t *testing.T) {
+	got := orchestratorLaunchContext(officeservice.LaunchContext{
+		CausingRunID: "office-run-1",
+	})
+	if got.CausingRunID != "office-run-1" {
+		t.Fatalf("CausingRunID = %q, want office-run-1", got.CausingRunID)
 	}
 }
 
@@ -99,6 +119,14 @@ func (f *distinctFiller) fill(t *testing.T, v reflect.Value, name string) {
 		f.fill(t, value, name+"-value")
 		m.SetMapIndex(key, value)
 		v.Set(m)
+	case reflect.Func:
+		v.Set(reflect.MakeFunc(v.Type(), func([]reflect.Value) []reflect.Value {
+			outputs := make([]reflect.Value, v.Type().NumOut())
+			for i := range outputs {
+				outputs[i] = reflect.Zero(v.Type().Out(i))
+			}
+			return outputs
+		}))
 	default:
 		t.Fatalf("distinctFiller: unsupported kind %s for field %s — extend the helper", v.Kind(), name)
 	}
@@ -125,6 +153,12 @@ func assertSameNamedFieldsEqual(t *testing.T, label string, src, dst any) {
 			continue
 		}
 		want := srcVal.Field(i).Interface()
+		if srcVal.Field(i).Kind() == reflect.Func {
+			if srcVal.Field(i).IsNil() != dstField.IsNil() {
+				t.Errorf("%s: field %s nil = %v, want %v", label, name, dstField.IsNil(), srcVal.Field(i).IsNil())
+			}
+			continue
+		}
 		if got := dstField.Interface(); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: field %s = %#v, want %#v", label, name, got, want)
 		}
@@ -248,6 +282,51 @@ func TestBuildLifecycleLaunchRequestCarriesMCPProviders(t *testing.T) {
 	}, "", "")
 	if len(got.McpProviders) != len(want) || got.McpProviders[0] != want[0] || got.McpProviders[1] != want[1] {
 		t.Fatalf("McpProviders = %#v, want %#v", got.McpProviders, want)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesTaskScope(t *testing.T) {
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		TaskScope: lifecycle.TaskLaunchScopeOffice,
+	}, "", "")
+	if launchReq.TaskScope != lifecycle.TaskLaunchScopeOffice {
+		t.Fatalf("TaskScope = %q, want %q", launchReq.TaskScope, lifecycle.TaskLaunchScopeOffice)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesSessionSettingsPolicy(t *testing.T) {
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		SessionSettingsPolicy: orchestratorexecutor.ResumeSettingsPolicyProviderRestored,
+	}, "", "")
+	if launchReq.SessionSettingsPolicy != lifecycle.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("SessionSettingsPolicy = %d, want provider-restored", launchReq.SessionSettingsPolicy)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesContextContinuation(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		ForceContextContinuation: true,
+	}, "", "")
+	if !got.ForceContextContinuation {
+		t.Fatal("ForceContextContinuation was dropped from lifecycle launch request")
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesPassthroughResume(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		IsPassthrough: true, ResumePassthrough: true,
+	}, "", "")
+	if !got.IsPassthrough || !got.ResumePassthrough {
+		t.Fatal("passthrough resume intent was dropped from lifecycle launch request")
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesNativeConversationReplacement(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		ReplaceNativeConversation: true,
+	}, "", "")
+	if !got.ReplaceNativeConversation {
+		t.Fatal("ReplaceNativeConversation was dropped from lifecycle launch request")
 	}
 }
 
@@ -521,6 +600,67 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 	}
 }
 
+func TestRepositoryResolverAdapterUsesCurrentGitProtocol(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name: "Workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	paths := []string{filepath.Join(t.TempDir(), "one"), filepath.Join(t.TempDir(), "two")}
+	for _, path := range paths {
+		runGit(t, "", "init", "--quiet", path)
+	}
+	cloner := &recordingReviewRepositoryCloner{protocol: repoclone.ProtocolSSH, paths: paths}
+	adapter := &repositoryResolverAdapter{
+		cloner:  cloner,
+		taskSvc: harness.taskSvc,
+		logger:  newTestLogger(),
+	}
+
+	if _, _, err := adapter.ResolveForReview(ctx, workspace.ID, "github", "owner", "one", ""); err != nil {
+		t.Fatalf("first ResolveForReview: %v", err)
+	}
+	cloner.protocol = repoclone.ProtocolHTTPS
+	if _, _, err := adapter.ResolveForReview(ctx, workspace.ID, "github", "owner", "two", ""); err != nil {
+		t.Fatalf("second ResolveForReview: %v", err)
+	}
+
+	want := []string{
+		"git@github.com:owner/one.git",
+		"https://github.com/owner/two.git",
+	}
+	if !reflect.DeepEqual(cloner.cloneURLs, want) {
+		t.Fatalf("clone URLs = %v, want %v", cloner.cloneURLs, want)
+	}
+}
+
+type recordingReviewRepositoryCloner struct {
+	protocol  string
+	paths     []string
+	cloneURLs []string
+}
+
+func (c *recordingReviewRepositoryCloner) EnsureWorkspaceCloned(
+	_ context.Context, _, _, _, _, name string,
+) (string, error) {
+	path := c.paths[0]
+	c.paths = c.paths[1:]
+	return path, nil
+}
+
+func (c *recordingReviewRepositoryCloner) BuildCloneURLWithHost(
+	_ context.Context, provider, host, owner, name string,
+) (string, error) {
+	cloneURL, err := repoclone.CloneURLWithHost(provider, host, owner, name, c.protocol)
+	if err == nil {
+		c.cloneURLs = append(c.cloneURLs, cloneURL)
+	}
+	return cloneURL, err
+}
+
 type staticRepoCloneCredential struct{}
 
 func (staticRepoCloneCredential) ResolveGitCredential(
@@ -622,6 +762,69 @@ func TestMessageCreatorAdapter_StructFields(t *testing.T) {
 	}
 }
 
+func TestMessageCreatorAdapter_CreateLifecycleSessionMessage(t *testing.T) {
+	ctx := context.Background()
+	harness := newBootStateTestHarness(t)
+	checkErr := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkErr(harness.taskRepo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws-lifecycle-message", Name: "Lifecycle test"}))
+	checkErr(harness.taskRepo.CreateTask(ctx, &taskmodels.Task{
+		ID: "task-lifecycle-message", WorkspaceID: "ws-lifecycle-message",
+		Title: "Lifecycle test", State: "todo",
+	}))
+	checkErr(harness.taskRepo.CreateTaskSession(ctx, &taskmodels.TaskSession{
+		ID: "session-lifecycle-message", TaskID: "task-lifecycle-message",
+		State: taskmodels.TaskSessionStateWaitingForInput,
+	}))
+
+	adapter := &messageCreatorAdapter{svc: harness.taskSvc}
+	checkErr(adapter.CreateLifecycleSessionMessage(ctx, "task-lifecycle-message", "Updated Todos",
+		"session-lifecycle-message", string(taskmodels.MessageTypeTodo), map[string]interface{}{
+			"todos": []map[string]interface{}{},
+		}))
+
+	messages, err := harness.taskRepo.ListMessages(ctx, "session-lifecycle-message")
+	checkErr(err)
+	if len(messages) != 1 {
+		t.Fatalf("message count = %d, want 1", len(messages))
+	}
+	turn, err := harness.taskRepo.GetTurn(ctx, messages[0].TurnID)
+	checkErr(err)
+	if turn.CompletedAt == nil || turn.Metadata[taskmodels.TurnMetaKeyLifecycleOnly] != true {
+		t.Fatalf("turn = %#v, want completed lifecycle-only turn", turn)
+	}
+	active, err := harness.taskSvc.GetActiveTurn(ctx, "session-lifecycle-message")
+	checkErr(err)
+	if active != nil {
+		t.Fatalf("active turn = %#v, want none", active)
+	}
+}
+
+func TestClarificationQuestionDataPreservesCustomTextPolicy(t *testing.T) {
+	allowCustomText := false
+	question := clarification.Question{
+		ID:              "mode",
+		Title:           "Mode",
+		Prompt:          "Choose a mode",
+		AllowCustomText: &allowCustomText,
+	}
+
+	got := clarificationQuestionData(question, []interface{}{})
+	if got["allow_custom_text"] != false {
+		t.Fatalf("allow_custom_text = %#v, want false", got["allow_custom_text"])
+	}
+
+	question.AllowCustomText = nil
+	got = clarificationQuestionData(question, []interface{}{})
+	if _, ok := got["allow_custom_text"]; ok {
+		t.Fatalf("legacy question unexpectedly set allow_custom_text: %#v", got["allow_custom_text"])
+	}
+}
+
 func TestWrapGitHubTaskIssueStoreError(t *testing.T) {
 	taskErr := fmt.Errorf("load task: %w", taskrepo.ErrTaskNotFound)
 	wrapped := wrapGitHubTaskIssueStoreError(taskErr)
@@ -665,3 +868,14 @@ func TestNormalizeRuntimeStopError(t *testing.T) {
 // jiraSecretAdapter Set/Exists branching is tested in
 // internal/integrations/secretadapter/secretadapter_test.go now that the
 // upsert helper lives there.
+
+func TestContinuationNativeOnlyRestoreLaunchContract(t *testing.T) {
+	req := &orchestratorexecutor.LaunchAgentRequest{RequiredNativeConversationID: "provider-session"}
+	got := reflect.ValueOf(buildLifecycleLaunchRequest(req, "/workspace", "profile-1")).Elem().FieldByName("RequiredNativeConversationID")
+	if !got.IsValid() {
+		t.Fatal("missing native identity field")
+	}
+	if got.String() != "provider-session" {
+		t.Fatal("native identity was not forwarded")
+	}
+}

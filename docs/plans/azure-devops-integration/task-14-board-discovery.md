@@ -5,7 +5,7 @@ status: done
 wave: 8
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 14: Board Discovery And Snapshots

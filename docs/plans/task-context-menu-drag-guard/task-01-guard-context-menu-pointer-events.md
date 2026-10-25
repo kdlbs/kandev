@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-reparenting-drag-drop.md"
+spec: "../../specs/tasks/requirements/subtask-reparenting-drag-drop.md"
 ---
 
 # Task 01: Guard context-menu pointer events
@@ -75,7 +75,7 @@ Sequential; the guard and its regression tests change together.
 
 ## Inputs
 
-- [Subtask re-parenting by drag and drop spec](../../specs/tasks/subtask-reparenting-drag-drop.md) (amended with the menu-containment scenarios)
+- [Subtask re-parenting by drag and drop spec](../../specs/tasks/requirements/subtask-reparenting-drag-drop.md) (amended with the menu-containment scenarios)
 - [Fix plan](plan.md)
 - dnd-kit sensor behavior (`MouseSensor.activators` ignores only right-click;
   `PointerSensor` requires primary button) from `@dnd-kit/core` source.

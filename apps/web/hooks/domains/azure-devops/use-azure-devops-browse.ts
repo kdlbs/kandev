@@ -14,11 +14,18 @@ import type {
   AzureDevOpsPullRequestFeedback,
   AzureDevOpsWorkItem,
 } from "@/lib/types/azure-devops";
+import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 
 type AsyncResult<T> = {
   data: T;
   loading: boolean;
   error: string | null;
+};
+
+type AzureDevOpsConnectionState = AsyncResult<AzureDevOpsConfig | null> & {
+  workspaceId?: string;
+  refreshing: boolean;
 };
 
 function useOperationGeneration(scope?: string) {
@@ -30,30 +37,68 @@ function useOperationGeneration(scope?: string) {
 }
 
 export function useAzureDevOpsConnection(workspaceId?: string) {
-  const [state, setState] = useState<AsyncResult<AzureDevOpsConfig | null>>({
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [state, setState] = useState<AzureDevOpsConnectionState>({
+    workspaceId,
     data: null,
     loading: true,
     error: null,
+    refreshing: false,
   });
   useEffect(() => {
-    if (!workspaceId) {
-      setState({ data: null, loading: false, error: null });
-      return;
-    }
     let cancelled = false;
-    setState({ data: null, loading: true, error: null });
-    getAzureDevOpsConfig(workspaceId, { cache: "no-store" })
-      .then((data) => {
-        if (!cancelled) setState({ data, loading: false, error: null });
-      })
-      .catch((err) => {
-        if (!cancelled) setState({ data: null, loading: false, error: String(err) });
+    let requestId = 0;
+    const load = async () => {
+      const currentRequestId = ++requestId;
+      setState((previous) => {
+        const sameWorkspace = previous.workspaceId === workspaceId;
+        const backgroundRefresh = sameWorkspace && !previous.loading;
+        return {
+          workspaceId,
+          data: sameWorkspace ? previous.data : null,
+          loading: Boolean(workspaceId) && !backgroundRefresh,
+          error: null,
+          refreshing: Boolean(workspaceId) && backgroundRefresh,
+        };
       });
+      if (!workspaceId) return;
+      try {
+        const data = await getAzureDevOpsConfig(workspaceId, { cache: "no-store" });
+        if (!cancelled && currentRequestId === requestId) {
+          setState({ workspaceId, data, loading: false, error: null, refreshing: false });
+        }
+      } catch (err) {
+        if (!cancelled && currentRequestId === requestId) {
+          setState((previous) => ({
+            workspaceId,
+            data: previous.workspaceId === workspaceId ? previous.data : null,
+            loading: false,
+            error: String(err),
+            refreshing: false,
+          }));
+        }
+      }
+    };
+    void load();
+    if (!workspaceId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const interval = setInterval(() => void load(), INTEGRATION_STATUS_REFRESH_MS);
+    const unsubscribe = subscribeIntegrationAvailability(() => void load());
     return () => {
       cancelled = true;
+      clearInterval(interval);
+      unsubscribe();
     };
-  }, [workspaceId]);
-  return state;
+  }, [refreshVersion, workspaceId]);
+  const refresh = useCallback(() => setRefreshVersion((version) => version + 1), []);
+  const scopedState =
+    state.workspaceId === workspaceId
+      ? state
+      : { workspaceId, data: null, loading: Boolean(workspaceId), error: null, refreshing: false };
+  return { ...scopedState, refresh };
 }
 
 export function useAzureDevOpsWorkItemSearch(workspaceId?: string) {

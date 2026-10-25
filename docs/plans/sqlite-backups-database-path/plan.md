@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/system-page/spec.md
+spec: docs/specs/system-page/requirements/system-page.md
 created: 2026-08-15
 status: complete
 ---

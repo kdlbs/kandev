@@ -236,6 +236,43 @@ func TestUpdateExecutorProfileWritesMutableFieldsAndReportsMissing(t *testing.T)
 	}
 }
 
+func TestUpdateExecutorProfileIfUnmodifiedRejectsStaleProfile(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedExecutorForProfiles(t, repo, "executor-profile-cas")
+	if err := repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "profile-cas", ExecutorID: "executor-profile-cas", Name: "Before",
+		Config: map[string]string{"allow_user_namespaces": "true"},
+	}); err != nil {
+		t.Fatalf("CreateExecutorProfile: %v", err)
+	}
+
+	stale, err := repo.GetExecutorProfile(ctx, "profile-cas")
+	if err != nil {
+		t.Fatalf("GetExecutorProfile(stale): %v", err)
+	}
+	fresh, err := repo.GetExecutorProfile(ctx, "profile-cas")
+	if err != nil {
+		t.Fatalf("GetExecutorProfile(fresh): %v", err)
+	}
+	fresh.Config["allow_user_namespaces"] = ""
+	if err := repo.UpdateExecutorProfile(ctx, fresh); err != nil {
+		t.Fatalf("UpdateExecutorProfile(fresh): %v", err)
+	}
+
+	stale.Config["image_tag"] = "agent:stale"
+	if err := repo.UpdateExecutorProfileIfUnmodified(ctx, stale, stale.UpdatedAt); err == nil {
+		t.Fatal("stale update succeeded; want optimistic-lock conflict")
+	}
+	got, err := repo.GetExecutorProfile(ctx, "profile-cas")
+	if err != nil {
+		t.Fatalf("GetExecutorProfile(after conflict): %v", err)
+	}
+	if got.Config["allow_user_namespaces"] != "" || got.Config["image_tag"] != "" {
+		t.Fatalf("stale update mutated profile: %#v", got.Config)
+	}
+}
+
 func TestDeleteExecutorProfileRemovesRowAndReportsMissing(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/adaptive-kanban.md"
+spec: "../../specs/ui/requirements/adaptive-kanban.md"
 parallelism: sequential
 ---
 
@@ -78,7 +78,7 @@ Sequential. This task updates a package lock and one shared UI path.
 
 ## Inputs
 
-- `docs/specs/ui/adaptive-kanban.md`, large-column requirements and scenarios.
+- `docs/specs/ui/requirements/adaptive-kanban.md`, large-column requirements and scenarios.
 - `docs/plans/kanban-large-column-virtualization/plan.md`, confirmed root cause and design.
 - `apps/web/components/kanban-column.tsx`, current full-list mount and scroll owner.
 - `apps/web/components/kanban/swimlane-kanban-content.tsx`, shared drag overlay and responsive layouts.

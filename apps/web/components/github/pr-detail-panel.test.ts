@@ -24,6 +24,7 @@ const reviewMocks = vi.hoisted(() => ({ requestReviewers: vi.fn(), submitReview:
 const RE_REQUEST_BUTTON = "change-request-review-action-rerequest-review-octocat";
 const PENDING_REVIEWER = "change-request-pending-reviewer-octocat";
 const DISMISSED_REVIEWED_AT = "2026-01-01T00:00:00Z";
+const WORKSPACE_ID = "workspace-1";
 
 vi.mock("@/hooks/domains/github/use-pr-feedback", () => ({
   usePRFeedback: () => ({
@@ -72,6 +73,7 @@ afterEach(async () => {
 function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: WORKSPACE_ID,
     task_id: "task",
     owner: "o",
     repo: "r",
@@ -141,7 +143,7 @@ function ReviewRequestHarness({
   onReady,
   requestedReviewers = [],
   reviews = [],
-  workspaceId = "workspace-1",
+  workspaceId = WORKSPACE_ID,
 }: {
   onReady: (reviewRequest: ReturnType<typeof usePRScopedReviewRequest>) => void;
   requestedReviewers?: { login: string; type: "user" }[];
@@ -171,7 +173,7 @@ function dismissedReview(id = 1): PRReview {
 }
 
 const TEST_INITIAL_STATE = {
-  workspaces: { activeId: "workspace-1" },
+  workspaces: { activeId: WORKSPACE_ID },
 } as unknown as Partial<AppState>;
 
 function prDetailTree(taskPR = makeTaskPR()) {
@@ -305,7 +307,7 @@ describe("PRDetailContent deferred re-request", () => {
       "r",
       1,
       ["octocat"],
-      "workspace-1",
+      WORKSPACE_ID,
     );
     expect(screen.queryByTestId(RE_REQUEST_BUTTON)).toBeNull();
   });

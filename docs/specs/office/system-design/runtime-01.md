@@ -1,0 +1,304 @@
+---
+status: draft
+system: office
+requirements:
+  - REQ-OFFICE-RUNTIME-001
+created: 2026-05-04
+owners:
+  - cfl
+---
+# Office Agent Runtime — Error Handling Contract System Design Part 1
+
+## Purpose and boundaries
+
+This design preserves the technical source detail for `REQ-OFFICE-RUNTIME-001` during migration.
+
+## Requirement mapping
+
+| Requirement | Design section |
+| --- | --- |
+| `REQ-OFFICE-RUNTIME-001` | [Migrated source detail](#migrated-source-detail) |
+
+## Related decisions
+
+[Keep MCP availability separate from runtime permissions](../../../decisions/2026-09-07-separate-runtime-permissions-and-advisory-actions.md)
+defines the boundary between enforced runtime permissions and seat-derived
+prompt metadata.
+
+## Migrated source detail
+
+> **Amendment (2026-08-17):** The provider-classification and automatic
+> recovery policy in this spec is superseded by
+> [Provider Error Recovery](../../platform/requirements/provider-error-recovery.md) and
+> [Dynamic Agent Routing](../../agents/requirements/dynamic-agent-routing.md). Office consumes
+> the shared transient/hard catalogue and the selected dynamic profile's policy.
+> The terminal run state, inbox, and manual recovery contracts below still own
+> non-provider and effect-unsafe failures. The historical v1 classification
+> text remains as migration context and is not the target behavior.
+
+This spec defines the runtime contract for how Office agent errors are observed, classified, and recovered. It covers what the lifecycle layer publishes on failure, how sessions and wakeups transition, how failures surface in the inbox and per-task chat, and how the user recovers — via Mark fixed, Resume session, or reassignment to a different agent.
+
+## Why
+
+When an agent run fails mid-turn (invalid model, auth failure, malformed response, transient upstream), today's UX is:
+
+1. The chat shows a raw JSON-RPC blob in red: `{"code":-32603,"message":"Internal error","data":{"codex_error_info":"other","message":"…"}}`.
+2. The session ends in `WAITING_FOR_INPUT`, which the chat reads as "live" - the topbar spinner and the "Agent working for Xs" header stay on even though the agent has stopped.
+3. The wakeup scheduler queues a retry with the standard backoff table (~135 s). For a 400 `invalid_request_error` (e.g. unsupported model) the retry fails identically and burns CPU + tokens for nothing. A flaky provider can produce a tight retry loop that never surfaces to the user.
+4. The agent detail Runs tab and the dashboard agent card show no sign of the failure. The user has to open the task to know.
+5. Nothing surfaces in the office inbox even though the existing `office-inbox` spec already lists "Agent errors" as one of its computed sources.
+6. With multiple agents using different providers, there's no path to recover by reassigning a task - the failed wakeup keeps firing on the original (broken) agent regardless of who's actually assigned.
+
+Three classes of bug are mixed up here: a state-machine bug (`FAILED` modeled as `WAITING_FOR_INPUT`), a retry-policy bug (every error is treated as retryable), and a presentation bug (raw error blob shown verbatim, no inbox entry, no recovery path).
+
+The target pattern: runs persist with explicit status (`queued | running | scheduled_retry | failed | timed_out | cancelled`); failed runs surface in the inbox as a computed view over the runs table with a `inbox_dismissals` row keyed by run id; the sidebar badge counts un-dismissed failures; the run-ledger card shows a humanised liveness reason rather than the raw payload. Scoped tightly for v1.
+
+## What
+
+### v1 classification policy: every agent error is terminal
+
+The runtime does **not** classify errors in v1. Any error event from the agent adapter - Codex, Claude, Copilot, Amp, OpenCode, Auggie, Gemini, mock - is treated as terminal. The user fixes the cause (bad model, expired auth, network outage, rate limit) and re-runs the task by clicking **Resume session** in the chat or **Mark fixed** in the inbox.
+
+This is a deliberate trade-off: the cost of a classifier per adapter is not worth paying yet. Treating every error as terminal means we may surface a transient failure that would have self-recovered on the next retry; the cost is one click. Treating retryable as terminal is always safe; treating terminal as retryable burns CPU and tokens. We prefer the safe direction.
+
+A follow-up spec can introduce per-adapter classification once we have real usage data on which errors are common and worth auto-retrying. The existing `rate-limit-retry` spec is independent of this work - it parses provider rate-limit reset times. In v1 we treat rate limits as generic errors and let the user reassign or wait, rather than auto-detect.
+
+### Retry policy
+
+- No automatic retry, except the bounded legacy-path transient retry below. Every other adapter error is terminal for the wakeup that produced it.
+- The wakeup row is stamped with `status = failed` and `error_message`. No follow-up wakeup is queued from the failure path, other than the classified-transient retry's own `scheduled_retry_at`.
+- Re-runs only happen via explicit user action — **Resume session** in chat, **Mark fixed** on an inbox entry, or task reassignment to a different agent — except the automatic bounded retry below.
+- A terminal failure still stamps `office_agent_runtime.last_run_finished_at` — `HandleAgentFailure` calls the same `Service.stampRunFinished` helper the completed/stopped paths use. Cooldown is a run-pacing mechanism, not a success tracker: a below-threshold failing agent is paced by `cooldown_sec` on its next heartbeat-driven fire exactly as it would be after a success, so a flapping provider or a misconfigured agent cannot retry back-to-back with zero pacing and burn cost/tokens before hitting auto-pause. This applies uniformly across every task assigned to the agent, not just the one that just failed - `cooldown_sec` gates the agent's next heartbeat-triggered fire, regardless of which task last failed. It does not gate task assignment or manual resume: those go through the runs scheduler's `ClaimNextRun`/`ProcessRunGuard` path, which does not consult `last_run_finished_at`. The consecutive-failure counter and auto-pause threshold (below) are the separate, existing mechanism for stopping a chronically broken agent altogether; cooldown only paces the failures that happen before that threshold is reached. The legacy-path transient retry below deliberately skips this stamp while it is retrying: it is not a success-tracking event, and pacing is already bounded by its own fixed 5s/10s schedule rather than the heartbeat cadence `cooldown_sec` governs.
+
+### Legacy post-start transient retry
+
+AC-OFFICE-RUNTIME-001.11 carves a narrow exception out of the "every error is terminal" policy above, closing Beta gap AC-4.2: a post-start failure on the legacy (`HandleAgentFailure`) path — the one `tryPostStartFallback`'s routing-tier retry (see the amendment note above) does not reach, because no routing dispatcher is wired or the run has no `ResolvedProviderID` — is retried instead of counted toward auto-pause, but only when it classifies **transient** by the same shared predicate the routing tier uses (`(*routingerr.Error).ShouldShortRetry`: `ClassTransient && AutoRetryable && FallbackAllowed`), reused rather than reimplemented.
+
+Mechanism: `HandleAgentFailure` classifies the failure (preferring the structured `ProviderError.Message` over the bare error string, since a bare adapter string like `"Overloaded"` or a raw 429 rarely classifies on its own) **before** calling `MarkRunFailed` at all, not after. Classification passes the underlying agent id (for example `"claude-acp"`) as the provider id, substituting `ProviderError.ProviderID` only when the agent id itself has no provider rules and the provider id does — the same resolution `classifyKanbanFailure` uses, mirrored rather than reimplemented, because provider rules are keyed by agent id and a raw stderr rate-limit string only matches its provider's rule set when the right id is threaded through. `ProviderError.ResetAt` is not used on this path: unlike the routing tier's short-retry delay, the fixed 5s/10s backoff below does not shorten for an imminent reset window. On a classified-transient hit, bounded by `run.RetryCount < 2` and the same 24h `retryMaxAge` staleness rule the pre-launch tier uses, it releases the task checkout, clears the agent's working flag, and calls `ScheduleRetryIfClaimed` at a fixed 5s then 10s delay — a requeue write guarded to `status = 'claimed'`, mirroring `MarkRunFailed`'s own guard, so it only succeeds while the run is still the row this handler read. On success it returns early so `MarkRunFailed`, `recordTerminalShape`, `stampRunFinished`, `IncrementAgentConsecutiveFailures`, `publishRunFailed`, and `autoPauseAgent` never run for that attempt — the run goes `claimed -> queued` directly and never visits `status = 'failed'`. If the guarded requeue writes zero rows, a concurrent writer (a task-tree cancel, workspace pause, or participant eviction — each guarded to `status IN ('queued','claimed')`) already moved the run off `claimed` first; the handler falls through to `MarkRunFailed`, whose identical guard no-ops the same way, leaving the concurrent writer's terminal state untouched (Review round 6, R6-1: classifying before any write closes the `claimed -> failed -> queued` window a cancel's guard could not see into). `RetryCount` is shared with the pre-launch tier rather than a new column, so a run that already burned pre-launch retries gets no post-start retry — under-retrying rather than ever exceeding the combined budget. `ScheduleRetryIfClaimed` also clears `session_id` and `error_message`: the row may already carry the session id and error text of the failed attempt, and a relaunch must resolve the session the new attempt actually gets and not still be flagged with an error once it finishes successfully.
+
+The retry additionally checks the run's **scheduled arrival**, not just its current age: `time.Since(run.RequestedAt) + delay > staleRunThreshold` (2h, `scheduler_staleness.go`), where `delay` is the same 5s/10s backoff this attempt is about to schedule — and refuses to schedule when that would already be true, falling through to terminal accounting instead. This is a second, tighter gate than the 24h `retryMaxAge` above: `evaluateRunStaleness` cancels any claimed run with `RetryCount > 0` once it is older than `staleRunThreshold`, and scheduling this retry always leaves `RetryCount > 0`. The run cannot be claimed before `ScheduleRetry`'s `retry_at` elapses, so testing the age the run has *now* rather than the age it will have on arrival lets a run age into the cancellation window during its own backoff, silently converting a scheduled retry into an `execution_too_old` cancellation instead of counting the failure (no `consecutive_failures` increment, no `agent_run_failed` inbox row). An Office agent session running past 2h is routine, not an edge case, so this band is reachable in practice. A narrower residual remains even with the delay folded in: the run is claimed at the first scheduler tick *after* `scheduled_retry_at`, not exactly at it, so a tick-width window (bounded by the scheduler's poll interval) can still let `evaluateRunStaleness` cancel a retry whose scheduled arrival landed just inside the threshold. This residual is deliberately not closed — it is orders of magnitude narrower than the backoff-width gap it replaces and would require coupling this gate to the scheduler's poll cadence.
+
+This retry re-drives the whole run from the top only when the lifecycle event carries the exact run identity and current-invocation evidence: a non-empty execution ID, a non-zero prompt generation, known evidence, and no observed output or effect. A missing or mismatched run or session identity, unknown evidence, output, effect, or a provider diagnostic that does not match the terminal failure falls through to terminal accounting. This keeps the Office path aligned with the shared provider-recovery contract while preserving the existing 5s and 10s retry policy.
+
+### Inbox surfacing
+
+Failed wakeups surface in the inbox, fulfilling the "Agent errors" bullet already in the `office-inbox` spec. Two kinds:
+
+- **`agent_run_failed`** - one entry per failed (task, agent) wakeup while the agent is below threshold. Title: "<agent> failed on <task>". Action: **Mark fixed** -> dismiss + retry.
+- **`agent_paused_after_failures`** - one entry per auto-paused agent. Title: "<agent> auto-paused after <N> failures (tasks A, B, C)". Action: **Mark fixed** -> unpause + retry the affected tasks.
+
+When auto-pause triggers, the threshold-th failure does **not** create its own per-task entry. Instead, the prior `agent_run_failed` entries for that agent are auto-dismissed and replaced with a single `agent_paused_after_failures` entry that lists the affected tasks. The inbox shows one row per broken agent rather than N rows per failed task. (Per-task chat error entries are unaffected - they live in each task's chat thread.)
+
+### Recovery hooks
+
+#### Mark fixed = dismiss + retry
+
+Both inbox actions converge on the same effect: clear the failure state and re-run.
+
+For `agent_run_failed`:
+1. Insert into `inbox_dismissals`.
+2. Clear `FAILED` on the (task, agent) session -> `IDLE`.
+3. Re-queue a wakeup for that (task, agent) with reason `manual_resume_after_failure`.
+
+For `agent_paused_after_failures`:
+See [part 2](runtime-02.md#migrated-source-detail) for the compare-and-set clear,
+dismissal ordering, and retry scenario detail.
+
+There is no separate "Dismiss without retry" affordance. If the user wants to silence the inbox without re-running the task, they reassign the task to a different agent - that's the explicit recovery path described below.
+
+#### Reassignment as the multi-provider failover path
+
+Multiple agents may run on different providers (e.g. CEO on Claude, Worker on Codex). When one provider hits a sustained outage or rate limit, the user can switch the assignee on a per-task basis to recover without waiting for the broken provider.
+
+Reassignment is independent of the pause / dismiss flow:
+
+- Changing `assignee_agent_instance_id` on a task fires the existing reactivity pipeline, which queues a fresh `task_assigned` wakeup for the new agent.
+- The existing staleness check (`recovery-reliability` spec) cancels the prior wakeup for the (task, **old** agent) since the assignee has changed.
+- Any per-task `agent_run_failed` inbox entry tied to the old (task, agent) auto-dismisses - the failure is no longer actionable on this task.
+- The old agent's `consecutive_failures` counter is **not** reset by reassignment. The agent remains paused (or close to pause) since the root cause hasn't been fixed; reassigning is a workaround for the specific task, not an unpause.
+- An `agent_paused_after_failures` entry persists until the user explicitly **Mark fixed**s it, regardless of how many of its affected tasks have been reassigned away. (The list of "affected tasks" on the entry is a snapshot at pause time; we don't recompute on reassign.)
+
+Worked example with the rate-limit scenario:
+
+1. Workspace has CEO (Claude) and Worker (Codex), threshold = 3.
+2. Claude rate-limits. CEO fails on tasks A, B, then C.
+3. After A: inbox row `agent_run_failed` for (A, CEO).
+4. After B: inbox row `agent_run_failed` for (B, CEO).
+5. After C: pause triggers. Rows for A and B auto-dismiss. New row `agent_paused_after_failures` for CEO covering {A, B, C}.
+6. User reassigns task B to Worker (Codex). Codex's wakeup runs B successfully. The CEO entry's affected list still mentions B (we don't recompute) but the user can ignore that detail.
+7. CEO stays paused. User waits for the rate limit window or fixes billing, then clicks **Mark fixed** on the CEO entry -> unpause + retry A and C (B is already done; the retry is a no-op for B because its current assignee is Worker).
+
+### Chat surface (per-task)
+
+The red banner that today shows the raw JSON-RPC blob is replaced by a structured **error entry** in the unified chat timeline (alongside comments, session entries, decisions). The entry contains:
+
+- A short generic header: "The agent stopped with an error."
+- A `Show details` collapsible revealing the raw error payload verbatim - what the user copy-pastes when filing a bug.
+- The existing **Resume session** + **Start fresh** action buttons, unchanged. Resume session is equivalent to **Mark fixed** on the per-task inbox entry (same backend effect).
+
+The entry sorts at the failure timestamp like any other comment, so the chat reads chronologically: `prompt -> tool calls -> error -> (next user comment if any) -> next turn`.
+
+The runtime does **not** humanise the error message in v1. The raw payload is the most useful artefact when classification is absent.
+
+### Sidebar agent indicator
+
+The sidebar Agents list (`SidebarAgentsList`) currently renders, per row, either a `LiveAgentIndicator` (live count when > 0) or an `AgentStatusDot`. The runtime adds two cases:
+
+- **Auto-paused agent** - a small red "paused" badge replaces the status dot, with a tooltip showing the pause reason. Takes priority over the live indicator (if a paused agent has somehow racing live count, the paused state is more important).
+- **Agent with un-dismissed failures below pause threshold** - a red "<N> errors" badge alongside the live/status indicator. N is the count of `agent_run_failed` inbox entries for this agent.
+
+The Inbox sidebar item already shows a total badge count; this is a per-agent surface for users who triage by agent rather than by inbox.
+
+### Runs tab pill
+
+The agent detail page Runs tab gains a status pill per row: `queued | running | failed | completed | cancelled`. The pill colour reuses the dashboard agent-card vocabulary. A failed run row links to the task that produced it.
+
+### Dashboard agent card
+
+When the agent's most recent wakeup is `failed` or the agent is auto-paused, the dashboard agent card subtitle changes:
+
+- Most recent wakeup failed but agent below threshold: "Last run failed {ago}".
+- Agent auto-paused: "Paused - <N> consecutive failures".
+
+Same component, new branches in `pickSubtitle` and `StatusDot` (red dot in both cases).
+
+## Data model
+
+### `agent_instances` additions
+
+- `consecutive_failures INT NOT NULL DEFAULT 0` - counter across any task assigned to this agent. Increments on every failure regardless of which task; resets to zero on any successful run for the agent.
+- `failure_threshold INT NULL` - per-agent override. When NULL, the workspace default applies.
+- `pause_reason TEXT NULL` - reused from manual pause. On auto-pause the runtime sets `"Auto-paused: <N> consecutive failures. Last error: <message>"`.
+
+### `workspace_settings` additions
+
+- `agent_failure_threshold INT NOT NULL DEFAULT 3` - workspace default threshold. Configurable from the workspace settings page. Per-agent override on `agent_instances.failure_threshold` wins when present. Rationale: twice is coincidence, three times is a pattern. Critical agents can be tuned down to 1, flaky-but-tolerable agents up to 5.
+
+### `inbox_dismissals`
+
+New table: `(user_id, item_kind, item_id, dismissed_at)` with a unique constraint on `(user_id, item_kind, item_id)`. `item_kind` is one of `agent_run_failed | agent_paused_after_failures` to start; the table is reusable for future inbox sources.
+
+### Wakeup row
+
+- `status` extended with `failed` (in addition to the existing values).
+- `error_message TEXT NULL` - stamped on failure with the raw error payload.
+
+## API surface
+
+The error-handling contract spans three boundaries: the agent runtime facade (Go), the office runtime action surface (HTTP, agent-facing), and the dashboard/inbox HTTP + WS event surface (UI-facing).
+
+### Agent runtime facade (`internal/agent/runtime`)
+
+`runtime.Runtime` is the single seam coordinators (workflow engine, scheduler dispatcher, orchestrator) use to launch / resume / stop agent executions:
+
+```go
+type Runtime interface {
+    Launch(ctx, spec LaunchSpec) (ExecutionRef, error)
+    Resume(ctx, executionID, prompt string) error
+    Stop(ctx, executionID, reason string) error
+    GetExecution(ctx, executionID string) (*Execution, error)
+    SubscribeEvents(ctx, executionID string) (<-chan Event, error) // ErrUnsupported in Phase 1
+    SetMcpMode(ctx, executionID, mode string) error
+}
+```
+
+The runtime knows nothing about tasks, workflows, or office stages. Errors classified by `routingerr.Classify` reach this layer via the agent process's stderr / stdout / structured ACP error frame and are published as `streams.AgentEvent` events through the lifecycle manager's event bus.
+
+### Office runtime action surface (HTTP, agent-process-facing)
+
+Mounted by `runtime.RegisterRoutes` (`internal/office/runtime/handler.go`). Every endpoint requires a `Bearer <agent JWT>` header issued via `agents.MintRuntimeJWT`; the handler resolves the JWT to a `RunContext` and checks capabilities before delegating to `Actions`.
+
+| Method | Path | Capability | Body / Params |
+|---|---|---|---|
+| POST | `/runtime/comments` | `post_comment` | `{task_id?, body}` |
+| POST | `/runtime/tasks/:id/status` | `update_task_status` | `{status, comment}` |
+| POST | `/runtime/tasks/:id/subtasks` | `create_subtask` | `CreateSubtaskInput` |
+| POST | `/runtime/agents` | `create_agent` | `CreateAgentInput` |
+| PATCH | `/runtime/agents/:id` | `modify_agents` | `ModifyAgentInput` |
+| POST | `/runtime/agents/:id/runs` | `spawn_agent_run` | `SpawnAgentRunInput` |
+| POST | `/runtime/approvals` | `request_approval` | `RequestApprovalInput` |
+| GET | `/runtime/memory/*path` | `read_memory` | `*path = /workspaces/{ws}/memory/{kind}s/{id}/{key}` |
+| PUT | `/runtime/memory/*path` | `write_memory` | `{content}` |
+| GET | `/runtime/skills` | `list_skills` | – |
+| DELETE | `/runtime/skills/:id` | `delete_skills` | – |
+
+Capability-denied (`ErrCapabilityDenied`), task-out-of-scope (`ErrTaskOutOfScope`), and workspace-out-of-scope (`ErrWorkspaceOutOfScope`) errors return `403 Forbidden` and append a `runtime.denied` event to `office_run_events`. Successful actions append `runtime.action`. Missing dependencies and other operational errors return `500 Internal Server Error` with the stable `internal runtime error` message. The server log keeps the original error cause.
+
+### Recovery actions (UI-facing, dashboard handler)
+
+| Method | Path | Effect |
+|---|---|---|
+| POST | `/workspaces/:wsId/inbox/items/:id/dismiss` | Insert `inbox_dismissals` row + (for `agent_run_failed`) clear session FAILED and re-queue wakeup with reason `manual_resume_after_failure`; (for `agent_paused_after_failures`) clear `pause_reason`, reset `consecutive_failures`, re-queue wakeups for every affected task |
+| POST | `/tasks/:id/sessions/:sessionId/resume` | Equivalent to Mark fixed on the per-task inbox entry — clears session FAILED and re-queues a wakeup for the (task, agent) |
+| PATCH | `/tasks/:id` | Changing `assignee_agent_instance_id` cancels the prior (task, old agent) wakeup and queues a fresh `task_assigned` wakeup for the new agent |
+
+### WS event types (forwarded to clients)
+
+| Event type | Payload | When |
+|---|---|---|
+| `office.task.session.updated` | `session_id, state, error_message?` | Session transitions to `FAILED` (or any other state) |
+| `office.wakeup.updated` | `wakeup_id, status, error_message?` | Wakeup row stamped `failed` |
+| `office.inbox_item` | `kind, item_id, agent_id?, task_ids?, title` | New `agent_run_failed` or `agent_paused_after_failures` |
+| `office.agent.updated` | `agent_id, pause_reason?, consecutive_failures` | Auto-pause toggle, counter increment / reset |
+
+## State machine
+
+### Session state on agent error
+
+Office sessions transition to a terminal `FAILED` state distinct from `WAITING_FOR_INPUT`. When the lifecycle layer publishes an error event:
+
+- Session state -> `FAILED`.
+- Task state -> `REVIEW` (already happens today; unchanged).
+- Wakeup status -> `failed`, with `error_message` stamped, no retry queued.
+- The `executors_running` row is preserved so the user can resume via the existing **Resume session** button. The agent process and agentctl instance are torn down.
+
+This fixes today's bug where the topbar spinner stays on after the agent has actually stopped: a `FAILED` session is correctly read as non-live by `isLiveSession`.
+
+### Run status lifecycle
+
+`queued -> running -> {completed | failed | timed_out | cancelled}`. The `scheduled_retry` status from the target pattern is reserved for a future classifier; v1 produces only the listed terminal states.
+
+### Consecutive-failure counter and auto-pause
+
+Each agent carries `consecutive_failures` on the `agent_instances` row. It increments on every failure across any task assigned to this agent. Any successful run for the agent resets it to zero.
+
+When the counter reaches the agent's threshold (per-agent override or workspace default), the agent is auto-paused: `pause_reason` is set to `"Auto-paused: <N> consecutive failures. Last error: <message>"`. The wakeup scheduler refuses to claim wakeups for a paused agent (existing behaviour); the counter is preserved across the pause so unpause-and-fail-immediately re-pauses without surprise.
+
+## Permissions
+
+Recovery and runtime-action authorization splits across three actors: human users (via dashboard auth), agent processes (via agent JWT + per-run capabilities), and the runtime itself (acts on its own behalf for state transitions).
+
+- **Mark fixed (inbox dismiss + retry)** and **Resume session**: any workspace user. There is no agent-role gating on these affordances; they are explicit human-driven recovery actions surfaced in the inbox and per-task chat.
+- **Reassignment** (`PATCH /tasks/:id` with new `assignee_agent_instance_id`): workspace user. Agent JWTs cannot reassign tasks via the runtime action surface in v1; there is no `CapabilityReassignTask`.
+- **Manual unpause** (clearing `pause_reason` from the agent detail page): workspace admin / CEO role only, enforced by `isAdminRole` in `internal/office/agents/handler.go`.
+- **Runtime action surface capabilities**: derived from `agent_instances.role` / `permissions` via `runtime.FromAgent`. The agent JWT carries the serialized `Capabilities` snapshot taken at run-claim time; subsequent permission revocations on the agent profile do not affect a JWT already in flight (it expires after `DefaultTokenDuration = 4h`). The seat-derived `record_step_decision` CLI affordance is not a runtime capability. `runtime.ContextBuilder.Build` stores it in `RunContext.AvailableActions` when the agent holds the current workflow participant seat. The scheduler uses this advisory action to inject `kandev-step-decision` and add the command to the prompt, but does not add it to JWT capability claims. The task-bound runtime decision handler derives task, session, and agent identity from the signed run context and performs live authorization through `DashboardService.RecordAgentDecision` and `ResolveParticipantRole`.
+- **Task scope**: `RunContext.CanMutateTask(taskID)` returns true only when `taskID == runCtx.TaskID` or `taskID` (or wildcard `*`) appears in `Capabilities.AllowedTaskIDs`. Out-of-scope mutations return `ErrTaskOutOfScope`.
+- **Workspace scope**: every action that touches another entity (target agent, target skill, target task) is rejected with `ErrWorkspaceOutOfScope` when the target's `workspace_id` does not match the run's.
+- **Memory namespaces**: `CanAccessMemory` enforces workspace match plus, for `kind=agent`, that the namespace ID matches `runCtx.AgentID`. Agents cannot read or write another agent's memory.
+- An auto-paused agent's wakeups are refused at scheduler claim time regardless of who queued them; only Mark fixed (or manual unpause) clears `pause_reason`.
+
+## Failure modes
+
+- **Adapter error event published**: session -> `FAILED`, wakeup -> `failed`, agent process and agentctl torn down, `executors_running` preserved, `consecutive_failures++`, inbox entry created or upgraded to `agent_paused_after_failures` on threshold.
+- **Provider returns malformed response**: treated as terminal like any other adapter error. Raw payload preserved in the chat error entry and wakeup `error_message`.
+- **Transient network failure**: on the legacy post-start path, classified-transient failures auto-retry up to 2 times (5s/10s) per [Legacy post-start transient retry](#legacy-post-start-transient-retry) before falling back to terminal; any other transient failure (pre-launch, or already exhausted its retry budget) is terminal and the user clicks Resume / Mark fixed to retry.
+- **Auto-paused agent's wakeup fires**: scheduler refuses to claim it; behaviour identical to a manually-paused agent.
+- **Reassignment during failure**: cancels the (task, old agent) wakeup via the existing staleness check; auto-dismisses `agent_run_failed` for (task, old agent). Does not unpause the old agent.
+
+## Persistence guarantees
+
+- **Session state** (`task_sessions.state`): durable. A `FAILED` session is read as non-live by `isLiveSession`; the topbar spinner and "Agent working for Xs" header clear on the next render. Survives restart.
+- **Wakeup row** (`status=failed`, `error_message`): durable. The raw adapter error payload is stored verbatim so the chat error entry and the inbox row can hydrate from one source after restart.
+- **`agent_instances.consecutive_failures`**: durable. Survives restart, so an agent that has accumulated `threshold - 1` failures pre-restart still auto-pauses on the next failure post-restart.
+- **`agent_instances.pause_reason`**: durable. An auto-paused agent stays paused across restarts; the scheduler continues to refuse to claim its wakeups until Mark fixed or manual unpause.
+- **`inbox_dismissals`**: durable. Once a user dismisses an inbox item, the dismissal survives restart and the computed inbox view excludes the dismissed item indefinitely. Keyed by `(user_id, item_kind, item_id)` with a unique constraint.
+- **`executors_running` row** (preserved on FAILED): durable. The agent process and agentctl instance are torn down, but the executor metadata stays so **Resume session** can recover into the same workspace / worktree without re-creating the executor.
+- **ACP session id** (`task_sessions.acp_session_id`): durable. Resume reattaches to the same ACP session id so the agent's context window survives.
+- **Run-event log** (`office_run_events`): durable. `runtime.action` and `runtime.denied` rows persist for the run-detail Events tab; capability denials remain visible after restart for audit.
+- **Capability snapshot on the run** (`runs.capabilities`, `runs.input_snapshot`): durable, written by `ContextBuilder.BuildAndPersist`. A re-issued JWT after restart uses the same capability set so the run keeps the permissions it was granted at claim time.
+- **Agent JWT signing key**: process-local. Defaults to a random 32-byte key when the `KANDEV_AGENT_JWT_KEY` config is empty, in which case all in-flight JWTs are invalidated on restart and agents must mint fresh tokens on the next prompt cycle. Configurable for stable cross-restart JWTs.
+- **`affected_tasks` snapshot on `agent_paused_after_failures`**: NOT recomputed when listed tasks are reassigned away. The snapshot is intentionally point-in-time so the user resolves the pause entry as a whole.
+- **`office_agent_runtime.last_run_finished_at`**: durable. Stamped on every terminal run outcome for the agent, including failure - not just completion/stop - so the heartbeat cooldown gate paces the agent's next fire regardless of why the previous run ended. See [`office/agents.md`](../requirements/agents.md#persistence-guarantees) persistence guarantees for the gate itself.
+- **`scheduled_retry` runs**: not produced by the general v1 classification policy — every other adapter error is terminal, stamped `failed` with no follow-up scheduled. The one exception is [Legacy post-start transient retry](#legacy-post-start-transient-retry): the run is requeued (`status = queued`, `scheduled_retry_at` set, `session_id` and `error_message` cleared) via a `status = 'claimed'`-guarded write, rather than marked `failed` at all, so a successful retry never reaches this status literally named `scheduled_retry`. A fuller per-adapter classifier producing that status remains future work.
+
+See also: [Dynamic Agent Routing](../../agents/requirements/dynamic-agent-routing.md) for provider routing and [`office/scheduler.md`](../requirements/scheduler.md) for wakeup queue semantics and the staleness check that cancels superseded wakeups.

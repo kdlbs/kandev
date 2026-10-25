@@ -47,9 +47,8 @@ export function IntegrationStartTaskMenu<T extends IntegrationTaskPreset>({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          size="sm"
           variant="outline"
-          className="h-11 cursor-pointer gap-1 sm:h-7"
+          className="cursor-pointer gap-1"
           aria-label={triggerAriaLabel ?? t("github:task")}
           data-testid={triggerTestId}
         >
@@ -66,7 +65,7 @@ export function IntegrationStartTaskMenu<T extends IntegrationTaskPreset>({
           return (
             <DropdownMenuItem
               key={preset.id}
-              className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+              className="min-h-11 cursor-pointer gap-2 md:min-h-8 [@media(pointer:coarse)]:min-h-11"
               onSelect={() => onSelect(preset)}
               data-testid={itemTestId}
               data-preset-id={preset.id}

@@ -5,10 +5,14 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/agent-launch-prompt-composer.md"
+spec: "../../specs/ui/requirements/agent-launch-prompt-composer.md"
 ---
 
 # Task 01: Reuse shared launch composer
+
+The automatic-summary preservation criterion below records the original completed
+delivery. It is superseded by [Blank handoff context](../handoff-blank-context/plan.md).
+The shared-composer acceptance and historical results remain applicable.
 
 ## Acceptance
 

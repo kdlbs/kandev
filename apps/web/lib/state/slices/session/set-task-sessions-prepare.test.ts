@@ -40,21 +40,65 @@ describe("setTaskSessionsForTask prepare backfill", () => {
     const session = makeSession("s1", {
       prepare_result: {
         status: "completed",
-        steps: [{ name: "clone", status: "ok", started_at: TS }],
+        steps: [
+          {
+            name: "clone",
+            kind: "remote_helper_download",
+            remote_platform: "linux/amd64",
+            failure_code: "timeout",
+            status: "ok",
+            started_at: TS,
+          },
+          {
+            name: "raw approval name",
+            kind: "agent_mcp_approval",
+            mcp_server_id: "server-a",
+            status: "failed",
+            error: "raw error",
+            output: "raw output",
+            mcp_diagnostic: {
+              operation: "enable",
+              stage: "start",
+              kind: "start_failed",
+              message: "exec: executable unavailable",
+            },
+          },
+        ],
       },
     });
 
-    store.getState().setTaskSessionsForTask(TASK_ID, [session]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [session], {});
 
     const prepare = store.getState().prepareProgress.bySessionId["s1"];
     expect(prepare).toBeDefined();
     expect(prepare.status).toBe("completed");
-    expect(prepare.steps).toEqual([{ name: "clone", status: "ok", startedAt: TS }]);
+    expect(prepare.steps).toEqual([
+      {
+        name: "clone",
+        kind: "remote_helper_download",
+        remotePlatform: "linux/amd64",
+        failureCode: "timeout",
+        status: "ok",
+        startedAt: TS,
+      },
+      {
+        name: "",
+        kind: "agent_mcp_approval",
+        mcpServerId: "server-a",
+        status: "failed",
+        mcpDiagnostic: {
+          operation: "enable",
+          stage: "start",
+          kind: "start_failed",
+          message: "exec: executable unavailable",
+        },
+      },
+    ]);
   });
 
   it("does not create an entry for sessions without prepare_result", () => {
     const store = makeStore();
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession("s1")]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession("s1")], {});
     expect(store.getState().prepareProgress.bySessionId["s1"]).toBeUndefined();
   });
 
@@ -69,11 +113,15 @@ describe("setTaskSessionsForTask prepare backfill", () => {
       };
     });
 
-    store.getState().setTaskSessionsForTask(TASK_ID, [
-      makeSession("s1", {
-        prepare_result: { status: "completed", steps: [] },
-      }),
-    ]);
+    store.getState().setTaskSessionsForTask(
+      TASK_ID,
+      [
+        makeSession("s1", {
+          prepare_result: { status: "completed", steps: [] },
+        }),
+      ],
+      {},
+    );
 
     // Existing (live) entry is preserved, not overwritten by stale metadata.
     expect(store.getState().prepareProgress.bySessionId["s1"].status).toBe("running");

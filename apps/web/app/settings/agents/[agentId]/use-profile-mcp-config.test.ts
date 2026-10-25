@@ -1,6 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { updateAgentProfileMcpConfigAction } from "@/app/actions/agents";
+import {
+  getAgentProfileMcpConfigAction,
+  updateAgentProfileMcpConfigAction,
+} from "@/app/actions/agents";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 import { useProfileMcpConfig } from "./use-profile-mcp-config";
 
@@ -41,6 +44,53 @@ describe("useProfileMcpConfig", () => {
 
     expect(result.current.mcpServers).toContain("newer");
     expect(result.current.mcpDirty).toBe(true);
+  });
+
+  it("ignores an in-flight load invalidated by a save", async () => {
+    let finishLoad: (config: AgentProfileMcpConfig) => void = () => undefined;
+    vi.mocked(getAgentProfileMcpConfigAction).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishLoad = resolve;
+        }),
+    );
+    let finishSave: (config: AgentProfileMcpConfig) => void = () => undefined;
+    vi.mocked(updateAgentProfileMcpConfigAction).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() =>
+      useProfileMcpConfig({
+        profileId: "profile-1",
+        supportsMcp: true,
+        onToastError: vi.fn(),
+      }),
+    );
+
+    act(() => result.current.handleMcpServersChange(serverText("submitted")));
+    let savePromise!: Promise<void>;
+    act(() => {
+      savePromise = result.current.handleSaveMcp();
+    });
+    await act(async () => {
+      finishLoad(config({ command: "stale" }));
+      await Promise.resolve();
+    });
+
+    expect(result.current.mcpConflict).toBe(false);
+    expect(result.current.mcpServers).toContain("submitted");
+
+    await act(async () => {
+      finishSave(config({ command: "submitted" }));
+      await savePromise;
+    });
+
+    expect(result.current.mcpConflict).toBe(false);
+    expect(result.current.mcpServers).toContain("submitted");
+    expect(result.current.mcpDirty).toBe(false);
   });
 });
 

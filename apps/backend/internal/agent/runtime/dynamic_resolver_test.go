@@ -1,0 +1,316 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
+	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/store"
+)
+
+func TestResolveRouteActionRejectsManualRetryAfterRecoveryClaim(t *testing.T) {
+	ctx := context.Background()
+	resolver, engine, generation := newRetryingRouteActionResolver(t)
+	_, err := resolver.ResolveRouteAction(
+		ctx, "session-retry", "dynamic-profile", "concrete-profile", generation, "retry",
+	)
+	if !errors.Is(err, dynamic.ErrRecoveryPending) {
+		t.Fatalf("ResolveRouteAction error = %v, want recovery pending", err)
+	}
+	state, ok := engine.State("session-retry")
+	if !ok || state.Generation != generation || state.Status != "retrying" {
+		t.Fatalf("route state = %#v, ok=%v, want unchanged claimed state", state, ok)
+	}
+}
+
+func TestResolveRouteActionRejectsSkipAfterRecoveryClaim(t *testing.T) {
+	resolver, _, generation := newRetryingRouteActionResolver(t)
+	_, err := resolver.ResolveRouteAction(
+		context.Background(), "session-retry", "dynamic-profile", "concrete-profile", generation, "skip",
+	)
+	if !errors.Is(err, dynamic.ErrRecoveryPending) {
+		t.Fatalf("ResolveRouteAction error = %v, want recovery pending", err)
+	}
+}
+
+func TestMarkRouteActionRequiredUnblocksRetryAndSkipAfterFailedLaunch(t *testing.T) {
+	ctx := context.Background()
+	resolver, engine, generation := newRetryingRouteActionResolver(t)
+
+	// Simulate the launch-failure handler's sync (dynamic_policy_recovery.go
+	// and dynamic_routing.go both call this after a resumed launch fails).
+	if err := resolver.MarkRouteRecoveryActionRequired(ctx, "session-retry", generation); err != nil {
+		t.Fatalf("MarkRouteRecoveryActionRequired: %v", err)
+	}
+	state, ok := engine.State("session-retry")
+	if !ok || state.Status != "action_required" {
+		t.Fatalf("route state after sync = %#v, ok=%v, want action_required", state, ok)
+	}
+
+	if _, err := resolver.ResolveRouteAction(
+		ctx, "session-retry", "dynamic-profile", "concrete-profile", generation, "retry",
+	); err != nil {
+		t.Fatalf("ResolveRouteAction retry after sync = %v, want success", err)
+	}
+}
+
+func TestResolveRouteActionReclaimsRetryingRouteAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	_, firstEngine, generation := newRetryingRouteActionResolver(t)
+	persisted, ok := firstEngine.State("session-retry")
+	if !ok || persisted.Status != "retrying" {
+		t.Fatalf("precondition route state = %#v, ok=%v", persisted, ok)
+	}
+
+	restartedEngine := dynamic.NewEngine(dynamic.WithStateLoader(&singleRouteStateLoader{state: persisted}))
+	profiles := &dynamicResolverTestProfiles{
+		logical:  &agentsettingsmodels.AgentProfile{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "dynamic-profile", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	restartedResolver := NewProfileExecutionResolver(profiles, restartedEngine, true)
+
+	result, err := restartedResolver.ResolveRouteAction(
+		ctx, "session-retry", "dynamic-profile", "concrete-profile", generation, "retry",
+	)
+	if err != nil {
+		t.Fatalf("ResolveRouteAction after restart: %v", err)
+	}
+	if result.Generation != generation+1 || result.ExecutionProfileID != "concrete-profile" || result.Decision.Status != "starting" {
+		t.Fatalf("result = %+v, want new generation %d on same candidate", result, generation+1)
+	}
+	state, ok := restartedEngine.State("session-retry")
+	if !ok || state.Generation != generation+1 || state.Status != "starting" {
+		t.Fatalf("restarted route state = %#v, ok=%v, want fenced successor", state, ok)
+	}
+}
+
+// TestResolveExecutionFollowsOfficeBinding reproduces the Office defect where
+// a CEO row inherits agent_id=dynamic but has no dynamic profile of its own.
+// The binding names the dynamic profile that owns the route, while the Office
+// ID stays the logical profile.
+func TestResolveExecutionFollowsOfficeBinding(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		logical: &agentsettingsmodels.AgentProfile{
+			ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true,
+		},
+		office: &agentsettingsmodels.AgentProfile{
+			ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+			ExecutionAgentProfileID: "dynamic-profile",
+		},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "dynamic-profile", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+
+	result, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, "")
+	if err != nil {
+		t.Fatalf("Resolve office profile: %v", err)
+	}
+	if result.LogicalProfileID != "ceo-office" || result.ExecutionProfileID != "concrete-profile" {
+		t.Fatalf("result = %+v, want logical ceo-office concrete concrete-profile", result)
+	}
+}
+
+// TestResolveExecutionFailsClosedWhenOfficeBindingDisabled covers the disabled
+// bound profile: the binding still names a dynamic profile with a live route
+// document, but that profile is no longer enabled, so resolution fails closed
+// instead of launching through its candidates.
+func TestResolveExecutionFailsClosedWhenOfficeBindingDisabled(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		office: &agentsettingsmodels.AgentProfile{
+			ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+			ExecutionAgentProfileID: "disabled-dynamic",
+		},
+		bound:    &agentsettingsmodels.AgentProfile{ID: "disabled-dynamic", AgentID: agents.DynamicAgentID, Enabled: false},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "disabled-dynamic", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "disabled-dynamic", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+
+	if _, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, ""); err == nil {
+		t.Fatal("Resolve succeeded with a disabled office binding")
+	}
+}
+
+func TestResolveExecutionFailsClosedWhenOfficeBindingMissing(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		logical: &agentsettingsmodels.AgentProfile{
+			ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true,
+		},
+		office: &agentsettingsmodels.AgentProfile{
+			ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+			ExecutionAgentProfileID: "deleted-dynamic-profile",
+		},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+	}
+	resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+
+	if _, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, ""); err == nil {
+		t.Fatal("Resolve succeeded with a dangling office binding")
+	}
+}
+
+func TestResolveExecutionFailsClosedWhenBoundDynamicSourceUnavailable(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*agentsettingsmodels.AgentProfile, *agentsettingsmodels.AgentProfile)
+	}{
+		{
+			name:   "disabled",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) { source.Enabled = false },
+		},
+		{
+			name: "deleted",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) {
+				deletedAt := time.Now().UTC()
+				source.DeletedAt = &deletedAt
+			},
+		},
+		{
+			name: "foreign workspace",
+			mutate: func(source, office *agentsettingsmodels.AgentProfile) {
+				source.WorkspaceID = "ws-foreign"
+				office.WorkspaceID = "ws-office"
+			},
+		},
+		{
+			name:   "wrong profile family",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) { source.AgentID = "concrete-agent" },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &agentsettingsmodels.AgentProfile{
+				ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true,
+			}
+			office := &agentsettingsmodels.AgentProfile{
+				ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+				ExecutionAgentProfileID: source.ID,
+			}
+			tc.mutate(source, office)
+			profiles := &dynamicResolverTestProfiles{
+				logical: source, office: office,
+				concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+				dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: source.ID, Version: 1},
+				routes: []agentsettingsmodels.DynamicAgentRoute{{
+					DynamicProfileID: source.ID, ExecutionProfileID: "concrete-profile", Enabled: true,
+				}},
+			}
+			resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+			if _, err := resolver.Resolve(context.Background(), "session-office", office.ID, 0, ""); err == nil {
+				t.Fatal("Resolve succeeded with an unavailable bound dynamic source")
+			}
+		})
+	}
+}
+
+type singleRouteStateLoader struct {
+	state dynamic.RouteState
+}
+
+func (l *singleRouteStateLoader) LoadRouteState(_ context.Context, sessionID string) (*dynamic.RouteState, error) {
+	if sessionID != l.state.SessionID {
+		return nil, nil
+	}
+	state := l.state
+	return &state, nil
+}
+
+func newRetryingRouteActionResolver(t *testing.T) (*ProfileExecutionResolver, *dynamic.Engine, int64) {
+	t.Helper()
+	ctx := context.Background()
+	engine := dynamic.NewEngine()
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{
+		Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60,
+	}
+	profile := dynamic.Profile{ID: "dynamic-profile", Version: 1, Candidates: []dynamic.Candidate{
+		{ID: "concrete-profile", Enabled: true, Policies: document},
+	}}
+	initial, err := engine.Select("session-retry", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if _, err := engine.ApplyFailure(
+		"session-retry", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	); !errors.Is(err, dynamic.ErrRecoveryPending) {
+		t.Fatalf("ApplyFailure error = %v, want recovery pending", err)
+	}
+	if _, err := engine.ResumePendingNow(ctx, "session-retry", initial.Generation); err != nil {
+		t.Fatalf("ResumePendingNow: %v", err)
+	}
+
+	profiles := &dynamicResolverTestProfiles{
+		logical:  &agentsettingsmodels.AgentProfile{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "dynamic-profile", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	return NewProfileExecutionResolver(profiles, engine, true), engine, initial.Generation
+}
+
+type dynamicResolverTestProfiles struct {
+	store.Repository
+	store.DynamicProfileRepository
+	logical  *agentsettingsmodels.AgentProfile
+	office   *agentsettingsmodels.AgentProfile
+	bound    *agentsettingsmodels.AgentProfile
+	concrete *agentsettingsmodels.AgentProfile
+	dynamic  *agentsettingsmodels.DynamicAgentProfile
+	routes   []agentsettingsmodels.DynamicAgentRoute
+}
+
+func (p *dynamicResolverTestProfiles) GetAgentProfile(_ context.Context, id string) (*agentsettingsmodels.AgentProfile, error) {
+	switch {
+	case p.bound != nil && id == p.bound.ID:
+		return p.bound, nil
+	case p.logical != nil && id == p.logical.ID:
+		return p.logical, nil
+	case p.office != nil && id == p.office.ID:
+		return p.office, nil
+	case p.concrete != nil && id == p.concrete.ID:
+		return p.concrete, nil
+	default:
+		return nil, errors.New("profile not found")
+	}
+}
+
+func (p *dynamicResolverTestProfiles) GetAgent(_ context.Context, id string) (*agentsettingsmodels.Agent, error) {
+	if id == agents.DynamicAgentID {
+		return &agentsettingsmodels.Agent{ID: id, Name: agents.DynamicAgentID}, nil
+	}
+	return &agentsettingsmodels.Agent{ID: id, Name: "concrete"}, nil
+}
+
+func (p *dynamicResolverTestProfiles) GetDynamicAgentProfile(
+	_ context.Context, profileID string,
+) (*agentsettingsmodels.DynamicAgentProfile, []agentsettingsmodels.DynamicAgentRoute, error) {
+	if profileID != p.dynamic.ProfileID {
+		return nil, nil, errors.New("dynamic profile not found")
+	}
+	return p.dynamic, p.routes, nil
+}

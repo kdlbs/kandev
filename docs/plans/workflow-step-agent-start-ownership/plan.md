@@ -1,10 +1,14 @@
 ---
-spec: docs/specs/workflow-step-agent-start-ownership/spec.md
+spec: docs/specs/tasks/requirements/workflow-step-agent-start-ownership.md
 created: 2026-08-05
 status: complete
 ---
 
 # Implementation Plan: Workflow Step Agent Start Ownership
+
+The asynchronous gap excluded from this completed package now has an implemented
+[follow-up package](../workflow-async-start-prompt-preservation/plan.md) for issue #3753.
+The original implementation scope and results remain unchanged.
 
 ## Overview
 
@@ -90,9 +94,8 @@ rejections are not queued. The queued prompt is drained by the existing
 `TestAutoStartTransientError_BootReadyDrainsOrphanedQueue` already pins, and
 the error is still returned so `FAILED` state and surfacing are unchanged.
 
-The async path remains uncovered — see the spec's **Known gap**. Task 01
-removes the only known trigger for it on a first-turn launch, so the incident
-cannot recur through it.
+The async path is implemented and verified in the issue #3753 follow-up package
+linked above. The original synchronous scope and its evidence remain unchanged.
 
 ## Frontend
 

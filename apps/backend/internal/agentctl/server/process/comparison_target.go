@@ -2,9 +2,9 @@ package process
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/gitbase"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -65,6 +65,7 @@ type ComparisonResolution struct {
 func (wt *WorkspaceTracker) SetComparisonTarget(target *models.ComparisonTarget) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	wt.comparisonGeneration++
 	if target == nil {
 		wt.comparisonTarget = nil
 		wt.comparisonTargetRef = ""
@@ -86,6 +87,7 @@ func (wt *WorkspaceTracker) SetComparisonTarget(target *models.ComparisonTarget)
 func (wt *WorkspaceTracker) SetComparisonTargetReady(target *models.ComparisonTarget, ref string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	wt.comparisonGeneration++
 	if target == nil || target.Validate() != nil || ref != target.ComparisonRef() {
 		wt.setComparisonTargetUnavailableLocked(target, comparisonTargetErrorInvalid)
 		return
@@ -102,6 +104,7 @@ func (wt *WorkspaceTracker) SetComparisonTargetReady(target *models.ComparisonTa
 func (wt *WorkspaceTracker) SetComparisonTargetUnavailable(target *models.ComparisonTarget, code string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	wt.comparisonGeneration++
 	wt.setComparisonTargetUnavailableLocked(target, code)
 }
 
@@ -161,47 +164,20 @@ func materializeComparisonTarget(
 	run comparisonTargetGitRunner,
 	target models.ComparisonTarget,
 ) (comparisonTargetMaterialization, error) {
-	if err := target.Validate(); err != nil {
-		return comparisonTargetMaterialization{}, comparisonTargetFailure(
-			comparisonTargetErrorInvalid,
-			fmt.Errorf("comparison target invalid: %w", err),
-		)
-	}
-	remoteName := target.ComparisonRemoteName()
-	configuredURL, remoteErr := run(ctx, "remote", "get-url", remoteName)
-	if remoteErr == nil {
-		if strings.TrimSpace(configuredURL) != target.TargetRepository.RemoteURL {
-			return comparisonTargetMaterialization{}, comparisonTargetFailure(
-				comparisonTargetErrorRemoteCollision,
-				fmt.Errorf("comparison remote collision for %s", remoteName),
-			)
+	materialized, err := gitbase.Materialize(ctx, gitbase.GitRunner(run), models.PRBase{Target: target})
+	if err != nil {
+		code := comparisonTargetErrorFetch
+		switch gitbase.ErrorCode(err) {
+		case gitbase.ErrorInvalidTarget:
+			code = comparisonTargetErrorInvalid
+		case gitbase.ErrorRemoteCollision:
+			code = comparisonTargetErrorRemoteCollision
+		case gitbase.ErrorRemoteSetup:
+			code = comparisonTargetErrorRemoteSetup
+		case gitbase.ErrorRefUnavailable:
+			code = comparisonTargetErrorRefUnavailable
 		}
-	} else {
-		if _, err := run(ctx, "remote", "add", "--no-tags", remoteName, target.TargetRepository.RemoteURL); err != nil {
-			return comparisonTargetMaterialization{}, comparisonTargetFailure(
-				comparisonTargetErrorRemoteSetup,
-				fmt.Errorf("comparison remote setup failed: %w", err),
-			)
-		}
+		return comparisonTargetMaterialization{}, comparisonTargetFailure(code, err)
 	}
-	if _, err := run(ctx, "config", "remote."+remoteName+".pushurl", "DISABLED"); err != nil {
-		return comparisonTargetMaterialization{}, comparisonTargetFailure(
-			comparisonTargetErrorRemoteSetup,
-			fmt.Errorf("comparison remote push protection failed: %w", err),
-		)
-	}
-	refspec := "refs/heads/" + target.TargetBranch + ":" + target.ComparisonRef()
-	if _, err := run(ctx, "fetch", "--no-tags", remoteName, refspec); err != nil {
-		return comparisonTargetMaterialization{}, comparisonTargetFailure(
-			comparisonTargetErrorFetch,
-			fmt.Errorf("comparison target fetch failed: %w", err),
-		)
-	}
-	if _, err := run(ctx, "rev-parse", "--verify", target.ComparisonRef()+"^{commit}"); err != nil {
-		return comparisonTargetMaterialization{}, comparisonTargetFailure(
-			comparisonTargetErrorRefUnavailable,
-			fmt.Errorf("comparison target ref unavailable: %w", err),
-		)
-	}
-	return comparisonTargetMaterialization{RemoteName: remoteName, Ref: target.ComparisonRef()}, nil
+	return comparisonTargetMaterialization{RemoteName: materialized.RemoteName, Ref: materialized.Ref}, nil
 }

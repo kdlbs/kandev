@@ -5,7 +5,7 @@ status: completed
 wave: 3g
 depends_on: ["12e-shared-task-status", "12f-shared-review-detail"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 decision: "../../decisions/2026-08-06-plugin-code-host-dashboard-parity.md"
 ---
 

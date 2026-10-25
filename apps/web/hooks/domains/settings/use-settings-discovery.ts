@@ -9,6 +9,8 @@ import { resolveSettingsDiscovery } from "@/lib/settings-discovery/resolve";
 export function useSettingsDiscovery() {
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
+  const multiTenancyEnabled = useFeature("multiTenancy");
+  const coordinatorEnabled = useFeature("coordinator");
   const authMode = useAppStore((state) => state.auth.mode);
   const role = useAppStore((state) => state.auth.user?.role);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -16,6 +18,10 @@ export function useSettingsDiscovery() {
   const executors = useAppStore((state) => state.executors.items);
   const showAccount = authEnabled && authMode === "enabled";
   const showUsers = authEnabled && (role === undefined || role === "admin");
+  // Operator-only in practice, but that answer costs a request; the feature
+  // gate keeps the entry out of search on installs that never enabled it, and
+  // the page turns a non-operator away.
+  const showOrganizations = authEnabled && multiTenancyEnabled;
 
   return useMemo(
     () =>
@@ -23,10 +29,21 @@ export function useSettingsDiscovery() {
         t,
         showAccount,
         showUsers,
+        showOrganizations,
+        coordinatorEnabled,
         workspaces,
         agents,
         executors,
       }),
-    [agents, executors, showAccount, showUsers, t, workspaces],
+    [
+      agents,
+      coordinatorEnabled,
+      executors,
+      showAccount,
+      showOrganizations,
+      showUsers,
+      t,
+      workspaces,
+    ],
   );
 }

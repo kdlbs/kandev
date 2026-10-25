@@ -5,7 +5,7 @@ status: done
 wave: 11
 depends_on: ["20-work-item-detail"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 21: Constrained Work-Item Mutations

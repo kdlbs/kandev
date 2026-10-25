@@ -2,11 +2,11 @@
 
 Status: Reference audit plan
 
-Formal spec: [../../specs/settings-typography/spec.md](../../specs/settings-typography/spec.md)
+Formal spec: [../../specs/ui/requirements/settings-typography.md](../../specs/ui/requirements/settings-typography.md)
 
 Canonical implementation plan: [../../plans/settings-typography/plan.md](../../plans/settings-typography/plan.md)
 
-Related audit: [README.md](./README.md)
+Related audit: [README.md](README.md)
 
 ## Goal
 
@@ -101,4 +101,4 @@ implementation class names.
 
 Before implementation is considered complete, run the focused settings unit
 and Playwright tests, the web typecheck, and the i18n checks. Update each
-finding's status and evidence in [README.md](./README.md) as work lands.
+finding's status and evidence in [README.md](README.md) as work lands.

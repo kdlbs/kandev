@@ -27,7 +27,7 @@ async function invokePluginAction(presentation: "desktop" | "mobile") {
   if (entry.kind !== "submenu") throw new Error("expected Edit submenu");
   const action = entry.children.find(
     (child) =>
-      child.kind === "item" && child.key === `plugin-edit-${PLUGIN_ID}-action-${presentation}`,
+      child.kind === "item" && child.key === `plugin-edit-${PLUGIN_ID}:action-${presentation}`,
   );
   if (action?.kind !== "item") throw new Error("expected plugin action");
 

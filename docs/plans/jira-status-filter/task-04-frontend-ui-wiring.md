@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-frontend-types-api", "03-frontend-filter-model"]
 plan: "plan.md"
-spec: "../../specs/jira-status-filter/spec.md"
+spec: "../../specs/integrations/requirements/jira-status-filter.md"
 ---
 
 # Task 04: Status pill + page wiring

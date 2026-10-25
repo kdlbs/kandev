@@ -24,6 +24,7 @@ Choose the guide that matches the job in front of you:
 - [Get started](use-kandev.md): install Kandev, add a local repository, configure an agent, and run a first task.
 - [Tasks and workflows](tasks-and-workflows.md): create tasks, use plans, configure workflow steps, and understand the Office-only document and label boundary.
 - [Sessions and review](sessions-and-review.md): work with named sessions, chat, files, terminal, changes, preview, pull requests, and walkthroughs.
+- [Agent-authored Canvases](canvases.md): create, review, promote, edit, and recover an experimental task or workspace canvas.
 - [Coordinate work](coordination.md): use parallel sessions, targeted messages, subtasks, dependencies, multiple repositories, and additional branches.
 - [Agent communication](agent-communication.md): send cross-task prompts, receive replies, and negotiate contracts with built-in Kandev MCP tools.
 - [Agents and profiles](agents-and-profiles.md): configure agent CLIs, models, modes, permissions, environment, passthrough, and credentials.
@@ -62,7 +63,7 @@ These pages describe the current source tree and its development conventions:
 
 The regular Kanban workbench, task sessions, review surfaces, and task-scoped Kandev MCP are the supported product path. Some capabilities still depend on a particular agent, executor, provider, platform, credential, or install channel; those differences are called out on their topic pages.
 
-**Office is separate, disabled in the production runtime profile, feature-flagged, and still in progress.** Its source, tests, specifications, and internal plans do not make persistent teams, routines, budgets, or coordinator-led autonomy a supported production contract. See [Feature status](feature-status.md) for that boundary and [Office provider routing](office-provider-routing.md) for the feature-flagged routing surface.
+**Office is separate, disabled in the production runtime profile, feature-flagged, and still in progress.** Its source, tests, specifications, and internal plans do not make persistent teams, routines, budgets, or coordinator-led autonomy a supported production contract. See [Feature status](feature-status.md) for that boundary. The [Office guide](office.md) covers evaluating the current implementation, starting with [workspace setup](office-getting-started.md), then configuring a team, managing tasks and approvals, scheduling routines, and operating the workspace.
 
 <details>
 <summary>Version matching</summary>

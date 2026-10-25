@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-publish-live-task-status"]
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 03: Decouple Git Polling From Viewers

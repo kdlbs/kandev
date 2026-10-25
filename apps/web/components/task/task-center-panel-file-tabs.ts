@@ -1,18 +1,55 @@
 import type { OpenFileTab } from "@/lib/types/backend";
 
+export type FileEditorTab = OpenFileTab & { instanceId?: symbol };
+
+export function installFileEditorTab(tab: OpenFileTab): FileEditorTab {
+  return { ...tab, instanceId: Symbol() };
+}
+
 export function getFileTabKey(file: Pick<OpenFileTab, "path" | "repo">): string {
   return `${file.repo ?? ""}\u0000${file.path}`;
 }
 
-export function upsertOpenFileTab(prev: OpenFileTab[], fileTab: OpenFileTab): OpenFileTab[] {
+const openFileTabKeys: (keyof OpenFileTab)[] = [
+  "resolvedPath",
+  "path",
+  "name",
+  "repo",
+  "content",
+  "originalContent",
+  "originalHash",
+  "isDirty",
+  "isBinary",
+  "renderedPreview",
+];
+
+function areOpenFileTabsEqual(left: OpenFileTab, right: OpenFileTab): boolean {
+  return openFileTabKeys.every((key) => Object.is(left[key], right[key]));
+}
+
+export function upsertOpenFileTab(prev: FileEditorTab[], fileTab: OpenFileTab): FileEditorTab[] {
   const fileKey = getFileTabKey(fileTab);
   const existingIndex = prev.findIndex((tab) => getFileTabKey(tab) === fileKey);
   if (existingIndex >= 0) {
-    if (fileTab.markdownPreview === undefined) return prev;
-    return prev.map((tab, index) =>
-      index === existingIndex ? { ...tab, markdownPreview: fileTab.markdownPreview } : tab,
-    );
+    const existing = prev[existingIndex];
+    const refreshed = existing.isDirty
+      ? {
+          ...existing,
+          resolvedPath: fileTab.resolvedPath,
+          ...(fileTab.renderedPreview !== undefined
+            ? { renderedPreview: fileTab.renderedPreview }
+            : {}),
+        }
+      : {
+          ...existing,
+          ...fileTab,
+          instanceId: existing.instanceId,
+          renderedPreview: fileTab.renderedPreview ?? existing.renderedPreview,
+        };
+    if (areOpenFileTabsEqual(existing, refreshed)) return prev;
+    return prev.map((tab, index) => (index === existingIndex ? refreshed : tab));
   }
   const maxTabs = 4;
-  return prev.length >= maxTabs ? [...prev.slice(1), fileTab] : [...prev, fileTab];
+  const installed = installFileEditorTab(fileTab);
+  return prev.length >= maxTabs ? [...prev.slice(1), installed] : [...prev, installed];
 }

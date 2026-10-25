@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-settings-explanation", "06-e2e-and-documentation"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 07: Group Task Credentials With Workspace GitHub Access
@@ -75,7 +75,7 @@ flow and should land together.
 - ADR `docs/decisions/2026-07-27-task-git-credential-policy.md`: automation identity and task policy
   remain behaviorally separate even when shown together.
 - ADR `docs/decisions/0046-settings-route-save-coordinator.md` and
-  `docs/specs/ui/settings-manual-save.md`: dialog-level explicit submissions remain named immediate
+  `docs/specs/ui/requirements/settings-manual-save.md`: dialog-level explicit submissions remain named immediate
   actions and do not use the route floating-save contributor.
 - `apps/web/components/github/github-connection-dialog.tsx` as the existing desktop Dialog/mobile
   full-height Drawer composition.

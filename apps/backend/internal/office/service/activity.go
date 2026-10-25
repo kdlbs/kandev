@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -75,30 +77,45 @@ func (s *Service) AppendRunEvent(
 	runID, eventType, level string,
 	payload map[string]interface{},
 ) {
-	if runID == "" {
-		return
-	}
-	body := "{}"
-	if len(payload) > 0 {
-		if b, err := json.Marshal(payload); err == nil {
-			body = string(b)
-		}
-	}
-	evt, err := s.repo.AppendRunEvent(ctx, runID, eventType, level, body)
-	if err != nil {
+	if err := s.appendRunEventStrict(ctx, runID, eventType, level, payload); err != nil {
 		s.logger.Warn("append run event failed",
 			zap.String("run_id", runID),
 			zap.String("event_type", eventType),
 			zap.Error(err))
-		return
+	}
+}
+
+// appendRunEventStrict persists a run event and returns persistence or payload
+// errors to the caller. Event-bus publication remains best effort because the
+// database row is the durable record and the bus only notifies live clients.
+func (s *Service) appendRunEventStrict(
+	ctx context.Context,
+	runID, eventType, level string,
+	payload map[string]interface{},
+) error {
+	if runID == "" {
+		return nil
+	}
+	body := "{}"
+	if len(payload) > 0 {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		body = string(b)
+	}
+	evt, err := s.repo.AppendRunEvent(ctx, runID, eventType, level, body)
+	if err != nil {
+		return err
 	}
 	s.publishRunEventAppended(ctx, evt)
+	return nil
 }
 
 // publishRunEventAppended emits the per-run notification on the event
 // bus. Subjects are namespaced by run id so only clients subscribed
 // to that run get the message.
-func (s *Service) publishRunEventAppended(ctx context.Context, evt *models.RunEvent) {
+func (s *Service) publishRunEventAppended(ctx context.Context, evt *runsmodels.RunEvent) {
 	if s.eb == nil || evt == nil {
 		return
 	}

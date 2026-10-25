@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
 useRegularMode();
@@ -8,9 +10,11 @@ test.describe("Agent-generated task titles", () => {
   test("hides the new-task title and persists a six-word provisional title", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const initial = await apiClient.getUserSettings();
     const initialEnabled = Boolean(initial.settings.agent_generated_task_titles);
+    const initialLayout = initial.settings.sidebar_layouts_by_workspace?.[seedData.workspaceId];
 
     try {
       await testPage.goto("/settings/preferences/task-behavior");
@@ -28,6 +32,7 @@ test.describe("Agent-generated task titles", () => {
 
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
+      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
       await kanban.createTaskButton.first().click();
 
       const dialog = testPage.getByTestId("create-task-dialog");
@@ -59,6 +64,7 @@ test.describe("Agent-generated task titles", () => {
       ).toBe(true);
     } finally {
       await apiClient.saveUserSettings({ agent_generated_task_titles: initialEnabled });
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
     }
   });
 });

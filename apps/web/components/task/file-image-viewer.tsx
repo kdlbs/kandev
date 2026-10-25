@@ -6,6 +6,7 @@ import { FileViewerHeader } from "./file-viewer-header";
 
 type FileImageViewerProps = {
   path: string;
+  isSymlink?: boolean;
   content: string; // base64-encoded
   worktreePath?: string;
   headerActions?: ReactNode;
@@ -13,6 +14,7 @@ type FileImageViewerProps = {
 
 export function FileImageViewer({
   path,
+  isSymlink,
   content,
   worktreePath,
   headerActions,
@@ -22,7 +24,12 @@ export function FileImageViewer({
 
   return (
     <div className="flex flex-col h-full">
-      <FileViewerHeader path={path} worktreePath={worktreePath} actions={headerActions} />
+      <FileViewerHeader
+        path={path}
+        isSymlink={isSymlink}
+        worktreePath={worktreePath}
+        actions={headerActions}
+      />
       <div className="flex-1 flex items-center justify-center overflow-auto p-6">
         <img
           src={src}

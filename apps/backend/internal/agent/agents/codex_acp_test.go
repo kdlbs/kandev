@@ -25,8 +25,9 @@ func TestCodexACP_PermissionSettings_NoBridgeCLIFlags(t *testing.T) {
 }
 
 func TestCodexACP_BuildCommand_NoCodexCLIFlags(t *testing.T) {
-	want := []string{"npx", "--yes", "--prefer-offline", codexACPPackage}
-	cmd := NewCodexACP().BuildCommand(CommandOptions{
+	agent := NewCodexACP()
+	want := agent.ManagedNPMRuntime().CachedACPCommand().Args()
+	cmd := agent.BuildCommand(CommandOptions{
 		PermissionValues: map[string]bool{PermissionKeyAutoApprove: true},
 	})
 	if !slices.Equal(cmd.Args(), want) {
@@ -36,7 +37,7 @@ func TestCodexACP_BuildCommand_NoCodexCLIFlags(t *testing.T) {
 
 func TestCodexACP_UsesAgentClientProtocolBridge(t *testing.T) {
 	a := NewCodexACP()
-	want := []string{"npx", "--yes", "--prefer-offline", "@agentclientprotocol/codex-acp"}
+	want := a.ManagedNPMRuntime().CachedACPCommand().Args()
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)

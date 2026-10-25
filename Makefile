@@ -143,7 +143,7 @@ help:
 	@echo "  test-backend     Run backend tests"
 	@echo "  test-web         Run web app tests"
 	@echo "  test-cli         Run CLI tests"
-	@echo "  test-e2e         Run E2E tests (headless, parallel)"
+	@echo "  test-e2e         Run E2E tests (headless, resource-bounded)"
 	@echo "  test-e2e-headed  Run E2E tests with visible browser"
 	@echo "  test-e2e-ui      Run E2E tests in Playwright UI mode"
 	@echo "  test-e2e-ci      Run E2E tests in Docker with CI-like Linux + resource limits"
@@ -257,8 +257,14 @@ desktop-runtime:
 		--output-dir "$(DESKTOP_RUNTIME_DIR)"
 
 .PHONY: desktop-dev
+DESKTOP_DEV_ENV = KANDEV_HOME_DIR="$(CURDIR)/.kandev-dev" \
+	KANDEV_DATABASE_PATH="$(CURDIR)/.kandev-dev/data/kandev.db" \
+	KANDEV_DATABASE_DRIVER=sqlite \
+	KANDEV_E2E_MOCK=false \
+	KANDEV_DEBUG_DEV_MODE=true
 desktop-dev: desktop-runtime
-	@KANDEV_DESKTOP_RUNTIME_DIR="$(CURDIR)/$(DESKTOP_RUNTIME_DIR)" \
+	@$(DESKTOP_DEV_ENV) \
+		KANDEV_DESKTOP_RUNTIME_DIR="$(CURDIR)/$(DESKTOP_RUNTIME_DIR)" \
 		$(PNPM) -C $(APPS_DIR) --filter @kandev/desktop dev
 
 .PHONY: desktop-build
@@ -443,6 +449,10 @@ build-backend-quiet:
 ## e2e/global-setup.ts checks the resulting tar.gz exists (like it does for
 ## the kandev/mock-agent binaries) but does not build it itself — this target
 ## is the "make it exist" step, wired into test-e2e* below.
+.PHONY: build-e2e-delivery-fixture
+build-e2e-delivery-fixture:
+	@$(MAKE) -C $(BACKEND_DIR) build-e2e-delivery-fixture
+
 .PHONY: build-e2e-plugin-package
 build-e2e-plugin-package:
 	@printf "$(CYAN)Packaging e2e fixture plugin...$(RESET)\n"
@@ -559,38 +569,44 @@ test-cli:
 test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
+	@python3 .github/scripts/notify-release-contributors_test.py
+	@python3 .github/scripts/notify-release-contributors-workflow-contract_test.py
+	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh
 	@bash scripts/run-quiet.test.sh
 	@bash scripts/dev-prod-db-path.test.sh
+	@bash scripts/desktop-dev-env.test.sh
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py
+	@python3 scripts/lint-spec-files.test.py
 	@python3 scripts/lint-architecture.test.py
 	@python3 scripts/playwright-blob-audit.test.py
 	@bash scripts/release-desktop.test.sh
 	@bash scripts/release/runtime-bundle.test.sh
 	@bash scripts/release/retry-ghcr-command.test.sh
+	@bash scripts/release/signpath-signing-ready.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
 	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
-	@node --test scripts/validate-public-docs.test.mjs
+	@node --test scripts/validate-public-docs.test.mjs scripts/generic-plugin-host-boundary.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
-	@printf "$(CYAN)Running E2E tests (headless, parallel, managed runner)...$(RESET)\n"
+test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
+	@printf "$(CYAN)Running E2E tests (headless, resource-bounded, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
 		e2e/scripts/run-e2e.sh --host --no-build --no-strict --shards 1 --project "$$project" -- --output="e2e/test-results-$$project" || status=1; \
 	done; exit $$status
 
 .PHONY: test-e2e-headed
-test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
 	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
 
 .PHONY: test-e2e-ui
-test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
 	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
 
@@ -621,7 +637,7 @@ test-e2e-ci:
 #
 
 .PHONY: lint
-lint: lint-backend lint-web lint-harness lint-architecture
+lint: lint-backend lint-web lint-harness lint-specs lint-architecture
 	@printf "\n$(GREEN)$(BOLD)✓ Linting complete!$(RESET)\n"
 
 .PHONY: lint-backend
@@ -638,6 +654,11 @@ lint-web:
 lint-harness:
 	@printf "$(CYAN)Linting harness files...$(RESET)\n"
 	@python3 .github/scripts/lint-harness-files.py --all
+
+.PHONY: lint-specs
+lint-specs:
+	@printf "$(CYAN)Linting specification files...$(RESET)\n"
+	@python3 scripts/lint-spec-files.py --all
 
 .PHONY: lint-architecture
 lint-architecture:

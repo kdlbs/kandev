@@ -416,6 +416,12 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 
 	params := src.AutoStartParams(evt)
 	if err := c.startTask.Start(ctx, task.ID, stepID, task.Description, params); err != nil {
+		if errors.Is(err, ErrCeilingLaunchDeferred) {
+			c.logger.Info("watcher dispatch: auto-start deferred by session ceiling; will replay once capacity frees up",
+				zap.String("source", src.Name()),
+				zap.String("task_id", task.ID))
+			return
+		}
 		c.logger.Error("watcher dispatch: auto-start failed",
 			zap.String("source", src.Name()),
 			zap.String("task_id", task.ID),

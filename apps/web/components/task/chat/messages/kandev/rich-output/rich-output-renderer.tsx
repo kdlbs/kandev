@@ -2,38 +2,46 @@
 
 import { IconChartBar } from "@tabler/icons-react";
 import { useMemo } from "react";
+import { createStateStore } from "@json-render/core";
+import { useOptionalAppStoreApi, useOptionalAppStore } from "@/components/state-provider";
+import { getRichOutputViewStore, withHostElementIds } from "@/lib/rich-output/view-state";
+import { RichOutputViewContext } from "./view-state";
 import { useTranslation } from "react-i18next";
 import { KandevRow } from "../shared";
 import type { KandevRenderer } from "../types";
-import { ChartBlock } from "./chart-block";
-import { FilePreviewBlock } from "./file-preview-block";
-import { MetricsBlock } from "./metrics-block";
-import { parseRichOutput } from "./parse";
-import type { RichOutputBlock } from "./types";
-
-function RichOutputBlockView({
-  block,
-  sessionId,
-  onOpenFile,
-}: {
-  block: RichOutputBlock;
-  sessionId?: string;
-  onOpenFile?: (path: string, repo?: string) => void;
-}) {
-  if (block.type === "metrics") return <MetricsBlock block={block} />;
-  if (block.type === "chart") return <ChartBlock block={block} />;
-  return <FilePreviewBlock block={block} sessionId={sessionId} onOpenFile={onOpenFile} />;
-}
+import { ActionProvider, Renderer, StateProvider, VisibilityProvider } from "@json-render/react";
+import { normalizeRichOutput } from "@/lib/rich-output/normalize";
+import { RichOutputHostContext, registry } from "./registry";
 
 export const RichOutputRenderer: KandevRenderer = ({
   args,
   result,
   status,
   sessionId,
+  messageId,
   onOpenFile,
 }) => {
   const { t } = useTranslation();
-  const output = useMemo(() => parseRichOutput(args, result), [args, result]);
+  const owner = useOptionalAppStoreApi();
+  const authIdentity = useOptionalAppStore(
+    (state) => JSON.stringify([state.auth.mode, state.auth.authenticated, state.auth.user?.id]),
+    undefined,
+  );
+  const viewStore = useMemo(
+    () =>
+      owner && messageId
+        ? getRichOutputViewStore(owner, JSON.stringify([authIdentity, sessionId, messageId]))
+        : createStateStore(),
+    [owner, authIdentity, sessionId, messageId],
+  );
+  const viewIdentity = JSON.stringify([authIdentity, sessionId, messageId]);
+  const host = useMemo(
+    () => ({ sessionId, onOpenFile, viewIdentity }),
+    [sessionId, onOpenFile, viewIdentity],
+  );
+  const output = useMemo(() => normalizeRichOutput(args, result), [args, result]);
+
+  const spec = useMemo(() => output && withHostElementIds(output.spec), [output]);
 
   if (status !== "complete") {
     return (
@@ -60,12 +68,18 @@ export const RichOutputRenderer: KandevRenderer = ({
               <p className="text-xs leading-relaxed text-muted-foreground">{output.description}</p>
             )}
           </header>
-          <div className="mt-4 divide-y divide-border/50 [&>*]:py-4 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
-            {output.blocks.map((block, index) => (
-              <div className="min-w-0" key={`${block.type}-${index}`}>
-                <RichOutputBlockView block={block} sessionId={sessionId} onOpenFile={onOpenFile} />
-              </div>
-            ))}
+          <div className="mt-4 min-w-0">
+            <RichOutputHostContext.Provider value={host}>
+              <RichOutputViewContext.Provider value={viewStore}>
+                <StateProvider store={viewStore}>
+                  <VisibilityProvider>
+                    <ActionProvider>
+                      <Renderer spec={spec!} registry={registry} />
+                    </ActionProvider>
+                  </VisibilityProvider>
+                </StateProvider>
+              </RichOutputViewContext.Provider>
+            </RichOutputHostContext.Provider>
           </div>
         </>
       ) : (

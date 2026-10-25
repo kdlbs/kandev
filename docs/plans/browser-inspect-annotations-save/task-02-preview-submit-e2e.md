@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-inspector-state"]
 plan: "plan.md"
-spec: "../../specs/browser-inspect-annotations-save/spec.md"
+spec: "../../specs/ui/requirements/browser-inspect-annotations-save.md"
 ---
 
 # Task 02: Cover preview annotation submission
@@ -42,7 +42,7 @@ preview fixture state.
 
 ## Inputs
 
-- `docs/specs/browser-inspect-annotations-save/spec.md` scenarios.
+- `docs/specs/ui/requirements/browser-inspect-annotations-save.md` scenarios.
 - `docs/plans/browser-inspect-annotations-save/plan.md` E2E section.
 - `apps/web/e2e/README.md` preview-fixture guidance.
 - `apps/web/components/task/dockview-header-actions.tsx` Browser panel action.

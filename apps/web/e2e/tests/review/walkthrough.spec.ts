@@ -1,6 +1,14 @@
+import {
+  exerciseWalkthroughFeedback,
+  checkFeedbackReload,
+  checkFeedbackViewport,
+} from "./walkthrough-feedback";
+import { watchWs } from "../../helpers/causal-waits";
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import { activeTaskSessionId, waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionState } from "../../helpers/session";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
@@ -87,7 +95,7 @@ async function expectContainedInPanel(panel: Locator, action: Locator): Promise<
   const actionCenterHitsButton = await action.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    return hit === element || !!hit?.closest('[data-testid="changes-request-walkthrough"]');
+    return element.contains(hit);
   });
   expect(actionCenterHitsButton).toBe(true);
 }
@@ -95,7 +103,7 @@ async function expectContainedInPanel(panel: Locator, action: Locator): Promise<
 test.describe("Code walkthrough", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
 
-  test("adapts the Changes walkthrough label to panel width", async ({
+  test("moves the Changes walkthrough into overflow in narrow panels", async ({
     testPage,
     apiClient,
     seedData,
@@ -107,6 +115,11 @@ test.describe("Code walkthrough", () => {
 
     const request = session.changesRequestWalkthroughButton();
     const label = request.getByText("Walkthrough", { exact: true });
+    const overflow = session.changes.getByTestId("panel-header-overflow");
+    const menuRequest = testPage.getByRole("menuitem", {
+      name: "Walk me through these changes",
+      exact: true,
+    });
     await expect(request).toBeEnabled({ timeout: 30_000 });
 
     const narrowWidth = await resizeColumnViaSplitview(testPage, "right", 349);
@@ -115,8 +128,12 @@ test.describe("Code walkthrough", () => {
       .poll(async () => Math.round((await session.changes.boundingBox())?.width ?? 0))
       .toBe(349);
     await expect(label).toBeHidden();
-    await expect(request).toBeVisible();
-    await expectContainedInPanel(session.changes, request);
+    await expect(request).toBeHidden();
+    await expectContainedInPanel(session.changes, overflow);
+    await overflow.click();
+    await expect(menuRequest).toBeVisible();
+    await expect(menuRequest).toBeEnabled();
+    await testPage.keyboard.press("Escape");
 
     const labeledWidth = await resizeColumnViaSplitview(testPage, "right", 350);
     expect(labeledWidth).toBe(350);
@@ -124,6 +141,7 @@ test.describe("Code walkthrough", () => {
       .poll(async () => Math.round((await session.changes.boundingBox())?.width ?? 0))
       .toBe(350);
     await expect(label).toBeVisible();
+    await expect(overflow).toHaveCount(0);
     await expectContainedInPanel(session.changes, request);
     await prCapture.screenshot("desktop-changes-walkthrough", {
       caption: "Walkthrough stays fully visible in the Changes toolbar",
@@ -135,11 +153,14 @@ test.describe("Code walkthrough", () => {
       .poll(async () => Math.round((await session.changes.boundingBox())?.width ?? 0))
       .toBe(180);
     await expect(label).toBeHidden();
-    await expect(request).toBeVisible();
-    await expectContainedInPanel(session.changes, request);
+    await expect(request).toBeHidden();
+    await expectContainedInPanel(session.changes, overflow);
+    await overflow.click();
+    await expect(menuRequest).toBeVisible();
+    await expect(menuRequest).toBeEnabled();
   });
 
-  test("Changes-panel request asks the agent to walk through current changes", async ({
+  test("narrow Changes-panel request asks the agent to walk through current changes", async ({
     testPage,
     apiClient,
     seedData,
@@ -149,9 +170,14 @@ test.describe("Code walkthrough", () => {
     try {
       await expect(session.walkthroughLauncher()).toHaveCount(0);
       await session.clickTab("Changes");
-      const request = session.changesRequestWalkthroughButton();
+      await resizeColumnViaSplitview(testPage, "right", 349);
+      await expect(session.changesRequestWalkthroughButton()).toBeHidden();
+      await session.changes.getByTestId("panel-header-overflow").click();
+      const request = testPage.getByRole("menuitem", {
+        name: "Walk me through these changes",
+        exact: true,
+      });
       await expect(request).toBeVisible({ timeout: 15_000 });
-      await expect(request).toContainText("Walkthrough");
       await expect(request).toBeEnabled({ timeout: 30_000 });
 
       await request.click();
@@ -250,7 +276,7 @@ test.describe("Code walkthrough", () => {
     await expectStep(2, "WALKTHROUGH_CHANGE_A");
     const nextNavigation = await card.getByTestId("walkthrough-navigation").boundingBox();
     if (!nextNavigation) throw new Error("walkthrough navigation missing after step change");
-    expect(Math.abs(nextNavigation.y - initialNavigation.y)).toBeLessThan(1);
+    expect(nextNavigation.y).toBeLessThan(initialNavigation.y);
     const viewport = testPage.viewportSize();
     if (viewport) {
       expect(nextNavigation.y + nextNavigation.height).toBeLessThanOrEqual(viewport.height);
@@ -338,6 +364,18 @@ test.describe("Code walkthrough", () => {
     if (!after) throw new Error("walkthrough card missing after drag");
     expect(Math.abs(after.x - before.x)).toBeGreaterThan(40);
     expect(Math.abs(after.y - before.y)).toBeGreaterThan(30);
+    await testPage.mouse.move(after.x + 100, after.y + 12);
+    await testPage.mouse.down();
+    await testPage.mouse.move(after.x + 100, testPage.viewportSize()!.height - 20, { steps: 6 });
+    await testPage.mouse.up();
+    await card.getByTestId("walkthrough-comment-trigger").click();
+    await expect
+      .poll(async () => {
+        const bounds = (await card.boundingBox())!;
+        return bounds.y + bounds.height;
+      })
+      .toBeLessThanOrEqual(testPage.viewportSize()!.height - 16);
+    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
   });
 
   test("step file label is shown and opens the file", async ({ testPage, apiClient, seedData }) => {
@@ -352,24 +390,21 @@ test.describe("Code walkthrough", () => {
     });
   });
 
-  test("ask box offers Add (queue) and Run (ask now)", async ({
+  test("keeps step feedback, drafts, counts, and submitted history", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
+    const ws = watchWs(testPage);
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-basic", "5-step tour");
     const card = await openWalkthrough(testPage);
-
-    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
-    await card.getByRole("textbox").fill("Why does this line exist?");
-    await expect(card.getByRole("button", { name: "Add" })).toBeEnabled();
-    await expect(card.getByRole("button", { name: "Run" })).toBeEnabled();
+    await exerciseWalkthroughFeedback(testPage, card, ws);
+    await checkFeedbackReload(testPage, card);
+    await checkFeedbackViewport(testPage, card);
     await prCapture.screenshot("desktop-walkthrough-feedback-controls", {
-      caption: "Desktop walkthrough keeps Add and Run without an inert Cancel action",
+      caption: "Step comments and counts with an on-demand composer",
     });
-    await card.getByRole("button", { name: "Run" }).click();
-    await expect(card.getByRole("textbox")).toHaveValue("");
   });
 
   test("closing minimizes the card but keeps the launcher; reopen restores it", async ({
@@ -420,7 +455,6 @@ test.describe("Code walkthrough", () => {
     await expect(reviewDialog.locator('[data-walkthrough-active="true"]')).toHaveCount(0);
     const reviewProgress = reviewDialog.getByText(/^0 of \d+ files reviewed$/);
     await expect(reviewProgress).toBeVisible({ timeout: 15_000 });
-    const initialProgress = await reviewProgress.textContent();
     await dwell(
       testPage,
       600,
@@ -428,7 +462,7 @@ test.describe("Code walkthrough", () => {
       "asserts the walkthrough behind the dialog never scrolls the review or advances its progress; both checks are absences, so they need the window in which a stray scroll or auto-review would land to elapse first",
     );
     await expect(reviewDialog.getByTestId("review-diff-scroll")).toHaveJSProperty("scrollTop", 0);
-    await expect(reviewProgress).toHaveText(initialProgress ?? "");
+    await expect(reviewProgress).toHaveText(/^0 of \d+ files reviewed$/);
     await expectWalkthroughBehindDialog(testPage, reviewDialog, [
       { locator: card, name: "walkthrough window" },
       { locator: session.walkthroughLauncher().locator(".."), name: "walkthrough launcher" },
@@ -474,25 +508,113 @@ test.describe("Code walkthrough", () => {
     await expect(session.walkthroughEditorRange()).toHaveCount(0);
   });
 
-  test("a re-emitted walkthrough replaces the previous one without a page reload", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // The agent emits a 2-step tour, then a different 3-step tour. Opening the
-    // card refetches the latest, so the re-emit shows without reloading.
-    await seedWalkthroughTask(
+  test.describe("live walkthrough replacement", () => {
+    test.describe.configure({ retries: 0 });
+
+    test("a re-emitted walkthrough replaces the previous one without a page reload", async ({
       testPage,
       apiClient,
       seedData,
-      "walkthrough-reemit",
-      "reemit-second-done",
-    );
-    const card = await openWalkthrough(testPage);
+    }) => {
+      test.setTimeout(180_000);
+      const walkthroughStep = await apiClient.createWorkflowStep(
+        seedData.workflowId,
+        "Walkthrough Re-emission",
+        4,
+      );
+      let taskId: string | undefined;
+      try {
+        const task = await apiClient.createTask(seedData.workspaceId, "Walkthrough re-emission", {
+          description: "/e2e:walkthrough-reemit",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: walkthroughStep.id,
+          agent_profile_id: seedData.agentProfileId,
+          repository_ids: [seedData.repositoryId],
+        });
+        taskId = task.id;
+        await testPage.goto(`/t/${task.id}`);
+        const session = new SessionPage(testPage);
+        await session.waitForLoad();
 
-    await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
-    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
-    await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
-    await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
+        const startButton = testPage.getByTestId("task-description-start-button");
+        await expect(startButton).toBeVisible({ timeout: 30_000 });
+        await startButton.click();
+        const sessionId = await activeTaskSessionId(testPage);
+        await waitForSessionAgentctlReady(testPage, sessionId, 60_000);
+        try {
+          await expect(
+            session.activeChat().getByText("reemit-first-done", { exact: false }),
+          ).toBeVisible({ timeout: 45_000 });
+        } catch (error) {
+          const [{ messages }, { sessions }] = await Promise.all([
+            apiClient.listSessionMessages(sessionId),
+            apiClient.listTaskSessions(task.id),
+          ]);
+          const failedSession = sessions.find((candidate) => candidate.id === sessionId);
+          const diagnostic = {
+            session: failedSession && {
+              id: failedSession.id,
+              state: failedSession.state,
+              updated_at: failedSession.updated_at,
+              agent_execution_id: failedSession.agent_execution_id,
+            },
+            messages: messages.map((message) => ({
+              author_type: message.author_type,
+              type: message.type,
+              content: message.content,
+              created_at: message.created_at,
+            })),
+          };
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)}\n` +
+              `First turn server state: ${JSON.stringify(diagnostic)}`,
+          );
+        }
+
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const primarySession = sessions.find((candidate) => candidate.is_primary);
+        if (!primarySession) throw new Error("walkthrough task has no primary session");
+        await waitForSessionState(apiClient, {
+          taskId: task.id,
+          sessionId: primarySession.id,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "first walkthrough turn to finish",
+          timeout: 45_000,
+        });
+
+        const card = await openWalkthrough(testPage);
+        await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 2");
+        await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_FIRST");
+        await card.getByTestId("walkthrough-comment-trigger").click();
+        await card.getByRole("textbox").fill("Feedback for the original revision");
+        await card.getByRole("button", { name: "Add", exact: true }).click();
+        await expect(card.getByTestId("walkthrough-comment")).toHaveCount(1);
+
+        await apiClient.addUserMessage(
+          task.id,
+          primarySession.id,
+          "/e2e:walkthrough-reemit-second",
+        );
+        await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
+        await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
+        await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
+        await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
+        await expect(card.getByTestId("walkthrough-comment")).toHaveCount(0);
+        await expect(card.getByTestId("walkthrough-comment-trigger")).toContainText("(0)");
+        await waitForSessionState(apiClient, {
+          taskId: task.id,
+          sessionId: primarySession.id,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "second walkthrough turn to finish",
+          timeout: 45_000,
+        });
+      } finally {
+        try {
+          if (taskId) await apiClient.deleteTask(taskId);
+        } finally {
+          await apiClient.deleteWorkflowStep(walkthroughStep.id);
+        }
+      }
+    });
   });
 });

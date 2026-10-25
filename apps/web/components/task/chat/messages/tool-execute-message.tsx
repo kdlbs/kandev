@@ -1,5 +1,7 @@
 "use client";
 
+import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
+import { ToolPayloadRemovedNotice } from "./tool-payload-removed-message";
 import { memo } from "react";
 import { IconCheck, IconTerminal, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -89,13 +91,17 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
             </span>
           </div>
         )}
-        {hasProjectedShellOutput(shellExec?.output) && (
-          <ShellOutputDisclosure
-            sessionId={comment.session_id}
-            messageId={comment.id}
-            messageStatus={status}
-            summary={shellExec?.output}
-          />
+        {payloadRetentionMarker(comment.metadata) ? (
+          <ToolPayloadRemovedNotice metadata={comment.metadata} />
+        ) : (
+          hasProjectedShellOutput(shellExec?.output) && (
+            <ShellOutputDisclosure
+              sessionId={comment.session_id}
+              messageId={comment.id}
+              messageStatus={status}
+              summary={shellExec?.output}
+            />
+          )
         )}
       </div>
     </div>

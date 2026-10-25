@@ -1,10 +1,30 @@
+import type { RepositoryCheckoutOptions } from "./repository-checkout-options";
 import type { RepositoryId, SessionId, TaskId } from "./ids";
 
+export type RepositoryBranchPolicy = {
+  id: string;
+  repository_id: RepositoryId;
+  name: string;
+  description: string;
+  base_branch: string;
+  branch_template: string;
+  pull_request_target: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TaskRepository = {
+  checkout_options?: RepositoryCheckoutOptions;
   id: string;
   task_id: TaskId;
   repository_id: RepositoryId;
+  workspace_relative_path?: string;
   base_branch: string;
+  branch_policy_id?: string;
+  branch_policy_name?: string;
+  branch_policy_base_branch?: string;
+  branch_policy_branch_template?: string;
+  branch_policy_pull_request_target?: string;
   /**
    * Optional branch to fetch and check out after worktree creation
    * (e.g. a PR head branch). Empty when no specific branch is requested.
@@ -21,6 +41,7 @@ export type WorkspaceFolder = {
   task_id: TaskId;
   local_path: string;
   display_name: string;
+  workspace_relative_path?: string;
   position: number;
   created_at?: string;
   updated_at?: string;
@@ -49,7 +70,34 @@ export type WorkspaceSourceRequest =
   | WorkspaceRepositorySourceRequest
   | WorkspaceFolderSourceRequest;
 
-export type AttachTaskWorkspaceSourcesRequest = { sources: WorkspaceSourceRequest[] };
+export type WorkspaceRepositoryPlacement = "kandev_directory" | "current_root" | "expand_root";
+
+export type WorkspaceRepositoryPlacementOption = {
+  placement: WorkspaceRepositoryPlacement;
+  enabled: boolean;
+  reason?: string;
+};
+
+export type WorkspaceRepositoryPlacementPreview = {
+  task_id: TaskId;
+  revision: string;
+  workspace_path: string;
+  placement: WorkspaceRepositoryPlacement;
+  sources: Array<{
+    kind?: "repository" | "folder";
+    repository_id?: RepositoryId;
+    repository_name?: string;
+    source_name?: string;
+    workspace_relative_path: string;
+  }>;
+  supported_placements: WorkspaceRepositoryPlacementOption[];
+};
+
+export type AttachTaskWorkspaceSourcesRequest = {
+  sources: WorkspaceSourceRequest[];
+  repository_placement?: WorkspaceRepositoryPlacement;
+  preview_revision?: string;
+};
 
 export type AttachTaskWorkspaceSourcesResponse = {
   task_id: TaskId;

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/create-local-repository/spec.md
+spec: docs/specs/workspaces/requirements/create-local-repository.md
 created: 2026-07-21
 updated: 2026-08-05
 status: implemented
@@ -8,6 +8,10 @@ status: implemented
 # Implementation Plan: Create a Local Repository During Task Creation
 
 ## Overview
+
+The [repository creation availability follow-up](../repository-creation-availability/plan.md)
+removes the single-row toolbar restriction and preserves the executor for multi-row creation.
+The results below record the original implementation.
 
 The original implementation owns directory creation, Git initialization, and workspace repository
 persistence, then merges the returned repository into the task-create selector on desktop and

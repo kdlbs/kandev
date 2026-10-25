@@ -60,7 +60,10 @@ export function noisyReceivedFrames(
       frame.sessionId === sessionId &&
       // A subscriber present before the burst can receive its coalesced state
       // as an add; a subscriber joining mid-burst observes subsequent updates.
-      (frame.action === "session.message.added" || frame.action === "session.message.updated"),
+      (frame.action === "session.message.added" ||
+        frame.action === "session.message.updated" ||
+        (frame.type === "session.event" &&
+          (frame.eventType === "message.added" || frame.eventType === "message.updated"))),
   );
 }
 

@@ -138,11 +138,15 @@ test.describe("Local executor branch split", () => {
       .first()
       .click();
 
-    await testPage.getByTestId("executor-profile-selector").click();
-    await testPage
+    const executorProfileSelector = testPage.getByTestId("executor-profile-selector");
+    await executorProfileSelector.click();
+    await expect(executorProfileSelector).toHaveAttribute("aria-expanded", "true");
+    const profileOption = testPage
       .getByRole("option", { name: new RegExp(`^${escapeRe(opts.profileName)}\\b`, "i") })
-      .first()
-      .click();
+      .first();
+    await expect(profileOption).toBeVisible();
+    await profileOption.click();
+    await expect(executorProfileSelector).toContainText(opts.profileName);
 
     // Wait for the chip to settle on the workspace's current branch — the
     // autoselect effect runs after currentLocalBranch resolves, and submitting

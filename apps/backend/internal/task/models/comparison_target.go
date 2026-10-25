@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	ComparisonTargetMetadataKey = "comparison_target"
-	ComparisonTargetVersion     = 1
+	ComparisonTargetMetadataKey         = "comparison_target"
+	ManualBaseBranchOverrideMetadataKey = "manual_base_branch_override"
+	ComparisonTargetVersion             = 1
 
 	ComparisonTargetProviderGitHub = RemoteContributionProviderGitHub
 	ComparisonTargetProviderGitLab = RemoteContributionProviderGitLab
@@ -21,6 +22,14 @@ const (
 	ComparisonTargetKindPullRequest  = RemoteContributionKindPullRequest
 	ComparisonTargetKindMergeRequest = RemoteContributionKindMergeRequest
 )
+
+// HasManualBaseBranchOverride reports whether the user explicitly selected
+// the task repository's comparison branch. The marker remains after clearing
+// provider-owned target metadata so launch-time PR refresh cannot replace it.
+func HasManualBaseBranchOverride(metadata map[string]interface{}) bool {
+	selected, ok := metadata[ManualBaseBranchOverrideMetadataKey].(bool)
+	return ok && selected
+}
 
 // ComparisonTargetRepository is the credential-free provider identity used
 // by a comparison target. Keeping the shape shared with remote contributions

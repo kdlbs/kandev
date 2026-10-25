@@ -4,7 +4,7 @@
 **Date:** 2026-08-08
 **Area:** backend, agentctl, protocol
 **Related ADR:** [ADR-2026-08-08-task-autopilot-contract](2026-08-08-task-autopilot-contract.md)
-**Related spec:** [Task Autopilot Mode](../specs/tasks/autopilot-mode.md)
+**Related spec:** [Task Autopilot Mode](../specs/tasks/requirements/autopilot-mode.md)
 
 ## Context
 

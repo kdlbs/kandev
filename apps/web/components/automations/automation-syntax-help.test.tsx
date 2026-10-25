@@ -53,7 +53,9 @@ function text(el: Element | null): string {
 
 describe("WebhookConfig usage help", () => {
   it("renders one sentence with the header and both placeholder paths in code elements", async () => {
-    const { container, findByText } = render(<WebhookConfig automationId="a1" workspaceId="w1" />);
+    const { container, findByText } = render(
+      <WebhookConfig automationId="a1" workspaceId="w1" config={{}} onUpdate={() => {}} />,
+    );
     await findByText("Webhook secret");
 
     const help = Array.from(container.querySelectorAll("p")).find((p) =>

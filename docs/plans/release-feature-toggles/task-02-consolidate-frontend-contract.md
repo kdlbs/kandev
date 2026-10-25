@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/feature-toggles/spec.md"
+spec: "../../specs/platform/requirements/feature-toggles.md"
 ---
 
 # Task 02: Consolidate frontend feature contract

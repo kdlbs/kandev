@@ -8,6 +8,7 @@ import {
   SettingsSaveProvider,
   SettingsSaveCancelledError,
   useSettingsSaveContributor,
+  useSettingsSaveCoordinator,
   type SettingsSaveRevision,
 } from "./settings-save-provider";
 
@@ -83,6 +84,18 @@ function DraftContributor({
       Edit {id}
     </button>
   );
+}
+
+function InvalidWithoutReasonContributor() {
+  useSettingsSaveContributor({
+    id: "invalid-without-reason",
+    revision: 1,
+    isDirty: true,
+    canSave: false,
+    save: vi.fn(),
+    discard: vi.fn(),
+  });
+  return null;
 }
 
 /** A contributor that starts clean (revision equals savedRevision) and dirties on Edit. */
@@ -406,6 +419,17 @@ describe("SettingsSaveProvider save state", () => {
     expect(screen.getByText("invalid-profile is invalid")).toBeTruthy();
   });
 
+  it("disables saving when an invalid contributor has no reason text", async () => {
+    render(
+      <SettingsSaveProvider>
+        <InvalidWithoutReasonContributor />
+      </SettingsSaveProvider>,
+    );
+
+    const save = await screen.findByRole("button", { name: SAVE_CHANGES_LABEL });
+    expect(save.hasAttribute("disabled")).toBe(true);
+  });
+
   it("briefly confirms a successful save", async () => {
     render(
       <SettingsSaveProvider>
@@ -640,4 +664,39 @@ describe("SettingsSaveProvider reset coordination", () => {
     await waitFor(() => expect(screen.getByTestId(FLOATING_SAVE_TEST_ID)).toBeTruthy());
     expect(screen.getByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
   });
+});
+
+const CONTRIBUTOR_STATUS_ID = "contributor-status";
+
+function ContributorStatus() {
+  const coordinator = useSettingsSaveCoordinator();
+  return (
+    <output data-testid={CONTRIBUTOR_STATUS_ID}>
+      {JSON.stringify(coordinator.contributorStates)}
+    </output>
+  );
+}
+it("exposes dirty, invalid and failed contributors for tab recovery", async () => {
+  render(
+    <SettingsSaveProvider>
+      <DraftContributor
+        id="runtime"
+        onSave={() => {
+          throw new Error("failed");
+        }}
+      />
+      <ContributorStatus />
+    </SettingsSaveProvider>,
+  );
+  expect(screen.getByTestId(CONTRIBUTOR_STATUS_ID).textContent).toContain('"isDirty":true');
+  fireEvent.click(screen.getByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() =>
+    expect(screen.getByTestId(CONTRIBUTOR_STATUS_ID).textContent).toContain('"saveFailed":true'),
+  );
+  fireEvent.click(screen.getByRole("button", { name: RESET_LABEL }));
+  await waitFor(() =>
+    expect(screen.getByTestId(CONTRIBUTOR_STATUS_ID).textContent).toContain('"isDirty":false'),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit runtime" }));
+  expect(screen.getByTestId(CONTRIBUTOR_STATUS_ID).textContent).toContain('"saveFailed":false');
 });

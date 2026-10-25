@@ -74,6 +74,35 @@ SOFTWARE.
 `,
     ecosystem: "source",
   },
+  {
+    name: "shadcn/ui Tailwind CSS",
+    version: "3.6.3",
+    license: "MIT",
+    repository: "https://github.com/shadcn-ui/ui",
+    license_text: `MIT License
+
+Copyright (c) 2023 shadcn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`,
+    ecosystem: "source",
+  },
 ];
 
 function readSafe(path: string): string | undefined {
@@ -381,15 +410,10 @@ function moduleAndVersion(row: GoRow): { module: string; version: string } {
   if (cachePath) {
     // The first capture is the leaf dir; reconstruct the module from row.pkg
     // because the leaf alone loses the host/owner prefix.
-    return { module: stripVersionSuffix(row.pkg), version: cachePath[2] };
+    // Go major-version suffixes are part of the canonical module path.
+    return { module: row.pkg, version: cachePath[2] };
   }
   return { module: row.pkg, version: "" };
-}
-
-// Some modules embed a major version in their import path (`/v2`, `/v3`, etc).
-// Keep that suffix — it's part of the canonical module name in Go.
-function stripVersionSuffix(pkg: string): string {
-  return pkg;
 }
 
 function repoFromGoURL(licenseURL: string): string | undefined {

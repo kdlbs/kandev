@@ -18,7 +18,7 @@ type mentionRecordingClient struct {
 
 func (c *mentionRecordingClient) ListIssuesPaged(
 	ctx context.Context,
-	filter, customQuery string,
+	filter, customQuery, _ string,
 	page, perPage int,
 ) (*IssueSearchPage, error) {
 	return c.issues(ctx, filter, customQuery, page, perPage)

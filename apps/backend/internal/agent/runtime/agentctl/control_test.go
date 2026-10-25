@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +38,12 @@ func newTestControlClient(t *testing.T, srv *httptest.Server, opts ...ControlCli
 	t.Helper()
 	host, port := splitTestServerHostPort(t, srv)
 	return NewControlClient(host, port, newTestLogger(), opts...)
+}
+
+type controlRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f controlRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestNewControlClient_BuildsBaseURLFromHostAndPort(t *testing.T) {
@@ -378,6 +386,27 @@ func TestCreateInstance_MarshalsFullRequestAndDecodesIDAndPort(t *testing.T) {
 	}
 }
 
+// TestCreateInstance_MarshalsMCPToolNamePresentationCapability covers the
+// wire portion of AC-TASKS-MCP-TOOL-NAMES-001.5.
+func TestCreateInstance_MarshalsMCPToolNamePresentationCapability(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	req := &CreateInstanceRequest{
+		WorkspacePath:              "/workspace/task-1",
+		NamespacesMCPToolsByServer: true,
+	}
+
+	if _, err := newTestControlClient(t, srv).CreateInstance(context.Background(), req); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if got, ok := body["namespaces_mcp_tools_by_server"].(bool); !ok || !got {
+		t.Fatalf("serialized capability = %#v, want true", body["namespaces_mcp_tools_by_server"])
+	}
+}
+
 // 200 is accepted alongside 201 — agentctl returns 200 when it reuses an
 // existing instance for the same ID.
 func TestCreateInstance_AcceptsBoth200And201(t *testing.T) {
@@ -441,6 +470,107 @@ func TestCreateInstance_FailureModes(t *testing.T) {
 	}
 }
 
+func TestCreateInstance_UsesLongerHTTPTimeout(t *testing.T) {
+	const want = 120 * time.Second
+	var remaining time.Duration
+	c := NewControlClient("agentctl.test", 80, newTestLogger())
+	c.httpClient.Transport = controlRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			t.Fatal("request has no deadline")
+		}
+		remaining = time.Until(deadline)
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"id":"inst-1","port":41234}`)),
+			Request:    req,
+		}, nil
+	})
+
+	if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{ID: "inst-1", WorkspacePath: "/workspace"}); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if remaining < want-time.Second || remaining > want {
+		t.Errorf("CreateInstance deadline had %v remaining, want close to %v", remaining, want)
+	}
+	if c.httpClient.Timeout != 30*time.Second {
+		t.Errorf("shared timeout = %v after CreateInstance, want 30s", c.httpClient.Timeout)
+	}
+}
+
+func TestCreateInstance_CallerDeadlineStillApplies(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	resp, err := newTestControlClient(t, srv).CreateInstance(ctx, &CreateInstanceRequest{WorkspacePath: "/w"})
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "failed to create instance") {
+		t.Fatalf("error = %v, want wrapped context.DeadlineExceeded", err)
+	}
+	if resp != nil {
+		t.Errorf("response = %+v, want nil on failure", resp)
+	}
+}
+
+func TestCreateInstance_SendsControlAuthToken(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"inst-1","port":41234}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newTestControlClient(t, srv, WithControlAuthToken("control-token"))
+	if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{WorkspacePath: "/w"}); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if auth != "Bearer control-token" {
+		t.Errorf("Authorization = %q, want Bearer control-token", auth)
+	}
+}
+
+// TestCreateInstance_CopiesClientUnderRotation is meaningful under -race:
+// credential rotation replaces the transport while creation copies the client.
+func TestCreateInstance_CopiesClientUnderRotation(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	t.Cleanup(srv.Close)
+	c := newTestControlClient(t, srv, WithControlAuthToken("initial-token"))
+
+	done := make(chan struct{})
+	rotated := make(chan struct{})
+	go func() {
+		defer close(rotated)
+		for i := 0; ; i++ {
+			select {
+			case <-done:
+				return
+			default:
+				c.SetAuthToken(fmt.Sprintf("token-%d", i))
+			}
+		}
+	}()
+	for range 20 {
+		if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{WorkspacePath: "/w"}); err != nil {
+			close(done)
+			<-rotated
+			t.Fatalf("CreateInstance: %v", err)
+		}
+	}
+	close(done)
+	<-rotated
+}
+
 func TestDeleteInstance_UsesDeleteVerbWithIDInPath(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusNoContent} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -460,6 +590,39 @@ func TestDeleteInstance_UsesDeleteVerbWithIDInPath(t *testing.T) {
 	}
 }
 
+func TestDeleteInstance_LostResponseThenNotFoundIsSuccessfulRetry(t *testing.T) {
+	transport := &lostDeleteResponseTransport{}
+	client := NewControlClient("agentctl.test", 80, newTestLogger())
+	client.httpClient = &http.Client{Transport: transport}
+
+	if err := client.DeleteInstance(context.Background(), "inst-9"); err == nil {
+		t.Fatal("first DeleteInstance error = nil, want lost-response error")
+	}
+	if err := client.DeleteInstance(context.Background(), "inst-9"); err != nil {
+		t.Fatalf("DeleteInstance retry after completed delete: %v", err)
+	}
+	if transport.requests != 2 {
+		t.Fatalf("requests = %d, want 2", transport.requests)
+	}
+}
+
+type lostDeleteResponseTransport struct {
+	requests int
+}
+
+func (t *lostDeleteResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests++
+	if t.requests == 1 {
+		return nil, errors.New("delete response lost")
+	}
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Body:       io.NopCloser(strings.NewReader(`{"error":"instance not found"}`)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
 func TestDeleteInstance_FailureModes(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -469,9 +632,9 @@ func TestDeleteInstance_FailureModes(t *testing.T) {
 	}{
 		{
 			name:    "structured error",
-			status:  http.StatusNotFound,
-			body:    `{"error":"no such instance"}`,
-			wantErr: "failed to delete instance: no such instance (status 404)",
+			status:  http.StatusConflict,
+			body:    `{"error":"instance still stopping"}`,
+			wantErr: "failed to delete instance: instance still stopping (status 409)",
 		},
 		{
 			name:    "unparseable error body",
@@ -522,6 +685,33 @@ func TestGetInstance_DecodesEveryField(t *testing.T) {
 	if !info.CreatedAt.Equal(wantCreated) {
 		t.Errorf("CreatedAt = %v, want %v", info.CreatedAt, wantCreated)
 	}
+	if info.LeaseGeneration != 0 || info.ListenerActive {
+		t.Errorf("missing lease diagnostics = generation %d, active %t; want zero values for an older server", info.LeaseGeneration, info.ListenerActive)
+	}
+}
+
+func TestControlClientInstanceLeaseDiagnostics(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusOK, `{
+		"id":"inst-lease","port":41001,"status":"running",
+		"workspace_path":"/workspace/lease","task_id":"task-lease",
+		"session_id":"session-lease","workspace_source_roots":["/workspace/lease"],
+		"provider_session_id":"provider-session-lease",
+		"lease_generation":17,"listener_active":true
+	}`))
+	t.Cleanup(srv.Close)
+
+	info, err := newTestControlClient(t, srv).GetInstance(context.Background(), "inst-lease")
+	if err != nil {
+		t.Fatalf("GetInstance: %v", err)
+	}
+	if info.LeaseGeneration != 17 || !info.ListenerActive {
+		t.Fatalf("lease diagnostics = generation %d, active %t; want 17 and true", info.LeaseGeneration, info.ListenerActive)
+	}
+	if info.TaskID != "task-lease" || info.SessionID != "session-lease" ||
+		len(info.WorkspaceSourceRoots) != 1 || info.WorkspaceSourceRoots[0] != "/workspace/lease" ||
+		info.ProviderSessionID != "provider-session-lease" {
+		t.Fatalf("existing instance metadata was lost: %+v", info)
+	}
 }
 
 func TestGetInstance_FailureModes(t *testing.T) {
@@ -531,7 +721,7 @@ func TestGetInstance_FailureModes(t *testing.T) {
 		body    string
 		wantErr string
 	}{
-		{"not found", http.StatusNotFound, `{}`, `instance "inst-3" not found`},
+		{"not found", http.StatusNotFound, `{}`, `instance not found: "inst-3"`},
 		{"other status", http.StatusInternalServerError, `{}`, "failed to get instance: status 500"},
 		{"malformed body", http.StatusOK, `{"id":`, "failed to decode response"},
 	}
@@ -544,6 +734,9 @@ func TestGetInstance_FailureModes(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
 			}
+			if errors.Is(err, ErrInstanceNotFound) != (tc.status == http.StatusNotFound) {
+				t.Errorf("not-found classification for status %d: %v", tc.status, err)
+			}
 			if info != nil {
 				t.Errorf("info = %+v, want nil on failure", info)
 			}
@@ -551,34 +744,11 @@ func TestGetInstance_FailureModes(t *testing.T) {
 	}
 }
 
-func TestListInstances_UnwrapsInstancesEnvelope(t *testing.T) {
-	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
-		"instances":[
-			{"id":"a","port":1,"status":"running","workspace_path":"/w/a","agent_command":"cmd-a"},
-			{"id":"b","port":2,"status":"stopped","workspace_path":"/w/b","agent_command":"cmd-b"}
-		]
-	}`))
-
-	instances, err := newTestControlClient(t, srv).ListInstances(context.Background())
-	if err != nil {
-		t.Fatalf("ListInstances: %v", err)
-	}
-
-	if got.Method != http.MethodGet || got.Path != "/api/v1/instances" {
-		t.Errorf("request = %s %s, want GET /api/v1/instances", got.Method, got.Path)
-	}
-	if len(instances) != 2 {
-		t.Fatalf("instances = %d, want 2", len(instances))
-	}
-	if instances[0].ID != "a" || instances[0].Port != 1 ||
-		instances[0].Status != "running" || instances[0].WorkspacePath != "/w/a" ||
-		instances[0].AgentCommand != "cmd-a" {
-		t.Errorf("instances[0] = %+v", instances[0])
-	}
-	if instances[1].ID != "b" || instances[1].Port != 2 || instances[1].Status != "stopped" {
-		t.Errorf("instances[1] = %+v", instances[1])
-	}
-}
+// The envelope-decode + request method/path contract this used to pin with a
+// hand-written response fixture is now covered end to end (real handler, real
+// client) by TestListInstancesReturnsEnvelopeWithSessionAndTaskID in
+// internal/agentctl/server/api — a fixture here could assert an envelope
+// shape the real handler had stopped producing without ever failing.
 
 func TestListInstances_FailureModes(t *testing.T) {
 	tests := []struct {
@@ -603,5 +773,54 @@ func TestListInstances_FailureModes(t *testing.T) {
 				t.Errorf("instances = %+v, want nil on failure", instances)
 			}
 		})
+	}
+}
+
+// TestClaimOwnership_UnauthorizedReturnsSupersededSentinel pins
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.3: a 401 response must be distinguished
+// from any other failure via ErrOwnershipCredentialSuperseded, so a caller
+// like OwnershipRenewer can tell "credential is no longer current" apart
+// from a transient failure it should retry.
+func TestClaimOwnership_UnauthorizedReturnsSupersededSentinel(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusUnauthorized, `{"error":"invalid auth token"}`))
+	t.Cleanup(srv.Close)
+
+	err := newTestControlClient(t, srv).ClaimOwnership(context.Background())
+	if !errors.Is(err, ErrOwnershipCredentialSuperseded) {
+		t.Fatalf("error = %v, want errors.Is(err, ErrOwnershipCredentialSuperseded)", err)
+	}
+}
+
+func TestClaimOwnership_OtherFailureModesDoNotReturnSupersededSentinel(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		wantErr string
+	}{
+		{"internal server error", http.StatusInternalServerError, "failed to claim ownership: status 500"},
+		{"not found", http.StatusNotFound, "failed to claim ownership: status 404"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(jsonResponder(tc.status, `{}`))
+			t.Cleanup(srv.Close)
+
+			err := newTestControlClient(t, srv).ClaimOwnership(context.Background())
+			if errors.Is(err, ErrOwnershipCredentialSuperseded) {
+				t.Fatalf("error = %v, want NOT errors.Is(err, ErrOwnershipCredentialSuperseded)", err)
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestClaimOwnership_SuccessReturnsNilError(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusOK, `{}`))
+	t.Cleanup(srv.Close)
+
+	if err := newTestControlClient(t, srv).ClaimOwnership(context.Background()); err != nil {
+		t.Fatalf("ClaimOwnership() error = %v, want nil", err)
 	}
 }

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-classify-provider-failure"]
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 04: Render Localized Quota Recovery

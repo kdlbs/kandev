@@ -28,6 +28,8 @@ export const MAX_ENTRY_BYTES = 64 * 1024;
 
 type StoredEntry = { entry: LogEntry; bytes: number };
 
+export type PreparedLogEntry = Readonly<StoredEntry>;
+
 export class RingBuffer {
   private entries: StoredEntry[] = [];
   private bytes = 0;
@@ -39,8 +41,11 @@ export class RingBuffer {
   ) {}
 
   push(entry: LogEntry): boolean {
-    const detached = cloneEntry(entry);
-    const bytes = encodedBytes(detached);
+    return this.pushPrepared(prepareLogEntry(entry));
+  }
+
+  pushPrepared(prepared: PreparedLogEntry): boolean {
+    const { entry, bytes } = prepared;
     if (bytes > MAX_ENTRY_BYTES) {
       this.loss.entry_too_large += 1;
       return false;
@@ -58,15 +63,19 @@ export class RingBuffer {
       this.bytes -= removed.bytes;
       this.loss.capacity += 1;
     }
-    this.entries.push({ entry: detached, bytes });
+    this.entries.push(prepared);
     this.bytes += bytes;
     return true;
   }
 
   snapshot(identityScope?: string): LogEntry[] {
+    return this.snapshotPrepared(identityScope).map(({ entry }) => entry);
+  }
+
+  snapshotPrepared(identityScope?: string): PreparedLogEntry[] {
     return this.entries
       .filter(({ entry }) => identityScope === undefined || entry.identity_scope === identityScope)
-      .map(({ entry }) => cloneEntry(entry));
+      .map(({ entry, bytes }) => ({ entry: cloneEntry(entry), bytes }));
   }
 
   clear(): void {
@@ -106,12 +115,21 @@ export function snapshotLogs(identityScope?: string): LogEntry[] {
   return getLogBuffer().snapshot(identityScope);
 }
 
+export function snapshotPreparedLogs(identityScope?: string): PreparedLogEntry[] {
+  return getLogBuffer().snapshotPrepared(identityScope);
+}
+
 export function clearLogs(): void {
   getLogBuffer().clear();
 }
 
 export function encodedBytes(entry: LogEntry): number {
   return new TextEncoder().encode(JSON.stringify(entry)).byteLength;
+}
+
+export function prepareLogEntry(entry: LogEntry): PreparedLogEntry {
+  const detached = cloneEntry(entry);
+  return { entry: detached, bytes: encodedBytes(detached) };
 }
 
 function cloneEntry(entry: LogEntry): LogEntry {

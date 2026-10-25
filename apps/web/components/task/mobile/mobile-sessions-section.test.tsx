@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   messagesBySession: {} as Record<string, unknown[]>,
   turnsBySession: {} as Record<string, unknown[]>,
   setActiveSession: vi.fn(),
+  removeSession: vi.fn(),
+  restartSession: vi.fn(),
+  isRestarting: false,
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -41,19 +44,25 @@ vi.mock("@/components/agent-logo", () => ({
 }));
 
 vi.mock("@/hooks/domains/session/use-session-actions", () => ({
-  useSessionActions: () => ({
+  useSessionActions: ({ sessionId }: { sessionId: string }) => ({
     setPrimary: vi.fn(),
     stop: vi.fn(),
     resume: vi.fn(),
-    remove: vi.fn(),
+    restart: () => mocks.restartSession(sessionId),
+    isRestarting: mocks.isRestarting,
+    remove: mocks.removeSession,
   }),
-  isSessionStoppable: () => false,
+  isSessionStoppable: (state: string) =>
+    ["RUNNING", "STARTING", "WAITING_FOR_INPUT"].includes(state),
   isSessionDeletable: () => true,
   isSessionResumable: () => false,
 }));
 
 const PILL_TESTID = "mobile-sessions-pill";
 const ICON_CIRCLE_CHECK = "tabler-icon-circle-check";
+const SESSION_ACTIONS_LABEL = "Session actions";
+const SESSION_BG_STATE_TESTID = "mobile-session-state-session-bg";
+const SESSION_B_ROW = "mobile-session-row-session-b";
 const SESSION_A = "session-a";
 const SESSION_BG = "session-bg";
 const TASK_ID = "task-1";
@@ -126,6 +135,9 @@ beforeEach(() => {
   mocks.messagesBySession = {};
   mocks.turnsBySession = {};
   mocks.setActiveSession.mockReset();
+  mocks.removeSession.mockReset();
+  mocks.restartSession.mockReset();
+  mocks.isRestarting = false;
 });
 
 describe("MobileSessionsPicker selection", () => {
@@ -140,9 +152,7 @@ describe("MobileSessionsPicker selection", () => {
     expect(screen.getByTestId("mobile-session-row-session-a").getAttribute("aria-current")).toBe(
       null,
     );
-    expect(screen.getByTestId("mobile-session-row-session-b").getAttribute("aria-current")).toBe(
-      "true",
-    );
+    expect(screen.getByTestId(SESSION_B_ROW).getAttribute("aria-current")).toBe("true");
   });
 
   it("shows the effective session agent icon beside its label", () => {
@@ -181,11 +191,9 @@ describe("MobileSessionsPicker selection", () => {
     expect(
       within(screen.getByTestId("mobile-session-row-session-a")).getByText("Frontend"),
     ).toBeTruthy();
-    expect(
-      within(screen.getByTestId("mobile-session-row-session-b")).getByText("API"),
-    ).toBeTruthy();
+    expect(within(screen.getByTestId(SESSION_B_ROW)).getByText("API")).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("mobile-session-row-session-b"));
+    fireEvent.click(screen.getByTestId(SESSION_B_ROW));
     expect(mocks.setActiveSession).toHaveBeenCalledWith(TASK_ID, "session-b");
   });
 });
@@ -216,14 +224,19 @@ describe("MobileSessionsPicker activity precedence", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
-    const bg = screen.getByTestId("mobile-session-state-session-bg");
+    const bg = screen.getByTestId(SESSION_BG_STATE_TESTID);
     const gen = screen.getByTestId("mobile-session-state-session-gen");
     const done = screen.getByTestId("mobile-session-state-session-done");
     const svgClass = (el: HTMLElement) => el.querySelector("svg")?.getAttribute("class") ?? "";
 
     // background-running: the shared spinner, in motion, and a label that says so.
     expect(svgClass(bg)).toContain("tabler-icon-loader-2");
-    expect(svgClass(bg)).toContain("animate-spin");
+    const spinner = bg.querySelector(".animate-spin");
+    expect(spinner).not.toBeNull();
+    expect(spinner?.tagName).toBe("SPAN");
+    const spinnerSvg = spinner?.querySelector("svg");
+    expect(spinnerSvg).not.toBeNull();
+    expect(spinnerSvg?.classList.contains("animate-spin")).toBe(false);
     expect(bg.textContent).toMatch(/background/i);
 
     // Distinct from generating: a static solid dot, no spin — a different SHAPE,
@@ -252,7 +265,7 @@ describe("MobileSessionsPicker activity precedence", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
-    const state = screen.getByTestId("mobile-session-state-session-bg");
+    const state = screen.getByTestId(SESSION_BG_STATE_TESTID);
     expect(state.textContent).toMatch(/waiting for input/i);
     expect(state.querySelector("svg")?.getAttribute("class")).toContain(
       "tabler-icon-message-question",
@@ -282,6 +295,53 @@ describe("MobileSessionsPicker activity precedence", () => {
     expect(state.textContent).toMatch(/permission requested/i);
     expect(state.querySelector("svg")?.getAttribute("class")).toContain(
       "tabler-icon-shield-question",
+    );
+    mocks.messagesBySession = {};
+  });
+});
+
+const BACKGROUND_SPINNER_CLASS = "tabler-icon-loader-2";
+
+describe("MobileSessionsPicker parked-on-background-work (AC-51/52)", () => {
+  it("renders parked-on-background-work identically to a live background substate", () => {
+    // A settled session with no live foreground_activity but a positively-sampled
+    // background process must read the same as a live RUNNING+background session
+    // — same spinner shape, same label — not the plain waiting-for-input reading.
+    mocks.activeSessionId = SESSION_BG;
+    mocks.sessions = [
+      session(SESSION_BG, "profile-a", START_TIME, {
+        state: "WAITING_FOR_INPUT",
+        parked_on_background_work: true,
+      } as Partial<TaskSession>),
+    ];
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    const state = screen.getByTestId(SESSION_BG_STATE_TESTID);
+    expect(state.querySelector("svg")?.getAttribute("class")).toContain(BACKGROUND_SPINNER_CLASS);
+    expect(state.querySelector(".animate-spin")).not.toBeNull();
+    expect(state.textContent).toMatch(/background/i);
+  });
+
+  it("lets pending clarification win over the parked reading", () => {
+    mocks.activeSessionId = SESSION_BG;
+    mocks.sessions = [
+      session(SESSION_BG, "profile-a", START_TIME, {
+        state: "RUNNING",
+        parked_on_background_work: true,
+      } as Partial<TaskSession>),
+    ];
+    mocks.messagesBySession = {
+      [SESSION_BG]: [{ type: "clarification_request", metadata: { status: "pending" } }],
+    };
+
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    const state = screen.getByTestId(SESSION_BG_STATE_TESTID);
+    expect(state.textContent).toMatch(/waiting for input/i);
+    expect(state.querySelector("svg")?.getAttribute("class")).toContain(
+      "tabler-icon-message-question",
     );
     mocks.messagesBySession = {};
   });
@@ -350,24 +410,208 @@ describe("MobileSessionsPicker pending lifecycle", () => {
 });
 
 describe("MobileSessionsPicker session delete confirmation", () => {
-  it("states conversation deletion and workspace retention from the actions sheet", () => {
+  it("uses the same modal for the named delete step and restores the picker on Back", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+      fireEvent.click(screen.getByTestId(PILL_TESTID));
+      const picker = screen.getByRole("dialog", { name: "Sessions" });
+      const row = screen.getByTestId(`mobile-session-row-${SESSION_A}`);
+      fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      expect(await screen.findByRole("dialog", { name: "Delete session?" })).toBe(picker);
+      expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+      expect(screen.getByRole("group").textContent).toContain("Alpha");
+      expect(screen.queryByRole("button", { name: SESSION_ACTIONS_LABEL })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(screen.getByRole("dialog", { name: "Sessions" })).toBe(picker);
+      expect(row.isConnected).toBe(true);
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(
+          within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }),
+        ),
+      );
+      expect(mocks.removeSession).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+    }
+  });
+
+  it("morphs the target row into local touch-sized confirmation actions", () => {
     mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
 
     // Open the picker sheet, then the session's actions menu.
     fireEvent.click(screen.getByTestId(PILL_TESTID));
-    const dotsButton = screen.getByRole("button", { name: "Session actions" });
+    const dotsButton = screen.getByRole("button", { name: SESSION_ACTIONS_LABEL });
     fireEvent.pointerDown(dotsButton);
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
-    const dialog = screen.getByRole("alertdialog");
-    expect(within(dialog).getByText(/permanently delete the conversation history/i)).toBeTruthy();
-    expect(
-      within(dialog).getAllByText(/task workspace and its files are kept/i).length,
-    ).toBeGreaterThan(0);
-    expect(within(dialog).getByText(/only session for this task/i)).toBeTruthy();
-    // No uncommitted/unpushed warning belongs on session deletion.
-    expect(within(dialog).queryByText(/uncommitted/i)).toBeNull();
-    expect(within(dialog).queryByText(/unpushed/i)).toBeNull();
+    const confirmation = screen.getByRole("group", { name: /delete session/i });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(confirmation.textContent).toContain("permanently delete the conversation history");
+    expect(confirmation.textContent).toContain("task workspace and its files are kept");
+    expect(confirmation.textContent).toContain("only session for this task");
+    const confirm = within(confirmation).getByTestId("mobile-session-delete-confirm");
+    expect(confirm.className).toContain("h-11");
+    expect(confirm.className).toContain("min-w-11");
   });
+
+  it("cancels locally without deleting the session", () => {
+    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    fireEvent.pointerDown(screen.getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(mocks.removeSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId(`mobile-session-row-${SESSION_A}`)).toBeTruthy();
+    expect(screen.queryByRole("group", { name: /delete session/i })).toBeNull();
+  });
+
+  it("resets pending confirmation when the picker closes externally", async () => {
+    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    fireEvent.pointerDown(screen.getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByRole("group", { name: /delete session/i })).toBeTruthy();
+    const picker = screen.getByRole("dialog", { name: "Sessions" });
+    expect(picker.getAttribute("data-state")).toBe("open");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await vi.waitFor(() => {
+      expect(picker.getAttribute("data-state")).toBe("closed");
+    });
+    expect(mocks.removeSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: /delete session/i })).toBeNull();
+
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    expect(screen.getByRole("dialog", { name: "Sessions" }).getAttribute("data-state")).toBe(
+      "open",
+    );
+    expect(screen.queryByRole("group", { name: /delete session/i })).toBeNull();
+  });
+
+  it("dispatches deletion once after local confirmation", async () => {
+    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    fireEvent.pointerDown(screen.getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(screen.getByTestId("mobile-session-delete-confirm"));
+
+    await vi.waitFor(() => expect(mocks.removeSession).toHaveBeenCalledTimes(1));
+  });
+});
+
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.1, AC-TASKS-SESSION-TAB-RESTART-001.4
+describe("Mobile session restart", () => {
+  it("restarts the chosen row without selecting it", () => {
+    render(<MobileSessionsPicker taskId={TASK_ID} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const row = screen.getByTestId(SESSION_B_ROW);
+    fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restart session" }));
+    expect(mocks.restartSession).toHaveBeenCalledWith("session-b");
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("disables conflicting actions while restarting", () => {
+    mocks.isRestarting = true;
+    render(<MobileSessionsPicker taskId={TASK_ID} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const row = screen.getByTestId(SESSION_B_ROW);
+    fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    for (const name of ["Stop", "Restart session", "Delete"]) {
+      expect(screen.getByRole("menuitem", { name }).getAttribute("data-disabled")).not.toBeNull();
+    }
+  });
+});
+
+// @covers AC-UI-MOBILE-TASK-NAVIGATION-001.11
+describe("Native session menu opening gesture", () => {
+  function renderTrigger() {
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    return within(screen.getByTestId(SESSION_B_ROW)).getByRole("button", {
+      name: SESSION_ACTIONS_LABEL,
+    });
+  }
+
+  it("keeps menu items absent until the opening touch click, then accepts a separate action once", () => {
+    const trigger = renderTrigger();
+    fireEvent.pointerDown(trigger, { pointerType: "touch", button: 0, ctrlKey: false });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.pointerUp(trigger, { pointerType: "touch", button: 0 });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(mocks.restartSession).not.toHaveBeenCalled();
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+    const restart = screen.getByRole("menuitem", { name: "Restart session" });
+    fireEvent.pointerDown(restart, { pointerType: "touch", button: 0 });
+    fireEvent.pointerUp(restart, { pointerType: "touch", button: 0 });
+    fireEvent.click(restart);
+    expect(mocks.restartSession).toHaveBeenCalledExactlyOnceWith("session-b");
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("does not open on a cancelled touch and permits a later mouse gesture", () => {
+    const trigger = renderTrigger();
+    fireEvent.pointerDown(trigger, { pointerType: "touch", button: 0, ctrlKey: false });
+    fireEvent.pointerCancel(trigger, { pointerType: "touch" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0, ctrlKey: false });
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(mocks.restartSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["mouse", "pen"])("retains Radix pointerdown opening for %s", (pointerType) => {
+    const trigger = renderTrigger();
+    fireEvent.pointerDown(trigger, { pointerType, button: 0, ctrlKey: false });
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.pointerUp(trigger, { pointerType, button: 0 });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(mocks.restartSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["Tab", "ArrowRight", "k"])("lets surrounding handlers receive %s", (key) => {
+    const onKeyDown = vi.fn();
+    document.addEventListener("keydown", onKeyDown);
+    try {
+      const trigger = renderTrigger();
+      fireEvent.keyDown(trigger, { key });
+      expect(onKeyDown).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(mocks.setActiveSession).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", onKeyDown);
+    }
+  });
+
+  it.each(["Enter", " ", "ArrowDown"])(
+    "opens with %s without selecting the enclosing row",
+    (key) => {
+      const trigger = renderTrigger();
+      fireEvent.keyDown(trigger, { key });
+      expect(screen.getByRole("menu")).toBeTruthy();
+      expect(mocks.setActiveSession).not.toHaveBeenCalled();
+      expect(mocks.restartSession).not.toHaveBeenCalled();
+    },
+  );
 });

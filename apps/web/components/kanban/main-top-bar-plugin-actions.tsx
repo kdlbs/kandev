@@ -1,10 +1,23 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import type { MainTopBarSlotProps } from "@/lib/plugins/types";
+import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 
 export type { MainTopBarSlotProps } from "@/lib/plugins/types";
+
+const MemoizedPluginSlot = memo(PluginSlot);
+
+/**
+ * The plugin contract predates Threads and names only the two surfaces that
+ * existed then. Threads is the same workspace-wide overview the board is, just
+ * arranged by conversation, so it reports as "kanban" rather than forcing every
+ * installed plugin to handle a third value it has never seen.
+ */
+export function toPluginTopBarPage(page: TaskListingPage): MainTopBarSlotProps["currentPage"] {
+  return page === "tasks" ? "tasks" : "kanban";
+}
 
 /**
  * Props forwarded to every plugin component registered for the `main-top-bar`
@@ -29,22 +42,45 @@ export type { MainTopBarSlotProps } from "@/lib/plugins/types";
 export function MainTopBarPluginActions(props: {
   workspaceId?: string;
   workspaceLabel?: string;
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   presentation?: MainTopBarSlotProps["presentation"];
+  excludePluginIds?: readonly string[];
 }) {
-  const { workspaceId, workspaceLabel, currentPage, presentation = "desktop" } = props;
+  const {
+    workspaceId,
+    workspaceLabel,
+    currentPage,
+    presentation = "desktop",
+    excludePluginIds,
+  } = props;
 
   const slotProps = useMemo<MainTopBarSlotProps>(
-    () => ({ workspaceId: workspaceId ?? null, workspaceLabel, currentPage, presentation }),
+    () => ({
+      workspaceId: workspaceId ?? null,
+      workspaceLabel,
+      currentPage: toPluginTopBarPage(currentPage),
+      presentation,
+    }),
     [workspaceId, workspaceLabel, currentPage, presentation],
   );
+  const actionSurface = useMemo(
+    () => ({ surface: "topbar" as const, presentation }),
+    [presentation],
+  );
 
-  const content = <PluginSlot name="main-top-bar" slotProps={slotProps} />;
+  const content = (
+    <MemoizedPluginSlot
+      name="main-top-bar"
+      slotProps={slotProps}
+      excludePluginIds={excludePluginIds}
+      actionSurface={actionSurface}
+    />
+  );
   if (presentation === "desktop") return content;
 
   return (
     <div
-      className="flex shrink-0 items-center gap-2 [&_[data-slot=button]]:!size-8 [&_[data-slot=button]]:!p-0 [&_[data-slot=button]_svg]:!size-4"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-2 [&>*]:min-w-0 [&>*]:max-w-full [&_[data-slot=button]]:!min-h-11 [&_[data-slot=button]]:!min-w-11 [&_[data-slot=button]]:!max-w-full [&_[data-slot=button]]:!whitespace-normal [&_[data-slot=button]_svg]:!size-4"
       data-testid="mobile-main-top-bar-plugin-actions"
     >
       {content}

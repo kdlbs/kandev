@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/prompt-attachments.md"
+spec: "../../specs/tasks/requirements/prompt-attachments.md"
 ---
 
 # Task 01: Attachment storage API

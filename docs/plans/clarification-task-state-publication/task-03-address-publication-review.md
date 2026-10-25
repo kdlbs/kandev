@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-publish-clarification-task-state"]
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-state-publication-order.md"
+spec: "../../specs/tasks/requirements/runtime-state-publication-order.md"
 ---
 
 # Task 03: Address ordered publication review findings
@@ -25,7 +25,7 @@ spec: "../../specs/tasks/runtime-state-publication-order.md"
 - `apps/backend/internal/mcp/handlers/handlers.go`
 - `apps/backend/internal/mcp/handlers/handlers_test.go`
 - `apps/backend/internal/task/service/service_events.go`
-- `docs/specs/tasks/runtime-state-publication-order.md`
+- `docs/specs/tasks/requirements/runtime-state-publication-order.md`
 - `docs/decisions/2026-07-30-runtime-task-state-before-running-event.md`
 - `docs/plans/clarification-task-state-publication/plan.md`
 - `docs/plans/clarification-task-state-publication/task-01-publish-clarification-task-state.md`

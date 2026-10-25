@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyUpdate, fetchSystemInfo, fetchSystemJob } from "@/lib/api/domains/system-api";
+import { registerBackendReloadOwner } from "@/lib/platform/backend-reload-coordinator";
 // Module-level `t`: resolved at call time, no JSX in this file for lint to see.
 import { t } from "@/lib/i18n";
 
@@ -79,6 +80,39 @@ export type SelfUpdateController = {
   dismiss: () => void;
 };
 
+function useSelfUpdateReloadOwnership(
+  phase: SelfUpdatePhase,
+  claimReloadOwnership: () => void,
+  releaseReloadOwnership: () => void,
+): void {
+  useEffect(() => {
+    if (phase === "idle" || phase === "error") releaseReloadOwnership();
+    else claimReloadOwnership();
+  }, [claimReloadOwnership, phase, releaseReloadOwnership]);
+
+  useEffect(() => releaseReloadOwnership, [releaseReloadOwnership]);
+}
+
+function useResumeSelfUpdate(
+  hydrated: { current: boolean },
+  setPhase: (phase: SelfUpdatePhase) => void,
+): void {
+  useEffect(() => {
+    if (hydrated.current) return;
+    hydrated.current = true;
+    const persisted = readPersisted();
+    if (!persisted) return;
+    if (Date.now() - persisted.startedAt > MAX_DURATION_MS) {
+      clearPersisted();
+      return;
+    }
+    // Resume an in-progress update after a page reload. Promoting out of "idle"
+    // here keeps the first client render matching the server's.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPhase("installing");
+  }, [hydrated, setPhase]);
+}
+
 export function useSelfUpdate({
   latestVersion,
   onComplete,
@@ -94,15 +128,30 @@ export function useSelfUpdate({
   const [jobId, setJobId] = useState<string | null>(null);
   const hydrated = useRef(false);
   const completionFired = useRef(false);
+  const ownerReleaseRef = useRef<(() => void) | null>(null);
 
-  const fail = useCallback((message: string) => {
-    setErrorMessage(message);
-    setPhase("error");
-    clearPersisted();
+  const claimReloadOwnership = useCallback(() => {
+    if (!ownerReleaseRef.current) ownerReleaseRef.current = registerBackendReloadOwner();
   }, []);
+
+  const releaseReloadOwnership = useCallback(() => {
+    ownerReleaseRef.current?.();
+    ownerReleaseRef.current = null;
+  }, []);
+
+  const fail = useCallback(
+    (message: string) => {
+      releaseReloadOwnership();
+      setErrorMessage(message);
+      setPhase("error");
+      clearPersisted();
+    },
+    [releaseReloadOwnership],
+  );
 
   const start = useCallback(async () => {
     if (!latestVersion) return;
+    claimReloadOwnership();
     completionFired.current = false;
     setErrorMessage(null);
     setTargetVersion(latestVersion);
@@ -115,33 +164,22 @@ export function useSelfUpdate({
     } catch (e) {
       fail(e instanceof Error ? e.message : t("system:selfUpdateStartFailed"));
     }
-  }, [latestVersion, fail]);
+  }, [claimReloadOwnership, latestVersion, fail]);
 
   const dismiss = useCallback(() => {
+    releaseReloadOwnership();
     completionFired.current = false;
     setPhase("idle");
     setErrorMessage(null);
     setJobId(null);
     clearPersisted();
-  }, []);
+  }, [releaseReloadOwnership]);
+
+  useSelfUpdateReloadOwnership(phase, claimReloadOwnership, releaseReloadOwnership);
 
   // Resume an in-progress update after a page reload (the restart window can
   // outlive a manual refresh). Runs once; the version poll below confirms done.
-  useEffect(() => {
-    if (hydrated.current) return;
-    hydrated.current = true;
-    const persisted = readPersisted();
-    if (!persisted) return;
-    if (Date.now() - persisted.startedAt > MAX_DURATION_MS) {
-      clearPersisted();
-      return;
-    }
-    // Resume an in-progress update after a page reload. Promoting out of "idle"
-    // here (rather than in the initial state) keeps the first client render
-    // matching the server's; the version poll below then confirms completion.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPhase("installing");
-  }, []);
+  useResumeSelfUpdate(hydrated, setPhase);
 
   // Drive the flow off the live version. While installing/restarting, poll
   // /system/info: success at the target version → done; an unreachable backend

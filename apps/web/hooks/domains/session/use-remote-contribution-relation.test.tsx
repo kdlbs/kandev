@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PRCommitInfo, TaskPR } from "@/lib/types/github";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { useRemoteContributionRelation } from "./use-remote-contribution-relation";
+import { remoteContributionActionPolicy } from "./remote-contribution-relation";
 
 const mocks = vi.hoisted(() => ({
   statuses: [] as Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -10,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   selectedPR: null as TaskPR | null,
   selectedKey: null as string | null,
   providerHead: "provider-head",
+  authoritativeCommits: [{ sha: "provider-head" }] as PRCommitInfo[],
+  loading: false,
+  error: null as string | null,
   repositoryName: "frontend",
 }));
 
@@ -29,10 +33,11 @@ vi.mock("@/hooks/domains/github/use-review-pr-selection", () => ({
 vi.mock("@/hooks/domains/github/use-pr-commits", () => ({
   usePRCommits: () => ({
     commits: [{ sha: mocks.providerHead }] as PRCommitInfo[],
+    authoritativeCommits: mocks.authoritativeCommits,
     providerHead: mocks.providerHead,
     providerCommitsComplete: true,
-    loading: false,
-    error: null,
+    loading: mocks.loading,
+    error: mocks.error,
     refresh: vi.fn(),
   }),
 }));
@@ -66,6 +71,7 @@ const baseStatus: Omit<GitStatusEntry, "repository_name" | "head_commit" | "remo
 function taskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-current",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     repository_id: "repo-frontend",
     owner: "acme",
@@ -117,14 +123,39 @@ function status(
   };
 }
 
-describe("useRemoteContributionRelation repository scoping", () => {
-  beforeEach(() => {
-    mocks.selectedPR = selectedPR;
-    mocks.prs = [selectedPR];
-    mocks.selectedKey = null;
-    mocks.statuses = [];
-    mocks.repositoryName = "frontend";
+function expectSelectedRepositoryState(current: ReturnType<typeof useRemoteContributionRelation>) {
+  expect(current.relation).toMatchObject({
+    kind: "aligned",
+    canPush: false,
+    canPull: false,
+    canReplaceRemote: false,
+    canUseRemote: false,
   });
+  expect(current.contributionHistoryTarget).toMatchObject({
+    sessionId: "session-1",
+    workspaceId: "workspace-1",
+    repositoryScope: "frontend",
+    branch: "feature",
+    selectedPRKey: "acme/frontend/2",
+    expectedLocalHead: mocks.providerHead,
+    expectedRemoteHead: mocks.providerHead,
+  });
+  expect(current.repositoryScope).toBe("frontend");
+}
+
+function resetRelationMocks() {
+  mocks.selectedPR = selectedPR;
+  mocks.prs = [selectedPR];
+  mocks.selectedKey = null;
+  mocks.statuses = [];
+  mocks.repositoryName = "frontend";
+  mocks.authoritativeCommits = [{ sha: mocks.providerHead }] as PRCommitInfo[];
+  mocks.loading = false;
+  mocks.error = null;
+}
+
+describe("useRemoteContributionRelation repository selection", () => {
+  beforeEach(resetRelationMocks);
 
   it.each([
     ["frontend then backend", ["frontend", "backend"]],
@@ -142,14 +173,7 @@ describe("useRemoteContributionRelation repository scoping", () => {
     );
 
     const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
-
-    expect(result.current.relation).toMatchObject({
-      kind: "aligned",
-      canPush: false,
-      canPull: false,
-      canReplaceRemote: false,
-      canUseRemote: false,
-    });
+    expectSelectedRepositoryState(result.current);
   });
 
   it("uses the empty-key status for a single-repository session", () => {
@@ -164,7 +188,104 @@ describe("useRemoteContributionRelation repository scoping", () => {
       canReplaceRemote: false,
       canUseRemote: false,
     });
+    expect(result.current.contributionHistoryTarget?.repositoryScope).toBe("");
+    expect(result.current.repositoryScope).toBe("");
   });
+});
+
+describe("useRemoteContributionRelation status quality", () => {
+  beforeEach(resetRelationMocks);
+
+  // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.4
+  it("waits for current upstream evidence without borrowing a sibling repository's counts", () => {
+    mocks.statuses = [
+      status("frontend", "local-head", "stale-upstream", {
+        remote_ahead: 2,
+        remote_behind: 0,
+      }),
+      status("backend", "backend-local", mocks.providerHead, {
+        remote_ahead: 2,
+        remote_behind: 2,
+      }),
+    ];
+    const { result, rerender } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.relation).toMatchObject({ kind: "unknown", presentation: "unified" });
+    expect(remoteContributionActionPolicy(result.current.relation)).toMatchObject({
+      replaceDisabled: true,
+      useDisabled: true,
+    });
+
+    mocks.statuses = [
+      status("frontend", "local-head", mocks.providerHead, {
+        remote_ahead: 1,
+        remote_behind: 0,
+      }),
+      ...mocks.statuses.slice(1),
+    ];
+    rerender();
+    expect(result.current.relation.kind).toBe("local_ahead");
+  });
+
+  // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7
+  it("keeps retained commits visible without authorizing actions during refresh", () => {
+    mocks.authoritativeCommits = [];
+    mocks.loading = true;
+    mocks.statuses = [
+      status("", mocks.providerHead, "provider-base", {
+        remote_ahead: 1,
+        remote_behind: 0,
+      }),
+    ];
+
+    const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.commits).toEqual([{ sha: mocks.providerHead }]);
+    expect(result.current.relation).toMatchObject({
+      kind: "unknown",
+      action: "unavailable_evidence",
+      canReplaceRemote: false,
+      canUseRemote: false,
+    });
+    expect(remoteContributionActionPolicy(result.current.relation)).toMatchObject({
+      pushDisabled: true,
+      pullDisabled: true,
+      replaceDisabled: true,
+      useDisabled: true,
+    });
+  });
+
+  it("keeps local Git actions available without a selected PR when status details are ready", () => {
+    mocks.prs = [];
+    mocks.selectedPR = null;
+    mocks.statuses = [
+      status("", "local-head", "", {
+        branch: "feature/local-only",
+        remote_branch: "",
+        ahead: 1,
+        detail_state: "ready",
+      }),
+    ];
+
+    const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.relation).toMatchObject({
+      kind: "not_applicable",
+      action: "normal_push",
+      pushAhead: 1,
+      canPush: true,
+      pullBehind: 0,
+      canPull: false,
+    });
+    expect(remoteContributionActionPolicy(result.current.relation)).toMatchObject({
+      pushDisabled: false,
+      pullDisabled: false,
+    });
+  });
+});
+
+describe("useRemoteContributionRelation branch-scoped PR selection", () => {
+  beforeEach(resetRelationMocks);
 
   it("ignores a merged Review PR when a newer PR matches the checked-out branch", () => {
     const historicalPR = taskPR({

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-aggregate-submodule-git-data"]
 plan: "plan.md"
-spec: "../../specs/ui/submodule-review.md"
+spec: "../../specs/ui/requirements/submodule-review.md"
 ---
 
 # Task 03: Present submodule review hierarchy

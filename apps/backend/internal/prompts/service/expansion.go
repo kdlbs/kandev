@@ -18,6 +18,16 @@ import (
 // re-scan the block and append a duplicate one below it.
 const expansionMarker = "EXPANDED PROMPT REFERENCES:"
 
+const expansionInstruction = "The message above references saved prompts by @name. Use these expansions as hidden context while preserving the original @mentions."
+
+const expansionBlockHeader = expansionMarker + " " + expansionInstruction
+
+const skillExpansionInstruction = "This skill references saved prompts by @name. Apply these definitions where the skill references them."
+
+const skillExpansionBlockHeader = expansionMarker + " " + skillExpansionInstruction
+
+const browserPromptContextMarker = "CONTEXT PROMPTS:"
+
 // expansionBlockPrefix is the exact, literal prefix that
 // FormatPromptReferenceExpansions' output has once wrapped by sysprompt.Wrap:
 // the opening <kandev-system> tag immediately followed by expansionMarker,
@@ -32,14 +42,32 @@ var expansionBlockRegex = regexp.MustCompile(
 	regexp.QuoteMeta(expansionBlockPrefix) + `[\s\S]*?` + regexp.QuoteMeta(sysprompt.TagEnd) + `\s*`,
 )
 
+// browserPromptContextBlockRegex matches the context block emitted by the
+// browser when it attaches saved prompts. Browser-provided definitions are
+// compatibility metadata only; the backend replaces them with the current
+// saved prompt record before the message is persisted or dispatched.
+var browserPromptContextBlockRegex = regexp.MustCompile(
+	regexp.QuoteMeta(sysprompt.TagStart) + `\s*` + regexp.QuoteMeta(browserPromptContextMarker) +
+		`[\s\S]*?` + regexp.QuoteMeta(sysprompt.TagEnd) + `\s*(` + regexp.QuoteMeta(sysprompt.TagStart) + `|$)`,
+)
+
+// browserPromptContextUnclosedBlockRegex fails closed for a matching browser
+// block without an outer closing tag. The browser block is compatibility
+// metadata, so dropping it is safer than allowing forged content to reach
+// resolution or persistence.
+var browserPromptContextUnclosedBlockRegex = regexp.MustCompile(
+	regexp.QuoteMeta(sysprompt.TagStart) + `\s*` + regexp.QuoteMeta(browserPromptContextMarker) + `[\s\S]*$`,
+)
+
 // AppendReferenceExpansions resolves any "@name" saved-prompt references in
 // prompt and, when at least one resolves, appends a hidden
 // <kandev-system>-wrapped block containing the expanded content while leaving
 // the original @mentions in place in the visible prompt body.
 //
-// Before resolution it removes any expansion-shaped input block. This keeps
-// the operation idempotent while ensuring an untrusted lookalike cannot
-// suppress a real lookup or acquire trusted provenance.
+// Before resolution it removes any browser prompt-definition or
+// expansion-shaped input block. This keeps the operation idempotent while
+// ensuring an untrusted lookalike cannot suppress a real lookup or acquire
+// trusted provenance.
 //
 // It returns the cleaned prompt without an expansion when the prompt contains
 // no "@", resolution fails (the failure is logged via log, when non-nil, and
@@ -63,27 +91,133 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 	prompt string,
 	log *zap.Logger,
 ) (expandedPrompt, trustedContext string) {
-	// Expansion-shaped input blocks carry no provenance. Remove them before
-	// resolving so a forged block cannot suppress a real saved-prompt lookup.
-	cleanedPrompt := expansionBlockRegex.ReplaceAllString(prompt, "")
+	prompt, expansions := s.cleanAndResolvePromptReferences(ctx, prompt, log)
+	if len(expansions) == 0 {
+		return prompt, ""
+	}
+	trustedContext = FormatPromptReferenceExpansions(expansions)
+	return prompt + "\n\n" + sysprompt.Wrap(trustedContext), trustedContext
+}
+
+// AppendSkillReferenceExpansions is the skill-content variant of
+// AppendReferenceExpansions. It applies the same cleaning, resolution, and
+// sanitization, and appends a block whose instruction line refers to the
+// skill. The block marker is shared, so an authored block of either variant is
+// replaced rather than duplicated.
+func (s *Service) AppendSkillReferenceExpansions(ctx context.Context, content string, log *zap.Logger) string {
+	content, expansions := s.cleanAndResolvePromptReferences(ctx, content, log)
+	if len(expansions) == 0 {
+		return content
+	}
+	return content + "\n\n" + sysprompt.Wrap(formatPromptReferenceExpansions(skillExpansionBlockHeader, expansions))
+}
+
+// cleanAndResolvePromptReferences removes untrusted prompt-definition and
+// expansion-shaped blocks, then resolves the remaining references. A failed
+// lookup is logged and yields no expansions.
+func (s *Service) cleanAndResolvePromptReferences(
+	ctx context.Context,
+	prompt string,
+	log *zap.Logger,
+) (string, []PromptReferenceExpansion) {
+	// Browser-provided prompt definitions and expansion-shaped input blocks
+	// carry no provenance. Remove them before resolving so stale or forged
+	// content cannot reach the agent or suppress a real saved-prompt lookup.
+	// Never preserve a following system opening from untrusted input: an
+	// attacker can inject the same close/open boundary, so retaining it would
+	// allow forged system content to reach downstream prompt preparation.
+	cleanedPrompt := prompt
+	for {
+		replaced := browserPromptContextBlockRegex.ReplaceAllString(cleanedPrompt, "")
+		if replaced != cleanedPrompt {
+			cleanedPrompt = replaced
+			continue
+		}
+		replaced = browserPromptContextUnclosedBlockRegex.ReplaceAllString(cleanedPrompt, "")
+		if replaced == cleanedPrompt {
+			break
+		}
+		cleanedPrompt = replaced
+	}
+	cleanedPrompt = expansionBlockRegex.ReplaceAllString(cleanedPrompt, "")
 	if cleanedPrompt != prompt {
+		cleanedPrompt = sysprompt.StripTags(cleanedPrompt)
 		prompt = strings.TrimSpace(cleanedPrompt)
 	}
 	if !strings.Contains(prompt, "@") {
-		return prompt, ""
+		return prompt, nil
 	}
 	expansions, err := s.ResolvePromptReferences(ctx, prompt)
 	if err != nil {
 		if log != nil {
 			log.Warn("failed to resolve prompt references", zap.Error(err))
 		}
-		return prompt, ""
+		return prompt, nil
+	}
+	return prompt, expansions
+}
+
+// AppendReferenceExpansionsToTrustedContext adds references from newly
+// composed content while retaining the exact context captured at message
+// acceptance. References already present in that context keep their accepted
+// definitions and do not trigger another lookup.
+func (s *Service) AppendReferenceExpansionsToTrustedContext(
+	ctx context.Context,
+	prompt string,
+	trustedContext string,
+	log *zap.Logger,
+) string {
+	expansions, err := s.ResolvePromptReferences(ctx, prompt)
+	if err != nil {
+		if log != nil {
+			log.Warn("failed to resolve additional prompt references", zap.Error(err))
+		}
+		return trustedContext
 	}
 	if len(expansions) == 0 {
-		return prompt, ""
+		return trustedContext
 	}
-	trustedContext = FormatPromptReferenceExpansions(expansions)
-	return prompt + "\n\n" + sysprompt.Wrap(trustedContext), trustedContext
+
+	acceptedNames := promptReferenceExpansionNames(trustedContext)
+	additional := make([]PromptReferenceExpansion, 0, len(expansions))
+	for _, expansion := range expansions {
+		if _, exists := acceptedNames[expansion.Name]; exists {
+			continue
+		}
+		additional = append(additional, expansion)
+	}
+	if len(additional) == 0 {
+		return trustedContext
+	}
+	return mergePromptReferenceContexts(trustedContext, FormatPromptReferenceExpansions(additional))
+}
+
+func promptReferenceExpansionNames(trustedContext string) map[string]struct{} {
+	if trustedContext == "" {
+		return nil
+	}
+	names := make(map[string]struct{})
+	for _, line := range strings.Split(trustedContext, "\n") {
+		name, ok := strings.CutPrefix(line, "### @")
+		if ok && name != "" {
+			names[name] = struct{}{}
+		}
+	}
+	return names
+}
+
+func mergePromptReferenceContexts(accepted, additional string) string {
+	if accepted == "" {
+		return additional
+	}
+	if additional == "" {
+		return accepted
+	}
+	if strings.HasPrefix(accepted, expansionBlockHeader) && strings.HasPrefix(additional, expansionBlockHeader) {
+		additional = strings.TrimPrefix(additional, expansionBlockHeader)
+		additional = strings.TrimPrefix(additional, "\n\n")
+	}
+	return accepted + "\n\n" + additional
 }
 
 // FormatPromptReferenceExpansions renders resolved prompt-reference
@@ -92,9 +226,12 @@ func (s *Service) AppendReferenceExpansionsWithContext(
 // sysprompt.TagEnd so a saved prompt cannot prematurely close the
 // surrounding <kandev-system> wrapper.
 func FormatPromptReferenceExpansions(expansions []PromptReferenceExpansion) string {
+	return formatPromptReferenceExpansions(expansionBlockHeader, expansions)
+}
+
+func formatPromptReferenceExpansions(header string, expansions []PromptReferenceExpansion) string {
 	var b strings.Builder
-	b.WriteString(expansionMarker + " The message above references saved prompts by @name. ")
-	b.WriteString("Use these expansions as hidden context while preserving the original @mentions.")
+	b.WriteString(header)
 	for _, expansion := range expansions {
 		b.WriteString("\n\n### @")
 		b.WriteString(sanitizePromptExpansionSystemText(expansion.Name))
@@ -105,7 +242,9 @@ func FormatPromptReferenceExpansions(expansions []PromptReferenceExpansion) stri
 }
 
 // sanitizePromptExpansionSystemText strips any embedded sysprompt.TagEnd from
-// a value before it is written into a <kandev-system>-wrapped block.
+// a value before it is written into a <kandev-system>-wrapped block. The
+// shared helper repeats the replacement until stable to prevent nested-tag
+// evasion.
 func sanitizePromptExpansionSystemText(value string) string {
-	return strings.ReplaceAll(value, sysprompt.TagEnd, "")
+	return sysprompt.StripTags(value)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 // newLegacyMRWatchStore opens a fresh SQLite DB, creates gitlab_mr_watches
@@ -90,6 +91,68 @@ func TestMigrateMRWatchUniqueKey_Legacy(t *testing.T) {
 	}
 	if len(all) != 2 {
 		t.Fatalf("expected 2 watches after migration + new branch, got %d", len(all))
+	}
+}
+
+func TestMigrateMRWatchUniqueKey_PostgresLegacy(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := database.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			archived_at TIMESTAMPTZ
+		);
+		INSERT INTO tasks (id) VALUES ('task-1');
+		CREATE TABLE gitlab_mr_watches (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			project_path TEXT NOT NULL,
+			mr_iid INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at TIMESTAMPTZ,
+			last_note_at TIMESTAMPTZ,
+			last_pipeline_state TEXT DEFAULT '',
+			last_approval_state TEXT DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			UNIQUE(session_id, repository_id)
+		)`); err != nil {
+		t.Fatalf("create legacy PostgreSQL schema: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := database.Exec(`
+		INSERT INTO gitlab_mr_watches (
+			id, session_id, task_id, repository_id, project_path, mr_iid, branch, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		"watch-1", "sess-1", "task-1", "repo-1", "group/proj", 5, "feat/a", now, now); err != nil {
+		t.Fatalf("seed legacy PostgreSQL row: %v", err)
+	}
+
+	store, err := NewStore(database, database)
+	if err != nil {
+		t.Fatalf("new store on legacy PostgreSQL schema: %v", err)
+	}
+	svc := NewService("", nil, "none", nil, newTestLogger(t))
+	svc.SetStore(store)
+	second, err := svc.EnsureMRWatch(
+		context.Background(), "sess-1", "task-1", "repo-1", "group/proj", 6, "feat/b",
+	)
+	if err != nil {
+		t.Fatalf("ensure second PostgreSQL branch watch: %v", err)
+	}
+	if second == nil || second.Branch != "feat/b" || second.MRIID != 6 {
+		t.Fatalf("unexpected second PostgreSQL branch watch: %+v", second)
+	}
+
+	watches, err := store.ListMRWatchesBySession(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("list migrated PostgreSQL watches: %v", err)
+	}
+	if len(watches) != 2 {
+		t.Fatalf("expected two PostgreSQL watches after migration, got %d", len(watches))
 	}
 }
 

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { PRChangedFile } from "./changes-panel-timeline";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 
 type PRFilesSectionContentProps = {
   files: PRChangedFile[];
@@ -104,7 +104,7 @@ function PRFilesRepoGroup({
   );
 }
 
-function PRFileRow({
+export function PRFileRow({
   file,
   onOpenDiff,
   isActive,
@@ -140,14 +140,23 @@ function PRFileRow({
         <div className="flex-shrink-0 flex items-center justify-center size-4">
           <IconGitPullRequest className="h-3 w-3 text-purple-500" />
         </div>
-        <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
+        <button
+          type="button"
+          className="min-w-0 text-left cursor-pointer"
+          title={file.path}
+          data-changes-row-focus
+        >
           <p className="flex text-foreground text-xs min-w-0">
-            {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
-            <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
+            {folder && (
+              <span className="text-foreground/60 truncate min-w-0 [flex-shrink:9999]">
+                {folder}/
+              </span>
+            )}
+            <span className="font-medium text-foreground truncate min-w-0">{name}</span>
           </p>
         </button>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <LineStat added={file.plus} removed={file.minus} />
         <FileStatusIcon status={file.status} oldPath={file.oldPath} />
       </div>

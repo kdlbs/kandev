@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-proclive-shared-helper"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 parallelism: parallel-safe
 ---
 
@@ -23,7 +23,7 @@ migration, generated contract, lockfile, or package config. Both depend on task
 ## Inputs
 
 - Plan sections "`KANDEV_LAUNCHER_PARENT_PID`" and "Launcher parent watchdog".
-- Spec: `docs/specs/desktop-tauri-app/spec.md`, the abnormal-termination bullet
+- Spec: `docs/specs/desktop/requirements/desktop-tauri-app.md`, the abnormal-termination bullet
   under "Failure modes" and its matching scenario under "Scenarios".
 - Pattern to mirror: `processSupervisor.attachSignals` in
   `apps/backend/internal/launcher/process.go:141`. The watchdog performs the same

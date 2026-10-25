@@ -2,12 +2,42 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
+
+func modelSelectionBootstrapFailure(
+	policy StartModelPolicy,
+	state *CachedModelState,
+	effectiveModel, reason, attemptedModel string,
+	cause error,
+) *BootstrapFailure {
+	code := models.AgentErrorCauseCodeModelSelectionFailed
+	if reason == ModelSelectionReasonRequestedNotAdvertised {
+		code = models.AgentErrorCauseCodeModelUnavailable
+	}
+	if effectiveModel == "" && state != nil {
+		effectiveModel = state.CurrentModelID
+	}
+	promptNotSent := true
+	return &BootstrapFailure{
+		Code:           code,
+		Reason:         reason,
+		Detail:         bootstrapFailureDetail(code),
+		RequestedModel: policy.Model,
+		EffectiveModel: effectiveModel,
+		AttemptedModel: attemptedModel,
+		PromptNotSent:  &promptNotSent,
+		Cause:          cause,
+	}
+}
 
 // StartModelPolicy carries the profile's model-selection settings for the
 // executor-authoritative policy applied at session start and when a fresh ACP
@@ -22,6 +52,10 @@ type StartModelPolicy struct {
 	// AutoFallback keeps selection best-effort after an advertised model
 	// rejects SetModel. It does not bypass the executor catalog.
 	AutoFallback bool
+	// RequireExactModel makes the configured model an explicit identity
+	// requirement. Dormant fallback settings and advertised variations do not
+	// satisfy this policy.
+	RequireExactModel bool
 }
 
 // ModelSelectionOutcome describes the executor-authoritative result.
@@ -31,6 +65,7 @@ const (
 	ModelSelectionOutcomeNone             ModelSelectionOutcome = ""
 	ModelSelectionOutcomeApplied          ModelSelectionOutcome = "applied"
 	ModelSelectionOutcomeExplicitFallback ModelSelectionOutcome = "explicit_fallback"
+	ModelSelectionOutcomeUniqueVariation  ModelSelectionOutcome = "unique_variation"
 	ModelSelectionOutcomeProviderDefault  ModelSelectionOutcome = "provider_default"
 )
 
@@ -42,6 +77,7 @@ const (
 	ModelSelectionReasonCatalogEmpty                = "catalog_empty"
 	ModelSelectionReasonSelectionUnsupported        = "selection_unsupported"
 	ModelSelectionReasonSelectionFailedAutoFallback = "selection_failed_auto_fallback"
+	ModelSelectionReasonUniqueVariationApplied      = "unique_variation_applied"
 )
 
 // ModelSelectionDecision is the single model-selection result shared by
@@ -84,6 +120,31 @@ func containsModel(ids []string, id string) bool {
 	return false
 }
 
+func uniqueAdvertisedModelVariation(requested string, advertised []string) string {
+	if requested == "" || strings.ContainsAny(requested, "[]") {
+		return ""
+	}
+	prefix := requested + "["
+	candidates := make(map[string]struct{})
+	for _, id := range advertised {
+		if !strings.HasPrefix(id, prefix) || !strings.HasSuffix(id, "]") {
+			continue
+		}
+		variant := strings.TrimSuffix(strings.TrimPrefix(id, prefix), "]")
+		if variant == "" || strings.ContainsAny(variant, "[]") {
+			continue
+		}
+		candidates[id] = struct{}{}
+		if len(candidates) > 1 {
+			return ""
+		}
+	}
+	for candidate := range candidates {
+		return candidate
+	}
+	return ""
+}
+
 func providerDefaultDecision(state *CachedModelState, policy StartModelPolicy, reason string) ModelSelectionDecision {
 	decision := ModelSelectionDecision{
 		RequestedModel: policy.Model,
@@ -98,12 +159,19 @@ func providerDefaultDecision(state *CachedModelState, policy StartModelPolicy, r
 	return decision
 }
 
+// isStartModelTransportError recognizes caller cancellation and typed loss of
+// the backend's agent stream. Opaque ACP replies cannot attest transport loss:
+// their messages can describe a provider-side model application failure.
+func isStartModelTransportError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, agentctl.ErrAgentStreamNotConnected)
+}
+
 // applyStartModelPolicy applies the profile model only when the executor's
-// ACP catalog advertises it. If the requested model is absent, it may apply an
-// explicitly configured fallback only when that fallback is also advertised.
-// All other mismatches continue on the agent's current/default model and
-// return a warning decision. Errors from an advertised model remain explicit,
-// except for method-not-supported and legacy auto-fallback mode.
+// ACP catalog advertises it. An exact profile fails closed when the requested
+// model cannot be attested before inference. Compatible profiles preserve the
+// legacy fallback order and may continue on the provider default with a
+// warning when no authorized alternate model is available.
 func applyStartModelPolicy(
 	ctx context.Context,
 	log *logger.Logger,
@@ -111,8 +179,17 @@ func applyStartModelPolicy(
 	state *CachedModelState,
 	policy StartModelPolicy,
 ) (ModelSelectionDecision, error) {
-	if policy.Model == "" {
+	if strings.TrimSpace(policy.Model) == "" {
+		if policy.RequireExactModel {
+			cause := fmt.Errorf("exact model is required when RequireExactModel is enabled")
+			return ModelSelectionDecision{}, modelSelectionBootstrapFailure(
+				policy, state, "", models.AgentErrorCauseReasonSelectionMissing, "", cause,
+			)
+		}
 		return ModelSelectionDecision{Outcome: ModelSelectionOutcomeNone}, nil
+	}
+	if policy.RequireExactModel || policy.AutoFallback {
+		policy.FallbackModel = ""
 	}
 
 	decision := ModelSelectionDecision{
@@ -121,28 +198,44 @@ func applyStartModelPolicy(
 	}
 	advertised := advertisedModelIDs(state)
 	if len(advertised) == 0 {
-		return providerDefaultDecision(state, policy, ModelSelectionReasonCatalogEmpty), nil
+		return unavailableStartModel(state, policy, ModelSelectionReasonCatalogEmpty)
 	}
 
 	if !containsModel(advertised, policy.Model) {
-		if policy.FallbackModel != "" && containsModel(advertised, policy.FallbackModel) {
+		if policy.RequireExactModel {
+			return unavailableStartModel(state, policy, ModelSelectionReasonRequestedNotAdvertised)
+		}
+		if !policy.AutoFallback && policy.FallbackModel != "" && containsModel(advertised, policy.FallbackModel) {
 			return applyAdvertisedFallback(ctx, log, applier, state, policy, decision)
 		}
+		if variation := uniqueAdvertisedModelVariation(policy.Model, advertised); variation != "" {
+			return applyUniqueAdvertisedVariation(ctx, log, applier, state, policy, decision, variation)
+		}
 		reason := ModelSelectionReasonRequestedNotAdvertised
-		if policy.FallbackModel != "" {
+		if !policy.AutoFallback && policy.FallbackModel != "" {
 			reason = ModelSelectionReasonFallbackNotAdvertised
 		}
-		return providerDefaultDecision(state, policy, reason), nil
+		return unavailableStartModel(state, policy, reason)
 	}
 
 	decision.SetModelCalled = true
 	if err := applier.SetModel(ctx, policy.Model); err != nil {
 		if sessionmodel.IsMethodNotFound(err) {
-			log.Debug("agent does not support model selection, continuing on provider default",
-				zap.String("model", policy.Model), zap.Error(err))
-			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
-			decision.SetModelCalled = true
-			return decision, nil
+			if policy.RequireExactModel {
+				unsupported, unavailableErr := unavailableStartModel(state, policy, ModelSelectionReasonSelectionUnsupported)
+				unsupported.SetModelCalled = true
+				return unsupported, unavailableErr
+			}
+			if policy.AutoFallback {
+				log.Debug("agent does not support model selection, continuing on provider default",
+					zap.String("model", policy.Model), zap.Error(err))
+				decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
+				decision.SetModelCalled = true
+				return decision, nil
+			}
+			unsupported, unavailableErr := unavailableStartModel(state, policy, ModelSelectionReasonSelectionUnsupported)
+			unsupported.SetModelCalled = true
+			return unsupported, unavailableErr
 		}
 		if policy.AutoFallback {
 			log.Warn("failed to set profile model via ACP (auto-fallback)",
@@ -151,11 +244,77 @@ func applyStartModelPolicy(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		return decision, fmt.Errorf("failed to set start model %q: %w", policy.Model, err)
+		if isStartModelTransportError(err) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, policy.Model,
+			fmt.Errorf("failed to set start model %q: %w", policy.Model, err),
+		)
 	}
 
 	decision.EffectiveModel = policy.Model
 	decision.Outcome = ModelSelectionOutcomeApplied
+	return decision, nil
+}
+
+// unavailableStartModel permits provider-default inference only for profiles
+// that explicitly authorize it. The error contains stable, provider-neutral
+// evidence and never includes executor configuration or transport details.
+func unavailableStartModel(
+	state *CachedModelState,
+	policy StartModelPolicy,
+	reason string,
+) (ModelSelectionDecision, error) {
+	decision := providerDefaultDecision(state, policy, reason)
+	if !policy.RequireExactModel {
+		return decision, nil
+	}
+	causeText := fmt.Sprintf("requested model %q is unavailable (reason: %s)", policy.Model, reason)
+	if decision.EffectiveModel == "" {
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", reason, "", fmt.Errorf("%s", causeText),
+		)
+	}
+	return decision, modelSelectionBootstrapFailure(
+		policy, state, decision.EffectiveModel, reason, "",
+		fmt.Errorf("requested model %q is unavailable (reason: %s, effective model: %q)",
+			policy.Model, reason, decision.EffectiveModel),
+	)
+}
+
+func applyUniqueAdvertisedVariation(
+	ctx context.Context,
+	log *logger.Logger,
+	applier modelApplier,
+	state *CachedModelState,
+	policy StartModelPolicy,
+	decision ModelSelectionDecision,
+	variation string,
+) (ModelSelectionDecision, error) {
+	decision.FallbackModel = ""
+	decision.SetModelCalled = true
+	if err := applier.SetModel(ctx, variation); err != nil {
+		if sessionmodel.IsMethodNotFound(err) || policy.AutoFallback {
+			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
+			decision.SetModelCalled = true
+			return decision, nil
+		}
+		if isStartModelTransportError(err) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, variation,
+			fmt.Errorf("failed to set unique model variation %q: %w", variation, err),
+		)
+	}
+	decision.EffectiveModel = variation
+	decision.Outcome = ModelSelectionOutcomeUniqueVariation
+	decision.Reason = ModelSelectionReasonUniqueVariationApplied
+	decision.Warning = true
+	log.Info("start model unavailable, using unique advertised variation",
+		zap.String("start_model", policy.Model),
+		zap.String("variation_model", variation))
 	return decision, nil
 }
 
@@ -170,11 +329,20 @@ func applyAdvertisedFallback(
 	decision.SetModelCalled = true
 	if err := applier.SetModel(ctx, policy.FallbackModel); err != nil {
 		if sessionmodel.IsMethodNotFound(err) {
-			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
-			decision.SetModelCalled = true
-			return decision, nil
+			if policy.RequireExactModel {
+				unsupported, unavailableErr := unavailableStartModel(state, policy, ModelSelectionReasonSelectionUnsupported)
+				unsupported.SetModelCalled = true
+				return unsupported, unavailableErr
+			}
+			return providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported), nil
 		}
-		return decision, fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err)
+		if isStartModelTransportError(err) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, policy.FallbackModel,
+			fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err),
+		)
 	}
 	decision.EffectiveModel = policy.FallbackModel
 	decision.Outcome = ModelSelectionOutcomeExplicitFallback

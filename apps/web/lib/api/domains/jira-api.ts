@@ -1,3 +1,4 @@
+import { withWorkspace, requestOptions, type WorkspaceApiOptions } from "../workspace-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
   CreateJiraIssueWatchInput,
@@ -12,20 +13,6 @@ import type {
   UpdateJiraIssueWatchInput,
 } from "@/lib/types/jira";
 import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
-
-type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
-
-function withWorkspace(path: string, options?: WorkspaceApiOptions): string {
-  if (!options?.workspaceId) return path;
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}workspace_id=${encodeURIComponent(options.workspaceId)}`;
-}
-
-function requestOptions(options?: WorkspaceApiOptions): ApiRequestOptions | undefined {
-  if (!options) return undefined;
-  const { workspaceId: _workspaceId, ...rest } = options;
-  return rest;
-}
 
 // getJiraConfig returns null when the backend responds 204 (no config yet).
 // fetchJson already maps 204 → undefined; we narrow it to null for callers.
@@ -53,6 +40,29 @@ export async function deleteJiraConfig(options?: WorkspaceApiOptions) {
       init: { ...(options?.init ?? {}), method: "DELETE" },
     }),
   );
+}
+
+// startJiraOAuth registers a client + PKCE and returns the Atlassian
+// authorization URL. Uses withWorkspace so the backend gets `workspace_id`.
+export async function startJiraOAuth(
+  siteUrl: string,
+  options?: WorkspaceApiOptions,
+): Promise<{ authUrl: string }> {
+  const path = withWorkspace(
+    `/api/v1/jira/oauth/start?siteUrl=${encodeURIComponent(siteUrl)}`,
+    options,
+  );
+  return fetchJson<{ authUrl: string }>(path, requestOptions(options));
+}
+
+// completeJiraOAuth exchanges the pasted redirect (code + state) for tokens.
+export async function completeJiraOAuth(
+  code: string,
+  state: string,
+  options?: WorkspaceApiOptions,
+): Promise<{ ok: boolean }> {
+  const path = `/api/v1/jira/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&api=1`;
+  return fetchJson<{ ok: boolean }>(path, requestOptions(options));
 }
 
 export async function testJiraConnection(

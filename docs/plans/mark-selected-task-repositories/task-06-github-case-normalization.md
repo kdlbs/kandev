@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["05-remote-identity-review-fix"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 06: Normalize GitHub repository case

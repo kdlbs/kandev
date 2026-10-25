@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useCallback, memo } from "react";
-import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconChevronRight, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { SubagentTaskPayload, ToolCallMetadata } from "@/components/task/chat/types";
 import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
+import { isTerminalToolCallStatus } from "@/lib/utils/tool-call-status";
+import { normalizeToolCallStatus } from "./tool-status";
 import { useTranslation } from "react-i18next";
 
 type ToolSubagentMessageProps = {
@@ -32,24 +34,74 @@ function arePropsEqual(
   );
 }
 
-const TERMINAL_TOOL_STATUSES = new Set([
-  "complete",
+const LIVE_SUBAGENT_PAYLOAD_STATUSES = new Set(["pendingInit", "started", "async_launched"]);
+
+// Mirrors backend subagentStatusTerminal: Codex session statuses that mean the
+// nested task has already settled, even while the parent turn is still active.
+const TERMINAL_SUBAGENT_PAYLOAD_STATUSES = new Set([
   "completed",
-  "success",
-  "error",
   "failed",
   "cancelled",
+  "errored",
+  "interrupted",
+  "shutdown",
+  "notFound",
 ]);
+
+function isSubagentPayloadTerminal(status: string | undefined): boolean {
+  if (!status) return false;
+  return TERMINAL_SUBAGENT_PAYLOAD_STATUSES.has(status) || isTerminalToolCallStatus(status);
+}
+
+function isSubagentPayloadLive(status: string | undefined): boolean {
+  if (!status) return false;
+  if (LIVE_SUBAGENT_PAYLOAD_STATUSES.has(status)) return true;
+  return !isSubagentPayloadTerminal(status);
+}
+
+type SubagentTerminalStatus = "complete" | "error" | "cancelled";
+
+function normalizeSubagentTerminalStatus(
+  status: string | undefined,
+): SubagentTerminalStatus | undefined {
+  if (status === "errored" || status === "notFound") return "error";
+  if (status === "interrupted" || status === "shutdown") return "cancelled";
+
+  const normalized = normalizeToolCallStatus(status);
+  if (normalized === "complete" || normalized === "error" || normalized === "cancelled") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function resolveSubagentTerminalStatus(
+  metadataStatus: ToolCallMetadata["status"] | undefined,
+  payloadStatus: string | undefined,
+): SubagentTerminalStatus {
+  const payloadTerminal = normalizeSubagentTerminalStatus(payloadStatus);
+  const metadataTerminal = normalizeSubagentTerminalStatus(metadataStatus);
+  if (payloadTerminal && payloadTerminal !== "complete") return payloadTerminal;
+  if (metadataTerminal && metadataTerminal !== "complete") return metadataTerminal;
+  return payloadTerminal ?? metadataTerminal ?? "complete";
+}
 
 export function isSubagentEffectivelyActive(
   metadata: ToolCallMetadata | undefined,
   isContainingTurnActive: boolean,
 ): boolean {
-  const status = metadata?.status;
-  if (status && TERMINAL_TOOL_STATUSES.has(status)) return false;
-  if (status === "running") return true;
   const payloadStatus = metadata?.normalized?.subagent_task?.status;
-  return isContainingTurnActive && (status === "in_progress" || payloadStatus === "started");
+  if (payloadStatus && isSubagentPayloadTerminal(payloadStatus)) return false;
+
+  const status = metadata?.status;
+  if (status === "running") return true;
+
+  const normalized = normalizeToolCallStatus(status);
+  if (normalized === "error" || normalized === "cancelled") return false;
+
+  if (!isContainingTurnActive) return false;
+
+  if (status === "in_progress" || isSubagentPayloadLive(payloadStatus)) return true;
+  return false;
 }
 
 // The result is what the subagent was dispatched to produce, so it is shown
@@ -124,16 +176,56 @@ type SubagentHeaderProps = {
   subagentType: string;
   description: string;
   isActive: boolean;
+  status?: ToolCallMetadata["status"];
+  payloadStatus?: string;
   childCount: number;
   hasExpandableContent: boolean;
   onToggle: () => void;
 };
+
+function SubagentStatusIcon({
+  isActive,
+  status,
+  payloadStatus,
+}: {
+  isActive: boolean;
+  status?: ToolCallMetadata["status"];
+  payloadStatus?: string;
+}) {
+  const { t } = useTranslation();
+  if (isActive) {
+    const workingLabel = t("task:statusWorking");
+    return (
+      <span className="inline-flex items-center gap-1.5 shrink-0" title={workingLabel}>
+        <span className="text-xs text-muted-foreground italic">{t("task:working")}</span>
+        <GridSpinner className="text-muted-foreground shrink-0" />
+      </span>
+    );
+  }
+  const normalized = resolveSubagentTerminalStatus(status, payloadStatus);
+  if (normalized === "error" || normalized === "cancelled") {
+    const label = normalized === "cancelled" ? t("task:statusCancelled") : t("task:failed");
+    return (
+      <span className="shrink-0" title={label} aria-label={label}>
+        <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
+      </span>
+    );
+  }
+  const completedLabel = t("task:statusCompleted");
+  return (
+    <span className="shrink-0" title={completedLabel} aria-label={completedLabel}>
+      <IconCheck aria-hidden className="h-3.5 w-3.5 text-muted-foreground" />
+    </span>
+  );
+}
 
 function SubagentHeader({
   isExpanded,
   subagentType,
   description,
   isActive,
+  status,
+  payloadStatus,
   childCount,
   hasExpandableContent,
   onToggle,
@@ -141,7 +233,6 @@ function SubagentHeader({
   const { t } = useTranslation();
   const shownDescription = stripSubagentTypePrefix(description, subagentType);
   const showDescription = shownDescription !== "";
-  const showInlineWorking = isActive && !hasExpandableContent;
   const content = (
     <>
       {hasExpandableContent &&
@@ -171,10 +262,7 @@ function SubagentHeader({
           {shownDescription}
         </span>
       )}
-      {showInlineWorking && (
-        <span className="text-xs text-muted-foreground italic">{t("task:working")}</span>
-      )}
-      {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
+      <SubagentStatusIcon isActive={isActive} status={status} payloadStatus={payloadStatus} />
       {childCount > 0 && (
         <span
           data-testid="subagent-child-count"
@@ -311,6 +399,8 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         subagentType={subagentType}
         description={description}
         isActive={isActive}
+        status={metadata?.status}
+        payloadStatus={subagentTask?.status}
         childCount={childCount}
         hasExpandableContent={hasExpandableContent}
         onToggle={handleToggle}

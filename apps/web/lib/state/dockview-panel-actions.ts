@@ -1,5 +1,9 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
-import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type {
+  ChangeLayer,
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+} from "@/lib/state/diff-target-types";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";
@@ -237,6 +241,9 @@ function openOrReplacePreview(args: OpenPreviewArgs): void {
   // Always prefer an existing pinned panel for this item — never disturb it.
   const pinned = api.getPanel(pinnedId);
   if (pinned) {
+    if (type === "commit-detail") {
+      pinned.api.updateParameters({ ...(pinned.params ?? {}), ...params });
+    }
     if (!quiet) pinned.api.setActive();
     return;
   }
@@ -374,6 +381,11 @@ function buildFileEditorAction(get: StoreGet) {
   };
 }
 
+function buildFileDiffItemId(path: string, scope: string | undefined, layer?: ChangeLayer): string {
+  const scopedItemId = buildRepoScopedItemId(path, scope);
+  return layer ? `${layer}:${scopedItemId}` : scopedItemId;
+}
+
 /**
  * Build the `addFileDiffPanel` action: opens the file-diff preview (or pinned
  * panel) for a path, passing content/source/repository/pr params through and
@@ -388,11 +400,16 @@ function buildFileDiffAction(get: StoreGet) {
       source?: string;
       repositoryName?: string;
       prKey?: string;
+      changeLayer?: ChangeLayer;
     },
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
-    const itemId = buildRepoScopedItemId(path, opts?.prKey ?? opts?.repositoryName);
+    const itemId = buildFileDiffItemId(
+      path,
+      opts?.prKey ?? opts?.repositoryName,
+      opts?.changeLayer,
+    );
     openOrReplacePreview({
       api,
       type: "file-diff",
@@ -405,6 +422,7 @@ function buildFileDiffAction(get: StoreGet) {
         source: opts?.source,
         repositoryName: opts?.repositoryName,
         prKey: opts?.prKey,
+        changeLayer: opts?.changeLayer,
       },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
@@ -438,7 +456,11 @@ function buildCommitItemId(
 function buildCommitDetailAction(get: StoreGet) {
   return (
     requestedTarget: CommitDetailTarget | string,
-    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+    opts?: OpenPanelOpts & {
+      groupId?: string;
+      repo?: string;
+      fileNavigation?: CommitFileNavigationRequest;
+    },
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
@@ -462,6 +484,7 @@ function buildCommitDetailAction(get: StoreGet) {
         target,
         commitSha: target.sha,
         ...(target.source === "local" && target.repo ? { repo: target.repo } : {}),
+        fileNavigation: opts?.fileNavigation,
       },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,

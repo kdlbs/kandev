@@ -1,5 +1,5 @@
+import { existsSync } from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -48,6 +48,11 @@ test.describe("Executor reuse", () => {
     expect(env!.status).toBe("ready");
     // executor_type should be present (standalone for mock agent)
     expect(env!.executor_type).toBeDefined();
+
+    // Keep cleanup and verification in one attempt so a retry cannot recreate
+    // the worker-scoped seed checkout and mask a cleanup regression.
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+    expect(existsSync(seedData.repositoryPath)).toBe(true);
   });
 
   test("second session reuses same task environment by default", async ({
@@ -85,14 +90,10 @@ test.describe("Executor reuse", () => {
     const envBefore = await apiClient.getTaskEnvironment(task.id);
     expect(envBefore).not.toBeNull();
 
-    // 4. Navigate to task and create second session via dialog
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Reuse Env Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 4. Navigate to the task through its API-authoritative route. The Kanban
+    // projection can still be settling after the session reaches its terminal
+    // state, so a card lookup would race a perfectly valid task.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -164,14 +165,8 @@ test.describe("Executor reuse", () => {
     expect(envBefore).not.toBeNull();
     expect(envBefore!.executor_type).toBe("worktree");
 
-    // Navigate to task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Reset Env Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // Open the API-created task directly; its Kanban projection may still be settling.
+    await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

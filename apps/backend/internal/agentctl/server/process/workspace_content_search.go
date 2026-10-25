@@ -120,11 +120,13 @@ func (wt *WorkspaceTracker) SearchContent(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	exclusions, revision := wt.recoveryExclusionSnapshot()
 
 	files, err := wt.getFileList(ctx)
 	if err != nil {
 		return nil, err
 	}
+	files = filterFileList(files, exclusions)
 	sort.Slice(files.Files, func(i, j int) bool {
 		return files.Files[i].Path < files.Files[j].Path
 	})
@@ -148,6 +150,10 @@ func (wt *WorkspaceTracker) SearchContent(
 		if err != nil {
 			return nil, err
 		}
+	}
+	_, currentRevision := wt.recoveryExclusionSnapshot()
+	if currentRevision != revision {
+		return nil, ErrWorkspaceExclusionsChanged
 	}
 	return contentSearchResults(ranked), nil
 }

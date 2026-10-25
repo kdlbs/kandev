@@ -18,7 +18,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Checkbox } from "@kandev/ui/checkbox";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskReview } from "@/hooks/domains/review/use-task-review";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -42,14 +42,14 @@ type ReviewTopBarProps = {
   onToggleSplitView: (split: boolean) => void;
   wordWrap: boolean;
   onToggleWordWrap: (wrap: boolean) => void;
-  onSendComments: (comments: DiffComment[]) => void;
+  onSendComments: (comments: ReviewComment[]) => Promise<boolean>;
+  sendingComments?: boolean;
   onClose: () => void;
   /** Selects a file in the review diff — used to jump to a finding's file. */
   onSelectFile: (fileKey: string) => void;
   onRequestWalkthrough?: () => void;
   requestWalkthroughDisabled?: boolean;
-  getPendingComments: () => DiffComment[];
-  markCommentsSent: (ids: string[]) => void;
+  getPendingComments: () => ReviewComment[];
   prs: TaskPR[];
   selectedPR: TaskPR | null;
   onSelectPR?: (pr: TaskPR) => void;
@@ -217,7 +217,7 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   onRequestWalkthrough,
   requestWalkthroughDisabled,
   getPendingComments,
-  markCommentsSent,
+  sendingComments = false,
   prs,
   selectedPR,
   onSelectPR,
@@ -231,12 +231,11 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const userSettings = useAppStore((state) => state.userSettings);
 
-  const handleFixComments = useCallback(() => {
+  const handleFixComments = useCallback(async () => {
     const comments = getPendingComments();
     if (comments.length === 0) return;
-    onSendComments(comments);
-    markCommentsSent(comments.map((c) => c.id));
-  }, [getPendingComments, onSendComments, markCommentsSent]);
+    await onSendComments(comments);
+  }, [getPendingComments, onSendComments]);
 
   const handleToggleAutoMark = useCallback(
     (checked: boolean) => {
@@ -270,6 +269,7 @@ export const ReviewTopBar = memo(function ReviewTopBar({
       />
       {commentCount > 0 && (
         <FixCommentsButton
+          sendingComments={sendingComments}
           commentCount={commentCount}
           getPendingComments={getPendingComments}
           onFixComments={handleFixComments}

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workspaces/creation.md"
+spec: "../../specs/workspaces/requirements/creation.md"
 ---
 
 # Task 02: Kanban workspace workflow bootstrap
@@ -37,7 +37,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/workspaces/creation.md`.
+- `docs/specs/workspaces/requirements/creation.md`.
 - `docs/plans/creation-flow-reliability/plan.md` backend section.
 - Built-in template `apps/backend/config/workflows/kanban.yml`.
 - Office adapter `apps/backend/internal/backendapp/adapters_office.go`.

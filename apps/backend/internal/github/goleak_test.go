@@ -21,6 +21,7 @@ import (
 // these readers before checking for leaks; doing it here keeps the assertion
 // strict (no broad IgnoreTopFunction suppression) without polluting prod code.
 func TestMain(m *testing.M) {
+	clearAmbientGitHubEnv()
 	exitCode := m.Run()
 	if tr, ok := http.DefaultTransport.(*http.Transport); ok {
 		tr.CloseIdleConnections()

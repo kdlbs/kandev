@@ -40,3 +40,30 @@ func TestHub_ClientLifecycleCallsReturnAfterShutdown(t *testing.T) {
 		})
 	}
 }
+
+func TestHubClientDisconnectNotifiesListenerOnce(t *testing.T) {
+	h := newTestHub(t)
+	client := newTestClient("connection-a")
+	h.clients[client] = true
+	disconnected := make(chan string, 1)
+	h.SetClientDisconnectListener(func(connectionID string) {
+		disconnected <- connectionID
+	})
+
+	h.removeClient(client)
+	h.removeClient(client)
+
+	select {
+	case connectionID := <-disconnected:
+		if connectionID != client.ID {
+			t.Fatalf("disconnect notification = %q, want %q", connectionID, client.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("disconnect listener was not called")
+	}
+	select {
+	case duplicate := <-disconnected:
+		t.Fatalf("duplicate disconnect notification = %q", duplicate)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

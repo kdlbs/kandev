@@ -66,10 +66,10 @@ func TestTaskStatusSummarySchemaReplayAndCascade(t *testing.T) {
 		t.Fatalf("summary rows after task deletion = %d, want 0", count)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations twice: %v", err)
 	}
 }
@@ -170,6 +170,12 @@ func TestTaskLastActivityBatch(t *testing.T) {
 	seedTaskAt("task-activity-active", base.Add(2*time.Hour), base.Add(3*time.Hour))
 	seedTaskAt("task-activity-no-session", base.Add(4*time.Hour), base.Add(5*time.Hour))
 	seedTaskAt("task-activity-queued", base.Add(4*time.Hour), base.Add(5*time.Hour))
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+		VALUES (?, ?, 'RUNNING', ?, ?)
+	`), "session-activity-queued", "task-activity-queued", base, base); err != nil {
+		t.Fatalf("seed queued activity session: %v", err)
+	}
 
 	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
 	if err != nil {
@@ -244,6 +250,17 @@ func TestTaskLastActivityBatch(t *testing.T) {
 		CreatedAt:     base.Add(12 * time.Hour),
 	}); err != nil {
 		t.Fatalf("create agent message: %v", err)
+	}
+	lifecycleCompletedAt := base.Add(14 * time.Hour)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-activity-lifecycle",
+		TaskSessionID: "session-activity-turn",
+		TaskID:        "task-activity-turn",
+		StartedAt:     base.Add(13 * time.Hour),
+		CompletedAt:   &lifecycleCompletedAt,
+		Metadata:      map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	}); err != nil {
+		t.Fatalf("create lifecycle turn: %v", err)
 	}
 	if err := repo.CreateTurn(ctx, &models.Turn{
 		ID:            "turn-activity-active",

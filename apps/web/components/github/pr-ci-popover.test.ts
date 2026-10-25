@@ -5,6 +5,7 @@ import type { CheckRun, TaskPR } from "@/lib/types/github";
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task",
     owner: "o",
     repo: "r",

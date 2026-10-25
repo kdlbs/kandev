@@ -34,6 +34,22 @@ func TestIsNotFoundErr(t *testing.T) {
 	}
 }
 
+func TestGHClientClassifiesRateLimitStderrWithoutTracker(t *testing.T) {
+	err := (&GHClient{}).inspectRateStderr(
+		[]string{"api", "graphql"},
+		"HTTP 403: API rate limit exceeded",
+	)
+	if err == nil {
+		t.Fatal("inspectRateStderr returned nil for a rate-limit refusal")
+	}
+	if err.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("FailureKind = %q, want %q", err.FailureKind, FailureSecondaryRateLimit)
+	}
+	if err.Resource != ResourceGraphQL {
+		t.Fatalf("Resource = %q, want %q", err.Resource, ResourceGraphQL)
+	}
+}
+
 func TestIsForbiddenErr(t *testing.T) {
 	cases := []struct {
 		name string
@@ -146,19 +162,17 @@ func TestGHSearchParsingPreservesImmutableIdentity(t *testing.T) {
 	}
 }
 
-func TestGHClient_GetPRParsesSupportedCLIRepositoryShape(t *testing.T) {
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "gh-args.log")
-	ghPath := filepath.Join(binDir, "gh")
-	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$GH_ARGS_LOG"
-printf '%s\n' '{"number":7,"title":"Remote contribution","url":"https://github.com/acme/widget/pull/7","state":"OPEN","body":"","headRefName":"feature/remote","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","additions":1,"deletions":0,"createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-02T00:00:00Z","mergedAt":"","closedAt":"","reviewRequests":[],"maintainerCanModify":true,"headRepository":{"id":"R_kgDOFork123","name":"widget-fork","nameWithOwner":"contributor/widget-fork","url":"https://github.com/contributor/widget-fork","cloneUrl":"https://github.com/contributor/widget-fork.git"},"headRepositoryOwner":{"login":"contributor"}}'
-`
-	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("GH_ARGS_LOG", logPath)
+func TestPRBaseGHCLIQueriesAndRetainsBaseOID(t *testing.T) {
+	calls := newFakeGH(t,
+		ghResponse{
+			Prefix: "pr view 7",
+			Stdout: `{"number":7,"title":"Remote contribution","url":"https://github.com/acme/widget/pull/7","state":"OPEN","body":"","headRefName":"feature/remote","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","additions":1,"deletions":0,"createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-02T00:00:00Z","mergedAt":"","closedAt":"","reviewRequests":[],"maintainerCanModify":true,"headRepository":{"id":"R_kgDOFork123","name":"widget-fork","nameWithOwner":"contributor/widget-fork","url":"https://github.com/contributor/widget-fork","cloneUrl":"https://github.com/contributor/widget-fork.git"},"headRepositoryOwner":{"login":"contributor"}}`,
+		},
+		ghResponse{
+			Prefix: "api repos/acme/widget/pulls/7",
+			Stdout: `{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","ref":"release/next","repo":{"id":17,"name":"widget","owner":{"login":"upstream"}}}`,
+		},
+	)
 
 	pr, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 7)
 	if err != nil {
@@ -167,18 +181,28 @@ printf '%s\n' '{"number":7,"title":"Remote contribution","url":"https://github.c
 	if pr.HeadRepoNodeID != "R_kgDOFork123" || pr.HeadRepoOwner != "contributor" || pr.HeadRepoName != "widget-fork" {
 		t.Fatalf("source repository = (%q, %q, %q), want CLI node ID and owner shape", pr.HeadRepoNodeID, pr.HeadRepoOwner, pr.HeadRepoName)
 	}
-	if pr.BaseRepoOwner != "acme" || pr.BaseRepoName != "widget" || pr.BaseDefaultBranch != "" {
-		t.Fatalf("target repository = (%q, %q, %q), want acme/widget with no guessed default branch", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseDefaultBranch)
+	if pr.BaseRepoID != 17 || pr.BaseRepoOwner != "upstream" || pr.BaseRepoName != "widget" ||
+		pr.BaseBranch != "release/next" || pr.BaseDefaultBranch != "" {
+		t.Fatalf("target repository = (%d, %q, %q), base=%q default=%q, want REST target identity and ref", pr.BaseRepoID, pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseBranch, pr.BaseDefaultBranch)
 	}
-	args, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read gh args: %v", err)
+	got := calls(t)
+	assertGHArgv(t, got, 0, []string{
+		"pr", "view", "7", "--repo", "acme/widget", "--json",
+		"number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,changedFiles,mergedBy,autoMergeRequest,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner",
+	})
+	assertGHArgv(t, got, 1, []string{
+		"api", "repos/acme/widget/pulls/7", "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}",
+	})
+	for _, invocation := range got {
+		for index, arg := range invocation {
+			if arg == "--json" && index+1 < len(invocation) && strings.Contains(invocation[index+1], "baseRefOid") {
+				t.Fatalf("unsupported baseRefOid requested from gh pr --json: %#v", invocation)
+			}
+		}
 	}
-	if !strings.Contains(string(args), "headRepositoryOwner") {
-		t.Fatalf("GetPR() did not request headRepositoryOwner: %s", args)
-	}
-	if strings.Contains(string(args), "baseRepository") {
-		t.Fatalf("GetPR() requested unsupported baseRepository field: %s", args)
+	if pr.BaseSHA != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("BaseSHA = %q, want REST base.sha", pr.BaseSHA)
 	}
 }
 
@@ -192,7 +216,7 @@ case "$*" in
   *check-runs*)
     case "$*" in
       *--slurp*) printf '%s\n' 'unsupported slurp' >&2; exit 1 ;;
-      *--paginate*) printf '%s\n' '{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}' '{"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint"}' ;;
+      *--paginate*) printf '%s\n' '{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}' '{"id":42,"name":"lint","status":"completed","conclusion":"failure","html_url":"https://ci/lint","app":{"id":17,"slug":"github-actions"},"check_suite":{"id":99}}' ;;
       *) printf '%s\n' '[{"name":"unit","status":"completed","conclusion":"success","html_url":"https://ci/unit"}]' ;;
     esac
     ;;
@@ -220,7 +244,7 @@ esac
 			break
 		}
 	}
-	if lint == nil || lint.Conclusion != "failure" {
+	if lint == nil || lint.Conclusion != "failure" || lint.ID != 42 || lint.AppID != 17 || lint.AppSlug != "github-actions" || lint.CheckSuiteID != 99 {
 		t.Fatalf("expected failed lint check from paginated output, got %+v", checks)
 	}
 	logged, err := os.ReadFile(logPath)
@@ -598,18 +622,30 @@ func TestGHStderrIndicatesRateLimit(t *testing.T) {
 func TestGHClient_InspectRateStderr_MarksGraphQL(t *testing.T) {
 	tracker := NewRateTracker(nil, nil)
 	c := NewGHClient().WithRateTracker(tracker)
-	c.inspectRateStderr([]string{"pr", "view", "1"}, "GraphQL: API rate limit already exceeded")
-	if !tracker.IsExhausted(ResourceGraphQL) {
-		t.Errorf("expected graphql exhausted")
+	apiErr := c.inspectRateStderr([]string{"pr", "view", "1"}, "GraphQL: API rate limit already exceeded")
+	if apiErr == nil || apiErr.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("typed error = %+v", apiErr)
+	}
+	if tracker.IsExhausted(ResourceGraphQL) {
+		t.Error("stderr without a zero primary snapshot must not exhaust graphql")
+	}
+	if secondary := tracker.Secondary(ResourceGraphQL); !secondary.Active {
+		t.Errorf("expected observed graphql secondary throttle: %+v", secondary)
 	}
 }
 
 func TestGHClient_InspectRateStderr_MarksSearchForSearchEndpoints(t *testing.T) {
 	tracker := NewRateTracker(nil, nil)
 	c := NewGHClient().WithRateTracker(tracker)
-	c.inspectRateStderr([]string{"api", "search/issues"}, "API rate limit exceeded")
-	if !tracker.IsExhausted(ResourceSearch) {
-		t.Errorf("expected search exhausted")
+	apiErr := c.inspectRateStderr([]string{"api", "search/issues"}, "API rate limit exceeded")
+	if apiErr == nil || apiErr.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("typed error = %+v", apiErr)
+	}
+	if tracker.IsExhausted(ResourceSearch) {
+		t.Error("stderr without a zero primary snapshot must not exhaust search")
+	}
+	if secondary := tracker.Secondary(ResourceSearch); !secondary.Active {
+		t.Errorf("expected observed search secondary throttle: %+v", secondary)
 	}
 }
 
@@ -647,6 +683,21 @@ func TestResourceForGHArgs(t *testing.T) {
 				t.Errorf("resourceForGHArgs(%v) = %s, want %s", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestIsGitHubRateLimitProbe(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"api", "rate_limit"}, want: true},
+		{args: []string{"api", "user"}, want: false},
+		{args: []string{"pr", "list"}, want: false},
+	} {
+		if got := isGitHubRateLimitProbe(tc.args); got != tc.want {
+			t.Errorf("isGitHubRateLimitProbe(%v) = %v, want %v", tc.args, got, tc.want)
+		}
 	}
 }
 
@@ -783,14 +834,20 @@ func TestBuildUserReposGHArgs_LimitClamping(t *testing.T) {
 	}
 }
 
-// Regression: a 429 on `gh api repos/...` (REST) must mark Core, not GraphQL.
-// Previously this would pause the GraphQL PR monitor incorrectly.
+// Regression: a rate refusal on `gh api repos/...` is a Core secondary
+// observation unless a real zero-remaining primary snapshot exists.
 func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
 	tracker := NewRateTracker(nil, nil)
 	c := NewGHClient().WithRateTracker(tracker)
-	c.inspectRateStderr([]string{"api", "repos/o/r/pulls/1"}, "API rate limit exceeded")
-	if !tracker.IsExhausted(ResourceCore) {
-		t.Errorf("expected core bucket exhausted for REST endpoint")
+	apiErr := c.inspectRateStderr([]string{"api", "repos/o/r/pulls/1"}, "API rate limit exceeded")
+	if apiErr == nil || apiErr.FailureKind != FailureSecondaryRateLimit {
+		t.Fatalf("typed error = %+v", apiErr)
+	}
+	if tracker.IsExhausted(ResourceCore) {
+		t.Error("stderr without a zero primary snapshot must not exhaust core")
+	}
+	if secondary := tracker.Secondary(ResourceCore); !secondary.Active {
+		t.Errorf("expected observed core secondary throttle: %+v", secondary)
 	}
 	if tracker.IsExhausted(ResourceGraphQL) {
 		t.Errorf("REST 429 must not pause graphql bucket")

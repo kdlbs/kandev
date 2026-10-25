@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/pr-task-status-summary.md
+spec: docs/specs/ui/requirements/pr-task-status-summary.md
 created: 2026-08-06
 status: implemented
 ---

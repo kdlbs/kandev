@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -37,10 +38,19 @@ func RegisterRepositoryRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc
 
 func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
+	api.POST("/workspaces/:id/repository-checkout-capabilities", h.httpRepositoryCheckoutCapabilities)
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
+	api.POST("/workspaces/:id/repositories/remote", h.httpRegisterRemoteRepository)
 	api.POST("/workspaces/:id/repositories/initialize-local", h.httpInitializeLocalRepository)
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
+	api.GET("/workspaces/:id/repositories/discovery", h.httpGetDiscoverySnapshot)
+	api.POST("/workspaces/:id/repositories/discovery/refresh", h.httpRefreshDiscovery)
+	api.GET("/repositories/discovery/roots", h.httpListDiscoveryRoots)
+	api.POST("/repositories/discovery/roots", h.httpAddDiscoveryRoot)
+	api.POST("/repositories/discovery/roots/confirm-home", h.httpConfirmHomeDiscovery)
+	api.POST("/repositories/discovery/roots/reconnect", h.httpReconnectDiscoveryRoot)
+	api.DELETE("/repositories/discovery/roots", h.httpRemoveDiscoveryRoot)
 	// Unified branch listing — accepts either ?repository_id= for an imported
 	// workspace repo, or ?path= for an on-machine folder discovered but not
 	// yet imported. Both paths bottom out in `listGitBranches`; the only
@@ -118,37 +128,173 @@ func (h *RepositoryHandlers) httpListRepositories(c *gin.Context) {
 }
 
 func (h *RepositoryHandlers) httpDiscoverRepositories(c *gin.Context) {
+	workspaceID := c.Param("id")
 	root := c.Query("root")
-	result, err := h.service.DiscoverLocalRepositories(c.Request.Context(), root)
+	result, err := h.service.DiscoverLocalRepositoriesForWorkspace(
+		c.Request.Context(), workspaceID, root,
+	)
 	if err != nil {
-		if errors.Is(err, service.ErrPathNotAllowed) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "root is not within allowed paths"})
-			return
-		}
-		h.logger.Error("failed to discover repositories", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to discover repositories"})
+		h.writeDiscoveryError(c, err)
 		return
 	}
 
-	resp := dto.RepositoryDiscoveryResponse{
-		Roots:        result.Roots,
-		Repositories: make([]dto.LocalRepositoryDTO, 0, len(result.Repositories)),
-		Total:        len(result.Repositories),
+	c.JSON(http.StatusOK, discoveryResponse(result))
+}
+
+func (h *RepositoryHandlers) httpGetDiscoverySnapshot(c *gin.Context) {
+	result, err := h.service.GetLocalRepositoryDiscoveryForWorkspace(
+		c.Request.Context(), c.Param("id"), c.Query("root"),
+	)
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
 	}
+	c.JSON(http.StatusOK, discoveryResponse(result))
+}
+
+func (h *RepositoryHandlers) httpRefreshDiscovery(c *gin.Context) {
+	result, err := h.service.RefreshLocalRepositoryDiscoveryForWorkspaceWithTrigger(
+		c.Request.Context(),
+		c.Param("id"),
+		c.Query("root"),
+		service.NormalizeRepositoryDiscoveryTrigger(c.Query("trigger")),
+	)
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, discoveryResponse(result))
+}
+
+func discoveryResponse(result service.RepositoryDiscoveryResult) dto.RepositoryDiscoveryResponse {
+	rootStates := make([]dto.DesktopDiscoveryRootDTO, 0, len(result.RootStates))
+	for _, root := range result.RootStates {
+		rootStates = append(rootStates, dto.FromDesktopDiscoveryRoot(root))
+	}
+	repositories := make([]dto.LocalRepositoryDTO, 0, len(result.Repositories))
 	for _, repo := range result.Repositories {
-		resp.Repositories = append(resp.Repositories, dto.FromLocalRepository(repo))
+		repositories = append(repositories, dto.FromLocalRepository(repo))
 	}
-	c.JSON(http.StatusOK, resp)
+	return dto.RepositoryDiscoveryResponse{
+		Roots:                    result.Roots,
+		Repositories:             repositories,
+		Total:                    len(repositories),
+		DesktopRuntime:           result.DesktopRuntime,
+		RootStates:               rootStates,
+		ScanTime:                 result.ScanTime,
+		Refreshing:               result.Refreshing,
+		Cached:                   result.Cached,
+		HomeConfirmationRequired: result.HomeConfirmationRequired,
+		FailedRoots:              result.FailedRoots,
+	}
+}
+
+func (h *RepositoryHandlers) writeDiscoveryError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+		handleNotFound(c, h.logger, err, "workspace not found")
+	case errors.Is(err, service.ErrPathNotAllowed), errors.Is(err, service.ErrInvalidDiscoveryRoot):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrDesktopDiscoveryUnavailable):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrHomeDiscoveryConfirmationStale):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		h.logger.Error("failed to load repository discovery", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load repository discovery"})
+	}
+}
+
+type discoveryRootRequest struct {
+	Path    string `json:"path"`
+	NewPath string `json:"new_path"`
+}
+
+func (h *RepositoryHandlers) httpListDiscoveryRoots(c *gin.Context) {
+	roots, err := h.service.ListDesktopDiscoveryRoots(c.Request.Context())
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	response := make([]dto.DesktopDiscoveryRootDTO, 0, len(roots))
+	for _, root := range roots {
+		if root != nil {
+			response = append(response, dto.FromDesktopDiscoveryRoot(*root))
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"roots": response})
+}
+
+func (h *RepositoryHandlers) httpAddDiscoveryRoot(c *gin.Context) {
+	var body discoveryRootRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
+		return
+	}
+	root, err := h.service.AddDesktopDiscoveryRoot(c.Request.Context(), body.Path)
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	if root == nil {
+		h.logger.Error("desktop discovery root was not returned after add")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add discovery root"})
+		return
+	}
+	c.JSON(http.StatusCreated, dto.FromDesktopDiscoveryRoot(*root))
+}
+
+func (h *RepositoryHandlers) httpConfirmHomeDiscovery(c *gin.Context) {
+	root, err := h.service.ConfirmHomeDesktopDiscovery(c.Request.Context())
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	if root == nil {
+		h.logger.Error("desktop Home discovery root was not returned after confirmation")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm Home discovery"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromDesktopDiscoveryRoot(*root))
+}
+
+func (h *RepositoryHandlers) httpReconnectDiscoveryRoot(c *gin.Context) {
+	var body discoveryRootRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
+		return
+	}
+	root, err := h.service.ReconnectDesktopDiscoveryRoot(c.Request.Context(), body.Path, body.NewPath)
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	if root == nil {
+		h.logger.Error("desktop discovery root was not returned after reconnect")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reconnect discovery root"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromDesktopDiscoveryRoot(*root))
+}
+
+func (h *RepositoryHandlers) httpRemoveDiscoveryRoot(c *gin.Context) {
+	if err := h.service.RemoveDesktopDiscoveryRoot(c.Request.Context(), c.Query("path")); err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // httpListDirectory lists the immediate subdirectories of ?path= (defaults
 // to $HOME). The picker deliberately allows browsing any directory the
 // kandev process has read access to — kandev runs locally on the user's
 // own machine, and the repo-less starting-folder flow legitimately wants
-// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded.
+// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded unless
+// ?include_hidden is exactly "true"; any other value keeps the current
+// contract, so a display-only setting can never turn into a request error.
 func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 	path := c.Query("path")
-	result, err := h.service.ListDirectory(c.Request.Context(), path)
+	result, err := h.service.ListDirectory(c.Request.Context(), path, includeHiddenRequested(c))
 	if err != nil {
 		// Log the raw OS error for debugging but return a generic message —
 		// otherwise we leak host paths and access patterns to the client (e.g.
@@ -163,6 +309,14 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 		"entries":   directoryEntriesResponse(result.Entries),
 		"choosable": result.Choosable,
 	})
+}
+
+// includeHiddenRequested reports whether the caller asked to reveal hidden
+// (".") directories. Only the exact value "true" activates it: a total
+// comparison cannot fail, so an absent or mis-spelled value falls back to the
+// default listing instead of rejecting a display-only request.
+func includeHiddenRequested(c *gin.Context) bool {
+	return c.Query("include_hidden") == "true"
 }
 
 func directoryEntriesResponse(entries []service.DirectoryEntry) []gin.H {
@@ -181,7 +335,7 @@ type httpCreateDirectoryRequest struct {
 func (h *RepositoryHandlers) httpCreateDirectory(c *gin.Context) {
 	var body httpCreateDirectoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	result, err := h.service.CreateDirectory(c.Request.Context(), body.ParentPath, body.Name)
@@ -400,7 +554,7 @@ func (h *RepositoryHandlers) readOnlyRepositoryMessage(ctx context.Context, repo
 func (h *RepositoryHandlers) httpInitializeLocalRepository(c *gin.Context) {
 	var body httpInitializeLocalRepositoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if h.rejectReadOnlyWorkspaceHTTP(c, c.Param("id")) {
@@ -431,7 +585,7 @@ func (h *RepositoryHandlers) httpInitializeLocalRepository(c *gin.Context) {
 func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 	var body httpCreateRepositoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if body.Name == "" {
@@ -557,7 +711,7 @@ type httpUpdateRepositoryRequest struct {
 func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 	var body httpUpdateRepositoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if h.rejectReadOnlyRepositoryHTTP(c, c.Param("id")) {

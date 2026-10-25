@@ -56,13 +56,14 @@ func (m *Manager) PushComparisonTargetsForTask(ctx context.Context, taskID strin
 		if exec.TaskID != taskID {
 			continue
 		}
-		client := exec.GetAgentCtlClient()
+		client, releaseClient := exec.AcquireAgentCtlClient()
 		if client == nil {
 			continue
 		}
 		pushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		err := client.SetComparisonTargets(pushCtx, targets)
 		cancel()
+		releaseClient()
 		if err != nil {
 			m.logger.Warn("failed to push comparison targets to agentctl",
 				zap.String("task_id", taskID),

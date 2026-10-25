@@ -1,13 +1,40 @@
 /* eslint-disable max-lines -- groups all create-dialog selector subcomponents; splitting per-selector files is a separate refactor. */
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback, useMemo } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  memo,
+  useCallback,
+  useMemo,
+} from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
-import { scoreBranch } from "@/lib/utils/branch-filter";
-import { BranchRefreshButton } from "./branch-refresh-button";
+import type { ComboboxOption } from "./combobox";
+import { Button } from "@kandev/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@kandev/ui/command";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import {
   processFile,
@@ -29,6 +56,14 @@ import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import { MentionMenu } from "@/components/task/chat/mention-menu";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
+import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
+import { TaskPromptReferenceEditor } from "@/components/task-prompt-reference-editor";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import { composeLaunchPreviewPrompt } from "@/components/task-create-dialog-launch-preview";
+import {
+  TaskCreateLaunchPreviewContent,
+  TaskCreateLaunchPreviewToggle,
+} from "@/components/task-create-dialog-launch-preview-control";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { JiraImportBar } from "@/components/jira/jira-import-bar";
 import { LinearImportBar } from "@/components/linear/linear-import-bar";
@@ -42,12 +77,18 @@ import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { TaskCreateDialogTaskCreatedContext } from "./task-create-dialog-task-created";
 import {
   composerIdentity,
   composerInsertionText,
   useStablePluginComposerCapability,
 } from "@/lib/plugins/composer-capability";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { ChatInputPluginActions } from "@/components/task/chat/chat-input-plugin-actions";
+
+export { BranchSelector } from "./branch-selector";
+export type { BranchOption, BranchSelectorProps } from "./branch-selector";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -118,80 +159,23 @@ export const RepositorySelector = memo(function RepositorySelector({
   );
 });
 
-type BranchOption = {
-  value: string;
-  label: string;
-  keywords?: string[];
-  renderLabel: () => React.ReactNode;
-};
-
-type BranchSelectorProps = {
-  options: BranchOption[];
-  value: string;
-  onValueChange: (value: string) => void;
-  disabled: boolean;
-  placeholder: string;
-  searchPlaceholder: string;
-  emptyMessage: string;
-  triggerClassName?: string;
-  onRefresh?: () => void;
-  refreshing?: boolean;
-  fetchedAt?: string;
-  fetchError?: string;
-  loading?: boolean;
-};
-
-export const BranchSelector = memo(function BranchSelector({
-  options,
-  value,
-  onValueChange,
-  disabled,
-  placeholder,
-  searchPlaceholder,
-  emptyMessage,
-  triggerClassName,
-  onRefresh,
-  refreshing,
-  fetchedAt,
-  fetchError,
-  loading,
-}: BranchSelectorProps) {
-  const headerAction = onRefresh ? (
-    <BranchRefreshButton
-      onRefresh={onRefresh}
-      refreshing={refreshing}
-      fetchedAt={fetchedAt}
-      fetchError={fetchError}
-    />
-  ) : undefined;
-  return (
-    <Combobox
-      options={options}
-      value={value}
-      onValueChange={onValueChange}
-      placeholder={placeholder}
-      searchPlaceholder={searchPlaceholder}
-      emptyMessage={emptyMessage}
-      disabled={disabled}
-      dropdownLabel={t("task:baseBranch2")}
-      className={disabled ? undefined : CURSOR_POINTER_CLASS}
-      triggerClassName={triggerClassName}
-      testId="branch-selector"
-      filter={scoreBranch}
-      headerAction={headerAction}
-      loading={loading}
-    />
-  );
-});
-
 type AgentSelectorProps = {
-  options: Array<{ value: string; label: string; renderLabel: () => React.ReactNode }>;
+  options: Array<{
+    value: string;
+    label: string;
+    renderLabel: () => React.ReactNode;
+    renderTriggerLabel?: () => React.ReactNode;
+  }>;
   value: string;
   onValueChange: (value: string) => void;
   disabled: boolean;
   placeholder: string;
   triggerClassName?: string;
   popoverPortal?: boolean;
+  touchTarget?: boolean;
+  testId?: string;
+  triggerId?: string;
+  ariaDescribedBy?: string;
 };
 
 export const AgentSelector = memo(function AgentSelector({
@@ -202,6 +186,10 @@ export const AgentSelector = memo(function AgentSelector({
   placeholder,
   triggerClassName,
   popoverPortal,
+  touchTarget,
+  testId,
+  triggerId,
+  ariaDescribedBy,
 }: AgentSelectorProps) {
   const { t } = useTranslation();
   return (
@@ -217,7 +205,10 @@ export const AgentSelector = memo(function AgentSelector({
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
-      testId="agent-profile-selector"
+      touchTarget={touchTarget}
+      testId={testId ?? "agent-profile-selector"}
+      triggerId={triggerId}
+      ariaDescribedBy={ariaDescribedBy}
     />
   );
 });
@@ -259,8 +250,8 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   );
 });
 
-type ExecutorProfileSelectorProps = {
-  options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+export type ExecutorProfileSelectorProps = {
+  options: ComboboxOption[];
   value: string;
   onValueChange: (value: string) => void;
   disabled: boolean;
@@ -268,6 +259,94 @@ type ExecutorProfileSelectorProps = {
   triggerClassName?: string;
   popoverPortal?: boolean;
 };
+
+function TouchExecutorProfileSelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  triggerClassName,
+}: ExecutorProfileSelectorProps) {
+  const { t } = useTranslation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+  return (
+    <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+      <DrawerTrigger asChild>
+        <Button
+          variant="ghost"
+          role="combobox"
+          aria-label={t("task:executorProfile2")}
+          aria-expanded={drawerOpen}
+          aria-haspopup="dialog"
+          disabled={disabled}
+          data-testid="executor-profile-selector"
+          className={cn("h-11 min-h-12 w-full justify-between", triggerClassName)}
+        >
+          <span className="min-w-0 truncate text-left">
+            {selected?.renderTriggerLabel?.() ??
+              selected?.renderLabel?.() ??
+              selected?.label ??
+              placeholder}
+          </span>
+          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent className="flex h-[min(82dvh,40rem)] max-h-[calc(100dvh-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
+        <DrawerHeader className="shrink-0 pr-12 text-left">
+          <DrawerTitle>{t("task:executorProfile2")}</DrawerTitle>
+          <DrawerDescription>{placeholder}</DrawerDescription>
+          <DrawerClose asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("common:close")}
+              className="absolute right-3 top-3 min-h-12 min-w-12"
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </DrawerClose>
+        </DrawerHeader>
+        <Command
+          className="min-h-0 flex-1 border-t"
+          data-testid="executor-profile-selector-dropdown"
+        >
+          <CommandInput placeholder={t("task:searchProfiles")} className="h-11 min-h-12" />
+          <CommandList className="min-h-0 flex-1 overflow-y-auto" data-vaul-no-drag>
+            <CommandEmpty>{t("task:noProfileFound")}</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option.value}
+                  value={option.value}
+                  keywords={[option.label, option.description ?? ""]}
+                  disabled={option.disabled}
+                  className="min-h-12 py-2"
+                  onSelect={() => {
+                    if (option.disabled) return;
+                    onValueChange(option.value);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <span className="flex min-w-0 flex-1 items-center">
+                    {option.renderLabel ? option.renderLabel() : option.label}
+                  </span>
+                  <IconCheck
+                    className={cn(
+                      "ml-2 h-4 w-4 shrink-0",
+                      option.value === value ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </DrawerContent>
+    </Drawer>
+  );
+}
 
 export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   options,
@@ -279,6 +358,19 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   popoverPortal,
 }: ExecutorProfileSelectorProps) {
   const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  if (usesTouchDrawer) {
+    return (
+      <TouchExecutorProfileSelector
+        options={options}
+        value={value}
+        onValueChange={onValueChange}
+        disabled={disabled}
+        placeholder={placeholder}
+        triggerClassName={triggerClassName}
+      />
+    );
+  }
   return (
     <Combobox
       options={options}
@@ -336,11 +428,21 @@ export const InlineTaskName = memo(function InlineTaskName({
 // Memoized description input to prevent re-rendering the entire dialog on every keystroke
 type TaskFormInputsProps = {
   isSessionMode: boolean;
+  promptReferencesEnabled?: boolean;
   taskId?: string | null;
   workspaceId?: string | null;
   autoFocus?: boolean;
   initialDescription: string;
   onDescriptionChange: (hasContent: boolean) => void;
+  onDescriptionValueChange?: (value: string) => void;
+  initialAttachments?: FileAttachment[];
+  onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void;
+  quickChatComposer?: boolean;
+  composerSubmitDisabled?: boolean;
+  toolbarActions?: React.ReactNode;
+  toolbarLeadingActions?: React.ReactNode;
+  toolbarAttachmentActions?: React.ReactNode;
+  contextLeadingContent?: React.ReactNode;
   onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
@@ -349,6 +451,7 @@ type TaskFormInputsProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  launchPreview?: TaskCreateLaunchPreview | null;
   jiraImport?: {
     workspaceId: string | null;
     disabled?: boolean;
@@ -372,24 +475,28 @@ type TaskFormInputsProps = {
 function useFileAttachments(
   workspaceId: string | null | undefined,
   onPendingAttachmentUploadsChange?: (pending: boolean) => void,
+  initialAttachments: FileAttachment[] = [],
+  onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void,
 ) {
-  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
-  const attachmentsRef = useRef<FileAttachment[]>([]);
+  const [attachments, setAttachments] = useState<FileAttachment[]>(initialAttachments);
+  const attachmentsRef = useRef<FileAttachment[]>(initialAttachments);
 
-  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
-    setAttachments((prev) => {
-      const next = prev.map((attachment) =>
+  const updateAttachment = useCallback(
+    (id: string, update: Partial<FileAttachment>): boolean => {
+      const next = attachmentsRef.current.map((attachment) =>
         attachment.id === id ? { ...attachment, ...update } : attachment,
       );
       attachmentsRef.current = next;
-      return next;
-    });
-  }, []);
+      setAttachments(next);
+      return onAttachmentsChange?.(next) !== false;
+    },
+    [onAttachmentsChange],
+  );
 
   const uploadPendingAttachment = useCallback(
     async (attachment: FileAttachment) => {
       if (!workspaceId || !attachment.file || attachment.attachmentId) return;
-      updateAttachment(attachment.id, { uploadStatus: "uploading" });
+      if (!updateAttachment(attachment.id, { uploadStatus: "uploading" })) return;
       try {
         const uploaded = await uploadAttachment(attachment.file, {
           workspaceId,
@@ -400,11 +507,13 @@ function useFileAttachments(
           void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
           return;
         }
-        updateAttachment(attachment.id, {
+        const keptByDraft = updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
+          expiresAt: uploaded.expires_at,
           uploadStatus: "ready",
           size: uploaded.size_bytes,
         });
+        if (!keptByDraft) void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
       } catch (error) {
         updateAttachment(attachment.id, {
           uploadStatus: "failed",
@@ -483,6 +592,16 @@ function useFileAttachments(
     if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
   }, []);
 
+  const clearAttachments = useCallback(() => {
+    const current = attachmentsRef.current;
+    attachmentsRef.current = [];
+    setAttachments([]);
+    current.forEach((attachment) => {
+      if (attachment.attachmentId)
+        void deleteAttachment(attachment.attachmentId).catch(() => undefined);
+    });
+  }, []);
+
   const handleRetryAttachment = useCallback(
     (id: string) => {
       const attachment = attachmentsRef.current.find((item) => item.id === id);
@@ -498,6 +617,7 @@ function useFileAttachments(
     addFiles,
     handleRemoveAttachment,
     handleRetryAttachment,
+    clearAttachments,
   };
 }
 
@@ -507,7 +627,7 @@ function useAttachmentHandlers(
   setIsDragging: (v: boolean) => void,
 ) {
   const handlePaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    (e: React.ClipboardEvent<HTMLElement>) => {
       if (disabled) return;
       const { files, issue } = readClipboardAttachments(e.clipboardData);
       if (files.length > 0 || issue) {
@@ -591,14 +711,17 @@ function toContextItems(
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
   const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  const isMobile = useResponsiveBreakpoint().isMobile;
+  const usesTouchTarget = usesTouchDrawer || isMobile;
   return (
-    <div className="flex items-center px-1 pb-1">
+    <div className="flex items-center">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             aria-label={t("task:attachFiles")}
-            className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+            className={`inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${usesTouchTarget ? "h-11 w-11" : "h-7 w-7"} ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
           >
@@ -611,13 +734,25 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
   );
 }
 
-function useDescriptionInput(
-  initialDescription: string,
-  autoFocus: boolean | undefined,
-  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>,
-  onDescriptionChange: (hasContent: boolean) => void,
-  attachments: FileAttachment[],
-) {
+type DescriptionInputOptions = {
+  initialDescription: string;
+  autoFocus: boolean | undefined;
+  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
+  onDescriptionChange: (hasContent: boolean) => void;
+  onDescriptionValueChange?: (value: string) => void;
+  attachments: FileAttachment[];
+  clearAttachments: () => void;
+};
+
+function useDescriptionInput({
+  initialDescription,
+  autoFocus,
+  descriptionValueRef,
+  onDescriptionChange,
+  onDescriptionValueChange,
+  attachments,
+  clearAttachments,
+}: DescriptionInputOptions) {
   const [description, setDescription] = useState(initialDescription);
   const descriptionRef = useRef(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -632,9 +767,10 @@ function useDescriptionInput(
       const hasContent = newValue.trim().length > 0;
       descriptionRef.current = newValue;
       setDescription(newValue);
+      onDescriptionValueChange?.(newValue);
       if (hadContent !== hasContent) onDescriptionChange(hasContent);
     },
-    [onDescriptionChange],
+    [onDescriptionChange, onDescriptionValueChange],
   );
 
   useEffect(() => {
@@ -644,9 +780,10 @@ function useDescriptionInput(
         getValue: () => descriptionRef.current,
         setValue: setDescriptionValue,
         getAttachments: () => attachments,
+        clearAttachments,
       };
     }
-  }, [attachments, descriptionValueRef, setDescriptionValue]);
+  }, [attachments, clearAttachments, descriptionValueRef, setDescriptionValue]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -705,9 +842,15 @@ type FormInputsToolbarProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  launchPreview?: TaskCreateLaunchPreview | null;
+  isLaunchPromptPreview: boolean;
+  onToggleLaunchPromptPreview: () => void;
   jiraImport?: TaskFormInputsProps["jiraImport"];
   linearImport?: TaskFormInputsProps["linearImport"];
   pluginActions?: React.ReactNode;
+  toolbarActions?: React.ReactNode;
+  toolbarLeadingActions?: React.ReactNode;
+  toolbarAttachmentActions?: React.ReactNode;
 };
 
 function FormInputsToolbar({
@@ -716,18 +859,34 @@ function FormInputsToolbar({
   onEnhancePrompt,
   isEnhancingPrompt,
   isUtilityConfigured,
+  launchPreview,
+  isLaunchPromptPreview,
+  onToggleLaunchPromptPreview,
   jiraImport,
   linearImport,
   pluginActions,
+  toolbarActions,
+  toolbarLeadingActions,
+  toolbarAttachmentActions,
 }: FormInputsToolbarProps) {
   return (
-    <div className="flex items-center px-1 pb-1">
+    <div className="flex items-center p-1">
+      {toolbarLeadingActions}
       <AttachButton onClick={onAttach} disabled={disabled} />
+      {toolbarAttachmentActions}
       {onEnhancePrompt && (
         <EnhancePromptButton
           onClick={onEnhancePrompt}
           isLoading={isEnhancingPrompt ?? false}
           isConfigured={isUtilityConfigured}
+        />
+      )}
+      {launchPreview?.stepPrompt.trim() && (
+        <TaskCreateLaunchPreviewToggle
+          active={isLaunchPromptPreview}
+          disabled={disabled}
+          stepName={launchPreview.stepName}
+          onToggle={onToggleLaunchPromptPreview}
         />
       )}
       {jiraImport && (
@@ -744,7 +903,10 @@ function FormInputsToolbar({
           onImport={linearImport.onImport}
         />
       )}
-      <div className="ml-auto flex items-center">{pluginActions}</div>
+      <div className="ml-auto flex items-center gap-1">
+        {pluginActions}
+        {toolbarActions}
+      </div>
     </div>
   );
 }
@@ -771,37 +933,57 @@ function PromptMentionPopover({
 
 function useCreationComposerPluginActions(args: {
   isSessionMode: boolean;
+  quickChatComposer?: boolean;
+  composerSubmitDisabled?: boolean;
   taskId: string | null;
   disabled: boolean;
   description: string;
   descriptionRef: React.RefObject<string>;
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  focusComposer: () => boolean;
   insertAtCursor: (text: string) => void;
   submit?: () => boolean | Promise<boolean>;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
-  const surface = args.isSessionMode ? "new-session" : "task-create";
+  const registerTaskCreatedHandler = useContext(TaskCreateDialogTaskCreatedContext);
+  const surface = getCreationComposerSurface(args);
   const composer = useStablePluginComposerCapability(
     {
       insertText: (text) => {
         args.insertAtCursor(text);
         return true;
       },
-      focus: () => {
-        if (!args.textareaRef.current) return false;
-        args.textareaRef.current.focus();
-        return true;
-      },
+      focus: args.focusComposer,
       // Gate on the synchronous ref for the same reason the chat composer
       // reads its editor: insert-then-submit in one callback happens before
       // React re-renders with the new description.
       submit: async () => {
-        if (args.disabled || !args.descriptionRef.current.trim() || !args.submit) return false;
+        if (
+          args.disabled ||
+          args.composerSubmitDisabled ||
+          !args.descriptionRef.current.trim() ||
+          !args.submit
+        )
+          return false;
         return await args.submit();
       },
     },
     composerIdentity(surface, args.taskId, null),
   );
+  if (args.quickChatComposer) {
+    return (
+      <ChatInputPluginActions
+        sessionId={null}
+        taskId={null}
+        surface="quick-chat"
+        presentation={isMobile ? "mobile" : "desktop"}
+        disabled={args.disabled || args.composerSubmitDisabled}
+        submittable={
+          !args.disabled && !args.composerSubmitDisabled && args.description.trim().length > 0
+        }
+        composer={composer}
+      />
+    );
+  }
   return (
     <PluginSlot
       name={args.isSessionMode ? "new-session-input-actions" : "task-create-input-actions"}
@@ -814,9 +996,22 @@ function useCreationComposerPluginActions(args: {
         disabled: args.disabled,
         submittable: !args.disabled && args.description.trim().length > 0,
         composer,
+        ...(!args.isSessionMode && registerTaskCreatedHandler
+          ? { registerTaskCreatedHandler }
+          : {}),
       }}
+      actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
     />
   );
+}
+
+function getCreationComposerSurface(args: {
+  quickChatComposer?: boolean;
+  isSessionMode: boolean;
+}): "quick-chat" | "new-session" | "task-create" {
+  if (args.quickChatComposer) return "quick-chat";
+  if (args.isSessionMode) return "new-session";
+  return "task-create";
 }
 
 function useTextareaHandlers(
@@ -886,14 +1081,98 @@ function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
   );
 }
 
+type TaskDescriptionInputProps = {
+  isLaunchPromptPreview: boolean;
+  launchPromptPreview: string;
+  promptReferencesEnabled: boolean;
+  referenceInputRef: React.RefObject<RichTextInputHandle | null>;
+  description: string;
+  onDescriptionChange: (value: string) => void;
+  descriptionPlaceholder: string;
+  isSessionMode: boolean;
+  autoFocus?: boolean;
+  disabled?: boolean;
+  onKeyDown: TaskFormInputsProps["onKeyDown"];
+  onPaste: React.ClipboardEventHandler<HTMLElement>;
+  handleChange: React.ChangeEventHandler<HTMLTextAreaElement>;
+  handleKeyDownCapture: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+};
+
+function TaskDescriptionInput({
+  isLaunchPromptPreview,
+  launchPromptPreview,
+  promptReferencesEnabled,
+  referenceInputRef,
+  description,
+  onDescriptionChange,
+  descriptionPlaceholder,
+  isSessionMode,
+  autoFocus,
+  disabled,
+  onKeyDown,
+  onPaste,
+  handleChange,
+  handleKeyDownCapture,
+  handleKeyDown,
+  textareaRef,
+}: TaskDescriptionInputProps) {
+  if (isLaunchPromptPreview) {
+    return <TaskCreateLaunchPreviewContent content={launchPromptPreview} />;
+  }
+
+  if (promptReferencesEnabled) {
+    return (
+      <TaskPromptReferenceEditor
+        ref={referenceInputRef}
+        value={description}
+        onChange={onDescriptionChange}
+        placeholder={descriptionPlaceholder}
+        autoFocus={autoFocus}
+        disabled={disabled}
+        onKeyDown={onKeyDown}
+        onPaste={onPaste}
+      />
+    );
+  }
+
+  return (
+    <Textarea
+      ref={textareaRef}
+      placeholder={descriptionPlaceholder}
+      value={description}
+      onChange={handleChange}
+      onKeyDownCapture={handleKeyDownCapture}
+      onKeyDown={handleKeyDown}
+      onPaste={onPaste}
+      data-testid="task-description-input"
+      rows={2}
+      className={`min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
+      required={isSessionMode}
+      disabled={disabled}
+    />
+  );
+}
+
 // The input coordinates existing attachment, mention and plugin controls in one field.
 // eslint-disable-next-line max-lines-per-function
 export const TaskFormInputs = memo(function TaskFormInputs({
   workspaceId,
   isSessionMode,
+  promptReferencesEnabled = false,
   autoFocus,
   initialDescription,
   onDescriptionChange,
+  onDescriptionValueChange,
+  initialAttachments,
+  onAttachmentsChange,
+  quickChatComposer,
+  contextLeadingContent,
+  composerSubmitDisabled,
+  toolbarActions,
+  toolbarLeadingActions,
+  toolbarAttachmentActions,
   onPendingAttachmentUploadsChange,
   onKeyDown,
   descriptionValueRef,
@@ -902,12 +1181,18 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   onEnhancePrompt,
   isEnhancingPrompt,
   isUtilityConfigured,
+  launchPreview,
   jiraImport,
   linearImport,
   onComposerSubmit,
   taskId = null,
 }: TaskFormInputsProps) {
   const { t } = useTranslation();
+  const [isLaunchPromptPreview, setIsLaunchPromptPreview] = useState(false);
+  const hasLaunchPromptPreview = Boolean(launchPreview?.stepPrompt.trim());
+  useEffect(() => {
+    if (!hasLaunchPromptPreview) setIsLaunchPromptPreview(false);
+  }, [hasLaunchPromptPreview]);
   const {
     attachments,
     isDragging,
@@ -915,7 +1200,13 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     addFiles,
     handleRemoveAttachment,
     handleRetryAttachment,
-  } = useFileAttachments(workspaceId, onPendingAttachmentUploadsChange);
+    clearAttachments,
+  } = useFileAttachments(
+    workspaceId,
+    onPendingAttachmentUploadsChange,
+    initialAttachments,
+    onAttachmentsChange,
+  );
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
@@ -926,33 +1217,86 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     [attachments, handleRemoveAttachment, handleRetryAttachment],
   );
   const { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor } =
-    useDescriptionInput(
+    useDescriptionInput({
       initialDescription,
       autoFocus,
       descriptionValueRef,
       onDescriptionChange,
+      onDescriptionValueChange,
       attachments,
-    );
+      clearAttachments,
+    });
+  useEffect(() => {
+    onAttachmentsChange?.(attachments);
+  }, [attachments, onAttachmentsChange]);
+  const referenceInputRef = useRef<RichTextInputHandle | null>(null);
   const mention = useTaskCreatePromptMention({
     textareaRef,
+    inputRef: promptReferencesEnabled ? referenceInputRef : undefined,
     value: description,
     onChange: setDescriptionValue,
+    promptInsertMode: promptReferencesEnabled ? "reference" : "inline",
   });
   const { handleChange, handleKeyDownCapture, handleKeyDown } = useTextareaHandlers(
     mention,
     onKeyDown,
   );
   const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
+  const descriptionPlaceholder =
+    placeholder ??
+    (isSessionMode ? t("task:describeWhatYouWantTheAgent") : t("task:writeAPromptForTheAgent"));
+  const insertComposerText = useCallback(
+    (text: string) => {
+      if (!promptReferencesEnabled) {
+        insertAtCursor(text);
+        return;
+      }
+      const input = referenceInputRef.current;
+      if (!input) return;
+      const current = descriptionRef.current;
+      const start = input.getSelectionStart();
+      const end = input.getSelectionEnd();
+      const insert = composerInsertionText(text, start > 0 ? current.charAt(start - 1) : "");
+      if (!insert) return;
+      input.insertText(insert, start, end);
+    },
+    [descriptionRef, insertAtCursor, promptReferencesEnabled],
+  );
+  const focusComposer = useCallback(() => {
+    if (promptReferencesEnabled) {
+      const input = referenceInputRef.current;
+      if (!input) return false;
+      input.focus();
+      return true;
+    }
+    if (!textareaRef.current) return false;
+    textareaRef.current.focus();
+    return true;
+  }, [promptReferencesEnabled, textareaRef]);
+  useEffect(() => {
+    if (!promptReferencesEnabled || !autoFocus) return;
+    const input = referenceInputRef.current;
+    if (!input) return;
+    const end = input.getValue().length;
+    input.focus();
+    input.setSelectionRange(end, end);
+  }, [autoFocus, promptReferencesEnabled]);
   const pluginActions = useCreationComposerPluginActions({
     isSessionMode,
+    quickChatComposer,
+    composerSubmitDisabled,
     taskId,
     disabled: Boolean(disabled),
     description,
     descriptionRef,
-    textareaRef,
-    insertAtCursor,
+    focusComposer,
+    insertAtCursor: insertComposerText,
     submit: onComposerSubmit,
   });
+  const launchPromptPreview =
+    hasLaunchPromptPreview && launchPreview
+      ? composeLaunchPreviewPrompt(launchPreview.stepPrompt, description)
+      : "";
 
   return (
     <div
@@ -964,25 +1308,29 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       <div
         className={`min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30 ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
-        <ContextZone items={contextItems} />
-        <Textarea
-          ref={textareaRef}
-          placeholder={
-            placeholder ??
-            (isSessionMode
-              ? t("task:describeWhatYouWantTheAgent")
-              : t("task:writeAPromptForTheAgent"))
-          }
-          value={description}
-          onChange={handleChange}
-          onKeyDownCapture={handleKeyDownCapture}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          data-testid="task-description-input"
-          rows={2}
-          className={`min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 ${isSessionMode ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]" : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"}`}
-          required={isSessionMode}
+        <ContextZone
+          items={contextItems}
+          leadingContent={contextLeadingContent}
+          rowClassName={quickChatComposer ? "gap-2 px-3 py-2" : undefined}
+          scrollable={!quickChatComposer}
+        />
+        <TaskDescriptionInput
+          isLaunchPromptPreview={isLaunchPromptPreview}
+          launchPromptPreview={launchPromptPreview}
+          promptReferencesEnabled={promptReferencesEnabled}
+          referenceInputRef={referenceInputRef}
+          description={description}
+          onDescriptionChange={setDescriptionValue}
+          descriptionPlaceholder={descriptionPlaceholder}
+          isSessionMode={isSessionMode}
+          autoFocus={autoFocus}
           disabled={disabled}
+          onKeyDown={onKeyDown}
+          onPaste={handlePaste}
+          handleChange={handleChange}
+          handleKeyDownCapture={handleKeyDownCapture}
+          handleKeyDown={handleKeyDown}
+          textareaRef={textareaRef}
         />
         <FormInputsToolbar
           onAttach={handleAttachClick}
@@ -990,13 +1338,19 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           onEnhancePrompt={onEnhancePrompt}
           isEnhancingPrompt={isEnhancingPrompt}
           isUtilityConfigured={isUtilityConfigured}
+          launchPreview={launchPreview}
+          isLaunchPromptPreview={isLaunchPromptPreview}
+          onToggleLaunchPromptPreview={() => setIsLaunchPromptPreview((active) => !active)}
           jiraImport={jiraImport}
           linearImport={linearImport}
           pluginActions={pluginActions}
+          toolbarActions={toolbarActions}
+          toolbarLeadingActions={toolbarLeadingActions}
+          toolbarAttachmentActions={toolbarAttachmentActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>
-      <PromptMentionPopover mention={mention} />
+      {!promptReferencesEnabled && <PromptMentionPopover mention={mention} />}
       <DraggingOverlay isDragging={isDragging} />
     </div>
   );

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/system-page/storage-overview-parallel-scan.md
+spec: docs/specs/system-page/requirements/storage-overview-parallel-scan.md
 created: 2026-08-08
 status: completed
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-ssh-workspace-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/ssh-executor/spec.md"
+spec: "../../specs/executors/requirements/ssh-executor.md"
 ---
 
 # Task 02: SSH Container Regression

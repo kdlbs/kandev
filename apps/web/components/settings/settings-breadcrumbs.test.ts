@@ -95,6 +95,11 @@ describe("settings breadcrumb chain", () => {
 });
 
 describe("settings breadcrumb: workspaces", () => {
+  it("keeps the workspace parent and translated MCP title on the server catalog", () => {
+    const path = `${WS_HREF}/mcp-servers`;
+    expect(chain(path)).toEqual([SETTINGS, WORKSPACES, WS_NAME, "settings:mcpServers"]);
+    expect(resolveSettingsBreadcrumbs(path, t, values()).titleFromUrlSegment).toBe(false);
+  });
   it("titles the workspace page with its name and links the list", () => {
     expect(chain(WS_HREF)).toEqual([SETTINGS, WORKSPACES, WS_NAME]);
     expect(hrefs(WS_HREF)).toEqual([SETTINGS_HREF, WORKSPACES_HREF]);
@@ -184,6 +189,7 @@ describe("settings breadcrumb: executors", () => {
   it("puts every executor route under the Executors page", () => {
     expect(chain(`${EXECUTORS_HREF}/exec-profile-1`)).toEqual([SETTINGS, EXECUTORS, PROFILE_NAME]);
     expect(chain(`${EXECUTORS_HREF}/ssh/exec-1`)).toEqual([SETTINGS, EXECUTORS, EXECUTOR_NAME]);
+    expect(chain(`${EXECUTORS_HREF}/k8s/exec-1`)).toEqual([SETTINGS, EXECUTORS, EXECUTOR_NAME]);
     expect(chain(`${EXECUTORS_HREF}/new/local_docker`)).toEqual([
       SETTINGS,
       EXECUTORS,

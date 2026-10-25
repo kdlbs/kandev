@@ -13,6 +13,19 @@ const unavailable: AgentRuntimeAvailability = {
 const available: AgentRuntimeAvailability = { status: "available" };
 
 describe("registerSystemEventsHandlers", () => {
+  it("bumps the storage revision when analysis progress is published", () => {
+    const store = createAppStore();
+    const handlers = registerSystemEventsHandlers(store);
+
+    handlers["system.storage.analysis.updated"]?.({
+      type: "notification",
+      action: "system.storage.analysis.updated",
+      payload: { generation: 4, state: "scanning" },
+    });
+
+    expect(store.getState().system.storage.analysisRevision).toBe(1);
+  });
+
   it("replaces the complete runtime snapshot without touching domain state", () => {
     const store = createAppStore({
       agentRuntime: unavailable,
@@ -43,5 +56,24 @@ describe("registerSystemEventsHandlers", () => {
     store.getState().setConnectionIssueSeverity("none");
 
     expect(store.getState().agentRuntime).toEqual(unavailable);
+  });
+
+  it("ignores an older runtime WebSocket snapshot from the same boot", () => {
+    const current: AgentRuntimeAvailability = {
+      status: "recovering",
+      boot_id: "boot-1",
+      runtime_epoch: 5,
+      revision: 8,
+    };
+    const store = createAppStore({ agentRuntime: current });
+    const handlers = registerSystemEventsHandlers(store);
+
+    handlers[SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]?.({
+      type: "notification",
+      action: SYSTEM_AGENT_RUNTIME_STATUS_CHANGED,
+      payload: { ...current, status: "unavailable", revision: 7 },
+    });
+
+    expect(store.getState().agentRuntime).toEqual(current);
   });
 });

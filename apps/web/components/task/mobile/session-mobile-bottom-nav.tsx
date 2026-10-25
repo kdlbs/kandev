@@ -14,35 +14,57 @@ import {
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Badge } from "@kandev/ui/badge";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { PluginPanelPicker } from "./plugin-panel-picker";
+import { registrationIsVisible } from "../plugin-task-panel";
+import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
-  showPromptHistory?: boolean;
   planBadge?: boolean;
   changesBadge?: number;
   hasReview?: boolean;
   showStatus: boolean;
   onOpenStatus: () => void;
   connectionIssueSeverity?: ConnectionIssueSeverity;
+  taskCanvases?: Canvas[];
+  onOpenCanvas?: (canvasId: string) => void;
+  taskId?: string | null;
+  sessionId?: string | null;
+  sessionKind?: "managed" | "passthrough" | null;
 };
 
 type NavItem = {
   label: string;
+  testId?: string;
   icon: React.ReactNode;
   badge?: React.ReactNode;
   active?: boolean;
   connectionIssueSeverity?: Exclude<ConnectionIssueSeverity, "none">;
 } & ({ panel: MobileSessionPanel; onClick?: never } | { panel?: never; onClick: () => void });
 
-function hasMobilePluginPanels(): boolean {
-  return pluginRegistry.getTaskPanels().some((registration) => registration.mobileEnabled);
+function hasMobilePluginPanels(
+  taskId: string | null,
+  sessionId: string | null,
+  sessionKind: "managed" | "passthrough" | null,
+): boolean {
+  if (!taskId) return false;
+  return pluginRegistry.getTaskPanels().some(
+    (registration) =>
+      registration.mobileEnabled &&
+      registrationIsVisible(registration, {
+        taskId,
+        sessionId,
+        sessionKind,
+        presentation: "mobile",
+      }),
+  );
 }
 
 function buildMobileNavItems({
@@ -53,7 +75,9 @@ function buildMobileNavItems({
   showStatus,
   onOpenStatus,
   onOpenPluginPicker,
-  showPromptHistory,
+  hasTaskCanvases,
+  hasPortForwarding,
+  mobilePluginPanelsAvailable,
   connectionIssueSeverity,
   t,
 }: {
@@ -64,9 +88,11 @@ function buildMobileNavItems({
   showStatus: boolean;
   onOpenStatus: () => void;
   onOpenPluginPicker: () => void;
-  showPromptHistory: boolean;
+  hasTaskCanvases: boolean;
+  hasPortForwarding: boolean;
   connectionIssueSeverity: ConnectionIssueSeverity;
   t: (key: string) => string;
+  mobilePluginPanelsAvailable: boolean;
 }): NavItem[] {
   return [
     {
@@ -115,13 +141,13 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(showPromptHistory || hasMobilePluginPanels()
+    ...(hasTaskCanvases || mobilePluginPanelsAvailable || hasPortForwarding
       ? [
           {
             label: t("common:panels"),
+            testId: "mobile-session-nav-panels",
             icon: <IconLayoutGrid className="h-5 w-5" />,
-            active:
-              parsePluginPanelId(activePanel) !== undefined || activePanel === "prompt-history",
+            active: parsePluginPanelId(activePanel) !== undefined,
             onClick: onOpenPluginPicker,
           },
         ]
@@ -142,18 +168,25 @@ function buildMobileNavItems({
 export function SessionMobileBottomNav({
   activePanel,
   onPanelChange,
-  showPromptHistory = false,
   planBadge = false,
   changesBadge = 0,
   hasReview = false,
   showStatus,
   onOpenStatus,
   connectionIssueSeverity = "none",
+  taskCanvases = [],
+  onOpenCanvas,
+  taskId = null,
+  sessionId = null,
+  sessionKind = null,
 }: SessionMobileBottomNavProps) {
   const { t } = useTranslation();
+  const portForwarding = useOptionalPortForwardingVisibility();
+  const hasPortForwarding = Boolean(taskId && portForwarding);
   usePluginRegistry();
   const registryVersion = pluginRegistry.getVersion();
   const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
+  const mobilePluginPanelsAvailable = hasMobilePluginPanels(taskId, sessionId, sessionKind);
   const items: NavItem[] = useMemo(
     () =>
       buildMobileNavItems({
@@ -164,7 +197,9 @@ export function SessionMobileBottomNav({
         showStatus,
         onOpenStatus,
         onOpenPluginPicker: () => setPluginPickerOpen(true),
-        showPromptHistory,
+        hasTaskCanvases: taskCanvases.length > 0,
+        hasPortForwarding,
+        mobilePluginPanelsAvailable,
         connectionIssueSeverity,
         t,
       }),
@@ -177,14 +212,17 @@ export function SessionMobileBottomNav({
       connectionIssueSeverity,
       registryVersion,
       activePanel,
-      showPromptHistory,
+      taskCanvases.length,
+      mobilePluginPanelsAvailable,
+      hasPortForwarding,
       t,
     ],
   );
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-border bg-background"
+      className="fixed bottom-0 left-0 right-0 z-40 flex items-center overflow-x-auto overscroll-x-contain border-t border-border bg-background"
+      data-testid="session-mobile-bottom-nav"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       {items.map((item) => (
@@ -199,7 +237,11 @@ export function SessionMobileBottomNav({
         open={pluginPickerOpen}
         onOpenChange={setPluginPickerOpen}
         onSelect={onPanelChange}
-        showPromptHistory={showPromptHistory}
+        taskCanvases={taskCanvases}
+        onOpenCanvas={onOpenCanvas}
+        taskId={taskId}
+        sessionId={sessionId}
+        sessionKind={sessionKind}
       />
     </nav>
   );
@@ -221,10 +263,14 @@ function MobileNavButton({
       type="button"
       onClick={item.onClick ?? (() => onPanelChange(item.panel))}
       className={cn(
-        "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-3 py-2 transition-colors",
+        "flex min-h-11 min-w-11 flex-1 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 px-2 py-2 transition-colors",
         mobileNavColorClass(item, activePanel, issueDetails !== null),
       )}
       aria-label={issueDetails?.description}
+      onFocus={(event) =>
+        event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+      }
+      data-testid={item.panel === "changes" ? "mobile-session-nav-changes" : item.testId}
       data-connection-severity={item.connectionIssueSeverity}
     >
       <span className="relative">

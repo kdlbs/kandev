@@ -5,9 +5,7 @@ import { createSessionRuntimeSlice } from "./session-runtime-slice";
 import type { SessionCommit, SessionRuntimeSlice } from "./types";
 
 function makeStore() {
-  return create<SessionRuntimeSlice>()(
-    immer((set, get, store) => createSessionRuntimeSlice(set, get, store)),
-  );
+  return create<SessionRuntimeSlice>()(immer((set, get) => createSessionRuntimeSlice(set, get)));
 }
 
 const SESSION = "sess-1";
@@ -114,5 +112,35 @@ describe("setSessionCommits — empty-response guard", () => {
     const after = useStore.getState().sessionCommits.byEnvironmentId[SESSION];
     expect(after).toHaveLength(1);
     expect(after[0].commit_sha).toBe("new");
+  });
+});
+
+describe("addSessionCommit — duplicate notifications", () => {
+  let useStore: ReturnType<typeof makeStore>;
+
+  beforeEach(() => {
+    useStore = makeStore();
+  });
+
+  it("updates a commit from a live notification without duplicating a fetched snapshot", () => {
+    useStore
+      .getState()
+      .setSessionCommits(SESSION, [
+        commit({ commit_sha: "head", parent_sha: "middle" }),
+        commit({ commit_sha: "middle", parent_sha: "base", insertions: 1, pushed: true }),
+      ]);
+
+    useStore
+      .getState()
+      .addSessionCommit(
+        SESSION,
+        commit({ commit_sha: "middle", parent_sha: "base", insertions: 7 }),
+      );
+
+    const commits = useStore.getState().sessionCommits.byEnvironmentId[SESSION];
+    expect(commits).toHaveLength(2);
+    expect(commits?.map(({ commit_sha }) => commit_sha)).toEqual(["head", "middle"]);
+    expect(commits?.[1].insertions).toBe(7);
+    expect(commits?.[1].pushed).toBe(true);
   });
 });

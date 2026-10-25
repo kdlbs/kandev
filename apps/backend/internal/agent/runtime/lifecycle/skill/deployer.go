@@ -11,10 +11,9 @@ import (
 )
 
 // MetadataKeySkillManifestJSON mirrors lifecycle.MetadataKeySkillManifestJSON
-// to avoid an import cycle. It carries the JSON-serialised Manifest the
-// Sprites executor consumes during post-create setup to upload skill +
-// instruction files into the sprite. The lifecycle test suite asserts
-// the same string value.
+// to avoid an import cycle. It carries the JSON-serialised Manifest that
+// remote workspace executors consume during setup to upload skill and
+// instruction files. The lifecycle test suite asserts the same string value.
 const MetadataKeySkillManifestJSON = "skill_manifest_json"
 
 // Config holds Deployer dependencies. All fields except Logger are
@@ -81,11 +80,17 @@ func New(cfg Config) (*Deployer, error) {
 // lifecycle.SkillDeployRequest but is decoupled from the lifecycle
 // package to keep the import boundary one-way.
 type Request struct {
-	Profile       *settingsmodels.AgentProfile
-	WorkspacePath string
-	ExecutorType  string
-	WorkspaceID   string
-	SessionID     string
+	Profile              *settingsmodels.AgentProfile
+	WorkspacePath        string
+	ExecutorType         string
+	WorkspaceID          string
+	SessionID            string
+	AdditionalSkillSlugs []string
+	// OfficeRuntime reports whether backend selected Office mode and the
+	// finalized launch env contains a non-empty KANDEV_CLI. Office launch
+	// validation checks the remaining runtime variables before this hook runs.
+	// When false, system skills are omitted from the manifest. See appendSkills.
+	OfficeRuntime bool
 }
 
 // Deploy materialises the profile's skills and instructions into the
@@ -96,7 +101,7 @@ func (d *Deployer) Deploy(ctx context.Context, req Request) (DeployResult, error
 	if req.Profile == nil {
 		return DeployResult{}, errors.New("skill deploy: profile is required")
 	}
-	manifest := d.buildManifest(ctx, req.Profile, d.workspaceSlugFn(req.WorkspaceID))
+	manifest := d.buildManifest(ctx, req.Profile, d.workspaceSlugFn(req.WorkspaceID), req.AdditionalSkillSlugs, req.OfficeRuntime)
 	result := d.deliver(ctx, manifest, req.ExecutorType, req.WorkspacePath)
 	return result, nil
 }

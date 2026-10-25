@@ -16,6 +16,8 @@ interface SessionPanelContentProps {
   children: ReactNode;
   className?: string;
   wrapperClassName?: string;
+  sessionId?: string;
+  tabIndex?: number;
 }
 
 export function SessionPanel({
@@ -42,7 +44,10 @@ export function SessionPanel({
 }
 
 export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelContentProps>(
-  function SessionPanelContent({ children, className, wrapperClassName }, ref) {
+  function SessionPanelContent(
+    { children, className, wrapperClassName, sessionId, tabIndex },
+    ref,
+  ) {
     const internalRef = useRef<HTMLDivElement>(null);
     /**
      * Continuously updated by the scroll listener so we always have
@@ -93,8 +98,14 @@ export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelConten
           if (isHiddenRef.current) {
             isHiddenRef.current = false;
             const saved = savedScrollTopRef.current;
+            const scrollTopAtSchedule = el.scrollTop;
             requestAnimationFrame(() => {
-              el.scrollTop = saved;
+              // A transcript can reconcile its position in the expected
+              // restore window. Do not overwrite a newer app or user scroll
+              // with the stale offset captured before the panel was shown.
+              // This guard also protects against a later-than-expected
+              // generic restore delivery.
+              if (el.scrollTop === scrollTopAtSchedule) el.scrollTop = saved;
             });
           }
         }
@@ -113,6 +124,8 @@ export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelConten
       >
         <div
           ref={setRefs}
+          data-session-id={sessionId}
+          tabIndex={tabIndex}
           className={cn("h-full overflow-y-auto overflow-x-hidden p-2", className)}
         >
           {children}

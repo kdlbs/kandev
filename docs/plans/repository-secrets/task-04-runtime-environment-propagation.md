@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-task-environment-resolver"]
 plan: "plan.md"
-spec: "../../specs/workspaces/repository-secrets.md"
+spec: "../../specs/workspaces/requirements/repository-secrets.md"
 ---
 
 # Task 04: Propagate Approved Runtime Environments

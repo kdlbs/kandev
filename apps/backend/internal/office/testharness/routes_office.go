@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -175,7 +177,7 @@ func seedAgentFailureHandler(
 		// office service into the testharness; the row is enough to
 		// drive HandleAgentFailure → MarkRunFailed +
 		// IncrementAgentConsecutiveFailures.
-		run := &officemodels.Run{
+		run := &runsmodels.Run{
 			ID:             uuid.New().String(),
 			AgentProfileID: req.AgentProfileID,
 			Reason:         "task_assigned",
@@ -189,7 +191,7 @@ func seedAgentFailureHandler(
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if err := repo.MarkRunFailed(ctx, run.ID, req.ErrorMessage); err != nil {
+		if _, err := repo.MarkRunFailed(ctx, run.ID, req.ErrorMessage); err != nil {
 			log.Error("test harness: mark run failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -306,7 +308,7 @@ func createSeededRun(
 		v := req.IdempotencyKey
 		idemPtr = &v
 	}
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:               uuid.New().String(),
 		AgentProfileID:   req.AgentProfileID,
 		Reason:           req.Reason,
@@ -621,7 +623,7 @@ func seedRunSkillSnapshotHandler(repo *officesqlite.Repository, log *logger.Logg
 // Used by the agent dashboard E2E spec to drive the costs section
 // (aggregate + per-run rollup) without launching an agent. TokensOut is a
 // pointer so a test can omit it to seed the "never measured" NULL shape
-// (docs/specs/office/costs.md) instead of always writing a measured 0.
+// (docs/specs/office/requirements/costs.md) instead of always writing a measured 0.
 type seedCostEventRequest struct {
 	AgentProfileID string  `json:"agent_profile_id"`
 	TaskID         string  `json:"task_id"`

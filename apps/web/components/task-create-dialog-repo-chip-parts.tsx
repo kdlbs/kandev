@@ -1,0 +1,411 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import {
+  IconCode,
+  IconFolderPlus,
+  IconGitBranch,
+  IconHome,
+  IconInfoCircle,
+  IconSettings,
+} from "@tabler/icons-react";
+import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Pill, type PillAction, type PillOption } from "@/components/task-create-dialog-pill";
+import type { Branch, RepositoryBranchPolicy } from "@/lib/types/http";
+import type { TaskRepoRow } from "@/components/task-create-dialog-types";
+import { branchOptionValue, computeBranchPlaceholder } from "@/components/branch-picker-options";
+import {
+  computeBranchDisabledReason,
+  computeBranchPrefix,
+  computeBranchTooltip,
+  type BranchIntent,
+} from "@/components/task-create-dialog-branch-utils";
+import { scoreBranch } from "@/lib/utils/branch-filter";
+import { t } from "@/lib/i18n";
+import { useTranslation } from "react-i18next";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+
+function BranchPolicyOptionInfo({
+  policy,
+  summary,
+  unavailableReason,
+}: {
+  policy: RepositoryBranchPolicy;
+  summary: string;
+  unavailableReason?: string;
+}) {
+  const usesTouchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
+  const details = unavailableReason ? `${summary} ${unavailableReason}` : summary;
+  const trigger = (
+    <button
+      type="button"
+      aria-label={details}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? open : undefined}
+      data-testid={`branch-policy-option-info-${policy.id}`}
+      className="flex h-11 w-11 shrink-0 cursor-help items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-7 sm:w-7"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <IconInfoCircle className="h-4 w-4" aria-hidden="true" />
+    </button>
+  );
+
+  if (!usesTouchDrawer) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+        <TooltipContent className="max-w-80 text-xs">{details}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{policy.name}</DrawerTitle>
+          <DrawerDescription>{details}</DrawerDescription>
+        </DrawerHeader>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+function branchPolicyToOption(
+  policy: RepositoryBranchPolicy,
+  branches: Branch[],
+  policyDisabledReason?: string,
+): PillOption {
+  const baseBranchAvailable = branches.some(
+    (branch) => branchOptionValue(branch) === policy.base_branch,
+  );
+  const unavailableReason =
+    policyDisabledReason ?? (baseBranchAvailable ? undefined : t("task:branchPolicyUnavailable"));
+  const summary = t("workspaces:branchPolicySummary", {
+    base: policy.base_branch,
+    template: policy.branch_template,
+    target: policy.pull_request_target,
+  });
+  return {
+    value: `policy:${policy.id}`,
+    label: policy.name,
+    keywords: [
+      policy.name,
+      policy.description,
+      policy.base_branch,
+      policy.branch_template,
+      policy.pull_request_target,
+    ].filter(Boolean),
+    group: "policies",
+    groupLabel: t("task:branchPoliciesGroup"),
+    disabled: Boolean(unavailableReason),
+    disabledReason: unavailableReason,
+    renderLabel: () => (
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <Badge variant="secondary" className="shrink-0 text-xs">
+          {t("task:branchPolicyMarker")}
+        </Badge>
+        <span className="truncate" title={policy.name}>
+          {policy.name}
+        </span>
+      </span>
+    ),
+    renderAccessory: () => (
+      <BranchPolicyOptionInfo
+        policy={policy}
+        summary={summary}
+        unavailableReason={unavailableReason}
+      />
+    ),
+  };
+}
+
+export function useRepoChipBranchPicker({
+  row,
+  branchValue = row.branch,
+  branchPolicies,
+  branches,
+  branchOptions,
+  branchesLoading,
+  preferredDefaultBranchLoading,
+  policyDisabledReason,
+  onBranchChange,
+  onPolicyChange,
+  onPolicySelected,
+}: {
+  row: TaskRepoRow;
+  branchValue?: string;
+  branchPolicies: RepositoryBranchPolicy[];
+  branches: Branch[];
+  branchOptions: PillOption[];
+  branchesLoading: boolean;
+  preferredDefaultBranchLoading?: boolean;
+  policyDisabledReason?: string;
+  onBranchChange: (value: string) => void;
+  onPolicyChange?: (policyId: string, baseBranch: string) => void;
+  onPolicySelected?: () => void;
+}) {
+  const { t } = useTranslation();
+  const hasRepo = !!(row.repositoryId || row.localPath);
+  const visibleBranchValue = preferredDefaultBranchLoading ? "" : branchValue;
+  const selectedPolicy = branchPolicies.find((policy) => policy.id === row.branchPolicyId);
+  const policyOptions = useMemo(
+    () =>
+      branchPolicies.map((policy) => branchPolicyToOption(policy, branches, policyDisabledReason)),
+    [branchPolicies, branches, policyDisabledReason],
+  );
+  const branchPickerOptions = useMemo(
+    () => [...policyOptions, ...branchOptions],
+    [branchOptions, policyOptions],
+  );
+  const selectedBranchValue = selectedPolicy ? "policy:" + selectedPolicy.id : visibleBranchValue;
+  const selectedBranchLabel = selectedPolicy
+    ? t("task:branchPolicySelected", {
+        name: selectedPolicy.name,
+        base: selectedPolicy.base_branch,
+      })
+    : visibleBranchValue;
+  const handleBranchSelect = (value: string) => {
+    if (value.startsWith("policy:")) {
+      const policy = branchPolicies.find((candidate) => `policy:${candidate.id}` === value);
+      if (policy) {
+        onPolicyChange?.(policy.id, policy.base_branch);
+        onPolicySelected?.();
+      }
+      return;
+    }
+    onBranchChange(value);
+  };
+  const branchPlaceholder = computeBranchPlaceholder(
+    hasRepo,
+    branchesLoading || !!preferredDefaultBranchLoading,
+    branchPickerOptions.length,
+  );
+  return {
+    hasRepo,
+    branchPickerOptions,
+    selectedBranchValue,
+    selectedBranchLabel,
+    handleBranchSelect,
+    branchPlaceholder,
+  };
+}
+
+export type RepoChipBranchPicker = ReturnType<typeof useRepoChipBranchPicker>;
+
+function buildCreateRepositoryAction(onSelect?: () => void): PillAction | undefined {
+  if (!onSelect) return undefined;
+  return {
+    label: t("task:createNewRepository"),
+    icon: <IconFolderPlus className="h-3.5 w-3.5" />,
+    testId: "create-local-repository-button",
+    onSelect,
+  };
+}
+
+function buildDiscoverySettingsAction(onSelect?: () => void): PillAction | undefined {
+  if (!onSelect) return undefined;
+  return {
+    label: t("workspaces:chooseFoldersToDiscoverRepositories"),
+    icon: <IconSettings className="h-3.5 w-3.5" />,
+    testId: "repository-discovery-settings-button",
+    onSelect,
+  };
+}
+
+export function RepoChipRepositoryPill({
+  repoLabel,
+  repoTooltip,
+  repositoryValue,
+  repoOptions,
+  onRepositoryChange,
+  onCreateRepository,
+  onOpenDiscoverySettings,
+  onAddHomeAndOpenDiscovery,
+  onRefreshRepositories,
+  repositoriesRefreshing,
+  popoverHeader,
+  ariaDescribedBy,
+}: {
+  repoLabel: string;
+  repoTooltip: string;
+  repositoryValue: string;
+  repoOptions: PillOption[];
+  onRepositoryChange: (value: string) => void;
+  onCreateRepository?: () => void;
+  onOpenDiscoverySettings?: () => void;
+  onAddHomeAndOpenDiscovery?: () => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
+  popoverHeader?: React.ReactNode;
+  ariaDescribedBy?: string;
+}) {
+  const { t } = useTranslation();
+  const createAction = buildCreateRepositoryAction(onCreateRepository);
+  const discoveryAction = buildDiscoverySettingsAction(onOpenDiscoverySettings);
+  const actions = [createAction, discoveryAction].filter(Boolean) as PillAction[];
+
+  const emptyMessage =
+    repoOptions.length === 0 && onAddHomeAndOpenDiscovery ? (
+      <div className="flex flex-col items-center justify-center gap-2 py-4 px-3 text-center">
+        <p className="text-xs text-muted-foreground">
+          {t("workspaces:noRepositoriesScanHomeHint")}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 max-md:min-h-11 max-md:h-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:h-11 gap-1.5 text-xs cursor-pointer"
+          data-testid="scan-home-folder-hint-button"
+          onClick={() => {
+            onAddHomeAndOpenDiscovery();
+          }}
+        >
+          <IconHome className="h-3.5 w-3.5 text-muted-foreground" />
+          <span>{t("workspaces:scanHomeFolderAction")}</span>
+        </Button>
+      </div>
+    ) : (
+      t("task:noRepositories")
+    );
+
+  return (
+    <Pill
+      icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
+      value={repoLabel}
+      selectedValue={repositoryValue}
+      placeholder={t("task:repository")}
+      options={repoOptions}
+      onSelect={onRepositoryChange}
+      searchPlaceholder={t("task:searchRepositories")}
+      emptyMessage={emptyMessage}
+      testId="repo-chip-trigger"
+      tooltip={repoTooltip}
+      actions={actions.length > 0 ? actions : undefined}
+      onRefresh={onRefreshRepositories}
+      refreshing={repositoriesRefreshing}
+      refreshLabel="repositories"
+      popoverHeader={popoverHeader}
+      ariaDescribedBy={ariaDescribedBy}
+      flat
+    />
+  );
+}
+
+export function RepoChipBranchPill({
+  branchPicker,
+  branchIntent,
+  branchLocked,
+  branchesLoading,
+  refreshBranches,
+  ariaDescribedBy,
+}: {
+  branchPicker: RepoChipBranchPicker;
+  branchIntent?: BranchIntent;
+  branchLocked?: boolean;
+  branchesLoading: boolean;
+  refreshBranches?: () => void;
+  ariaDescribedBy?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Pill
+      icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
+      value={branchPicker.selectedBranchLabel}
+      selectedValue={branchPicker.selectedBranchValue}
+      placeholder={branchPicker.branchPlaceholder}
+      prefix={computeBranchPrefix(branchIntent ?? "none")}
+      options={branchPicker.branchPickerOptions}
+      onSelect={branchPicker.handleBranchSelect}
+      disabled={
+        branchLocked ||
+        !branchPicker.hasRepo ||
+        branchesLoading ||
+        branchPicker.branchPickerOptions.length === 0
+      }
+      disabledReason={computeBranchDisabledReason({
+        branchLocked: !!branchLocked,
+        hasRepo: branchPicker.hasRepo,
+        branchesLoading,
+        optionCount: branchPicker.branchPickerOptions.length,
+      })}
+      searchPlaceholder={t("task:searchBranches")}
+      emptyMessage={t("task:noBranches")}
+      testId="branch-chip-trigger"
+      tooltip={computeBranchTooltip(branchIntent)}
+      onRefresh={refreshBranches}
+      refreshing={branchesLoading}
+      filter={scoreBranch}
+      ariaDescribedBy={ariaDescribedBy}
+      flat
+    />
+  );
+}
+
+export function RepoChipBaseBranchPill({
+  options,
+  value,
+  defaultBranch,
+  hasRepo,
+  branchesLoading,
+  onSelect,
+  refreshBranches,
+  ariaDescribedBy,
+}: {
+  options: PillOption[];
+  value: string;
+  defaultBranch: string;
+  hasRepo: boolean;
+  branchesLoading: boolean;
+  onSelect: (value: string) => void;
+  refreshBranches?: () => void;
+  ariaDescribedBy?: string;
+}) {
+  const { t } = useTranslation();
+  const defaultLabel = defaultBranch || t("common:repositoryDefaultBranchOption");
+  const valueLabel = value || t("workspaces:repositorySetsTaskDefault", { branch: defaultLabel });
+  const disabledReason = baseBranchDisabledReason(hasRepo, branchesLoading, t);
+  return (
+    <Pill
+      icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
+      value={valueLabel}
+      selectedValue={value}
+      placeholder={valueLabel}
+      options={options}
+      onSelect={onSelect}
+      disabled={!hasRepo || branchesLoading || options.length === 0}
+      disabledReason={disabledReason}
+      searchPlaceholder={t("task:searchBranches")}
+      emptyMessage={t("task:noBranches")}
+      testId="repo-chip-base-branch"
+      tooltip={t("workspaces:repositorySetsBaseBranchLabel")}
+      onRefresh={refreshBranches}
+      refreshing={branchesLoading}
+      filter={scoreBranch}
+      ariaDescribedBy={ariaDescribedBy}
+      flat
+    />
+  );
+}
+
+function baseBranchDisabledReason(
+  hasRepo: boolean,
+  branchesLoading: boolean,
+  translate: (key: string) => string,
+): string {
+  if (!hasRepo) return translate("task:selectRepositoryFirst");
+  if (branchesLoading) return translate("task:loadingBranches2");
+  return translate("task:noBranches");
+}

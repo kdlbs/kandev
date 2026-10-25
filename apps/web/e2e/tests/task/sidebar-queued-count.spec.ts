@@ -39,8 +39,9 @@ test.describe("Sidebar queued prompt count", () => {
       state: "IDLE",
       agentProfileId: seedData.agentProfileId,
     });
+    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
     for (let index = 0; index < 3; index++) {
-      await apiClient.queueMessage(task.id, sessionId, `Queued prompt ${index + 1}`);
+      await apiClient.queueMessage(queueIdentity, `Queued prompt ${index + 1}`);
     }
 
     await testPage.goto(`/t/${task.id}`);
@@ -60,7 +61,7 @@ test.describe("Sidebar queued prompt count", () => {
 
     // Clearing the queue must remove the badge without a reload (live path
     // through the status-summary broadcast).
-    await apiClient.clearQueue(sessionId);
+    await apiClient.clearQueue(queueIdentity);
     await expect(badge).not.toBeVisible({ timeout: 10_000 });
   });
 
@@ -95,7 +96,8 @@ test.describe("Sidebar queued prompt count", () => {
       state: "IDLE",
       agentProfileId: seedData.agentProfileId,
     });
-    await apiClient.queueMessage(child.id, sessionId, "Subtask queued prompt");
+    const queueIdentity = await apiClient.getQueueSessionIdentity(child.id, sessionId);
+    await apiClient.queueMessage(queueIdentity, "Subtask queued prompt");
 
     await testPage.goto(`/t/${parent.id}`);
     const session = new SessionPage(testPage);

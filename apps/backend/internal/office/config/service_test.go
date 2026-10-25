@@ -197,18 +197,7 @@ func TestExportBundle_UnresolvableReferencesBecomeEmpty(t *testing.T) {
 	assertEqual(t, "project lead", bundle.Projects[0].LeadAgentName, "")
 }
 
-// TestExportBundle_LeaksOtherWorkspaces_KnownDefect records a suspected bug,
-// not an endorsed contract. Every export helper calls ListX(ctx, "") and so
-// lists across all workspaces; the workspace ID argument only labels the
-// settings block. PreviewImport on the same service *is* scoped (see
-// TestPreviewImport_ScopesToWorkspace), so the two disagree, and under
-// enabled auth a config export or zip for one workspace can carry another
-// user's agents, routines, projects and skill content.
-//
-// This is reported separately rather than fixed here: this package's tests
-// were added under a test-only mandate. Scoping the export is the fix, and it
-// must delete or invert this test — that failure is the intended signal.
-func TestExportBundle_LeaksOtherWorkspaces_KnownDefect(t *testing.T) {
+func TestExportBundle_ScopesToWorkspace(t *testing.T) {
 	env := newTestEnv(t)
 	seedAgent(t, env, testWorkspaceID, "ada")
 	seedAgent(t, env, "ws-other", "grace")
@@ -223,12 +212,10 @@ func TestExportBundle_LeaksOtherWorkspaces_KnownDefect(t *testing.T) {
 
 	names := agentBundleNames(bundle.Agents)
 	sort.Strings(names)
-	assertStrings(t, "agents across workspaces", names, []string{"ada", "grace"})
-	assertStrings(t, "skills across workspaces", skillBundleSlugs(bundle.Skills), []string{"triage"})
-	assertStrings(t, "routines across workspaces",
-		routineBundleNames(bundle.Routines), []string{"retro"})
-	assertStrings(t, "projects across workspaces",
-		projectBundleNames(bundle.Projects), []string{"gemini"})
+	assertStrings(t, "agents in workspace", names, []string{"ada"})
+	assertStrings(t, "skills in workspace", skillBundleSlugs(bundle.Skills), []string{})
+	assertStrings(t, "routines in workspace", routineBundleNames(bundle.Routines), []string{})
+	assertStrings(t, "projects in workspace", projectBundleNames(bundle.Projects), []string{})
 }
 
 func TestExportBundle_EmptyDatabase(t *testing.T) {
@@ -407,5 +394,80 @@ func TestExportZip_PropagatesExportError(t *testing.T) {
 	}
 	if r != nil {
 		t.Error("reader should be nil on error")
+	}
+}
+
+func TestExportManifestMatchesZipBytes(t *testing.T) {
+	env := newTestEnv(t)
+	seedFullDBState(t, env, testWorkspaceID)
+
+	manifest, err := env.svc.ExportManifest(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportManifest: %v", err)
+	}
+	archive, err := env.svc.ExportZip(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportZip: %v", err)
+	}
+	entries := readZip(t, archive)
+	if len(entries) != len(manifest.Files) {
+		t.Fatalf("archive entries = %d, manifest files = %d", len(entries), len(manifest.Files))
+	}
+	for _, file := range manifest.Files {
+		if got := string(entries[file.Path]); got != file.Content {
+			t.Errorf("%s differs between manifest and archive", file.Path)
+		}
+	}
+}
+
+func TestExportSelectedZipRevisionConflict(t *testing.T) {
+	env := newTestEnv(t)
+	seedAgent(t, env, testWorkspaceID, "ada")
+	manifest, err := env.svc.ExportManifest(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportManifest: %v", err)
+	}
+	if _, err := env.svc.ExportSelectedZip(context.Background(), testWorkspaceID, "sha256:stale", []string{manifest.Files[0].Path}); err != ErrExportRevisionConflict {
+		t.Fatalf("error = %v, want ErrExportRevisionConflict", err)
+	}
+}
+
+func TestExportSelectedZipRejectsInvalidPaths(t *testing.T) {
+	env := newTestEnv(t)
+	seedAgent(t, env, testWorkspaceID, "ada")
+	manifest, err := env.svc.ExportManifest(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportManifest: %v", err)
+	}
+	if _, err := env.svc.ExportSelectedZip(context.Background(), testWorkspaceID, manifest.Revision, []string{".kandev/secret.yml"}); err != ErrInvalidExportSelection {
+		t.Fatalf("error = %v, want ErrInvalidExportSelection", err)
+	}
+}
+
+func TestExportSelectedZipRejectsEmptySelection(t *testing.T) {
+	env := newTestEnv(t)
+	if _, err := env.svc.ExportSelectedZip(context.Background(), testWorkspaceID, "sha256:any", nil); err != ErrInvalidExportSelection {
+		t.Fatalf("error = %v, want ErrInvalidExportSelection", err)
+	}
+}
+
+func TestBundleToFilesRejectsUnsafeAndDuplicatePaths(t *testing.T) {
+	unsafe := []string{"../escape", "/tmp/escape"}
+	for _, name := range unsafe {
+		t.Run(name, func(t *testing.T) {
+			_, err := bundleToFiles(&ConfigBundle{
+				Agents: []AgentConfig{{Name: name}},
+			})
+			if err == nil {
+				t.Fatalf("bundleToFiles(%q) returned nil error", name)
+			}
+		})
+	}
+
+	_, err := bundleToFiles(&ConfigBundle{
+		Agents: []AgentConfig{{Name: "same"}, {Name: "same"}},
+	})
+	if err == nil {
+		t.Fatal("bundleToFiles accepted duplicate archive paths")
 	}
 }

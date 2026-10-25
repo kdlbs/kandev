@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/cancel-turn-progress.md"
+spec: "../../specs/ui/requirements/cancel-turn-progress.md"
 ---
 
 # Task 03: Backend cancellation lifecycle

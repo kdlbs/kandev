@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["task-context-menu-drag-guard-01"]
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-reparenting-drag-drop.md"
+spec: "../../specs/tasks/requirements/subtask-reparenting-drag-drop.md"
 ---
 
 # Task 02: Cancel touch drag when the context menu opens
@@ -56,7 +56,7 @@ make fmt && make typecheck && make test && make lint
   (stub `TouchEvent` for happy-dom).
 - `apps/web/e2e/tests/task/mobile-subtask-reparent-drag-drop.spec.ts` — new
   "long-press opens the context menu without dragging the row" test.
-- `docs/specs/tasks/subtask-reparenting-drag-drop.md` — touch long-press
+- `docs/specs/tasks/requirements/subtask-reparenting-drag-drop.md` — touch long-press
   cancellation contract (What bullet + scenario).
 
 ## Dependencies
@@ -70,7 +70,7 @@ Sequential; task 02 depends on task 01 and changes the same component.
 
 ## Inputs
 
-- [Subtask re-parenting by drag and drop spec](../../specs/tasks/subtask-reparenting-drag-drop.md) (amended)
+- [Subtask re-parenting by drag and drop spec](../../specs/tasks/requirements/subtask-reparenting-drag-drop.md) (amended)
 - [Fix plan](plan.md)
 - dnd-kit `TouchSensor` source: activation after the 250ms delay; `touchcancel`
   listener attached to the touchstart target element while a drag is active;

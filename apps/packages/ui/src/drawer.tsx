@@ -9,6 +9,10 @@ function Drawer({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>)
   return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
 }
 
+function DrawerNested({ ...props }: React.ComponentProps<typeof DrawerPrimitive.NestedRoot>) {
+  return <DrawerPrimitive.NestedRoot {...props} />;
+}
+
 function DrawerTrigger({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Trigger>) {
   return <DrawerPrimitive.Trigger data-slot="drawer-trigger" {...props} />;
 }
@@ -87,7 +91,10 @@ function DrawerTitle({ className, ...props }: React.ComponentProps<typeof Drawer
   return (
     <DrawerPrimitive.Title
       data-slot="drawer-title"
-      className={cn("text-foreground text-sm font-medium", className)}
+      className={cn(
+        "text-foreground min-w-0 text-sm font-medium text-balance wrap-anywhere",
+        className,
+      )}
       {...props}
     />
   );
@@ -100,7 +107,10 @@ function DrawerDescription({
   return (
     <DrawerPrimitive.Description
       data-slot="drawer-description"
-      className={cn("text-muted-foreground text-xs/relaxed", className)}
+      className={cn(
+        "text-muted-foreground min-w-0 text-xs/relaxed text-pretty wrap-anywhere",
+        className,
+      )}
       {...props}
     />
   );
@@ -108,6 +118,7 @@ function DrawerDescription({
 
 export {
   Drawer,
+  DrawerNested,
   DrawerPortal,
   DrawerOverlay,
   DrawerTrigger,

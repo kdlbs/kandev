@@ -23,6 +23,7 @@ function makeStore(initialMeta?: Partial<Meta>) {
     s1: [],
     s2: [],
   };
+  const mergeTurnsWindow = vi.fn();
   let prependCalls = 0;
   const setMeta = (sessionId: string, patch: Partial<Meta>) => {
     const defaults: Meta = {
@@ -40,6 +41,8 @@ function makeStore(initialMeta?: Partial<Meta>) {
         bySession,
         metaBySession: meta,
       },
+      turns: { reconcileEpochBySession: {}, activeBySession: {}, bySession: {} },
+      mergeTurnsWindow,
       setMessagesMetadata: (sessionId: string, patch: { isLoadingMore?: boolean }) => {
         setMeta(sessionId, patch);
       },
@@ -58,6 +61,7 @@ function makeStore(initialMeta?: Partial<Meta>) {
     store,
     meta,
     bySession,
+    mergeTurnsWindow,
     prependCalls: () => prependCalls,
   };
 }
@@ -83,34 +87,61 @@ describe("requestOlderMessages", () => {
     const { store, meta, bySession, prependCalls } = makeStore();
     listTaskSessionMessages.mockResolvedValue(pageResponse(["m3", "m2", "m1"], true));
 
-    // Panel, native transcript, automatic backfill, and last-prompt preload
+    // Native transcript sentinel, automatic backfill, and last-prompt preload
     // all request the same cursor with different limits, synchronously.
-    const panel = requestOlderMessages({ sessionId: "s1", cursor: "m3", limit: 20, store });
+    const nativeSentinel = requestOlderMessages({
+      sessionId: "s1",
+      cursor: "m3",
+      limit: 20,
+      store,
+    });
     const transcript = requestOlderMessages({ sessionId: "s1", cursor: "m3", limit: 20, store });
     const backfill = requestOlderMessages({ sessionId: "s1", cursor: "m3", limit: 100, store });
     const preload = requestOlderMessages({ sessionId: "s1", cursor: "m3", limit: 50, store });
 
-    const [panelResult, transcriptResult, backfillResult, preloadResult] = await Promise.all([
-      panel,
-      transcript,
-      backfill,
-      preload,
-    ]);
+    const [nativeSentinelResult, transcriptResult, backfillResult, preloadResult] =
+      await Promise.all([nativeSentinel, transcript, backfill, preload]);
 
     expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
+    expect(listTaskSessionMessages).toHaveBeenCalledWith("s1", {
+      limit: 20,
+      before: "m3",
+      sort: "desc",
+      include_turns: true,
+    });
     expect(prependCalls()).toBe(1);
     // Every follower receives the same response and effective limit.
-    expect(panelResult.count).toBe(3);
-    expect(transcriptResult).toEqual(panelResult);
-    expect(backfillResult).toEqual(panelResult);
-    expect(preloadResult).toEqual(panelResult);
-    expect(panelResult.effectiveLimit).toBe(20); // first caller (panel) won
+    expect(nativeSentinelResult.count).toBe(3);
+    expect(transcriptResult).toEqual(nativeSentinelResult);
+    expect(backfillResult).toEqual(nativeSentinelResult);
+    expect(preloadResult).toEqual(nativeSentinelResult);
+    expect(nativeSentinelResult.effectiveLimit).toBe(20); // the first caller won
     // Monotonic cursor metadata after the merge.
     expect(meta.s1.oldestCursor).toBe("m1");
     expect(meta.s1.hasMore).toBe(true);
     expect(meta.s1.isLoadingMore).toBe(false);
     expect(meta.s1.isLoading).toBe(false);
     expect(bySession.s1.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("merges turn context from an accepted older page", async () => {
+    const { store, mergeTurnsWindow } = makeStore();
+    listTaskSessionMessages.mockResolvedValue({
+      messages: [{ id: "older", created_at: "2026-01-01T00:00:00Z", session_id: "s1" }],
+      has_more: false,
+      turns: [{ id: "turn-older" }],
+      turn_coverage: { message_ids: ["older"], active_turn_id: null },
+    });
+
+    await requestOlderMessages({ sessionId: "s1", cursor: "newer", limit: 20, store });
+
+    expect(mergeTurnsWindow).toHaveBeenCalledWith(
+      "s1",
+      [{ id: "turn-older" }],
+      { message_ids: ["older"], active_turn_id: null },
+      0,
+      { activeTurnId: null, reconcileEpoch: 0, updatedAt: undefined },
+    );
   });
 
   it("clears isLoadingMore on error without touching initial isLoading", async () => {

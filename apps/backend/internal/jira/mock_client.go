@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,12 +21,18 @@ type MockClient struct {
 	statuses    map[string][]JiraStatus // projectKey → statuses
 	searchHits  []JiraTicket            // returned by SearchTickets regardless of JQL
 	doneCalls   []doneTransitionCall
+	comments    []commentCall
 	getError    *APIError
 }
 
 type doneTransitionCall struct {
 	TicketKey    string
 	TransitionID string
+}
+
+type commentCall struct {
+	TicketKey string
+	Body      string
 }
 
 // NewMockClient returns a MockClient with TestAuth set to a successful result
@@ -87,6 +94,13 @@ func (m *MockClient) DoTransition(_ context.Context, ticketKey, transitionID str
 	return nil
 }
 
+func (m *MockClient) AddComment(_ context.Context, ticketKey, body string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.comments = append(m.comments, commentCall{TicketKey: ticketKey, Body: body})
+	return fmt.Sprintf("mock-comment-%d", len(m.comments)), nil
+}
+
 func (m *MockClient) ListProjects(context.Context) ([]JiraProject, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -119,6 +133,12 @@ func (m *MockClient) SearchTickets(_ context.Context, jql, _ string, maxResults 
 	out := make([]JiraTicket, len(hits))
 	copy(out, hits)
 	return &SearchResult{Tickets: out, MaxResults: maxResults, IsLast: true}, nil
+}
+
+// SearchTicketsForWatch returns the same seeded issues as SearchTickets. The
+// mock already includes every JiraTicket field, including descriptions.
+func (m *MockClient) SearchTicketsForWatch(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	return m.SearchTickets(ctx, jql, pageToken, maxResults)
 }
 
 // filterByJQL is a stand-in for real JQL parsing. An empty query passes every
@@ -311,6 +331,15 @@ func (m *MockClient) TransitionCalls() []doneTransitionCall {
 	return out
 }
 
+// CommentCalls returns comments recorded through AddComment.
+func (m *MockClient) CommentCalls() []commentCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]commentCall, len(m.comments))
+	copy(out, m.comments)
+	return out
+}
+
 // Reset clears every seeded value back to defaults. Called between tests.
 func (m *MockClient) Reset() {
 	m.mu.Lock()
@@ -327,6 +356,7 @@ func (m *MockClient) Reset() {
 	m.projects = nil
 	m.searchHits = nil
 	m.doneCalls = nil
+	m.comments = nil
 	m.getError = nil
 }
 

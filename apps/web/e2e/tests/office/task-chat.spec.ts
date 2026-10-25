@@ -64,7 +64,6 @@ const test = base.extend<{ testPage: Page }, IssueChatFixtures>({
       workflow_filter_id: seedData.workflowId,
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
     await use(basePage);
   },

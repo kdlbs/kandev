@@ -1,8 +1,11 @@
+/* eslint-disable max-lines -- ChatMessage integration coverage stays in one spec. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { ChatMessage } from "./chat-message";
+import { MessageTaskOriginProvider } from "./message-task-origin-context";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { activateLocale } from "@/lib/i18n";
@@ -26,10 +29,19 @@ const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 const PROMPT_MENTION_TESTID = "custom-prompt-mention";
 const ENTITY_REFERENCE_TESTID = "entity-reference-chip";
+const { copyMessage } = vi.hoisted(() => ({
+  copyMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/hooks/use-copy-to-clipboard", () => ({
+  useCopyToClipboard: () => ({ copied: false, copy: copyMessage }),
+}));
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  copyMessage.mockReset();
+  copyMessage.mockResolvedValue(undefined);
 });
 
 /** Builds a user Message with default test fields, merged with the given overrides. */
@@ -142,7 +154,60 @@ describe("ChatMessage prompt mentions", () => {
     expect(chip.getAttribute("data-slot")).toBe("hover-card-trigger");
     expect(chip.getAttribute("title")).toBeNull();
   });
+  it.each(["Enter", " "])("opens a saved prompt preview with the %s key", (key) => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
 
+    render(
+      <Wrapper>
+        <ChatMessage comment={userMessage({ content: "@hello" })} label="Message" className="" />
+      </Wrapper>,
+    );
+
+    const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+    fireEvent.keyDown(chip, { key });
+
+    expect(screen.getByText("hello content")).toBeTruthy();
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("Prompt mention touch previews", () => {
+  it("uses a touch-sized drawer trigger for prompt previews on coarse pointers", () => {
+    const originalWidth = window.innerWidth;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+      const listeners = new Set<() => void>();
+      return {
+        media: query,
+        matches: false,
+        onchange: null,
+        addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+        dispatchEvent: () => true,
+      } as unknown as MediaQueryList;
+    });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+
+    try {
+      const Wrapper = wrapper([], [customPrompt("hello")]);
+      render(
+        <Wrapper>
+          <ChatMessage comment={userMessage({ content: "@hello" })} label="Message" className="" />
+        </Wrapper>,
+      );
+
+      const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+      expect(chip.tagName).toBe("BUTTON");
+      expect(chip.getAttribute("data-slot")).toBe("drawer-trigger");
+      expect(chip.className).toContain("h-11");
+      fireEvent.click(chip);
+      expect(chip.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+});
+
+describe("ChatMessage prompt mention fallbacks", () => {
   it("falls back to a plain chip with a title when the prompt has no contents", () => {
     // A prompt with empty content has nothing to reveal on hover, so keep the
     // lightweight title tooltip instead of a hover card.
@@ -179,6 +244,44 @@ describe("ChatMessage prompt mentions", () => {
     expect(checkbox.checked).toBe(true);
     expect(checkbox.closest("li")?.className).toContain("task-list-item");
     expect(screen.getByRole("cell").getAttribute("style")).toContain("text-align: center");
+  });
+  it("renders aliases nested in formatted Markdown nodes", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+    render(
+      <ToastProvider>
+        <Wrapper>
+          <ChatMessage
+            comment={userMessage({
+              content: "**@hello** and _@hello_ and [**@hello**](https://example.com) and `@hello`",
+            })}
+            label="Message"
+            className=""
+          />
+        </Wrapper>
+      </ToastProvider>,
+    );
+
+    expect(screen.getAllByTestId(PROMPT_MENTION_TESTID)).toHaveLength(3);
+    const linkedMention = screen
+      .getByRole("link", { name: "@hello" })
+      .querySelector<HTMLElement>(`[data-testid="${PROMPT_MENTION_TESTID}"]`);
+    expect(linkedMention).not.toBeNull();
+    expect(linkedMention?.getAttribute("role")).toBeNull();
+    expect(linkedMention?.getAttribute("tabindex")).toBeNull();
+  });
+  it("does not chip an alias that follows formatted text without a boundary", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ content: "**bold**@hello" })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByTestId(PROMPT_MENTION_TESTID)).toBeNull();
   });
 });
 
@@ -463,6 +566,30 @@ describe("ChatMessage sender badge", () => {
   });
 });
 
+describe("ChatMessage blocked delivery badge", () => {
+  it("keeps the saved user instruction visible with its blocked delivery state", () => {
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "Inspect the saved work and continue",
+            metadata: { delivery_status: "blocked" },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("user-message-delivery-blocked").textContent).toBe(
+      "Delivery is blocked while session recovery is pending.",
+    );
+    expect(screen.getByText("Inspect the saved work and continue", { exact: true })).not.toBeNull();
+  });
+});
+
 describe("ChatMessage raw view", () => {
   it("shows user raw_content with hidden kandev-system blocks when raw view is enabled", () => {
     const raw = `<kandev-system>This message was sent by an agent working in task "Sender" (${SENDER_TASK_ID}).</kandev-system>
@@ -529,6 +656,88 @@ Visible agent response.`;
 
     expect(screen.getByText(/Hidden agent context/)).not.toBeNull();
     expect(screen.getByText(/Visible agent response/)).not.toBeNull();
+  });
+});
+
+describe("ChatMessage bounded user source", () => {
+  it("keeps complete copy and attachment values while shortening the rendered preview", () => {
+    const content = Array.from({ length: 240 }, (_, index) => `message-${index}`).join("\n");
+
+    render(
+      <StateProvider>
+        <ChatMessage
+          comment={userMessage({
+            content,
+            metadata: {
+              attachments: [{ type: "resource", mime_type: "text/plain", name: "full-log.txt" }],
+            },
+          })}
+          label="Message"
+          className=""
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("message-file-attachment").textContent).toContain("full-log.txt");
+    expect(screen.getByTestId("user-message-bubble").textContent).not.toContain("message-239");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message to clipboard" }));
+
+    expect(copyMessage).toHaveBeenCalledWith(content);
+  });
+});
+
+const COORDINATOR_ABOUT_MESSAGE = "About KAN-418: why is this here?";
+
+describe("ChatMessage task origin", () => {
+  it("renders the coordinator About-prefix tag when wrapped in MessageTaskOriginProvider", () => {
+    render(
+      <StateProvider>
+        <MessageTaskOriginProvider value="coordinator">
+          <ChatMessage
+            comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+            label="Message"
+            className=""
+          />
+        </MessageTaskOriginProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("coordinator-about-tag")).toBeTruthy();
+    expect(screen.getByText("why is this here?")).toBeTruthy();
+  });
+
+  it("renders the About-prefix verbatim without a provider", () => {
+    render(
+      <StateProvider>
+        <ChatMessage
+          comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+          label="Message"
+          className=""
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByTestId("coordinator-about-tag")).toBeNull();
+    expect(screen.getByText(/About KAN-418: why is this here\?/)).toBeTruthy();
+  });
+
+  it("copies the full stored text, prefix included, for a coordinator-origin message", () => {
+    render(
+      <StateProvider>
+        <MessageTaskOriginProvider value="coordinator">
+          <ChatMessage
+            comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+            label="Message"
+            className=""
+          />
+        </MessageTaskOriginProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message to clipboard" }));
+
+    expect(copyMessage).toHaveBeenCalledWith(COORDINATOR_ABOUT_MESSAGE);
   });
 });
 
@@ -637,7 +846,7 @@ describe("ChatMessage image attachments", () => {
     expect(openSpy).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
     const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
-    expect(dialog.className).toContain("w-fit");
+    expect(dialog.className).toContain("w-[min(96vw,1126px)]");
     expect(dialog.className).toContain("max-w-[calc(100vw-1rem)]");
     expect(preview.className).toContain("w-[min(92vw,1100px)]");
     expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");

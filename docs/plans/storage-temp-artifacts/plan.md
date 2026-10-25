@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/system-page/storage-maintenance.md
+spec: docs/specs/system-page/requirements/storage-maintenance.md
 created: 2026-08-08
 status: complete
 ---
@@ -17,6 +17,10 @@ mobile coverage. The implementation must preserve the inherited shared-temp boun
 The architectural boundary is recorded in
 [ADR-2026-08-08-owned-temp-artifact-cleanup](../../decisions/2026-08-08-owned-temp-artifact-cleanup.md),
 which supplements [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
+
+The later [temporary storage visibility and cleanup package](../storage-temporary-folders/plan.md)
+adds read-only system temporary-folder visibility and the disabled-by-default scheduled cleanup
+policy while preserving this package's ownership and quarantine boundaries.
 
 ---
 
@@ -179,3 +183,8 @@ Wave 4 (desktop/mobile E2E after Task 03):
 Wave 5 (docs after behavior is implemented):
 
 - [x] [Task 05 — Temporary-artifact operations documentation](task-05-storage-temp-artifact-docs.md)
+
+## Follow-up presentation package
+
+The [settings storage tabs package](../settings-storage-tabs/plan.md) owns the planned header tabs and maintenance presentation changes.
+This package retains its historical implementation results. The follow-up owns new route, copy, and regression verification.

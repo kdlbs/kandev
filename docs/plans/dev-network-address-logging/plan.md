@@ -1,5 +1,5 @@
 ---
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 created: 2026-08-13
 status: implemented
 ---

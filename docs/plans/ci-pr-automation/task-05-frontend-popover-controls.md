@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["04-frontend-api-state-hook"]
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 05: Frontend Popover Controls

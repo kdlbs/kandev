@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/improve-kandev/spec.md
+spec: docs/specs/workspaces/requirements/improve-kandev.md
 created: 2026-08-12
 status: complete
 ---

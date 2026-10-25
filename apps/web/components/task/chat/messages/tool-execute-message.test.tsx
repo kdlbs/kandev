@@ -4,6 +4,8 @@ import { sessionId, taskId, type Message } from "@/lib/types/http";
 import type { UseShellCommandOutputResult } from "@/hooks/domains/session/use-shell-command-output";
 import { ToolExecuteMessage } from "./tool-execute-message";
 
+const COMMAND_TEST_ID = "tool-execute-command";
+
 const useShellOutputMock = vi.hoisted(() => vi.fn());
 const runningMessageID = "message-running";
 const outputUpdatedAt = "2026-07-16T12:00:02Z";
@@ -87,7 +89,7 @@ describe("ToolExecuteMessage command row", () => {
       />,
     );
 
-    expect(screen.getByTestId("tool-execute-command")).toBeTruthy();
+    expect(screen.getByTestId(COMMAND_TEST_ID)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /show command output/i })).toBeNull();
     expect(useShellOutputMock).not.toHaveBeenCalled();
   });
@@ -102,7 +104,7 @@ describe("ToolExecuteMessage command row", () => {
       />,
     );
 
-    const command = screen.getByTestId("tool-execute-command");
+    const command = screen.getByTestId(COMMAND_TEST_ID);
     expect(command.textContent).toBe("printf normalized-command");
     expect(command.className).toContain("whitespace-pre-wrap");
     expect(screen.getByText("/workspace/with/a/long/path")).toBeTruthy();
@@ -118,7 +120,7 @@ describe("ToolExecuteMessage command row", () => {
   it("falls back to message content when the normalized command is absent", () => {
     render(<ToolExecuteMessage comment={executeMessage("complete", {}, "")} />);
 
-    expect(screen.getByTestId("tool-execute-command").textContent).toBe("fallback message content");
+    expect(screen.getByTestId(COMMAND_TEST_ID).textContent).toBe("fallback message content");
   });
 
   it("renders loading and empty snapshot states only after opening", () => {
@@ -266,4 +268,36 @@ describe("ToolExecuteMessage cancelled result", () => {
     openOutput();
     expect(screen.getByText("Exit code 0").className).toContain("text-muted-foreground");
   });
+});
+
+it("replaces an expanded cached transcript with the removal notice while retaining command and status", () => {
+  const original = executeMessage("complete", retainedOutputSummary({ exit_code: 0 }));
+  useShellOutputMock.mockReturnValue(
+    hookResult({
+      snapshot: {
+        message_id: original.id,
+        status: "complete",
+        updated_at: outputUpdatedAt,
+        output: { stdout: "removed secret output" },
+      },
+    }),
+  );
+  const view = render(<ToolExecuteMessage comment={original} />);
+  openOutput();
+  expect(screen.getByText("removed secret output")).toBeTruthy();
+  view.rerender(
+    <ToolExecuteMessage
+      comment={{
+        ...original,
+        metadata: {
+          ...original.metadata,
+          payload_retention: { version: 1, removed_at: outputUpdatedAt },
+        },
+      }}
+    />,
+  );
+  expect(screen.queryByText("removed secret output")).toBeNull();
+  expect(screen.getByText(/Tool details removed on/)).toBeTruthy();
+  expect(screen.getByTestId(COMMAND_TEST_ID).textContent).toBe("printf normalized-command");
+  expect(screen.getByLabelText("Command succeeded")).toBeTruthy();
 });

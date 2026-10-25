@@ -18,6 +18,9 @@ function state(overrides: Partial<HydrationState> = {}): HydrationState {
         "wf-1": { workflowId: "wf-1", workflowName: "Development", steps: [], tasks: [] },
       },
       isLoading: false,
+      orderRevisionByStepId: {},
+      pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
     },
     ...overrides,
   };
@@ -41,10 +44,30 @@ describe("hasHydratedKanbanRouteState", () => {
       hasHydratedKanbanRouteState(
         state({
           kanban: { workflowId: null, steps: [], tasks: [] },
-          kanbanMulti: { snapshots: {}, isLoading: false },
+          kanbanMulti: {
+            snapshots: {},
+            isLoading: false,
+            orderRevisionByStepId: {},
+            pendingReorderBandKeys: {},
+            withheldReorderByBandKey: {},
+          },
         }),
         {},
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("renders All Workflows from authorized metadata before board demand loads", () => {
+    expect(
+      hasHydratedKanbanRouteState(
+        state({
+          workflows: {
+            activeId: null,
+            items: [{ id: "wf-1", workspaceId: "ws-1", name: "Development" }],
+          },
+        }),
+        {},
+      ),
+    ).toBe(true);
   });
 });

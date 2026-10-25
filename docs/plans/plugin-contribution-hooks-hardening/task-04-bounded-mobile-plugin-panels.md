@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-authoritative-plugin-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/plugins/spec.md"
+spec: "../../specs/plugins/requirements/plugins.md"
 ---
 
 # Task 04: Bounded mobile plugin panels

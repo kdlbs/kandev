@@ -26,13 +26,14 @@ type acpAgentSpec struct {
 	// to skip the test whenever ANY of these is on PATH — otherwise an
 	// agent with multiple WithCommand fallbacks flakes when a secondary binary
 	// is present.
-	detectBinaries  []string
-	expectedArgv    []string // BuildCommand and Runtime.Cmd
-	inferenceArgv   []string // InferenceConfig.Command
-	passthroughArgv []string // PassthroughCmd (zero-args allowed)
-	installViaNpm   bool     // InstallScript starts with "npm install -g"
-	installScript   string   // expected InstallScript() value (empty = unchecked)
-	stripEnv        []string // expected Runtime().StripEnv (nil = unchecked)
+	detectBinaries         []string
+	expectedArgv           []string // BuildCommand and Runtime.Cmd
+	inferenceArgv          []string // InferenceConfig.Command
+	passthroughArgv        []string // PassthroughCmd (zero-args allowed)
+	installViaNpm          bool     // InstallScript starts with "npm install -g"
+	installScript          string   // expected InstallScript() value (empty = unchecked)
+	skipInstallBinaryCheck bool     // installer is intentionally unavailable on this platform
+	stripEnv               []string // expected Runtime().StripEnv (nil = unchecked)
 	// sessionDirTemplate is the agent's on-disk session root. Pinned per
 	// agent because it is derived from what the CLI actually writes (see the
 	// evidence comment on each Runtime()), not from a naming convention —
@@ -40,6 +41,17 @@ type acpAgentSpec struct {
 	// wrong value silently bind-mounts the wrong directory into the
 	// container.
 	sessionDirTemplate string
+}
+
+func managedRuntimeNpxArgv(packageName string) []string {
+	return []string{
+		"npx",
+		"--yes",
+		"--prefer-offline",
+		"--prefix",
+		"~/.kandev/managed-npm-runtime",
+		packageName + "@" + MustDefaultManagedNPMRuntimeVersion(packageName),
+	}
 }
 
 var newACPAgentSpecs = []struct {
@@ -80,8 +92,8 @@ var newACPAgentSpecs = []struct {
 	}},
 	{func() Agent { return NewPiACP() }, acpAgentSpec{
 		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi"},
-		expectedArgv:       []string{"npx", "-y", "pi-acp"},
-		inferenceArgv:      []string{"npx", "-y", "pi-acp"},
+		expectedArgv:       managedRuntimeNpxArgv("pi-acp"),
+		inferenceArgv:      managedRuntimeNpxArgv("pi-acp"),
 		passthroughArgv:    []string{"pi"},
 		installViaNpm:      true,
 		installScript:      "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
@@ -162,6 +174,24 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		installViaNpm:      false,
 		sessionDirTemplate: "{home}/.hermes",
 	}},
+	{func() Agent { return NewGooseACP() }, acpAgentSpec{
+		id: "goose-acp", displayName: "Goose", detectBinaries: []string{"goose"},
+		expectedArgv:       []string{"goose", "acp"},
+		inferenceArgv:      []string{"goose", "acp"},
+		passthroughArgv:    []string{"goose"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.local/share/goose",
+	}},
+	{func() Agent { return NewMuseACP() }, acpAgentSpec{
+		id: "muse-acp", displayName: "Muse", detectBinaries: []string{"muse"},
+		expectedArgv:           managedRuntimeNpxArgv("@bex-co/muse-code-acp"),
+		inferenceArgv:          managedRuntimeNpxArgv("@bex-co/muse-code-acp"),
+		passthroughArgv:        []string{"muse"},
+		installViaNpm:          false,
+		skipInstallBinaryCheck: true,
+		stripEnv:               []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME"},
+		sessionDirTemplate:     "{home}",
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {
@@ -227,6 +257,29 @@ func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
 	}
 }
 
+// TestAuggieRuntime_DeclaresServerNamespacedMCPTools covers
+// AC-TASKS-MCP-TOOL-NAMES-001.1 and .2.
+func TestAuggieRuntime_DeclaresServerNamespacedMCPTools(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func() Agent
+		want bool
+	}{
+		{name: "auggie", new: func() Agent { return NewAuggie() }, want: true},
+		{name: "cursor", new: func() Agent { return NewCursorACP() }, want: false},
+		{name: "codex", new: func() Agent { return NewCodexACP() }, want: false},
+		{name: "claude", new: func() Agent { return NewClaudeACP() }, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.new().Runtime().NamespacesMCPToolsByServer
+			if got != tt.want {
+				t.Errorf("NamespacesMCPToolsByServer = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestNewACPAgents_SessionDirTemplate pins the session root each agent
 // declares. The lifecycle manager turns SessionDirTemplate into the
 // bind-mount source under <kandev-home>/agent-sessions/<instance>/, so an
@@ -243,7 +296,7 @@ func TestNewACPAgents_SessionDirTemplate(t *testing.T) {
 			if got := rt.SessionConfig.SessionDirTemplate; got != tc.spec.sessionDirTemplate {
 				t.Errorf("SessionDirTemplate = %q, want %q", got, tc.spec.sessionDirTemplate)
 			}
-			if !strings.HasPrefix(tc.spec.sessionDirTemplate, "{home}/") {
+			if tc.spec.sessionDirTemplate != "{home}" && !strings.HasPrefix(tc.spec.sessionDirTemplate, "{home}/") {
 				t.Errorf("SessionDirTemplate %q must be {home}-relative; SessionDirHostPath only trims that prefix",
 					tc.spec.sessionDirTemplate)
 			}
@@ -272,6 +325,9 @@ func TestNewACPAgents_InstallScript(t *testing.T) {
 			// to Install" status see a hint that resolves to the right
 			// command. Only check the first detect binary; secondaries are
 			// fallbacks that may not appear in either surface.
+			if tc.spec.skipInstallBinaryCheck {
+				return
+			}
 			primary := tc.spec.detectBinaries[0]
 			argv := ag.BuildCommand(CommandOptions{}).Args()
 			if !slices.Contains(argv, primary) && !strings.Contains(got, primary) {

@@ -190,6 +190,9 @@ func TestRouteMonitorEvents_AsyncMonitorEventEmitsIdleComplete(t *testing.T) {
 		a := newTestAdapter()
 		defer func() { _ = a.Close() }()
 		seedMonitor(t, a, "s1", "t1", "tc-monitor")
+		payload := newMonitorGeneric()
+		payload.SetMonitorIdentity("t1", false)
+		a.activeToolCalls["tc-monitor"] = payload
 
 		cleaned := a.routeMonitorEvents("s1",
 			"<task-notification><task-id>t1</task-id><event>event-A</event></task-notification>")

@@ -1,5 +1,7 @@
 ---
-spec: docs/specs/office/unread-divider.md, docs/specs/ui/transcript-navigation-settings.md
+spec: docs/specs/office/requirements/unread-divider.md
+related_specs:
+  - docs/specs/ui/requirements/transcript-navigation-settings.md
 created: 2026-07-31
 status: completed
 ---

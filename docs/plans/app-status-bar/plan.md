@@ -1,6 +1,6 @@
 ---
 status: done
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 ---
 
 # App Status Bar — implementation plan
@@ -11,7 +11,7 @@ Ship one app-owned status surface: 24 px in-flow bar in the non-phone route-cont
 
 ## Fixed decisions
 
-- Slots: `app-status-bar-left`, `app-status-bar-right`; exact props live in [spec](../../specs/ui/app-status-bar.md#plugin-slots) and [plugin API](../plugins/PLUGIN-API.md#app-status-bar-slots).
+- Slots: `app-status-bar-left`, `app-status-bar-right`; exact props live in [spec](../../specs/ui/requirements/app-status-bar.md#plugin-slots) and [plugin API](../plugins/PLUGIN-API.md#app-status-bar-slots).
 - One responsive presentation mounts at once. Desktop=`full`, tablet=`compact`, drawer=`full`.
 - Metrics subscribe only when legacy `showInTopbar` preference permits: desktop/tablet while bar mounted, phone only while drawer open.
 - Shell places the full-height sidebar beside a route/status column whose in-flow footer starts at the sidebar layout edge. `--app-status-bar-height` offsets audited desktop fixed overlays only.

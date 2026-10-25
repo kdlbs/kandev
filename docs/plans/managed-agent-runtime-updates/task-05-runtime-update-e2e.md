@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-backend-update-pipeline", "04-settings-update-ui"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 role: test-engineer
 model_tier: default
 ---

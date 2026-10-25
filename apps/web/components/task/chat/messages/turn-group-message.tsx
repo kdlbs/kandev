@@ -124,7 +124,7 @@ function TurnGroupHeader({
   );
 }
 
-type TurnGroupContentProps = {
+export type TurnGroupContentProps = {
   group: TurnGroup;
   sessionId: string | null;
   permissionsByToolCallId: Map<string, Message>;
@@ -300,7 +300,7 @@ function RepeatedToolSummary({
   );
 }
 
-function TurnGroupContent({
+export function TurnGroupContent({
   group,
   sessionId,
   permissionsByToolCallId,

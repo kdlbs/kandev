@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/agents.md"
+spec: "../../specs/office/requirements/agents.md"
 ---
 
 # Task 06: Guard Office launch context
@@ -38,7 +38,7 @@ cd apps/backend && rtk go test ./internal/orchestrator -run 'Test(StartCreatedSe
 
 ## Inputs
 
-- `docs/specs/office/agents.md`, sections **Runtime**, **Failure modes**, and
+- `docs/specs/office/requirements/agents.md`, sections **Runtime**, **Failure modes**, and
   **Scenarios / CLI and MCP**.
 - `StartCreatedSession`, `startTask`, and `StartTaskWithEnv` in
   `apps/backend/internal/orchestrator/task_operations.go`.
@@ -69,7 +69,7 @@ Files changed:
 - `apps/backend/internal/orchestrator/task_operations_test.go`
 - `apps/backend/internal/orchestrator/event_handlers_workflow_profile_test.go`
 - `apps/backend/cmd/agentctl/kandev_test.go`
-- `docs/specs/office/agents.md`
+- `docs/specs/office/requirements/agents.md`
 - `docs/public/automation-and-mcp.md`
 - This plan and its task records.
 

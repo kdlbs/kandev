@@ -5,15 +5,15 @@ status: done
 wave: 8
 depends_on: [app-status-bar-12]
 plan: docs/plans/app-status-bar/plan.md
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 ---
 
 # Reorder docs, E2E, and verification
 
 ## Inputs
 
-[App status bar spec](../../specs/ui/app-status-bar.md),
-[plugin spec](../../specs/plugins/spec.md), task 12, public plugin docs, and the
+[App status bar spec](../../specs/ui/requirements/app-status-bar.md),
+[plugin spec](../../specs/plugins/requirements/plugins.md), task 12, public plugin docs, and the
 real in-tree plugin fixture.
 
 ## Files likely touched

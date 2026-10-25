@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-persist-profile-bindings"]
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 02: Build profile-aware one-shot runtime

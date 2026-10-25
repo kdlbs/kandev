@@ -27,5 +27,6 @@ steps:
     name: Done
     position: 1
     color: bg-green-500
+    complete_task_on_enter: true
     show_in_command_panel: false
     allow_manual_move: false

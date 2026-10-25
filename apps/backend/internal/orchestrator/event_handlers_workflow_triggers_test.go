@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -340,7 +341,7 @@ func TestProcessOnEnterSetSessionMode(t *testing.T) {
 	}
 
 	session, _ := repo.GetTaskSession(ctx, "s1")
-	svc.processOnEnter(ctx, "t1", session, step, "test task")
+	svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 	updated, _ := repo.GetTaskSession(ctx, "s1")
 	if got, _ := updated.Metadata[models.SessionMetaKeySessionMode].(string); got != "acceptEdits" {
@@ -374,7 +375,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task")
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata == nil {
@@ -403,7 +404,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task")
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		// Plan mode should persist — only explicit on_exit/on_turn_complete
 		// disable_plan_mode actions should clear it.
@@ -445,7 +446,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, reviewStep, "task description")
+		svc.processOnEnter(ctx, "t1", session, reviewStep, "task description", 0, nil)
 
 		select {
 		case <-agentMgr.promptDone:
@@ -462,6 +463,48 @@ func TestProcessOnEnter(t *testing.T) {
 
 		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.Count != 0 {
 			t.Fatalf("expected queue to be drained, count=%d entries=%+v", status.Count, status.Entries)
+		}
+	})
+
+	// A one-shot instruction overlay must use the same queue path when the
+	// destination has no on_enter actions. The durable step prompt is not sent
+	// through this path, so the extracted instruction block is the assertion.
+	t.Run("queues move instructions when destination has no on_enter actions", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateWaitingForInput
+		session.AgentExecutionID = "exec-1"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{isAgentRunning: true, promptDone: make(chan struct{})}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+		step := workflowmove.OverlayStep(&wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review", Position: 1,
+		}, &workflowmove.EntryOptions{Instructions: "focus on the auth bug"})
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "task description", 0, nil)
+
+		select {
+		case <-agentMgr.promptDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for move instructions to be sent to agent")
+		}
+
+		agentMgr.mu.Lock()
+		got := agentMgr.capturedPrompts[0]
+		agentMgr.mu.Unlock()
+		want := workflowmove.WrapInstructions("focus on the auth bug")
+		if got != want {
+			t.Fatalf("agent received %q, want one-time instruction block %q", got, want)
+		}
+		if status := svc.messageQueue.GetStatus(ctx, "s1"); status.Count != 0 {
+			t.Fatalf("expected move instruction queue to be drained, count=%d entries=%+v", status.Count, status.Entries)
 		}
 	})
 
@@ -492,7 +535,7 @@ func TestProcessOnEnter(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "queued prompt content")
+		svc.processOnEnter(ctx, "t1", session, step, "queued prompt content", 0, nil)
 
 		deadline := time.Now().Add(2 * time.Second)
 		for {
@@ -744,7 +787,7 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task")
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata != nil {
@@ -771,7 +814,7 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "test task")
+		svc.processOnEnter(ctx, "t1", session, step, "test task", 0, nil)
 
 		// plan_mode should still be set since passthrough sessions skip plan mode management
 		updated, _ := repo.GetTaskSession(ctx, "s1")
@@ -849,7 +892,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		published := eventBus.published()
 		if len(published) < 2 {
@@ -960,7 +1003,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Verify RestartAgentProcess was called with the correct execution ID
 		if len(agentMgr.restartProcessCalls) != 1 {
@@ -996,7 +1039,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Verify RestartAgentProcess was NOT called (no execution ID)
 		if len(agentMgr.restartProcessCalls) != 0 {
@@ -1050,6 +1093,87 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		if updated.Metadata != nil {
 			if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
 				t.Errorf("expected acp_session_id to remain empty, got %q", acp)
+			}
+		}
+	})
+
+	// A workflow-driven reset (durable reset_agent_context action or a one-time
+	// move override) must surface the same "Context reset" chat divider that the
+	// manual toolbar reset button emits, so the user sees the context was cleared.
+	t.Run("workflow reset emits the context reset divider", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-reset")
+
+		svc := createTestServiceWithAgent(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			&mockAgentManager{repoForExecutionLookup: repo},
+		)
+		messages := &mockMessageCreator{}
+		svc.messageCreator = messages
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Review Step",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterResetAgentContext},
+			}},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
+
+		dividers := 0
+		for _, m := range messages.sessionMessages {
+			if m.content != contextResetMessage {
+				continue
+			}
+			if m.messageType != string(v1.MessageTypeStatus) {
+				t.Fatalf("context reset divider must be a status message, got %q", m.messageType)
+			}
+			dividers++
+		}
+		if dividers != 1 {
+			t.Fatalf("expected exactly one context reset divider, got %d", dividers)
+		}
+	})
+
+	// A CREATED session has no prior conversation, so resetAgentContext skips the
+	// actual reset; the divider must be suppressed to match the manual path,
+	// which cannot even reach a CREATED session (it requires WAITING_FOR_INPUT).
+	t.Run("workflow reset on a CREATED session emits no divider", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateCreated
+		session.AgentExecutionID = "exec-created"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-created")
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestServiceWithAgent(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			&mockAgentManager{repoForExecutionLookup: repo},
+		)
+		messages := &mockMessageCreator{}
+		svc.messageCreator = messages
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterResetAgentContext},
+			}},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
+
+		for _, m := range messages.sessionMessages {
+			if m.content == contextResetMessage {
+				t.Fatal("a never-prompted CREATED session must not emit a context reset divider")
 			}
 		}
 	})
@@ -1135,7 +1259,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "Run the work")
+		svc.processOnEnter(ctx, "t1", session, step, "Run the work", 0, nil)
 		select {
 		case <-startAgentProcessCalled:
 		case <-time.After(time.Second):
@@ -1177,7 +1301,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Verify RestartAgentProcess was called even for passthrough sessions
 		if len(agentMgr.restartProcessCalls) != 1 {
@@ -1211,7 +1335,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.State != models.TaskSessionStateWaitingForInput {
@@ -1255,7 +1379,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			t.Fatalf("precondition: seed should start session as RUNNING, got %q", session.State)
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "review task")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// In-memory session must also be updated — queueAutoStartPromptIfRunning
 		// (further down in processOnEnter when auto_start_agent is present)
@@ -1304,7 +1428,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 
 		session, _ = repo.GetTaskSession(ctx, "s1")
-		svc.processOnEnter(ctx, "t1", session, step, "review task")
+		svc.processOnEnter(ctx, "t1", session, step, "review task", 0, nil)
 
 		// Positive assertion: pin the expected state to RUNNING so any other
 		// unintended mutation (COMPLETED, FAILED, etc.) also fails the test,

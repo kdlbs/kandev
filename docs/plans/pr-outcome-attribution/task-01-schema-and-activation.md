@@ -4,7 +4,7 @@ title: "Add outcome storage and activation"
 status: done
 wave: 1
 plan: "plan.md"
-spec: "../../specs/pr-outcome-attribution/spec.md"
+spec: "../../specs/integrations/requirements/pr-outcome-attribution.md"
 ---
 
 # Task 01: Schema and activation

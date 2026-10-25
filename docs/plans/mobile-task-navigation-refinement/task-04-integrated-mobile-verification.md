@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-mobile-kanban-hierarchy", "02-mobile-home-task-interaction", "03-dockview-mobile-surfaces"]
 plan: "plan.md"
-spec: "../../specs/ui/mobile-task-navigation.md"
+spec: "../../specs/ui/requirements/mobile-task-navigation.md"
 ---
 
 # Task 04: Integrated mobile verification

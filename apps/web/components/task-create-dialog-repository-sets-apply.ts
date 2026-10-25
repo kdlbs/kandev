@@ -12,6 +12,7 @@ type UseApplyRepositorySetArgs = {
   rows: TaskRepoRow[];
   repositories: Repository[];
   setRepositories: (rows: TaskRepoRow[]) => void;
+  setRepositoriesDirty: (dirty: boolean) => void;
 };
 
 /**
@@ -27,6 +28,7 @@ export function useApplyRepositorySet({
   rows,
   repositories,
   setRepositories,
+  setRepositoriesDirty,
 }: UseApplyRepositorySetArgs) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -36,6 +38,7 @@ export function useApplyRepositorySet({
       const outcome = applyRepositorySet({ rows, set, repositories });
       if (outcome.addedCount > 0) {
         setRepositories(outcome.rows);
+        setRepositoriesDirty(true);
       }
       if (outcome.missingCount > 0) {
         toast({
@@ -58,6 +61,6 @@ export function useApplyRepositorySet({
         });
       }
     },
-    [rows, repositories, setRepositories, t, toast],
+    [rows, repositories, setRepositories, setRepositoriesDirty, t, toast],
   );
 }

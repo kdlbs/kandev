@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["02-backend-issue-workflow", "03-frontend-dialog-and-mobile", "04-e2e-coverage"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 05: Required verification and commit
@@ -37,7 +37,7 @@ feat: add issue-only Improve Kandev workflow
 ## Files likely touched
 
 - Files owned by Tasks 01–04.
-- `docs/specs/improve-kandev/spec.md`
+- `docs/specs/workspaces/requirements/improve-kandev.md`
 - `docs/plans/improve-kandev/plan.md`
 - `docs/plans/improve-kandev/task-*.md`
 

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-settings-toggle-ui"]
 plan: "plan.md"
-spec: "../../specs/agents/profile-disable.md"
+spec: "../../specs/agents/requirements/profile-disable.md"
 ---
 
 # Task 04: E2E disable-profile flow

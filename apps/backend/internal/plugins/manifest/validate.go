@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -23,15 +24,13 @@ var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var actionKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var referenceIdentityPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
 
-// supportedAPIVersion is the only api_version this kandev build accepts.
-const supportedAPIVersion = 1
-
 // validCategories are the allowed values for Manifest.Categories entries.
 var validCategories = map[string]bool{
 	"connector":  true,
 	"automation": true,
 	"tools":      true,
 	"analytics":  true,
+	"canvas":     true,
 }
 
 // validUISurfaces are the allowed values for UIPage.Surface.
@@ -123,7 +122,7 @@ func buildShiftAlteredKeySet() map[string]bool {
 }
 
 // Validate checks the manifest against the plugin registration rules
-// described in docs/specs/plugins/spec.md. It returns nil if the manifest
+// described in docs/specs/plugins/requirements/plugins.md. It returns nil if the manifest
 // is well-formed, or a joined error describing every violation found.
 func (m *Manifest) Validate() error {
 	var errs []error
@@ -139,12 +138,17 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateRepoURL()...)
 	errs = append(errs, m.validateUIPages()...)
 	errs = append(errs, m.validateUIBundle()...)
+	errs = append(errs, m.validateWebApps()...)
 	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)
 	errs = append(errs, m.validateActions()...)
+	errs = append(errs, m.validateAutomationConditions()...)
+	errs = append(errs, m.validateCapabilityMinimumVersions()...)
 	errs = append(errs, m.validateRepositoryProviders()...)
+	errs = append(errs, m.validateExecutorProviders()...)
 	errs = append(errs, m.validateReferenceSources()...)
 	errs = append(errs, m.validateAgentTools()...)
+	errs = append(errs, m.validateDistribution()...)
 	return errors.Join(errs...)
 }
 
@@ -166,7 +170,30 @@ func (m *Manifest) validateAgentTools() []error {
 		prefix := fmt.Sprintf("agent_tools[%d]", i)
 		errs = append(errs, validateAgentTool(prefix, tool, seen)...)
 	}
+	if manifestDeclaresSurface(m.AgentTools, AgentToolSurfaceManaged) && !hasCapabilityResource(m.Capabilities.APIWrite, "managed_agent_tools") {
+		errs = append(errs, errors.New("agent_tools using managed-conversation surface require capabilities.api_write: managed_agent_tools"))
+	}
 	return errs
+}
+
+func manifestDeclaresSurface(tools []AgentTool, surface string) bool {
+	for _, tool := range tools {
+		for _, declared := range tool.Surfaces {
+			if declared == surface {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasCapabilityResource(resources []string, wanted string) bool {
+	for _, resource := range resources {
+		if strings.TrimSpace(resource) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func validateAgentTool(prefix string, tool AgentTool, seen map[string]struct{}) []error {
@@ -203,7 +230,7 @@ func validateAgentToolSurfaces(prefix string, surfaces []string) []error {
 	var errs []error
 	seen := map[string]struct{}{}
 	for _, surface := range surfaces {
-		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice {
+		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice && surface != AgentToolSurfaceManaged {
 			errs = append(errs, fmt.Errorf("%s.surfaces contains unsupported surface %q", prefix, surface))
 		}
 		if _, ok := seen[surface]; ok {
@@ -260,8 +287,11 @@ func (m *Manifest) validateIdentity() []error {
 	} else if strings.HasSuffix(m.ID, dotConfigSuffix) {
 		errs = append(errs, fmt.Errorf("invalid plugin id %q: must not end in %q", m.ID, dotConfigSuffix))
 	}
-	if m.APIVersion != supportedAPIVersion {
-		errs = append(errs, fmt.Errorf("unsupported api_version %d: only %d is supported", m.APIVersion, supportedAPIVersion))
+	if m.APIVersion < LegacyAPIVersion || m.APIVersion > CurrentAPIVersion {
+		errs = append(errs, fmt.Errorf(
+			"unsupported api_version %d: supported versions are %d through %d",
+			m.APIVersion, LegacyAPIVersion, CurrentAPIVersion,
+		))
 	}
 	return errs
 }
@@ -341,6 +371,11 @@ func validateRelativePackagePath(p string) error {
 
 // validateEndpoints checks base_url and the required endpoint paths.
 func (m *Manifest) validateEndpoints() []error {
+	// A static web-application-only package intentionally has no managed
+	// backend and therefore no legacy base_url or endpoint contract.
+	if m.HasWebApps() && m.BaseURL == "" && m.Endpoints == (Endpoints{}) {
+		return nil
+	}
 	var errs []error
 	if m.BaseURL == "" {
 		errs = append(errs, errors.New("base_url is required"))
@@ -355,6 +390,78 @@ func (m *Manifest) validateEndpoints() []error {
 		errs = append(errs, errors.New("endpoints.webhooks is required"))
 	}
 	return errs
+}
+
+var webAppKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+func (m *Manifest) validateWebApps() []error {
+	if len(m.UI.WebApps) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(m.UI.WebApps))
+	var errs []error
+	for i, app := range m.UI.WebApps {
+		prefix := fmt.Sprintf("ui.web_apps[%d]", i)
+		if !webAppKeyPattern.MatchString(app.Key) {
+			errs = append(errs, fmt.Errorf("%s.key %q must match %s", prefix, app.Key, webAppKeyPattern.String()))
+		}
+		if _, ok := seen[app.Key]; ok {
+			errs = append(errs, fmt.Errorf("%s.key duplicates %q", prefix, app.Key))
+		}
+		seen[app.Key] = struct{}{}
+		if strings.TrimSpace(app.Title) == "" || len(app.Title) > 200 {
+			errs = append(errs, fmt.Errorf("%s.title must be 1-200 bytes", prefix))
+		}
+		if err := validateRelativePackagePath(app.Entry); err != nil {
+			errs = append(errs, fmt.Errorf("%s.entry: %w", prefix, err))
+		}
+		if len(app.Placements) == 0 {
+			errs = append(errs, fmt.Errorf("%s.placements must not be empty", prefix))
+		}
+		placementSeen := make(map[string]struct{}, len(app.Placements))
+		for _, placement := range app.Placements {
+			if placement != WebAppPlacementTask && placement != WebAppPlacementWorkspace {
+				errs = append(errs, fmt.Errorf("%s.placements contains unsupported placement %q", prefix, placement))
+			}
+			if _, ok := placementSeen[placement]; ok {
+				errs = append(errs, fmt.Errorf("%s.placements duplicates %q", prefix, placement))
+			}
+			placementSeen[placement] = struct{}{}
+		}
+		networkOrigins, originErrs := normalizeWebAppNetworkOrigins(prefix, app.NetworkOrigins)
+		errs = append(errs, originErrs...)
+		m.UI.WebApps[i].NetworkOrigins = networkOrigins
+	}
+	return errs
+}
+
+// normalizeWebAppNetworkOrigins validates the exact HTTPS origins that a
+// packaged web application may request from its sandbox. The host later uses
+// this canonical form for grants and CSP, so equivalent host casing cannot
+// create two permission entries.
+func normalizeWebAppNetworkOrigins(prefix string, origins []string) ([]string, []error) {
+	if len(origins) == 0 {
+		return nil, nil
+	}
+	result := make([]string, 0, len(origins))
+	seen := make(map[string]struct{}, len(origins))
+	var errs []error
+	for i, raw := range origins {
+		trimmed := strings.TrimSpace(raw)
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(parsed.Host, " \t\r\n") || parsed.Hostname() == "" {
+			errs = append(errs, fmt.Errorf("%s.network_origins[%d] must be an exact HTTPS origin", prefix, i))
+			continue
+		}
+		origin := parsed.Scheme + "://" + strings.ToLower(parsed.Host)
+		if _, exists := seen[origin]; exists {
+			errs = append(errs, fmt.Errorf("%s.network_origins duplicates %q", prefix, origin))
+			continue
+		}
+		seen[origin] = struct{}{}
+		result = append(result, origin)
+	}
+	return result, errs
 }
 
 // validateCategories checks each category against the known enum.
@@ -525,13 +632,13 @@ func (m *Manifest) validateWebhooks() []error {
 	seen := make(map[string]bool, len(m.Webhooks))
 	var errs []error
 	for _, wh := range m.Webhooks {
-		if access := wh.EffectiveAccess(); access != WebhookAccessPublic && access != WebhookAccessAuthenticated {
+		if access := wh.EffectiveAccess(m.APIVersion); access != WebhookAccessPublic && access != WebhookAccessAuthenticated {
 			errs = append(errs, fmt.Errorf("webhook %q access %q is invalid", wh.Key, wh.Access))
 		}
 		if wh.MaxBodyBytes < 0 || wh.MaxBodyBytes > MaximumWebhookMaxBodyBytes {
 			errs = append(errs, fmt.Errorf("webhook %q max_body_bytes must be between 1 and %d when set", wh.Key, MaximumWebhookMaxBodyBytes))
 		}
-		if wh.EffectiveAccess() == WebhookAccessPublic && wh.MaxBodyBytes > DefaultWebhookMaxBodyBytes {
+		if wh.EffectiveAccess(m.APIVersion) == WebhookAccessPublic && wh.MaxBodyBytes > DefaultWebhookMaxBodyBytes {
 			errs = append(errs, fmt.Errorf("webhook %q must use authenticated access when max_body_bytes exceeds %d", wh.Key, DefaultWebhookMaxBodyBytes))
 		}
 		if seen[wh.Key] {
@@ -544,6 +651,9 @@ func (m *Manifest) validateWebhooks() []error {
 }
 
 func (m *Manifest) validateActions() []error {
+	const minimumAdminActionKandevVersion = "0.91.1"
+	minimum, validMinimum := NormalizeReleaseVersion(m.MinKandevVersion)
+	adminAccessSupported := validMinimum && CompareVersions(minimum, minimumAdminActionKandevVersion) >= 0
 	seen := make(map[string]bool, len(m.Actions))
 	var errs []error
 	for _, action := range m.Actions {
@@ -558,6 +668,15 @@ func (m *Manifest) validateActions() []error {
 		if action.ResourceScope != ActionScopeWorkspace && action.ResourceScope != ActionScopeTask &&
 			action.ResourceScope != ActionScopeRepository {
 			errs = append(errs, fmt.Errorf("action %q has invalid scope %q", action.Key, action.ResourceScope))
+		}
+		if access := action.EffectiveAccess(); access != ActionAccessAuthenticated && access != ActionAccessAdmin {
+			errs = append(errs, fmt.Errorf("action %q has invalid access %q", action.Key, action.Access))
+		} else if access == ActionAccessAdmin && !adminAccessSupported {
+			errs = append(errs, fmt.Errorf(
+				"action %q with admin access requires min_kandev_version >= %s",
+				action.Key,
+				minimumAdminActionKandevVersion,
+			))
 		}
 		if action.MaxBodyBytes <= 0 || action.MaxBodyBytes > MaxActionBodyBytes {
 			errs = append(errs, fmt.Errorf("action %q max_body_bytes must be between 1 and %d", action.Key, MaxActionBodyBytes))

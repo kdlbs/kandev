@@ -3,23 +3,22 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 )
 
-// askQuestionKeepAliveInterval is how often ask_user_question streams a progress
-// notification to the agent while waiting for the user's answer. The agent's MCP
-// client (auggie runs on Node, whose fetch/undici applies a 300s idle timeout to
-// the in-flight tool-call request) aborts the call with "fetch failed" if no bytes
-// arrive for that long. Emitting a progress notification well inside that window
-// keeps the streamed POST/SSE response alive so the call survives until the user
-// responds. Declared as a var so tests can shorten it.
+// askQuestionKeepAliveInterval controls progress notifications during the
+// blocking ask_user_question call. Managed defaults keep it below client idle
+// deadlines. Tests can shorten it for fast transport tests.
 var askQuestionKeepAliveInterval = 20 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
@@ -28,6 +27,8 @@ const (
 	promptArg            = "prompt"
 	questionsArg         = "questions"
 	optionsArg           = "options"
+	allowCustomTextArg   = "allow_custom_text"
+	instructionsArg      = "instructions"
 	idArg                = "id"
 	titleArg             = "title"
 	labelArg             = "label"
@@ -40,7 +41,73 @@ const (
 	messageArg           = "message"
 	autopilotArg         = "autopilot"
 	contextParagraphsArg = "context_paragraphs"
+	objType              = "object"
+	propsKey             = "properties"
+	reqKey               = "required"
+	typeKey              = "type"
+	stringType           = "string"
+	retryKeyArg          = "retry_key"
+	agentProfileIDArg    = "agent_profile_id"
 )
+
+// transportRequestIDMetaKey is the Kandev-private `_meta` key under which the
+// BeforeCallTool hook records the agent's JSON-RPC request id. mcp-go hands the
+// id to hooks but not to tool handlers, so the hook stamps it onto the request
+// the handler receives.
+const transportRequestIDMetaKey = "kandev.transport_request_id"
+
+// stampTransportRequestID records the JSON-RPC request id on the call request
+// so handlers can build a retry-stable identity. RequestId.String() renders
+// numeric and string ids deterministically regardless of JSON decoding.
+func stampTransportRequestID(request *mcp.CallToolRequest, id any) {
+	if request == nil || id == nil {
+		return
+	}
+	if request.Params.Meta == nil {
+		request.Params.Meta = &mcp.Meta{}
+	}
+	if request.Params.Meta.AdditionalFields == nil {
+		request.Params.Meta.AdditionalFields = map[string]any{}
+	}
+	request.Params.Meta.AdditionalFields[transportRequestIDMetaKey] = mcp.NewRequestId(id).String()
+}
+
+// clarificationRetryKey identifies one agent tool call across exact transport
+// retries: the MCP connection (client session) plus the JSON-RPC request id the
+// agent chose. JSON-RPC ids restart on every new connection, so the connection
+// scope keeps two different calls from aliasing each other. Empty when either
+// component is unavailable, which leaves the backend on its random identity.
+func clarificationRetryKey(ctx context.Context, req mcp.CallToolRequest) string {
+	connectionID := mcpConnectionID(ctx)
+	if connectionID == "" || req.Params.Meta == nil {
+		return ""
+	}
+	requestID, _ := req.Params.Meta.AdditionalFields[transportRequestIDMetaKey].(string)
+	if requestID == "" {
+		return ""
+	}
+	return connectionID + "/" + requestID
+}
+
+func moveTaskEntryOptionsToolOption() mcp.ToolOption {
+	return mcp.WithObject("entry_options",
+		mcp.Description("One-shot overrides applied only when the task enters the target step; they never change durable step configuration and require an actual workflow step change. Rejected when the target step does not start an agent on entry."),
+		mcp.Properties(map[string]any{
+			"reset_context": map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Reset the target session's agent context before the step's on_enter actions run.",
+			},
+			instructionsArg: map[string]any{
+				typeKey:        stringType,
+				descriptionArg: "One-time instructions appended to the target step's prompt (never replacing it) for this entry only.",
+			},
+			"skip_step_prompt": map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Suppress the destination step's configured prompt (and its task-description fallback) for this one entry. With instructions the agent auto-starts a turn carrying only those instructions; without instructions no turn starts and the task lands idle.",
+			},
+		}),
+	)
+}
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -150,11 +217,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 
 		parentID := req.GetString("parent_id", "")
+		parentIsSelf := false
 		if parentID == "self" {
 			if s.taskID == "" {
 				return mcp.NewToolResultError("cannot use 'self' as parent_id: no current task context"), nil
 			}
 			parentID = s.taskID
+			parentIsSelf = true
 		}
 		workspaceID := req.GetString("workspace_id", "")
 		workflowID := req.GetString("workflow_id", "")
@@ -177,13 +246,19 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"title":               title,
 			"description":         req.GetString("prompt", ""),
 			autopilotArg:          req.GetBool(autopilotArg, false),
-			"agent_profile_id":    req.GetString("agent_profile_id", ""),
+			agentProfileIDArg:     req.GetString(agentProfileIDArg, ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
+		}
+		if parentIsSelf {
+			// This is an internal server-owned intent marker. The backend still
+			// authenticates the current session and verifies that parent_id is
+			// the authenticated caller task before applying self placement.
+			payload["parent_is_self"] = true
 		}
 		if externalID := req.GetString("external_id", ""); externalID != "" {
 			payload["external_id"] = externalID
@@ -281,45 +356,175 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskPRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
-		); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		operation, err := req.RequireString("operation")
+		if err != nil || (operation != "link" && operation != "unlink" && operation != "replace") {
+			return mcp.NewToolResultError("operation must be link, unlink, or replace"), nil
 		}
-		removeLifecyclePromptFields(result)
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		if errMsg := validateChangeRequestOldIdentity(operation, req.GetArguments()); errMsg != "" {
+			return mcp.NewToolResultError(errMsg), nil
+		}
+		payload := map[string]interface{}{
+			"operation":      operation,
+			mcpKeyTaskID:     taskID,
+			"caller_task_id": s.taskID,
+		}
+		for _, key := range []string{
+			"provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number",
+		} {
+			if value, ok := req.GetArguments()[key]; ok {
+				payload[key] = value
+			}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPManageTaskChangeRequest, payload, &result); err != nil {
+			return backendToolError(err), nil
+		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 
-func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
+func (s *Server) getTaskChangeRequestsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(
+			ctx, ws.ActionMCPGetTaskChangeRequests, map[string]interface{}{"task_id": s.taskID}, &result,
+		); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) updateTaskChangeRequestAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload := map[string]interface{}{"task_id": s.taskID}
 		args := req.GetArguments()
-		if hasLifecyclePromptOverrideArgument(args) {
-			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
+		if errMsg := validateChangeRequestAutomationTarget(args); errMsg != "" {
+			return mcp.NewToolResultError(errMsg), nil
 		}
-		for _, key := range []string{
-			"auto_fix_enabled", "auto_merge_enabled",
-			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
-		} {
-			if value, ok := args[key].(bool); ok {
+		payload := make(map[string]interface{}, 2)
+		for _, key := range []string{"target", "patch"} {
+			if value, ok := args[key]; ok {
 				payload[key] = value
 			}
-		}
-		for _, key := range []string{"auto_fix_prompt_override"} {
-			if value, ok := args[key].(string); ok {
-				payload[key] = value
-			}
-		}
-		if len(payload) == 1 {
-			return mcp.NewToolResultError("at least one PR automation option is required"), nil
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskChangeRequestAutomation, payload, &result); err != nil {
+			return taskChangeRequestAutomationToolError(err), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func backendToolError(err error) *mcp.CallToolResult {
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) || backendErr.Details == nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	data, marshalErr := json.MarshalIndent(backendErr.Details, "", "  ")
+	if marshalErr != nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	result := mcp.NewToolResultStructured(backendErr.Details, string(data))
+	result.IsError = true
+	return result
+}
+
+func taskChangeRequestAutomationToolError(err error) *mcp.CallToolResult {
+	return backendToolError(err)
+}
+
+// validateChangeRequestOldIdentity enforces the operation/old-identity
+// exclusivity the portable schema can no longer express: link and unlink reject
+// any old identity field, replace requires all three. It names the violated
+// constraint without echoing argument values.
+func validateChangeRequestOldIdentity(operation string, args map[string]interface{}) string {
+	oldFields := []string{"old_provider", "old_repository_id", "old_number"}
+	if operation == "replace" {
+		for _, key := range oldFields {
+			if _, ok := args[key]; !ok {
+				return "replace requires old_provider, old_repository_id, and old_number"
+			}
+		}
+		return ""
+	}
+	for _, key := range oldFields {
+		if _, ok := args[key]; ok {
+			return "old_provider, old_repository_id, and old_number are only valid for replace"
+		}
+	}
+	return ""
+}
+
+// validateChangeRequestAutomationTarget enforces the target scope exclusivity
+// and the association prompt exclusion the portable schema can no longer
+// express. An association target requires the change-request identity and
+// rejects providers; a task target requires providers and rejects that
+// identity; an association target cannot carry auto_fix_prompt_override.
+func validateChangeRequestAutomationTarget(args map[string]interface{}) string {
+	target, ok := args["target"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	identityFields := []string{"provider", "repository_id", "number"}
+	switch target["scope"] {
+	case "association":
+		for _, key := range identityFields {
+			if _, present := target[key]; !present {
+				return "an association target requires provider, repository_id, and number"
+			}
+		}
+		if _, present := target["providers"]; present {
+			return "providers is only valid for a task target"
+		}
+		if patch, ok := args["patch"].(map[string]interface{}); ok {
+			if _, present := patch["auto_fix_prompt_override"]; present {
+				return "auto_fix_prompt_override is only valid for a task target"
+			}
+		}
+	case "task":
+		if _, present := target["providers"]; !present {
+			return "a task target requires a providers array"
+		}
+		for _, key := range identityFields {
+			if _, present := target[key]; present {
+				return "provider, repository_id, and number are only valid for an association target"
+			}
+		}
+	}
+	return ""
+}
+
+func (s *Server) reportTaskChangeRequestAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome)
+}
+
+func (s *Server) reportTaskAutoFixOutcomeHandler(action string) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		outcome := strings.TrimSpace(req.GetString("outcome", ""))
+		summary := strings.TrimSpace(req.GetString("summary", ""))
+		if outcome != "action_taken" && outcome != "non_actionable" && outcome != "blocked" {
+			return mcp.NewToolResultError("outcome must be action_taken, non_actionable, or blocked"), nil
+		}
+		if summary == "" {
+			return mcp.NewToolResultError("summary is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			"outcome":    outcome,
+			"summary":    summary,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -353,41 +558,31 @@ func (s *Server) mrAutomationToolError(logMsg string, err error) (*mcp.CallToolR
 	return mcp.NewToolResultError("failed to process MR automation request"), nil
 }
 
-func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
-		); err != nil {
-			return s.mrAutomationToolError("get task MR automation failed", err)
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
-func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload := map[string]interface{}{"task_id": s.taskID}
-		args := req.GetArguments()
-		if hasLifecyclePromptOverrideArgument(args) {
-			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
-		}
-		for _, key := range []string{"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed"} {
-			if value, ok := args[key].(bool); ok {
-				payload[key] = value
+// copyMRIdentityArgs copies the optional repository_id/project_path/mr_iid
+// triple that scopes a patch to one linked MR. repository_id is frequently
+// an empty string on self-managed hosts without a numeric project ID (R6),
+// so presence in args — not non-emptiness — is what marks it as sent;
+// copyOptionalStringArg's "empty means absent" rule would silently turn a
+// complete-but-empty identity into a partial one and get it rejected.
+func copyMRIdentityArgs(payload, args map[string]interface{}) error {
+	for _, key := range []string{"repository_id", "project_path"} {
+		if value, ok := args[key]; ok {
+			if s, ok := value.(string); ok {
+				payload[key] = s
 			}
 		}
-		if len(payload) == 1 {
-			return mcp.NewToolResultError("at least one MR automation option is required"), nil
-		}
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
-			return s.mrAutomationToolError("update task MR automation failed", err)
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
 	}
+	if value, ok := args["mr_iid"].(float64); ok {
+		if !isValidMRIID(value) {
+			return fmt.Errorf("mr_iid must be a positive integer")
+		}
+		payload["mr_iid"] = int(value)
+	}
+	return nil
+}
+
+func isValidMRIID(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0 && math.Trunc(value) == value
 }
 
 func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
@@ -461,7 +656,7 @@ func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
 			"sender_task_id":    s.taskID,
 			"sender_session_id": s.sessionID,
 		}
-		copyOptionalStringArg(payload, req, "agent_profile_id")
+		copyOptionalStringArg(payload, req, agentProfileIDArg)
 		copyOptionalStringArg(payload, req, "name")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSpawnSession, payload, &result); err != nil {
@@ -504,6 +699,42 @@ func (s *Server) listTaskSessionsHandler() server.ToolHandlerFunc {
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskSessions, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) listPendingAgentPermissionsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]interface{}{mcpKeyTaskID: taskID}
+		copyOptionalStringArg(payload, req, "session_id")
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListPendingAgentPermissions, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) resolveAgentPermissionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := make(map[string]interface{}, 5)
+		for _, field := range []string{mcpKeyTaskID, "session_id", "request_id", "pending_id", "option_id"} {
+			value, err := req.RequireString(field)
+			if err != nil {
+				return mcp.NewToolResultError(field + " is required"), nil
+			}
+			payload[field] = value
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPResolveAgentPermission, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -572,6 +803,11 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			"session_id": s.sessionID,
 			questionsArg: questions,
 			"context":    questionCtx,
+		}
+		// Carry the connection-scoped transport identity so an exact retry of
+		// an interrupted call reconciles to the bundle it already created.
+		if retryKey := clarificationRetryKey(ctx, req); retryKey != "" {
+			payload[retryKeyArg] = retryKey
 		}
 
 		// Waiting on a human answer routinely outlasts the agent MCP client's
@@ -737,6 +973,11 @@ func normalizeAndValidateQuestion(q map[string]interface{}, index int, seenIDs m
 		return mcp.NewToolResultError(fmt.Sprintf("question %d has duplicate id %q", index+1, id))
 	}
 	seenIDs[id] = true
+	if value, exists := q[allowCustomTextArg]; exists {
+		if _, ok := value.(bool); !ok {
+			return mcp.NewToolResultError(fmt.Sprintf("question %d field %q must be a boolean", index+1, allowCustomTextArg))
+		}
+	}
 
 	options, errResult := decodeOptionsForQuestion(q, index)
 	if errResult != nil {
@@ -827,6 +1068,9 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 			continue
 		}
 		if entry, ok := answersByID[qid]; ok {
+			if label := selectedAnswerLabel(q, entry); label != "" {
+				entry["selected_label"] = label
+			}
 			out[qid] = entry
 			continue
 		}
@@ -845,6 +1089,28 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.NewToolResultStructured(out, string(data))
+}
+
+// selectedAnswerLabel returns the offered label only when the selected ID
+// identifies exactly one option. Missing or ambiguous selections return no label.
+func selectedAnswerLabel(question, answer map[string]interface{}) string {
+	selected, _ := answer["selected_option"].(string)
+	if selected == "" {
+		return ""
+	}
+	options, _ := question[optionsArg].([]map[string]interface{})
+	var label string
+	matches := 0
+	for _, option := range options {
+		if option[optionIDFieldName] == selected {
+			matches++
+			label, _ = option[labelArg].(string)
+		}
+	}
+	if matches != 1 {
+		return ""
+	}
+	return label
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but
@@ -947,8 +1213,33 @@ func planWriteAck(action string, result map[string]interface{}, sentContent stri
 	if updatedAt := stringField(result, "updated_at"); updatedAt != "" {
 		ack += ", updated_at=" + updatedAt
 	}
-	return mcp.NewToolResultText(ack +
-		". Plan content is omitted from this response; read it back with get_task_plan_kandev if needed.")
+	if version := stringField(result, "version"); version != "" {
+		ack += ", version=" + version
+	}
+	ack += ". Plan content is omitted from this response; read it back with get_task_plan_kandev if needed."
+	if warning := stringField(result, "plan_write_warning"); warning != "" {
+		ack += "\n\n" + warning
+	}
+	return mcp.NewToolResultText(ack)
+}
+
+// planToolError preserves the structured correction data attached to a safe
+// plan-write rejection when the MCP bridge turns a backend error into text.
+func planToolError(err error) string {
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) || len(backendErr.Details) == 0 {
+		return err.Error()
+	}
+	parts := make([]string, 0, 5)
+	for _, key := range []string{"reason", "next_action", "current_version", "current_revision_version", "write_applied"} {
+		if value, ok := backendErr.Details[key]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%v", key, value))
+		}
+	}
+	if len(parts) == 0 {
+		return err.Error()
+	}
+	return err.Error() + " " + strings.Join(parts, "; ")
 }
 
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
@@ -956,6 +1247,26 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 		taskID, err := s.resolveTaskID(req)
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		// Checked before RequireString ("content"), so a non-empty mode argument is
+		// rejected even when content is also present but empty. content is
+		// schema-required, so a
+		// call missing content entirely never reaches this handler at all -
+		// the server's generic MCP argument-schema validator rejects it
+		// first; that generic message is acceptable here because create has
+		// no ordering requirement between mode and content the way
+		// update. This tool has no
+		// mode of its own — wrongType is folded into the reject rather than
+		// silently treated as absent, since a non-empty-but-wrongly-typed
+		// mode is not "absent or empty" either; in practice the schema's own
+		// type constraint on "mode" already rejects a non-string value
+		// before this runs, so wrongType here is defense-in-depth against a
+		// future schema change, not the primary guard.
+		if mode, present, wrongType := planModeArg(req); present && (wrongType || mode != "") {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"mode is not supported by create_task_plan_kandev; use update_task_plan_kandev with mode=%q to add a section to an existing plan without resending it",
+				taskcontract.PlanWriteModeAppend,
+			)), nil
 		}
 		content, err := req.RequireString("content")
 		if err != nil {
@@ -969,9 +1280,15 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 			"title":      title,
 			"created_by": "agent",
 		}
+		if expectedVersion := req.GetString("expected_version", ""); expectedVersion != "" {
+			payload["expected_version"] = expectedVersion
+		}
+		if req.GetBool("allow_truncation", false) {
+			payload["allow_truncation"] = true
+		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTaskPlan, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		return planWriteAck("created", result, content), nil
 	}
@@ -984,10 +1301,18 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 
-		payload := map[string]string{"task_id": taskID}
+		arguments, marshalErr := json.Marshal(req.GetArguments())
+		if marshalErr != nil {
+			return mcp.NewToolResultError("invalid plan read arguments"), nil
+		}
+		options, parseErr := taskcontract.ParsePlanReadOptions(arguments)
+		if parseErr != nil {
+			return mcp.NewToolResultError(parseErr.Error()), nil
+		}
+		payload := planReadRequestPayload(taskID, options)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 
 		// Check if plan exists
@@ -995,14 +1320,44 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultText("No plan exists for this task yet."), nil
 		}
 
-		// Return the plan content for easy reading
+		// Keep metadata separate from the content block. This lets an agent read
+		// the exact stored document while still receiving the version needed for
+		// its next conditional write.
 		if content, ok := result["content"].(string); ok {
-			return mcp.NewToolResultText(content), nil
+			metadata := make(map[string]interface{}, len(result))
+			for key, value := range result {
+				if key != "content" {
+					metadata[key] = value
+				}
+			}
+			metadata["content_bytes"] = len(content)
+			data, marshalErr := json.MarshalIndent(metadata, "", "  ")
+			if marshalErr != nil {
+				return mcp.NewToolResultError("failed to format plan metadata"), nil
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{
+				mcp.NewTextContent("Plan metadata:\n" + string(data)),
+				mcp.NewTextContent(content),
+			}}, nil
 		}
 
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func planReadRequestPayload(taskID string, options taskcontract.PlanReadOptions) map[string]interface{} {
+	payload := map[string]interface{}{"task_id": taskID}
+	if options.Offset != nil {
+		payload["offset"] = *options.Offset
+	}
+	if options.Limit != nil {
+		payload["limit"] = *options.Limit
+	}
+	if options.ExpectedVersion != nil {
+		payload["expected_version"] = *options.ExpectedVersion
+	}
+	return payload
 }
 
 func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
@@ -1011,10 +1366,33 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
-		content, err := req.RequireString("content")
-		if err != nil {
-			return mcp.NewToolResultError("content is required"), nil
+
+		// Mode is checked before content, mirroring
+		// precedence: mode validity is decided
+		// entirely from the request itself, so it is resolved before a
+		// round trip. GetString would silently read a non-string mode as
+		// absent and default to the destructive replace behavior
+		// so the type is checked explicitly -
+		// though in practice the schema's own type constraint on "mode"
+		// already rejects a non-string value before this handler runs, so
+		// this is defense-in-depth against a future schema change, not the
+		// primary guard. content is deliberately NOT schema-required (see
+		// its registration in registerPlanTools) and read permissively
+		// here rather than with RequireString: "content is required" is
+		// PlanService.UpdatePlan's call to make, after authorization, so
+		// that a denied caller never learns content validity for a task it
+		// cannot reach.
+		mode, _, wrongType := planModeArg(req)
+		if wrongType {
+			return mcp.NewToolResultError(fmt.Sprintf("mode must be a string; accepted values are %q and %q", taskcontract.PlanWriteModeReplace, taskcontract.PlanWriteModeAppend)), nil
 		}
+		if mode != "" {
+			if _, err := taskcontract.ParsePlanWriteMode(mode); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		}
+
+		content := req.GetString("content", "")
 		title := req.GetString("title", "")
 
 		payload := map[string]interface{}{
@@ -1025,13 +1403,76 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		if title != "" {
 			payload["title"] = title
 		}
+		if mode != "" {
+			payload["mode"] = mode
+		}
+		if expectedVersion := req.GetString("expected_version", ""); expectedVersion != "" {
+			payload["expected_version"] = expectedVersion
+		}
+		if req.GetBool("allow_truncation", false) {
+			payload["allow_truncation"] = true
+		}
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		return planWriteAck("updated", result, content), nil
 	}
+}
+
+func (s *Server) editTaskPlanHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		oldText, err := req.RequireString("old_text")
+		if err != nil {
+			return mcp.NewToolResultError("old_text is required"), nil
+		}
+		newText, err := req.RequireString("new_text")
+		if err != nil {
+			return mcp.NewToolResultError("new_text is required; use an empty string to delete the match"), nil
+		}
+		expectedVersion, err := req.RequireString("expected_version")
+		if err != nil {
+			return mcp.NewToolResultError("expected_version is required"), nil
+		}
+
+		payload := map[string]interface{}{
+			"task_id":          taskID,
+			"old_text":         oldText,
+			"new_text":         newText,
+			"expected_version": expectedVersion,
+			"created_by":       "agent",
+		}
+		if req.GetBool("allow_truncation", false) {
+			payload["allow_truncation"] = true
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPEditTaskPlan, payload, &result); err != nil {
+			return mcp.NewToolResultError(planToolError(err)), nil
+		}
+		return planWriteAck("edited", result, newText), nil
+	}
+}
+
+// planModeArg reads the optional "mode" tool argument. It distinguishes a
+// value present but not a string from one genuinely absent: silently
+// treating the former as absent (as GetString would) defaults a malformed
+// request to destructive replace behavior. value is "" whenever wrongType is
+// true.
+func planModeArg(req mcp.CallToolRequest) (value string, present, wrongType bool) {
+	raw, ok := req.GetArguments()["mode"]
+	if !ok {
+		return "", false, false
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", true, true
+	}
+	return s, true, false
 }
 
 func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {

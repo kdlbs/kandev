@@ -1,9 +1,115 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { waitForStableActiveSession } from "../../helpers/session-store";
+import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
+import { watchOlderMessageRequests } from "./message-pagination-helpers";
+
+const MOBILE_END_TOLERANCE_PX = 10;
+
+function mobileOverflowScript(prefix: string): string {
+  return Array.from(
+    { length: 30 },
+    (_, index) =>
+      `e2e:message("${prefix} ${index + 1} - lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua")`,
+  ).join("\n");
+}
+
+async function switchMobileTask(testPage: Page, title: string): Promise<void> {
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
+  const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+  const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
+  await expect(taskRow).toBeVisible({ timeout: 15_000 });
+  // This test covers task-switch transcript continuity, not touch activation.
+  // Use a click so the row's long-press drag sensor cannot consume the gesture
+  // while the mobile drawer is under CI load.
+  await taskRow.click();
+  await expect(sheet).not.toBeVisible({ timeout: 10_000 });
+}
+
+type ReaderGestureElement = HTMLElement & {
+  readerGestureProbe?: { events: string[]; controller: AbortController };
+};
+
+async function scrollMobileReaderIntoHistory(page: Page, list: Locator): Promise<number> {
+  const client = await page.context().newCDPSession(page);
+  let touching = false;
+  let events: string[] = [];
+  try {
+    await list.evaluate((element: ReaderGestureElement) => {
+      const probe = { events: [] as string[], controller: new AbortController() };
+      element.readerGestureProbe = probe;
+      for (const type of ["touchstart", "touchmove", "touchend"]) {
+        element.addEventListener(
+          type,
+          (event) => {
+            if (event.isTrusted) probe.events.push(type);
+          },
+          { capture: true, signal: probe.controller.signal },
+        );
+      }
+    });
+    const box = await list.boundingBox();
+    if (!box) throw new Error("Mobile transcript has no reading viewport");
+    const point = { x: box.x + box.width / 2, y: box.y + box.height / 4 };
+    touching = true;
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ ...point, y: point.y + box.height / 2 }],
+    });
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    touching = false;
+  } finally {
+    try {
+      if (touching)
+        await client.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+    } finally {
+      try {
+        events = await list.evaluate((element: ReaderGestureElement) => {
+          const probe = element.readerGestureProbe;
+          probe?.controller.abort();
+          delete element.readerGestureProbe;
+          return probe?.events ?? [];
+        });
+      } finally {
+        await client.detach();
+      }
+    }
+  }
+  expect(events).toEqual(["touchstart", "touchmove", "touchend"]);
+  await expect
+    .poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+    .toBeGreaterThan(100);
+  let previousGeometry = "";
+  let stableReads = 0;
+  let settledGeometry = [-1, 0, 0];
+  await expect
+    .poll(
+      async () => {
+        const geometry = await list.evaluate((el) => [
+          el.scrollTop,
+          el.scrollHeight,
+          el.clientHeight,
+        ]);
+        const key = geometry.join(":");
+        stableReads = key === previousGeometry ? stableReads + 1 : 0;
+        previousGeometry = key;
+        settledGeometry = geometry;
+        return stableReads;
+      },
+      { intervals: [100], message: "Mobile reading position and geometry should settle" },
+    )
+    .toBeGreaterThanOrEqual(3);
+  const [top, height, viewportHeight] = settledGeometry;
+  expect(top).toBeGreaterThan(100);
+  expect(height - viewportHeight - top).toBeGreaterThan(100);
+  return top;
+}
 
 /**
  * Seed a task whose mock-agent script emits enough distinct messages to
@@ -80,6 +186,129 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       .toBeLessThan(25);
   });
 
+  test("task switch places cached history before its refresh settles", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile cached transcript A",
+      seedData.agentProfileId,
+      {
+        description: mobileOverflowScript("Mobile environment A history"),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile cached transcript B",
+      seedData.agentProfileId,
+      {
+        description: mobileOverflowScript("Mobile environment B history"),
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!taskA.session_id || !taskB.session_id) {
+      throw new Error("createTaskWithAgent did not return both session ids");
+    }
+    await waitForSessionDone(apiClient, taskA.id, taskA.session_id, "mobile task A should finish");
+    await waitForSessionDone(apiClient, taskB.id, taskB.session_id, "mobile task B should finish");
+
+    const refreshHold = await routeMainWebSocketWithMessageListResponseHold(testPage);
+    const olderRequests = watchOlderMessageRequests(testPage, taskA.session_id);
+    await testPage.goto(`/t/${taskA.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    const list = session.activeChat().locator(".chat-message-list");
+    await expect
+      .poll(async () => list.evaluate((element) => element.scrollHeight - element.clientHeight), {
+        timeout: 15_000,
+        message: "mobile task A transcript should overflow",
+      })
+      .toBeGreaterThan(200);
+
+    await switchMobileTask(testPage, "Mobile cached transcript B");
+    await waitForStableActiveSession(testPage, taskB.session_id);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    await switchMobileTask(testPage, "Mobile cached transcript A");
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    await expect.poll(refreshHold.heldCount, { timeout: 5_000 }).toBe(1);
+    await expect
+      .poll(
+        async () =>
+          list.evaluate(
+            (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+          ),
+        {
+          timeout: 2_000,
+          message: "mobile cached transcript should be at the bottom before refresh release",
+        },
+      )
+      .toBeLessThan(MOBILE_END_TOLERANCE_PX);
+    refreshHold.releaseHeldResponse();
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(MOBILE_END_TOLERANCE_PX);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "observe mobile pagination after first refresh release",
+    );
+    expect(olderRequests).toHaveLength(0);
+
+    const targetScrollTop = await scrollMobileReaderIntoHistory(testPage, list);
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await switchMobileTask(testPage, "Mobile cached transcript B");
+    await waitForStableActiveSession(testPage, taskB.session_id);
+    refreshHold.holdNextLatestWindow(taskA.session_id);
+    await switchMobileTask(testPage, "Mobile cached transcript A");
+    await waitForStableActiveSession(testPage, taskA.session_id);
+    await expect.poll(refreshHold.heldCount, { timeout: 5_000 }).toBe(1);
+    await expect
+      .poll(
+        async () =>
+          Math.abs((await list.evaluate((element) => element.scrollTop)) - targetScrollTop),
+        {
+          timeout: 2_000,
+          message:
+            "mobile cached transcript should restore its saved position before refresh release",
+        },
+      )
+      .toBeLessThanOrEqual(20);
+    refreshHold.releaseHeldResponse();
+    await expect
+      .poll(async () =>
+        Math.abs((await list.evaluate((element) => element.scrollTop)) - targetScrollTop),
+      )
+      .toBeLessThanOrEqual(20);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "observe mobile pagination after second refresh release",
+    );
+    expect(olderRequests).toHaveLength(0);
+
+    const documentWidth = await testPage.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(documentWidth.scrollWidth).toBeLessThanOrEqual(documentWidth.clientWidth);
+  });
+
   test("is reachable and toggles by touch", async ({ testPage, apiClient, seedData }) => {
     const session = await seedOverflowingTask(
       testPage,
@@ -124,27 +353,64 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       })
       .toBeGreaterThan(200);
 
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
+    const targetScrollTop = await scrollMobileReaderIntoHistory(testPage, list);
     expect(targetScrollTop).toBeGreaterThan(100);
 
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
+    expect(Math.abs((await list.evaluate((el) => el.scrollTop)) - targetScrollTop)).toBeLessThan(
+      10,
+    );
+
     // A brand-new message arrives while scrolled away from the bottom and
     // disabled — the view must not jump.
     const marker = "New content while disabled on mobile";
     await session.sendMessageViaButton(`e2e:message("${marker}")`);
-    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
+    await expect(activeChat.getByText(marker, { exact: true }).last()).toBeVisible({
       timeout: 15_000,
     });
     await expect
       .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
       .toBeLessThan(targetScrollTop + 10);
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
+  });
+
+  test("enabled auto-scroll stays at the bottom for live messages on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Auto-scroll Toggle Enabled Live Message",
+    );
+    const activeChat = session.activeChat();
+    const list = activeChat.locator(".chat-message-list");
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.clientHeight), {
+        timeout: 15_000,
+        message: "Waiting for chat to overflow",
+      })
+      .toBeGreaterThan(200);
+
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    const marker = "New content while enabled on mobile";
+    await session.sendMessageViaButton(`e2e:message("${marker}")`);
+    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 5_000,
+        message: "enabled mobile auto-scroll should stay at the bottom after live content",
+      })
+      .toBeLessThan(10);
   });
 
   test("disabling from the bottom freezes the view when new content arrives", async ({
@@ -181,12 +447,31 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const marker = "New content while disabled at bottom on mobile";
-    await session.sendMessageViaButton(`e2e:delay(500)\ne2e:message("${marker}")`);
-    // Mobile submission clears the composer and appends the user's prompt,
-    // which can resize the transcript before the delayed agent reply. Capture
-    // the frozen position after that submit layout settles so this assertion
-    // isolates movement caused by the incoming content.
-    const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
+    await session.sendMessageViaButton(`e2e:delay(1500)\ne2e:message("${marker}")`);
+    await expect(activeChat.getByText("e2e:delay(1500)", { exact: false })).toBeVisible();
+    // Capture only after the submitted prompt's scroll position is stable.
+    // The delayed response leaves time for the user's message row to settle.
+    const frozenScrollTop = await list.evaluate(async (el) => {
+      let previous = el.scrollTop;
+      let stableFrames = 0;
+      for (let frame = 0; frame < 30; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const current = el.scrollTop;
+        stableFrames = Math.abs(current - previous) <= 0.5 ? stableFrames + 1 : 0;
+        previous = current;
+        if (stableFrames === 3) return current;
+      }
+      throw new Error("transcript scroll position did not settle after prompt submission");
+    });
+    const markerMessages = activeChat.getByText(marker, { exact: false });
+    const promptMarkerCount = await markerMessages.count();
+    expect(promptMarkerCount).toBeGreaterThan(0);
+    await expect
+      .poll(() => markerMessages.count(), {
+        timeout: 15_000,
+        message: "Waiting for the delayed assistant response after the submitted prompt",
+      })
+      .toBeGreaterThan(promptMarkerCount);
     await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
       timeout: 15_000,
     });
@@ -201,5 +486,101 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
         { timeout: 2_000 },
       )
       .toBeLessThanOrEqual(2);
+  });
+
+  test("follows a live turn from the bottom, then pauses after a small upward touch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.emulateMedia({ reducedMotion: "reduce" });
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile transcript live follow intent",
+    );
+    const activeChat = session.activeChat();
+    const list = activeChat.locator(".chat-message-list");
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(5);
+
+    await session.sendMessageViaButton(
+      'e2e:message("MOBILE-LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("MOBILE-LIVE-FOLLOW-TAIL")',
+    );
+    const agentMessages = activeChat.getByTestId("agent-message-highlight");
+    await expect(
+      agentMessages.getByText("MOBILE-LIVE-FOLLOW-START", { exact: false }),
+    ).toBeVisible();
+    const runningStatus = list.getByRole("status", { name: "Agent is running" });
+    await expect(runningStatus).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () =>
+        list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+      )
+      .toBeLessThan(5);
+    const listBox = await list.boundingBox();
+    const statusBox = await runningStatus.boundingBox();
+    expect(listBox).not.toBeNull();
+    expect(statusBox).not.toBeNull();
+    expect(statusBox!.y).toBeGreaterThanOrEqual(listBox!.y - 1);
+    expect(statusBox!.y + statusBox!.height).toBeLessThanOrEqual(listBox!.y + listBox!.height + 1);
+
+    const startTop = await list.evaluate((element) => element.scrollTop);
+    const box = await list.boundingBox();
+    expect(box).not.toBeNull();
+    await list.evaluate((element) => {
+      const events = ((
+        window as Window & { __transcriptTouchEvents?: { start: number; move: number } }
+      ).__transcriptTouchEvents = { start: 0, move: 0 });
+      element.addEventListener("touchstart", () => events.start++, { capture: true });
+      element.addEventListener("touchmove", () => events.move++, { capture: true });
+    });
+    const scrollEnded = list.evaluate(
+      (element) =>
+        new Promise<void>((resolve) => {
+          element.addEventListener("scrollend", () => resolve(), { once: true });
+        }),
+    );
+    const client = await testPage.context().newCDPSession(testPage);
+    const point = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ ...point, y: point.y + 30 }],
+    });
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await client.detach();
+    await scrollEnded;
+    const touchEvents = await testPage.evaluate(
+      () =>
+        (
+          window as Window & {
+            __transcriptTouchEvents?: { start: number; move: number };
+          }
+        ).__transcriptTouchEvents,
+    );
+    expect(touchEvents?.start).toBeGreaterThan(0);
+    expect(touchEvents?.move).toBeGreaterThan(0);
+    await expect
+      .poll(async () => startTop - (await list.evaluate((element) => element.scrollTop)))
+      .toBeGreaterThan(5);
+    const readerTop = await list.evaluate((element) => element.scrollTop);
+
+    await expect(agentMessages.getByText("MOBILE-LIVE-FOLLOW-TAIL", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect
+      .poll(
+        async () => Math.abs((await list.evaluate((element) => element.scrollTop)) - readerTop),
+        {
+          timeout: 2_000,
+          message: "new live output must not pull a phone reader back to the latest message",
+        },
+      )
+      .toBeLessThanOrEqual(3);
   });
 });

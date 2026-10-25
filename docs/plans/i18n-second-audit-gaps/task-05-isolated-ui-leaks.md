@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-production-operation-audit"]
 plan: "plan.md"
-spec: "../../specs/i18n-second-audit-gaps/spec.md"
+spec: "../../specs/platform/requirements/i18n-second-audit-gaps.md"
 ---
 
 # Task 05: Isolated UI Leaks

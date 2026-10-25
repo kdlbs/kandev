@@ -22,6 +22,7 @@ type RouteName string
 const (
 	RouteUnknown    RouteName = "unknown"
 	RouteHome       RouteName = "home"
+	RouteThreads    RouteName = "threads"
 	RouteTasks      RouteName = "tasks"
 	RouteTaskDetail RouteName = "taskDetail"
 	RouteOffice     RouteName = "office"
@@ -81,6 +82,8 @@ func classifySPARoute(requestPath string) (RouteName, map[string]string) {
 	switch {
 	case requestPath == "/":
 		return RouteHome, nil
+	case requestPath == "/threads":
+		return RouteThreads, nil
 	case requestPath == "/tasks":
 		return RouteTasks, nil
 	case requestPath == "/github":

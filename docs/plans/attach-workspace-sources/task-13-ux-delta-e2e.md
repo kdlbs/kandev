@@ -7,7 +7,7 @@ depends_on:
   - "11-shared-local-remote-selector"
   - "12-unified-files-workspace-actions"
 plan: "plan.md"
-spec: "../../specs/tasks/attach-workspace-sources.md"
+spec: "../../specs/tasks/system-design/attach-workspace-sources.md"
 ---
 
 # Task 13: UX delta end-to-end coverage

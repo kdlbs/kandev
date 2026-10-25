@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/context-window-reset-freshness/spec.md
+spec: docs/specs/ui/requirements/context-window-reset-freshness.md
 created: 2026-07-31
 status: implemented
 ---

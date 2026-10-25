@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["08-message-reference-metadata", "11-composer-reference-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 12: Reference Submission and Sent Rendering
