@@ -2774,5 +2774,18 @@
   "allPRsClosedNotice_one": "全部 {{count}} 个 PR 已关闭但未合并。您可以归档此任务。",
   "allPRsClosedNotice_other": "全部 {{count}} 个 PR 已关闭但未合并。您可以归档此任务。",
   "turnOffTranscriptAutoScroll": "关闭对话记录自动滚动",
-  "turnOnTranscriptAutoScroll": "开启对话记录自动滚动"
+  "turnOnTranscriptAutoScroll": "开启对话记录自动滚动",
+  "questionImageInspect": "查看图像",
+  "questionImageCanvas": "图像查看",
+  "questionImageFit": "适应窗口",
+  "questionImageActualSize": "实际大小",
+  "questionImageShow": "显示图像",
+  "questionImageHide": "隐藏图像",
+  "questionImageLoading": "正在加载图像…",
+  "questionImageNotFound": "未找到图像文件。",
+  "questionImageUnsupported": "不支持图像预览。",
+  "questionImageInvalid": "此图像已损坏或格式不受支持。",
+  "questionImageTooLarge": "此图像超过预览大小限制。",
+  "questionImageUnavailable": "图像不可用。您仍可回答问题。",
+  "questionImageRetry": "重试"
 }

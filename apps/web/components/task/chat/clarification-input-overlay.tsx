@@ -29,6 +29,8 @@ import {
 } from "./clarification-overlay-parts";
 import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
+import { QuestionImages } from "./question-images";
+import { useQuestionImageDraft } from "./question-image-draft-context";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { useTranslation } from "react-i18next";
 
@@ -83,21 +85,6 @@ function resolveQuestionMessages(messages: readonly Message[] | null | undefined
   return [];
 }
 
-function useResetOverlayStateOnBundleChange(
-  pendingId: string | null,
-  setCustomDrafts: (drafts: Record<string, string>) => void,
-  setActiveIndex: (index: number) => void,
-) {
-  useEffect(() => {
-    // The hook resets its answer and retry state when a new pending bundle
-    // replaces the current one. Drafts and carousel navigation are overlay-
-    // local state, so they need the same lifecycle fence as well. Question IDs
-    // can repeat across bundles, which makes an ID-only draft key unsafe.
-    setCustomDrafts({});
-    setActiveIndex(0);
-  }, [pendingId, setCustomDrafts, setActiveIndex]);
-}
-
 function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
   return messages.slice().sort((a, b) => {
     const ai = (a.metadata as ClarificationRequestMetadata | undefined)?.question_index ?? 0;
@@ -136,6 +123,7 @@ function computeAllAnswered(
 }
 
 type CardProps = {
+  onInspectionChange: (open: boolean) => void;
   meta: SingleQuestionMeta;
   index: number;
   total: number;
@@ -193,6 +181,13 @@ function ClarificationCard(props: CardProps) {
           )}
         </div>
       )}
+      <QuestionImages
+        pendingId={metadata.pending_id}
+        questionId={meta.questionId}
+        sessionId={meta.message.session_id}
+        images={question.images}
+        onInspectionChange={props.onInspectionChange}
+      />
       <ClarificationMarkdown
         variant="block"
         className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
@@ -205,6 +200,17 @@ function ClarificationCard(props: CardProps) {
         isSubmitting={isSubmitting}
         customActive={customActive}
         onSelectOption={onSelectOption}
+        renderOptionPreview={(option) =>
+          option.images?.length ? (
+            <QuestionImages
+              pendingId={metadata.pending_id}
+              questionId={meta.questionId}
+              sessionId={meta.message.session_id}
+              images={option.images}
+              onInspectionChange={props.onInspectionChange}
+            />
+          ) : null
+        }
       />
       {showAgentDisconnected && (
         <div
@@ -401,6 +407,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
 }
 
 type CarouselBodyProps = {
+  onInspectionChange: (open: boolean) => void;
   sortedMessages: Message[];
   meta: SingleQuestionMeta | null;
   group: ReturnType<typeof useClarificationGroup>;
@@ -541,6 +548,7 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
   };
 }
 function ClarificationCarouselBody({
+  onInspectionChange,
   sortedMessages,
   meta,
   group,
@@ -590,6 +598,7 @@ function ClarificationCarouselBody({
   return (
     <>
       <ClarificationCard
+        onInspectionChange={onInspectionChange}
         meta={meta}
         index={activeIndex}
         total={total}
@@ -648,6 +657,7 @@ export function ClarificationInputOverlay({
   lateAnswerState,
 }: ClarificationInputOverlayProps) {
   const { t } = useTranslation();
+  const [inspectingImage, setInspectingImage] = useState(false);
   const lateMode = mode === "late";
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
@@ -668,12 +678,28 @@ export function ClarificationInputOverlay({
     group.lateAnswerState === "sending" ||
     effectiveLateStatus === "sending";
   const lateInteraction = lateMode || group.lateAnswerState !== "idle";
-  const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
-  const [rawActiveIndex, setActiveIndex] = useState(0);
-  useResetOverlayStateOnBundleChange(group.pendingId, setCustomDrafts, setActiveIndex);
+  const draftKey = group.pendingId
+    ? JSON.stringify([sortedMessages[0]?.session_id, group.pendingId, mode])
+    : null;
+  const retainDraft =
+    !lateMode &&
+    sortedMessages.some((message) => {
+      const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+      return Boolean(
+        metadata?.question?.images?.length ||
+        metadata?.question?.options?.some((option) => option.images?.length),
+      );
+    });
+  const { customDrafts, setCustomDrafts, rawActiveIndex, setActiveIndex, savedAnswers } =
+    useQuestionImageDraft(
+      draftKey,
+      retainDraft,
+      group.answers,
+      group.submitState === "ok" || group.submitState === "expired",
+    );
   const restoredAnswers = lateMode
     ? (lateAnswerState?.snapshot?.answers ?? initialAnswers)
-    : initialAnswers;
+    : (initialAnswers ?? savedAnswers);
   const initialAnswersKey = JSON.stringify(restoredAnswers ?? []);
   useEffect(() => {
     if (!restoredAnswers || restoredAnswers.length === 0) return;
@@ -743,6 +769,7 @@ export function ClarificationInputOverlay({
   // that would actually handle Escape never mounted in the first place.
   const armedEventRef = useEscapeGuardRegistration(
     keyboardShortcutsEnabled &&
+      !inspectingImage &&
       !isSubmitting &&
       group.submitState !== "expired" &&
       group.lateAnswerState !== "sent" &&
@@ -825,6 +852,7 @@ export function ClarificationInputOverlay({
         </div>
       )}
       <ClarificationCarouselBody
+        onInspectionChange={setInspectingImage}
         sortedMessages={sortedMessages}
         meta={meta}
         group={group}
@@ -837,7 +865,7 @@ export function ClarificationInputOverlay({
         agentDisconnected={agentDisconnected}
         shortcutScopeRef={shortcutScopeRef}
         armedEventRef={armedEventRef}
-        keyboardShortcutsEnabled={keyboardShortcutsEnabled}
+        keyboardShortcutsEnabled={keyboardShortcutsEnabled && !inspectingImage}
         onSubmit={handleSubmit}
         submitAnswers={submitAnswers}
         autoSubmitSingleQuestion={!lateInteraction}

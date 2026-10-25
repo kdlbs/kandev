@@ -941,6 +941,16 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		if errResult != nil {
 			return errResult, nil
 		}
+		for _, q := range questions {
+			if _, ok := q["images"]; ok {
+				return mcp.NewToolResultError("parent questions do not support images"), nil
+			}
+			for _, option := range q[optionsArg].([]map[string]interface{}) {
+				if _, ok := option["images"]; ok {
+					return mcp.NewToolResultError("parent questions do not support images"), nil
+				}
+			}
+		}
 		payload := map[string]interface{}{
 			"task_id":    s.taskID,
 			"session_id": s.sessionID,
@@ -1027,6 +1037,9 @@ func parseQuestions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.Cal
 			return nil, errResult
 		}
 		questions[i] = q
+	}
+	if err := validateQuestionImagePayloads(questions); err != nil {
+		return nil, mcp.NewToolResultError(err.Error())
 	}
 	return questions, nil
 }

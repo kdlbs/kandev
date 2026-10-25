@@ -271,6 +271,13 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 5. Inspect commits and branch state. Create or associate a pull request only after provider credentials and the target base branch are correct.
 6. Move the task through the workflow's human review gate. Archive it only after deciding what should happen to its branch, worktree, and external issue or pull request.
 
+When a clarification includes an image, select **Inspect image** to enlarge it.
+Choices can also have images. Select a choice label to answer. Select its image
+or **Inspect image** to examine it without selecting the choice.
+Close inspection, answer each question, then submit the bundle. Image errors do
+not prevent an answer. See [image questions](agent-communication.md#show-an-image-with-an-operator-question)
+for supported files and reload behavior.
+
 Large user messages keep their complete source for storage, agent input, copying, editing, and delivery. Kandev shortens the rendered transcript, raw text, workflow instructions, pinned prompt, and queued-message previews when they exceed the display limit. Select **Download full text** below a shortened preview to save the complete message.
 
 See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks and workflows](tasks-and-workflows.md) for transitions, plans, workflow automation, and the current document and label limitations.

@@ -2774,5 +2774,18 @@
   "allPRsClosedNotice_one": "O {{count}} PR foi fechado sem integração. Pode arquivar esta tarefa.",
   "allPRsClosedNotice_other": "Todos os {{count}} PRs foram fechados sem integração. Pode arquivar esta tarefa.",
   "turnOffTranscriptAutoScroll": "Desativar o deslocamento automático da transcrição",
-  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição"
+  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição",
+  "questionImageInspect": "Inspecionar imagem",
+  "questionImageCanvas": "Inspeção de imagem",
+  "questionImageFit": "Ajustar",
+  "questionImageActualSize": "Tamanho real",
+  "questionImageShow": "Mostrar imagens",
+  "questionImageHide": "Ocultar imagens",
+  "questionImageLoading": "A carregar imagem…",
+  "questionImageNotFound": "Ficheiro de imagem não encontrado.",
+  "questionImageUnsupported": "A pré-visualização da imagem não é suportada.",
+  "questionImageInvalid": "Esta imagem está danificada ou tem um formato não suportado.",
+  "questionImageTooLarge": "Esta imagem excede o limite de tamanho da pré-visualização.",
+  "questionImageUnavailable": "Imagem indisponível. Pode continuar a responder à pergunta.",
+  "questionImageRetry": "Tentar novamente"
 }

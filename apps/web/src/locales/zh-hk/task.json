@@ -2774,5 +2774,18 @@
   "allPRsClosedNotice_one": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "allPRsClosedNotice_other": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "turnOffTranscriptAutoScroll": "關閉對話記錄自動滾動",
-  "turnOnTranscriptAutoScroll": "開啓對話記錄自動滾動"
+  "turnOnTranscriptAutoScroll": "開啓對話記錄自動滾動",
+  "questionImageInspect": "查看圖像",
+  "questionImageCanvas": "圖像查看",
+  "questionImageFit": "適應窗口",
+  "questionImageActualSize": "實際大小",
+  "questionImageShow": "顯示圖像",
+  "questionImageHide": "隱藏圖像",
+  "questionImageLoading": "正在載入圖像…",
+  "questionImageNotFound": "未找到圖像檔案。",
+  "questionImageUnsupported": "不支援圖像預覽。",
+  "questionImageInvalid": "此圖像已損壞或格式不受支援。",
+  "questionImageTooLarge": "此圖像超過預覽大小限制。",
+  "questionImageUnavailable": "圖像不可用。您仍可回答問題。",
+  "questionImageRetry": "重試"
 }

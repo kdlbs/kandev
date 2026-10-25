@@ -1866,6 +1866,7 @@ func registerSecondaryRoutes(
 		p.taskSvc,
 		p.taskRepo,
 		p.features.NeedsYouInbox,
+		&questionImageReaderAdapter{lifecycle: p.lifecycleMgr},
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
