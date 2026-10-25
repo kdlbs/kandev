@@ -51,10 +51,21 @@ func classifyMCPCarrier(agent agents.Agent, strategy mcpconfig.PassthroughMCPStr
 	}
 }
 
+// sandboxedMCPRoute reports whether the execution reaches Kandev MCP only
+// through its private per-attempt sandbox relay. That route has its own
+// credential, so the instance token is neither required nor written into
+// the child-readable configuration.
+func sandboxedMCPRoute(execution *AgentExecution) bool {
+	return execution != nil && execution.SandboxSelection != nil
+}
+
 // requireSessionMCPCarrier refuses an agent that has no way to carry the
 // session token. It must run before any path that writes the Kandev entry,
 // including the Cursor project-file path that bypasses withSessionMCPAuth.
-func (m *Manager) requireSessionMCPCarrier(agent agents.Agent, strategy mcpconfig.PassthroughMCPStrategy) error {
+func (m *Manager) requireSessionMCPCarrier(execution *AgentExecution, agent agents.Agent, strategy mcpconfig.PassthroughMCPStrategy) error {
+	if sandboxedMCPRoute(execution) {
+		return nil
+	}
 	if _, ok := m.sessionKeyStore(); !ok {
 		return nil
 	}
@@ -101,10 +112,10 @@ func (m *Manager) withSessionMCPAuth(
 	strategy mcpconfig.PassthroughMCPStrategy,
 	servers []types.McpServer,
 ) ([]types.McpServer, error) {
-	if _, ok := m.sessionKeyStore(); !ok {
+	if _, ok := m.sessionKeyStore(); !ok || sandboxedMCPRoute(execution) {
 		return servers, nil
 	}
-	if err := m.requireSessionMCPCarrier(agent, strategy); err != nil {
+	if err := m.requireSessionMCPCarrier(execution, agent, strategy); err != nil {
 		return nil, err
 	}
 	auth, err := m.sessionMCPAuthorization(ctx, execution)
@@ -133,7 +144,7 @@ func (m *Manager) withSessionMCPAuth(
 // remote passthrough is started by its own agentctl, which sets the variable
 // from the token it already holds.
 func (m *Manager) withCodexSessionTokenEnv(ctx context.Context, execution *AgentExecution, request process.InteractiveStartRequest) (process.InteractiveStartRequest, error) {
-	if isSSHPassthrough(execution) || !slices.Contains(request.Command, sessionmcp.CodexTokenArg) {
+	if isSSHPassthrough(execution) || sandboxedMCPRoute(execution) || !slices.Contains(request.Command, sessionmcp.CodexTokenArg) {
 		return request, nil
 	}
 	auth, err := m.sessionMCPAuthorization(ctx, execution)

@@ -60,7 +60,7 @@ func (c *codexProbeCache) store(key string) {
 // override, that the carrier will work: the command starts with npx or codex
 // with no launch wrapper, and the resolved Codex is at least codexMinVersion.
 func (m *Manager) checkCodexCarrier(ctx context.Context, execution *AgentExecution, argv []string, wrapper launchwrapper.Spec) error {
-	if !slices.Contains(argv, sessionmcp.CodexTokenArg) {
+	if sandboxedMCPRoute(execution) || !slices.Contains(argv, sessionmcp.CodexTokenArg) {
 		return nil
 	}
 	if _, ok := m.sessionKeyStore(); !ok {
