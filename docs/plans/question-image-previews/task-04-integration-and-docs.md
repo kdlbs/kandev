@@ -636,3 +636,42 @@ tests/session/delivery-retention.spec.ts --grep 'preserves saved history'
 --retries=0 --repeat-each=3`). Log:
 `/tmp/question-images-checks/kandev-run.e2e.PlXJpd2t.log`. Changed-file lint,
 specification lint, and documentation catalog passed.
+
+### Restore visible motion and await resumed mobile chat
+
+Workflow [40216849404](https://github.com/kdlbs/kandev/actions/runs/40216849404)
+reported two intermittent E2E failures. The complete 118-report audit found
+4,244 first-attempt passes, two flaky cases, 40 skips, and no parse errors.
+
+The persistent composer animation case moved the glow outside its clipped panel
+with a transform, then used `scrollIntoView` without removing that transform.
+The original failure retained an active turn, so turn completion did not cause
+this failure. The test now removes the transform, asserts viewport intersection,
+and then requires the compositor animation to resume. Hidden and offscreen pause
+checks and terminal removal remain intact. This avoids incidental panel scrolling
+as the mechanism for restoring a deliberately displaced element.
+
+The mobile workflow override case checked backend idleness before reloading both
+clients. Its original failure snapshot showed the correct initial session with
+`Starting Mock` and a queued composer after reload. The test now waits for an
+idle, editable phone composer after reload before inspecting the next-step button.
+The task, session, selected profile, workflow preview, and touch assertions remain
+unchanged. This uses the existing session readiness helper.
+
+Both original cases passed three constrained local checks with retries off:
+`--project chromium tests/chat/persistent-animation-motion.spec.ts --retries=0
+--repeat-each=3` and `--project mobile-chrome
+tests/task/mobile-create-task-workflow-agent-overrides.spec.ts --retries=0
+--repeat-each=3`. Logs:
+`/tmp/question-images-checks/kandev-run.e2e.1vFCWCjH.log` and
+`/tmp/question-images-checks/kandev-run.e2e.FK3ePJ9o.log`. The original CI artifacts
+remain the failure evidence. These corrections change tests only, so no public
+behavior, durable contract, or UI capture changes are required.
+
+Both corrected cases passed all three repeated checks with retries disabled,
+two CPUs, and one worker, using the same commands above. Logs:
+`/tmp/question-images-checks/kandev-run.e2e.HVzZEk3U.log` (animation) and
+`/tmp/question-images-checks/kandev-run.e2e.ohgj0b41.log` (mobile workflow).
+Changed-file lint, specification lint, documentation catalog, and work-order
+coverage also passed. The terminal PR snapshot reported only these two leaf
+failures and their E2E aggregate, with no unresolved review threads.

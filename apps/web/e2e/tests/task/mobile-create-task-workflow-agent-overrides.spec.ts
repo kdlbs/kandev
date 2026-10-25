@@ -206,6 +206,8 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
 
       await testPage.reload();
       await phoneSession.waitForLoad();
+      // Reload can restore the parked runtime after the earlier API idle check.
+      await phoneSession.waitForChatIdle({ timeout: 45_000, requireEditable: true });
       const actualAboveChatButton = testPage.getByTestId("proceed-next-step");
       await expect(actualAboveChatButton).toBeVisible();
       await longPress(testPage, actualAboveChatButton);

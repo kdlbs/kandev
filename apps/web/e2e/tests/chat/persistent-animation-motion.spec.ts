@@ -48,12 +48,10 @@ test("keeps the busy task composer glow animated until the turn settles", async 
   });
   await expectCompositorMotionPaused(glow);
   await glow.evaluate((element) => {
-    element.scrollIntoView({ block: "center", inline: "nearest" });
-  });
-  await expectCompositorPulse(glow);
-  await glow.evaluate((element) => {
     (element as HTMLElement).style.removeProperty("transform");
   });
+  await expect(glow).toBeInViewport();
+  await expectCompositorPulse(glow);
 
   await glow.evaluate((element) => {
     (element as HTMLElement).style.display = "none";
