@@ -30,8 +30,8 @@ func (m *Manager) ReadQuestionImage(ctx context.Context, path, repo string) (*im
 		return nil, imagepreview.Unavailable
 	}
 	m.repoTrackersMu.RLock()
-	defer m.repoTrackersMu.RUnlock()
 	root, err := m.openQuestionImageRoot(repo)
+	m.repoTrackersMu.RUnlock()
 	if err != nil {
 		return nil, questionImageFileError(err)
 	}
@@ -116,7 +116,7 @@ func (m *Manager) setWorkspaceWorkDirLocked(workDir string) {
 
 // openQuestionImageRoot selects a manifest-authorized root, then opens through
 // directory handles. A replacement symlink can never redirect the root open.
-// The caller holds repoTrackersMu while using the returned handle.
+// The caller holds repoTrackersMu while selecting and opening the handle.
 func (m *Manager) openQuestionImageRoot(repo string) (*os.Root, error) {
 	if m.questionImageWorkDir == "" {
 		return nil, imagepreview.Unavailable

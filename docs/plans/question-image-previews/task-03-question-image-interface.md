@@ -242,3 +242,15 @@ Logs: `/tmp/question-images-checks/kandev-run.e2e.5sAfIjhZ.log` (1 phone case)
 and `/tmp/question-images-checks/kandev-run.e2e.LjN1vXd2.log` (2 desktop cases).
 The Vite build, targeted ESLint, Prettier, and specification checks passed.
 This adjustment does not close Task 04's existing remote-runtime and broad-suite gaps.
+
+
+PR review correction: question and choice image hooks now share a two-read
+scheduler for each bundle, question, and owner. Queued requests abort on cleanup;
+idle groups are removed. A deferred multi-hook regression failed with three
+simultaneous requests before the fix. It now verifies the shared limit, queued
+cancellation, and progress of a surviving choice. The existing owner-change test
+drains its deferred mocks during cleanup.
+
+`pnpm exec vitest run hooks/domains/session/use-question-images.test.ts` passed
+(three tests). The helper is
+`apps/web/hooks/domains/session/question-image-scheduler.ts`.

@@ -184,3 +184,10 @@ source /tmp/question-images-browser-env.sh
 E2E_PORT_OFFSET=23 pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/chat/question-image-previews.spec.ts tests/chat/clarification-choice-only.spec.ts
 E2E_PORT_OFFSET=23 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-question-image-previews.spec.ts
 ```
+
+
+CodeRabbit review correction: release the workspace lock after selecting and
+opening the authorized root handle. File I/O and decode keep root-handle confinement
+without blocking workspace updates. A gated decoder regression failed while the
+lock covered decoding and passed after the change. The focused image race suite
+passed with `go test -trimpath -race ./internal/agentctl/server/process -run TestQuestionImage -count=1 -timeout=2m`.

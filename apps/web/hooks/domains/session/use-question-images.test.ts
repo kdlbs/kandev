@@ -34,6 +34,7 @@ it("loads only active images, with two reads, and revokes blobs on owner change"
   await act(async () => pending[1](new Blob(["old"], { type: "image/png" })));
   expect(result.current.states.image2?.kind).not.toBe("loaded");
   unmount();
+  await act(async () => pending.forEach((resolve) => resolve(new Blob(["cleanup"]))));
 });
 
 it("requires explicit retry after a failure", async () => {
@@ -45,4 +46,37 @@ it("requires explicit retry after a failure", async () => {
   expect(mocks.fetch).toHaveBeenCalledTimes(1);
   act(() => result.current.retry());
   await waitFor(() => expect(result.current.states.image1.kind).toBe("loaded"));
+});
+
+it("shares two reads across question and choice hooks and cancels queued choices", async () => {
+  const pending: (() => void)[] = [];
+  mocks.fetch.mockImplementation(
+    (_pending, _question, _image, signal: AbortSignal) =>
+      new Promise<Blob>((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+        pending.push(() => {
+          signal.removeEventListener("abort", abort);
+          resolve(new Blob(["png"], { type: "image/png" }));
+        });
+      }),
+  );
+  const question = renderHook(() =>
+    useQuestionImages("shared", "q", images.slice(0, 2), true, "owner"),
+  );
+  const choice = renderHook(() => useQuestionImages("shared", "q", images.slice(2), true, "owner"));
+  const nextChoice = renderHook(() =>
+    useQuestionImages("shared", "q", [{ ...images[2], id: "image4" }], true, "owner"),
+  );
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+  choice.unmount();
+  await act(async () => pending[0]());
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(3));
+  expect(mocks.fetch.mock.calls[2][2]).toBe("image4");
+  await act(async () => {
+    pending[1]();
+    pending[2]();
+  });
+  question.unmount();
+  nextChoice.unmount();
 });

@@ -241,7 +241,10 @@ and retention. Do not create synthetic uploads for workspace references.
 Workspace rebind, rescan, and rollback update the image root together with the
 tracker root under `repoTrackersMu`. Failed changes retain the previous root.
 An unchanged workspace path retains its original resolved image scope, so a
-rescan cannot authorize a replacement symlink.
+rescan cannot authorize a replacement symlink. Image reads hold this lock only
+while selecting and opening the authorized root handle. Reads admitted before
+a workspace change finish through that confined handle; later reads use the
+updated policy. File I/O and decoding do not block workspace updates.
 
 The new reader must enforce all of these conditions:
 
@@ -356,7 +359,9 @@ Use authenticated `fetch`, `AbortController`, and revocable blob URLs. Scope all
 state by source session, pending ID, question ID, and image ID. Clear it on auth
 change, bundle replacement, or unmount. Ignore stale completions.
 
-Load only images on the active expanded question. Use at most two concurrent reads
+Load only images on the active expanded question. Question and choice hooks share
+one scheduler keyed by bundle, question, and owner. Cancel queued work on cleanup
+and remove idle groups. Use at most two concurrent reads
 in a visible group. Do not preload the next question. Historical messages initially
 show labelled preview controls and fetch only when explicitly expanded. A failure
 requires explicit Retry. No polling or automatic retry loop is introduced.

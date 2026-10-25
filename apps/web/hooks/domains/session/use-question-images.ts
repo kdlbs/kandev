@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { QuestionImage } from "@/lib/types/http";
 import { fetchQuestionImage, questionImageErrorCode } from "@/lib/api/domains/question-image-api";
 
+import { scheduleQuestionImage } from "./question-image-scheduler";
+
 export type QuestionImageState =
   | { kind: "loading" }
   | { kind: "loaded"; url: string }
@@ -38,7 +40,11 @@ export function useQuestionImages(
         const image = refs[cursor++];
         update(image.id, { kind: "loading" });
         try {
-          const blob = await fetchQuestionImage(pendingId, questionId, image.id, controller.signal);
+          const blob = await scheduleQuestionImage(
+            JSON.stringify([pendingId, questionId, owner]),
+            controller.signal,
+            () => fetchQuestionImage(pendingId, questionId, image.id, controller.signal),
+          );
           if (controller.signal.aborted) return;
           const url = URL.createObjectURL(blob);
           urls.push(url);
@@ -54,7 +60,7 @@ export function useQuestionImages(
       controller.abort();
       urls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [active, pendingId, questionId, imageKey, key]);
+  }, [active, pendingId, questionId, imageKey, key, owner]);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   return { states: snapshot.key === key ? snapshot.states : {}, retry };
 }
