@@ -35,3 +35,5 @@ records the bind decision and needs no code.
 - Every supported agent must carry a header; Task 01 inventories them first.
 - Removing WebSocket mutations requires moving three web call sites to HTTP (task 03).
 - Lost derivation key replaces retained instances.
+- The first required-capability addition interrupts every retained local control server once on upgrade.
+- Remote executors' recovery paths each need the shared verifier at the two consuming points (task 01).

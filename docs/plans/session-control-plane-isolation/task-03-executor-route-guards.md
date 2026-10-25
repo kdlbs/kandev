@@ -31,6 +31,7 @@ Scope and interlock on executor mutations; remove WS mutations; record bind deci
 ## Scope
 
 - Route guards implementing the authorization matrix, route-enumeration test, WS registration removal.
+- Owner snapshot carried from the middleware to the service write; mismatch answers not found and changes nothing (including owner-to-shared races).
 - Web: move executor create, update and delete from the WebSocket request to the existing HTTP functions, with web unit tests.
 
 ## Exclusions
