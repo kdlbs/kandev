@@ -13,6 +13,7 @@
 
 ## QA fixes worth reviewer attention
 - RV-01: An ordinary Office task could request an unrelated task's compact relation tree through the raw backend action. The handler now validates scope and caller identity against the per-dispatch principal; QA confirmed denied and allowed paths at commit 35d6f0e097.
+- Human-QA broadened the handler package check and updated three older direct-handler tests to provide the trusted principal and MCP surface that the production dispatch path supplies. The affected cases, nine-package selector, and full handler package pass.
 
 ## Assumptions made during QA
 - The approved scope is a same-workspace, compact, read-only relation view for an attested Office coordinator. Manual task-visibility grants remain a separate capability.
