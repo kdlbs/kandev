@@ -194,6 +194,7 @@ function seedRetentionRecoveryBlock(backend: BackendContext, sessionId: string) 
   const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
   const blockId = `retention-native-recovery:${sessionId}`;
   try {
+    db.exec("PRAGMA busy_timeout=5000");
     const inserted = db
       .prepare(
         `INSERT INTO session_recovery_blocks

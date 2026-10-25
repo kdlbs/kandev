@@ -598,3 +598,27 @@ tests/system/storage-temporary-folders.spec.ts --grep 'bounded entry ownership'
 `/tmp/question-images-checks/kandev-run.e2e.91hi7WpL.log`. All nine corrected
 checks passed, as did changed-file lint, specification lint, documentation catalog,
 and work-order coverage. Existing UI captures remain applicable.
+
+### Bounded SQLite contention in the retention fixture
+
+Workflow [40214715871](https://github.com/kdlbs/kandev/actions/runs/40214715871)
+exposed a direct fixture write failing with `database is locked` in the mobile
+retention recovery case. The test inserts an independent recovery block while
+its disposable backend remains active. That connection had no busy timeout.
+The fixture now sets `PRAGMA busy_timeout=5000` before its single insert, matching
+the adjacent tool-payload retention fixture. It still requires exactly one row
+and retains all history, recovery, and prompt-authority assertions. This changes
+only the test connection; production database handling is unchanged.
+
+The original mobile case passed three constrained local checks with retries off:
+`--project mobile-chrome tests/session/mobile-delivery-retention.spec.ts
+--retries=0 --repeat-each=3`. Log:
+`/tmp/question-images-checks/kandev-run.e2e.Tvl3nDpE.log`. Passing without
+contention does not invalidate the CI lock evidence.
+
+The completed 118-report audit found 4,245 first-attempt passes, this one flaky
+case, and 40 skips. No other failure was reported. The corrected mobile retention
+case passed all three repeated checks under the same limits and with retries off.
+Log: `/tmp/question-images-checks/kandev-run.e2e.3BO7QYKA.log`. Changed-file lint,
+specification lint, documentation catalog, and work-order coverage passed. No UI
+capture or public documentation change is needed for the fixture-only correction.
