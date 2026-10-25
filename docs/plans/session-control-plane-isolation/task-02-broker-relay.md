@@ -32,7 +32,7 @@ Relay the credential broker through the instance listener for same-host executor
 
 ## Scope
 
-- Relay handler, upstream URL in create request, orchestrator URL selection, preflight.
+- Relay handler for resolve and reissue, upstream URL in the create request alongside the unchanged broker URL environment value, agentctl effective broker URL for every process-visible use, readiness probe limits (20 s curl, 25 s wait).
 
 ## Exclusions
 
@@ -41,7 +41,8 @@ Remote executor transport; lease semantics.
 ## Acceptance
 
 1. Same-host agents see only the instance URL; remote executors still require HTTPS.
-2. Limits, timeouts and method/path rules hold.
+2. Limits, timeouts, no-retry, caller-cancel and method/path rules hold; reissue works through the relay.
+3. Managed-launch signals (readiness probe, credential snapshot, helper activation) still fire.
 
 ## Verification
 

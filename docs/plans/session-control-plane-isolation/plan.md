@@ -33,5 +33,5 @@ records the bind decision and needs no code.
 ## Risks
 
 - Every supported agent must carry a header; Task 01 inventories them first.
-- Removing WebSocket mutations needs a check that no web caller uses them.
+- Removing WebSocket mutations requires moving three web call sites to HTTP (task 03).
 - Lost derivation key replaces retained instances.

@@ -35,9 +35,11 @@ Derive, inject, carry and enforce the per-instance token on /mcp, /sse, /message
 
 ## Scope
 
-- Backend HMAC derivation and key in the secret store; create-request field.
-- agentctl guard, 503 when unset, header redaction, /identity capability.
-- Header carriers for ACP, Codex, Claude, Cursor and utility paths.
+- Backend HMAC derivation over instance ID plus a persisted per-create nonce; key in the secret store (create-if-absent, hidden from user secret paths); create-request field.
+- agentctl guard outside activity accounting, 503 when unset, header redaction (request logs and the ACP frame debug log), /identity capability and fingerprint.
+- `session_mcp_token` in survival capabilities; per-instance fingerprint mismatch deletes the instance during standalone recovery.
+- Carriers for ACP, Codex (native and passthrough with version gate), Claude, OpenCode, Pi, both Cursor writers and custom TUI strategies; shared file handling (mutex, symlink/malformed refusal, local exclude).
+- Typed launch failures, unknown-outcome delete-by-ID, public docs for the three codes.
 
 ## Exclusions
 
@@ -45,8 +47,9 @@ Broker relay, executor routes.
 
 ## Acceptance
 
-1. Missing, wrong and cross-instance tokens are refused on all three paths; the right one is served.
-2. The token is absent from logs, env and argv.
+1. Missing, wrong and cross-instance tokens are refused on all three paths; the right one is served; refusals do not move activity.
+2. The token is absent from logs, the ACP frame debug log, env and argv.
+3. The plan records the per-agent carrier inventory and the Codex minimum-version constant before the exemption is removed.
 
 ## Verification
 

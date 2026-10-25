@@ -30,7 +30,8 @@ Scope and interlock on executor mutations; remove WS mutations; record bind deci
 
 ## Scope
 
-- Route guards, route-enumeration test, WS registration removal, web check.
+- Route guards implementing the authorization matrix, route-enumeration test, WS registration removal.
+- Web: move executor create, update and delete from the WebSocket request to the existing HTTP functions, with web unit tests.
 
 ## Exclusions
 
@@ -39,12 +40,12 @@ Bind default change.
 ## Acceptance
 
 1. Mutations are refused without scope or interlock and accepted with both.
-2. Settings pages still work.
+2. Settings pages still work, using HTTP for executor create, update and delete.
 
 ## Verification
 
 `(cd apps/backend && go test ./internal/task/handlers/... -count=1)`
-`cd apps/web && pnpm run typecheck`
+`cd apps/web && pnpm run typecheck && pnpm run i18n:check`
 
 ## Likely files
 
