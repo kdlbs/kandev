@@ -356,8 +356,9 @@ Use conditional task-repository operations within the existing transition and
 lifecycle serialization. Fresh session insertion and prepared destination
 recording commit together; promotion and committed phase advance together.
 Preflight external credentials before that transaction; do not hold a database
-transaction while stopping or launching a runtime. Retry continues the recorded
-destination and stamped source cleanup rather than allocating another session.
+transaction while stopping or launching a runtime. The allocation path refuses
+a second destination for a recorded entry. Runtime continuation and source
+cleanup require separate ownership checks.
 
 Reject an obsolete entry against the current transition/entry identity before
 replacing this record. A newer entry cannot overtake an unfinished route without
