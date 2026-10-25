@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,7 +30,7 @@ func TestWorkflowAllocationPreservesRecordedDestinationStates(t *testing.T) {
 			before, err := repo.GetTask(ctx, first.TaskID)
 			require.NoError(t, err)
 			err = repo.CreateTaskSessionWithWorkflowSessionRoute(ctx, &models.TaskSession{ID: "duplicate", TaskID: first.TaskID}, &route)
-			require.Error(t, err)
+			require.ErrorIs(t, err, repoerrors.ErrWorkflowAllocationRecorded)
 			rows, err := repo.ListTaskSessions(ctx, first.TaskID)
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
@@ -55,8 +56,22 @@ func TestWorkflowAllocationRejectsStaleEntryAfterRevisit(t *testing.T) {
 	task.WorkflowStepID = "step-a"
 	require.NoError(t, repo.UpdateTask(ctx, task))
 	err = repo.CreateTaskSessionWithWorkflowSessionRoute(ctx, &models.TaskSession{ID: "stale", TaskID: task.ID}, &route)
-	require.Error(t, err)
+	require.ErrorIs(t, err, repoerrors.ErrWorkflowAllocationStaleEntry)
 	rows, err := repo.ListTaskSessions(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+}
+
+func TestWorkflowAllocationRejectsStaleDestinationStep(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	route := allocationRouteFixture(t, repo)
+	task, err := repo.GetTask(t.Context(), "allocation-task")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-b"
+	require.NoError(t, repo.UpdateTask(t.Context(), task))
+	err = repo.CreateTaskSessionWithWorkflowSessionRoute(t.Context(), &models.TaskSession{ID: "stale", TaskID: task.ID}, &route)
+	require.ErrorIs(t, err, repoerrors.ErrWorkflowAllocationStaleEntry)
+	rows, err := repo.ListTaskSessions(t.Context(), task.ID)
 	require.NoError(t, err)
 	require.Empty(t, rows)
 }
@@ -83,6 +98,11 @@ func verifyWorkflowAllocationConcurrentTransactions(t *testing.T, repo *Reposito
 	wg.Wait()
 	first, second := <-errs, <-errs
 	require.NotEqual(t, first == nil, second == nil, "exactly one allocation must commit")
+	if first != nil {
+		require.ErrorIs(t, first, repoerrors.ErrWorkflowAllocationRecorded)
+	} else {
+		require.ErrorIs(t, second, repoerrors.ErrWorkflowAllocationRecorded)
+	}
 	rows, err := repo.ListTaskSessions(t.Context(), "allocation-task")
 	require.NoError(t, err)
 	require.Len(t, rows, 1)

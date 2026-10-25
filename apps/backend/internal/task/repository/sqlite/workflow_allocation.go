@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // admitWorkflowAllocationTx fences profile-entry allocation before any seed,
@@ -40,7 +41,7 @@ func (r *Repository) admitWorkflowAllocationTx(ctx context.Context, tx *sqlx.Tx,
 			return fmt.Errorf("recorded workflow allocation is invalid")
 		}
 		if previous.OperationID == route.OperationID || previous.EntryIdentity == route.EntryIdentity {
-			return fmt.Errorf("workflow entry already has a recorded allocation")
+			return repoerrors.ErrWorkflowAllocationRecorded
 		}
 	}
 	return nil
@@ -52,7 +53,7 @@ func (r *Repository) workflowAllocationOwnerTx(ctx context.Context, tx *sqlx.Tx,
 		return nil, fmt.Errorf("read workflow allocation owner: %w", err)
 	}
 	if stepID != route.DestinationStepID {
-		return nil, fmt.Errorf("workflow allocation entry is no longer current")
+		return nil, repoerrors.ErrWorkflowAllocationStaleEntry
 	}
 	if strings.HasPrefix(route.EntryIdentity, "entry:") {
 		var entryID int64
@@ -60,7 +61,7 @@ func (r *Repository) workflowAllocationOwnerTx(ctx context.Context, tx *sqlx.Tx,
 			return nil, fmt.Errorf("read workflow allocation entry: %w", err)
 		}
 		if route.EntryIdentity != fmt.Sprintf("entry:%020d", entryID) {
-			return nil, fmt.Errorf("workflow allocation entry is no longer current")
+			return nil, repoerrors.ErrWorkflowAllocationStaleEntry
 		}
 	}
 	var metadata map[string]interface{}
