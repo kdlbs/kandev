@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 func TestSessionHasPendingClarification(t *testing.T) {
@@ -101,6 +103,98 @@ func TestSessionHasLiveClarificationIgnoresDetachedBundle(t *testing.T) {
 	}
 	if svc.sessionHasLiveClarification(ctx, "session-detached") {
 		t.Fatal("detached-only clarification must not block a successor queue drain")
+	}
+}
+
+func TestSessionHasLiveClarificationExportedReportsCurrentTurnWait(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-live", "session-live", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-live", TaskSessionID: "session-live", TaskID: "task-live",
+		StartedAt: now, CreatedAt: now,
+	}))
+	requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: "clarification-live", TaskSessionID: "session-live", TaskID: "task-live",
+		TurnID: "turn-live", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest, Content: "question", CreatedAt: now,
+		Metadata: map[string]any{"pending_id": "pending-live", "status": "pending"},
+	}))
+
+	if !svc.SessionHasLiveClarification(ctx, "session-live") {
+		t.Fatal("a current-turn clarification with a live waiter must be reported")
+	}
+	if svc.SessionHasLiveClarification(ctx, "session-without-question") {
+		t.Fatal("a session without a clarification must not be reported")
+	}
+}
+
+func TestSessionHasLiveClarificationExportedFailsClosedOnRepositoryError(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-live-error", "session-live-error", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !svc.SessionHasLiveClarification(ctx, "session-live-error") {
+		t.Fatal("repository error must retain the live-clarification queue barrier")
+	}
+}
+
+// TestSessionHasPendingClarificationSurvivesLifecycleShadowViaRealWritePath
+// covers the guard-level consumer named in the spec's Verification Notes as
+// "the most severe consumer": sessionHasPendingClarification must still see
+// the pending clarification on a real open turn after a synthetic
+// lifecycle-only turn is written through the actual task-service write path
+// (Service.CreateMessage with CompletedTurn: true), the same call
+// Service.createCompletedTurn makes on agent resume. Both turns share this
+// service's own repo so the guard reads what task/service actually wrote,
+// not a hand-seeded row shaped to match.
+func TestSessionHasPendingClarificationSurvivesLifecycleShadowViaRealWritePath(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-lifecycle-guard", "session-lifecycle-guard", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	taskSvc := taskservice.NewService(taskservice.Repos{
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
+	}, bus.NewMemoryEventBus(testLogger()), testLogger(), taskservice.RepositoryDiscoveryConfig{})
+
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-open-guard", TaskSessionID: "session-lifecycle-guard", TaskID: "task-lifecycle-guard",
+		StartedAt: now, CreatedAt: now,
+	}))
+	requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: "clarification-guard", TaskSessionID: "session-lifecycle-guard", TaskID: "task-lifecycle-guard",
+		TurnID: "turn-open-guard", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest, Content: "q", CreatedAt: now,
+		Metadata: map[string]any{"pending_id": "pending-guard", "status": "pending"},
+	}))
+
+	if _, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: "session-lifecycle-guard",
+		Content:       "resumed",
+		CompletedTurn: true,
+	}); err != nil {
+		t.Fatalf("create lifecycle turn via CreateMessage: %v", err)
+	}
+
+	if !svc.sessionHasPendingClarification(ctx, "session-lifecycle-guard") {
+		t.Fatal("guard cleared after a lifecycle-only turn shadowed the open turn's pending clarification")
 	}
 }
 

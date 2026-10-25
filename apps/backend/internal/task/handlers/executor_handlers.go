@@ -64,6 +64,9 @@ func (h *ExecutorHandlers) listExecutors(ctx context.Context) (dto.ListExecutors
 	for _, executor := range executors {
 		d := dto.FromExecutor(executor)
 		d.Profiles = profilesByExecutor[executor.ID]
+		for index := range d.Profiles {
+			d.Profiles[index].Provider = executor.Provider
+		}
 		resp.Executors = append(resp.Executors, d)
 	}
 	return resp, nil
@@ -80,12 +83,13 @@ func (h *ExecutorHandlers) httpListExecutors(c *gin.Context) {
 }
 
 type httpCreateExecutorRequest struct {
-	Name      string            `json:"name"`
-	Type      string            `json:"type"`
-	Status    string            `json:"status"`
-	IsSystem  bool              `json:"is_system"`
-	Resumable *bool             `json:"resumable,omitempty"`
-	Config    map[string]string `json:"config,omitempty"`
+	OwnerUserID string            `json:"owner_user_id,omitzero"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Status      string            `json:"status"`
+	IsSystem    bool              `json:"is_system"`
+	Resumable   *bool             `json:"resumable,omitempty"`
+	Config      map[string]string `json:"config,omitempty"`
 }
 
 func (h *ExecutorHandlers) httpCreateExecutor(c *gin.Context) {
@@ -107,14 +111,22 @@ func (h *ExecutorHandlers) httpCreateExecutor(c *gin.Context) {
 		resumable = *body.Resumable
 	}
 	executor, err := h.service.CreateExecutor(c.Request.Context(), &service.CreateExecutorRequest{
-		Name:      body.Name,
-		Type:      models.ExecutorType(body.Type),
-		Status:    models.ExecutorStatus(status),
-		IsSystem:  body.IsSystem,
-		Resumable: resumable,
-		Config:    body.Config,
+		OwnerUserID: body.OwnerUserID,
+		Name:        body.Name,
+		Type:        models.ExecutorType(body.Type),
+		Status:      models.ExecutorStatus(status),
+		IsSystem:    body.IsSystem,
+		Resumable:   resumable,
+		Config:      body.Config,
 	})
 	if err != nil {
+		if writeExecutorOwnershipError(c, err) {
+			return
+		}
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -137,11 +149,12 @@ func (h *ExecutorHandlers) httpGetExecutor(c *gin.Context) {
 }
 
 type httpUpdateExecutorRequest struct {
-	Name      *string           `json:"name,omitempty"`
-	Type      *string           `json:"type,omitempty"`
-	Status    *string           `json:"status,omitempty"`
-	Resumable *bool             `json:"resumable,omitempty"`
-	Config    map[string]string `json:"config,omitempty"`
+	OwnerUserID models.OptionalOwner `json:"owner_user_id,omitzero"`
+	Name        *string              `json:"name,omitempty"`
+	Type        *string              `json:"type,omitempty"`
+	Status      *string              `json:"status,omitempty"`
+	Resumable   *bool                `json:"resumable,omitempty"`
+	Config      map[string]string    `json:"config,omitempty"`
 }
 
 func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
@@ -161,15 +174,27 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 		execStatus = &value
 	}
 	executor, err := h.service.UpdateExecutor(c.Request.Context(), c.Param("id"), &service.UpdateExecutorRequest{
-		Name:      body.Name,
-		Type:      execType,
-		Status:    execStatus,
-		Resumable: body.Resumable,
-		Config:    body.Config,
+		OwnerUserID: body.OwnerUserID,
+		Name:        body.Name,
+		Type:        execType,
+		Status:      execStatus,
+		Resumable:   body.Resumable,
+		Config:      body.Config,
 	})
 	if err != nil {
+		if writeExecutorOwnershipError(c, err) {
+			return
+		}
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			c.JSON(http.StatusConflict, gin.H{"error": "executor is used by an active agent session"})
 			return
 		}
 		h.logger.Error("failed to update executor", zap.Error(err))
@@ -181,6 +206,13 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 
 func (h *ExecutorHandlers) httpDeleteExecutor(c *gin.Context) {
 	if err := h.service.DeleteExecutor(c.Request.Context(), c.Param("id")); err != nil {
+		if writeExecutorOwnershipError(c, err) {
+			return
+		}
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, service.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "executor is used by an active agent session"})
 			return
@@ -202,12 +234,13 @@ func (h *ExecutorHandlers) wsListExecutors(ctx context.Context, msg *ws.Message)
 }
 
 type wsCreateExecutorRequest struct {
-	Name      string            `json:"name"`
-	Type      string            `json:"type"`
-	Status    string            `json:"status"`
-	IsSystem  bool              `json:"is_system"`
-	Resumable *bool             `json:"resumable,omitempty"`
-	Config    map[string]string `json:"config,omitempty"`
+	OwnerUserID string            `json:"owner_user_id,omitzero"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Status      string            `json:"status"`
+	IsSystem    bool              `json:"is_system"`
+	Resumable   *bool             `json:"resumable,omitempty"`
+	Config      map[string]string `json:"config,omitempty"`
 }
 
 func (h *ExecutorHandlers) wsCreateExecutor(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -227,16 +260,23 @@ func (h *ExecutorHandlers) wsCreateExecutor(ctx context.Context, msg *ws.Message
 		resumable = *req.Resumable
 	}
 	executor, err := h.service.CreateExecutor(ctx, &service.CreateExecutorRequest{
-		Name:      req.Name,
-		Type:      models.ExecutorType(req.Type),
-		Status:    models.ExecutorStatus(status),
-		IsSystem:  req.IsSystem,
-		Resumable: resumable,
-		Config:    req.Config,
+		OwnerUserID: req.OwnerUserID,
+		Name:        req.Name,
+		Type:        models.ExecutorType(req.Type),
+		Status:      models.ExecutorStatus(status),
+		IsSystem:    req.IsSystem,
+		Resumable:   resumable,
+		Config:      req.Config,
 	})
 	if err != nil {
+		if status, code, message := executorOwnershipError(err); status != 0 {
+			return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		}
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
 		}
 		h.logger.Error("failed to create executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create executor", nil)
@@ -264,12 +304,13 @@ func (h *ExecutorHandlers) wsGetExecutor(ctx context.Context, msg *ws.Message) (
 }
 
 type wsUpdateExecutorRequest struct {
-	ID        string            `json:"id"`
-	Name      *string           `json:"name,omitempty"`
-	Type      *string           `json:"type,omitempty"`
-	Status    *string           `json:"status,omitempty"`
-	Resumable *bool             `json:"resumable,omitempty"`
-	Config    map[string]string `json:"config,omitempty"`
+	OwnerUserID models.OptionalOwner `json:"owner_user_id,omitzero"`
+	ID          string               `json:"id"`
+	Name        *string              `json:"name,omitempty"`
+	Type        *string              `json:"type,omitempty"`
+	Status      *string              `json:"status,omitempty"`
+	Resumable   *bool                `json:"resumable,omitempty"`
+	Config      map[string]string    `json:"config,omitempty"`
 }
 
 func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -291,15 +332,26 @@ func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message
 		execStatus = &value
 	}
 	executor, err := h.service.UpdateExecutor(ctx, req.ID, &service.UpdateExecutorRequest{
-		Name:      req.Name,
-		Type:      execType,
-		Status:    execStatus,
-		Resumable: req.Resumable,
-		Config:    req.Config,
+		OwnerUserID: req.OwnerUserID,
+		Name:        req.Name,
+		Type:        execType,
+		Status:      execStatus,
+		Resumable:   req.Resumable,
+		Config:      req.Config,
 	})
 	if err != nil {
+		if status, code, message := executorOwnershipError(err); status != 0 {
+			return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		}
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		if errors.Is(err, service.ErrInvalidExecutorConfig) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, service.ErrInvalidExecutorConfig.Error(), nil)
+		}
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"executor is used by an active agent session", nil)
 		}
 		h.logger.Error("failed to update executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor", nil)

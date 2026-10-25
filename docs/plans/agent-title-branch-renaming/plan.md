@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/agent-generated-titles.md
+spec: docs/specs/tasks/requirements/agent-generated-titles.md
 created: 2026-08-04
 status: complete
 ---

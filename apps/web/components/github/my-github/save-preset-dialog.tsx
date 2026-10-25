@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState, type RefObject } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,7 @@ import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { RepoFilterCombobox } from "./repo-filter-combobox";
 import { useTranslation } from "react-i18next";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 
 type SavePresetDialogProps = {
   open: boolean;
@@ -23,7 +24,8 @@ type SavePresetDialogProps = {
   repoFilter: string;
   repoOptions: string[];
   suggestedLabel: string;
-  onSave: (label: string, repoFilter: string) => void;
+  onSave: (label: string, repoFilter: string) => Promise<boolean>;
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 function SavePresetForm({
@@ -34,6 +36,7 @@ function SavePresetForm({
   suggestedLabel,
   onSave,
   onClose,
+  pending,
 }: {
   kind: "pr" | "issue";
   customQuery: string;
@@ -42,18 +45,18 @@ function SavePresetForm({
   suggestedLabel: string;
   onSave: (label: string, repoFilter: string) => void;
   onClose: () => void;
+  pending: boolean;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState(suggestedLabel);
   const [defaultRepoFilter, setDefaultRepoFilter] = useState(repoFilter);
   const trimmed = value.trim();
-  const canSubmit = trimmed.length > 0;
+  const canSubmit = trimmed.length > 0 && !pending;
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
     onSave(trimmed, defaultRepoFilter);
-    onClose();
-  }, [canSubmit, trimmed, defaultRepoFilter, onSave, onClose]);
+  }, [canSubmit, trimmed, defaultRepoFilter, onSave]);
 
   return (
     <>
@@ -65,7 +68,7 @@ function SavePresetForm({
           })}
         </DialogDescription>
       </DialogHeader>
-      <div className="flex flex-col gap-3">
+      <fieldset disabled={pending} className="flex min-w-0 flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="preset-label" className="text-xs">
             {t("github:name")}
@@ -96,7 +99,7 @@ function SavePresetForm({
             onRepoFilterChange={setDefaultRepoFilter}
             repoOptions={repoOptions}
             ariaLabel={t("github:defaultRepository")}
-            triggerClassName="h-11 border border-input bg-background px-3 py-2 text-sm hover:bg-secondary/50 md:h-9 md:py-1.5"
+            triggerClassName="border border-input bg-background px-3 text-sm hover:bg-secondary/50"
             testId="github-save-query-repo-trigger"
             dropdownTestId="github-save-query-repo-dropdown"
           />
@@ -104,9 +107,14 @@ function SavePresetForm({
             {t("github:thisRepositoryOpensByDefaultYou")}
           </p>
         </div>
-      </div>
+      </fieldset>
+      {pending && (
+        <p role="status" className="text-xs text-muted-foreground">
+          {t("github:saving")}
+        </p>
+      )}
       <DialogFooter>
-        <Button variant="outline" className="cursor-pointer" onClick={onClose}>
+        <Button variant="outline" className="cursor-pointer" onClick={onClose} disabled={pending}>
           {t("common:cancel")}
         </Button>
         <Button className="cursor-pointer" disabled={!canSubmit} onClick={handleSubmit}>
@@ -126,11 +134,35 @@ export function SavePresetDialog({
   repoOptions,
   suggestedLabel,
   onSave,
+  focusReturnRef,
 }: SavePresetDialogProps) {
-  const handleClose = useCallback(() => onOpenChange(false), [onOpenChange]);
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!pendingRef.current) onOpenChange(nextOpen);
+    },
+    [onOpenChange],
+  );
+  const handleClose = useCallback(() => handleOpenChange(false), [handleOpenChange]);
+  const handleSave = async (label: string, repo: string) => {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    try {
+      if (await onSave(label, repo)) onOpenChange(false);
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="sm:max-w-md"
+        aria-busy={pending}
+        onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
+      >
         {open && (
           <SavePresetForm
             kind={kind}
@@ -138,8 +170,9 @@ export function SavePresetDialog({
             repoFilter={repoFilter}
             repoOptions={repoOptions}
             suggestedLabel={suggestedLabel}
-            onSave={onSave}
+            onSave={handleSave}
             onClose={handleClose}
+            pending={pending}
           />
         )}
       </DialogContent>

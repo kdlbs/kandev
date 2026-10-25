@@ -46,7 +46,11 @@ describe("RemoteRepoChip — write paths", () => {
     const alert = screen.getByRole("alert");
     expect(alert.className).toContain("max-w-full");
     expect(alert.textContent).toContain("GitHub rate limit exceeded");
-    fireEvent.click(screen.getByRole("button", { name: /retry remote repository resolution/i }));
+    const retryButton = screen.getByRole("button", { name: /retry remote repository resolution/i });
+    expect(retryButton.getAttribute("data-size")).toBe("default");
+    expect(retryButton.className).toContain("h-7");
+    expect(retryButton.className).toContain("pointer:coarse");
+    fireEvent.click(retryButton);
     expect(onRetry).toHaveBeenCalledOnce();
   });
 });
@@ -582,5 +586,16 @@ describe("RemoteRepoChip — trigger label", () => {
       />,
     );
     expect(screen.getByTestId(TRIGGER_TID).textContent).toContain("github.com/foo/bar");
+  });
+});
+
+describe("RemoteRepoChip checkout gear visibility", () => {
+  it("does not offer checkout options before a repository is selected", () => {
+    renderRemoteRepoChip({ onOptionsChange: vi.fn() });
+    expect(screen.queryByTestId("repository-options-trigger")).toBeNull();
+  });
+  it("offers checkout options for a selected repository", () => {
+    renderRemoteRepoChip({ row: row({ url: URL_ACME_SITE }), onOptionsChange: vi.fn() });
+    expect(screen.getByTestId("repository-options-trigger")).toBeTruthy();
   });
 });

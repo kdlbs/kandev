@@ -188,7 +188,9 @@ function ResolvedRow({ tier, config }: { tier: Tier | undefined; config: Workspa
   );
 }
 
-function firstProviderWithTier(
+// Exported for reuse by RoleTierCard's own ResolvedRow (same "currently
+// maps to" lookup, one level down the tier precedence chain).
+export function firstProviderWithTier(
   tier: Tier,
   config: WorkspaceRouting,
 ): { providerId: string; model: string } | null {

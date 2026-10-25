@@ -35,6 +35,7 @@ function escapeRegExp(value: string): string {
 }
 
 export default defineConfig({
+  base: process.env.VITE_KANDEV_BASE_PATH || "/",
   plugins: [react(), pseudoLocaleBundling()],
   server: {
     port: readPort(process.env.PORT),

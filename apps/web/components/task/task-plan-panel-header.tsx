@@ -18,7 +18,10 @@ type PlanPanelHeaderProps = {
   isLoadingRevisions: boolean;
   isSaving: boolean;
   isAgentBusy: boolean;
-  savePlan: (content: string, title?: string) => Promise<TaskPlan | null>;
+  /** The guarded `attemptSave` wrapper (not the raw `savePlan`), so an
+   * Implement-triggered save participates in the same autosave-suppression
+   * bookkeeping as the autosave timer and the Ctrl/Cmd+S shortcut. */
+  attemptSave: (content: string, title?: string) => Promise<TaskPlan | null>;
   onOpenRevisions: () => void;
   onRevert: (id: string) => Promise<TaskPlanRevision | null>;
   loadRevisionContent: (revisionId: string) => Promise<string>;
@@ -41,7 +44,7 @@ export function PlanPanelHeader({
   isLoadingRevisions,
   isSaving,
   isAgentBusy,
-  savePlan,
+  attemptSave,
   onOpenRevisions,
   onRevert,
   loadRevisionContent,
@@ -67,7 +70,7 @@ export function PlanPanelHeader({
       try {
         let savedPlan: TaskPlan;
         if (hasUnsavedChanges || !plan) {
-          const nextPlan = await savePlan(draftContent, plan?.title);
+          const nextPlan = await attemptSave(draftContent, plan?.title);
           if (!nextPlan) return;
           savedPlan = nextPlan;
         } else {
@@ -85,7 +88,7 @@ export function PlanPanelHeader({
         setIsImplementing(false);
       }
     },
-    [draftContent, hasUnsavedChanges, implementDisabled, implementPlan, plan, savePlan],
+    [attemptSave, draftContent, hasUnsavedChanges, implementDisabled, implementPlan, plan],
   );
 
   return (

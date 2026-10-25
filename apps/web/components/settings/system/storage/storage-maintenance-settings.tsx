@@ -12,10 +12,17 @@ import {
 } from "@/hooks/domains/system/use-storage-maintenance";
 import type { StorageMaintenanceSettings as Settings, SystemJob } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "../../settings-save-provider";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { StorageActionButton } from "./storage-action-button";
+import {
+  policyBlockedReason,
+  policyControlsPending,
+  storageActionDisabledReason,
+} from "./storage-gating";
 import { StorageDiskCapacityCard } from "./storage-disk-capacity-card";
 import { StorageOverviewCard } from "./storage-overview-card";
-import { StoragePolicyCard } from "./storage-policy-card";
+import { storageGoCacheResultSummary } from "./storage-go-cache-result";
+import { StoragePolicyCard } from "./storage-policy-card-root";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
 import { StorageRunHistory } from "./storage-run-history";
 import { SettingsTarget } from "../../settings-target";
@@ -135,13 +142,19 @@ function StorageActions({
 
 function StorageActionFeedback({
   controller,
+  isAdmin,
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
+  isAdmin: boolean;
 }) {
   const { t } = useTranslation();
   if (controller.busy) {
     return (
-      <StorageBusyFeedback busy={controller.busy} onRunAnyway={() => void controller.runAnyway()} />
+      <StorageBusyFeedback
+        busy={controller.busy}
+        isAdmin={isAdmin}
+        onRunAnyway={() => void controller.runAnyway()}
+      />
     );
   }
   if (!controller.error) return null;
@@ -156,9 +169,11 @@ function StorageActionFeedback({
 
 function StorageBusyFeedback({
   busy,
+  isAdmin,
   onRunAnyway,
 }: {
   busy: StorageBusyState;
+  isAdmin: boolean;
   onRunAnyway: () => void;
 }) {
   const { t } = useTranslation();
@@ -174,7 +189,10 @@ function StorageBusyFeedback({
             <li key={resource.kind}>{resource.label}</li>
           ))}
         </ul>
-        {busy.forceAvailable && (
+        {/* Run anyway forces POST /storage/run, which is admin only. The busy
+            alert is a second, independent path to that call, so it carries the
+            same gate as the action buttons rather than trusting them. */}
+        {busy.forceAvailable && isAdmin && (
           <>
             <p className="mt-3">{t("system:storageBusyForceHint")}</p>
             <StorageActionButton
@@ -196,29 +214,10 @@ function serializeSettings(settings: Settings | null): string {
   return settings ? JSON.stringify(settings) : "loading";
 }
 
-function policyPendingAction(action: ReturnType<typeof useStorageMaintenance>["pendingAction"]) {
-  return action === "save" || action === "adopt";
-}
-
-function policyBlockedReason(
-  t: (key: string) => string,
-  action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
-  loading: boolean,
+function useStoragePolicyDraft(
+  controller: ReturnType<typeof useStorageMaintenance>,
+  isAdmin: boolean,
 ) {
-  if (action === "adopt") return t("system:storageAdoptionPending");
-  if (loading) return t("system:storagePolicyLoadingBlock");
-  return undefined;
-}
-
-function storageActionDisabledReason(
-  t: (key: string) => string,
-  action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
-) {
-  if (action) return t("system:storageActionPending");
-  return undefined;
-}
-
-function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenance>) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<Settings | null>(null);
   const previousServerSettings = useRef<Settings | null>(null);
@@ -240,7 +239,7 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
     previousServerSettings.current = savedSettings;
   }, [savedSettings]);
 
-  const invalidReason = policyBlockedReason(t, controller.pendingAction, policyLoading);
+  const invalidReason = policyBlockedReason(t, controller.pendingAction, policyLoading, isAdmin);
   useSettingsSaveContributor({
     id: "system:storage-policy",
     revision: serializeSettings(draft),
@@ -282,28 +281,40 @@ function StoragePolicyState({ loading, error }: { loading: boolean; error?: stri
 
 function StoragePrimarySections({
   controller,
+  temporaryEntriesRequest,
+  temporaryCleanupRequest,
+  onViewTemporary,
+  onReviewTemporaryCleanup,
   disabledReason,
+  readOnlyReason,
   draft,
   setDraft,
   savedSettings,
   onRunTemporaryArtifacts,
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
+  temporaryEntriesRequest: number;
+  temporaryCleanupRequest: number;
+  onViewTemporary: () => void;
+  onReviewTemporaryCleanup: () => void;
   disabledReason?: string;
+  readOnlyReason?: string;
   draft: Settings | null;
   setDraft: (settings: Settings | null) => void;
   savedSettings: Settings | null;
   onRunTemporaryArtifacts: () => void;
 }) {
-  const controlsPending = policyPendingAction(controller.pendingAction);
+  const controlsPending = policyControlsPending(controller.pendingAction, readOnlyReason);
   const policyLoading = controller.loading?.policy ?? !savedSettings;
   const capabilities = controller.policy?.capabilities ?? controller.overview?.capabilities;
+  const latestGoCacheRun = controller.runs.find((run) => storageGoCacheResultSummary(run.result));
   return (
     <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
       <StorageDiskCapacityCard
         disk={controller.disk}
         loading={controller.loading?.disk}
         error={controller.sectionErrors?.disk}
+        onViewTemporary={onViewTemporary}
       />
       <StorageOverviewCard
         overview={controller.overview}
@@ -311,8 +322,12 @@ function StoragePrimarySections({
         loading={controller.loading?.overview}
         error={controller.sectionErrors?.overview}
         disabledReason={disabledReason}
+        latestGoCacheRun={latestGoCacheRun}
         onRunGoCache={() => void controller.runNow(["go_cache"])}
         onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        focusTemporaryEntries={temporaryEntriesRequest}
+        focusTemporaryCleanup={temporaryCleanupRequest}
+        onReviewTemporaryArtifacts={onReviewTemporaryCleanup}
       />
       <StoragePolicyState loading={policyLoading} error={controller.sectionErrors?.policy} />
       {draft && savedSettings && capabilities && (
@@ -321,9 +336,11 @@ function StoragePrimarySections({
           savedSettings={savedSettings}
           capabilities={capabilities}
           pending={controlsPending}
+          pendingReason={readOnlyReason}
           onChange={setDraft}
           onAdopt={controller.adopt}
           onCleanDependencies={() => void controller.runNow(["workspace_dependencies"])}
+          onCleanTemporaryArtifacts={onRunTemporaryArtifacts}
         />
       )}
     </div>
@@ -361,19 +378,36 @@ function StorageQuarantineSection({
 
 function StoragePageSections({
   controller,
+  temporaryEntriesRequest,
+  temporaryCleanupRequest,
+  onViewTemporary,
+  onReviewTemporaryCleanup,
   disabledReason,
+  readOnlyReason,
+  isAdmin,
   onRunTemporaryArtifacts,
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
+  temporaryEntriesRequest: number;
+  temporaryCleanupRequest: number;
+  onViewTemporary: () => void;
+  onReviewTemporaryCleanup: () => void;
   disabledReason?: string;
+  readOnlyReason?: string;
+  isAdmin: boolean;
   onRunTemporaryArtifacts: () => void;
 }) {
-  const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller);
+  const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller, isAdmin);
   return (
     <>
       <StoragePrimarySections
         controller={controller}
+        temporaryEntriesRequest={temporaryEntriesRequest}
+        temporaryCleanupRequest={temporaryCleanupRequest}
+        onViewTemporary={onViewTemporary}
+        onReviewTemporaryCleanup={onReviewTemporaryCleanup}
         disabledReason={disabledReason}
+        readOnlyReason={readOnlyReason}
         draft={draft}
         setDraft={setDraft}
         savedSettings={savedSettings}
@@ -393,21 +427,34 @@ function StoragePageSections({
   );
 }
 
-export function StorageMaintenanceSettings() {
+export function StorageMaintenanceSettings({ active = true }: { active?: boolean }) {
   const { t } = useTranslation();
-  const controller = useStorageMaintenance();
-  const actionDisabledReason = storageActionDisabledReason(t, controller.pendingAction);
+  const controller = useStorageMaintenance(active);
+  const isAdmin = useIsAdmin();
+  // Every mutating storage route is admin-only on the backend, so a member
+  // sees the read-only view with each control disabled and explained rather
+  // than a 403 after the click.
+  const readOnlyReason = isAdmin ? undefined : t("system:storageAdminOnly");
+  const actionDisabledReason = storageActionDisabledReason(t, controller.pendingAction, isAdmin);
   const [temporaryCleanupOpen, setTemporaryCleanupOpen] = useState(false);
+  const [temporaryEntriesRequest, setTemporaryEntriesRequest] = useState(0);
+  const [temporaryCleanupRequest, setTemporaryCleanupRequest] = useState(0);
 
   return (
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">
       <StorageActions controller={controller} disabledReason={actionDisabledReason} />
 
-      <StorageActionFeedback controller={controller} />
+      <StorageActionFeedback controller={controller} isAdmin={isAdmin} />
 
       <StoragePageSections
         controller={controller}
+        temporaryEntriesRequest={temporaryEntriesRequest}
+        temporaryCleanupRequest={temporaryCleanupRequest}
+        onViewTemporary={() => setTemporaryEntriesRequest((current) => current + 1)}
+        onReviewTemporaryCleanup={() => setTemporaryCleanupRequest((current) => current + 1)}
         disabledReason={actionDisabledReason}
+        readOnlyReason={readOnlyReason}
+        isAdmin={isAdmin}
         onRunTemporaryArtifacts={() => setTemporaryCleanupOpen(true)}
       />
       <TemporaryArtifactsDialog

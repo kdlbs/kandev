@@ -11,10 +11,11 @@ type AppLinkHref = string | URL;
 export type AppLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
   href: AppLinkHref;
   children?: ReactNode;
+  onNavigated?: () => void;
 };
 
 const Link = forwardRef<HTMLAnchorElement, AppLinkProps>(function Link(
-  { href, onClick, ...props },
+  { href, onClick, onNavigated, ...props },
   ref,
 ) {
   const resolvedHref = href.toString();
@@ -27,6 +28,7 @@ const Link = forwardRef<HTMLAnchorElement, AppLinkProps>(function Link(
     pushNavigationState({}, "", resolvedHref, () => {
       window.scrollTo({ top: 0, left: 0 });
       window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+      onNavigated?.();
     });
   };
 

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-preview-and-hierarchy", "02-contribution-status-and-state"]
 plan: "plan.md"
-spec: "../../specs/tasks/rich-task-title-previews.md"
+spec: "../../specs/tasks/requirements/rich-task-title-previews.md"
 ---
 
 # Task 03: End-to-end verification

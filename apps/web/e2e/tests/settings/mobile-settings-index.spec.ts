@@ -1,10 +1,82 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 
 // Below `md` there is no sidebar, so `/settings` is the settings list itself —
 // the same tree the nav sheet shows, rendered as a real route rather than an
 // overlay the app has to open for you.
 test.describe("Settings index on a phone", () => {
-  test("renders the settings tree as the page and navigates from it", async ({ testPage }) => {
+  // @covers AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.9
+  test("shows GitHub and GitLab badges only while their saved workspace toggles are on", async ({
+    testPage,
+    seedData,
+    prCapture,
+  }) => {
+    for (const slug of ["github", "gitlab"]) {
+      await testPage.route(`**/api/v1/${slug}/status?*`, (route) =>
+        route.fulfill({
+          json: {
+            workspace_id: seedData.workspaceId,
+            authenticated: true,
+            token_configured: true,
+            username: "badge-test",
+            auth_method: "pat",
+            host: slug === "gitlab" ? "gitlab.com" : "github.com",
+            required_scopes: [],
+          },
+        }),
+      );
+    }
+    const rows = await openIntegrationRows(testPage, seedData.workspaceId);
+    for (const slug of ["github", "gitlab"]) {
+      await expect(rows.locator(`a[href$="/integrations/${slug}"]`)).toContainText("Enabled");
+    }
+
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations`);
+    for (const slug of ["github", "gitlab"]) await testPage.locator(`#${slug}-enabled`).tap();
+    const save = testPage.getByTestId("settings-floating-save");
+    await save.getByRole("button", { name: "Save changes" }).tap();
+    await expect(save).not.toBeVisible();
+    await openIntegrationRows(testPage, seedData.workspaceId);
+    for (const slug of ["github", "gitlab"]) {
+      const row = rows.locator(`a[href$="/integrations/${slug}"]`);
+      await expect(row).toBeVisible();
+      await expect(row).not.toContainText("Enabled");
+    }
+    await rows
+      .locator('a[href$="/integrations/gitlab"]')
+      .evaluate((row) => row.scrollIntoView({ block: "center" }));
+    await testPage.evaluate(async () => {
+      await Promise.allSettled(
+        document
+          .getAnimations()
+          .filter(
+            (animation) =>
+              animation.playState === "running" &&
+              animation.effect?.getTiming().iterations !== Infinity,
+          )
+          .map((animation) => animation.finished),
+      );
+    });
+    await prCapture.screenshot("phone-disabled-integration-badges", {
+      caption:
+        "The phone Settings index keeps disabled GitHub and GitLab reachable without Enabled badges.",
+    });
+
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations`);
+    for (const slug of ["github", "gitlab"]) await testPage.locator(`#${slug}-enabled`).tap();
+    await save.getByRole("button", { name: "Save changes" }).tap();
+    await expect(save).not.toBeVisible();
+    await openIntegrationRows(testPage, seedData.workspaceId);
+    for (const slug of ["github", "gitlab"]) {
+      await expect(rows.locator(`a[href$="/integrations/${slug}"]`)).toContainText("Enabled");
+    }
+  });
+
+  // @covers AC-UI-SETTINGS-MENU-DEFAULT-001.1
+  test("renders accordion by default and navigates from the settings tree", async ({
+    testPage,
+    seedData,
+  }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
     await testPage.goto("/settings");
 
@@ -12,6 +84,12 @@ test.describe("Settings index on a phone", () => {
     await expect(index).toBeVisible();
     // Stays on /settings: no desktop-style handoff, and nothing to go Back past.
     await expect(testPage).toHaveURL(/\/settings$/);
+
+    // Accordion is the default on the phone Settings index too.
+    await index.getByRole("button", { name: /Expand Workspaces/ }).tap();
+    await expect(
+      index.locator(`a[href="/settings/workspaces/${seedData.workspaceId}"]`),
+    ).toBeVisible();
 
     await index.getByRole("link", { name: /Terminal & Editors/ }).click();
 
@@ -76,3 +154,18 @@ test.describe("Settings index on a phone", () => {
     ).toBeVisible();
   });
 });
+
+async function openIntegrationRows(page: Page, workspaceId: string) {
+  await page.goto("/settings");
+  const index = page.getByTestId("settings-index");
+  await expect(index).toBeVisible();
+  for (const label of ["Workspaces", "E2E Workspace", "Integrations"]) {
+    const toggle = index.getByRole("button", { name: new RegExp(`^(Expand|Collapse) ${label}$`) });
+    await expect(toggle).toBeVisible();
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.tap();
+  }
+  await expect(
+    index.locator(`a[href="/settings/workspaces/${workspaceId}/integrations/gitlab"]`),
+  ).toBeVisible();
+  return index;
+}

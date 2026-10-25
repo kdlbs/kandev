@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/last-prompt-pinning-regressions/spec.md"
+spec: "../../specs/ui/requirements/last-prompt-pinning-regressions.md"
 ---
 
 # Task 01: Correct transcript threshold and navigation icon

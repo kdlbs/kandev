@@ -28,6 +28,7 @@ const (
 	TriggerTaskCreated      Trigger = "task_created"
 	TriggerManualMove       Trigger = "manual_move"
 	TriggerTaskUpdate       Trigger = "task_update"
+	TriggerTaskTransfer     Trigger = "task_transfer"
 	TriggerMCPMove          Trigger = "mcp_move"
 	TriggerMCPDeferredMove  Trigger = "mcp_deferred_move"
 	TriggerEngineTransition Trigger = "engine_transition"
@@ -37,6 +38,7 @@ const (
 	TriggerUnarchiveRestore Trigger = "unarchive_restore"
 	TriggerWorkflowAttached Trigger = "workflow_attached"
 	TriggerWorkflowDetached Trigger = "workflow_detached"
+	TriggerPluginMove       Trigger = "plugin_move"
 	TriggerUnknown          Trigger = "unknown"
 )
 
@@ -65,6 +67,10 @@ type Attribution struct {
 	// the initiator. Left empty when there is none or several candidates
 	// exist with no single initiator — never guessed.
 	SessionID string
+	// CausingRunID is the trusted Office run that initiated an agent-caused
+	// transition. Lifecycle retains it with the execution so handoff processing
+	// does not infer it from mutable session or claim state.
+	CausingRunID string
 }
 
 type attributionContextKey struct{}

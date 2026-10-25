@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/utility/models"
 )
 
@@ -84,12 +85,28 @@ func (r *sqliteRepository) initSchema() error {
 		return err
 	}
 
-	// Add enabled column if it doesn't exist (migration for existing DBs)
-	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
-	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN profile_binding_state TEXT NOT NULL DEFAULT 'explicit'`)
-	_, _ = r.db.Exec(`ALTER TABLE utility_agent_calls ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = r.db.Exec(`ALTER TABLE utility_agent_calls ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	// Add columns for existing databases. Duplicate-column errors are the only
+	// tolerated replay result; every other migration failure must stop the
+	// required utility store from being published.
+	migrate := db.NewRequiredMigrateLogger(r.db, nil)
+	migrations := []struct {
+		name string
+		stmt string
+	}{
+		{"utility_agents.enabled", `ALTER TABLE utility_agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`},
+		{"utility_agents.agent_profile_id", `ALTER TABLE utility_agents ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''`},
+		{"utility_agents.profile_binding_state", `ALTER TABLE utility_agents ADD COLUMN profile_binding_state TEXT NOT NULL DEFAULT 'explicit'`},
+		{"utility_agent_calls.agent_profile_id", `ALTER TABLE utility_agent_calls ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''`},
+		{"utility_agent_calls.execution_profile_id", `ALTER TABLE utility_agent_calls ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, migration := range migrations {
+		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
+			return fmt.Errorf("required utility migration: %w", err)
+		}
+	}
+	if err := migrate.Err(); err != nil {
+		return fmt.Errorf("required utility migration: %w", err)
+	}
 
 	// Heal pre-existing custom agents that were created with enabled=0 due
 	// to a bug in CreateAgent (the Enabled field on the model defaulted to
@@ -102,10 +119,12 @@ func (r *sqliteRepository) initSchema() error {
 	// updated_at, so a user who deliberately disables an agent post-fix
 	// has updated_at > created_at and is left alone. Without this guard
 	// every restart would silently re-enable any user-disabled custom agent.
-	_, _ = r.db.Exec(`UPDATE utility_agents SET enabled = 1
+	if _, err := r.db.Exec(`UPDATE utility_agents SET enabled = 1
 		WHERE builtin = 0 AND enabled = 0
 		  AND agent_id <> '' AND model <> ''
-		  AND updated_at = created_at`)
+		  AND updated_at = created_at`); err != nil {
+		return fmt.Errorf("repair utility agent enabled values: %w", err)
+	}
 
 	// Legacy-data backfill: rewrite the old "claude-code" identifier and any
 	// pre-fix builtin rows that were persisted with an empty agent_id to the
@@ -115,8 +134,10 @@ func (r *sqliteRepository) initSchema() error {
 	// ON CONFLICT(id) DO NOTHING contract, those stale rows survived
 	// untouched on every restart. Current seeds now use builtinSeedAgentID
 	// (see builtins.go), so this migration only repairs existing deployments.
-	_, _ = r.db.Exec(`UPDATE utility_agents SET agent_id = 'claude-acp'
-		WHERE agent_id IN ('claude-code', '')`)
+	if _, err := r.db.Exec(`UPDATE utility_agents SET agent_id = 'claude-acp'
+		WHERE agent_id IN ('claude-code', '')`); err != nil {
+		return fmt.Errorf("repair utility agent identifiers: %w", err)
+	}
 
 	// Seed built-in agents
 	if err := r.seedBuiltinAgents(); err != nil {
@@ -140,7 +161,9 @@ func (r *sqliteRepository) migrateTemplatePlaceholders() error {
 	for _, p := range placeholders {
 		old := "{{." + p + "}}"
 		new := "{{" + p + "}}"
-		_, _ = r.db.Exec(r.db.Rebind(`UPDATE utility_agents SET prompt = REPLACE(prompt, ?, ?) WHERE builtin = 1`), old, new)
+		if _, err := r.db.Exec(r.db.Rebind(`UPDATE utility_agents SET prompt = REPLACE(prompt, ?, ?) WHERE builtin = 1`), old, new); err != nil {
+			return fmt.Errorf("replace utility prompt placeholder %q: %w", old, err)
+		}
 	}
 	return nil
 }

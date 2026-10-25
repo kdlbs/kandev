@@ -23,7 +23,7 @@ type bufferedDelivery struct {
 // ringBuffer holds events for one plugin while it is in the error state, so
 // Deliverer.Flush can replay them in order after a health-poller recovery
 // transition. Capacity and TTL are the numbers in
-// docs/specs/plugins/spec.md ("Event webhook delivery"): 100 events / 5
+// docs/specs/plugins/requirements/plugins.md ("Event webhook delivery"): 100 events / 5
 // minutes. The oldest entry is dropped on overflow; expired entries are
 // purged lazily on the next Add, Drain, or Len call.
 type ringBuffer struct {

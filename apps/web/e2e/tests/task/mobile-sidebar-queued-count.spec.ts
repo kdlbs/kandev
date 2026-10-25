@@ -24,14 +24,15 @@ test.describe("Mobile sidebar — queued prompt count", () => {
       state: "IDLE",
       agentProfileId: seedData.agentProfileId,
     });
-    await apiClient.queueMessage(task.id, sessionId, "Mobile queued prompt");
+    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
+    await apiClient.queueMessage(queueIdentity, "Mobile queued prompt");
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
     // Open the task switcher sheet from the mobile session top bar.
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog");
     await expect(sheet.getByText("Mobile Queued Badge Task")).toBeVisible({ timeout: 10_000 });
 

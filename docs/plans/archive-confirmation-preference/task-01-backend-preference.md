@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/archive-confirmation.md"
+spec: "../../specs/tasks/requirements/archive-confirmation.md"
 ---
 
 # Task 01: Backend Archive Confirmation Preference

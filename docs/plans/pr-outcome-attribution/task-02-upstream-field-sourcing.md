@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-schema-and-activation"]
 plan: "plan.md"
-spec: "../../specs/pr-outcome-attribution/spec.md"
+spec: "../../specs/integrations/requirements/pr-outcome-attribution.md"
 ---
 
 # Task 02: Upstream field sourcing

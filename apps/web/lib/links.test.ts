@@ -4,6 +4,7 @@ import {
   linkToTask,
   linkToTaskOverview,
   linkToTasks,
+  linkToThreads,
   normalizePathname,
   replaceTaskUrl,
 } from "./links";
@@ -16,6 +17,23 @@ describe("task links", () => {
   it("uses /t as the canonical task detail route", () => {
     expect(linkToTask("task-123")).toBe("/t/task-123");
     expect(linkToTask("task-123", "plan")).toBe("/t/task-123?layout=plan");
+  });
+
+  it("encodes the raw task id once and merges task query context", () => {
+    const searchParams = new URLSearchParams([
+      ["layout", "old"],
+      ["tag", "first"],
+      ["tag", "second"],
+    ]);
+
+    expect(
+      linkToTask("task/123%raw", {
+        searchParams,
+        layout: "plan",
+        sessionId: "session 123",
+      }),
+    ).toBe("/t/task%2F123%25raw?layout=plan&tag=first&tag=second&sessionId=session+123");
+    expect(searchParams.toString()).toBe("layout=old&tag=first&tag=second");
   });
 
   it("keeps /tasks for the task list route", () => {
@@ -39,6 +57,20 @@ describe("task links", () => {
     replaceTaskUrl("task-123");
 
     expect(replaceState).toHaveBeenCalledWith({}, "", "/t/task-123");
+  });
+});
+
+describe("Threads links", () => {
+  it("carries the task and selected session for a Threads deep link", () => {
+    expect(linkToThreads("workspace-123", "task-123", "session-123")).toBe(
+      "/threads?workspace=workspace-123&taskId=task-123&sessionId=session-123",
+    );
+  });
+
+  it("does not emit a session parameter without a task", () => {
+    expect(linkToThreads("workspace-123", undefined, "session-123")).toBe(
+      "/threads?workspace=workspace-123",
+    );
   });
 });
 

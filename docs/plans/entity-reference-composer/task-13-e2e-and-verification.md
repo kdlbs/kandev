@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["12-message-reference-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 13: Entity Reference E2E and Integrated Verification

@@ -5,6 +5,7 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,8 +79,8 @@ const legacySessionWorktreeDDL = `
 
 // openLegacyDB opens a SQLite database in the pre-cutover schema: it runs
 // the current initializer once (final shape for everything else), then
-// rewinds task_environments and task_environment_repos to the legacy shape
-// and recreates task_session_worktrees.
+// rewinds task_environments, task_environment_repos, and git snapshots to
+// their legacy shapes and recreates task_session_worktrees.
 func openLegacyDB(t *testing.T) *sqlx.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
@@ -98,6 +99,14 @@ func openLegacyDB(t *testing.T) *sqlx.DB {
 
 func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	t.Helper()
+	// Final-schema tables own foreign keys to task_environments. Recreate or
+	// remove them before dropping the environment tables, otherwise PostgreSQL
+	// correctly rejects this test-only rewind.
+	replaceGitSnapshotTableWithLegacy(t, &Repository{db: db, ro: db})
+	if _, err := db.Exec(`DROP TABLE workspace_inventory_recovery_receipts`); err != nil {
+		t.Fatalf("drop final workspace inventory receipts: %v", err)
+	}
+	dropTaskRecoveryTablesForLegacyCutover(t, db)
 	if _, err := db.Exec(`DROP TABLE task_environment_repos`); err != nil {
 		t.Fatalf("drop final env repos: %v", err)
 	}
@@ -107,6 +116,20 @@ func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	for _, ddl := range []string{legacyEnvDDL, legacySessionWorktreeDDL} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatalf("seed legacy schema: %v", err)
+		}
+	}
+}
+
+func dropTaskRecoveryTablesForLegacyCutover(t *testing.T, db *sqlx.DB) {
+	t.Helper()
+	for _, table := range []string{
+		"task_environment_checkout_adoptions",
+		"task_environment_recovery_claims",
+		"task_environment_recovery_artifacts",
+		"task_environment_recovery_operations",
+	} {
+		if _, err := db.Exec(`DROP TABLE ` + table); err != nil {
+			t.Fatalf("drop final %s: %v", table, err)
 		}
 	}
 }
@@ -220,10 +243,15 @@ func TestCutover_FreshSchemaHasFinalShape(t *testing.T) {
 		}
 	}
 	repoCols := tableColumnSet(t, sqlxDB, tableTaskEnvRepos)
-	for _, required := range []string{"status", "merged_at", "deleted_at"} {
+	for _, required := range []string{
+		"status", "merged_at", "deleted_at", "worktree_branch_compacted_at",
+	} {
 		if !repoCols[required] {
 			t.Fatalf("fresh task_environment_repos missing %s", required)
 		}
+	}
+	if !indexExists(t, sqlxDB, "idx_task_environment_repos_archived_branch_candidates") {
+		t.Fatal("fresh task_environment_repos missing archived branch candidate index")
 	}
 }
 
@@ -249,6 +277,7 @@ func TestCutover_HybridNormalizedEnvironmentWithLegacySessionWorktrees(t *testin
 
 func seedHybridCutoverState(t *testing.T, db *sqlx.DB, suffix string) legacySeed {
 	t.Helper()
+	dropTaskRecoveryTablesForLegacyCutover(t, db)
 	now := time.Now().UTC().Truncate(time.Second)
 	seed := legacySeed{
 		envID: "env-hybrid-" + suffix, taskID: "task-hybrid-" + suffix,
@@ -265,9 +294,24 @@ func seedHybridCutoverState(t *testing.T, db *sqlx.DB, suffix string) legacySeed
 	seedLegacyEnvRepo(t, db, "env-repo-hybrid", seed.envID, seed.repoID,
 		"wt-hybrid", "/tasks/hybrid/repo", "feature/hybrid", now)
 	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_git_snapshots (
+			id, task_environment_id, session_id, snapshot_type, branch,
+			files, metadata, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, '{}', ?)`),
+		"snapshot-hybrid-"+seed.envID, seed.envID, seed.sessionID,
+		string(models.SnapshotTypeStatusUpdate), "main", `{"hybrid.go":{"status":"modified"}}`, now); err != nil {
+		t.Fatalf("seed environment-owned git snapshot: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
 		UPDATE task_environment_repos
-		SET status = 'deleted', merged_at = ?, deleted_at = ?
-		WHERE id = 'env-repo-hybrid'`), now, now); err != nil {
+		SET status = 'deleted',
+			worktree_branch_owner = 'kandev',
+			worktree_integration_ref = 'refs/heads/main',
+			worktree_recovery_head_sha = ?,
+			worktree_branch_compacted_at = ?,
+			merged_at = ?,
+			deleted_at = ?
+		WHERE id = 'env-repo-hybrid'`), strings.Repeat("a", 40), now, now, now); err != nil {
 		t.Fatalf("seed normalized repository lifecycle: %v", err)
 	}
 	if _, err := db.Exec(legacySessionWorktreeDDL); err != nil {
@@ -304,8 +348,23 @@ func assertHybridCutoverResult(t *testing.T, repo *Repository, seed legacySeed) 
 		!got[seed.repoID].DeletedAt.Equal(got[seed.repoID].CreatedAt) {
 		t.Fatalf("normalized repository lifecycle = %+v", got[seed.repoID])
 	}
+	if got[seed.repoID].WorktreeBranchOwner != "kandev" ||
+		got[seed.repoID].WorktreeIntegrationRef != "refs/heads/main" ||
+		got[seed.repoID].WorktreeRecoveryHeadSHA != strings.Repeat("a", 40) ||
+		got[seed.repoID].WorktreeBranchCompactedAt == nil {
+		t.Fatalf("normalized repository branch metadata = %+v", got[seed.repoID])
+	}
 	assertHybridWorktree(t, got[seed.repoID+"-session-only"], "wt-session-only",
 		"/tasks/hybrid/session-only", "feature/session-only")
+	var snapshotEnvironmentID string
+	if err := repo.db.Get(&snapshotEnvironmentID, repo.db.Rebind(`
+		SELECT task_environment_id FROM task_session_git_snapshots
+		WHERE id = ?`), "snapshot-hybrid-"+seed.envID); err != nil {
+		t.Fatalf("read preserved git snapshot: %v", err)
+	}
+	if snapshotEnvironmentID != seed.envID {
+		t.Fatalf("preserved git snapshot environment = %q, want %q", snapshotEnvironmentID, seed.envID)
+	}
 }
 
 func assertHybridWorktree(t *testing.T, got *models.TaskEnvironmentRepo, worktreeID, path, branch string) {
@@ -331,6 +390,17 @@ func tableColumnSet(t *testing.T, db *sqlx.DB, table string) map[string]bool {
 		cols[name] = true
 	}
 	return cols
+}
+
+func indexExists(t *testing.T, db *sqlx.DB, index string) bool {
+	t.Helper()
+	var exists bool
+	err := db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name=?)`, index).Scan(&exists)
+	if err != nil {
+		t.Fatalf("probe index: %v", err)
+	}
+	return exists
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +448,81 @@ func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 	if session.TaskEnvironmentID != "env-1" {
 		t.Fatalf("session env = %q, want env-1", session.TaskEnvironmentID)
+	}
+}
+
+func TestCutoverPreservesManagedCloneSourceIdentity(t *testing.T) {
+	db := openLegacyDB(t)
+	for _, column := range []string{
+		"worktree_source_clone_path TEXT NOT NULL DEFAULT ''",
+		"worktree_source_common_dir TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec("ALTER TABLE task_environment_repos ADD COLUMN " + column); err != nil {
+			t.Fatalf("add source clone column: %v", err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-source", taskID: "task-source", repoID: "repo-source", sessionID: "session-source"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-source", seed.repoID, "main", "/tasks/source/repo", "main", "active", now)
+	seedLegacyFlatEnv(t, db, seed, "wt-source", "/tasks/source/repo", "main", now)
+	seedLegacyEnvRepo(t, db, "env-repo-source", seed.envID, seed.repoID, "wt-source", "/tasks/source/repo", "main", now)
+	if _, err := db.Exec(`UPDATE task_environment_repos SET worktree_source_clone_path = ?, worktree_source_common_dir = ? WHERE id = ?`,
+		"/managed/legacy/repo", "/managed/legacy/repo/.git", "env-repo-source"); err != nil {
+		t.Fatalf("seed source clone identity: %v", err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeSourceClonePath != "/managed/legacy/repo" ||
+		env.Repos[0].WorktreeSourceCommonDir != "/managed/legacy/repo/.git" {
+		t.Fatalf("managed clone source identity was not preserved: %+v", env.Repos)
+	}
+}
+
+func TestCutover_PreservesLegacyDockerCredentialReferences(t *testing.T) {
+	db := openLegacyDB(t)
+	for _, column := range []string{
+		"container_bootstrap_nonce_secret_id TEXT DEFAULT ''",
+		"container_control_auth_token_secret_id TEXT DEFAULT ''",
+	} {
+		if _, err := db.Exec("ALTER TABLE task_environments ADD COLUMN " + column); err != nil {
+			t.Fatalf("add legacy credential column: %v", err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-docker", taskID: "task-docker", repoID: "repo-docker", sessionID: "session-docker"}
+	seedLegacyTask(t, db, seed, now)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environments (
+			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, workspace_path, container_id,
+			container_bootstrap_nonce_secret_id, container_control_auth_token_secret_id,
+			sandbox_id, task_dir_name, created_at, updated_at
+		) VALUES (?, ?, ?, 'local_docker', 'docker', '', 0, 'ready', '/workspace', 'container-1', ?, ?, '', '', ?, ?)`),
+		seed.envID, seed.taskID, seed.repoID, "bootstrap-secret", "control-secret", now, now); err != nil {
+		t.Fatalf("seed legacy Docker environment: %v", err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("upgrade legacy database: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if env.ContainerBootstrapNonceSecretID != "bootstrap-secret" {
+		t.Fatalf("ContainerBootstrapNonceSecretID = %q, want bootstrap-secret", env.ContainerBootstrapNonceSecretID)
+	}
+	if env.ContainerControlAuthTokenSecretID != "control-secret" {
+		t.Fatalf("ContainerControlAuthTokenSecretID = %q, want control-secret", env.ContainerControlAuthTokenSecretID)
 	}
 }
 

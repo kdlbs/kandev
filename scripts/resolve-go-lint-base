@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# resolve-go-lint-base prints the local remote-tracking ref used by the
+# pre-commit Go lint hook. Fork worktrees conventionally retain the canonical
+# repository as `upstream`; do not silently fall back when the base is unclear.
+set -euo pipefail
+
+canonical_repository='kdlbs/kandev'
+comparison_base=false
+
+die() {
+	echo "Go lint base resolution failed: $*" >&2
+	exit 1
+}
+
+case "${1:-}" in
+	'') ;;
+	--comparison-base) comparison_base=true; shift ;;
+	*) die "unknown argument: $1" ;;
+esac
+
+[ "$#" -eq 0 ] || die "unexpected arguments: $*"
+
+normalize_remote_ref() {
+	local ref=$1 remote_branch remote branch normalized
+	case "$ref" in
+		refs/remotes/*) remote_branch=${ref#refs/remotes/} ;;
+		refs/*) die "base ref must be a remote-tracking ref: $ref" ;;
+		*/*) remote_branch=$ref ;;
+		*) die "base ref must be a remote-tracking ref: $ref" ;;
+	esac
+
+	remote=${remote_branch%%/*}
+	branch=${remote_branch#*/}
+	[ -n "$remote" ] && [ "$branch" != "$remote_branch" ] && [ -n "$branch" ] || die "base ref must name a remote and branch: $ref"
+	normalized="refs/remotes/$remote/$branch"
+	git check-ref-format "$normalized" >/dev/null 2>&1 || die "base ref does not have a safe ref format: $ref"
+	printf '%s\n' "$normalized"
+}
+
+is_canonical_remote() {
+	local url=$1 path
+	case "$url" in
+		https://github.com/*) path=${url#https://github.com/} ;;
+		http://github.com/*) path=${url#http://github.com/} ;;
+		ssh://git@github.com/*) path=${url#ssh://git@github.com/} ;;
+		git+ssh://git@github.com/*) path=${url#git+ssh://git@github.com/} ;;
+		git://github.com/*) path=${url#git://github.com/} ;;
+		git@github.com:*) path=${url#git@github.com:} ;;
+		*) return 1 ;;
+	esac
+	path=${path%.git}
+	path=${path%/}
+	[ "$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')" = "$canonical_repository" ]
+}
+
+configured_refs=()
+while IFS= read -r ref; do
+	[ -n "$ref" ] && configured_refs+=("$ref")
+done < <(git config --get-all kandev.lintBaseRef || true)
+
+if [ "${#configured_refs[@]}" -gt 1 ]; then
+	die "ambiguous kandev.lintBaseRef values: ${configured_refs[*]}"
+fi
+
+if [ "${#configured_refs[@]}" -eq 1 ]; then
+	base_ref=$(normalize_remote_ref "${configured_refs[0]}")
+else
+	origin_head=$(git symbolic-ref --quiet refs/remotes/origin/HEAD || true)
+	[ -n "$origin_head" ] || die "origin's default branch is unavailable; set kandev.lintBaseRef to a local remote-tracking ref"
+	case "$origin_head" in
+		refs/remotes/origin/*) base_branch=${origin_head#refs/remotes/origin/} ;;
+		*) die "origin's default ref is invalid: $origin_head" ;;
+	esac
+	[ -n "$base_branch" ] || die "origin's default ref is invalid: $origin_head"
+
+	if upstream_url=$(git remote get-url upstream 2>/dev/null); then
+		is_canonical_remote "$upstream_url" || die "upstream remote is not the canonical $canonical_repository repository"
+		base_ref=$(normalize_remote_ref "refs/remotes/upstream/$base_branch")
+		git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "canonical upstream ref does not resolve locally: $base_ref"
+	else
+		base_ref=$(normalize_remote_ref "$origin_head")
+	fi
+fi
+
+git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "base ref does not resolve locally: $base_ref"
+
+if [ "$comparison_base" = true ]; then
+	merge_head=$(git rev-parse --verify MERGE_HEAD 2>/dev/null || true)
+	base_tip=$(git rev-parse --verify --quiet "$base_ref^{commit}")
+	if [ -n "$merge_head" ] && [ "$merge_head" = "$base_tip" ]; then
+		printf '%s\n' "$merge_head"
+	else
+		merge_base=$(git merge-base HEAD "$base_ref" 2>/dev/null) || die "base ref has no merge base with HEAD: $base_ref"
+		printf '%s\n' "$merge_base"
+	fi
+else
+	printf '%s\n' "$base_ref"
+fi

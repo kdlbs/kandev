@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/notifications/dto"
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/notifications/service"
@@ -18,8 +19,20 @@ func NewController(svc *service.Service) *Controller {
 	return &Controller{service: svc}
 }
 
+// callerUserID resolves the user whose providers this request may touch: the
+// authenticated identity when there is one, otherwise the pre-auth default
+// user. A synthetic identity means authentication is disabled, so it maps to
+// the same default row single-user installs have always used.
+func callerUserID(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic || identity.UserID == "" {
+		return userstore.DefaultUserID
+	}
+	return identity.UserID
+}
+
 func (c *Controller) ListProviders(ctx context.Context) (dto.NotificationProvidersResponse, error) {
-	userID := userstore.DefaultUserID
+	userID := callerUserID(ctx)
 	providers, subscriptions, err := c.service.ListProviders(ctx, userID)
 	if err != nil {
 		return dto.NotificationProvidersResponse{}, err
@@ -37,7 +50,7 @@ func (c *Controller) ListProviders(ctx context.Context) (dto.NotificationProvide
 }
 
 func (c *Controller) CreateProvider(ctx context.Context, req dto.UpsertProviderRequest) (dto.NotificationProviderDTO, error) {
-	userID := userstore.DefaultUserID
+	userID := callerUserID(ctx)
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		name = defaultNameForType(req.Type)
@@ -72,11 +85,11 @@ func (c *Controller) UpdateProvider(ctx context.Context, providerID string, req 
 		Config:  req.Config,
 		Events:  req.Events,
 	}
-	provider, err := c.service.UpdateProvider(ctx, providerID, updates)
+	userID := callerUserID(ctx)
+	provider, err := c.service.UpdateProvider(ctx, userID, providerID, updates)
 	if err != nil {
 		return dto.NotificationProviderDTO{}, err
 	}
-	userID := userstore.DefaultUserID
 	_, subscriptions, err := c.service.ListProviders(ctx, userID)
 	if err != nil {
 		return dto.NotificationProviderDTO{}, err
@@ -85,11 +98,11 @@ func (c *Controller) UpdateProvider(ctx context.Context, providerID string, req 
 }
 
 func (c *Controller) DeleteProvider(ctx context.Context, providerID string) error {
-	return c.service.DeleteProvider(ctx, providerID)
+	return c.service.DeleteProvider(ctx, callerUserID(ctx), providerID)
 }
 
 func (c *Controller) TestProvider(ctx context.Context, providerID string) error {
-	return c.service.TestProvider(ctx, providerID)
+	return c.service.TestProvider(ctx, callerUserID(ctx), providerID)
 }
 
 func defaultNameForType(providerType string) string {

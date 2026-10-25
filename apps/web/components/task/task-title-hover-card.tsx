@@ -1,20 +1,28 @@
 "use client";
 
-import { useRef, type FocusEvent, type MouseEvent, type ReactNode } from "react";
+import { useRef, type FocusEvent, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { IconSubtask } from "@tabler/icons-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { useTaskSubtasks } from "@/hooks/domains/kanban/use-task-subtasks";
+import { useTaskSubtasks, type TaskSubtask } from "@/hooks/domains/kanban/use-task-subtasks";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { cn } from "@/lib/utils";
 import { TaskSubtaskRow } from "./task-subtask-row";
 
 const MAX_VISIBLE_SUBTASKS = 12;
 const OPEN_DELAY_MS = 200;
 const CLOSE_DELAY_MS = 100;
+const PREVIEW_FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-function SubtasksSection({ taskId }: { taskId: string }) {
+function focusFirstPreviewTarget(contentRef: RefObject<HTMLDivElement | null>) {
+  contentRef.current?.querySelector<HTMLElement>(PREVIEW_FOCUSABLE_SELECTOR)?.focus();
+}
+
+function SubtasksSection({ subtasks }: { subtasks: TaskSubtask[] }) {
   const { t } = useTranslation();
-  const subtasks = useTaskSubtasks(taskId);
   if (subtasks.length === 0) return null;
 
   const visible = subtasks.slice(0, MAX_VISIBLE_SUBTASKS);
@@ -42,18 +50,56 @@ function SubtasksSection({ taskId }: { taskId: string }) {
   );
 }
 
+function DescriptionSection({ description }: { description?: string }) {
+  if (!description) return null;
+  return (
+    <div
+      data-testid="task-title-hover-description"
+      className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground [overflow-wrap:anywhere]"
+    >
+      {description}
+    </div>
+  );
+}
+
+function ParentSection({ parentTaskId }: { parentTaskId?: string | null }) {
+  const { t } = useTranslation();
+  const parentTitle = useTaskById(parentTaskId)?.title ?? null;
+  if (!parentTaskId) return null;
+  // Matches KanbanCardRelationship's fallback (kanban-card-status-strip.tsx)
+  // so the two "show the parent relationship" surfaces don't diverge when the
+  // parent title isn't resolvable from the store.
+  const relationshipTitle = parentTitle ?? t("task:subtask");
+  return (
+    <div
+      data-testid="task-title-hover-parent"
+      className="mt-2 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground"
+    >
+      <IconSubtask className="h-3 w-3 shrink-0" />
+      <span className="shrink-0 font-medium">{t("kanban:subtaskOf")}</span>
+      <span className="min-w-0 truncate">{relationshipTitle}</span>
+    </div>
+  );
+}
+
 function DesktopTaskTitlePreview({
-  taskId,
   title,
   children,
+  description,
+  parentTaskId,
+  subtasks,
   side,
   align,
+  triggerClassName,
 }: {
-  taskId: string;
   title: string;
   children: ReactNode;
+  description?: string;
+  parentTaskId?: string | null;
+  subtasks: TaskSubtask[];
   side: "top" | "right" | "bottom" | "left";
   align: "start" | "center" | "end";
+  triggerClassName?: string;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -65,11 +111,15 @@ function DesktopTaskTitlePreview({
     event.preventDefault();
     event.stopPropagation();
     keyboardSessionRef.current = true;
+    if (hover.open) {
+      focusFirstPreviewTarget(contentRef);
+      return;
+    }
     hover.onOpenChange(true);
   };
 
   const handleContentBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) hover.onContentLeave();
+    if (!event.currentTarget.contains(event.relatedTarget)) hover.onContentLeave(event);
   };
 
   return (
@@ -83,6 +133,8 @@ function DesktopTaskTitlePreview({
           aria-expanded={hover.open}
           onPointerEnter={hover.onTriggerEnter}
           onPointerLeave={hover.onTriggerLeave}
+          onFocus={hover.onTriggerEnter}
+          onBlur={hover.onTriggerLeave}
           onKeyDown={(event) => {
             // Only swallow keys while the preview is open (protects it from
             // the card/row's own keyboard shortcuts, e.g. drag pickup).
@@ -93,7 +145,11 @@ function DesktopTaskTitlePreview({
             event.stopPropagation();
           }}
           onClick={handleTriggerClick}
-          className="min-w-0 max-w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+          onContextMenu={(event) => event.stopPropagation()}
+          className={cn(
+            "min-w-0 max-w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+            triggerClassName,
+          )}
         >
           {children}
         </button>
@@ -112,13 +168,7 @@ function DesktopTaskTitlePreview({
         onBlurCapture={handleContentBlur}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          if (keyboardSessionRef.current) {
-            contentRef.current
-              ?.querySelector<HTMLElement>(
-                'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-              )
-              ?.focus();
-          }
+          if (keyboardSessionRef.current) focusFirstPreviewTarget(contentRef);
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -131,7 +181,9 @@ function DesktopTaskTitlePreview({
         <div className="text-pretty break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
           {title}
         </div>
-        <SubtasksSection taskId={taskId} />
+        <DescriptionSection description={description} />
+        <ParentSection parentTaskId={parentTaskId} />
+        <SubtasksSection subtasks={subtasks} />
       </PopoverContent>
     </Popover>
   );
@@ -142,21 +194,39 @@ export function TaskTitleHoverCard({
   taskId,
   title,
   children,
+  description,
+  parentTaskId,
+  isTitleTruncated,
   side = "bottom",
   align = "start",
+  triggerClassName,
 }: {
   taskId: string;
   title: string;
   children: ReactNode;
+  description?: string;
+  parentTaskId?: string | null;
+  isTitleTruncated?: boolean;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
+  triggerClassName?: string;
 }) {
   const { isFinePointer } = useResponsiveBreakpoint();
+  const subtasks = useTaskSubtasks(taskId);
+  const hasContent = Boolean(description) || Boolean(parentTaskId) || subtasks.length > 0;
 
-  if (!isFinePointer) return <>{children}</>;
+  if (!isFinePointer || (!hasContent && !isTitleTruncated)) return <>{children}</>;
 
   return (
-    <DesktopTaskTitlePreview taskId={taskId} title={title} side={side} align={align}>
+    <DesktopTaskTitlePreview
+      title={title}
+      description={description}
+      parentTaskId={parentTaskId}
+      subtasks={subtasks}
+      side={side}
+      align={align}
+      triggerClassName={triggerClassName}
+    >
       {children}
     </DesktopTaskTitlePreview>
   );

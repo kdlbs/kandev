@@ -24,7 +24,7 @@ The normal `GITHUB_TOKEN` pushes the release branch, creates the pull request, a
 
 The workflow removes `--delete-branch` and relies on the repository branch-cleanup setting. It verifies the reported merge commit on `origin/main` before it signs the release tag.
 
-The repair contract is recorded in `docs/specs/release-pr-queue-bypass/spec.md`.
+The repair contract is recorded in `docs/specs/release/requirements/release-pr-queue-bypass.md`.
 
 ## Consequences
 

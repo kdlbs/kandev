@@ -6,7 +6,7 @@ wave: 1
 parallelism: sequential
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 01: Defer and stabilize charts

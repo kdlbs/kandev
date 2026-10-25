@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import type { TaskRepositorySnapshot } from "@/components/task-create-dialog-types";
 import type { KanbanState } from "@/lib/state/slices";
 import type { Task } from "@/lib/types/http";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
@@ -17,6 +18,10 @@ export type SidebarTaskEditTarget = {
   workflowStepId: string;
   state?: Task["state"];
   repositoryId?: string;
+  repositories?: TaskRepositorySnapshot[];
+  primaryExecutorProfileId?: string;
+  runnerEditable?: boolean;
+  runnerIneligibleReason?: string;
 };
 
 export function buildSidebarTaskEditTarget(
@@ -35,25 +40,27 @@ export function buildSidebarTaskEditTarget(
     workflowStepId,
     state: sourceTask.state,
     repositoryId: sourceTask.repositoryId ?? undefined,
+    repositories: sourceTask.repositories,
+    primaryExecutorProfileId: sourceTask.primaryExecutorProfileId ?? undefined,
+    runnerEditable: sourceTask.runnerEditable,
+    runnerIneligibleReason: sourceTask.runnerIneligibleReason,
   };
 }
 
-export function useSidebarTaskEdit() {
+export function useSidebarTaskEdit(pageTasks: KanbanState["tasks"] = []) {
   const store = useAppStoreApi();
   const [editingTask, setEditingTask] = useState<SidebarTaskEditTarget | null>(null);
 
   const handleEditTask = useCallback(
     (item: TaskSwitcherItem) => {
       const state = store.getState();
-      const sourceTask = findTaskInSnapshots(
-        item.id,
-        state.kanbanMulti.snapshots,
-        state.kanban.tasks,
-      );
+      const sourceTask =
+        pageTasks.find((task) => task.id === item.id) ??
+        findTaskInSnapshots(item.id, state.kanbanMulti.snapshots, state.kanban.tasks);
       const target = buildSidebarTaskEditTarget(item, sourceTask);
       if (target) setEditingTask(target);
     },
-    [store],
+    [pageTasks, store],
   );
 
   return { editingTask, setEditingTask, handleEditTask };
@@ -92,6 +99,10 @@ export function SidebarTaskEditDialog({
               workflowStepId: target.workflowStepId,
               state: target.state,
               repositoryId: target.repositoryId,
+              repositories: target.repositories,
+              primaryExecutorProfileId: target.primaryExecutorProfileId,
+              runnerEditable: target.runnerEditable,
+              runnerIneligibleReason: target.runnerIneligibleReason,
             }
           : null
       }
@@ -102,6 +113,7 @@ export function SidebarTaskEditDialog({
               description: target.description,
               state: target.state,
               repositoryId: target.repositoryId,
+              repositories: target.repositories,
             }
           : undefined
       }

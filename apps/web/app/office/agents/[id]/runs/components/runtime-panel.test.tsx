@@ -32,4 +32,36 @@ describe("RuntimePanel", () => {
     expect(screen.getByTestId("runtime-skills").textContent).toContain("skill-1");
     expect(screen.getByTestId("runtime-skills").textContent).toContain("hash abc");
   });
+
+  it("prefers captured skill labels and shows an explicit fallback when absent", () => {
+    render(
+      <RuntimePanel
+        runtime={{
+          capabilities: {},
+          input_snapshot: {},
+          skills: [
+            {
+              skill_id: "skill-renamed",
+              display_name: "Planning",
+              slug: "planning",
+              version: "2",
+              content_hash: "hash-2",
+              materialized_path: "/tmp/skills/planning",
+            },
+            {
+              skill_id: "skill-deleted",
+              version: "1",
+              content_hash: "hash-1",
+              materialized_path: "/tmp/skills/deleted",
+            },
+          ],
+        }}
+      />,
+    );
+
+    const skills = screen.getByTestId("runtime-skills");
+    expect(skills.textContent).toContain("Planning");
+    expect(skills.textContent).toContain("skill-renamed");
+    expect(skills.textContent).toMatch(/skill unavailable/i);
+  });
 });

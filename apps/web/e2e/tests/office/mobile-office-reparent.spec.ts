@@ -24,12 +24,15 @@ test.describe("Office manager reassignment on mobile", () => {
     await reportsTo.click();
     const listbox = testPage.getByRole("listbox");
     await expect(listbox).toBeVisible();
-    await listbox.getByRole("option", { name: "CEO" }).click();
+    await listbox.getByRole("option", { name: "CEO", exact: true }).click();
 
     const saved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/agents/${workerId}$`));
     await testPage.getByRole("button", { name: "Save Configuration" }).click();
     await saved;
 
+    const successToast = testPage.locator('[data-sonner-toast][data-type="success"]');
+    await expect(successToast).toHaveCount(1);
+    await expect(successToast).toHaveCount(0, { timeout: 10_000 });
     await testPage.getByTestId("app-nav-trigger").click();
     await testPage
       .getByTestId("app-nav-sheet")

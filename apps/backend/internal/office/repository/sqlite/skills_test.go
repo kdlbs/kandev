@@ -27,6 +27,9 @@ func TestRunSkillSnapshotsRemainStableAfterSkillUpdate(t *testing.T) {
 	if err := repo.CreateRunSkillSnapshots(ctx, []models.RunSkillSnapshot{{
 		RunID:            "run-1",
 		SkillID:          skill.ID,
+		DisplayName:      skill.Name,
+		Slug:             skill.Slug,
+		LabelSource:      "captured",
 		Version:          skill.Version,
 		ContentHash:      skill.ContentHash,
 		MaterializedPath: "/tmp/run-1/skills/review",
@@ -51,5 +54,32 @@ func TestRunSkillSnapshotsRemainStableAfterSkillUpdate(t *testing.T) {
 	got := snapshots[0]
 	if got.Version != "v1" || got.ContentHash != "hash-original" {
 		t.Fatalf("snapshot changed after source update: %#v", got)
+	}
+	if got.DisplayName != "Review" || got.Slug != "review" || got.LabelSource != "captured" {
+		t.Fatalf("snapshot label changed after source update: %#v", got)
+	}
+}
+
+func TestRunSkillSnapshotLabelRetention(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateRunSkillSnapshots(ctx, []models.RunSkillSnapshot{{
+		RunID: "run-2", SkillID: "skill-2", DisplayName: "Legacy Review", Slug: "legacy-review",
+		LabelSource: "captured", Version: "v1", ContentHash: "hash", MaterializedPath: "/tmp/skills",
+	}}); err != nil {
+		t.Fatalf("CreateRunSkillSnapshots: %v", err)
+	}
+	if err := repo.CreateRunSkillSnapshots(ctx, []models.RunSkillSnapshot{{
+		RunID: "run-2", SkillID: "skill-2", DisplayName: "Renamed Review", Slug: "renamed-review",
+		LabelSource: "captured", Version: "v2", ContentHash: "hash-2", MaterializedPath: "/tmp/skills-2",
+	}}); err != nil {
+		t.Fatalf("replace snapshot: %v", err)
+	}
+	snapshots, err := repo.ListRunSkillSnapshots(ctx, "run-2")
+	if err != nil {
+		t.Fatalf("ListRunSkillSnapshots: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].DisplayName != "Renamed Review" {
+		t.Fatalf("snapshots = %#v, want one updated snapshot", snapshots)
 	}
 }

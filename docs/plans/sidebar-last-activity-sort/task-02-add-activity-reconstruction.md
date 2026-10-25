@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-last-activity-sort.md"
+spec: "../../specs/ui/requirements/sidebar-last-activity-sort.md"
 ---
 
 # Task 02: Add durable activity reconstruction

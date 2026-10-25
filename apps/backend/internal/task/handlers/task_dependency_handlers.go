@@ -37,13 +37,21 @@ func dependencyRefs(refs []service.DependencyRef) []dto.TaskDependencyRefDTO {
 
 // Response keys repeated across the dependency handlers.
 const (
-	dependencyKeyError  = "error"
-	dependencyKeyTaskID = "task_id"
+	dependencyKeyError        = "error"
+	dependencyKeyTaskID       = "task_id"
+	maxDependencyRequestBytes = 128 << 10
 )
 
 // addTaskDependencyBody is the POST /tasks/:id/dependencies payload.
 type addTaskDependencyBody struct {
 	DependsOnTaskID string `json:"depends_on_task_id" binding:"required"`
+}
+
+// replaceTaskDependenciesBody is the PUT /tasks/:id/dependencies payload.
+// A pointer distinguishes an explicit empty list, which clears all edges,
+// from a request that omitted the complete-set field.
+type replaceTaskDependenciesBody struct {
+	DependsOnTaskIDs *[]string `json:"depends_on_task_ids"`
 }
 
 // httpAddTaskDependency handles POST /api/v1/tasks/:id/dependencies —
@@ -53,6 +61,7 @@ type addTaskDependencyBody struct {
 // "A → B → C → A"; that body shape is what BlockersPicker already parses.
 func (h *TaskHandlers) httpAddTaskDependency(c *gin.Context) {
 	taskID := c.Param("id")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxDependencyRequestBytes)
 	var body addTaskDependencyBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{dependencyKeyError: "depends_on_task_id is required"})
@@ -66,6 +75,37 @@ func (h *TaskHandlers) httpAddTaskDependency(c *gin.Context) {
 	var cycle *service.CycleError
 	if errors.As(err, &cycle) {
 		c.JSON(http.StatusConflict, gin.H{dependencyKeyError: cycle.Error(), "cycle": cycle.Path})
+		return
+	}
+	if errors.Is(err, service.ErrDependencyRepositoryUnavailable) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{dependencyKeyError: err.Error()})
+		return
+	}
+	handleNotFound(c, h.logger, err, "task not found")
+}
+
+// httpReplaceTaskDependencies handles PUT /api/v1/tasks/:id/dependencies.
+// The request is a complete predecessor set, including an empty list to clear
+// all direct dependencies.
+func (h *TaskHandlers) httpReplaceTaskDependencies(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxDependencyRequestBytes)
+	var body replaceTaskDependenciesBody
+	if err := c.ShouldBindJSON(&body); err != nil || body.DependsOnTaskIDs == nil {
+		c.JSON(http.StatusBadRequest, gin.H{dependencyKeyError: "depends_on_task_ids is required"})
+		return
+	}
+	err := h.service.ReplaceDependencies(c.Request.Context(), c.Param("id"), *body.DependsOnTaskIDs)
+	if err == nil {
+		h.respondWithDependencies(c, c.Param("id"))
+		return
+	}
+	var cycle *service.CycleError
+	if errors.As(err, &cycle) {
+		c.JSON(http.StatusConflict, gin.H{dependencyKeyError: cycle.Error(), "cycle": cycle.Path})
+		return
+	}
+	if errors.Is(err, service.ErrInvalidDependencySet) {
+		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
 	if errors.Is(err, service.ErrDependencyRepositoryUnavailable) {

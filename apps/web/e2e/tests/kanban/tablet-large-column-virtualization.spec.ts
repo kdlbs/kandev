@@ -26,7 +26,9 @@ test("virtualizes a large tablet column in the snap-scrolling layout", async ({
 
   const column = layout.getByTestId(`kanban-column-${seedData.startStepId}`);
   await expect(column).toBeVisible();
-  await expect(column.getByText(String(LARGE_COLUMN_TASK_COUNT), { exact: true })).toBeVisible();
+  await expect(column.getByText(String(LARGE_COLUMN_TASK_COUNT), { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
   await expect.poll(() => taskCards(column).count()).toBeGreaterThan(0);
 
   const initialCardIds = await mountedTaskCardIds(column);

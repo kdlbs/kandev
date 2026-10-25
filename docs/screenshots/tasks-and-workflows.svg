@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1200 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="tasks-and-workflows-title tasks-and-workflows-desc" width="1200" height="620">
+      <title id="tasks-and-workflows-title">From scoped work to a reviewed task</title>
+      <desc id="tasks-and-workflows-desc">A task moves from workspace scope to task definition, an agent session, a human review gate, and a completed workflow position. The review gate is the focal step.</desc>
+      <defs><style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');</style>
+        <marker id="tasks-workflows-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a1a1a1"/></marker>
+        <marker id="tasks-workflows-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6468f0"/></marker>
+      </defs>
+      <rect width="1200" height="620" fill="#0d0d10"/>
+
+      <!-- Lane structure. The labels identify responsibility, not workflow state. -->
+      <line x1="168" y1="112" x2="1144" y2="112" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="168" y1="216" x2="1144" y2="216" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="168" y1="320" x2="1144" y2="320" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="168" y1="424" x2="1144" y2="424" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="168" y1="528" x2="1144" y2="528" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="168" y1="80" x2="168" y2="528" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <text x="84" y="164" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">WORKSPACE</text>
+      <text x="84" y="268" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">TASK</text>
+      <text x="84" y="372" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">AGENT</text>
+      <text x="84" y="476" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">HUMAN</text>
+
+      <!-- Phase headers. Review is the single focal step. -->
+      <rect x="252" y="48" width="32" height="16" rx="8" fill="rgba(255,255,255,0.12)"/>
+      <text x="268" y="59" text-anchor="middle" fill="#ffffff" font-size="8" font-family="'Geist Mono', monospace">01</text>
+      <text x="268" y="76" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">SCOPE</text>
+      <rect x="448" y="48" width="32" height="16" rx="8" fill="rgba(255,255,255,0.12)"/>
+      <text x="464" y="59" text-anchor="middle" fill="#ffffff" font-size="8" font-family="'Geist Mono', monospace">02</text>
+      <text x="464" y="76" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">DEFINE</text>
+      <rect x="644" y="48" width="32" height="16" rx="8" fill="rgba(255,255,255,0.12)"/>
+      <text x="660" y="59" text-anchor="middle" fill="#ffffff" font-size="8" font-family="'Geist Mono', monospace">03</text>
+      <text x="660" y="76" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">WORK</text>
+      <rect x="832" y="48" width="32" height="16" rx="8" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1"/>
+      <text x="848" y="59" text-anchor="middle" fill="#6468f0" font-size="8" font-family="'Geist Mono', monospace">04</text>
+      <text x="848" y="76" text-anchor="middle" fill="#6468f0" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">REVIEW</text>
+      <rect x="1028" y="48" width="32" height="16" rx="8" fill="rgba(255,255,255,0.12)"/>
+      <text x="1044" y="59" text-anchor="middle" fill="#ffffff" font-size="8" font-family="'Geist Mono', monospace">05</text>
+      <text x="1044" y="76" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">CLOSE</text>
+
+      <!-- Connectors are painted before all task nodes. -->
+      <circle cx="152" cy="160" r="6" fill="#ffffff"/>
+      <path d="M158 160 H182" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#tasks-workflows-arrow)"/>
+      <path d="M338 160 H448 Q456 160 456 168 V232" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#tasks-workflows-arrow)"/>
+      <path d="M534 264 H644 Q652 264 652 272 V336" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#tasks-workflows-arrow)"/>
+      <path d="M730 368 H840 Q848 368 848 376 V440" fill="none" stroke="#6468f0" stroke-width="1.4" marker-end="url(#tasks-workflows-arrow-accent)"/>
+      <path d="M926 472 H1036 Q1044 472 1044 464 V296" fill="none" stroke="#6468f0" stroke-width="1.4" marker-end="url(#tasks-workflows-arrow-accent)"/>
+      <path d="M1122 264 H1144" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#tasks-workflows-arrow)"/>
+      <circle cx="1152" cy="264" r="8" fill="none" stroke="#ffffff" stroke-width="1"/>
+      <circle cx="1152" cy="264" r="5" fill="#ffffff"/>
+
+      <!-- Nodes. -->
+      <g role="group" aria-label="Workspace scope">
+        <rect x="182" y="128" width="156" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="190" y="136" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="214" y="145" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.08em">SCOPE</text>
+        <text x="260" y="164" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Workspace</text>
+        <text x="260" y="180" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace">repos + defaults</text>
+      </g>
+      <g role="group" aria-label="Task definition">
+        <rect x="378" y="232" width="156" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="386" y="240" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="410" y="249" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.08em">TASK</text>
+        <text x="456" y="268" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Task</text>
+        <text x="456" y="284" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace">outcome + workflow</text>
+      </g>
+      <g role="group" aria-label="Agent session">
+        <rect x="574" y="336" width="156" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="582" y="344" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="606" y="353" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.08em">RUNTIME</text>
+        <text x="652" y="372" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Agent session</text>
+        <text x="652" y="388" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace">turn + plan</text>
+      </g>
+      <g role="group" aria-label="Human review gate">
+        <rect x="770" y="440" width="156" height="64" rx="6" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <rect x="778" y="448" width="48" height="12" rx="2" fill="transparent" stroke="rgba(100,104,240,0.60)" stroke-width="0.8"/>
+        <text x="802" y="457" text-anchor="middle" fill="#6468f0" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.08em">GATE</text>
+        <text x="848" y="476" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Human review</text>
+        <text x="848" y="492" text-anchor="middle" fill="#a1a1a1" font-size="9" font-family="'Geist Mono', monospace">changes + checks</text>
+      </g>
+      <g role="group" aria-label="Completed task">
+        <rect x="966" y="232" width="156" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="974" y="240" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="998" y="249" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.08em">STATE</text>
+        <text x="1044" y="268" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Workflow done</text>
+        <text x="1044" y="284" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono', monospace">position ≠ runtime</text>
+      </g>
+
+      <line x1="168" y1="560" x2="1144" y2="560" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="196" y1="580" x2="228" y2="580" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#tasks-workflows-arrow)"/>
+      <text x="244" y="584" fill="#a1a1a1" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.06em">TASK FLOW</text>
+      <line x1="424" y1="580" x2="456" y2="580" stroke="#6468f0" stroke-width="1.4" marker-end="url(#tasks-workflows-arrow-accent)"/>
+      <text x="472" y="584" fill="#6468f0" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HUMAN GATE</text>
+      <text x="700" y="584" fill="#737373" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.06em">WORKFLOW POSITION IS NOT RUNTIME STATE</text>
+    </svg>

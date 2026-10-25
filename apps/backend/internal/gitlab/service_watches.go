@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"net/url"
 	"strings"
 	"time"
@@ -458,6 +459,10 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 	if store == nil {
 		return nil, errStoreUnavailable
 	}
+
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := store.CreateReviewWatch(ctx, rw); err != nil {
 		return nil, fmt.Errorf("create review watch: %w", err)
 	}
@@ -543,6 +548,10 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 		return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
 	}
 	if err := validateWatchMaxInflight(rw.MaxInflightTasks); err != nil {
+		return err
+	}
+
+	if _, err := s.executorActorContext(ctx, rw.CreatedByUserID, rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
 		return err
 	}
 	return store.UpdateReviewWatch(ctx, rw)
@@ -687,6 +696,12 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if watch == nil {
 		return nil, fmt.Errorf("watch is nil")
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	if !watch.Enabled {
 		return nil, nil
 	}
@@ -836,17 +851,11 @@ func (s *Service) requireStore() *Store {
 // appendLabelsToQuery merges a label list into an existing customQuery string.
 // If the query already has a `labels` key the caller's value is kept (we
 // don't want to silently double-up). url.ParseQuery is used for an exact
-// key match — strings.Contains("labels=") would false-positive on keys
-// like `mylabels=` and silently drop the watch's labels.
+// key match by the shared appendQueryParam helper — strings.Contains("labels=")
+// would false-positive on keys like `mylabels=` and silently drop the watch's
+// labels.
 func appendLabelsToQuery(customQuery string, labels []string) string {
-	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has("labels") {
-		return customQuery
-	}
-	encoded := url.QueryEscape(strings.Join(labels, ","))
-	if customQuery == "" {
-		return "labels=" + encoded
-	}
-	return customQuery + "&labels=" + encoded
+	return appendQueryParam(customQuery, "labels", strings.Join(labels, ","))
 }
 
 func normalizeProjectFilters(in []ProjectFilter) []ProjectFilter {

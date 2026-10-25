@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/embedded-vscode-executor-availability.md
+spec: docs/specs/ui/requirements/embedded-vscode-executor-availability.md
 created: 2026-07-30
 status: complete
 ---

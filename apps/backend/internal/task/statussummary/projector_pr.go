@@ -19,17 +19,27 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			key = fmt.Sprintf("index:%d", index)
 		}
 		state.prs[key] = pullRequestObservation{
-			state:                 input.State,
-			number:                maxInt(input.Number, 0),
-			url:                   input.URL,
-			reviewState:           input.ReviewState,
-			checksState:           input.ChecksState,
-			mergeableState:        input.MergeableState,
-			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
-			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
-			requiredReviews:       maxInt(input.RequiredReviews, 0),
-			checksTotal:           maxInt(input.ChecksTotal, 0),
-			checksPassing:         maxInt(input.ChecksPassing, 0),
+			state:                    input.State,
+			owner:                    input.Owner,
+			repo:                     input.Repo,
+			number:                   maxInt(input.Number, 0),
+			url:                      input.URL,
+			reviewState:              input.ReviewState,
+			checksState:              input.ChecksState,
+			mergeableState:           input.MergeableState,
+			hasMergeConflicts:        input.HasMergeConflicts,
+			mergeQueueState:          input.MergeQueueState,
+			unresolvedReviewCount:    maxInt(input.UnresolvedReviewCount, 0),
+			pendingReviewCount:       maxInt(input.PendingReviewCount, 0),
+			requiredReviews:          maxInt(input.RequiredReviews, 0),
+			checksTotal:              maxInt(input.ChecksTotal, 0),
+			checksPassing:            maxInt(input.ChecksPassing, 0),
+			autoFixEnabled:           input.AutoFixEnabled,
+			autoMergeEnabled:         input.AutoMergeEnabled,
+			headSHA:                  boundedWorkflowValue(input.HeadSHA),
+			workflowAttentionState:   boundedWorkflowValue(input.WorkflowAttentionState),
+			workflowAttentionHeadSHA: boundedWorkflowValue(input.WorkflowAttentionHeadSHA),
+			workflowAttentionStale:   input.WorkflowAttentionStale,
 		}
 	}
 }
@@ -41,6 +51,8 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	}
 	var summary PullRequestSummary
 	var representative *pullRequestObservation
+	var approvalRepresentative *pullRequestObservation
+	var conflictRepresentative *pullRequestObservation
 	keys := make([]string, 0, len(state.prs))
 	for key := range state.prs {
 		keys = append(keys, key)
@@ -49,8 +61,33 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	for _, key := range keys {
 		observation := state.prs[key]
 		summary.Count++
+		hasMergeConflict := strings.EqualFold(observation.state, prStateOpen) &&
+			((observation.hasMergeConflicts != nil && *observation.hasMergeConflicts) ||
+				(observation.hasMergeConflicts == nil && strings.EqualFold(observation.mergeableState, "dirty")))
+		if hasMergeConflict {
+			summary.HasMergeConflicts = true
+			if conflictRepresentative == nil || betterPRRepresentative(observation, *conflictRepresentative) {
+				copy := observation
+				conflictRepresentative = &copy
+			}
+		}
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
+			if workflowApprovalRequired(observation) {
+				if approvalRepresentative == nil ||
+					(approvalRepresentative.workflowAttentionStale && !observation.workflowAttentionStale) ||
+					(approvalRepresentative.workflowAttentionStale == observation.workflowAttentionStale &&
+						betterPRRepresentative(observation, *approvalRepresentative)) {
+					copy := observation
+					approvalRepresentative = &copy
+				}
+			}
+			if observation.autoFixEnabled {
+				summary.AutoFixEnabled = true
+			}
+			if observation.autoMergeEnabled {
+				summary.AutoMergeEnabled = true
+			}
 		}
 		if pullRequestNeedsAttention(observation) {
 			summary.Attention = true
@@ -67,7 +104,48 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	summary.Number = representative.number
 	summary.URL = truncateString(representative.url, maxPullRequestURLBytes)
 	summary.AggregateState = aggregatePullRequestState(state.prs)
+	if approvalRepresentative != nil {
+		summary.WorkflowApprovalRequired = true
+		summary.WorkflowApprovalStale = approvalRepresentative.workflowAttentionStale
+		summary.WorkflowApprovalPRNumber = approvalRepresentative.number
+		summary.WorkflowApprovalRepository = pullRequestRepositoryIdentity(*approvalRepresentative)
+	}
+	if conflictRepresentative != nil {
+		summary.MergeConflictPRNumber = conflictRepresentative.number
+		summary.MergeConflictRepository = pullRequestRepositoryIdentity(*conflictRepresentative)
+	}
 	return &summary
+}
+
+func pullRequestRepositoryIdentity(observation pullRequestObservation) string {
+	owner := strings.TrimSpace(observation.owner)
+	repo := strings.TrimSpace(observation.repo)
+	if owner == "" || repo == "" {
+		return ""
+	}
+	return truncateString(owner+"/"+repo, maxPullRequestRepositoryBytes)
+}
+
+func workflowApprovalRequired(pr pullRequestObservation) bool {
+	return strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) &&
+		pr.headSHA != "" &&
+		strings.EqualFold(pr.headSHA, pr.workflowAttentionHeadSHA) &&
+		strings.EqualFold(pr.workflowAttentionState, "approval_required")
+}
+
+func boundedWorkflowValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 128 {
+		return ""
+	}
+	return value
+}
+
+func equalPullRequestSummary(left, right *PullRequestSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func pullRequestNeedsAttention(pr pullRequestObservation) bool {
@@ -121,11 +199,14 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	mergeable := strings.ToLower(strings.TrimSpace(pr.mergeableState))
 	checks := strings.ToLower(strings.TrimSpace(pr.checksState))
 	review := strings.ToLower(strings.TrimSpace(pr.reviewState))
+	if state == prStateMerged || state == prStateClosed {
+		return pullRequestLifecycleState(state, mergeable)
+	}
+	if strings.TrimSpace(pr.mergeQueueState) != "" {
+		return prStateQueued
+	}
 	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
 		return lifecycle
-	}
-	if mergeable == prStateBlocked || mergeable == prStateDirty {
-		return prStateBlocked
 	}
 	if pullRequestHasFailure(pr, review, checks) {
 		return prStateFailure
@@ -133,8 +214,14 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	if pullRequestHasPendingChecks(pr, checks) {
 		return prStatePending
 	}
-	if pullRequestAwaitsReview(pr, review) {
+	if pullRequestAwaitsReview(pr, review, checks) {
 		return prStateAwaiting
+	}
+	if review == prStatePending {
+		return prStatePending
+	}
+	if mergeable == prStateBlocked || mergeable == prStateDirty {
+		return prStateBlocked
 	}
 	if review == prStateApproved && (checks == "" || checks == prStateSuccess) {
 		return prStateReady
@@ -170,22 +257,34 @@ func pullRequestHasPendingChecks(pr pullRequestObservation, checks string) bool 
 		(pr.checksTotal > 0 && pr.checksPassing < pr.checksTotal && checks != prStateSuccess)
 }
 
-func pullRequestAwaitsReview(pr pullRequestObservation, review string) bool {
+func pullRequestAwaitsReview(pr pullRequestObservation, review, checks string) bool {
+	if !pullRequestChecksPassed(pr, checks) {
+		return false
+	}
 	return pr.pendingReviewCount > 0 || (pr.requiredReviews > 0 && review == prStatePending)
+}
+
+func pullRequestChecksPassed(pr pullRequestObservation, checks string) bool {
+	if checks == prStateSuccess {
+		return true
+	}
+	return checks == "" && pr.checksTotal > 0 && pr.checksPassing >= pr.checksTotal
 }
 
 func pullRequestStateRank(state string) int {
 	switch state {
 	case prStateFailure:
 		return 100
-	case prStateBlocked:
-		return 90
 	case prStatePending:
-		return 80
+		return 90
 	case prStateAwaiting:
+		return 80
+	case prStateBlocked:
 		return 70
 	case prStateReady:
 		return 60
+	case prStateQueued:
+		return 55
 	case prStatePassing:
 		return 50
 	case prStateDraft:

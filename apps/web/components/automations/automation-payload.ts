@@ -1,6 +1,12 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
+  AutomationRepository,
+  ContinuationPolicy,
+  ManagedConversationDestination,
+  RepositoryMode,
+  RetryPolicy,
+  TaskMode,
   TriggerType,
   UpdateAutomationRequest,
 } from "@/lib/types/automation";
@@ -10,9 +16,17 @@ import {
   type RepositorySelection,
 } from "./automation-repository-selection";
 
-// Shared form state + pending trigger types used by the editor and its
-// save handler. Lifted out of automation-editor.tsx so the editor stays
-// under the file-length lint cap.
+// Managed conversations do not expose retry policy controls. Keep their wire
+// value canonical even when an older saved record hydrates an enabled policy.
+export const DEFAULT_RETRY_POLICY: RetryPolicy = {
+  mode: "disabled",
+  max_retries: "0",
+  delay_seconds: "0",
+  backoff: "fixed",
+  history_mode: "attempts",
+};
+// Shared form state and pending trigger types keep the editor and save handler
+// aligned while keeping automation-editor.tsx under its file-length limit.
 
 export type FormState = {
   name: string;
@@ -21,15 +35,38 @@ export type FormState = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
-  // repositorySelections captures an ordered list of registered workspace
-  // repos (id), discovered local repos (path — registered at save time to
-  // obtain an id), or an empty list for repo-less automations.
+  taskMode: TaskMode;
+  managedDestination?: ManagedConversationDestination;
+  repositoryMode: RepositoryMode;
   repositorySelections: RepositorySelection[];
   prompt: string;
   taskTitleTemplate: string;
   enabled: boolean;
   maxConcurrentRuns: number;
+  continuationPolicy: ContinuationPolicy;
+  retryPolicy: RetryPolicy;
 };
+
+export function retryPolicyAfterModeChange(
+  policy: RetryPolicy,
+  mode: RetryPolicy["mode"],
+): RetryPolicy {
+  const maxRetries = Number(policy.max_retries);
+  return {
+    ...policy,
+    mode,
+    ...(mode === "finite" && (!Number.isSafeInteger(maxRetries) || maxRetries < 1)
+      ? { max_retries: "1" }
+      : {}),
+  };
+}
+
+export function normalizeRetryPolicyForTaskMode(
+  taskMode: TaskMode,
+  policy: RetryPolicy,
+): RetryPolicy {
+  return taskMode === "managed_conversation" ? DEFAULT_RETRY_POLICY : policy;
+}
 
 export type PendingTrigger = {
   tempId: string;
@@ -46,6 +83,7 @@ export type PendingTrigger = {
 // re-register the same local path.
 export type ResolvedRepositories = {
   ids: string[];
+  repositories: AutomationRepository[];
   selections: RepositorySelection[];
 };
 
@@ -64,28 +102,55 @@ export async function resolveRepositoryIds(
   );
   const promoted = selections.map((selection, i) =>
     selection.kind === "discovered" && resolvedIds[i]
-      ? ({ kind: "registered", id: resolvedIds[i] } as const)
+      ? ({
+          kind: "registered",
+          id: resolvedIds[i],
+          key: selection.key,
+          branch: selection.branch || selection.defaultBranch,
+        } as const)
       : selection,
   );
-  return { ids: resolvedIds.filter((id) => id !== ""), selections: promoted };
+  const repositories = resolvedIds.flatMap((repositoryId, index) => {
+    if (!repositoryId) return [];
+    const selection = selections[index];
+    const baseBranch =
+      selection?.branch || (selection?.kind === "discovered" ? selection.defaultBranch : "");
+    return [{ repository_id: repositoryId, base_branch: baseBranch }];
+  });
+  return {
+    ids: repositories.map((repository) => repository.repository_id),
+    repositories,
+    selections: promoted,
+  };
 }
 
 // resolveNormalizedRepositoryIds is the save-boundary entry point used by
 // useSaveHandler (automation-editor.tsx). It enforces the single-repository
 // invariant (see normalizeRepositorySelections) before resolving, so a form
 // that had 2+ repos selected under a compatible executor, then switched to
-// an incompatible executor or a github_pr trigger without the picker being
-// touched again, can't smuggle every stale entry into the saved
-// repository_ids — only the first survives. Kept as a named function (not
+// an incompatible executor without touching the picker, can't send stale
+// repository entries. Only the first survives. Kept as a named function (not
 // inlined at the call site) deliberately: it's the test seam this module's
 // unit tests exercise directly, without needing a full AutomationEditor
 // render harness.
 export async function resolveNormalizedRepositoryIds(
   workspaceId: string,
   selections: RepositorySelection[],
-  mode: { supportsMultiRepo: boolean; isPRTrigger: boolean },
+  mode: { supportsMultiRepo: boolean },
 ): Promise<ResolvedRepositories> {
   return resolveRepositoryIds(workspaceId, normalizeRepositorySelections(selections, mode));
+}
+
+export async function resolveRepositoryIdsForMode(
+  workspaceId: string,
+  selections: RepositorySelection[],
+  repositoryMode: RepositoryMode,
+  mode: { supportsMultiRepo: boolean },
+): Promise<ResolvedRepositories> {
+  if (repositoryMode !== "selected") {
+    return { ids: [], repositories: [], selections: [] };
+  }
+  return resolveNormalizedRepositoryIds(workspaceId, selections, mode);
 }
 
 async function resolveOneRepositoryId(
@@ -115,48 +180,64 @@ async function resolveOneRepositoryId(
   return created.id;
 }
 
+// The save boundary carries decimal strings without number coercion.
 export function buildCreatePayload(
   workspaceId: string,
   form: FormState,
-  repositoryIds: string[],
+  repositories: AutomationRepository[],
   pending: PendingTrigger[],
 ): CreateAutomationRequest {
   // i18n-exempt: persisted automation name. See the comment below.
   return {
     workspace_id: workspaceId,
-    // Persisted as the automation's name — user data, so it stays English
-    // rather than writing a locale-dependent value into the record. (Unreachable
-    // in practice: canSave requires a non-empty name.)
     name: form.name || "New Automation",
     description: form.description,
     workflow_id: form.workflowId,
-    workflow_step_id: form.workflowStepId,
+    workflow_step_id: "",
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
-    repository_ids: repositoryIds,
+    task_mode: form.taskMode,
+    managed_destination:
+      form.taskMode === "managed_conversation" ? form.managedDestination : undefined,
+    repository_mode: repositories.length > 0 ? "selected" : "none",
+    repository_ids: repositories.map((repository) => repository.repository_id),
+    repositories,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     max_concurrent_runs: form.maxConcurrentRuns,
-    triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
+    continuation_policy: form.continuationPolicy,
+    triggers: pending.map((trigger) => ({
+      type: trigger.type,
+      config: trigger.config,
+      enabled: trigger.enabled,
+    })),
+    retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
   };
 }
 
 export function buildUpdatePayload(
   form: FormState,
-  repositoryIds: string[],
+  repositories: AutomationRepository[],
 ): UpdateAutomationRequest {
   return {
     name: form.name,
     description: form.description,
     workflow_id: form.workflowId,
-    workflow_step_id: form.workflowStepId,
+    workflow_step_id: "",
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
-    repository_ids: repositoryIds,
+    task_mode: form.taskMode,
+    managed_destination:
+      form.taskMode === "managed_conversation" ? form.managedDestination : undefined,
+    repository_mode: repositories.length > 0 ? "selected" : "none",
+    repository_ids: repositories.map((repository) => repository.repository_id),
+    repositories,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
+    continuation_policy: form.continuationPolicy,
+    retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
   };
 }
 

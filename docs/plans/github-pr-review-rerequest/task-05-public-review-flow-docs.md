@@ -8,7 +8,7 @@ depends_on:
   - "02-frontend-dismissed-review-action"
   - "03-mobile-github-pr-review"
 plan: "plan.md"
-spec: "../../specs/ui/github-pr-review-actions.md"
+spec: "../../specs/ui/requirements/github-pr-review-actions.md"
 ---
 
 # Task 05: Public review-flow docs

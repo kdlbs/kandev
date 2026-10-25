@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kandev plugin runtime lifecycle</title>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --paper: #0d0d10;
+      --ink: #ffffff;
+      --muted: #a1a1a1;
+      --soft: #737373;
+      --sans: 'Figtree', 'Geist', system-ui, sans-serif;
+      --serif: 'Instrument Serif', serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 32px 24px 40px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: var(--sans);
+    }
+    .frame { width: min(100%, 1280px); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--soft);
+      font: 500 10px/1.4 'Geist Mono', monospace;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font: 400 clamp(28px, 4vw, 36px)/1.1 var(--serif);
+      letter-spacing: -.02em;
+    }
+    .lede {
+      max-width: 74ch;
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    svg { display: block; width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <p class="eyebrow">Flowchart · Kandev · doc-wide · balanced</p>
+    <h1>How a plugin reaches the host</h1>
+    <p class="lede">Validation and extraction lead to one supervised go-plugin process. Kandev delivers events and webhooks to that process, which calls back through the Host API; the SPA bundle remains optional.</p>
+
+    <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="plugin-runtime-lifecycle-title plugin-runtime-lifecycle-desc">
+      <title id="plugin-runtime-lifecycle-title">How a plugin reaches the host</title>
+      <desc id="plugin-runtime-lifecycle-desc">Kandev installs, verifies, and extracts a plugin before spawning a supervised go-plugin subprocess. The runtime receives bus events and external webhooks, calls the Host API, and can optionally load a native UI bundle in the SPA.</desc>
+      <defs>
+        <marker id="plugin-runtime-lifecycle-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#a1a1a1"/>
+        </marker>
+        <marker id="plugin-runtime-lifecycle-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#6468f0"/>
+        </marker>
+        <marker id="plugin-runtime-lifecycle-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#53eafd"/>
+        </marker>
+      </defs>
+
+      <rect x="0" y="0" width="1280" height="720" fill="#0d0d10"/>
+
+      <!-- Zones separate package handling, the supervised process, and the SPA. -->
+      <rect x="40" y="64" width="840" height="144" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="320" y="256" width="640" height="272" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="448" y="552" width="384" height="112" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <text x="56" y="84" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">PACKAGE PIPELINE</text>
+      <text x="336" y="276" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">SUPERVISED PLUGIN PROCESS</text>
+      <text x="464" y="572" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">SPA SURFACE</text>
+
+      <!-- Routes are painted before the opaque nodes. -->
+      <path d="M216 144 H248" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
+      <path d="M408 144 H440" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
+      <path d="M600 144 H632" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
+      <path d="M704 168 V224 H488 Q480 224 480 232 V288" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow-link)"/>
+      <path d="M768 168 V248 H792 Q800 248 800 256 V288" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow-link)"/>
+      <path d="M480 352 V400 H632 Q640 400 640 408 V432" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
+      <path d="M800 352 V416 H768 Q760 416 760 424 V432" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
+      <path d="M640 496 V592" fill="none" stroke="#a1a1a1" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
+
+      <!-- Route labels are masked with the dark paper token. -->
+      <rect x="520" y="200" width="160" height="20" rx="4" fill="#0d0d10"/>
+      <text x="600" y="214" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">DELIVER EVENT</text>
+      <rect x="808" y="200" width="144" height="20" rx="4" fill="#0d0d10"/>
+      <text x="880" y="214" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">WEBHOOK</text>
+      <rect x="648" y="388" width="160" height="20" rx="4" fill="#0d0d10"/>
+      <text x="728" y="402" text-anchor="middle" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PLUGIN CALLBACK</text>
+      <rect x="640" y="528" width="128" height="20" rx="4" fill="#0d0d10"/>
+      <text x="704" y="542" text-anchor="middle" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">OPTIONAL UI</text>
+
+      <!-- Package nodes. -->
+      <g role="group" aria-label="Install plugin package">
+        <rect x="56" y="112" width="160" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="136" y="140" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Install</text>
+        <text x="136" y="160" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">plugin archive</text>
+      </g>
+      <g role="group" aria-label="Verify plugin package">
+        <rect x="248" y="112" width="160" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="328" y="140" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Verify</text>
+        <text x="328" y="160" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">manifest + package</text>
+      </g>
+      <g role="group" aria-label="Extract plugin package">
+        <rect x="440" y="112" width="160" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="520" y="140" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Extract</text>
+        <text x="520" y="160" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">safe contents</text>
+      </g>
+      <g role="group" aria-label="Spawn supervised plugin subprocess">
+        <rect x="632" y="112" width="208" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="736" y="136" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Spawn subprocess</text>
+        <text x="736" y="156" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">supervised go-plugin</text>
+      </g>
+
+      <!-- Event and webhook ingress nodes. -->
+      <g role="group" aria-label="Kandev delivers bus events to the plugin">
+        <rect x="360" y="288" width="240" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="480" y="316" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">kandev delivers bus events</text>
+        <text x="480" y="336" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">DeliverEvent</text>
+      </g>
+      <g role="group" aria-label="Kandev relays an external webhook to the plugin">
+        <rect x="680" y="288" width="240" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="800" y="316" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">kandev relays webhook</text>
+        <text x="800" y="336" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">HandleWebhook · external</text>
+      </g>
+      <g role="group" aria-label="Plugin calls the Host API">
+        <rect x="520" y="432" width="240" height="64" rx="8" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <text x="640" y="460" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Host API</text>
+        <text x="640" y="480" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace">plugin callbacks</text>
+      </g>
+      <g role="group" aria-label="Optional SPA native UI bundle">
+        <rect x="520" y="592" width="240" height="56" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="640" y="616" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">SPA native UI</text>
+        <text x="640" y="636" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">optional frontend bundle</text>
+      </g>
+
+      <line x1="56" y1="688" x2="88" y2="688" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow)"/>
+      <text x="104" y="692" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">PACKAGE / RUNTIME</text>
+      <line x1="296" y1="688" x2="328" y2="688" stroke="#53eafd" stroke-width="1.2" marker-end="url(#plugin-runtime-lifecycle-arrow-link)"/>
+      <text x="344" y="692" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">EVENT / WEBHOOK</text>
+      <rect x="544" y="680" width="12" height="12" rx="2" fill="#6468f0"/>
+      <text x="572" y="692" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HOST API FOCAL</text>
+    </svg>
+  </main>
+</body>
+</html>

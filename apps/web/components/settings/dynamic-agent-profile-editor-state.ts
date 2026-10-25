@@ -2,13 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { isDynamicErrorPolicyValid } from "@/components/settings/dynamic-agent-policy-editor";
 import { updateAgentProfileAction } from "@/app/actions/agents";
+import { isHandledApiError } from "@/lib/api/client";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { orderProfilesForSelection } from "@/lib/settings/agent-profile-selector-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { useSyncAgentsToStore } from "@/components/settings/agent-profile-page-state";
+import { isProfileRevisionNewer } from "@/components/settings/agent-profile-reconciliation";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
@@ -30,6 +34,7 @@ export type DynamicAgentProfileEditorState = {
   name: string;
   profileEnabled: boolean;
   standalone: boolean;
+  hasExternalConflict: boolean;
   routingEnabled: boolean;
   enabledLabel: string;
   concreteProfiles: AgentProfile[];
@@ -46,9 +51,10 @@ export type DynamicAgentProfileEditorState = {
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
   candidates: DynamicAgentCandidate[];
+  discardDraft: () => void;
 };
 
-function dynamicProfilePayload(
+export function dynamicProfilePayload(
   name: string,
   enabled: boolean,
   version: number,
@@ -89,6 +95,11 @@ function dynamicProfilePayload(
             },
             on_exhausted: candidate.policies.hard.onExhausted,
           },
+          unclassified: {
+            enabled: candidate.policies.unclassified.enabled,
+            consecutive_failure_threshold:
+              candidate.policies.unclassified.consecutiveFailureThreshold,
+          },
         },
       })),
     },
@@ -106,16 +117,9 @@ export function useDynamicAgentProfileEditorState({
   const { toast } = useToast();
   const routingEnabled = useFeature("dynamicAgentRouting");
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const storeApi = useAppStoreApi();
+  const syncAgentsToStore = useSyncAgentsToStore();
   const draft = useDynamicAgentProfileEditorDraft({ profile, onDraftChange });
-  const [savedRevision, setSavedRevision] = useState(
-    dynamicDraftRevision(
-      profile.name,
-      profile.dynamic?.candidates ?? [],
-      profile.enabled !== false,
-    ),
-  );
   const [saving, setSaving] = useState(false);
   const standalone = onDraftChange === undefined;
 
@@ -135,7 +139,7 @@ export function useDynamicAgentProfileEditorState({
       settingsAgents.flatMap((item) =>
         item.name === "dynamic"
           ? []
-          : item.profiles
+          : orderProfilesForSelection(item.profiles)
               .filter(
                 (candidate) =>
                   candidate.kind !== "dynamic" &&
@@ -153,11 +157,14 @@ export function useDynamicAgentProfileEditorState({
       !routingEnabled ||
       !draft.name.trim() ||
       draft.candidates.length === 0 ||
-      !profile.dynamic
+      !profile.dynamic ||
+      draft.hasExternalConflict
     ) {
       return;
     }
     setSaving(true);
+    const submitted = draft.currentProfile;
+    draft.markProfileSubmitted(submitted);
     try {
       const draftPayload = {
         name: draft.name.trim(),
@@ -178,32 +185,26 @@ export function useDynamicAgentProfileEditorState({
         return;
       }
       const updated = await updateAgentProfileAction(profile.id, payload);
-      const nextAgents = settingsAgents.map((item) =>
+      const nextAgents = storeApi.getState().settingsAgents.items.map((item) =>
         item.id !== agent.id
           ? item
           : {
               ...item,
               profiles: item.profiles.map((itemProfile) =>
-                itemProfile.id === updated.id ? updated : itemProfile,
+                itemProfile.id === profile.id &&
+                updated.id === profile.id &&
+                isProfileRevisionNewer(updated, itemProfile)
+                  ? updated
+                  : itemProfile,
               ),
             },
       );
-      setSettingsAgents(nextAgents);
-      setAgentProfiles(
-        nextAgents.flatMap((item) =>
-          item.profiles.map((itemProfile) => toAgentProfileOption(item, itemProfile)),
-        ),
-      );
-      draft.applyProfile(updated);
-      setSavedRevision(
-        dynamicDraftRevision(
-          updated.name,
-          updated.dynamic?.candidates ?? draft.candidates,
-          updated.enabled !== false,
-        ),
-      );
+      syncAgentsToStore(nextAgents);
+      draft.acceptProfileSaveResponse(updated, submitted);
       toast({ title: t("agents:dynamicProfileSaved") });
     } catch (error) {
+      draft.markProfileSubmitted(null);
+      if (isHandledApiError(error)) return;
       toast({
         title: t("agents:failedToSaveProfile"),
         description: error instanceof Error ? error.message : undefined,
@@ -215,6 +216,11 @@ export function useDynamicAgentProfileEditorState({
   };
 
   const draftRevision = dynamicDraftRevision(draft.name, draft.candidates, draft.profileEnabled);
+  const savedRevision = dynamicDraftRevision(
+    draft.savedProfile.name,
+    draft.savedProfile.dynamic?.candidates ?? [],
+    draft.savedProfile.enabled !== false,
+  );
   const policiesValid = draft.candidates.every(
     (candidate) =>
       isDynamicErrorPolicyValid(candidate.policies.transient) &&
@@ -223,6 +229,8 @@ export function useDynamicAgentProfileEditorState({
   let invalidReason = t("agents:dynamicPolicyValidation");
   if (!draft.name.trim()) invalidReason = t("agents:profileNameRequired");
   else if (draft.candidates.length === 0) invalidReason = t("agents:noDynamicCandidates");
+  else if (draft.hasExternalConflict)
+    invalidReason = t("agents:profileExternalChangeInvalidReason");
   useSettingsSaveContributor({
     id: `dynamic-profile:${profile.id}`,
     revision: draftRevision,
@@ -230,6 +238,7 @@ export function useDynamicAgentProfileEditorState({
     canSave:
       routingEnabled &&
       !saving &&
+      !draft.hasExternalConflict &&
       Boolean(draft.name.trim()) &&
       draft.candidates.length > 0 &&
       policiesValid,
@@ -238,13 +247,6 @@ export function useDynamicAgentProfileEditorState({
     discard: () => {
       if (!standalone) return;
       draft.reset();
-      setSavedRevision(
-        dynamicDraftRevision(
-          profile.name,
-          profile.dynamic?.candidates ?? [],
-          profile.enabled !== false,
-        ),
-      );
     },
   });
 
@@ -252,6 +254,7 @@ export function useDynamicAgentProfileEditorState({
     name: draft.name,
     profileEnabled: draft.profileEnabled,
     standalone,
+    hasExternalConflict: draft.hasExternalConflict,
     routingEnabled,
     enabledLabel,
     concreteProfiles,
@@ -264,5 +267,6 @@ export function useDynamicAgentProfileEditorState({
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
     candidates: draft.candidates,
+    discardDraft: draft.reset,
   };
 }

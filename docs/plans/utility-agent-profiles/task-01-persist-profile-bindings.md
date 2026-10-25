@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 01: Persist utility profile bindings

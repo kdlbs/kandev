@@ -46,7 +46,7 @@ func TestUpdateTransitionTaskWithCapacity_QueuesFullLimitedStep(t *testing.T) {
 	task.WorkflowStepID = "step2"
 	target := &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", WIPLimit: 1}
 
-	err = svc.updateTransitionTaskWithCapacity(ctx, task, target)
+	err = svc.updateTransitionTaskWithCapacity(ctx, task, "step1", target)
 	if err != nil {
 		t.Fatalf("updateTransitionTaskWithCapacity: %v", err)
 	}
@@ -204,6 +204,36 @@ func TestQueuePromotionTokenRemainsPendingWhenTargetLookupFails(t *testing.T) {
 	}
 	if _, ok := stored.Metadata[models.MetaKeyQueuePromotionPending]; !ok {
 		t.Fatal("queue promotion token was consumed before target lookup succeeded")
+	}
+}
+
+func TestQueuePromotionWithoutSessionCompletesDestinationEntry(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "promotion-no-session", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "destination-step",
+		Title: "Promotion without session", State: v1.TaskStateTODO, WIPAdmitted: true,
+		Metadata: map[string]interface{}{models.MetaKeyQueuePromotionPending: true},
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	steps := newMockStepGetter()
+	steps.steps["destination-step"] = &wfmodels.WorkflowStep{
+		ID: "destination-step", WorkflowID: "wf1", Name: "Destination", Position: 0,
+	}
+	steps.steps["next-step"] = &wfmodels.WorkflowStep{
+		ID: "next-step", WorkflowID: "wf1", Name: "Next", Position: 1,
+	}
+	svc := createTestService(repo, steps, newMockTaskRepo())
+	svc.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: "promotion-no-session"})
+
+	stored, err := repo.GetTask(ctx, "promotion-no-session")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if _, pending := stored.Metadata[models.MetaKeyQueuePromotionPending]; pending {
+		t.Fatal("queue promotion token remained after destination entry completed without a session")
 	}
 }
 
@@ -422,6 +452,28 @@ func TestReconcileTaskLifecycleTokensRetriesDestinationEntryOnce(t *testing.T) {
 	}
 }
 
+func TestLoadQueuePromotedTaskDropsWhenWorkflowStepLookupIsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "promotion-no-step-getter", "promotion-no-step-session", "step1")
+	task, err := repo.GetTask(ctx, "promotion-no-step-getter")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WIPAdmitted = true
+	task.Metadata = map[string]interface{}{models.MetaKeyQueuePromotionPending: true}
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("prepare promoted task: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.workflowStepGetter = nil
+	gotTask, gotStep, ok := svc.loadQueuePromotedTaskAndTargetStep(ctx, task.ID)
+	if ok || gotTask != nil || gotStep != nil {
+		t.Fatalf("loaded task/step = %#v/%#v (ok=%t), want dropped event", gotTask, gotStep, ok)
+	}
+}
+
 type publishedEvent struct {
 	Subject string
 	Event   *bus.Event
@@ -534,8 +586,12 @@ func TestPublishSessionWaitingEvent(t *testing.T) {
 		if _, exists := data["agent_profile_id"]; exists {
 			t.Errorf("expected agent_profile_id to be absent, got %v", data["agent_profile_id"])
 		}
-		if _, exists := data["session_metadata"]; exists {
-			t.Errorf("expected session_metadata to be absent, got %v", data["session_metadata"])
+		metadata, exists := data["session_metadata"].(map[string]interface{})
+		if !exists {
+			t.Fatalf("expected initial session metadata, got %v", data["session_metadata"])
+		}
+		if metadata[models.SessionMetaKeyOrigin] != models.SessionOriginTaskInitial {
+			t.Errorf("expected initial session origin, got %v", metadata[models.SessionMetaKeyOrigin])
 		}
 	})
 

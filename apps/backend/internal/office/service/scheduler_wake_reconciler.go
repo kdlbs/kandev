@@ -1,0 +1,248 @@
+package service
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/workflow/engine"
+)
+
+// maxWakeReconcilePerTick caps the number of stuck parents processed in one
+// tick, mirroring maxRecoveryPerTick (scheduler_recovery.go). ListStuckParents
+// filters out every sticky non-actionable candidate — stale-or-missing
+// receipt, active/terminal run, unresolved or paused/stopped/pending-approval
+// assignee — in SQL before this cap is applied, so it bounds real work, not
+// resting or permanently-blocked parents.
+const maxWakeReconcilePerTick = 5
+
+// ParentWakeReconciler is a level-triggered backstop for the
+// task_children_completed wake: queueChildrenCompletedRun
+// (event_subscribers.go) fires it edge-triggered off the child-completion
+// event, and that dispatch can be lost without re-delivery. This handler
+// re-derives "is this parent stuck" from current task state every tick, then
+// sends the trigger through the same workflow engine used by the edge path.
+type ParentWakeReconciler struct {
+	scheduler *SchedulerIntegration
+	logger    *logger.Logger
+}
+
+// NewParentWakeReconciler constructs the parent-wake reconciliation handler
+// for a scheduler integration.
+func NewParentWakeReconciler(si *SchedulerIntegration) *ParentWakeReconciler {
+	return &ParentWakeReconciler{
+		scheduler: si,
+		logger:    si.svc.logger.WithFields(zap.String("component", "parent-wake-reconciler")),
+	}
+}
+
+// Name implements scheduler/cron.Handler.
+func (h *ParentWakeReconciler) Name() string { return "parent_wake_reconciler" }
+
+// Tick implements scheduler/cron.Handler. The adoption check prevents an
+// Office-enabled but Kanban-only installation from scanning task rows.
+func (h *ParentWakeReconciler) Tick(ctx context.Context) error {
+	adopted, err := h.scheduler.svc.repo.HasOfficeAdoption(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("check Office adoption: %w", err)
+	}
+	if !adopted {
+		return nil
+	}
+	h.reconcile(ctx)
+	return nil
+}
+
+// reconcile sweeps for stuck parents and re-delivers a wake for any whose
+// last-delivered receipt no longer matches their current child set.
+func (h *ParentWakeReconciler) reconcile(ctx context.Context) {
+	svc := h.scheduler.svc
+
+	candidates, err := svc.repo.ListStuckParents(ctx, RunReasonTaskChildrenCompleted, maxWakeReconcilePerTick)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: list stuck parents failed", zap.Error(err))
+		return
+	}
+
+	for _, c := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
+		svc.recordWakeCandidate(c.ParentTaskID)
+		h.reconcileOne(ctx, svc, c)
+	}
+}
+
+// reconcileOne re-delivers the wake for a single stuck parent, unless its
+// assignee cannot accept a run right now. It re-reads the child-set key before
+// dispatch and again before recording the receipt. This keeps a child update
+// from making an old candidate look delivered for the new generation.
+func (h *ParentWakeReconciler) reconcileOne(
+	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate,
+) {
+	// No dispatcher wired means there is nothing to admit: bail out before
+	// any of the work below.
+	if svc.engineDispatcher == nil {
+		return
+	}
+	if _, err := svc.guardAgentStatus(ctx, c.AssigneeAgentProfileID); err != nil {
+		svc.recordWakeAssigneeUnresolved(c.ParentTaskID, err.Error())
+		return
+	}
+
+	waveKey, waveString, ok := resolveWaveIdentity(ctx, svc.repo, c.ParentTaskID, h.logger)
+	if !ok {
+		return
+	}
+
+	// The payload carries no child summaries: the prompt path derives the
+	// child list at assembly time. Nothing here can fail, so no read for the
+	// briefing can stop a wake that readiness already judged due.
+	payload := engine.OnChildrenCompletedPayload{
+		WaveKey:    waveKey,
+		WaveString: waveString,
+	}
+
+	currentKey, err := svc.repo.GetChildSetKey(ctx, c.ParentTaskID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: revalidate child set failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+	if currentKey != c.ChildSetKey {
+		return
+	}
+
+	operationID := wakeOperationID(c.ParentTaskID, c.ChildSetKey, c.NewestChildUpdatedAt)
+	accepted, err := svc.dispatchEngineTriggerForRecovery(
+		ctx,
+		c.ParentTaskID,
+		engine.TriggerOnChildrenCompleted,
+		payload,
+		operationID,
+	)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: engine dispatch failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+	if !accepted {
+		return
+	}
+
+	h.recordReceipt(ctx, svc, c, operationID)
+}
+
+// recordReceipt stores the operation-backed receipt after the workflow engine
+// accepts the trigger. The engine owns run admission and can fan out to more
+// than one target, so a single delivered run id cannot represent this wake.
+func (h *ParentWakeReconciler) recordReceipt(
+	ctx context.Context, svc *Service, c sqlite.StuckParentCandidate, operationID string,
+) {
+	tx, err := svc.repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: begin tx failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	currentKey, err := svc.repo.GetChildSetKeyTx(ctx, tx, c.ParentTaskID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: revalidate child set in receipt tx failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+	if currentKey != c.ChildSetKey {
+		return
+	}
+
+	// c.NewestChildUpdatedAt is the sweep-time MAX(tasks.updated_at) across
+	// this parent's children (ListStuckParents), not just the ones that
+	// completed — any later edit to a terminal child (title, description,
+	// labels, metadata) with no state change bumps that same column, so the
+	// next tick sees newest_child_updated_at != child_generation again and
+	// re-admits the parent for one extra wake even though nothing completed.
+	// This is bounded and self-correcting (recordReceipt persists the same
+	// value that triggered the re-admit, so the tick after that sees them
+	// equal and stops), and follows the same duplicate-over-missed bias
+	// already accepted for wakeOperationID below. A real fix needs a
+	// completion-specific generation distinct from generic updated_at — see
+	// follow-up task fc871ca9-bcb2-4db5-915d-52c92c7bd1ad.
+	deliveredAt := time.Now().UTC()
+	if err := svc.repo.UpsertWakeReceiptTx(
+		ctx, tx, c.ParentTaskID, c.ChildSetKey, "", operationID, c.NewestChildUpdatedAt, deliveredAt,
+	); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: upsert wake receipt failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		h.logger.Error("wake sweep: commit failed",
+			zap.String("parent_task_id", c.ParentTaskID), zap.Error(err))
+		return
+	}
+
+	svc.recordWakeEmitted(c.ParentTaskID, operationID)
+}
+
+// wakeOperationID identifies one task_children_completed dispatch. Two
+// independent producers can race for the same completion wave — the
+// edge-triggered path (queueChildrenCompletedRun, event_subscribers.go) and
+// this reconciler's own sweep — so both must derive the same id from the
+// same observed state for idx_run_idempotency to actually collapse the
+// race; a per-caller counter could never do that. A completion wave is
+// identified by the child IDs, not by the terminal state each child
+// reached: a terminal-to-terminal edit (for example, CANCELLED to
+// COMPLETED) must not mint a new wake, so only the state suffix is
+// stripped, not the id. generation (child_generation /
+// NewestChildUpdatedAt, both dialect.SecondPrecisionText-rendered so every
+// caller sees the same text) distinguishes a reopen-and-recomplete that
+// lands on the same terminal child set from the delivery it invalidates.
+func wakeOperationID(parentTaskID, childSetKey, generation string) string {
+	childIDs := make([]string, 0)
+	for _, child := range strings.Split(childSetKey, ",") {
+		if child == "" {
+			continue
+		}
+		if separator := strings.LastIndexByte(child, ':'); separator >= 0 {
+			child = child[:separator]
+		}
+		childIDs = append(childIDs, child)
+	}
+	canonicalChildSet := strings.Join(childIDs, ",")
+	sum := sha256.Sum256([]byte(parentTaskID + "\x00" + canonicalChildSet + "\x00" + generation))
+	return fmt.Sprintf("task_children_completed:%s:%s", parentTaskID, hex.EncodeToString(sum[:]))
+}

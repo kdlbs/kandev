@@ -14,6 +14,7 @@ import type {
   DynamicErrorClass,
   DynamicErrorPolicy,
 } from "@/lib/types/agent-profile";
+import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 
 type DynamicAgentCandidateListProps = {
   candidates: DynamicAgentCandidate[];
@@ -72,7 +73,7 @@ export function DynamicAgentCandidateList({
           searchPlaceholder={t("agents:searchDynamicCandidates")}
           emptyMessage={t("agents:noDynamicCandidatesFound")}
           ariaLabel={t("agents:addDynamicCandidate")}
-          triggerClassName="min-h-11 w-full sm:w-auto"
+          triggerClassName={settingsControlClassName("w-full sm:w-auto")}
         />
       </div>
 
@@ -105,8 +106,8 @@ export function DynamicAgentCandidateList({
                 <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="min-h-11 min-w-11 shrink-0 cursor-pointer"
+                    size="icon"
+                    className={settingsActionClassName("shrink-0 cursor-pointer")}
                     onClick={() => moveCandidate(index, -1)}
                     disabled={index === 0}
                     aria-label={t("agents:moveDynamicCandidateUp")}
@@ -115,8 +116,8 @@ export function DynamicAgentCandidateList({
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="min-h-11 min-w-11 shrink-0 cursor-pointer"
+                    size="icon"
+                    className={settingsActionClassName("shrink-0 cursor-pointer")}
                     onClick={() => moveCandidate(index, 1)}
                     disabled={index === candidates.length - 1}
                     aria-label={t("agents:moveDynamicCandidateDown")}
@@ -125,8 +126,8 @@ export function DynamicAgentCandidateList({
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="min-h-11 min-w-11 shrink-0 cursor-pointer text-destructive"
+                    size="icon"
+                    className={settingsActionClassName("shrink-0 cursor-pointer text-destructive")}
                     onClick={() => removeCandidate(index)}
                     aria-label={t("agents:removeDynamicCandidate")}
                   >

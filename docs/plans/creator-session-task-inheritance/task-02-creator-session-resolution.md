@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-initial-runtime-seed"]
 plan: "plan.md"
-spec: "../../specs/tasks/mcp-task-agent-profile-default/spec.md"
+spec: "../../specs/tasks/requirements/mcp-task-agent-profile-default.md"
 ---
 
 # Task 02: Creator-session resolution

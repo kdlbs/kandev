@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: docs/plans/dynamic-provider-options/plan.md
-spec: docs/specs/agents/dynamic-provider-options.md
+spec: docs/specs/agents/requirements/dynamic-provider-options.md
 ---
 
 # Add model-aware capability probe

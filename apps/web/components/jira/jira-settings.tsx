@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { IconTicket } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { settingsCredentialClassName } from "@/components/settings/settings-control";
@@ -17,6 +16,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
 import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
+import { JiraActionBar } from "@/components/jira/jira-action-bar";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
@@ -37,48 +37,24 @@ import type {
 } from "@/lib/types/jira";
 import { useTranslation } from "react-i18next";
 import {
+  configToForm,
+  deriveFormState,
+  emptyForm,
+  type FormState,
+} from "@/components/jira/jira-form-state";
+import {
   CookieExpiry,
   SecretHelp,
   secretCopy,
   secretPlaceholder,
 } from "@/components/jira/jira-secret-help";
+import { OAuthFields } from "@/components/jira/jira-oauth-fields";
+import { useJiraConfigPublication } from "./use-jira-config-publication";
 import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // Cloud sites live under this domain; shown as an example, not as prose, so it
 // is interpolated rather than written into the catalog.
 const ATLASSIAN_CLOUD_DOMAIN = "*.atlassian.net";
-
-type FormState = {
-  siteUrl: string;
-  email: string;
-  authMethod: JiraAuthMethod;
-  instanceType: JiraInstanceType;
-  defaultProjectKey: string;
-  secret: string;
-};
-
-const emptyForm: FormState = {
-  siteUrl: "",
-  email: "",
-  authMethod: "api_token",
-  instanceType: "cloud",
-  defaultProjectKey: "",
-  secret: "",
-};
-
-function configToForm(cfg: JiraConfig | null): FormState {
-  if (!cfg) return emptyForm;
-  return {
-    siteUrl: cfg.siteUrl,
-    email: cfg.email,
-    authMethod: cfg.authMethod,
-    // Legacy rows written before Server/DC support carry an empty instanceType;
-    // default to cloud so the dropdown has a valid selection.
-    instanceType: cfg.instanceType || "cloud",
-    defaultProjectKey: cfg.defaultProjectKey,
-    secret: "",
-  };
-}
 
 // defaultAuthForInstance returns the canonical auth method for an instance
 // type. Used when the user switches Instance type and the current auth method
@@ -97,6 +73,7 @@ function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType
   if (auth === "api_token") return instance === "cloud";
   if (auth === "pat") return instance === "server";
   if (auth === "session_cookie") return instance === "cloud";
+  if (auth === "oauth") return instance === "cloud";
   return false;
 }
 
@@ -212,6 +189,7 @@ function AuthFields({ form, baseline, loading, update }: FieldsRowProps) {
             {form.instanceType === "cloud" ? (
               <>
                 <SelectItem value="api_token">{t("jira:apiTokenRecommended")}</SelectItem>
+                <SelectItem value="oauth">{t("jira:oauth2")}</SelectItem>
                 <SelectItem value="session_cookie">{t("jira:browserSessionCookie")}</SelectItem>
               </>
             ) : (
@@ -313,63 +291,36 @@ function configToHealth(config: JiraConfig | null): IntegrationAuthHealth | null
   };
 }
 
-type ActionBarProps = {
-  testing: boolean;
-  loading: boolean;
-  hasConfig: boolean;
-  disableTest: boolean;
-  onTest: () => void;
-  onDelete: () => void;
-};
+type JiraConfigPublication = ReturnType<typeof useJiraConfigPublication>;
 
-function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        onClick={onTest}
-        disabled={testing || loading || disableTest}
-        className="cursor-pointer"
-        title={disableTest ? t("jira:pasteATokenToTestTheConnection") : undefined}
-        data-testid="jira-test-button"
-      >
-        {testing ? t("jira:testingConnection") : t("jira:testConnection")}
-      </Button>
-      {hasConfig && (
-        <Button
-          type="button"
-          variant="destructive"
-          onClick={onDelete}
-          className="ml-auto cursor-pointer"
-          data-testid="jira-delete-button"
-        >
-          {t("jira:removeConfiguration")}
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig | null) => void) {
+function useJiraConfigRefresh(
+  workspaceId: string,
+  setConfig: (cfg: JiraConfig | null) => void,
+  beginRead: JiraConfigPublication["beginRead"],
+  loading: boolean,
+) {
   // Background refresh so the auth-health banner picks up new probe results
   // from the backend poller without requiring a page reload. We re-fetch the
   // config rather than the loud full `load()` to avoid flashing the form.
   useEffect(() => {
+    if (loading) return;
     const id = setInterval(() => {
+      const request = beginRead();
       getJiraConfig({ workspaceId })
-        .then((cfg) => setConfig(cfg))
+        .then((cfg) => {
+          if (request.isCurrent()) setConfig(cfg);
+        })
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, [workspaceId, setConfig]);
+  }, [workspaceId, setConfig, beginRead, loading]);
 }
 
 type JiraConfigMutationDeps = {
   workspaceId: string;
+  beginWrite: JiraConfigPublication["beginWrite"];
   form: FormState;
   setConfig: Dispatch<SetStateAction<JiraConfig | null>>;
   setForm: Dispatch<SetStateAction<FormState>>;
@@ -381,6 +332,7 @@ type JiraConfigMutationDeps = {
 // useJiraSettings to keep each hook inside the function-length limit.
 function useJiraConfigMutations({
   workspaceId,
+  beginWrite,
   form,
   setConfig,
   setForm,
@@ -392,6 +344,7 @@ function useJiraConfigMutations({
 
   const handleSave = useCallback(async () => {
     const submitted = form;
+    const accept = beginWrite();
     setSaving(true);
     try {
       const saved = await setJiraConfig(
@@ -402,16 +355,17 @@ function useJiraConfigMutations({
           instanceType: form.instanceType,
           defaultProjectKey: form.defaultProjectKey,
           secret: form.secret || undefined,
+          clientId: form.clientId || undefined,
         },
         { workspaceId },
       );
-      setConfig(saved);
-      setForm((current) =>
-        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
-      );
-      // Clear any inline test result from the previous credentials so the
-      // alert reflects only the currently-saved state.
-      setTestResult(null);
+      if (accept()) {
+        setConfig(saved);
+        setForm((current) =>
+          JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+        );
+        setTestResult(null);
+      }
       toast({ description: t("jira:jiraConfigurationSaved"), variant: "success" });
     } catch (err) {
       toast({ description: t("jira:saveFailed", { error: String(err) }), variant: "error" });
@@ -419,20 +373,22 @@ function useJiraConfigMutations({
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, form, setConfig, setForm, setTestResult, setSaving, t, toast]);
+  }, [workspaceId, beginWrite, form, setConfig, setForm, setTestResult, setSaving, t, toast]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm(t("jira:removeJiraConfiguration"))) return;
+    const accept = beginWrite();
     try {
       await deleteJiraConfig({ workspaceId });
-      setConfig(null);
-      setForm(emptyForm);
-      setTestResult(null);
+      if (accept()) {
+        setConfig(null);
+        setForm(emptyForm);
+        setTestResult(null);
+      }
       toast({ description: t("jira:jiraConfigurationRemoved"), variant: "success" });
     } catch (err) {
       toast({ description: t("jira:deleteFailed", { error: String(err) }), variant: "error" });
     }
-  }, [workspaceId, setConfig, setForm, setTestResult, t, toast]);
+  }, [workspaceId, beginWrite, setConfig, setForm, setTestResult, t, toast]);
 
   return { handleSave, handleDelete };
 }
@@ -447,28 +403,32 @@ function useJiraSettings(workspaceId: string) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestJiraConnectionResult | null>(null);
   const health = configToHealth(config);
+  const { beginRead, beginWrite } = useJiraConfigPublication(workspaceId);
 
   const load = useCallback(async () => {
+    const request = beginRead();
     setLoading(true);
     try {
       const cfg = await getJiraConfig({ workspaceId });
+      if (!request.isCurrent()) return;
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
+      if (!request.isCurrent()) return;
       toast({
         description: t("jira:failedToLoadJiraConfig", { error: String(err) }),
         variant: "error",
       });
     } finally {
-      setLoading(false);
+      if (request.isActive()) setLoading(false);
     }
-  }, [workspaceId, t, toast]);
+  }, [workspaceId, beginRead, t, toast]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useJiraConfigRefresh(workspaceId, setConfig);
+  useJiraConfigRefresh(workspaceId, setConfig, beginRead, loading);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -491,6 +451,7 @@ function useJiraSettings(workspaceId: string) {
 
   const { handleSave, handleDelete } = useJiraConfigMutations({
     workspaceId,
+    beginWrite,
     form,
     setConfig,
     setForm,
@@ -513,51 +474,23 @@ function useJiraSettings(workspaceId: string) {
     handleSave,
     handleDelete,
     discard,
+    load,
   };
-}
-
-function normalizeComparableSiteUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
-  if (!trimmed) return "";
-  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
-}
-
-// savedSecretMatches reports whether the saved secret can be reused against
-// the current form values. Reuse is only safe when every identity component
-// of the saved credential still matches: same auth method, same instance
-// type, same Jira host, and — for Cloud api_token where the basic pair is
-// email:token — the same email (case-insensitive). Otherwise the user could
-// change the site URL or Cloud account and silently submit the previous
-// token to a different host/account.
-function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean {
-  if (!config?.hasSecret) return false;
-  if (config.authMethod !== form.authMethod) return false;
-  if ((config.instanceType || "cloud") !== form.instanceType) return false;
-  if (normalizeComparableSiteUrl(config.siteUrl) !== normalizeComparableSiteUrl(form.siteUrl)) {
-    return false;
-  }
-  if (form.authMethod !== "api_token") return true;
-  return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
 }
 
 export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const s = useJiraSettings(workspaceId);
   const baseline = configToForm(s.config);
-  const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
-  const missingSecret = !savedSecretMatchesMode && !s.form.secret;
-  const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
-  const disableSave =
-    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
-  const disableTest = missingSecret;
-  const revision = JSON.stringify(s.form);
-  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
-  // Assigned rather than returned from a helper, but the guard would not see it
-  // either way — `invalidReason` is a plain string, never a JSX literal.
-  let invalidReason: string | undefined;
-  if (!s.form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
-  else if (emailRequired && !s.form.email) invalidReason = t("jira:anEmailAddressIsRequired");
-  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
+  const {
+    isOAuth,
+    savedSecretMatchesMode,
+    disableSave,
+    disableTest,
+    revision,
+    dirty,
+    invalidReason,
+  } = deriveFormState(s, t);
 
   useSettingsSaveContributor({
     id: `jira-config:${workspaceId}`,
@@ -589,17 +522,29 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           />
           <SiteFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
           <AuthFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
-          <SecretField
-            form={s.form}
-            baseline={baseline}
-            loading={s.loading}
-            update={s.update}
-            hasSavedSecret={savedSecretMatchesMode}
-            secretExpiresAt={s.config?.secretExpiresAt ?? null}
-          />
+          {isOAuth ? (
+            <OAuthFields
+              form={s.form}
+              loading={s.loading}
+              workspaceId={workspaceId}
+              connected={savedSecretMatchesMode}
+              tokenExpiresAt={s.config?.tokenExpiresAt ?? null}
+              onConnected={() => void s.load()}
+            />
+          ) : (
+            <SecretField
+              form={s.form}
+              baseline={baseline}
+              loading={s.loading}
+              update={s.update}
+              hasSavedSecret={savedSecretMatchesMode}
+              secretExpiresAt={s.config?.secretExpiresAt ?? null}
+            />
+          )}
           <TestResultAlert result={s.testResult} />
           <Separator />
-          <ActionBar
+          <JiraActionBar
+            workspaceId={workspaceId}
             testing={s.testing}
             loading={s.loading}
             hasConfig={!!s.config}

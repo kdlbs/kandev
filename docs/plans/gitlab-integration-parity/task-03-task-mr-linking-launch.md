@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-workspace-connection"]
 plan: "plan.md"
-spec: "../../specs/gitlab-integration/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-integration.md"
 ---
 
 # Task 03: Task-to-MR Linking And Quick Launch

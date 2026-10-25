@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -23,6 +24,13 @@ async function installFixture(page: Page): Promise<void> {
 
 function visibleEditor(scope: Locator | Page): Locator {
   return scope.locator(".tiptap.ProseMirror:visible").first();
+}
+
+async function clearEditor(editor: Locator): Promise<void> {
+  await editor.click();
+  await editor.press("ControlOrMeta+A");
+  await editor.press("Backspace");
+  await expect(editor.getByTestId("entity-reference-chip")).toHaveCount(0);
 }
 
 async function expectPersistedReference(
@@ -97,6 +105,18 @@ test.describe("Bitbucket plugin contract", () => {
       },
     );
     if (!task.session_id) throw new Error("fixture contract task has no session");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "Waiting for the fixture task's initial turn",
+      30_000,
+    );
+    const reviewStep = seedData.steps.find((step) => step.name === "Review");
+    if (!reviewStep) throw new Error("fixture workflow has no Review step");
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(reviewStep.id);
 
     // Native Link submenu action invokes the declared task-scoped action.
     await kanban.goto();
@@ -149,7 +169,7 @@ test.describe("Bitbucket plugin contract", () => {
     await session.clickSessionChatTab();
     await session.waitForChatIdle({ timeout: 30_000 });
     const editor = visibleEditor(session.activeChat());
-    await editor.fill("");
+    await clearEditor(editor);
     await editor.pressSequentially("#revoked");
     await testPage.getByRole("option", { name: /Pull request #99/ }).click();
     await expect(session.activeChat().getByTestId("entity-reference-chip")).toBeVisible();
@@ -161,7 +181,7 @@ test.describe("Bitbucket plugin contract", () => {
 
     // Search returns a manifest-owned source; a selected good reference is
     // reauthorized by the live plugin during submission before metadata persists.
-    await editor.fill("");
+    await clearEditor(editor);
     await editor.pressSequentially("#Provider-neutral");
     await testPage.getByRole("option", { name: /Pull request #42/ }).click();
     await expect(session.activeChat().getByTestId("entity-reference-chip")).toBeVisible();

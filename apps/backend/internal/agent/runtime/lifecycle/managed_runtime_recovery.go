@@ -7,6 +7,36 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
+const (
+	managedRuntimePreferOfflineArg = "--prefer-offline"
+	managedRuntimePreferOnlineArg  = "--prefer-online"
+)
+
+func managedRuntimeSpecForArgs(agent agents.Agent, args []string) (agents.ManagedNPMRuntimeSpec, bool) {
+	managed, ok := agent.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return agents.ManagedNPMRuntimeSpec{}, false
+	}
+	if openCode, ok := agent.(*agents.OpenCodeACP); ok {
+		for _, family := range []managedruntime.OpenCodeFamily{
+			managedruntime.OpenCodeFamilyV1,
+			managedruntime.OpenCodeFamilyV2,
+		} {
+			spec, err := openCode.ManagedNPMRuntimeForFamily(family)
+			if err != nil {
+				continue
+			}
+			if _, _, found := onlineManagedRuntimeArgs(args, spec); found {
+				return spec, true
+			}
+		}
+		return agents.ManagedNPMRuntimeSpec{}, false
+	}
+	spec := managed.ManagedNPMRuntime()
+	_, _, found := onlineManagedRuntimeArgs(args, spec)
+	return spec, found
+}
+
 // onlineManagedRuntimeArgs returns a copy of a trusted managed-npm launch
 // command with only npm's metadata preference changed. The package spec is
 // returned separately so cache invalidation can target the exact execution
@@ -18,30 +48,26 @@ func onlineManagedRuntimeArgs(args []string, spec agents.ManagedNPMRuntimeSpec) 
 	}
 
 	for npxIndex, arg := range args {
-		if arg != "npx" || npxIndex+3 >= len(args) {
+		if arg != "npx" || npxIndex+5 >= len(args) {
 			continue
 		}
-		if args[npxIndex+1] != "--yes" || args[npxIndex+2] != "--prefer-offline" {
+		if args[npxIndex+1] != "--yes" ||
+			(args[npxIndex+2] != managedRuntimePreferOfflineArg && args[npxIndex+2] != managedRuntimePreferOnlineArg) ||
+			args[npxIndex+3] != "--prefix" || args[npxIndex+4] != managedruntime.NPMProjectPrefix || npxIndex+5 >= len(args) {
 			continue
 		}
 
-		packageSpec := args[npxIndex+3]
-		if packageSpec != packageName {
-			versionPrefix := packageName + "@"
-			if !strings.HasPrefix(packageSpec, versionPrefix) {
-				return nil, "", false
-			}
-			version := strings.TrimPrefix(packageSpec, versionPrefix)
-			if version == "" {
-				return nil, "", false
-			}
-			if _, err := managedruntime.ParseStableVersion(version); err != nil {
-				return nil, "", false
-			}
+		packageSpec := args[npxIndex+5]
+		versionPrefix := packageName + "@"
+		if !strings.HasPrefix(packageSpec, versionPrefix) {
+			return nil, "", false
+		}
+		if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+			return nil, "", false
 		}
 
 		recovered := append([]string(nil), args...)
-		recovered[npxIndex+2] = "--prefer-online"
+		recovered[npxIndex+2] = managedRuntimePreferOnlineArg
 		return recovered, packageSpec, true
 	}
 

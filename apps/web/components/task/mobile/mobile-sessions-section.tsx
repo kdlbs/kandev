@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { IconDotsVertical, IconPlus, IconStar } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -10,17 +10,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { AgentLogo } from "@/components/agent-logo";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import {
@@ -41,6 +32,8 @@ import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/ty
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
+import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";
 
 type SessionRow = {
   id: string;
@@ -49,6 +42,10 @@ type SessionRow = {
   repositoryLabel: string | null;
   state: TaskSessionState | null;
   foregroundActivity: ForegroundActivity | null;
+  /** True when the session is waiting on the operator to notice, not to act —
+   *  a settled session with a positively-sampled background process still
+   *  live (spec: docs/specs/disambiguate-waiting/spec.md). */
+  parkedOnBackgroundWork: boolean;
   isPrimary: boolean;
   index: number;
   startedAt: string;
@@ -75,6 +72,7 @@ function buildSessionRows(
       repositoryLabel: s.repository_id ? (repositoryLabelsById.get(s.repository_id) ?? null) : null,
       state: (s.state as TaskSessionState | undefined) ?? null,
       foregroundActivity: s.foreground_activity ?? null,
+      parkedOnBackgroundWork: !!s.parked_on_background_work,
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
       index: idx + 1,
       startedAt: s.started_at,
@@ -97,6 +95,7 @@ function sessionStateLabel(
   state: TaskSessionState,
   foregroundActivity: ForegroundActivity | null,
   pending: PendingInput,
+  parkedOnBackgroundWork: boolean,
 ): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && pending.permission) return t("task:permissionRequested");
@@ -106,6 +105,9 @@ function sessionStateLabel(
   if (canRequestInput && foregroundActivity === "background") {
     return t(BACKGROUND_RUNNING_LABEL_KEY);
   }
+  if (canRequestInput && parkedOnBackgroundWork) {
+    return t(BACKGROUND_RUNNING_LABEL_KEY);
+  }
   return formatTaskSessionStateLabel(state);
 }
 
@@ -113,72 +115,95 @@ function StateBadge({
   sessionId,
   state,
   foregroundActivity,
+  parkedOnBackgroundWork,
   testId,
 }: {
   sessionId: string;
   state: TaskSessionState | null;
   foregroundActivity: ForegroundActivity | null;
+  parkedOnBackgroundWork: boolean;
   testId?: string;
 }) {
   const pending = useSessionPendingInput(sessionId);
   if (!state) return null;
-  const label = sessionStateLabel(state, foregroundActivity, pending);
+  const label = sessionStateLabel(state, foregroundActivity, pending, parkedOnBackgroundWork);
   return (
     <span
       data-testid={testId}
       title={label}
       className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground shrink-0"
     >
-      {getSessionStateIcon(
-        state,
-        "h-3 w-3 shrink-0",
+      {getSessionStateIcon(state, "h-3 w-3 shrink-0", {
         foregroundActivity,
-        pending.clarification,
-        pending.permission,
-      )}
+        hasPendingClarification: pending.clarification,
+        hasPendingPermission: pending.permission,
+        parkedOnBackgroundWork,
+      })}
       {label}
     </span>
   );
 }
 
-function SessionActionsMenu({
-  taskId,
-  state,
-  isPrimary,
-  onSetPrimary,
-  onStop,
-  onResume,
-  onAskDelete,
-  onHandoffProfile,
-}: {
+type SessionActionsMenuProps = {
+  triggerRef: RefObject<HTMLButtonElement | null>;
   taskId: string;
   state: TaskSessionState | null;
   isPrimary: boolean;
   onSetPrimary: () => void;
   onStop: () => void;
   onResume: () => void;
+  onRestart: () => void;
+  isRestarting: boolean;
   onAskDelete: () => void;
   onHandoffProfile: (profileId: string) => void;
-}) {
+};
+
+/** Exposes touch-accessible session actions and blocks conflicting lifecycle requests during restart. */
+function SessionActionsMenu({
+  triggerRef,
+  taskId,
+  state,
+  isPrimary,
+  onSetPrimary,
+  onStop,
+  onResume,
+  onRestart,
+  isRestarting,
+  onAskDelete,
+  onHandoffProfile,
+}: SessionActionsMenuProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const pendingDelete = useRef(false);
+  const { open, setOpen, triggerProps } = useSessionMenuOpeningGesture();
   const hasLifecycleAction =
     !!state &&
     (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
+          ref={triggerRef}
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer h-7 w-7"
-          onClick={(e) => e.stopPropagation()}
+          className="cursor-pointer h-11 w-11 md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          {...triggerProps}
           aria-label={t("task:sessionActions")}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+      <DropdownMenuContent
+        align="end"
+        onClick={(e) => e.stopPropagation()}
+        onCloseAutoFocus={(event) => {
+          if (!pendingDelete.current) return;
+          event.preventDefault();
+          pendingDelete.current = false;
+          onAskDelete();
+        }}
+      >
         <DropdownMenuItem
           className="cursor-pointer"
           onSelect={onSetPrimary}
@@ -188,19 +213,32 @@ function SessionActionsMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {state && isSessionStoppable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onStop}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onStop} disabled={isRestarting}>
             {t("task:stop")}
           </DropdownMenuItem>
         )}
+        {(isRestarting || (state && isSessionStoppable(state))) && (
+          <DropdownMenuItem
+            className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            onSelect={onRestart}
+            disabled={isRestarting}
+          >
+            {t("task:restartSession")}
+          </DropdownMenuItem>
+        )}
         {state && isSessionResumable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onResume}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onResume} disabled={isRestarting}>
             {t("task:resume")}
           </DropdownMenuItem>
         )}
         {state && isSessionDeletable(state) && (
           <DropdownMenuItem
             className="cursor-pointer text-destructive focus:text-destructive"
-            onSelect={onAskDelete}
+            disabled={isRestarting}
+            onSelect={() => {
+              if (isMobile) pendingDelete.current = true;
+              else onAskDelete();
+            }}
           >
             {t("task:delete")}
           </DropdownMenuItem>
@@ -209,54 +247,6 @@ function SessionActionsMenu({
         <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function DeleteSessionConfirmDialog({
-  open,
-  onOpenChange,
-  isPrimary,
-  isOnlySession,
-  onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  isPrimary: boolean;
-  isOnlySession: boolean;
-  onConfirm: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t("task:deleteSession")}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div>
-              <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
-              {isPrimary && !isOnlySession && (
-                <p className="mt-2 font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>
-              )}
-              {isOnlySession && (
-                <p className="mt-2 font-medium">{t("task:thisIsTheOnlySessionFor")}</p>
-              )}
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => {
-              onOpenChange(false);
-              onConfirm();
-            }}
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            {t("task:delete")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 
@@ -276,24 +266,82 @@ function SessionIdentity({ row }: { row: SessionRow }) {
   );
 }
 
+/** Connects one session's menu and delete confirmation to its shared lifecycle actions. */
+function SessionRowTrailingActions({
+  row,
+  taskId,
+  totalSessions,
+  isConfirming,
+  onAskDelete,
+  onCancelDelete,
+  onHandoffProfile,
+  actions,
+}: {
+  row: SessionRow;
+  taskId: string;
+  totalSessions: number;
+  isConfirming: boolean;
+  onAskDelete: () => void;
+  onCancelDelete: () => void;
+  onHandoffProfile: (profileId: string) => void;
+  actions: ReturnType<typeof useSessionActions>;
+}) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <MobileSessionDeleteConfirmation
+        focusReturnRef={triggerRef}
+        open={isConfirming}
+        targetKey={`${taskId}:${row.id}`}
+        isPrimary={row.isPrimary}
+        isOnlySession={totalSessions === 1}
+        targetName={row.agentLabel}
+        onCancel={onCancelDelete}
+        onClose={onCancelDelete}
+        onConfirm={() => void actions.remove()}
+      />
+      {(!isConfirming || isMobile) && (
+        <SessionActionsMenu
+          triggerRef={triggerRef}
+          taskId={taskId}
+          state={row.state}
+          isPrimary={row.isPrimary}
+          onSetPrimary={() => void actions.setPrimary()}
+          onStop={() => void actions.stop()}
+          onResume={() => void actions.resume()}
+          onRestart={() => void actions.restart()}
+          isRestarting={actions.isRestarting}
+          onAskDelete={onAskDelete}
+          onHandoffProfile={onHandoffProfile}
+        />
+      )}
+    </>
+  );
+}
+
 function SessionRowItem({
   row,
   taskId,
   isActive,
   totalSessions,
+  isConfirming,
+  onAskDelete,
+  onCancelDelete,
   onSelect,
 }: {
   row: SessionRow;
   taskId: string;
   isActive: boolean;
   totalSessions: number;
+  isConfirming: boolean;
+  onAskDelete: () => void;
+  onCancelDelete: () => void;
   onSelect: (sessionId: string) => void;
 }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
   const actions = useSessionActions({ sessionId: row.id, taskId });
-  const isOnly = totalSessions === 1;
   const showBadges = totalSessions > 1;
   const handleHandoffProfile = useCallback(
     (profileId: string) => {
@@ -335,17 +383,18 @@ function SessionRowItem({
           sessionId={row.id}
           state={row.state}
           foregroundActivity={row.foregroundActivity}
+          parkedOnBackgroundWork={row.parkedOnBackgroundWork}
           testId={`mobile-session-state-${row.id}`}
         />
-        <SessionActionsMenu
+        <SessionRowTrailingActions
+          row={row}
           taskId={taskId}
-          state={row.state}
-          isPrimary={row.isPrimary}
-          onSetPrimary={() => void actions.setPrimary()}
-          onStop={() => void actions.stop()}
-          onResume={() => void actions.resume()}
-          onAskDelete={() => setConfirmDelete(true)}
+          totalSessions={totalSessions}
+          isConfirming={isConfirming}
+          onAskDelete={onAskDelete}
+          onCancelDelete={onCancelDelete}
           onHandoffProfile={handleHandoffProfile}
+          actions={actions}
         />
       </div>
       {handoffPreset && (
@@ -359,13 +408,6 @@ function SessionRowItem({
           handoff={handoffPreset}
         />
       )}
-      <DeleteSessionConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        isPrimary={row.isPrimary}
-        isOnlySession={isOnly}
-        onConfirm={() => void actions.remove()}
-      />
     </>
   );
 }
@@ -407,20 +449,28 @@ function useSessionRows(taskId: string | null) {
 const MobileSessionsList = memo(function MobileSessionsList({
   taskId,
   activeSessionId,
+  open,
   onClose,
 }: {
   taskId: string | null;
   activeSessionId: string | null;
+  open: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const { rows, isLoading } = useSessionRows(taskId);
   const [launchOpen, setLaunchOpen] = useState(false);
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) setConfirmDeleteSessionId(null);
+  }, [open]);
 
   const handleSelect = useCallback(
     (sessionId: string) => {
       if (!taskId) return;
+      setConfirmDeleteSessionId(null);
       setActiveSession(taskId, sessionId);
       onClose();
     },
@@ -470,6 +520,9 @@ const MobileSessionsList = memo(function MobileSessionsList({
             taskId={taskId}
             isActive={row.id === activeSessionId}
             totalSessions={rows.length}
+            isConfirming={row.id === confirmDeleteSessionId}
+            onAskDelete={() => setConfirmDeleteSessionId(row.id)}
+            onCancelDelete={() => setConfirmDeleteSessionId(null)}
             onSelect={handleSelect}
           />
         ))}
@@ -555,10 +608,17 @@ export const MobileSessionsPicker = memo(function MobileSessionsPicker({
         data-testid="mobile-sessions-pill"
         ariaLabel={ariaLabel}
       />
-      <MobilePickerSheet open={open} onOpenChange={setOpen} title={t("task:sessions")}>
+      <MobilePickerSheet
+        key={taskId}
+        open={open}
+        onOpenChange={setOpen}
+        title={t("task:sessions")}
+        confirmationHost
+      >
         <MobileSessionsList
           taskId={taskId}
           activeSessionId={effectiveSessionId}
+          open={open}
           onClose={() => setOpen(false)}
         />
       </MobilePickerSheet>

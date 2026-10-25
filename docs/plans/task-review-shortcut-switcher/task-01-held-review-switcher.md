@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-review-shortcut.md"
+spec: "../../specs/ui/requirements/task-review-shortcut.md"
 ---
 
 # Task 01: Implement held review shortcut switcher

@@ -9,6 +9,7 @@ import {
   buildModelOptions,
   hasCompleteDynamicConfig,
   requiredConfigKeys,
+  resolveCurrentModel,
 } from "@/components/task/model-selector";
 import { t } from "@/lib/i18n";
 import type { Agent, TaskSession } from "@/lib/types/http";
@@ -32,6 +33,44 @@ function compactTriggerLabel(
 const providerModelId = "gpt-5.6-sol";
 const providerModelName = "GPT-5.6-Sol";
 const modelOptions = [{ id: providerModelId, name: providerModelName }];
+
+describe("provider-restored current model", () => {
+  it("keeps unknown effective state clear of saved model fallbacks", () => {
+    expect(
+      resolveCurrentModel(
+        "saved-model",
+        null,
+        "profile-snapshot-model",
+        "profile-model",
+        "provider_restored",
+      ),
+    ).toBeNull();
+  });
+
+  it("uses the effective model instead of a stale active selection", () => {
+    expect(
+      resolveCurrentModel(
+        "saved-model",
+        "provider-model",
+        "profile-snapshot-model",
+        "profile-model",
+        "provider_restored",
+      ),
+    ).toBe("provider-model");
+  });
+
+  it("keeps an explicit selection when it matches the effective projection", () => {
+    expect(
+      resolveCurrentModel(
+        "user-selected-model",
+        "user-selected-model",
+        "profile-snapshot-model",
+        "profile-model",
+        "provider_restored",
+      ),
+    ).toBe("user-selected-model");
+  });
+});
 
 function sessionConfigOptions(reasoningEffort = "high", fastMode = "off"): ConfigOptionEntry[] {
   return [
@@ -435,15 +474,58 @@ describe("cross-agent persisted config reconciliation", () => {
     expect(hasCompleteDynamicConfig(session, catalogEntry(advertised, true), noAgents)).toBe(true);
   });
 
-  it("keeps a profile-snapshot key required even when the agent has not advertised it", () => {
+  it("keeps an unadvertised profile-snapshot key required while the catalog is unsettled", () => {
     const session = makeSession({
       metadata: { runtime_config: { config_options: { model: providerModelId } } },
       agent_profile_snapshot: { config_options: { verbosity: "terse" } },
     });
 
     expect(
-      hasCompleteDynamicConfig(session, catalogEntry([modelConfigOption], true), noAgents),
+      hasCompleteDynamicConfig(session, catalogEntry([modelConfigOption], false), noAgents),
     ).toBe(false);
+  });
+
+  it("hydrates when a settled model catalog omits profile options from a prior model", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: {
+          config_options: {
+            effort: "high",
+            fast: "false",
+            mode: "agent",
+            model: providerModelId,
+            optimize_for: "balanced",
+          },
+        },
+        runtime_config_overrides: {
+          model: providerModelId,
+          config_options: { model: providerModelId },
+        },
+      },
+      agent_profile_snapshot: { config_options: { fast: "false" } },
+    });
+    const advertised = [
+      selectOption("mode", "agent"),
+      modelConfigOption,
+      selectOption("optimize_for", "balanced"),
+    ];
+
+    expect(hasCompleteDynamicConfig(session, catalogEntry(advertised, true), noAgents)).toBe(true);
+  });
+
+  it("hydrates when a settled model catalog omits a profile-only option", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: providerModelId } } },
+      agent_profile_snapshot: { config_options: { fast: "false" } },
+    });
+
+    expect(
+      hasCompleteDynamicConfig(
+        session,
+        catalogEntry([modelConfigOption, selectOption("mode", "agent")], true),
+        noAgents,
+      ),
+    ).toBe(true);
   });
 
   it("still requires persisted-only unadvertised keys while the catalog is unsettled", () => {

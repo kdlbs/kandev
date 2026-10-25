@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import Link from "@/components/routing/app-link";
 import {
   IconBrandGithub,
@@ -95,6 +95,47 @@ type IntegrationsIndexPageProps = {
   workspaceId?: string;
 };
 
+type IntegrationCardProps = {
+  href: string;
+  label: string;
+  description: ReactNode;
+  Icon: ComponentType<{ className?: string }>;
+  control?: ReactNode;
+  testId: string;
+};
+
+function IntegrationCard({
+  href,
+  label,
+  description,
+  Icon,
+  control,
+  testId,
+}: IntegrationCardProps) {
+  return (
+    <Card
+      data-testid={testId}
+      className="relative h-full w-full transition-colors hover:border-primary/40"
+    >
+      <Link
+        href={href}
+        aria-label={label}
+        className="absolute inset-0 rounded-[inherit] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      />
+      <CardContent className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 text-base font-semibold">
+            <Icon className="h-5 w-5 shrink-0" />
+            <span className="truncate">{label}</span>
+          </div>
+          {control ? <div className="relative z-10 shrink-0">{control}</div> : null}
+        </div>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Row for the "Hide disabled integrations from left panel navigation" setting, drafted/saved like the per-integration toggles. */
 function HideDisabledIntegrationsSetting() {
   const { t } = useTranslation();
@@ -153,62 +194,36 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
           const href = `${rootHref}/${slug}`;
           const EnabledControl = ENABLED_CONTROL_BY_SLUG[slug];
           return (
-            <Card
+            <IntegrationCard
               key={slug}
-              data-testid={`integration-card-${slug}`}
-              className="h-full w-full transition-colors hover:border-primary/40"
-            >
-              <CardContent className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Link
-                    href={href}
-                    className="flex min-w-0 items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
-                  >
-                    <Icon className="h-5 w-5 shrink-0" />
-                    <span className="truncate">{label}</span>
-                  </Link>
-                  <div className="shrink-0">
-                    <EnabledControl workspaceId={workspaceId} />
-                  </div>
-                </div>
-                <Link href={href} className="text-sm text-muted-foreground cursor-pointer">
-                  {t(descriptionKey)}
-                </Link>
-              </CardContent>
-            </Card>
+              testId={`integration-card-${slug}`}
+              href={href}
+              label={label}
+              Icon={Icon}
+              description={t(descriptionKey)}
+              control={<EnabledControl workspaceId={workspaceId} />}
+            />
           );
         })}
         {pluginIntegrations.map(({ pluginId, id, label, description, icon, action: Action }) => {
           const href = `${rootHref}/${id}`;
           const Icon = resolvePluginIcon(icon);
           return (
-            <Card
+            <IntegrationCard
               key={`${pluginId}:${id}`}
-              data-testid={`integration-card-${pluginId}-${id}`}
-              className="h-full w-full transition-colors hover:border-primary/40"
-            >
-              <CardContent className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Link
-                    href={href}
-                    className="flex min-w-0 items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
-                  >
-                    <Icon className="h-5 w-5 shrink-0" />
-                    <span className="truncate">{label}</span>
-                  </Link>
-                  <div className="shrink-0">
-                    {Action ? (
-                      <PluginErrorBoundary context={`integration card action "${pluginId}:${id}"`}>
-                        <Action workspaceId={workspaceId} surface="index" />
-                      </PluginErrorBoundary>
-                    ) : null}
-                  </div>
-                </div>
-                <Link href={href} className="text-sm text-muted-foreground cursor-pointer">
-                  {description}
-                </Link>
-              </CardContent>
-            </Card>
+              testId={`integration-card-${pluginId}-${id}`}
+              href={href}
+              label={label}
+              Icon={Icon}
+              description={description}
+              control={
+                Action ? (
+                  <PluginErrorBoundary context={`integration card action "${pluginId}:${id}"`}>
+                    <Action workspaceId={workspaceId} surface="index" />
+                  </PluginErrorBoundary>
+                ) : null
+              }
+            />
           );
         })}
       </div>

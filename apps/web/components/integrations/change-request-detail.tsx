@@ -59,6 +59,7 @@ export type ChangeRequestDetailComment = {
   author: ChangeRequestDetailPerson;
   body: string;
   createdAt?: string;
+  url?: string;
   path?: string;
   line?: number;
   resolved?: boolean;
@@ -128,7 +129,7 @@ function DetailState({ props }: { props: ChangeRequestDetailProps }) {
       >
         <p>{props.error}</p>
         {props.onRetry ? (
-          <Button type="button" variant="outline" className="min-h-11" onClick={props.onRetry}>
+          <Button type="button" variant="outline" onClick={props.onRetry}>
             {t("integrations:retry")}
           </Button>
         ) : null}

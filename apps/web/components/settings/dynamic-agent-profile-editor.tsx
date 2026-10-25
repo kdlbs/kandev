@@ -1,7 +1,9 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconInfoCircle } from "@tabler/icons-react";
+import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
+import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
+import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
@@ -136,6 +138,24 @@ export function DynamicAgentProfileEditor({
           onEnabledChange={state.updateProfileEnabled}
         />
       )}
+      {state.hasExternalConflict ? (
+        <Alert variant="destructive" data-testid="dynamic-profile-external-change-alert">
+          <IconAlertTriangle className="h-4 w-4" />
+          <AlertTitle>{t("agents:profileExternalChangeTitle")}</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{t("agents:profileExternalChangeDescription")}</span>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 shrink-0"
+              onClick={state.discardDraft}
+              data-testid="dynamic-profile-external-change-discard"
+            >
+              {t("agents:profileExternalChangeDiscard")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {state.standalone ? (
         <Card>
           <CardHeader>

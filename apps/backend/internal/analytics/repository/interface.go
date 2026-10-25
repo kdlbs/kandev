@@ -4,8 +4,23 @@ import (
 	"context"
 	"time"
 
+	analyticserrors "github.com/kandev/kandev/internal/analytics"
 	"github.com/kandev/kandev/internal/analytics/models"
 )
+
+// ErrAnalyticsBusy marks a bounded analytics operation that could not finish
+// within its admission-plus-query budget.
+var ErrAnalyticsBusy = analyticserrors.ErrAnalyticsBusy
+
+// NewAnalyticsBusyError wraps the internal timeout cause with the stable
+// classification used by HTTP and plugin callers.
+func NewAnalyticsBusyError(cause error) error {
+	return analyticserrors.NewAnalyticsBusyError(cause)
+}
+
+// IsAnalyticsBusy reports whether an analytics operation exhausted its bounded
+// budget rather than failing because the caller canceled it.
+func IsAnalyticsBusy(err error) bool { return analyticserrors.IsAnalyticsBusy(err) }
 
 // Repository defines the interface for analytics/statistics operations.
 type Repository interface {

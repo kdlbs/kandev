@@ -23,10 +23,11 @@ type WorkflowStepLister interface {
 }
 
 type WorkflowHandlers struct {
-	service            *service.Service
-	workflowStepLister WorkflowStepLister
-	foregroundActivity dto.ForegroundActivityProvider
-	logger             *logger.Logger
+	service              *service.Service
+	workflowStepLister   WorkflowStepLister
+	foregroundActivity   dto.ForegroundActivityProvider
+	taskParkedProjection dto.TaskParkedProvider
+	logger               *logger.Logger
 }
 
 func NewWorkflowHandlers(svc *service.Service, stepLister WorkflowStepLister, log *logger.Logger) *WorkflowHandlers {
@@ -53,6 +54,12 @@ func RegisterWorkflowRoutes(
 // SetForegroundActivityProvider wires live session activity into task snapshots.
 func (h *WorkflowHandlers) SetForegroundActivityProvider(provider dto.ForegroundActivityProvider) {
 	h.foregroundActivity = provider
+}
+
+// SetTaskParkedProvider wires the task-level parked_on_background_work
+// OR-aggregate into task snapshots (spec: docs/specs/disambiguate-waiting/spec.md).
+func (h *WorkflowHandlers) SetTaskParkedProvider(provider dto.TaskParkedProvider) {
+	h.taskParkedProjection = provider
 }
 
 func (h *WorkflowHandlers) registerHTTP(router *gin.Engine) {
@@ -101,6 +108,12 @@ func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string
 	}
 	for _, w := range workflows {
 		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
+	}
+	if includeHidden {
+		result.TaskWorkflowCoverage, err = h.service.TaskWorkflowCoverage(ctx, workspaceID)
+		if err != nil {
+			h.logger.Warn("workflow task coverage unavailable", zap.Error(err))
+		}
 	}
 	return result, nil
 }
@@ -161,7 +174,7 @@ type httpCreateWorkflowRequest struct {
 func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 	var body httpCreateWorkflowRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if body.Name == "" || body.WorkspaceID == "" {
@@ -274,7 +287,7 @@ type httpUpdateWorkflowRequest struct {
 func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 	var body httpUpdateWorkflowRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	id := c.Param("id")
@@ -327,6 +340,7 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 		return
 	}
 
+	totalTasks := len(tasks)
 	tasks = applyTaskLimit(c, tasks)
 
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
@@ -336,9 +350,10 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
-		Workflow: dto.FromWorkflow(workflow),
-		Steps:    steps,
-		Tasks:    taskDTOs,
+		Workflow:     dto.FromWorkflow(workflow),
+		Steps:        steps,
+		Tasks:        taskDTOs,
+		TaskCoverage: h.service.WorkflowTaskCoverage(workflow, totalTasks, len(taskDTOs)),
 	})
 }
 
@@ -389,6 +404,7 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 		return
 	}
 
+	totalTasks := len(tasks)
 	tasks = applyTaskLimit(c, tasks)
 
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
@@ -398,9 +414,10 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
-		Workflow: dto.FromWorkflow(workflow),
-		Steps:    steps,
-		Tasks:    taskDTOs,
+		Workflow:     dto.FromWorkflow(workflow),
+		Steps:        steps,
+		Tasks:        taskDTOs,
+		TaskCoverage: h.service.WorkflowTaskCoverage(workflow, totalTasks, len(taskDTOs)),
 	})
 }
 
@@ -621,5 +638,5 @@ func (h *WorkflowHandlers) convertTasksWithPrimarySessions(
 	ctx context.Context,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, tasks)
 }

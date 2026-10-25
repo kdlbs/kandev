@@ -39,10 +39,10 @@ func (s *Store) beginWatchInvalidation(ctx context.Context, watchTable, taskTabl
 	defer func() { _ = tx.Rollback() }()
 	set := "generation = generation + 1, updated_at = CURRENT_TIMESTAMP"
 	if deleting {
-		set += ", deleting = 1, enabled = 0"
+		set += ", deleting = TRUE, enabled = FALSE"
 	}
-	result, err := tx.ExecContext(ctx,
-		fmt.Sprintf("UPDATE %s SET %s WHERE id = ? AND deleting = 0", watchTable, set), watchID)
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		fmt.Sprintf("UPDATE %s SET %s WHERE id = ? AND deleting = FALSE", watchTable, set)), watchID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,13 +57,13 @@ func (s *Store) beginWatchInvalidation(ctx context.Context, watchTable, taskTabl
 		return s.resumeWatchDelete(ctx, tx, watchTable, taskTable, foreignKey, watchID)
 	}
 	var generation int64
-	if err := tx.GetContext(ctx, &generation,
-		fmt.Sprintf("SELECT generation FROM %s WHERE id = ?", watchTable), watchID); err != nil {
+	if err := tx.GetContext(ctx, &generation, tx.Rebind(
+		fmt.Sprintf("SELECT generation FROM %s WHERE id = ?", watchTable)), watchID); err != nil {
 		return nil, err
 	}
 	var taskIDs []string
-	if err := tx.SelectContext(ctx, &taskIDs,
-		fmt.Sprintf("SELECT task_id FROM %s WHERE %s = ? AND generation < ? AND task_id <> '' ORDER BY created_at", taskTable, foreignKey),
+	if err := tx.SelectContext(ctx, &taskIDs, tx.Rebind(
+		fmt.Sprintf("SELECT task_id FROM %s WHERE %s = ? AND generation < ? AND task_id <> '' ORDER BY created_at", taskTable, foreignKey)),
 		watchID, generation); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -78,8 +78,8 @@ func (s *Store) resumeWatchDelete(ctx context.Context, tx *sqlx.Tx, watchTable, 
 		Generation int64 `db:"generation"`
 		Deleting   bool  `db:"deleting"`
 	}
-	err := tx.GetContext(ctx, &state,
-		fmt.Sprintf("SELECT generation, deleting FROM %s WHERE id = ?", watchTable), watchID)
+	err := tx.GetContext(ctx, &state, tx.Rebind(
+		fmt.Sprintf("SELECT generation, deleting FROM %s WHERE id = ?", watchTable)), watchID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &watchInvalidation{Missing: true}, nil
 	}
@@ -90,8 +90,8 @@ func (s *Store) resumeWatchDelete(ctx context.Context, tx *sqlx.Tx, watchTable, 
 		return nil, ErrWatchOwnershipLost
 	}
 	var taskIDs []string
-	if err := tx.SelectContext(ctx, &taskIDs,
-		fmt.Sprintf("SELECT task_id FROM %s WHERE %s = ? AND generation < ? AND task_id <> '' ORDER BY created_at", taskTable, foreignKey),
+	if err := tx.SelectContext(ctx, &taskIDs, tx.Rebind(
+		fmt.Sprintf("SELECT task_id FROM %s WHERE %s = ? AND generation < ? AND task_id <> '' ORDER BY created_at", taskTable, foreignKey)),
 		watchID, state.Generation); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -115,12 +115,12 @@ func (s *Store) finishWatchReset(ctx context.Context, watchTable, taskTable, for
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		fmt.Sprintf("DELETE FROM %s WHERE %s = ? AND generation < ?", taskTable, foreignKey), watchID, generation); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		fmt.Sprintf("DELETE FROM %s WHERE %s = ? AND generation < ?", taskTable, foreignKey)), watchID, generation); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx,
-		fmt.Sprintf("UPDATE %s SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND generation = ? AND deleting = 0", watchTable),
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		fmt.Sprintf("UPDATE %s SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND generation = ? AND deleting = FALSE", watchTable)),
 		watchID, generation)
 	if err != nil {
 		return err
@@ -137,8 +137,8 @@ func (s *Store) finishWatchReset(ctx context.Context, watchTable, taskTable, for
 
 func (s *Store) ListReviewMRTaskIDsByWatch(ctx context.Context, watchID string) ([]string, error) {
 	var ids []string
-	if err := s.ro.SelectContext(ctx, &ids,
-		`SELECT task_id FROM gitlab_review_mr_tasks WHERE review_watch_id = ? ORDER BY created_at`, watchID); err != nil {
+	if err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
+		`SELECT task_id FROM gitlab_review_mr_tasks WHERE review_watch_id = ? ORDER BY created_at`), watchID); err != nil {
 		return nil, err
 	}
 	return ids, nil
@@ -150,10 +150,10 @@ func (s *Store) ResetReviewWatchState(ctx context.Context, watchID string) error
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM gitlab_review_mr_tasks WHERE review_watch_id = ?`, watchID); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_review_mr_tasks WHERE review_watch_id = ?`), watchID); err != nil {
 		return fmt.Errorf("clear review watch tasks: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE gitlab_review_watches SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, watchID); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE gitlab_review_watches SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`), watchID); err != nil {
 		return fmt.Errorf("clear review watch poll state: %w", err)
 	}
 	return tx.Commit()
@@ -161,8 +161,8 @@ func (s *Store) ResetReviewWatchState(ctx context.Context, watchID string) error
 
 func (s *Store) ListIssueWatchTaskIDsByWatch(ctx context.Context, watchID string) ([]string, error) {
 	var ids []string
-	if err := s.ro.SelectContext(ctx, &ids,
-		`SELECT task_id FROM gitlab_issue_watch_tasks WHERE issue_watch_id = ? ORDER BY created_at`, watchID); err != nil {
+	if err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
+		`SELECT task_id FROM gitlab_issue_watch_tasks WHERE issue_watch_id = ? ORDER BY created_at`), watchID); err != nil {
 		return nil, err
 	}
 	return ids, nil
@@ -174,10 +174,10 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM gitlab_issue_watch_tasks WHERE issue_watch_id = ?`, watchID); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_issue_watch_tasks WHERE issue_watch_id = ?`), watchID); err != nil {
 		return fmt.Errorf("clear issue watch tasks: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE gitlab_issue_watches SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, watchID); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE gitlab_issue_watches SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`), watchID); err != nil {
 		return fmt.Errorf("clear issue watch poll state: %w", err)
 	}
 	return tx.Commit()

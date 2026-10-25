@@ -59,6 +59,31 @@ function renderSwitcher(collapsedSubtaskParentIds: string[] = []) {
   );
 }
 
+it("omits the state group header icon while retaining task row icons", () => {
+  render(
+    <Providers>
+      <TaskSwitcher
+        grouped={{
+          ...grouped(),
+          groupKey: "state",
+          groups: [{ key: "IN_PROGRESS", label: "In progress", tasks: [ROOT] }],
+        }}
+        activeTaskId={null}
+        selectedTaskId={null}
+        onSelectTask={vi.fn()}
+      />
+    </Providers>,
+  );
+  const header = screen.getByTestId("sidebar-group-header");
+  expect(header.querySelectorAll("svg")).toHaveLength(1);
+  expect(within(header).queryByTestId("sidebar-group-state")).toBeNull();
+  const rows = screen.getAllByTestId("sidebar-task-item");
+  expect(rows).toHaveLength(3);
+  for (const row of rows) {
+    expect(within(row).getByTestId("task-state-running")).toBeTruthy();
+  }
+});
+
 function blockDepth(container: HTMLElement, taskId: string): string | null {
   return (
     container
@@ -124,6 +149,31 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
     expect(rootToggle!.textContent).toContain("2");
   });
 
+  it("keeps the expand control for a collapsed tree when descendants are not on the page", () => {
+    const collapsedRoot = item("Root", undefined, { subtaskCount: 2 });
+    const { container } = render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [collapsedRoot] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onToggleSubtasks={vi.fn()}
+          collapsedSubtaskParentIds={["Root"]}
+        />
+      </Providers>,
+    );
+    const toggle = container.querySelector(
+      "[data-testid='sidebar-subtask-toggle'][data-task-id='Root']",
+    );
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle?.textContent).toContain("2");
+  });
+
   it("omits grab cursor on nested rows when subtask reorder is disabled", () => {
     const { container } = render(
       <Providers>
@@ -144,6 +194,28 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
       expect(handle).not.toBeNull();
       expect(handle!.className).not.toContain("cursor-grab");
     }
+  });
+});
+
+describe("TaskSwitcher cross-page selection", () => {
+  it("shows the total selected count and a clear action", () => {
+    const clearSelection = vi.fn();
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          selectedTaskIds={new Set(["Root", "off-page-task"])}
+          onClearSelection={clearSelection}
+          onSelectTask={vi.fn()}
+        />
+      </Providers>,
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("2 tasks selected");
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(clearSelection).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -391,6 +463,7 @@ describe("TaskSwitcher — edit menu", () => {
 
     fireEvent.contextMenu(screen.getByText(archivedTask.title));
     expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+    expect(screen.queryByTestId("task-context-priority")).toBeNull();
 
     rerender(
       <Providers>
@@ -409,6 +482,7 @@ describe("TaskSwitcher — edit menu", () => {
     );
     fireEvent.contextMenu(screen.getByText(editableTask.title));
     expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+    expect(screen.queryByTestId("task-context-priority")).toBeNull();
   });
 });
 
@@ -452,7 +526,8 @@ describe("TaskSwitcher — archived rows action menu", () => {
     expect(screen.queryByText("Link")).toBeNull();
     expect(screen.queryByText("Duplicate")).toBeNull();
     expect(screen.queryByText("Color")).toBeNull();
-    expect(screen.queryByText("Send to workflow")).toBeNull();
+    expect(screen.queryByTestId("task-context-priority")).toBeNull();
+    expect(screen.queryByText("Change workflow...")).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });
 });
@@ -529,5 +604,48 @@ describe("TaskSwitcher — external issue link menu", () => {
 
     expect(onLinkMergeRequest).toHaveBeenCalledWith(archivedTask.id, archivedTask.title);
     expect(closeMenu).toHaveBeenCalledOnce();
+  });
+});
+
+describe("TaskSwitcher repository labels", () => {
+  const REPOSITORY_TEST_ID = "sidebar-task-repository";
+  const REPOSITORY_SLUG = "kdlbs/kandev";
+
+  function renderGroupedBy(
+    groupKey: GroupedSidebarList["groupKey"],
+    groups: GroupedSidebarList["groups"],
+  ) {
+    return render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{ groups, subTasksByParentId: new Map(), groupKey }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+        />
+      </Providers>,
+    );
+  }
+
+  const REPO_TASK = item("Task A", undefined, { repositoryPath: REPOSITORY_SLUG });
+
+  it("names each task's repository in a flat, ungrouped list", () => {
+    renderGroupedBy("none", [{ key: "__all__", label: "All", tasks: [REPO_TASK] }]);
+
+    expect(screen.getByTestId(REPOSITORY_TEST_ID).textContent).toBe(REPOSITORY_SLUG);
+  });
+
+  it("names each task's repository when grouped by a dimension other than repository", () => {
+    renderGroupedBy("workflowStep", [{ key: "step-1", label: "In progress", tasks: [REPO_TASK] }]);
+
+    expect(screen.getByTestId(REPOSITORY_TEST_ID).textContent).toBe(REPOSITORY_SLUG);
+  });
+
+  it("leaves the repository off the rows when the group header already names it", () => {
+    renderGroupedBy("repository", [
+      { key: REPOSITORY_SLUG, label: REPOSITORY_SLUG, tasks: [REPO_TASK] },
+    ]);
+
+    expect(screen.queryByTestId(REPOSITORY_TEST_ID)).toBeNull();
   });
 });

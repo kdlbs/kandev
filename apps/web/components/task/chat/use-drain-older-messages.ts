@@ -8,13 +8,17 @@ import { useAppStore } from "@/components/state-provider";
  *  most one page (mixed first-request-wins page sizes). */
 export const MAX_DRAIN_MESSAGES = 1000;
 
+export type DrainOlderMessagesOptions = {
+  /** Use backend-wide pagination for explicit reverse-search backfill. */
+  rawPagination?: boolean;
+};
+
 /**
  * When `active` flips true, walk the message pagination cursor until the
- * server reports no more older messages (or the message budget is hit). Used
- * by the Ctrl+R reverse-search overlay so the user can fuzzy-search the entire
- * session history, not only the pages already loaded by the chat list, and by
- * the transcript's scroll-to-start affordance so it lands on the true first
- * prompt instead of a partial-page boundary.
+ * server reports no more older messages (or the message budget is hit). The
+ * default visible path is used by the transcript's scroll-to-start affordance
+ * and stops at the first prompt. The Ctrl+R reverse-search overlay opts into
+ * raw pagination so it can search the complete backend session history.
  *
  * Step-driven, not an imperative loop: each batch only fires once `isLoadingMore`
  * (older-page, from `useLazyLoadMessages`, reactive) is confirmed false AND the
@@ -28,8 +32,16 @@ export const MAX_DRAIN_MESSAGES = 1000;
  * whose cumulative count reaches or exceeds MAX_DRAIN_MESSAGES, and stops
  * immediately after a zero-result batch even when `hasMore` remains true.
  */
-export function useDrainOlderMessages(sessionId: string | null, active: boolean) {
-  const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId);
+export function useDrainOlderMessages(
+  sessionId: string | null,
+  active: boolean,
+  options?: DrainOlderMessagesOptions,
+) {
+  const { loadMore, loadMoreRaw, hasMore, rawHasMore, isLoadingMore } =
+    useLazyLoadMessages(sessionId);
+  const rawPagination = options?.rawPagination ?? false;
+  const drainLoadMore = rawPagination ? loadMoreRaw : loadMore;
+  const drainHasMore = rawPagination ? rawHasMore : hasMore;
   const messagesLoading = useAppStore((state) =>
     sessionId ? (state.messages.metaBySession[sessionId]?.isLoading ?? false) : false,
   );
@@ -46,12 +58,12 @@ export function useDrainOlderMessages(sessionId: string | null, active: boolean)
   }, [active]);
 
   const isDraining =
-    active && Boolean(sessionId) && hasMore && fetchedMessageCount < MAX_DRAIN_MESSAGES;
+    active && Boolean(sessionId) && drainHasMore && fetchedMessageCount < MAX_DRAIN_MESSAGES;
 
   useEffect(() => {
     if (!isDraining || !sessionId || messagesLoading || isLoadingMore) return;
     let cancelled = false;
-    void loadMore()
+    void drainLoadMore()
       .then((fetched) => {
         if (cancelled) return;
         setFetchedMessageCount((count) => {
@@ -77,7 +89,7 @@ export function useDrainOlderMessages(sessionId: string | null, active: boolean)
     return () => {
       cancelled = true;
     };
-  }, [isDraining, sessionId, messagesLoading, isLoadingMore, loadMore, fetchedMessageCount]);
+  }, [isDraining, sessionId, messagesLoading, isLoadingMore, drainLoadMore, fetchedMessageCount]);
 
   return { isDraining };
 }

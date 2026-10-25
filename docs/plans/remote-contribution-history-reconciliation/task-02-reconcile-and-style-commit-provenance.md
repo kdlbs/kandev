@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-recover-provider-commit-evidence"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 02: Reconcile and Style Commit Provenance

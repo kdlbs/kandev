@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/acp-shell-command-output.md
+spec: docs/specs/ui/requirements/acp-shell-command-output.md
 created: 2026-08-10
 status: implemented
 issue: https://github.com/kdlbs/kandev/issues/2480

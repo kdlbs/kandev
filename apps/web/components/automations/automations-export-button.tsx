@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { toast } from "@/lib/toast/sonner";
 import { exportAutomationsZip } from "@/lib/api/domains/automations-export-api";
 import { triggerBlobDownload } from "@/lib/utils/file-download";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 // i18n-exempt: fixed download file name, not user-facing copy.
 const EXPORT_FILE_NAME = "kandev-automations.zip";
@@ -42,9 +43,8 @@ export function AutomationsExportButton({ workspaceId }: AutomationsExportButton
     <Button
       type="button"
       variant="outline"
-      size="sm"
       data-testid="export-automations-button"
-      className="min-h-11 cursor-pointer md:min-h-7"
+      className={controlSizingClassName("standard", "cursor-pointer")}
       onClick={() => void handleExport()}
       disabled={downloading}
     >

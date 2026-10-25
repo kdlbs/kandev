@@ -4,8 +4,8 @@ export type CheckBucket = "passed" | "in_progress" | "failed";
 
 /**
  * Bucket a CheckRun's status/conclusion into Passed / In Progress / Failed.
- * Returns null for skipped/stale checks — they're ignored entirely in the
- * popover (see Q11). Order of evaluation matters: status comes before
+ * Returns null for cancelled/skipped/stale checks — they are ignored entirely
+ * in the popover. Order of evaluation matters: status comes before
  * conclusion so a queued/in_progress run never falls through to the
  * conclusion mapping (which would be the *previous* run's conclusion when
  * GitHub re-runs a check).
@@ -19,10 +19,10 @@ export function bucketCheck(check: CheckRun): CheckBucket | null {
     case "neutral":
       return "passed";
     case "failure":
-    case "cancelled":
     case "timed_out":
     case "action_required":
       return "failed";
+    case "cancelled":
     case "skipped":
     case "stale":
       return null;
@@ -54,6 +54,8 @@ export function bucketCheckCounts(checks: CheckRun[]): CheckBucketCounts {
 }
 
 export type WorkflowGroup = {
+  /** Stable identity key that distinguishes independent workflow executions. */
+  id: string;
   /** Workflow name (the part before " / " in CheckRun.name); falls back to
    *  the full name for status_context entries. */
   workflow: string;
@@ -87,10 +89,12 @@ export function groupChecksByWorkflow(checks: CheckRun[]): WorkflowGroup[] {
   const map = new Map<string, WorkflowGroup>();
   for (const check of checks) {
     const sep = check.name.indexOf(" / ");
-    const workflow = sep >= 0 ? check.name.slice(0, sep) : check.name;
-    let group = map.get(workflow);
+    const workflow = check.workflow_name || (sep >= 0 ? check.name.slice(0, sep) : check.name);
+    const id = workflowGroupId(check, workflow);
+    let group = map.get(id);
     if (!group) {
       group = {
+        id,
         workflow,
         bucket: "passed",
         jobs: [],
@@ -100,8 +104,8 @@ export function groupChecksByWorkflow(checks: CheckRun[]): WorkflowGroup[] {
         total: 0,
         htmlUrl: check.html_url,
       };
-      map.set(workflow, group);
-      order.push(workflow);
+      map.set(id, group);
+      order.push(id);
     }
     group.jobs.push(check);
     const bucket = bucketCheck(check);
@@ -122,5 +126,22 @@ export function groupChecksByWorkflow(checks: CheckRun[]): WorkflowGroup[] {
     const target = g.jobs.find((j) => bucketCheck(j) === g.bucket && j.html_url);
     if (target) g.htmlUrl = target.html_url;
   }
-  return order.map((w) => map.get(w)!);
+  return order.map((id) => map.get(id)!).filter((group) => group.total > 0);
+}
+
+function workflowGroupId(check: CheckRun, workflow: string): string {
+  const sourceRepository = [check.head_repo_id, check.head_repo_owner, check.head_repo_name]
+    .filter((part) => part !== undefined && part !== "")
+    .join(":");
+  const provider = [check.app_id, check.app_slug, sourceRepository].filter(Boolean).join(":");
+  if (check.workflow_run_id !== undefined) {
+    return `run:${provider}:${check.workflow_id ?? ""}:${check.workflow_run_id}:${check.workflow_event ?? ""}`;
+  }
+  if (check.check_suite_id !== undefined) {
+    return `suite:${provider}:${check.workflow_id ?? ""}:${check.check_suite_id}`;
+  }
+  if (check.workflow_id !== undefined || check.workflow_event || provider) {
+    return `producer:${provider}:${check.workflow_id ?? ""}:${check.workflow_event ?? ""}:${workflow}`;
+  }
+  return `name:${workflow}`;
 }

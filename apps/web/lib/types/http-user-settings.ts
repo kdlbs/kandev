@@ -1,9 +1,10 @@
 import type { WorkspaceId } from "./ids";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
-export type StartupPage = "task_overview" | "last_task";
+export type StartupPage = "task_overview" | "last_task" | "threads";
 export type LspStatusLocation = "toolbar" | "status_bar";
 export type LastSeenDisplay = "absolute" | "relative";
+export type MessageTimeDisplay = "relative" | "absolute_short" | "absolute_long";
 
 export type SavedLayout = {
   id: string;
@@ -17,22 +18,138 @@ export type SidebarViewApi = {
   id: string;
   name: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
   collapsed_groups: string[];
+  task_row?: SidebarTaskRowPresentationApi | null;
 };
 
 export type SidebarViewDraftApi = {
   base_view_id: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
+  task_row?: SidebarTaskRowPresentationApi | null;
+};
+
+export type SidebarTaskRowPresentationApi = {
+  details_enabled?: boolean;
+  detail_order?: unknown[];
+  visible_details?: unknown[];
+  trailing?: string;
 };
 
 export type SidebarTaskPrefsApi = {
   pinned_task_ids: string[];
   ordered_task_ids: string[];
   subtask_order_by_parent_id: Record<string, string[]>;
+};
+
+export type ThreadTaskScopeApi = {
+  mode: "all" | "selected";
+  task_ids: string[];
+};
+
+export type ThreadViewClauseApi = {
+  id: string;
+  dimension: string;
+  op: string;
+  value: unknown;
+};
+
+export type ThreadViewSortApi = {
+  key: string;
+  direction: string;
+};
+
+export type ThreadViewApi = {
+  id: string;
+  name: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
+};
+
+export type ThreadViewDraftApi = {
+  base_view_id: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
+};
+export type SidebarTaskColorDimension =
+  | "workflow_step"
+  | "repository"
+  | "workflow"
+  | "executor_profile"
+  | "task_state"
+  | "priority"
+  | "origin";
+
+export type FixedAutomaticTaskColor =
+  | "gray"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "cyan"
+  | "blue"
+  | "indigo"
+  | "purple"
+  | "pink";
+
+export type SidebarTaskColorRepositoryTarget =
+  | { kind: "workspace"; workspace_id: string; repository_id: string }
+  | {
+      kind: "provider";
+      provider_id: string;
+      host: string;
+      scope: string;
+      provider_repository_id: string;
+    }
+  | { kind: "local"; path: string };
+
+export type SidebarTaskColorRule = {
+  id: string;
+  enabled: boolean;
+  condition: {
+    dimension: SidebarTaskColorDimension;
+    value: unknown;
+    label: string;
+  };
+  output: { kind: "fixed"; color: FixedAutomaticTaskColor } | { kind: "workflow_step" };
+};
+
+export type SidebarTaskColorAutomation = {
+  enabled: boolean;
+  rules: SidebarTaskColorRule[];
+};
+
+/** User-settings wire alias kept explicit for API and boot-payload callers. */
+export type SidebarTaskColorAutomationApi = SidebarTaskColorAutomation;
+
+export type SidebarTaskColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink";
+export type SidebarTaskColorsApi = Record<string, SidebarTaskColor | null>;
+export type SidebarTaskColorPatchApi = {
+  colors: SidebarTaskColorsApi;
+  if_missing: boolean;
 };
 
 export type TaskCreateLastUsedApi = {
@@ -46,6 +163,34 @@ export type TaskCreateLastUsedApi = {
 export type AppStatusBarOrderApi = {
   left_item_ids?: string[];
   right_item_ids?: string[];
+};
+
+export type SidebarShortcutTargetApi = {
+  kind: "destination" | "host_action" | "canvas" | "automation";
+  id: string;
+};
+
+export type SidebarShortcutApi = {
+  id: string;
+  target: SidebarShortcutTargetApi;
+};
+
+export type SidebarLayoutNodeApi = {
+  id: string;
+  kind: "builtin" | "plugin" | "shortcuts";
+  visible: boolean;
+  destination_id?: string;
+  name?: string;
+  shortcuts?: SidebarShortcutApi[];
+};
+
+export type SidebarLayoutApi = {
+  navigation_height?: number;
+  navigation_expanded?: boolean;
+  version: number;
+  revision: number;
+  nodes: SidebarLayoutNodeApi[];
+  unsupported_version?: boolean;
 };
 
 export type UserSettings = {
@@ -69,11 +214,14 @@ export type UserSettings = {
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
   show_todo_list_panel_only_when_not_empty?: boolean;
+  show_turn_changed_files?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
+  agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -82,12 +230,20 @@ export type UserSettings = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_views_by_workspace?: Record<string, SidebarWorkspaceStateApi>;
+  sidebar_layouts_by_workspace?: Record<string, SidebarLayoutApi>;
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
+  sidebar_task_color_automation?: SidebarTaskColorAutomationApi;
+  sidebar_task_colors?: SidebarTaskColorsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown;
+  jira_default_view_id?: string;
   jira_task_presets?: unknown;
   github_saved_presets?: unknown;
   github_default_query_presets?: unknown;
@@ -102,10 +258,20 @@ export type UserSettings = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
   revision?: number;
   updated_at: string;
 };
@@ -134,11 +300,14 @@ export type UserSettingsUpdatePayload = {
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
   show_todo_list_panel_only_when_not_empty?: boolean;
+  show_turn_changed_files?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
+  agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -147,12 +316,29 @@ export type UserSettingsUpdatePayload = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_layout_state?: {
+    workspace_id: string;
+    expected_revision: number;
+    layout: SidebarLayoutApi | null;
+  };
+  sidebar_view_state?: {
+    workspace_id: string;
+    views?: SidebarViewApi[];
+    active_view_id?: string;
+    draft?: SidebarViewDraftApi | null;
+  };
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
+  sidebar_task_color_automation?: SidebarTaskColorAutomationApi;
+  sidebar_task_color_patch?: SidebarTaskColorPatchApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown[] | null;
+  jira_default_view_id?: string;
   jira_task_presets?: unknown[] | null;
   github_saved_presets?: unknown[] | null;
   github_default_query_presets?: object | null;
@@ -167,8 +353,24 @@ export type UserSettingsUpdatePayload = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
+};
+
+export type SidebarWorkspaceStateApi = {
+  views: SidebarViewApi[];
+  active_view_id: string;
+  draft: SidebarViewDraftApi | null;
 };

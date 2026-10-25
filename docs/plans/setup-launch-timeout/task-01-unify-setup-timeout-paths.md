@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/setup-launch-timeout.md"
+spec: "../../specs/platform/requirements/setup-launch-timeout.md"
 ---
 
 # Task 01: Unify Setup Timeout Paths

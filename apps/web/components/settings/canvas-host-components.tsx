@@ -1,0 +1,515 @@
+"use client";
+
+import type { ReactNode } from "react";
+import {
+  IconDatabase,
+  IconEdit,
+  IconExternalLink,
+  IconLayoutGrid,
+  IconListDetails,
+  IconShare3,
+  IconSparkles,
+} from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { Button } from "@kandev/ui/button";
+import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
+import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
+import { CanvasPage } from "@/components/plugins/canvas-page";
+import type { WebAppStartupFailureReason } from "@/components/plugins/web-app-startup";
+import {
+  canvasCanEnableWorkspaceData,
+  canvasHref,
+  type Canvas,
+} from "@/lib/api/domains/canvas-api";
+import { CanvasMobileActionsButton } from "./canvas-host-actions";
+import { canvasLockHelp, canvasPromotionHelp } from "./canvas-host-desktop-actions";
+export { CanvasHostDialogs, CanvasMobileActionsButton } from "./canvas-host-actions";
+export {
+  CanvasDesktopActions,
+  CanvasDesktopOverflowActions,
+  CanvasDesktopOverflowMenuItems,
+  CanvasDesktopPrimaryAction,
+} from "./canvas-host-desktop-actions";
+
+export type CanvasHostState =
+  | "loading_metadata"
+  | "pending_first_release"
+  | "pending_permission"
+  | "loading_runtime"
+  | "ready"
+  | "offline"
+  | "invalid_release"
+  | "unavailable"
+  | "runtime_failed"
+  | "archived";
+
+const RUNTIME_FAILED_DESCRIPTIONS: Record<WebAppStartupFailureReason, string> = {
+  document_error: "canvases:runtimeFailedDocumentErrorDescription",
+  context_unavailable: "canvases:runtimeFailedContextUnavailableDescription",
+  timeout: "canvases:runtimeFailedTimeoutDescription",
+};
+
+const STATE_COPY: Record<CanvasHostState, { title: string; description: string }> = {
+  loading_metadata: {
+    title: "canvases:loadingCanvas",
+    description: "canvases:loadingCanvasDescription",
+  },
+  pending_first_release: {
+    title: "canvases:pendingFirstRelease",
+    description: "canvases:pendingFirstReleaseDescription",
+  },
+  pending_permission: {
+    title: "canvases:pendingPermission",
+    description: "canvases:pendingPermissionDescription",
+  },
+  loading_runtime: {
+    title: "canvases:loadingRuntime",
+    description: "canvases:loadingRuntimeDescription",
+  },
+  ready: { title: "canvases:ready", description: "canvases:readyDescription" },
+  offline: { title: "canvases:offline", description: "canvases:offlineDescription" },
+  invalid_release: {
+    title: "canvases:invalidRelease",
+    description: "canvases:invalidReleaseDescription",
+  },
+  unavailable: { title: "canvases:unavailable", description: "canvases:unavailableDescription" },
+  runtime_failed: {
+    title: "canvases:runtimeFailed",
+    description: "canvases:runtimeFailedDescription",
+  },
+  archived: { title: "canvases:archived", description: "canvases:archivedDescription" },
+};
+
+function MobileCanvasAction({
+  description,
+  children,
+  testId,
+}: {
+  description: string;
+  children: ReactNode;
+  testId: string;
+}) {
+  return (
+    <div className="space-y-0.5 px-1">
+      {children}
+      <p className="px-3 text-xs text-muted-foreground" data-testid={testId}>
+        {description}
+      </p>
+    </div>
+  );
+}
+
+export function CanvasHostBody({
+  canvasId,
+  title,
+  state,
+  runtimeUrl,
+  error,
+  runtimeFailureReason,
+  onRuntimeReady,
+  onRuntimeError,
+  onRetry,
+}: {
+  canvasId: string;
+  title: string;
+  state: CanvasHostState;
+  runtimeUrl: string | null;
+  error: string | null;
+  runtimeFailureReason?: WebAppStartupFailureReason | null;
+  onRuntimeReady: () => void;
+  onRuntimeError: (reason: WebAppStartupFailureReason) => void;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      data-testid="canvas-host-route"
+    >
+      {(state === "loading_runtime" || state === "ready") && runtimeUrl ? (
+        <>
+          {state === "ready" && (
+            <span
+              className="sr-only"
+              role="status"
+              aria-live="polite"
+              data-testid="canvas-host-state"
+            >
+              <span data-testid="canvas-host-ready-announcement">{t(STATE_COPY.ready.title)}</span>
+            </span>
+          )}
+          <CanvasPage
+            key={`${canvasId}:${runtimeUrl}`}
+            runtimeUrl={runtimeUrl}
+            title={title}
+            onLoad={onRuntimeReady}
+            onError={onRuntimeError}
+          />
+        </>
+      ) : (
+        <CanvasHostStatePanel
+          state={state}
+          error={error}
+          runtimeFailureReason={runtimeFailureReason}
+          onRetry={onRetry}
+        />
+      )}
+    </div>
+  );
+}
+
+export function CanvasHostHeader({
+  title,
+  dataScopeLabel,
+  isMobile,
+  menuOpen,
+  onOpenActions,
+  actions,
+  renameAction,
+  overflowActions,
+}: {
+  title: string;
+  dataScopeLabel?: string;
+  isMobile: boolean;
+  menuOpen: boolean;
+  onOpenActions: () => void;
+  actions?: ReactNode;
+  renameAction?: ReactNode;
+  overflowActions?: ReactNode;
+}) {
+  return (
+    <PanelHeaderBarSplit
+      data-testid="canvas-host-header"
+      left={
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="block min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+          {dataScopeLabel && (
+            <span
+              className="max-w-20 shrink-0 truncate text-xs text-muted-foreground"
+              data-testid="canvas-data-scope"
+              title={dataScopeLabel}
+            >
+              {dataScopeLabel}
+            </span>
+          )}
+          {renameAction}
+        </div>
+      }
+      right={
+        <>
+          {actions}
+          {isMobile && (
+            <CanvasMobileActionsButton menuOpen={menuOpen} onOpenActions={onOpenActions} />
+          )}
+        </>
+      }
+      overflow={!isMobile ? overflowActions : undefined}
+      overflowAt={520}
+    />
+  );
+}
+
+export function CanvasHostStatePanel({
+  state,
+  error,
+  runtimeFailureReason,
+  onRetry,
+}: {
+  state: CanvasHostState;
+  error: string | null;
+  runtimeFailureReason?: WebAppStartupFailureReason | null;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  const copy = STATE_COPY[state];
+  const descriptionKey =
+    state === "runtime_failed" && runtimeFailureReason
+      ? RUNTIME_FAILED_DESCRIPTIONS[runtimeFailureReason]
+      : copy.description;
+  return (
+    <div
+      className="flex min-h-0 flex-1 items-center justify-center p-6 text-center"
+      data-testid="canvas-host-state-panel"
+    >
+      <div className="max-w-md space-y-3">
+        <h2 className="text-lg font-semibold" data-testid="canvas-host-state">
+          {t(copy.title)}
+        </h2>
+        <p className="text-sm text-muted-foreground">{error || t(descriptionKey)}</p>
+        {state !== "loading_metadata" && state !== "loading_runtime" && (
+          <Button
+            variant="outline"
+            className={controlSizingClassName("standard", "cursor-pointer")}
+            onClick={onRetry}
+          >
+            {t("canvases:retry")}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MobileCanvasPicker({
+  canvases,
+  canvas,
+  onSelectCanvas,
+  t,
+}: {
+  canvases: Canvas[];
+  canvas: Canvas | null;
+  onSelectCanvas: (canvas: Canvas) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="mb-2 border-b pb-2" data-testid="canvas-mobile-picker">
+      <p className="px-3 pb-1 text-xs font-medium text-muted-foreground">
+        {t("canvases:canvases")}
+      </p>
+      {canvases.map((candidate) => (
+        <Button
+          key={candidate.id}
+          variant="ghost"
+          className="min-h-11 w-full justify-start cursor-pointer"
+          disabled={candidate.id === canvas?.id}
+          onClick={() => onSelectCanvas(candidate)}
+          data-testid={`canvas-mobile-picker-item-${candidate.id}`}
+        >
+          <IconLayoutGrid className="mr-2 h-4 w-4" />
+          <span className="truncate">{candidate.title}</span>
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function MobileCanvasEditAction({
+  canvas,
+  editing,
+  onEdit,
+  t,
+}: {
+  canvas: Canvas;
+  editing: boolean;
+  onEdit: () => void;
+  t: (key: string) => string;
+}) {
+  const lifecycleLocked = canvas.status === "archived" || canvas.status === "disabled";
+  return (
+    <MobileCanvasAction
+      description={lifecycleLocked ? canvasLockHelp(canvas, t) : t("canvases:editCanvasHelp")}
+      testId="canvas-action-edit-help"
+    >
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start cursor-pointer"
+        disabled={editing || lifecycleLocked}
+        onClick={onEdit}
+      >
+        <IconEdit className="mr-2 h-4 w-4" />
+        {t("canvases:editCanvas")}
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
+function MobileCanvasReleasesAction({
+  onReleases,
+  t,
+}: {
+  onReleases: () => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <MobileCanvasAction
+      description={t("canvases:releasesAndPermissionsHelp")}
+      testId="canvas-action-releases-help"
+    >
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start cursor-pointer"
+        onClick={onReleases}
+      >
+        <IconListDetails className="mr-2 h-4 w-4" />
+        {t("canvases:releasesAndPermissions")}
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
+function MobileCanvasPromoteAction({
+  canvas,
+  lifecycleLocked,
+  onPromote,
+  t,
+}: {
+  canvas: Canvas;
+  lifecycleLocked: boolean;
+  onPromote: () => void;
+  t: (key: string) => string;
+}) {
+  const promoteDisabled = lifecycleLocked || canvas.active_release_status !== "valid";
+  return (
+    <MobileCanvasAction
+      description={canvasPromotionHelp(canvas, t)}
+      testId="canvas-action-promote-help"
+    >
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start cursor-pointer"
+        disabled={promoteDisabled}
+        onClick={onPromote}
+      >
+        <IconSparkles className="mr-2 h-4 w-4" />
+        {t("canvases:promoteCanvas")}
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
+function MobileCanvasWorkspaceDataAction({
+  canvas,
+  onEnable,
+  t,
+}: {
+  canvas: Canvas | null;
+  onEnable?: () => void;
+  t: (key: string) => string;
+}) {
+  if (!canvas || !onEnable || !canvasCanEnableWorkspaceData(canvas)) return null;
+
+  return (
+    <MobileCanvasAction
+      description={t("canvases:enableWorkspaceDataHelp")}
+      testId="canvas-action-enable-workspace-data-help"
+    >
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start cursor-pointer"
+        onClick={onEnable}
+        data-testid="canvas-action-enable-workspace-data"
+      >
+        <IconDatabase className="mr-2 h-4 w-4" />
+        {t("canvases:enableWorkspaceData")}
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
+function MobileCanvasShareAction({
+  onShare,
+  t,
+}: {
+  onShare: () => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <MobileCanvasAction
+      description={t("canvases:shareCanvasDescription")}
+      testId="canvas-action-share-help"
+    >
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start cursor-pointer"
+        onClick={onShare}
+      >
+        <IconShare3 className="mr-2 h-4 w-4" />
+        {t("canvases:shareCanvas")}
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
+function MobileCanvasNewTabAction({ canvas, t }: { canvas: Canvas; t: (key: string) => string }) {
+  return (
+    <MobileCanvasAction
+      description={t("canvases:openInNewTabHelp")}
+      testId="canvas-action-new-tab-help"
+    >
+      <Button variant="ghost" className="min-h-11 w-full justify-start cursor-pointer" asChild>
+        <a href={canvasHref(canvas.id)} target="_blank" rel="noreferrer">
+          <IconExternalLink className="mr-2 h-4 w-4" />
+          {t("canvases:openInNewTab")}
+        </a>
+      </Button>
+    </MobileCanvasAction>
+  );
+}
+
+export function MobileCanvasActions({
+  canvas,
+  canvases,
+  open,
+  onOpenChange,
+  onEdit,
+  onPromote,
+  onReleases,
+  onShare,
+  onRename,
+  onEnableWorkspaceData,
+  onSelectCanvas,
+  editing,
+}: {
+  canvas: Canvas | null;
+  canvases: Canvas[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onEdit: () => void;
+  onPromote: () => void;
+  onReleases: () => void;
+  onShare: () => void;
+  onRename: () => void;
+  onEnableWorkspaceData?: () => void;
+  onSelectCanvas: (canvas: Canvas) => void;
+  editing: boolean;
+}) {
+  const { t } = useTranslation();
+  const lifecycleLocked = canvas?.status === "archived" || canvas?.status === "disabled";
+  return (
+    <MobilePickerSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t("canvases:canvasActions")}
+      description={canvas?.title}
+      contentTestId="canvas-mobile-actions-sheet"
+    >
+      <div className="flex flex-col gap-1 pb-2">
+        {canvases.length > 0 && (
+          <MobileCanvasPicker
+            canvases={canvases}
+            canvas={canvas}
+            onSelectCanvas={onSelectCanvas}
+            t={t}
+          />
+        )}
+        {canvas && (
+          <Button
+            variant="ghost"
+            className="min-h-11 w-full justify-start"
+            onClick={onRename}
+            data-testid="canvas-mobile-rename"
+          >
+            <IconEdit className="mr-2 size-4" />
+            {t("canvases:renameCanvas")}
+          </Button>
+        )}
+        {canvas?.scope_kind === "workspace" && (
+          <MobileCanvasEditAction canvas={canvas} editing={editing} onEdit={onEdit} t={t} />
+        )}
+        <MobileCanvasReleasesAction onReleases={onReleases} t={t} />
+        {canvas && <MobileCanvasShareAction onShare={onShare} t={t} />}
+        <MobileCanvasWorkspaceDataAction canvas={canvas} onEnable={onEnableWorkspaceData} t={t} />
+        {canvas?.scope_kind === "task" && (
+          <MobileCanvasPromoteAction
+            canvas={canvas}
+            lifecycleLocked={Boolean(lifecycleLocked)}
+            onPromote={onPromote}
+            t={t}
+          />
+        )}
+        {canvas && <MobileCanvasNewTabAction canvas={canvas} t={t} />}
+      </div>
+    </MobilePickerSheet>
+  );
+}

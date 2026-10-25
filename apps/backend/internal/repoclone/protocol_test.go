@@ -1,6 +1,15 @@
 package repoclone
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestCloneURL(t *testing.T) {
 	tests := []struct {
@@ -142,9 +151,122 @@ func TestProviderHost(t *testing.T) {
 	}
 }
 
-func TestDetectGitProtocol(t *testing.T) {
-	got := DetectGitProtocol()
-	if got != ProtocolSSH && got != ProtocolHTTPS {
-		t.Errorf("expected %q or %q, got %q", ProtocolSSH, ProtocolHTTPS, got)
+func TestDetectGitProtocolPrefersHostConfiguration(t *testing.T) {
+	ghPath := filepath.Join(t.TempDir(), "gh")
+	script := "#!/bin/sh\n" +
+		"if [ \"$3\" = \"-h\" ]; then printf 'ssh\\n'; else printf 'https\\n'; fi\n"
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", filepath.Dir(ghPath))
+
+	resolver := NewGitProtocolResolver()
+	if got := resolver.ResolveGitProtocol(context.Background(), "https://github.com/"); got != ProtocolSSH {
+		t.Fatalf("ResolveGitProtocol() = %q, want host-specific %q", got, ProtocolSSH)
+	}
+}
+
+func TestDetectGitProtocolFallbacks(t *testing.T) {
+	tests := []struct {
+		name       string
+		hostOutput string
+		hostErr    error
+		globalOut  string
+		globalErr  error
+		want       string
+		wantCalls  [][]string
+	}{
+		{
+			name:       "host-specific value wins",
+			hostOutput: ProtocolSSH,
+			globalOut:  ProtocolHTTPS,
+			want:       ProtocolSSH,
+			wantCalls:  [][]string{{"config", "get", "-h", "github.com", "git_protocol"}},
+		},
+		{
+			name:      "global value is fallback",
+			hostErr:   errors.New("host config unavailable"),
+			globalOut: ProtocolHTTPS,
+			want:      ProtocolHTTPS,
+			wantCalls: [][]string{
+				{"config", "get", "-h", "github.com", "git_protocol"},
+				{"config", "get", "git_protocol"},
+			},
+		},
+		{
+			name:       "unsupported host value falls back",
+			hostOutput: "ssh+git",
+			globalOut:  ProtocolHTTPS,
+			want:       ProtocolHTTPS,
+			wantCalls: [][]string{
+				{"config", "get", "-h", "github.com", "git_protocol"},
+				{"config", "get", "git_protocol"},
+			},
+		},
+		{
+			name:       "unsupported values default to ssh",
+			hostOutput: "git",
+			globalOut:  "http",
+			want:       ProtocolSSH,
+			wantCalls: [][]string{
+				{"config", "get", "-h", "github.com", "git_protocol"},
+				{"config", "get", "git_protocol"},
+			},
+		},
+		{
+			name:      "command failures default to ssh",
+			hostErr:   errors.New("host lookup failed"),
+			globalErr: errors.New("global lookup failed"),
+			want:      ProtocolSSH,
+			wantCalls: [][]string{
+				{"config", "get", "-h", "github.com", "git_protocol"},
+				{"config", "get", "git_protocol"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls [][]string
+			runner := func(_ context.Context, args ...string) ([]byte, error) {
+				calls = append(calls, append([]string(nil), args...))
+				if len(calls) == 1 {
+					return []byte(tt.hostOutput), tt.hostErr
+				}
+				return []byte(tt.globalOut), tt.globalErr
+			}
+			resolver := newGitProtocolResolver(runner)
+
+			got := resolver.ResolveGitProtocol(context.Background(), "https://github.com/")
+			if got != tt.want {
+				t.Fatalf("ResolveGitProtocol() = %q, want %q", got, tt.want)
+			}
+			if !reflect.DeepEqual(calls, tt.wantCalls) {
+				t.Fatalf("gh calls = %v, want %v", calls, tt.wantCalls)
+			}
+			if len(calls) > 0 && strings.Contains(strings.Join(calls[0], " "), "https://") {
+				t.Fatalf("host-specific gh lookup received URL instead of hostname: %v", calls[0])
+			}
+		})
+	}
+}
+
+func TestDetectGitProtocolStopsFallbackAfterContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	calls := 0
+	runner := func(ctx context.Context, _ ...string) ([]byte, error) {
+		calls++
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	resolver := newGitProtocolResolver(runner)
+
+	if got := resolver.ResolveGitProtocol(ctx, "github.com"); got != ProtocolSSH {
+		t.Fatalf("ResolveGitProtocol() = %q, want SSH default", got)
+	}
+	if calls != 1 {
+		t.Fatalf("gh lookup calls = %d, want one lookup after deadline", calls)
 	}
 }

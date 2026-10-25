@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 )
 
 var (
@@ -25,6 +28,8 @@ var (
 	ErrRuntimeUpdateTargetRequired = errors.New("managed runtime target version is required")
 	ErrRuntimeUpdateTargetInvalid  = errors.New("managed runtime target version is invalid")
 	ErrRuntimeUpdateTargetMissing  = errors.New("managed runtime target version is not published")
+	ErrRuntimeMigrationUnsupported = errors.New("OpenCode runtime migration is unavailable")
+	ErrRuntimeMigrationBlocked     = errors.New("OpenCode runtime migration is blocked")
 )
 
 // PreviewAgentUpdate resolves the trusted built-in update recipe without
@@ -34,6 +39,28 @@ func (c *Controller) PreviewAgentUpdate(
 	name string,
 	targetVersions ...string,
 ) (*dto.AgentUpdatePreviewDTO, error) {
+	target := ""
+	if len(targetVersions) > 0 {
+		target = strings.TrimSpace(targetVersions[0])
+	}
+	return c.previewAgentUpdate(ctx, name, target, false)
+}
+
+// PreviewAgentUpdateUseDefault previews returning to the reviewed Kandev
+// default without claiming maintenance state or running a candidate.
+func (c *Controller) PreviewAgentUpdateUseDefault(
+	ctx context.Context,
+	name string,
+) (*dto.AgentUpdatePreviewDTO, error) {
+	return c.previewAgentUpdate(ctx, name, "", true)
+}
+
+func (c *Controller) previewAgentUpdate(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+	useDefault bool,
+) (*dto.AgentUpdatePreviewDTO, error) {
 	if c.runtimeUpdater == nil {
 		return nil, ErrRuntimeUpdaterUnavailable
 	}
@@ -41,59 +68,176 @@ func (c *Controller) PreviewAgentUpdate(
 	if !ok {
 		return nil, ErrAgentNotFound
 	}
-	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
-	if !ok {
-		return nil, ErrRuntimeUpdateUnsupported
+	if harness, supported := ag.(agents.HarnessUpdateAgent); supported {
+		return c.previewHarnessUpdate(ctx, ag, harness.HarnessUpdate(), targetVersion, useDefault)
 	}
-	spec := managed.ManagedNPMRuntime()
-	if strings.TrimSpace(spec.Package) == "" {
-		return nil, ErrRuntimeUpdateUnsupported
+	spec, fallback, err := c.managedRuntimeUpdateSpec(ag)
+	var family managedruntime.OpenCodeFamily
+	var source managedruntime.OpenCodeSource
+	var revision uint64
+	var activeSelection string
+	var migrationAvailable bool
+	if managed, ok := ag.(agents.ManagedNPMRuntimeAgent); ok && name == agents.OpenCodeACPAgentID && c.hasOpenCodeSelection(ctx) {
+		spec, family, source, revision, activeSelection, migrationAvailable, err = c.managedRuntimeState(ctx, name, managed)
+		fallback = false
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	current := ""
-	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found {
-		current = caps.AgentVersion
+	active, effective, defaultVersion := activeSelection, "", spec.DefaultVersionOrPinned()
+	if active != "" {
+		effective = active
+	} else {
+		effective = defaultVersion
 	}
-	active, err := c.activeRuntimeVersion(ctx, name, spec.Package)
+	if family == "" {
+		active, effective, defaultVersion, err = c.runtimeVersions(ctx, name, spec)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+		}
+	}
+	current := managedCurrentVersion(ctx, c.runtimeUpdater, c.managedRuntimeSelections, managedVersionState{
+		agentName: name, packageName: spec.Package, fallback: fallback, active: active, effective: effective,
+	})
+	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(
+		ctx, spec.Package, active, current, effective, defaultVersion,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
-	catalogue, exactCatalogue, err := c.resolveRuntimeCatalogue(ctx, spec.Package, active, current)
+	target, err := resolvePreviewTarget(
+		catalogue,
+		exactCatalogue,
+		targetVersion,
+		defaultVersion,
+		useDefault,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+		return nil, err
 	}
-	target := catalogue.Latest
-	if len(targetVersions) > 0 && strings.TrimSpace(targetVersions[0]) != "" {
-		target = strings.TrimSpace(targetVersions[0])
-		if _, err := managedruntime.ParseStableVersion(target); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
-		}
-		if exactCatalogue && !catalogue.Has(target) {
-			return nil, fmt.Errorf("%w: %s", ErrRuntimeUpdateTargetMissing, target)
-		}
-	}
-	operation, err := managedruntime.ClassifyOperation(active, current, target)
+	operation, err := managedruntime.ClassifyEffectiveOperation(
+		useDefault, active, effective, current, target, defaultVersion,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
 	}
-	command := spec.CacheUpdateCommand(target).Args()
-	if !exactCatalogue && (len(targetVersions) == 0 || strings.TrimSpace(targetVersions[0]) == "") {
+	command := spec.UpdateCommand(target).Args()
+	if family != "" && source == managedruntime.OpenCodeSourceManaged {
+		command = spec.CacheUpdateCommand(target).Args()
+	}
+	if !exactCatalogue && targetVersion == "" && !useDefault {
 		// Keep the compatibility preview for embedders that provide only the
 		// legacy latest-version seam. Production uses the catalogue resolver and
 		// always previews an exact package@version command.
-		command = spec.CacheUpdateCommand().Args()
+		command = spec.UpdateCommand().Args()
 	}
 	return &dto.AgentUpdatePreviewDTO{
-		AgentName:         name,
-		Package:           spec.Package,
-		CurrentVersion:    current,
-		ActiveVersion:     active,
-		TargetVersion:     target,
-		Operation:         string(operation),
-		AvailableVersions: runtimeVersionDTOs(catalogue),
-		Command:           command,
-		CommandString:     buildCommandString(command),
+		UpdateMode:         dto.AgentUpdateModePinned,
+		ManagedFallback:    fallback,
+		AgentName:          name,
+		Package:            spec.Package,
+		CurrentVersion:     current,
+		DefaultVersion:     defaultVersion,
+		ActiveVersion:      active,
+		EffectiveVersion:   effective,
+		TargetVersion:      target,
+		Family:             string(family),
+		Source:             string(source),
+		TargetFamily:       string(family),
+		RuntimeRevision:    revision,
+		MigrationAvailable: migrationAvailable,
+		Operation:          string(operation),
+		AvailableVersions:  runtimeVersionDTOs(catalogue),
+		Command:            command,
+		CommandString:      buildCommandString(command),
 	}, nil
+}
+
+// managedVersionState identifies the managed package whose current version is
+// being derived and the versions that future launches will use.
+type managedVersionState struct {
+	agentName   string
+	packageName string
+	fallback    bool
+	active      string
+	effective   string
+}
+
+// managedCurrentVersion returns the observed version of the managed package.
+// Host capabilities describe a native installation in fallback mode, so the
+// fallback's observation is the version its last successful activation
+// validated, while that version is still effective. A selection is itself
+// persisted only after its probe passed, so it remains a valid observation when
+// no validation record names the effective version or the store keeps no
+// validation records.
+func managedCurrentVersion(
+	ctx context.Context,
+	updater RuntimeUpdater,
+	selections managedruntime.SelectionStore,
+	state managedVersionState,
+) string {
+	if !state.fallback {
+		if caps, found := updater.CurrentCapabilities(state.agentName); found {
+			return caps.AgentVersion
+		}
+		return ""
+	}
+	if records, ok := selections.(managedruntime.ValidatedVersionStore); ok {
+		record, found, err := records.GetValidated(ctx, state.agentName, state.packageName)
+		if err == nil && found && record.Version == state.effective {
+			return record.Version
+		}
+	}
+	return state.active
+}
+
+func (c *Controller) managedRuntimeUpdateSpec(ag agents.Agent) (agents.ManagedNPMRuntimeSpec, bool, error) {
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return agents.ManagedNPMRuntimeSpec{}, false, ErrRuntimeUpdateUnsupported
+	}
+	spec := managed.ManagedNPMRuntime()
+	if ag.ID() == agents.OpenCodeACPAgentID && c.hasOpenCodeSelection(context.Background()) {
+		return spec, false, nil
+	}
+	fallback := spec.NativeBinaryOnPath()
+	if strings.TrimSpace(spec.Package) == "" || (fallback && !c.verifiedManagedActivation()) {
+		return agents.ManagedNPMRuntimeSpec{}, false, ErrRuntimeUpdateUnsupported
+	}
+	spec.NativeBinary = ""
+	return spec, fallback, nil
+}
+
+func (c *Controller) verifiedManagedActivation() bool {
+	_, candidate := c.runtimeUpdater.(RuntimeCandidateUpdater)
+	_, catalogue := c.runtimeUpdater.(RuntimeVersionResolver)
+	return candidate && catalogue && c.managedRuntimeSelections != nil
+}
+
+func resolvePreviewTarget(
+	catalogue managedruntime.Catalogue,
+	exactCatalogue bool,
+	targetVersion string,
+	defaultVersion string,
+	useDefault bool,
+) (string, error) {
+	target := catalogue.Latest
+	switch {
+	case useDefault:
+		target = defaultVersion
+	case targetVersion != "":
+		target = targetVersion
+	default:
+		return target, nil
+	}
+	if _, err := managedruntime.ParseStableVersion(target); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)
+	}
+	if exactCatalogue && !catalogue.Has(target) {
+		return "", fmt.Errorf("%w: %s", ErrRuntimeUpdateTargetMissing, target)
+	}
+	return target, nil
 }
 
 func (c *Controller) resolveRuntimeCatalogue(
@@ -106,14 +250,14 @@ func (c *Controller) resolveRuntimeCatalogue(
 		if err != nil {
 			return managedruntime.Catalogue{}, true, err
 		}
-		catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest, extras...)
+		catalogue, err := managedruntime.BuildCatalogueForPackage(packageName, metadata.Versions, metadata.Latest, extras...)
 		return catalogue, true, err
 	}
 	target, err := c.runtimeUpdater.ResolveTarget(ctx, packageName)
 	if err != nil {
 		return managedruntime.Catalogue{}, false, err
 	}
-	catalogue, err := managedruntime.BuildCatalogue([]string{target}, target)
+	catalogue, err := managedruntime.BuildCatalogueForPackage(packageName, []string{target}, target)
 	return catalogue, false, err
 }
 
@@ -146,6 +290,30 @@ func (c *Controller) activeRuntimeVersion(
 	return selection.Version, nil
 }
 
+func (c *Controller) runtimeVersions(
+	ctx context.Context,
+	agentName string,
+	spec agents.ManagedNPMRuntimeSpec,
+) (active, effective, defaultVersion string, err error) {
+	defaultVersion = spec.DefaultVersionOrPinned()
+	if agentName == agents.OpenCodeACPAgentID {
+		selectedActive, selectedEffective, found, readErr := c.selectedOpenCodeVersions(ctx, spec.Package)
+		if readErr != nil || found {
+			return selectedActive, selectedEffective, defaultVersion, readErr
+		}
+	}
+
+	active, err = c.activeRuntimeVersion(ctx, agentName, spec.Package)
+	if err != nil {
+		return "", "", defaultVersion, err
+	}
+	effective = defaultVersion
+	if active != "" {
+		effective = active
+	}
+	return active, effective, defaultVersion, nil
+}
+
 // RuntimeUpdater is the external-process and host-probe boundary used by
 // managed runtime jobs. Implementations must execute commands as direct argv.
 type RuntimeUpdater interface {
@@ -167,6 +335,11 @@ type RuntimeVersionMetadata struct {
 	Latest   string
 }
 
+type npmRuntimeMetadata struct {
+	Versions []string          `json:"versions"`
+	DistTags map[string]string `json:"dist-tags"`
+}
+
 // RuntimeVersionResolver obtains package metadata without executing a package.
 type RuntimeVersionResolver interface {
 	ResolveVersions(context.Context, string) (RuntimeVersionMetadata, error)
@@ -177,6 +350,14 @@ type RuntimeVersionResolver interface {
 type RuntimeCandidateUpdater interface {
 	Probe(context.Context, string, agents.Command) (hostutility.AgentCapabilities, error)
 	PublishCapabilities(string, hostutility.AgentCapabilities)
+}
+
+type IsolatedRuntimeCandidateUpdater interface {
+	ProbeIsolated(context.Context, string, agents.Command) (hostutility.AgentCapabilities, error)
+}
+
+type RuntimeCapabilityInvalidator interface {
+	InvalidateCapabilities(string)
 }
 
 // ExactRuntimeCacheInvalidator removes only the version-specific npm tree.
@@ -208,8 +389,10 @@ func (c *Controller) InvalidateExecutionCacheVersion(ctx context.Context, packag
 }
 
 type hostRuntimeUpdater struct {
-	host     *hostutility.Manager
-	executor directCommandExecutor
+	host       *hostutility.Manager
+	executor   directCommandExecutor
+	logger     *commonlogger.Logger
+	httpClient *http.Client
 }
 
 type directCommandExecutor interface {
@@ -258,6 +441,49 @@ func (u *hostRuntimeUpdater) ResolveTarget(ctx context.Context, packageName stri
 	return target, nil
 }
 
+// ResolveHarnessLatest reads the stable dist-tag from the fixed public HTTPS
+// registry. Unlike pinned runtimes, this lookup never starts an npm process.
+const harnessPackumentMaxBytes = 16 << 20
+
+func (u *hostRuntimeUpdater) ResolveHarnessLatest(ctx context.Context, pkg string) (string, error) {
+	lookupCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(lookupCtx, http.MethodGet,
+		"https://registry.npmjs.org/"+url.PathEscape(pkg), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.npm.install-v1+json")
+	client := u.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("registry metadata: HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, harnessPackumentMaxBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read registry metadata: %w", err)
+	}
+	if len(body) > harnessPackumentMaxBytes {
+		return "", fmt.Errorf("registry metadata exceeds %d bytes", harnessPackumentMaxBytes)
+	}
+	var packument struct {
+		DistTags struct {
+			Latest string `json:"latest"`
+		} `json:"dist-tags"`
+	}
+	if err := json.Unmarshal(body, &packument); err != nil {
+		return "", fmt.Errorf("decode registry metadata: %w", err)
+	}
+	return validateRuntimeUpdateLatest(packument.DistTags.Latest, nil)
+}
+
 func (u *hostRuntimeUpdater) ResolveVersions(
 	ctx context.Context,
 	packageName string,
@@ -267,12 +493,9 @@ func (u *hostRuntimeUpdater) ResolveVersions(
 	if err != nil {
 		return RuntimeVersionMetadata{}, err
 	}
-	var metadata struct {
-		Versions []string          `json:"versions"`
-		DistTags map[string]string `json:"dist-tags"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &metadata); err != nil {
-		return RuntimeVersionMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+	metadata, err := parseNPMRuntimeMetadata(output)
+	if err != nil {
+		return RuntimeVersionMetadata{}, err
 	}
 	latest := ""
 	if metadata.DistTags != nil {
@@ -284,13 +507,37 @@ func (u *hostRuntimeUpdater) ResolveVersions(
 	return RuntimeVersionMetadata{Versions: metadata.Versions, Latest: latest}, nil
 }
 
+func parseNPMRuntimeMetadata(output string) (npmRuntimeMetadata, error) {
+	payload := []byte(strings.TrimSpace(output))
+	if len(payload) > 0 && payload[0] == '[' {
+		var records []npmRuntimeMetadata
+		if err := json.Unmarshal(payload, &records); err != nil {
+			return npmRuntimeMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+		}
+		if len(records) != 1 {
+			return npmRuntimeMetadata{}, errors.New("parse npm runtime metadata: expected one record")
+		}
+		return records[0], nil
+	}
+
+	var metadata npmRuntimeMetadata
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		return npmRuntimeMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+	}
+	return metadata, nil
+}
+
 func runDirectCommandOutput(ctx context.Context, command agents.Command) (string, error) {
 	argv := command.Args()
 	if len(argv) == 0 {
 		return "", errors.New("runtime update command is empty")
 	}
+	env := filteredInstallEnv()
+	if err := managedruntime.PrepareNPMProjectPrefix(argv); err != nil {
+		return "", errors.New("managed npm project prefix could not be prepared")
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = filteredInstallEnv()
+	cmd.Env = env
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -307,7 +554,8 @@ func (u *hostRuntimeUpdater) RunUpdate(
 }
 
 func (u *hostRuntimeUpdater) npxCacheRoot(ctx context.Context) (string, error) {
-	output, err := u.executor.Output(ctx, agents.NewCommand("npm", "config", "get", "cache"))
+	args := append(managedruntime.NPMProjectPrefixArgs(), "config", "get", "cache")
+	output, err := u.executor.Output(ctx, agents.NewCommand(append([]string{"npm"}, args...)...))
 	if err != nil {
 		return "", fmt.Errorf("resolve npm cache root: %w", err)
 	}
@@ -323,7 +571,11 @@ func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packa
 	if err != nil {
 		return err
 	}
-	return managedruntime.RemoveNpxExecutionTree(cacheRoot, packageName)
+	// Cache repair must target the same exact package spec used by the managed
+	// launch command. Known built-ins therefore invalidate their pinned tree,
+	// while unknown packages retain the unversioned compatibility path.
+	spec := agents.ManagedNPMRuntimeSpec{Package: packageName}
+	return managedruntime.RemoveNpxExecutionTree(cacheRoot, spec.PackageSpec(""))
 }
 
 func (u *hostRuntimeUpdater) InvalidateExecutionCacheVersion(
@@ -370,13 +622,21 @@ func (u *hostRuntimeUpdater) PublishCapabilities(
 	u.host.PublishCapabilities(agentName, caps)
 }
 
+func (u *hostRuntimeUpdater) InvalidateCapabilities(agentName string) {
+	u.host.InvalidateCapabilities(agentName)
+}
+
 func runDirectCommand(ctx context.Context, command agents.Command, onChunk func(string)) error {
 	argv := command.Args()
 	if len(argv) == 0 {
 		return errors.New("runtime update command is empty")
 	}
+	env := filteredInstallEnv()
+	if err := managedruntime.PrepareNPMProjectPrefix(argv); err != nil {
+		return errors.New("managed npm project prefix could not be prepared")
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = filteredInstallEnv()
+	cmd.Env = env
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -424,29 +684,73 @@ func scanCommandOutput(
 	}
 }
 
-// EnqueueAgentUpdate starts or reuses an update for a built-in managed agent.
+// IsHarnessUpdate derives approval shape from the registered built-in agent,
+// not request fields.
+func (c *Controller) IsHarnessUpdate(name string) bool {
+	if c.agentRegistry == nil {
+		return false
+	}
+	ag, found := c.agentRegistry.Get(name)
+	if !found {
+		return false
+	}
+	_, supported := ag.(agents.HarnessUpdateAgent)
+	return supported
+}
+
+// EnqueueAgentUpdate starts or reuses an update for a built-in agent.
 func (c *Controller) EnqueueAgentUpdate(
 	ctx context.Context,
 	name string,
 	targetVersion string,
 ) (*dto.AgentUpdateJobDTO, error) {
+	return c.enqueueAgentUpdate(ctx, name, strings.TrimSpace(targetVersion), false)
+}
+
+// EnqueueAgentUpdateUseDefault validates and activates the reviewed Kandev
+// default, deleting an operator selection only after the candidate probe
+// succeeds.
+func (c *Controller) EnqueueAgentUpdateUseDefault(
+	ctx context.Context,
+	name string,
+) (*dto.AgentUpdateJobDTO, error) {
+	return c.enqueueAgentUpdate(ctx, name, "", true)
+}
+
+func (c *Controller) enqueueAgentUpdate(
+	ctx context.Context,
+	name string,
+	targetVersion string,
+	useDefault bool,
+) (*dto.AgentUpdateJobDTO, error) {
 	if c.updateJobStore == nil || c.runtimeUpdater == nil {
 		return nil, ErrRuntimeUpdaterUnavailable
 	}
+	c.runtimeAutoUpdateMu.Lock()
+	defer c.runtimeAutoUpdateMu.Unlock()
 	if active, found := c.updateJobStore.GetActive(name); found {
+		if active.Automatic {
+			return nil, &MaintenanceConflictError{AgentName: name, Active: MaintenanceJobRef{JobID: active.JobID, Kind: MaintenanceKindUpdate}}
+		}
 		return active, nil
 	}
 	ag, ok := c.agentRegistry.Get(name)
 	if !ok {
 		return nil, ErrAgentNotFound
 	}
-	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
-	if !ok {
-		return nil, ErrRuntimeUpdateUnsupported
+	if harness, supported := ag.(agents.HarnessUpdateAgent); supported {
+		return c.enqueueHarnessUpdate(ag, harness.HarnessUpdate(), targetVersion, useDefault)
 	}
-	spec := managed.ManagedNPMRuntime()
-	if strings.TrimSpace(spec.Package) == "" {
-		return nil, ErrRuntimeUpdateUnsupported
+	spec, fallback, err := c.managedRuntimeUpdateSpec(ag)
+	if managed, ok := ag.(agents.ManagedNPMRuntimeAgent); ok && name == agents.OpenCodeACPAgentID && c.hasOpenCodeSelection(ctx) {
+		spec, _, _, _, _, _, err = c.managedRuntimeState(ctx, name, managed)
+		fallback = false
+	}
+	if err != nil {
+		return nil, err
+	}
+	if useDefault {
+		targetVersion = spec.DefaultVersionOrPinned()
 	}
 	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion == "" {
@@ -455,10 +759,17 @@ func (c *Controller) EnqueueAgentUpdate(
 	if err := c.validateAgentUpdateTarget(ctx, spec, targetVersion); err != nil {
 		return nil, err
 	}
-	if noOp := c.alreadyActiveHealthyUpdate(ctx, name, spec, targetVersion); noOp != nil {
-		return noOp, nil
+	if !useDefault && !fallback {
+		if noOp := c.alreadyActiveHealthyUpdate(ctx, name, spec, targetVersion); noOp != nil {
+			if err := c.disableAutomaticUpdatesLocked(ctx, name); err != nil {
+				return nil, err
+			}
+			return noOp, nil
+		}
 	}
-	job, err := c.updateJobStore.Enqueue(name, spec, targetVersion)
+	job, err := c.updateJobStore.enqueueManual(name, spec, useDefault, targetVersion, fallback, func() error {
+		return c.disableAutomaticUpdatesLocked(ctx, name)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +796,11 @@ func (c *Controller) validateAgentUpdateTarget(
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
-	catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest)
+	return validateRuntimeCatalogueTargetForPackage(spec.Package, metadata, targetVersion)
+}
+
+func validateRuntimeCatalogueTargetForPackage(pkg string, metadata RuntimeVersionMetadata, targetVersion string) error {
+	catalogue, err := managedruntime.BuildCatalogueForPackage(pkg, metadata.Versions, metadata.Latest)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
@@ -515,16 +830,20 @@ func (c *Controller) alreadyActiveHealthyUpdate(
 		return nil
 	}
 	now := time.Now().UTC()
+	defaultVersion := spec.DefaultVersionOrPinned()
 	return &dto.AgentUpdateJobDTO{
-		AgentName:      agentName,
-		Status:         dto.AgentUpdateJobStatusSucceeded,
-		Operation:      string(managedruntime.OperationUpToDate),
-		CurrentVersion: caps.AgentVersion,
-		ActiveVersion:  selection.Version,
-		TargetVersion:  targetVersion,
-		Output:         "Runtime already up to date.\n",
-		StartedAt:      now,
-		FinishedAt:     &now,
+		UpdateMode:       dto.AgentUpdateModePinned,
+		AgentName:        agentName,
+		Status:           dto.AgentUpdateJobStatusSucceeded,
+		Operation:        string(managedruntime.OperationUpToDate),
+		CurrentVersion:   caps.AgentVersion,
+		DefaultVersion:   defaultVersion,
+		ActiveVersion:    selection.Version,
+		EffectiveVersion: selection.Version,
+		TargetVersion:    targetVersion,
+		Output:           "Runtime already up to date.\n",
+		StartedAt:        now,
+		FinishedAt:       &now,
 	}
 }
 

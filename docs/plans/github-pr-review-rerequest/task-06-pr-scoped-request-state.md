@@ -6,7 +6,7 @@ wave: 4
 depends_on:
   - "02-frontend-dismissed-review-action"
 plan: "plan.md"
-spec: "../../specs/ui/github-pr-review-actions.md"
+spec: "../../specs/ui/requirements/github-pr-review-actions.md"
 ---
 
 # Task 06: PR-scoped optimistic request state

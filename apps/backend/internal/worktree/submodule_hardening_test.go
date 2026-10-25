@@ -166,11 +166,15 @@ func TestNewSubmoduleUpdateCmd_HasHardeningFlags(t *testing.T) {
 	wantEnv := []string{
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
-		"SSH_ASKPASS=/bin/false",
+		"SSH_ASKPASS=exit 1",
 		"GCM_INTERACTIVE=Never",
 	}
 	haveEnv := make(map[string]bool, len(cmd.Env))
 	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "GIT_SSH_COMMAND=") {
+			haveEnv["GIT_SSH_COMMAND=ssh -oBatchMode=yes"] = strings.Contains(e, "-oBatchMode=yes")
+			continue
+		}
 		haveEnv[e] = true
 	}
 	for _, want := range wantEnv {

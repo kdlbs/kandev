@@ -5,7 +5,7 @@ status: pending
 wave: 2
 depends_on: ["01-sidebar-mr-badge"]
 plan: "plan.md"
-spec: "../../specs/gitlab-mr-task-list-badges/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-mr-task-list-badges.md"
 ---
 
 # Task 04: E2E for the sidebar MR badge

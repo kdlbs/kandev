@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -59,6 +60,9 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	for {
 		_, gitPoll, _ := wt.pollIntervals(wt.GetPollMode())
 		timer.Reset(gitPoll)
+		if wt.pollTimerArmed != nil {
+			wt.pollTimerArmed("gitPoll", gitPoll)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -113,6 +117,8 @@ func (wt *WorkspaceTracker) handleGitPollTimerTick(ctx context.Context, consecut
 // (commits, branch switches, staging). Returns true if the loop should stop.
 // The deferred flag reset ensures gitPollRunning is cleared even on panic.
 func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures *int) bool {
+	start := time.Now()
+	defer func() { wt.recordGitPollTick(time.Since(start)) }()
 	defer atomic.StoreInt32(&wt.gitPollRunning, 0)
 
 	if !wt.workDirExists() {
@@ -127,7 +133,7 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 	}
 	*consecutiveFailures = 0
 
-	wt.checkGitChanges(ctx, snap)
+	noteSlowPollIdle(&wt.slowIdleGitPollTicks, wt.checkGitChanges(ctx, snap))
 	return false
 }
 
@@ -139,6 +145,11 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 //
 // Returns true if pollGitChanges should exit.
 func (wt *WorkspaceTracker) handleGitPollFailure(ctx context.Context, consecutiveFailures *int, cause error) bool {
+	if fsdiagnostics.IsAccessDenied(cause) {
+		wt.recordFilesystemFailure("workspace.git_poll", workspaceTrigger(ctx, "poll"), cause)
+		*consecutiveFailures = 0
+		return false
+	}
 	if errors.Is(cause, subproc.ErrAdmissionCanceled) {
 		wt.logger.Debug("git poll admission canceled; preserving tracker liveness",
 			zap.String("workDir", wt.workDir),
@@ -148,6 +159,11 @@ func (wt *WorkspaceTracker) handleGitPollFailure(ctx context.Context, consecutiv
 	}
 
 	probeErr := wt.runPollingGit(ctx, "rev-parse", "--git-dir")
+	if fsdiagnostics.IsAccessDenied(probeErr) {
+		wt.recordFilesystemFailure("workspace.git_poll", workspaceTrigger(ctx, "poll"), probeErr)
+		*consecutiveFailures = 0
+		return false
+	}
 	if errors.Is(probeErr, subproc.ErrAdmissionCanceled) {
 		wt.logger.Debug("git poll health probe admission canceled; preserving tracker liveness",
 			zap.String("workDir", wt.workDir),
@@ -343,12 +359,13 @@ func (wt *WorkspaceTracker) compareToCachedState(snap gitPollSnapshot) gitPollDe
 
 // checkGitChanges checks if HEAD, git index, or the upstream ref has changed
 // and processes changes. It only routes: each case below owns its own cache
-// update and notifications.
-func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSnapshot) {
+// update and notifications. It reports whether any tracked value moved.
+func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSnapshot) bool {
 	delta := wt.compareToCachedState(snap)
+	changed := delta.headChanged || delta.branchChanged || delta.indexChanged || delta.upstreamChanged
 
 	switch {
-	case !delta.headChanged && !delta.branchChanged && !delta.indexChanged && !delta.upstreamChanged:
+	case !changed:
 		// Nothing moved.
 	case delta.upstreamChanged && !delta.headChanged && !delta.branchChanged && !delta.indexChanged:
 		wt.handleUpstreamOnlyChange(ctx, delta)
@@ -359,6 +376,7 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSna
 	case delta.headChanged:
 		wt.handleHeadChange(ctx, delta)
 	}
+	return changed
 }
 
 // handleUpstreamOnlyChange records a push or fetch that moved the upstream

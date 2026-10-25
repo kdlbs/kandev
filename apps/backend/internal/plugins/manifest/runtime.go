@@ -10,6 +10,18 @@ func (m *Manifest) IsManaged() bool {
 	return m.Runtime.Type == runtimeTypeBinary
 }
 
+// HasWebApps reports whether the manifest declares one or more isolated
+// static web applications.
+func (m *Manifest) HasWebApps() bool {
+	return m != nil && len(m.UI.WebApps) > 0
+}
+
+// IsStaticWebAppOnly reports the package form that has no managed backend and
+// contributes only isolated static web applications.
+func (m *Manifest) IsStaticWebAppOnly() bool {
+	return m != nil && m.HasWebApps() && !m.IsManaged() && m.BaseURL == "" && m.Endpoints == (Endpoints{})
+}
+
 // ExecutableFor returns the package-relative executable path declared for
 // the given host platform (goos/goarch, e.g. "linux", "amd64"), and whether
 // an entry exists. The returned path is relative to the extracted package

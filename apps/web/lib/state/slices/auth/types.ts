@@ -25,15 +25,21 @@ export type SsoProvider = {
   initiateUrl: string;
 };
 
+export type SessionHostnameEntry = {
+  hostname: string;
+  resolvedAt: string | null;
+};
 export type AuthSliceState = {
   auth: {
     mode: AuthMode;
     authenticated: boolean;
     user: AuthUser | null;
     // External-login options for the login screen. Optional: GET
-    // /api/v1/auth/me omits it, only the anonymous boot payload carries it.
+    // /api/auth/me omits it, only the anonymous boot payload carries it.
     ssoProviders?: SsoProvider[];
   };
+  sessionHostnames: Record<string, SessionHostnameEntry>;
+  sessionHostnamesEpoch: number;
 };
 
 export type AuthSliceActions = {
@@ -43,6 +49,7 @@ export type AuthSliceActions = {
   /** Mark the session unauthenticated without touching mode.
    * Used by the 401 handler when a session expires mid-use. */
   clearAuthenticated: () => void;
+  setSessionHostname: (ip: string, hostname: string, resolvedAt: string | null) => void;
 };
 
 export type AuthSlice = AuthSliceState & AuthSliceActions;

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workspaces/secret-scope-transfer.md
+spec: docs/specs/workspaces/requirements/secret-scope-transfer.md
 created: 2026-08-11
 status: completed
 ---

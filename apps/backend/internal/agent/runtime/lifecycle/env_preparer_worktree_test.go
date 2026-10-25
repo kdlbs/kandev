@@ -63,3 +63,24 @@ func TestCopyFilesStep_WarningsOnlyNoCopies(t *testing.T) {
 		t.Error("expected warning to be set")
 	}
 }
+
+func TestApplySyncProgressEvent_PropagatesWarning(t *testing.T) {
+	step := beginStep("Sync base branch")
+	applySyncProgressEvent(&step, worktree.SyncProgressEvent{
+		StepName:      "Sync base branch",
+		Status:        worktree.SyncProgressCompleted,
+		Output:        "Fetch timeout; using main",
+		Warning:       "Remote refresh was incomplete; using local base main.",
+		WarningDetail: "The selected local base was verified before refresh.",
+	})
+
+	if step.Status != PrepareStepCompleted {
+		t.Fatalf("status = %q, want completed", step.Status)
+	}
+	if step.Warning != "Remote refresh was incomplete; using local base main." {
+		t.Fatalf("warning = %q, want sync warning", step.Warning)
+	}
+	if step.WarningDetail != "The selected local base was verified before refresh." {
+		t.Fatalf("warning detail = %q, want sync warning detail", step.WarningDetail)
+	}
+}

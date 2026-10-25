@@ -5,15 +5,15 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/app-status-bar.md"
+spec: "../../specs/ui/requirements/app-status-bar.md"
 ---
 
 # Task 01: Hide initial metrics loading state
 
 ## Inputs
 
-- [App status bar failure modes](../../specs/ui/app-status-bar.md#failure-modes)
-- [App status bar scenarios](../../specs/ui/app-status-bar.md#scenarios)
+- [App status bar failure modes](../../specs/ui/requirements/app-status-bar.md#failure-modes)
+- [App status bar scenarios](../../specs/ui/requirements/app-status-bar.md#scenarios)
 - [Metrics loading-state plan](plan.md)
 - Existing subscription and responsive rendering in `apps/web/components/system-metrics/status-surface-metrics.tsx`
 

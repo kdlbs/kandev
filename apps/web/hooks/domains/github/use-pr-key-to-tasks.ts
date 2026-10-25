@@ -11,10 +11,21 @@ function prKey(owner: string, repo: string, prNumber: number): string {
 
 export function usePRKeyToTasks(workspaceId: string | null): Map<string, TaskPR[]> {
   useWorkspacePRs(workspaceId);
-  const byTaskId = useAppStore((state) => state.taskPRs.byTaskId);
+  const taskPRs = useAppStore((state) => state.taskPRs);
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration);
 
   return useMemo(() => {
     const map = new Map<string, TaskPR[]>();
+    if (
+      workspaceId === null ||
+      workspaceId !== activeWorkspaceId ||
+      taskPRs.workspaceId !== workspaceId ||
+      taskPRs.workspaceContextGeneration !== workspaceContextGeneration
+    ) {
+      return map;
+    }
+    const { byTaskId } = taskPRs;
     for (const taskId of Object.keys(byTaskId)) {
       const prs = byTaskId[taskId];
       if (!Array.isArray(prs)) continue;
@@ -26,7 +37,7 @@ export function usePRKeyToTasks(workspaceId: string | null): Map<string, TaskPR[
       }
     }
     return map;
-  }, [byTaskId]);
+  }, [taskPRs, activeWorkspaceId, workspaceContextGeneration, workspaceId]);
 }
 
 export { prKey };

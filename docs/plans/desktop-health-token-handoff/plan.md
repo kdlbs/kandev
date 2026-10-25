@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/port-collision-safety/spec.md
+spec: docs/specs/executors/requirements/port-collision-safety.md
 created: 2026-08-11
 status: in_progress
 ---
@@ -19,7 +19,7 @@ generate a fresh token and ignore stale inherited values. After targeted tests a
 desktop validation run, the stable release workflow publishes v0.86.2.
 
 The companion desktop contract is
-[Tauri Desktop App](../../specs/desktop-tauri-app/spec.md). Launcher ownership remains governed by
+[Tauri Desktop App](../../specs/desktop/requirements/desktop-tauri-app.md). Launcher ownership remains governed by
 [ADR-2026-08-08-go-launcher-owns-all-launch-modes](../../decisions/2026-08-08-go-launcher-owns-all-launch-modes.md).
 
 ## Backend

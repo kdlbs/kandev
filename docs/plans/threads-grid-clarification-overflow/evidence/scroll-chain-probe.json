@@ -1,0 +1,627 @@
+{
+  "change": "Temporary DOM overscrollBehaviorY:auto on clarification-overlay-container",
+  "clicks": [
+    {
+      "label": "SQLite",
+      "point": {
+        "x": 918.8889465332031,
+        "y": 423.0816078186035,
+        "hit": true
+      },
+      "geometry": {
+        "wheelEvents": [
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 319,
+            "deltaY": 66.66666843273026,
+            "target": "clarification-question-card"
+          },
+          {
+            "x": 918,
+            "y": 319,
+            "deltaY": 66.66666843273026,
+            "target": "clarification-option"
+          }
+        ],
+        "viewport": {
+          "innerWidth": 1517,
+          "innerHeight": 853,
+          "dpr": 0.8999999761581421,
+          "visualScale": 1
+        },
+        "layout": "grid",
+        "nodes": [
+          {
+            "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+            "x": 331.9965515136719,
+            "y": 51.99652862548828,
+            "width": 1173.7847900390625,
+            "height": 388.6632080078125,
+            "bottom": 440.6597366333008,
+            "clientHeight": 386,
+            "scrollHeight": 386,
+            "scrollTop": 0,
+            "overflowY": "hidden",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "session-chat",
+            "x": 333.107666015625,
+            "y": 118.6805648803711,
+            "width": 1171.5625,
+            "height": 320.8680725097656,
+            "bottom": 439.5486373901367,
+            "clientHeight": 321,
+            "scrollHeight": 321,
+            "scrollTop": 0,
+            "overflowY": "visible",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+            "x": 333.107666015625,
+            "y": 118.6805648803711,
+            "width": 1171.5625,
+            "height": 80,
+            "bottom": 198.6805648803711,
+            "clientHeight": 80,
+            "scrollHeight": 206,
+            "scrollTop": 125.55555725097656,
+            "overflowY": "auto",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "thread-footer-allocation",
+            "x": 333.107666015625,
+            "y": 198.68057250976562,
+            "width": 1171.5625,
+            "height": 240.86807250976562,
+            "bottom": 439.54864501953125,
+            "clientHeight": 241,
+            "scrollHeight": 616,
+            "scrollTop": 66.66667175292969,
+            "overflowY": "auto",
+            "overscrollY": "contain",
+            "maxHeight": "calc(100% - 80px)",
+            "minHeight": "0px"
+          },
+          {
+            "id": "clarification-overlay-container",
+            "x": 333.107666015625,
+            "y": 133.125,
+            "width": 1171.5625,
+            "height": 426.66668701171875,
+            "bottom": 559.7916870117188,
+            "clientHeight": 427,
+            "scrollHeight": 427,
+            "scrollTop": 0,
+            "overflowY": "hidden",
+            "overscrollY": "auto",
+            "maxHeight": "426.667px",
+            "minHeight": "120px"
+          },
+          {
+            "id": "clarification-scroll-region",
+            "x": 333.107666015625,
+            "y": 133.125,
+            "width": 1171.5625,
+            "height": 426.66668701171875,
+            "bottom": 559.7916870117188,
+            "clientHeight": 427,
+            "scrollHeight": 475,
+            "scrollTop": 48.88888931274414,
+            "overflowY": "auto",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "chat-input-area",
+            "x": 333.107666015625,
+            "y": 559.7916870117188,
+            "width": 1171.5625,
+            "height": 188.15972900390625,
+            "bottom": 747.951416015625,
+            "clientHeight": 188,
+            "scrollHeight": 188,
+            "scrollTop": 0,
+            "overflowY": "visible",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          }
+        ],
+        "targets": [
+          {
+            "id": "clarification-option",
+            "text": "1PostgreSQLRelational database with strong consistency",
+            "x": 353.0903015136719,
+            "y": 269.3923645019531,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 326.0763931274414,
+            "hit": true
+          },
+          {
+            "id": "clarification-option",
+            "text": "2MongoDBDocument database for flexible schemas",
+            "x": 353.0903015136719,
+            "y": 332.06597900390625,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 388.75000762939453,
+            "hit": true
+          },
+          {
+            "id": "clarification-option",
+            "text": "3SQLiteEmbedded database for simplicity",
+            "x": 353.0903015136719,
+            "y": 394.7395935058594,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 451.42362213134766,
+            "hit": true
+          },
+          {
+            "id": "clarification-next",
+            "text": "Next",
+            "x": 1422.5869140625,
+            "y": 521.40625,
+            "width": 62.1006965637207,
+            "height": 26.197917938232422,
+            "bottom": 547.6041679382324,
+            "hit": false
+          },
+          {
+            "id": "clarification-submit",
+            "text": "Submit",
+            "x": 1338.24658203125,
+            "y": 94.23611450195312,
+            "width": 82.4826431274414,
+            "height": 23.97569465637207,
+            "bottom": 118.2118091583252,
+            "hit": false
+          }
+        ]
+      }
+    },
+    {
+      "label": "Rust",
+      "point": {
+        "x": 918.8889465332031,
+        "y": 423.0816078186035,
+        "hit": true
+      },
+      "geometry": {
+        "wheelEvents": [
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 319,
+            "deltaY": 66.66666843273026,
+            "target": "clarification-question-card"
+          },
+          {
+            "x": 918,
+            "y": 319,
+            "deltaY": 66.66666843273026,
+            "target": "clarification-option"
+          }
+        ],
+        "viewport": {
+          "innerWidth": 1517,
+          "innerHeight": 853,
+          "dpr": 0.8999999761581421,
+          "visualScale": 1
+        },
+        "layout": "grid",
+        "nodes": [
+          {
+            "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+            "x": 331.9965515136719,
+            "y": 51.99652862548828,
+            "width": 1173.7847900390625,
+            "height": 388.6632080078125,
+            "bottom": 440.6597366333008,
+            "clientHeight": 386,
+            "scrollHeight": 386,
+            "scrollTop": 0,
+            "overflowY": "hidden",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "session-chat",
+            "x": 333.107666015625,
+            "y": 118.6805648803711,
+            "width": 1171.5625,
+            "height": 320.8680725097656,
+            "bottom": 439.5486373901367,
+            "clientHeight": 321,
+            "scrollHeight": 321,
+            "scrollTop": 0,
+            "overflowY": "visible",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+            "x": 333.107666015625,
+            "y": 118.6805648803711,
+            "width": 1171.5625,
+            "height": 80,
+            "bottom": 198.6805648803711,
+            "clientHeight": 80,
+            "scrollHeight": 206,
+            "scrollTop": 125.55555725097656,
+            "overflowY": "auto",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "thread-footer-allocation",
+            "x": 333.107666015625,
+            "y": 198.68057250976562,
+            "width": 1171.5625,
+            "height": 240.86807250976562,
+            "bottom": 439.54864501953125,
+            "clientHeight": 241,
+            "scrollHeight": 616,
+            "scrollTop": 66.66667175292969,
+            "overflowY": "auto",
+            "overscrollY": "contain",
+            "maxHeight": "calc(100% - 80px)",
+            "minHeight": "0px"
+          },
+          {
+            "id": "clarification-overlay-container",
+            "x": 333.107666015625,
+            "y": 133.125,
+            "width": 1171.5625,
+            "height": 426.66668701171875,
+            "bottom": 559.7916870117188,
+            "clientHeight": 427,
+            "scrollHeight": 427,
+            "scrollTop": 0,
+            "overflowY": "hidden",
+            "overscrollY": "auto",
+            "maxHeight": "426.667px",
+            "minHeight": "120px"
+          },
+          {
+            "id": "clarification-scroll-region",
+            "x": 333.107666015625,
+            "y": 133.125,
+            "width": 1171.5625,
+            "height": 426.66668701171875,
+            "bottom": 559.7916870117188,
+            "clientHeight": 427,
+            "scrollHeight": 475,
+            "scrollTop": 48.88888931274414,
+            "overflowY": "auto",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "chat-input-area",
+            "x": 333.107666015625,
+            "y": 559.7916870117188,
+            "width": 1171.5625,
+            "height": 188.15972900390625,
+            "bottom": 747.951416015625,
+            "clientHeight": 188,
+            "scrollHeight": 188,
+            "scrollTop": 0,
+            "overflowY": "visible",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          }
+        ],
+        "targets": [
+          {
+            "id": "clarification-option",
+            "text": "1GoStrong typing, fast compile",
+            "x": 353.0903015136719,
+            "y": 269.3923645019531,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 326.0763931274414,
+            "hit": true
+          },
+          {
+            "id": "clarification-option",
+            "text": "2TypeScriptFamiliar to the team",
+            "x": 353.0903015136719,
+            "y": 332.06597900390625,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 388.75000762939453,
+            "hit": true
+          },
+          {
+            "id": "clarification-option",
+            "text": "3RustBest for systems work",
+            "x": 353.0903015136719,
+            "y": 394.7395935058594,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 451.42362213134766,
+            "hit": true
+          },
+          {
+            "id": "clarification-next",
+            "text": "Next",
+            "x": 1422.5869140625,
+            "y": 521.40625,
+            "width": 62.1006965637207,
+            "height": 26.197917938232422,
+            "bottom": 547.6041679382324,
+            "hit": false
+          },
+          {
+            "id": "clarification-submit",
+            "text": "Submit",
+            "x": 1338.24658203125,
+            "y": 94.23611450195312,
+            "width": 82.4826431274414,
+            "height": 23.97569465637207,
+            "bottom": 118.2118091583252,
+            "hit": false
+          }
+        ]
+      }
+    },
+    {
+      "label": "Bare metal",
+      "point": {
+        "x": 918.8889465332031,
+        "y": 360.4079933166504,
+        "hit": true
+      },
+      "geometry": {
+        "wheelEvents": [
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 268,
+            "deltaY": 1000.0000264909539,
+            "target": "clarification-overlay"
+          },
+          {
+            "x": 918,
+            "y": 319,
+            "deltaY": 66.66666843273026,
+            "target": "clarification-question-card"
+          },
+          {
+            "x": 918,
+            "y": 319,
+            "deltaY": 66.66666843273026,
+            "target": "clarification-option"
+          }
+        ],
+        "viewport": {
+          "innerWidth": 1517,
+          "innerHeight": 853,
+          "dpr": 0.8999999761581421,
+          "visualScale": 1
+        },
+        "layout": "grid",
+        "nodes": [
+          {
+            "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+            "x": 331.9965515136719,
+            "y": 51.99652862548828,
+            "width": 1173.7847900390625,
+            "height": 388.6632080078125,
+            "bottom": 440.6597366333008,
+            "clientHeight": 386,
+            "scrollHeight": 386,
+            "scrollTop": 0,
+            "overflowY": "hidden",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "session-chat",
+            "x": 333.107666015625,
+            "y": 118.6805648803711,
+            "width": 1171.5625,
+            "height": 320.8680725097656,
+            "bottom": 439.5486373901367,
+            "clientHeight": 321,
+            "scrollHeight": 321,
+            "scrollTop": 0,
+            "overflowY": "visible",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+            "x": 333.107666015625,
+            "y": 118.6805648803711,
+            "width": 1171.5625,
+            "height": 80,
+            "bottom": 198.6805648803711,
+            "clientHeight": 80,
+            "scrollHeight": 206,
+            "scrollTop": 125.55555725097656,
+            "overflowY": "auto",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "thread-footer-allocation",
+            "x": 333.107666015625,
+            "y": 198.68057250976562,
+            "width": 1171.5625,
+            "height": 240.86807250976562,
+            "bottom": 439.54864501953125,
+            "clientHeight": 241,
+            "scrollHeight": 602,
+            "scrollTop": 115.55555725097656,
+            "overflowY": "auto",
+            "overscrollY": "contain",
+            "maxHeight": "calc(100% - 80px)",
+            "minHeight": "0px"
+          },
+          {
+            "id": "clarification-overlay-container",
+            "x": 333.107666015625,
+            "y": 84.23611450195312,
+            "width": 1171.5625,
+            "height": 412.69097900390625,
+            "bottom": 496.9270935058594,
+            "clientHeight": 413,
+            "scrollHeight": 413,
+            "scrollTop": 0,
+            "overflowY": "hidden",
+            "overscrollY": "auto",
+            "maxHeight": "426.667px",
+            "minHeight": "120px"
+          },
+          {
+            "id": "clarification-scroll-region",
+            "x": 333.107666015625,
+            "y": 84.23611450195312,
+            "width": 1171.5625,
+            "height": 412.69097900390625,
+            "bottom": 496.9270935058594,
+            "clientHeight": 413,
+            "scrollHeight": 413,
+            "scrollTop": 0,
+            "overflowY": "auto",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          },
+          {
+            "id": "chat-input-area",
+            "x": 333.107666015625,
+            "y": 496.9270935058594,
+            "width": 1171.5625,
+            "height": 188.15972900390625,
+            "bottom": 685.0868225097656,
+            "clientHeight": 188,
+            "scrollHeight": 188,
+            "scrollTop": 0,
+            "overflowY": "visible",
+            "overscrollY": "auto",
+            "maxHeight": "none",
+            "minHeight": "0px"
+          }
+        ],
+        "targets": [
+          {
+            "id": "clarification-option",
+            "text": "1DockerContainerized deploy",
+            "x": 353.0903015136719,
+            "y": 269.3923645019531,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 326.0763931274414,
+            "hit": true
+          },
+          {
+            "id": "clarification-option",
+            "text": "2Bare metalRun directly on hosts",
+            "x": 353.0903015136719,
+            "y": 332.06597900390625,
+            "width": 1131.5972900390625,
+            "height": 56.68402862548828,
+            "bottom": 388.75000762939453,
+            "hit": true
+          },
+          {
+            "id": "clarification-next",
+            "text": "Next",
+            "x": 1422.5869140625,
+            "y": 458.732666015625,
+            "width": 62.1006965637207,
+            "height": 26.197917938232422,
+            "bottom": 484.9305839538574,
+            "hit": false
+          },
+          {
+            "id": "clarification-submit",
+            "text": "Submit",
+            "x": 1338.24658203125,
+            "y": 94.23611450195312,
+            "width": 82.4826431274414,
+            "height": 23.97569465637207,
+            "bottom": 118.2118091583252,
+            "hit": false
+          }
+        ]
+      }
+    }
+  ],
+  "submitPoint": {
+    "x": 1379.4879035949707,
+    "y": 221.77951908111572,
+    "hit": true
+  },
+  "resolved": false,
+  "resolvedAfterWait": true,
+  "agent_answer": "Let me ask you a few questions about the project setup.You answered: {\n  \"db\": {\n    \"selected_option\": \"q1_opt3\"\n  },\n  \"deploy\": {\n    \"selected_option\": \"q3_opt2\"\n  },\n  \"language\": {\n    \"selected_option\": \"q2_opt3\"\n  }"
+}

@@ -11,7 +11,7 @@ import (
 )
 
 // yamlNewlineChars is YAML 1.2's line-break set, per
-// docs/specs/automations-yaml-export/spec.md's Definitions section:
+// docs/specs/office/requirements/automations-yaml-export.md's Definitions section:
 // {U+000A, U+000D, U+0085, U+2028, U+2029}. AC-17 and AC-46 are stated against this
 // set, not against "\n" alone — a CR-only, NEL-only, LS-only, or PS-only prompt still
 // forces a non-literal emission and must still warn under AC-17.

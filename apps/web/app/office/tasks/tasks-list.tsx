@@ -125,7 +125,7 @@ export function TasksList() {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [showSystem, setShowSystem] = useShowSystemPref();
-  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
+  const { searchResults, triggerSearch, patchSearchResult } = useServerSearch(workspaceId);
 
   const agentMap = new Map(agents.map((a) => [a.id, a.name]));
 
@@ -204,6 +204,7 @@ export function TasksList() {
         expandedIds={expandedIds}
         onToggleExpand={handleToggleExpand}
         agentMap={agentMap}
+        onTaskPatch={searchResults ? patchSearchResult : undefined}
       />
 
       <LoadMoreButton

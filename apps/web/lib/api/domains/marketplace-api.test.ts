@@ -79,6 +79,22 @@ describe("getMarketplaceCatalog", () => {
     expect(String(url)).toBe("http://api.test/api/plugins/marketplace");
     expect(result).toEqual({ plugins: [], sources: [] });
   });
+
+  it("encodes the catalog kind and preserves canvas entries", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        plugins: [],
+        canvases: [entry({ id: "canvas-one", kind: "canvas" })],
+        sources: [],
+      }),
+    );
+
+    const result = await getMarketplaceCatalog({ kind: "canvas" });
+
+    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe("http://api.test/api/plugins/marketplace?kind=canvas");
+    expect(result.canvases?.[0].id).toBe("canvas-one");
+  });
 });
 
 describe("marketplace sources", () => {

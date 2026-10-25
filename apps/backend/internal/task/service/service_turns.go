@@ -16,10 +16,14 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -66,6 +70,13 @@ func (s *Service) createTurn(
 	defer unlock()
 
 	metadata := turnStartRuntimeMetadata(session)
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		if identity.Synthetic {
+			metadata[models.TurnMetaKeyTurnChangeSyntheticActor] = true
+		} else if identity.UserID != "" {
+			metadata[models.TurnMetaKeyTurnChangeActorUserID] = identity.UserID
+		}
+	}
 	if recovery != nil {
 		metadata[models.TurnMetaKeyPromptDispatchPending] = true
 		metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID] = recovery.PendingID
@@ -83,8 +94,22 @@ func (s *Service) createTurn(
 		CreatedAt:          time.Now().UTC(),
 		UpdatedAt:          time.Now().UTC(),
 	}
+	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+		if identity.TaskID != session.TaskID || identity.SessionID != sessionID {
+			return nil, errors.New("reserved launch belongs to another task session")
+		}
+		turn.ID = identity.TurnID
+	}
 
-	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	var (
+		stamped bool
+		receipt *models.ConversationMutationReceipt
+	)
+	if writer, ok := s.turns.(taskrepo.ConversationTurnStampWriter); ok {
+		stamped, receipt, err = writer.CreateTurnWithStepStampConversationReceipt(ctx, turn)
+	} else {
+		stamped, err = s.turns.CreateTurnWithStepStamp(ctx, turn)
+	}
 	if err != nil {
 		s.logger.Error("failed to create turn", zap.Error(err))
 		return nil, err
@@ -95,7 +120,7 @@ func (s *Service) createTurn(
 
 	if publishStarted {
 		// had_output is only meaningful on turn.completed; omit it from turn.started.
-		_ = s.publishTurnEvent(events.TurnStarted, turn, nil)
+		_ = s.publishTurnEvent(events.TurnStarted, turn, nil, receipt)
 	}
 
 	s.logger.Debug("started turn",
@@ -265,7 +290,21 @@ func (s *Service) RollbackReservedTurn(
 	ctx context.Context,
 	sessionID, turnID string,
 ) (bool, error) {
-	return s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+	turn, err := s.turns.GetTurn(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	if turn.TaskSessionID != sessionID {
+		return false, nil
+	}
+	removed, err := s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+	if err != nil || !removed {
+		return removed, err
+	}
+	if err := s.publishTurnEvent(events.TurnRemoved, turn, nil); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 // createCompletedTurn persists a synthetic turn that is never observable as
@@ -276,6 +315,8 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		return nil, errors.New("cannot create completed turn without a session")
 	}
 	now := time.Now().UTC()
+	metadata := turnStartRuntimeMetadata(session)
+	metadata[models.TurnMetaKeyLifecycleOnly] = true
 	turn := &models.Turn{
 		ID:                 uuid.New().String(),
 		TaskSessionID:      session.ID,
@@ -284,7 +325,7 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		RouteGeneration:    session.RouteGeneration,
 		StartedAt:          now,
 		CompletedAt:        &now,
-		Metadata:           turnStartRuntimeMetadata(session),
+		Metadata:           metadata,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -429,18 +470,10 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil // No active turn to complete
 	}
 
-	if err := s.turns.CompleteTurn(ctx, turnID); err != nil {
+	receipt, err := s.completeTurnMutation(ctx, turnID)
+	if err != nil {
 		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
 		return err
-	}
-
-	// Safety net: mark any tool calls still in a non-terminal state as "complete"
-	if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turnID); err != nil {
-		s.logger.Warn("failed to complete pending tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
-	} else if affected > 0 {
-		s.logger.Info("completed stale pending tool calls on turn end",
-			zap.String("turn_id", turnID),
-			zap.Int64("affected", affected))
 	}
 
 	// Fetch the completed turn to get the completed_at timestamp
@@ -452,7 +485,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	}
 
 	hadOutput := s.turnHadOutput(ctx, turn)
-	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
+	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput, receipt)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -460,6 +493,20 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		zap.String("task_id", turn.TaskID))
 
 	return nil
+}
+
+func (s *Service) completeTurnMutation(ctx context.Context, turnID string) (*models.ConversationMutationReceipt, error) {
+	if writer, ok := s.turns.(taskrepo.ConversationMutationWriter); ok {
+		return writer.CompleteTurnWithConversationReceipt(ctx, turnID)
+	}
+	if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turnID); err != nil {
+		s.logger.Warn("failed to complete pending tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
+	} else if affected > 0 {
+		s.logger.Info("completed stale pending tool calls on turn end",
+			zap.String("turn_id", turnID),
+			zap.Int64("affected", affected))
+	}
+	return nil, s.turns.CompleteTurn(ctx, turnID)
 }
 
 // GetActiveTurn returns the currently active (non-completed) turn for a session.
@@ -587,12 +634,27 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 	return s.StartTurn(ctx, sessionID)
 }
 
+// PublishTurnStarted is publishTurnEvent(events.TurnStarted, ...)'s exported
+// form, for callers outside this package that insert a turn directly
+// (bypassing StartTurn/ReserveTurn) but still need the frontend's
+// turns.bySession to learn about it. The e2e test harness
+// (internal/office/testharness) is the only current caller: it seeds turns
+// with caller-controlled timestamps to construct D1 turn-ordering scenarios,
+// which StartTurn's always-now stamping cannot produce. Without this, a
+// message attached to a harness-seeded turn the frontend has never observed
+// via turn.started is silently excluded by D1's turn-scoped
+// clarification/permission detection.
+func (s *Service) PublishTurnStarted(ctx context.Context, turn *models.Turn) error {
+	// had_output is only meaningful on turn.completed; omit it here too.
+	return s.publishTurnEvent(events.TurnStarted, turn, nil)
+}
+
 // publishTurnEvent publishes a turn event to the event bus. hadOutput reports
 // whether the turn produced any agent output; it is only meaningful for
 // turn.completed events (the frontend uses it to surface an "empty turn"
 // notice). Pass nil for turn.started so the field is omitted entirely rather
 // than carrying a misleading "false" on a turn that has not completed.
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) error {
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool, receipts ...*models.ConversationMutationReceipt) error {
 	if s.eventBus == nil {
 		return errors.New("turn event bus is unavailable")
 	}
@@ -621,6 +683,21 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 	if hadOutput != nil {
 		payload["had_output"] = *hadOutput
 	}
+	if len(receipts) > 0 && receipts[0] != nil {
+		projectedReceipt := projectConversationReceipt(receipts[0])
+		if hadOutput != nil {
+			for index := range projectedReceipt.Operations {
+				operation := &projectedReceipt.Operations[index]
+				if operation.Entity != models.ConversationEntityTurn || operation.Turn == nil || operation.Turn.ID != turn.ID {
+					continue
+				}
+				output := *hadOutput
+				operation.HadOutput = &output
+				break
+			}
+		}
+		payload["conversation_receipt"] = projectedReceipt
+	}
 	if err := s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload)); err != nil {
 		s.logger.Error("failed to publish turn event",
 			zap.String("event_type", eventType),
@@ -638,6 +715,12 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 // events). A read failure defaults to true so a transient DB error never
 // produces a spurious "empty turn" notice.
 func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
+	// A turn terminated by a recoverable agent failure carries its error entry
+	// as the turn's outcome, so it counts as output even though the
+	// status/recovery message itself is not in the agent-output allowlist.
+	if errorTerminated, _ := turn.Metadata[models.TurnMetaKeyErrorTerminated].(bool); errorTerminated {
+		return true
+	}
 	msgs, err := s.messages.ListMessagesByTurnID(ctx, turn.ID)
 	if err != nil {
 		s.logger.Debug("failed to list messages for had_output; assuming output",
@@ -663,6 +746,7 @@ func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
 		}
 		switch m.Type {
 		case models.MessageTypeToolCall, models.MessageTypeToolEdit, models.MessageTypeToolRead,
+			models.MessageTypeToolSearch,
 			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo,
 			models.MessageTypePermissionRequest, models.MessageTypeClarificationRequest:
 			return true
@@ -750,12 +834,12 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		taskID = session.TaskID
 	}
 
-	// Get workspace path from the session's worktree(s).
-	// Multi-repo: every per-repo worktree sits as a sibling under the task root
-	// (~/.kandev/tasks/{taskDirName}/{repoName}/), so the workspace path agentctl
-	// needs is the parent of any one of them. Picking the first repo's path here
-	// would point agentctl at a single repo subdir and disable the per-repo
-	// tracker fan-out that scanRepositorySubdirs relies on.
+	// Get a provisional workspace path from the session's worktree(s). A
+	// classified durable task environment replaces this value because explicit
+	// nested attachments can place a worktree below the current repository
+	// without changing the agent root. Unclassified legacy rows keep the
+	// session-derived path when one exists; older tests and records used a
+	// generic environment path before task-root metadata was persisted.
 	var workspacePath string
 	if len(session.Worktrees) > 1 {
 		workspacePath = filepath.Dir(session.Worktrees[0].WorktreePath)
@@ -832,6 +916,13 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		RuntimeConfigOptions:    runtimeConfig.ConfigOptions,
 		RuntimeConfigOptionsSet: runtimeConfigOptionsSet,
 	}
+	incarnationID, generation, err := s.workspaceDeliveryIdentity(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	info.DeliveryIncarnationID = incarnationID
+	info.DeliveryHarnessGeneration = generation
+	info.DeliveryStreamID = fmt.Sprintf("%s:g%d", incarnationID, generation)
 	// Durable folder attachments are replayed by lifecycle for both fresh
 	// launch and workspace-only session recovery.
 	if s.workspaceFolders != nil {
@@ -841,7 +932,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 		for _, folder := range folders {
 			if folder != nil {
-				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath})
+				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath, WorkspaceRelativePath: folder.WorkspaceRelativePath})
 			}
 		}
 	}
@@ -850,10 +941,16 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	if session.TaskEnvironmentID != "" {
 		env, envErr := s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 		if envErr != nil {
-			s.logger.Warn("failed to get task environment for session",
+			logFields := []zap.Field{
 				zap.String("session_id", sessionID),
 				zap.String("task_environment_id", session.TaskEnvironmentID),
-				zap.Error(envErr))
+				zap.Error(envErr),
+			}
+			if errors.Is(envErr, taskrepo.ErrTaskEnvironmentNotFound) {
+				s.logger.Debug("failed to get task environment for session", logFields...)
+			} else {
+				s.logger.Warn("failed to get task environment for session", logFields...)
+			}
 		} else {
 			taskEnv = env
 		}
@@ -871,9 +968,27 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 	if taskEnv != nil {
 		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
+		info.ValidatedTaskEnvironmentID = taskEnv.ID
+		info.ValidatedExecutorType = taskEnv.ExecutorType
+		info.ValidatedTaskEnvironmentGeneration = taskEnv.OwnershipGeneration
+		if info.ExecutorType == "" {
+			info.ExecutorType = taskEnv.ExecutorType
+		}
 		info.TaskDirName = taskEnv.TaskDirName
+		if taskEnv.TaskID != "" && taskEnv.TaskID != taskID {
+			owner, ownerErr := s.tasks.GetTask(ctx, taskEnv.TaskID)
+			if ownerErr != nil {
+				return nil, fmt.Errorf("get workspace owner task: %w", ownerErr)
+			}
+			info.WorkspaceOwnerArchived = owner != nil && owner.ArchivedAt != nil
+		}
 	}
-	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, session.Worktrees, info); err != nil {
+	workspaceInventory := session.Worktrees
+	if taskEnv != nil {
+		workspaceInventory = taskEnv.Repos
+	}
+	workspaceRepositories, err := s.populateWorkspaceRepositorySpecs(ctx, taskID, workspaceInventory, info)
+	if err != nil {
 		return nil, err
 	}
 
@@ -885,46 +1000,153 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		} else {
-			s.logger.Warn("failed to get executor running for session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+			return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, err)
 		}
 	} else if running != nil {
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
+			info.AgentProfileID = officeProfileID
+		}
 		if running.ContainerID != "" {
 			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
 		}
 	}
-	if session.ExecutorID != "" {
-		exec, err := s.executors.GetExecutor(ctx, session.ExecutorID)
-		if err != nil {
-			s.logger.Warn("failed to get executor for session",
-				zap.String("session_id", sessionID),
-				zap.String("executor_id", session.ExecutorID),
-				zap.Error(err))
-		} else if exec != nil {
-			info.ExecutorType = string(exec.Type)
-			// Project the executor record's connection config (e.g. ssh_host,
-			// ssh_host_fingerprint, ssh_user) into the workspace metadata as a
-			// fallback. The agent-launch path gets these via the orchestrator's
-			// executor-config merge, but the workspace-restore / terminal path
-			// only carries them forward from a live ExecutorRunning record. When
-			// no running record exists — terminal-state sessions (completed /
-			// failed / cancelled), post-restart, or after agentctl cleanup — the
-			// SSH executor would otherwise fail with "host (or host_alias) is
-			// required in executor config" when opening a terminal or restoring
-			// the workspace. Existing values (from the running record) win.
-			// Scoped to SSH: this fallback only makes sense for the SSH executor
-			// and the projected keys are SSH connection/profile keys.
-			if exec.Type == models.ExecutorTypeSSH {
-				mergeExecutorConfigMetadata(info, exec.Config)
-			}
+	s.populateWorkspaceRecoveryErrorObservation(taskID, sessionID, session, taskEnv, workspaceRepositories, info)
+	executorID := session.ExecutorID
+	recordedKubernetes := running != nil && running.Runtime == agentruntime.RuntimeKubernetes
+	if recordedKubernetes {
+		executorID = strings.TrimSpace(running.ExecutorID)
+		if executorID == "" {
+			return nil, errors.New("restore Kubernetes workspace: recorded executor ID is missing")
+		}
+	}
+	if executorID != "" {
+		if err := s.applyWorkspaceExecutorRecord(ctx, sessionID, executorID, recordedKubernetes, info); err != nil {
+			return nil, err
 		}
 	}
 
+	mcpMode, err := s.resolveWorkspaceInfoMcpMode(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	info.McpMode = mcpMode
+
 	return info, nil
+}
+
+// resolveWorkspaceInfoMcpMode derives WorkspaceInfo.McpMode from taskID alone
+// (BUILD DECISION F14 / docs/specs/coordinator/system-design/copilot.md#fail-closed):
+// mcpmode.Coordinator for a coordinator-origin task, empty otherwise. A read
+// error other than "not found" fails the call; a missing task (ErrTaskNotFound
+// or a nil task) leaves the mode empty without error — such an instance starts
+// no agent, and the agent-starting call goes through the executor's own
+// fail-closed resolvers instead. Deliberately independent of
+// populateWorkspaceRepositorySpecs's own gated task lookup, which must keep
+// failing on ErrTaskNotFound.
+func (s *Service) resolveWorkspaceInfoMcpMode(ctx context.Context, taskID string) (string, error) {
+	if taskID == "" {
+		return "", nil
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("get workspace task for mcp mode: %w", err)
+	}
+	if task == nil {
+		return "", nil
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		return mcpmode.Coordinator, nil
+	}
+	return "", nil
+}
+
+func (s *Service) applyWorkspaceExecutorRecord(
+	ctx context.Context,
+	sessionID, executorID string,
+	recordedKubernetes bool,
+	info *lifecycle.WorkspaceInfo,
+) error {
+	exec, err := s.executors.GetExecutor(ctx, executorID)
+	if err != nil {
+		if recordedKubernetes {
+			return fmt.Errorf("restore Kubernetes workspace executor %q: %w", executorID, err)
+		}
+		s.logger.Warn("failed to get executor for session",
+			zap.String("session_id", sessionID),
+			zap.String("executor_id", executorID),
+			zap.Error(err))
+		return nil
+	}
+	if exec == nil {
+		if recordedKubernetes {
+			return fmt.Errorf("restore Kubernetes workspace executor %q: executor not found", executorID)
+		}
+		return nil
+	}
+	if recordedKubernetes && exec.Type != models.ExecutorTypeKubernetes {
+		return fmt.Errorf("restore Kubernetes workspace executor %q: executor is no longer Kubernetes", executorID)
+	}
+	info.ExecutorType = string(exec.Type)
+	// Only stable SSH connection/profile keys fill missing metadata. A retained
+	// Kubernetes row instead keeps resource inventory while current connection
+	// config authoritatively replaces every connection key.
+	if exec.Type == models.ExecutorTypeSSH {
+		mergeExecutorConfigMetadata(info, exec.Config)
+	}
+	if exec.Type == models.ExecutorTypeKubernetes {
+		ensureWorkspaceMetadata(info)["executor_id"] = executorID
+		mergeKubernetesExecutorConfigMetadata(info, exec.Config)
+	}
+	return nil
+}
+
+func (s *Service) populateWorkspaceRecoveryErrorObservation(
+	taskID, sessionID string,
+	session *models.TaskSession,
+	taskEnv *models.TaskEnvironment,
+	workspaceRepositories map[string]*models.Repository,
+	info *lifecycle.WorkspaceInfo,
+) {
+	if taskEnv == nil || taskEnv.ExecutorType != string(models.ExecutorTypeWorktree) ||
+		info.TaskEnvironmentID == "" || info.EnvironmentOwnerTaskID == "" || info.OwnershipGeneration <= 0 {
+		return
+	}
+	errorStamp := ""
+	if lastError, ok := models.LoadLastAgentError(session.Metadata); ok {
+		errorStamp = lastError.Stamp()
+	}
+	selectionSnapshot, snapshotErr := models.CaptureWorkspaceRecoverySelectionSnapshot(session, taskEnv, func(repositoryID string) (*models.Repository, error) {
+		repository, ok := workspaceRepositories[repositoryID]
+		if !ok {
+			return nil, fmt.Errorf("repository %q was not in the captured workspace inventory", repositoryID)
+		}
+		return repository, nil
+	})
+	switch {
+	case snapshotErr != nil:
+		s.logger.Warn("failed to capture workspace recovery inventory",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(snapshotErr))
+	case !selectionSnapshot.Complete():
+		s.logger.Warn("workspace recovery inventory is incomplete",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+	default:
+		info.RecoveryErrorObservation = &models.WorkspaceRecoveryErrorObservation{
+			TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: info.TaskEnvironmentID,
+			EnvironmentOwnerTaskID: info.EnvironmentOwnerTaskID, OwnershipGeneration: info.OwnershipGeneration,
+			SelectionSnapshot: selectionSnapshot,
+			SessionState:      session.State, AgentExecutionID: info.AgentExecutionID,
+			ExpectedErrorStamp: errorStamp,
+		}
+	}
 }
 
 type workspaceWorktreeKey struct {
@@ -938,42 +1160,151 @@ type workspaceRepositoryProjection struct {
 	repoName       string
 }
 
-func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskEnvironmentRepo, info *lifecycle.WorkspaceInfo) error {
+func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskEnvironmentRepo, info *lifecycle.WorkspaceInfo) (map[string]*models.Repository, error) {
 	if taskID == "" || s.taskRepos == nil || s.repoEntities == nil {
-		return nil
+		return nil, nil
 	}
-	if task, err := s.tasks.GetTask(ctx, taskID); err != nil {
+	if err := s.populateWorkspaceTaskMetadata(ctx, taskID, info); err != nil {
+		return nil, err
+	}
+	worktreesByIdentity := indexWorkspaceWorktrees(sessionWorktrees)
+	worktreesByRepository := indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees)
+	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	repositories := indexWorkspaceRepositoryEntities(projections)
+	projectionCounts := make(map[string]int, len(projections))
+	for _, projection := range projections {
+		projectionCounts[projection.taskRepository.RepositoryID]++
+	}
+	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
+	for index, projection := range projections {
+		info.WorkspaceRepositories = append(info.WorkspaceRepositories, s.workspaceRepositorySpec(
+			projection, branchPlans[index].IdentitySlug, worktreesByIdentity, worktreesByRepository, projectionCounts,
+		))
+	}
+	return repositories, nil
+}
+
+func (s *Service) populateWorkspaceTaskMetadata(ctx context.Context, taskID string, info *lifecycle.WorkspaceInfo) error {
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return fmt.Errorf("get workspace task: %w", err)
-	} else if task != nil {
-		info.WorkspaceID = task.WorkspaceID
 	}
+	if task != nil {
+		info.WorkspaceID = task.WorkspaceID
+		info.TaskArchived = task.ArchivedAt != nil
+	}
+	return nil
+}
+
+func indexWorkspaceWorktrees(sessionWorktrees []*models.TaskEnvironmentRepo) map[workspaceWorktreeKey]*models.TaskEnvironmentRepo {
 	worktreesByIdentity := make(map[workspaceWorktreeKey]*models.TaskEnvironmentRepo, len(sessionWorktrees))
 	for _, worktree := range sessionWorktrees {
 		if worktree != nil && worktree.RepositoryID != "" {
 			worktreesByIdentity[workspaceWorktreeKey{repositoryID: worktree.RepositoryID, branchSlug: worktree.BranchSlug}] = worktree
 		}
 	}
-	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
-	for index, projection := range projections {
-		taskRepository, repository := projection.taskRepository, projection.repository
-		spec := lifecycle.WorkspaceRepositorySpec{
-			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
-			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
-			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+	return worktreesByIdentity
+}
+
+func indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees []*models.TaskEnvironmentRepo) map[string]*models.TaskEnvironmentRepo {
+	worktrees := make(map[string]*models.TaskEnvironmentRepo, len(sessionWorktrees))
+	ambiguous := make(map[string]struct{})
+	for _, worktree := range sessionWorktrees {
+		if worktree == nil || worktree.RepositoryID == "" {
+			continue
 		}
-		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
-			spec.WorktreeID = worktree.WorktreeID
-			spec.BranchSlug = worktree.BranchSlug
-			spec.BranchIdentitySlug = worktree.BranchSlug
+		if _, exists := ambiguous[worktree.RepositoryID]; exists {
+			continue
 		}
-		info.WorkspaceRepositories = append(info.WorkspaceRepositories, spec)
+		if _, exists := worktrees[worktree.RepositoryID]; exists {
+			delete(worktrees, worktree.RepositoryID)
+			ambiguous[worktree.RepositoryID] = struct{}{}
+			continue
+		}
+		worktrees[worktree.RepositoryID] = worktree
 	}
-	return nil
+	return worktrees
+}
+
+func indexWorkspaceRepositoryEntities(projections []workspaceRepositoryProjection) map[string]*models.Repository {
+	repositories := make(map[string]*models.Repository, len(projections))
+	for _, projection := range projections {
+		repositories[projection.taskRepository.RepositoryID] = projection.repository
+	}
+	return repositories
+}
+
+func (s *Service) workspaceRepositorySpec(
+	projection workspaceRepositoryProjection,
+	branchIdentitySlug string,
+	worktreesByIdentity map[workspaceWorktreeKey]*models.TaskEnvironmentRepo,
+	worktreesByRepository map[string]*models.TaskEnvironmentRepo,
+	projectionCounts map[string]int,
+) lifecycle.WorkspaceRepositorySpec {
+	taskRepository, repository := projection.taskRepository, projection.repository
+	branchTemplate := repository.WorktreeBranchTemplate
+	if taskRepository.BranchPolicyBranchTemplate != "" {
+		branchTemplate = taskRepository.BranchPolicyBranchTemplate
+	}
+	cloneRelocation := s.managedCloneRelocationProof(repository)
+	spec := lifecycle.WorkspaceRepositorySpec{
+		RepositoryID: taskRepository.RepositoryID, TaskRepositoryID: taskRepository.ID,
+		RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
+		RepositorySubpath: projection.repoName, RepositorySubpathKnown: projection.repoName != "",
+		CloneRelocation:       cloneRelocation,
+		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
+		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+	}
+	selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]
+	if selected == nil && projectionCounts[taskRepository.RepositoryID] == 1 {
+		selected = worktreesByRepository[taskRepository.RepositoryID]
+	}
+	if selected != nil {
+		spec.TaskEnvironmentRepoID = selected.ID
+		if spec.WorkspaceRelativePath == "" {
+			spec.WorkspaceRelativePath = selected.WorkspaceRelativePath
+		}
+		spec.WorktreeID = selected.WorktreeID
+		spec.WorktreePath = selected.WorktreePath
+		spec.WorktreeBranch = selected.WorktreeBranch
+		spec.BranchSlug = selected.BranchSlug
+		spec.BranchIdentitySlug = branchIdentitySlug
+		spec.WorktreeSourceClonePath = selected.WorktreeSourceClonePath
+		spec.WorktreeSourceCommonDir = selected.WorktreeSourceCommonDir
+		if cloneRelocation != nil {
+			cloneRelocation.RecordedSourcePath = selected.WorktreeSourceClonePath
+			cloneRelocation.RecordedSourceCommonDir = selected.WorktreeSourceCommonDir
+		}
+	}
+	return spec
+}
+
+func (s *Service) managedCloneRelocationProof(repository *models.Repository) *worktree.ManagedCloneRelocationProof {
+	paths, ok := s.repoCloneLocation.(interface {
+		ManagedCloneRelocationPaths(
+			*models.Repository,
+		) (root, providerSource, ownerNameSource, destination string, managed bool, err error)
+	})
+	if !ok {
+		return nil
+	}
+	root, source, ownerNameSource, destination, managed, err := paths.ManagedCloneRelocationPaths(repository)
+	if err != nil || !managed {
+		return nil
+	}
+	return &worktree.ManagedCloneRelocationProof{
+		ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
+		ExpectedDestinationPath: destination,
+		Identity: worktree.ManagedRepositoryIdentity{
+			Provider: repository.Provider, Host: repository.ProviderHost,
+			Owner: repository.ProviderOwner, Name: repository.ProviderName,
+		},
+	}
 }
 
 func (s *Service) workspaceRepositoryProjections(ctx context.Context, taskID string) ([]workspaceRepositoryProjection, error) {
@@ -1111,14 +1442,27 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	// while the ID still pointed at the stale row — a mismatch downstream
 	// reconcilers and progress events would key off the wrong env.
 	info.TaskEnvironmentID = env.ID
+	info.EnvironmentOwnerTaskID = env.TaskID
+	info.OwnershipGeneration = env.OwnershipGeneration
+	effectiveLayout := EffectiveTaskEnvironmentWorkspaceLayout(env)
+	info.WorkspaceLayout = effectiveLayout
 	if info.ExecutorProfileID == "" {
 		info.ExecutorProfileID = env.ExecutorProfileID
 	}
-	if info.WorkspacePath == "" {
+	if env.WorkspacePath != "" && (info.WorkspacePath == "" || env.WorkspaceLayout != "" || env.TaskDirName != "" || effectiveLayout == WorkspaceLayoutTaskRoot || (!filepath.IsAbs(info.WorkspacePath) && filepath.IsAbs(env.WorkspacePath))) {
 		info.WorkspacePath = env.WorkspacePath
 	}
 	if env.ContainerID != "" {
 		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = env.ContainerID
+	}
+	if env.ContainerControlAuthTokenSecretID != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerControlAuthSecret] = env.ContainerControlAuthTokenSecretID
+	}
+	if env.ContainerBootstrapNonceSecretID != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyBootstrapNonceSecret] = env.ContainerBootstrapNonceSecretID
+	}
+	if env.ExecutorType == string(models.ExecutorTypeSSH) && env.WorkspacePath != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeySSHRemoteTaskDir] = env.WorkspacePath
 	}
 	if env.SandboxID != "" {
 		ensureWorkspaceMetadata(info)["sprite_name"] = env.SandboxID
@@ -1167,6 +1511,19 @@ func mergeExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[strin
 			continue
 		}
 		dst[k] = v
+	}
+}
+
+func mergeKubernetesExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[string]string) {
+	dst := ensureWorkspaceMetadata(info)
+	for _, key := range []string{
+		lifecycle.MetadataKeyKubernetesAuthMode,
+		lifecycle.MetadataKeyKubernetesKubeconfigPath,
+		lifecycle.MetadataKeyKubernetesKubeContext,
+		lifecycle.MetadataKeyKubernetesConfigNamespace,
+		lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds,
+	} {
+		dst[key] = config[key]
 	}
 }
 

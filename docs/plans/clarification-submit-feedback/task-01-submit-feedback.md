@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/clarification-submit-feedback.md"
+spec: "../../specs/ui/requirements/clarification-submit-feedback.md"
 ---
 
 # Task 01: Add clarification submit spinner
@@ -50,7 +50,7 @@ vertical slice.
 
 ## Inputs
 
-- `docs/specs/ui/clarification-submit-feedback.md`
+- `docs/specs/ui/requirements/clarification-submit-feedback.md`
 - `docs/plans/clarification-submit-feedback/plan.md`
 - `apps/web/hooks/domains/session/use-clarification-group.ts`
 - `apps/web/components/task/chat/clarification-overlay-header.tsx`
@@ -73,7 +73,7 @@ vertical slice.
 - `cd apps/web && pnpm e2e:run --project chromium tests/chat/clarification.spec.ts -- --grep "question shortcuts stay disabled while answers are submitting"` passed (1 test).
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-clarification.spec.ts -- --grep "loading spinner"` passed (1 test).
 - `cd ../.. && git diff --check` passed.
-- Final files: `apps/web/components/task/chat/clarification-overlay-header.tsx`, `apps/web/e2e/tests/chat/clarification.spec.ts`, `apps/web/e2e/tests/chat/mobile-clarification.spec.ts`, `docs/specs/ui/clarification-submit-feedback.md`, `docs/plans/clarification-submit-feedback/plan.md`, and this task file.
+- Final files: `apps/web/components/task/chat/clarification-overlay-header.tsx`, `apps/web/e2e/tests/chat/clarification.spec.ts`, `apps/web/e2e/tests/chat/mobile-clarification.spec.ts`, `docs/specs/ui/requirements/clarification-submit-feedback.md`, `docs/plans/clarification-submit-feedback/plan.md`, and this task file.
 - The managed E2E runs rebuilt the backend and pseudo-locale Vite assets and cleaned their isolated test artifacts. No E2E blockers or failure artifacts remain.
 - Fresh phone and desktop pending-state screenshots were captured with synthetic E2E data, visually inspected, compressed, and validated through `apps/web/.pr-assets/manifest.json`; the disposable capture specs were removed afterward.
 - Fixup: addressed the P2 accessibility review by adding `aria-hidden="true"` to the decorative spinner and asserting that attribute in both desktop and mobile E2E coverage.

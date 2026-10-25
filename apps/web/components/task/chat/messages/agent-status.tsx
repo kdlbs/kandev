@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
-import { IconAlertCircle, IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
+import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { useAppStore } from "@/components/state-provider";
+import { SessionErrorDetails } from "@/components/task/session-error-details";
+import { hasSessionRecoveryMessage } from "@/lib/session-recovery-presentation";
+import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { GridSpinner } from "@/components/grid-spinner";
 import { resolveAgentErrorLabelKey } from "./agent-error-label";
 import { useTranslation } from "react-i18next";
+import { useActivityDisplay } from "./agent-status-mode";
 
 type AgentStatusProps = {
   sessionState?: TaskSessionState;
@@ -24,10 +28,12 @@ type StatusConfig = {
   icon: "spinner" | "error" | "warning" | null;
 };
 
+const RUNNING_LABEL_KEY = "task:agentIsRunning";
+
 const STATE_CONFIG: Record<TaskSessionState, StatusConfig> = {
   CREATED: { labelKey: "", icon: null },
   STARTING: { labelKey: "task:agentIsStarting", dynamicLabel: true, icon: "spinner" },
-  RUNNING: { labelKey: "task:agentIsRunning", icon: "spinner" },
+  RUNNING: { labelKey: RUNNING_LABEL_KEY, icon: "spinner" },
   IDLE: { labelKey: "", icon: null },
   WAITING_FOR_INPUT: { labelKey: "", icon: null },
   COMPLETED: { labelKey: "", icon: null },
@@ -166,42 +172,14 @@ function AgentErrorStatus({
       ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
       : undefined,
   );
-  const [expanded, setExpanded] = useState(false);
-  const toggle = useCallback(() => setExpanded((value) => !value), []);
-
   const displayLabel = t(resolveAgentErrorLabelKey(errorMessage, config.labelKey));
-  const hasDetails = !!errorMessage;
-  const detailsToggleLabel = expanded
-    ? t("task:hideErrorDetails", { displayLabel })
-    : t("task:showErrorDetails", { displayLabel });
-
   return (
-    <div
-      className="rounded-lg text-xs bg-destructive/10 text-destructive border border-destructive/20"
-      role="status"
-      aria-label={displayLabel}
-    >
-      <button
-        type="button"
-        className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left sm:min-h-0 ${hasDetails ? "cursor-pointer" : ""}`}
-        onClick={hasDetails ? toggle : undefined}
-        disabled={!hasDetails}
-        aria-expanded={hasDetails ? expanded : undefined}
-        aria-label={hasDetails ? detailsToggleLabel : displayLabel}
-      >
-        <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-        <span className="min-w-0 break-words font-medium">{displayLabel}</span>
-        {hasDetails && (
-          <IconChevronDown
-            className={`ml-auto h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
-          />
-        )}
-      </button>
-      {expanded && errorMessage && (
-        <pre className="max-h-40 max-w-full overflow-y-auto whitespace-pre-wrap break-words px-3 pb-2 text-[11px] text-destructive/80">
-          {errorMessage}
-        </pre>
-      )}
+    <div className="min-w-0 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+      <div className="flex items-start gap-2">
+        <IconAlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 wrap-anywhere font-medium">{displayLabel}</span>
+      </div>
+      {errorMessage && <SessionErrorDetails>{errorMessage}</SessionErrorDetails>}
     </div>
   );
 }
@@ -241,7 +219,12 @@ function AgentRunningStatus({
   );
 }
 
-function useAgentStatusData(sessionId: string | null, messages: Message[], isRunning: boolean) {
+function useAgentStatusData(
+  sessionId: string | null,
+  messages: Message[],
+  isRunning: boolean,
+  activityDisplay: boolean,
+) {
   const { lastTurnDuration, isActive: isTurnActive } = useSessionTurn(sessionId);
   const activeTurn = useActiveTurn(sessionId);
   const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(
@@ -252,7 +235,9 @@ function useAgentStatusData(sessionId: string | null, messages: Message[], isRun
     if (lastTurnDuration) return null;
     return calculateTurnDurationFromMessages(messages);
   }, [messages, lastTurnDuration]);
-  const displayDuration = lastTurnDuration?.formatted ?? fallbackDuration;
+  const displayDuration = activityDisplay
+    ? null
+    : (lastTurnDuration?.formatted ?? fallbackDuration);
   return { isTurnActive, runningDuration, elapsedSeconds, displayDuration };
 }
 
@@ -289,6 +274,10 @@ function useAgentLabel(sessionId: string | null, dynamicLabel?: boolean): string
   return profile ? profile.label.split(" \u2022 ")[0] : null;
 }
 
+function isCoarseRunning(state: TaskSessionState | undefined, config: StatusConfig | null) {
+  return state === "RUNNING" && config?.labelKey === RUNNING_LABEL_KEY;
+}
+
 export function AgentStatus({
   sessionState,
   sessionId,
@@ -299,12 +288,25 @@ export function AgentStatus({
   const hasBackgroundWork = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.foreground_activity === "background" : false,
   );
+  const recoveryOwned = useAppStore((state) => {
+    if (!sessionId) return false;
+    const error = readLastAgentError(state.taskSessions.items[sessionId]?.metadata);
+    return hasSessionRecoveryMessage(
+      state.messages.bySession[sessionId] ?? [],
+      sessionId,
+      error?.stamp,
+    );
+  });
+  const activityDisplay = useActivityDisplay();
   const config = resolveAgentStatusConfig(sessionState, isWorking, hasBackgroundWork);
   const isRunning = config?.icon === "spinner";
   const agentLabel = useAgentLabel(sessionId, config?.dynamicLabel);
 
-  const runningData = useAgentStatusData(sessionId, messages, isRunning);
+  const runningData = useAgentStatusData(sessionId, messages, isRunning, activityDisplay);
 
+  if (config?.icon === "error" && recoveryOwned) return null;
+  // The activity status line owns the running state; the coarse RUNNING label is redundant.
+  if (activityDisplay && isCoarseRunning(sessionState, config)) return null;
   if (config?.icon) {
     const label = agentLabel ? t("task:startingAgent", { agentLabel }) : t(config.labelKey);
     return renderActiveStatus(

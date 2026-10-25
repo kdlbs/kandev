@@ -66,6 +66,27 @@ func TestBuildCatalogueFiltersBoundsAndRetainsExtras(t *testing.T) {
 	}
 }
 
+func TestBuildCatalogueForPackageKeepsTheTrustedOpenCodeMajor(t *testing.T) {
+	catalogue, err := BuildCatalogueForPackage(
+		"@opencode/cli",
+		[]string{"1.18.32", "2.0.18", "2.1.0", "3.0.0-beta.1"},
+		"3.0.0",
+		"1.18.32",
+	)
+	if err != nil {
+		t.Fatalf("BuildCatalogueForPackage: %v", err)
+	}
+	if catalogue.Latest != "2.1.0" {
+		t.Fatalf("latest = %q, want newest supported v2", catalogue.Latest)
+	}
+	if catalogue.Has("1.18.32") || catalogue.Has("3.0.0") {
+		t.Fatalf("catalogue accepted versions outside package family: %#v", catalogue.Versions)
+	}
+	if !catalogue.Has("2.0.18") || !catalogue.Has("2.1.0") {
+		t.Fatalf("catalogue omitted supported v2 versions: %#v", catalogue.Versions)
+	}
+}
+
 func TestClassifyOperation(t *testing.T) {
 	tests := []struct {
 		name                    string
@@ -87,6 +108,67 @@ func TestClassifyOperation(t *testing.T) {
 			}
 			if got != test.want {
 				t.Fatalf("operation = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestClassifyEffectiveOperation(t *testing.T) {
+	tests := []struct {
+		name       string
+		useDefault bool
+		active     string
+		effective  string
+		current    string
+		target     string
+		defaultVer string
+		want       Operation
+	}{
+		{
+			name:       "return to default",
+			useDefault: true,
+			active:     "1.18.5",
+			effective:  "1.18.5",
+			current:    "1.18.5",
+			target:     "1.18.18",
+			defaultVer: "1.18.18",
+			want:       OperationUseDefault,
+		},
+		{
+			name:       "default is up to date without active selection",
+			effective:  "1.18.18",
+			current:    "1.18.18",
+			target:     "1.18.18",
+			defaultVer: "1.18.18",
+			want:       OperationUpToDate,
+		},
+		{
+			name:       "selected version updates",
+			active:     "1.18.5",
+			effective:  "1.18.5",
+			current:    "1.18.5",
+			target:     "1.18.10",
+			defaultVer: "1.18.18",
+			want:       OperationUpdate,
+		},
+		{
+			name:       "numeric default remains an active selection",
+			active:     "1.18.5",
+			effective:  "1.18.5",
+			current:    "1.18.5",
+			target:     "1.18.18",
+			defaultVer: "1.18.18",
+			want:       OperationUpdate,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ClassifyEffectiveOperation(tt.useDefault, tt.active, tt.effective, tt.current, tt.target, tt.defaultVer)
+			if err != nil {
+				t.Fatalf("ClassifyEffectiveOperation: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("operation = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -1,10 +1,17 @@
 ---
-spec: docs/specs/ui/message-queue-send-now.md
+spec: docs/specs/ui/requirements/message-queue-send-now.md
 created: 2026-08-05
 status: implemented
 ---
 
 # Implementation Plan: Send Queued Messages Now
+
+## Follow-up contract change
+
+The [live FIFO interruption package](../queue-send-now-live-fifo/plan.md)
+amends the accepted-handoff exclusion in the current requirement. This plan
+and its completed work orders remain historical implementation evidence;
+the follow-up owns new race tests, desktop/phone scenarios, and final results.
 
 ## Overview
 

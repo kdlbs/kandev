@@ -1,5 +1,7 @@
 # Template used by update-homebrew-tap.sh. Placeholder strings are replaced at
 # release time before this formula is pushed to kdlbs/homebrew-kandev.
+require "json"
+
 class Kandev < Formula
   desc "Manage tasks, orchestrate agents, review changes, and ship value"
   homepage "https://github.com/kdlbs/kandev"
@@ -39,16 +41,25 @@ class Kandev < Formula
 
   test do
     assert_equal "v#{version}", shell_output("#{bin}/kandev --version").strip
+    manifest_path = libexec/"remote-helpers.json"
+    manifest = JSON.parse(manifest_path.read)
+    assert_equal 1, manifest.fetch("schema_version")
+    assert_equal "standard", manifest.fetch("variant")
+    assert_equal "v#{version}", manifest.fetch("version")
 
     ENV["KANDEV_HOME_DIR"] = testpath.to_s
     ENV["KANDEV_DATABASE_PATH"] = (testpath/"kandev.db").to_s
     ENV["KANDEV_SERVER_HOST"] = "127.0.0.1"
     port = free_port
     pid = spawn bin/"kandev", "--headless", "--port", port.to_s
-    health_url = "http://127.0.0.1:#{port}/health"
+    # /health flips to 200 as soon as the listener binds, before startup
+    # recovery finishes, so curl's --retry (which only retries on
+    # connection-refused/5xx, never on 200) would stop waiting immediately.
+    # /ready holds at 503 until the app is actually usable.
+    ready_url = "http://127.0.0.1:#{port}/ready"
     curl = "curl --silent --show-error --fail --retry 30 --retry-connrefused --retry-delay 1"
-    health = shell_output("#{curl} #{health_url}")
-    assert_match '"status":"ok"', health
+    ready = shell_output("#{curl} #{ready_url}")
+    assert_match '"status":"ok"', ready
     assert_match "<title>Kandev</title>", shell_output("#{curl} http://127.0.0.1:#{port}/")
   ensure
     Process.kill("TERM", pid) if pid

@@ -25,6 +25,7 @@ func TestSupportsEmbeddedVscode(t *testing.T) {
 		{name: "remote Docker", executorType: models.ExecutorTypeRemoteDocker, hostOS: "windows", want: true},
 		{name: "Sprites", executorType: models.ExecutorTypeSprites, hostOS: "windows", want: true},
 		{name: "SSH", executorType: models.ExecutorTypeSSH, hostOS: "windows", want: true},
+		{name: "Kubernetes", executorType: models.ExecutorTypeKubernetes, hostOS: "windows", want: true},
 		{name: "mock remote fails closed", executorType: models.ExecutorTypeMockRemote, hostOS: "linux", want: false},
 		{name: "unknown executor fails closed", executorType: models.ExecutorType("future"), hostOS: "linux", want: false},
 	}

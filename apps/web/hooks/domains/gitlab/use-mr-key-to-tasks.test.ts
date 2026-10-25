@@ -1,3 +1,4 @@
+import { gitLabMRKey } from "@/lib/gitlab-identity";
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
@@ -8,7 +9,7 @@ vi.mock("@/lib/api/domains/gitlab-api", () => ({
   listWorkspaceTaskMRs: () => new Promise(() => {}),
 }));
 
-import { mrKey, useMRKeyToTasks } from "./use-mr-key-to-tasks";
+import { useMRKeyToTasks } from "./use-mr-key-to-tasks";
 
 const PROJECT_PATH = "group/project";
 const GITLAB_HOST = "https://gitlab.com";
@@ -64,7 +65,7 @@ describe("useMRKeyToTasks", () => {
       });
     });
     expect(
-      result.current.map.get(mrKey(GITLAB_HOST, PROJECT_PATH, 7))?.map((row) => row.task_id),
+      result.current.map.get(gitLabMRKey(GITLAB_HOST, PROJECT_PATH, 7))?.map((row) => row.task_id),
     ).toEqual(["task-1", "task-2"]);
   });
 
@@ -87,12 +88,12 @@ describe("useMRKeyToTasks", () => {
     });
     expect(
       result.current.map
-        .get(mrKey("https://gitlab.com/", PROJECT_PATH, 7))
+        .get(gitLabMRKey("https://gitlab.com/", PROJECT_PATH, 7))
         ?.map((row) => row.task_id),
     ).toEqual(["task-public"]);
     expect(
       result.current.map
-        .get(mrKey("https://gitlab.internal", PROJECT_PATH, 7))
+        .get(gitLabMRKey("https://gitlab.internal", PROJECT_PATH, 7))
         ?.map((row) => row.task_id),
     ).toEqual(["task-private"]);
   });
@@ -116,7 +117,7 @@ describe("useMRKeyToTasks", () => {
     });
 
     expect(
-      result.current.map.get(mrKey(GITLAB_HOST, PROJECT_PATH, 7))?.map((row) => row.task_id),
+      result.current.map.get(gitLabMRKey(GITLAB_HOST, PROJECT_PATH, 7))?.map((row) => row.task_id),
     ).toEqual(["task-b"]);
   });
 });

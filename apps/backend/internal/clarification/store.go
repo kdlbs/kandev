@@ -22,15 +22,37 @@ const maxStartedDeliveryConfirmationWait = 5 * time.Minute
 // Store manages pending clarification requests.
 // It provides thread-safe storage and notification when responses arrive.
 type Store struct {
-	mu      sync.RWMutex
-	pending map[string]*PendingClarification
-	timeout time.Duration
+	mu             sync.RWMutex
+	pending        map[string]*PendingClarification
+	deliveryMisses map[string]time.Time
+	timeout        time.Duration
 
 	// onWaitEntered, if non-nil, is invoked inside WaitForResponse after the
 	// initial pending lookup and before the select blocks. Tests use it to
 	// coordinate multi-waiter scenarios deterministically; always nil in
 	// production.
 	onWaitEntered func(pendingID string)
+
+	// onRespondEntered, if non-nil, is invoked inside Respond after the
+	// initial pending lookup and before pending.mu is acquired. Tests use it
+	// to force a specific interleaving against a concurrent CancelRequest or
+	// CancelSession; always nil in production.
+	onRespondEntered func(pendingID string)
+
+	// onCancelSessionEntered, if non-nil, is invoked inside CancelSession for
+	// each matching entry before its cancellation decision acquires the store
+	// and entry locks. Tests use it to force a
+	// specific interleaving against a concurrent Respond; always nil in
+	// production.
+	onCancelSessionEntered func(pendingID string)
+
+	// onCancelRequestEntered, if non-nil, is invoked inside CancelRequest
+	// after the initial pending lookup and before pending.mu is acquired.
+	// Tests use it to force a specific interleaving against a concurrent
+	// CancelRequest/CancelSession on the same entry; always nil in
+	// production.
+	onCancelRequestEntered func(pendingID string)
+
 	// onRespondLoaded coordinates cancellation-after-lookup tests. It is always
 	// nil in production.
 	onRespondLoaded func(pendingID string)
@@ -42,8 +64,9 @@ func NewStore(timeout time.Duration) *Store {
 		timeout = 2 * time.Hour // Default timeout — long enough for user to respond to clarification
 	}
 	return &Store{
-		pending: make(map[string]*PendingClarification),
-		timeout: timeout,
+		pending:        make(map[string]*PendingClarification),
+		deliveryMisses: make(map[string]time.Time),
+		timeout:        timeout,
 	}
 }
 
@@ -71,16 +94,102 @@ func (s *Store) SetOnRespondLoaded(fn func(pendingID string)) {
 func (s *Store) CreateRequest(req *Request) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createRequestLocked(req, true)
+}
+
+// CreateRetryRequest registers a transport retry before its durable bundle is
+// reconciled. deliveryMissed is true when a durable responder already found no
+// live waiter and therefore chose detached delivery. That receipt makes the
+// handoff linearizable: the retry must not open a second waiter or return the
+// same answer through the tool call while detached delivery is in flight.
+func (s *Store) CreateRetryRequest(req *Request) (pendingID string, isNew, deliveryMissed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createRetryRequestLocked(req)
+}
+
+// CreateRetryRequestWithWaiter pins the registered entry so a retry can join
+// its confirmation even when another waiter removes the map entry meanwhile.
+// A recorded response must already have its durable delivery marker cleared.
+func (s *Store) CreateRetryRequestWithWaiter(req *Request) (
+	pendingID string, isNew, deliveryMissed bool,
+	wait func(context.Context, *Response) (*Response, error),
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pendingID, isNew, deliveryMissed = s.createRetryRequestLocked(req)
+	if deliveryMissed {
+		return pendingID, isNew, deliveryMissed, nil
+	}
+	pending := s.pending[pendingID]
+	wait = func(ctx context.Context, recorded *Response) (*Response, error) {
+		return s.waitForRetryResponse(ctx, pendingID, pending, recorded)
+	}
+	return pendingID, isNew, deliveryMissed, wait
+}
+
+func (s *Store) waitForRetryResponse(ctx context.Context, pendingID string, pending *PendingClarification, recorded *Response) (*Response, error) {
+	if recorded != nil {
+		s.mu.RLock()
+		_, deliveryMissed := s.deliveryMisses[pendingID]
+		s.mu.RUnlock()
+		if deliveryMissed && !recorded.Rejected {
+			return nil, fmt.Errorf("%w: detached clarification delivery owns %s", ErrNotFound, pendingID)
+		}
+		pending.mu.Lock()
+		resolved := pending.resolved
+		pending.mu.Unlock()
+		if !resolved {
+			return recorded, nil
+		}
+	}
+	return s.waitForRegisteredResponse(ctx, pendingID, pending)
+}
+
+func (s *Store) createRetryRequestLocked(req *Request) (pendingID string, isNew, deliveryMissed bool) {
+	s.pruneDeliveryMissesLocked(time.Now())
+	if req.PendingID != "" {
+		if _, missed := s.deliveryMisses[req.PendingID]; missed {
+			return req.PendingID, false, true
+		}
+	}
+	// A preset retry identity is already the complete idempotency key. Broad
+	// question-only deduplication would alias distinct transport calls whose
+	// context, question IDs, or titles differ.
+	pendingID, isNew = s.createRequestLocked(req, req.PendingID == "")
+	return pendingID, isNew, false
+}
+
+// ClearDeliveryMiss removes a detached-delivery receipt after durable
+// delivery recovery restored the bundle to pending. A later exact retry can
+// then adopt the restored question normally.
+func (s *Store) ClearDeliveryMiss(pendingID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.deliveryMisses, pendingID)
+}
+
+func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (string, bool) {
 
 	// Normalise in-place so dedup keys are stable even when the caller
 	// hasn't assigned IDs yet.
 	_ = NormalizeAndValidateQuestions(req.Questions)
 
+	// An exact preset identity always joins its live entry. Replacing the map
+	// entry would orphan waiters on a done channel nobody closes.
+	if req.PendingID != "" {
+		if existing, ok := s.pending[req.PendingID]; ok {
+			return existing.Request.PendingID, false
+		}
+	}
+
 	// Deduplicate: if a pending entry for the same session with identical
 	// normalised questions already exists, return the existing pending ID.
-	for _, existing := range s.pending {
-		if existing.Request.SessionID == req.SessionID && questionsEqual(existing.Request.Questions, req.Questions) {
-			return existing.Request.PendingID, false
+	if deduplicateQuestions {
+		for _, existing := range s.pending {
+			if existing.Request.SessionID == req.SessionID && questionsEqual(existing.Request.Questions, req.Questions) {
+				return existing.Request.PendingID, false
+			}
 		}
 	}
 
@@ -99,6 +208,16 @@ func (s *Store) CreateRequest(req *Request) (string, bool) {
 	return req.PendingID, true
 }
 
+func (s *Store) pruneDeliveryMissesLocked(now time.Time) {
+	retention := max(s.timeout, maxStartedDeliveryConfirmationWait)
+	cutoff := now.Add(-retention)
+	for pendingID, missedAt := range s.deliveryMisses {
+		if missedAt.Before(cutoff) {
+			delete(s.deliveryMisses, pendingID)
+		}
+	}
+}
+
 // GetRequest returns a pending clarification request by ID.
 func (s *Store) GetRequest(pendingID string) (*Request, bool) {
 	s.mu.RLock()
@@ -115,7 +234,13 @@ func (s *Store) GetRequest(pendingID string) (*Request, bool) {
 // Returns the response or an error if cancelled/timed out.
 func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Response, error) {
 	s.mu.RLock()
-	pending, ok := s.pending[pendingID]
+	pending := s.pending[pendingID]
+	s.mu.RUnlock()
+	return s.waitForRegisteredResponse(ctx, pendingID, pending)
+}
+
+func (s *Store) waitForRegisteredResponse(ctx context.Context, pendingID string, pending *PendingClarification) (*Response, error) {
+	s.mu.RLock()
 	hook := s.onWaitEntered
 	s.mu.RUnlock()
 
@@ -123,7 +248,7 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 		hook(pendingID)
 	}
 
-	if !ok {
+	if pending == nil {
 		return nil, fmt.Errorf("clarification request not found: %s", pendingID)
 	}
 
@@ -242,12 +367,21 @@ func (s *Store) respond(
 	resp *Response,
 	confirm func() error,
 ) error {
-	s.mu.RLock()
+	s.mu.Lock()
 	pending, ok := s.pending[pendingID]
-	hook := s.onRespondLoaded
-	s.mu.RUnlock()
+	hook := s.onRespondEntered
+	loadedHook := s.onRespondLoaded
+	if !ok && confirm != nil {
+		now := time.Now()
+		s.pruneDeliveryMissesLocked(now)
+		s.deliveryMisses[pendingID] = now
+	}
+	s.mu.Unlock()
 	if hook != nil {
 		hook(pendingID)
+	}
+	if loadedHook != nil {
+		loadedHook(pendingID)
 	}
 
 	if !ok {
@@ -258,11 +392,31 @@ func (s *Store) respond(
 
 	if pending.cancelled {
 		pending.mu.Unlock()
+		s.recordDeliveryMissAfterCancellation(pendingID, pending, confirm != nil)
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	}
 	if pending.resolved {
 		pending.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
+	}
+
+	// A concurrent cancel may have already closed CancelCh (and possibly
+	// already unblocked WaitForResponse) while this entry was still
+	// unresolved. pending.mu makes this check race-free: CancelRequest
+	// only closes CancelCh while holding the same lock, so if it got there
+	// first, that close is already visible here. There is no live waiter
+	// left to deliver to, so this must not report success. Report the same
+	// ErrNotFound a fresh lookup would have hit had CancelRequest won a
+	// touch earlier: the caller's dichotomy (ErrNotFound falls back to
+	// detached delivery; anything else is a hard failure) is correct here
+	// too, since the durable claim already succeeded and there is simply no
+	// live in-memory waiter left to hand it to.
+	select {
+	case <-pending.CancelCh:
+		pending.mu.Unlock()
+		s.recordDeliveryMissAfterCancellation(pendingID, pending, confirm != nil)
+		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
+	default:
 	}
 
 	resp.PendingID = pendingID
@@ -303,6 +457,29 @@ func (s *Store) respond(
 	}
 }
 
+// recordDeliveryMissAfterCancellation closes a replacement retry that raced
+// between cancellation of the waiter we loaded and observing that cancellation.
+// Detached delivery has already won for this durable identity, so leaving the
+// replacement live would strand it: the responder still holds the old entry
+// and will never signal the replacement's done channel.
+func (s *Store) recordDeliveryMissAfterCancellation(
+	pendingID string,
+	loaded *PendingClarification,
+	record bool,
+) {
+	if !record {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.pruneDeliveryMissesLocked(now)
+	s.deliveryMisses[pendingID] = now
+	if replacement := s.pending[pendingID]; replacement != nil && replacement != loaded {
+		s.cancelPendingLocked(pendingID, replacement)
+	}
+}
+
 func (s *Store) waitForStartedDeliveryConfirmation(
 	ctx context.Context,
 	pending *PendingClarification,
@@ -331,18 +508,56 @@ func clarificationDeliveryConfirmationResult(pending *PendingClarification) erro
 }
 
 // CancelRequest cancels a single pending clarification by id, unblocking any
-// WaitForResponse caller that is currently parked on it. Returns true if the
-// entry existed (and was removed), false otherwise. Used by callers that need
-// to surface a creation-side failure immediately rather than wait for the
-// 2-hour MCP timeout.
+// WaitForResponse caller that is currently parked on it. Returns true only if
+// the entry existed and was still unresolved, so the cancel actually took
+// effect; returns false if the entry was never found, or a concurrent
+// Respond has already recorded a resolution and there is nothing left to
+// cancel. Used by callers that need to surface a creation-side failure
+// immediately rather than wait for the 2-hour MCP timeout, and by
+// httpCancelRequest to distinguish a real cancel from cancelling an entry
+// that already has an answer in flight.
+//
+// A losing resolution claim (see clarification.Resolver) calls this on every
+// cancel outcome, independently of whichever concurrent request reaches the
+// entry first. CancelCh is only closed while an entry is still unresolved:
+// once Respond has recorded a resolution, closing CancelCh would serve no
+// purpose (there is no wedge left to break) and would race Respond's own
+// close of done, letting WaitForResponse's select nondeterministically
+// report a spurious cancellation for an answer that was actually delivered.
+// Gating on pending.resolved under the same pending.mu Respond uses is what
+// makes the two mutually exclusive.
+//
+// Gating additionally on pending.cancelled (set here, under the same lock,
+// before the close) makes CancelRequest idempotent against a concurrent
+// second close of the same entry -- two overlapping /:id/cancel requests, or
+// a request racing CancelSession -- which would otherwise both observe
+// resolved=false and both call close(pending.CancelCh), panicking with
+// "close of closed channel" and taking down the backend process.
 func (s *Store) CancelRequest(pendingID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
+	hook := s.onCancelRequestEntered
+	s.mu.RUnlock()
+
+	if hook != nil {
+		hook(pendingID)
+	}
+
 	if !ok {
 		return false
 	}
-	return s.cancelPendingLocked(pendingID, pending)
+
+	pending.mu.Lock()
+	if pending.resolved || pending.cancelled {
+		pending.mu.Unlock()
+		return false
+	}
+	pending.cancelled = true
+	close(pending.CancelCh)
+	pending.mu.Unlock()
+
+	s.deletePendingIfCurrent(pendingID, pending)
+	return true
 }
 
 // ListPending returns a snapshot of all pending clarification requests.
@@ -360,14 +575,31 @@ func (s *Store) ListPending() []*Request {
 
 // CancelSession cancels all pending clarification requests for a given session.
 // It closes the CancelCh to unblock any WaitForResponse callers and removes entries.
-// Returns the list of cancelled pending IDs.
+// Returns the list of cancelled pending IDs. Same race protection as
+// CancelRequest: CancelCh is only closed for an entry that is still
+// unresolved and not already cancelled, checked and set under that entry's
+// own pending.mu -- guarding against a concurrent CancelRequest (or a second
+// CancelSession call) closing the same channel twice and panicking.
+// An in-flight delivery confirmation stays discoverable until its waiter
+// consumes it, so exact retries join that confirmation instead of replaying early.
 func (s *Store) CancelSession(sessionID string) []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	var toCancel []*PendingClarification
+	for _, pending := range s.pending {
+		if pending.Request.SessionID == sessionID {
+			toCancel = append(toCancel, pending)
+		}
+	}
+	hook := s.onCancelSessionEntered
+	s.mu.RUnlock()
 
 	var cancelled []string
-	for id, pending := range s.pending {
-		if pending.Request.SessionID == sessionID && s.cancelPendingLocked(id, pending) {
+	for _, pending := range toCancel {
+		id := pending.Request.PendingID
+		if hook != nil {
+			hook(id)
+		}
+		if s.cancelSessionPending(id, pending) {
 			cancelled = append(cancelled, id)
 		}
 	}
@@ -410,6 +642,9 @@ func questionsEqual(a, b []Question) bool {
 		if a[i].Prompt != b[i].Prompt {
 			return false
 		}
+		if clarificationAllowsCustomText(a[i]) != clarificationAllowsCustomText(b[i]) {
+			return false
+		}
 		if !optionsEqual(a[i].Options, b[i].Options) {
 			return false
 		}
@@ -425,6 +660,26 @@ func optionsEqual(a, b []Option) bool {
 		if a[i].ID != b[i].ID || a[i].Label != b[i].Label || a[i].Description != b[i].Description {
 			return false
 		}
+	}
+	return true
+}
+
+// cancelSessionPending makes removal and cancellation atomic with a response
+// claim. A live confirmation remains registered until its waiter consumes it.
+func (s *Store) cancelSessionPending(id string, pending *PendingClarification) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	if pending.resolved && pending.deliveryConfirmation != nil && !pending.deliveryConfirmationComplete {
+		return false
+	}
+	if !pending.resolved && !pending.cancelled {
+		pending.cancelled = true
+		close(pending.CancelCh)
+	}
+	if s.pending[id] == pending {
+		delete(s.pending, id)
 	}
 	return true
 }

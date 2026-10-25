@@ -58,7 +58,6 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
 
   const wrappedDelete = useCallback(
     async (id: string, workspaceId: string) => {
-      if (!confirm(t("sentry:deleteThisSentryWatcher"))) return;
       try {
         await remove(id, workspaceId);
         toast({ description: t("sentry:watcherDeleted"), variant: "success" });

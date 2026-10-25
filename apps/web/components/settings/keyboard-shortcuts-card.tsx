@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { IconAlertTriangle, IconRotate, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Kbd } from "@kandev/ui/kbd";
 import type { Key, KeyboardShortcut } from "@/lib/keyboard/constants";
-import { formatShortcut, isMac } from "@/lib/keyboard/utils";
+import { formatShortcut } from "@/lib/keyboard/utils";
 import {
   CONFIGURABLE_SHORTCUTS,
   UNBOUND_SHORTCUT,
@@ -27,6 +28,12 @@ import {
 import { SettingsCard } from "./settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  buildIntegrationShortcutEntries,
+  isFocusTraversalKey,
+  type IntegrationShortcutEntry,
+} from "@/lib/keyboard/integration-shortcuts";
 
 type ShortcutRecorderProps = {
   shortcutId: string;
@@ -40,6 +47,7 @@ type ShortcutRecorderProps = {
   onClear?: (id: string) => void;
   isDirty?: boolean;
   conflictsWith?: string[];
+  touchSized?: boolean;
 };
 
 export function ShortcutRecorder({
@@ -52,7 +60,9 @@ export function ShortcutRecorder({
   onClear,
   isDirty = false,
   conflictsWith,
+  touchSized = false,
 }: ShortcutRecorderProps) {
+  const statusId = useId();
   const [recording, setRecording] = useState(false);
   const isDefault = JSON.stringify(current) === JSON.stringify(defaultShortcut);
   const isUnbound = isUnboundShortcut(current);
@@ -62,6 +72,10 @@ export function ShortcutRecorder({
     (e: KeyboardEvent) => {
       if (!recording) return;
       if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return;
+      if (shortcutId.startsWith("integration:") && isFocusTraversalKey(e)) {
+        setRecording(false);
+        return;
+      }
 
       e.preventDefault();
       e.stopPropagation();
@@ -99,20 +113,32 @@ export function ShortcutRecorder({
   }, [recording]);
 
   return (
-    <div className="flex items-center justify-between py-2">
+    <div
+      className={
+        touchSized
+          ? "flex flex-col items-stretch gap-2 py-3"
+          : "flex items-center justify-between py-2"
+      }
+    >
       <ShortcutRecorderLabel label={label} conflictsWith={conflictsWith} />
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <button
           data-testid={`shortcut-recorder-${shortcutId}`}
+          data-shortcut-recording={recording}
+          aria-label={label}
+          aria-describedby={statusId}
           data-settings-dirty={isDirty}
           onClick={() => setRecording(!recording)}
-          className={`px-3 py-1.5 rounded-md border text-sm cursor-pointer transition-colors ${
-            recording
-              ? "border-primary bg-primary/10 text-primary"
-              : "border-border bg-background hover:bg-accent"
-          }`}
+          className={`${controlSizingClassName("standard", "min-w-0 px-3 rounded-md border text-sm")}
+            ${
+              recording
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-background hover:bg-accent"
+            }`}
         >
-          <RecorderLabel recording={recording} current={current} isUnbound={isUnbound} />
+          <span id={statusId} role="status" aria-live="polite" aria-atomic="true">
+            <RecorderLabel recording={recording} current={current} isUnbound={isUnbound} />
+          </span>
         </button>
         <ShortcutRecorderActions
           shortcutId={shortcutId}
@@ -136,11 +162,13 @@ function ShortcutRecorderLabel({
 }) {
   const { t } = useTranslation();
   return (
-    <span className="text-sm flex items-center gap-1.5">
+    <span className="min-w-0 break-words text-sm flex items-center gap-1.5">
       {label}
       {conflictsWith && conflictsWith.length > 0 && (
         <span
           className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"
+          role="img"
+          aria-label={t("settings:sameShortcutAs", { shortcuts: conflictsWith.join(", ") })}
           title={t("settings:sameShortcutAs", { shortcuts: conflictsWith.join(", ") })}
         >
           <IconAlertTriangle className="size-3.5" />
@@ -172,7 +200,7 @@ function ShortcutRecorderActions({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer"
+          className={`${controlSizingClassName("icon")} cursor-pointer`}
           onClick={() => onClear(shortcutId)}
           aria-label={t("settings:clearShortcut")}
           title={t("settings:clearShortcut")}
@@ -184,7 +212,7 @@ function ShortcutRecorderActions({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer"
+          className={`${controlSizingClassName("icon")} cursor-pointer`}
           onClick={() => onReset(shortcutId)}
           aria-label={
             defaultIsUnbound ? t("settings:resetClearShortcut") : t("settings:resetToDefault")
@@ -216,34 +244,40 @@ function RecorderLabel({
 }
 
 /** Builds a `shortcutId -> conflicting labels` lookup from conflict groups. */
-function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, string[]> {
-  const labels = new Map<string, string[]>();
+export function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, string[]> {
+  const peersByAction = new Map<string, Map<string, string>>();
   for (const group of groups) {
     for (const entry of group.entries) {
-      labels.set(
-        entry.id,
-        group.entries.filter((other) => other.id !== entry.id).map((other) => other.label),
-      );
+      const peers = peersByAction.get(entry.id) ?? new Map<string, string>();
+      for (const other of group.entries) {
+        if (other.id !== entry.id && !peers.has(other.id)) peers.set(other.id, other.label);
+      }
+      peersByAction.set(entry.id, peers);
     }
   }
-  return labels;
+  return new Map([...peersByAction].map(([id, peers]) => [id, [...new Set(peers.values())]]));
 }
 
 const CONFIGURABLE_SHORTCUT_IDS = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
 
-function useShortcutConflictLabels(
+export function useShortcutConflictLabels(
   pluginEntries: ShortcutEntry[],
   overrides: StoredShortcutOverrides,
   translate: NonNullable<Parameters<typeof coreShortcutEntries>[0]>,
+  integrationEntries: IntegrationShortcutEntry[] = buildIntegrationShortcutEntries(
+    [],
+    [],
+    translate,
+  ),
 ) {
   return useMemo(() => {
-    const allEntries = [...coreShortcutEntries(translate), ...pluginEntries];
+    const allEntries = [...coreShortcutEntries(translate), ...integrationEntries, ...pluginEntries];
     const resolved = allEntries.map((entry) => ({
       entry,
       shortcut: resolveShortcutEntry(entry, overrides),
     }));
-    return buildConflictLabels(findShortcutConflicts(resolved, isMac()));
-  }, [pluginEntries, overrides, translate]);
+    return buildConflictLabels(findShortcutConflicts(resolved));
+  }, [pluginEntries, integrationEntries, overrides, translate]);
 }
 
 export function KeyboardShortcutsCard({
@@ -251,18 +285,22 @@ export function KeyboardShortcutsCard({
   baselineOverrides = {},
   onChange,
   pluginEntries = [],
+  integrationEntries,
 }: {
   overrides: StoredShortcutOverrides;
   baselineOverrides?: StoredShortcutOverrides;
   onChange: (overrides: StoredShortcutOverrides) => void;
   /** Dynamic plugin-declared shortcuts (see `lib/keyboard/plugin-shortcuts.ts`). */
   pluginEntries?: ShortcutEntry[];
+  integrationEntries?: IntegrationShortcutEntry[];
 }) {
   const { t } = useTranslation();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const integrations = integrationEntries ?? buildIntegrationShortcutEntries([], [], t);
   const shortcuts = resolveAllShortcuts(overrides);
   const baselineShortcuts = resolveAllShortcuts(baselineOverrides);
 
-  const conflictLabels = useShortcutConflictLabels(pluginEntries, overrides, t);
+  const conflictLabels = useShortcutConflictLabels(pluginEntries, overrides, t, integrations);
 
   const handleChange = useCallback(
     (id: string, shortcut: KeyboardShortcut) => {
@@ -312,36 +350,67 @@ export function KeyboardShortcutsCard({
             />
           ))}
         </div>
-        {pluginEntries.length > 0 && (
-          <div className="mt-4">
-            <p className="text-xs font-medium text-muted-foreground mb-1">
-              {t("settings:pluginShortcuts")}
-            </p>
-            <div className="divide-y divide-border">
-              {pluginEntries.map((entry) => (
-                <ShortcutRecorder
-                  key={entry.id}
-                  shortcutId={entry.id}
-                  label={entry.label}
-                  defaultShortcut={entry.default}
-                  current={resolveShortcutEntry(entry, overrides)}
-                  onChange={handleChange}
-                  onReset={handleReset}
-                  onClear={handleClear}
-                  isDirty={
-                    JSON.stringify(resolveShortcutEntry(entry, overrides)) !==
-                    JSON.stringify(resolveShortcutEntry(entry, baselineOverrides))
-                  }
-                  conflictsWith={conflictLabels.get(entry.id)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        <IntegrationShortcutRows
+          entries={integrations}
+          overrides={overrides}
+          baselineOverrides={baselineOverrides}
+          conflictLabels={conflictLabels}
+          touchSized={isMobile || !isFinePointer}
+          onChange={handleChange}
+          onReset={handleReset}
+        />
         <p className="text-xs text-muted-foreground mt-3">
           {t("settings:clickAShortcutToRecordA")}
         </p>
       </CardContent>
     </SettingsCard>
+  );
+}
+
+function IntegrationShortcutRows({
+  entries,
+  overrides,
+  baselineOverrides,
+  conflictLabels,
+  touchSized,
+  onChange,
+  onReset,
+}: {
+  entries: IntegrationShortcutEntry[];
+  overrides: StoredShortcutOverrides;
+  baselineOverrides: StoredShortcutOverrides;
+  conflictLabels: Map<string, string[]>;
+  touchSized: boolean;
+  onChange: ShortcutRecorderProps["onChange"];
+  onReset: ShortcutRecorderProps["onReset"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <section
+      className="mt-4 min-w-0"
+      data-testid="integration-shortcuts-group"
+      aria-label={t("settings:integrationShortcuts")}
+    >
+      <h3 className="text-sm font-medium mb-1">{t("settings:integrationShortcuts")}</h3>
+      <div className="min-w-0 divide-y divide-border">
+        {entries.map((entry) => (
+          <ShortcutRecorder
+            key={entry.id}
+            shortcutId={entry.id}
+            label={entry.label}
+            defaultShortcut={entry.default}
+            current={resolveShortcutEntry(entry, overrides)}
+            onChange={onChange}
+            onReset={onReset}
+            touchSized={touchSized}
+            isDirty={
+              JSON.stringify(resolveShortcutEntry(entry, overrides)) !==
+              JSON.stringify(resolveShortcutEntry(entry, baselineOverrides))
+            }
+            conflictsWith={conflictLabels.get(entry.id)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }

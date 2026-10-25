@@ -1,14 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { type Page } from "@playwright/test";
-import { test, expect } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
   selectMarkdownPreviewRange,
   selectMarkdownPreviewText,
 } from "../../helpers/markdown-preview";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      bumpWorkspaceFilesRefresh: (sessionId: string) => void;
+    };
+  };
+};
 
 const MARKDOWN_CONTENT = `# Hello World
 
@@ -43,6 +53,10 @@ async function seedTaskWithSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  options: {
+    repositoryId?: string;
+    afterLoad?: (taskId: string, sessionId: string) => Promise<void>;
+  } = {},
 ): Promise<{ session: SessionPage; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -52,14 +66,37 @@ async function seedTaskWithSession(
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
+      repository_ids: [options.repositoryId ?? seedData.repositoryId],
     },
   );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  await options.afterLoad?.(task.id, task.session_id);
   return { session, sessionId: task.session_id };
+}
+
+async function taskRepositoryWorktreePath(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  repositoryId: string,
+): Promise<string> {
+  const [environment, { sessions }] = await Promise.all([
+    apiClient.getTaskEnvironment(taskId),
+    apiClient.listTaskSessions(taskId),
+  ]);
+  const session = sessions.find((candidate) => candidate.id === sessionId);
+  return (
+    environment?.repos?.find((repository) => repository.repository_id === repositoryId)
+      ?.worktree_path ??
+    session?.worktrees?.find((worktree) => worktree.repository_id === repositoryId)
+      ?.worktree_path ??
+    session?.worktree_path ??
+    session?.workspace_path ??
+    ""
+  );
 }
 
 /** Open a markdown file from the Files panel and enable preview mode. */
@@ -92,8 +129,7 @@ async function openFileInCode(
 ): Promise<void> {
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 5_000 });
-  const fileRow = session.files.getByText(fileName);
-  await expect(fileRow).toBeVisible({ timeout: 10_000 });
+  const fileRow = await session.fileTree.waitForFileTreeNode(fileName, 30_000);
   await fileRow.click();
 
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
@@ -102,7 +138,11 @@ async function openFileInCode(
 }
 
 test.describe("Markdown preview", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
+
+  test.beforeEach(({ backend, seedData }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
 
   test("toggle markdown preview in file editor", async ({
     testPage,
@@ -198,6 +238,80 @@ test.describe("Markdown preview", () => {
     expect(await testPage.evaluate(() => "markdownXss" in window)).toBe(false);
   });
 
+  test("resizes adjacent columns in a rendered Markdown file preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // Covers AC-UI-RESIZABLE-MARKDOWN-TABLES-001.1, .3, and .9.
+    const fileName = "resizable-table.md";
+    const marker = "Preview table resize marker";
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    fs.writeFileSync(
+      path.join(repoDir, fileName),
+      [
+        "| Setting | Effect | Notes |",
+        "| --- | --- | --- |",
+        `| strictDepBuilds | Blocks unapproved scripts | ${marker} |`,
+        "| allowBuilds | Allows approved scripts | Ephemeral width |",
+      ].join("\n"),
+    );
+
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Preview Table Resize Test",
+    );
+    await openFileInPreview(testPage, session, fileName);
+
+    const preview = testPage.getByTestId("markdown-preview");
+    const table = preview.locator("table", { hasText: marker });
+    const wrapper = table.locator("xpath=..");
+    const cells = table.locator("tbody tr").first().locator("td");
+    const separator = preview.getByTestId("markdown-table-resizer-0");
+    await expect(table).toBeVisible();
+    await expect(separator).toBeVisible();
+    await expect(separator).toHaveAccessibleName("Resize table columns 1 and 2");
+    await expect(wrapper).toHaveAttribute("data-md-source-start", "1");
+    await expect(wrapper).toHaveClass(/markdown-table-scroll/);
+
+    const initialWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    const initialTableWidth = await table.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    );
+    const [separatorBox, cellBox] = await Promise.all([
+      separator.boundingBox(),
+      cells.first().boundingBox(),
+    ]);
+    expect(separatorBox).not.toBeNull();
+    expect(cellBox).not.toBeNull();
+
+    const boundaryX = separatorBox!.x + separatorBox!.width / 2;
+    const rowY = cellBox!.y + cellBox!.height / 2;
+    await testPage.mouse.move(boundaryX, rowY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(boundaryX + 40, rowY);
+    await testPage.mouse.up();
+
+    const resizedWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    expect(resizedWidths[0] - initialWidths[0]).toBeCloseTo(40, 0);
+    expect(initialWidths[1] - resizedWidths[1]).toBeCloseTo(40, 0);
+    expect(resizedWidths[2]).toBeCloseTo(initialWidths[2], 0);
+    expect(await table.evaluate((element) => element.getBoundingClientRect().width)).toBeCloseTo(
+      initialTableWidth,
+      0,
+    );
+    expect(
+      await preview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+  });
+
   test("markdown preview persists across page refresh", async ({
     testPage,
     apiClient,
@@ -222,7 +336,7 @@ test.describe("Markdown preview", () => {
       "Persist Test",
     );
 
-    // Verify the markdownPreview flag is in sessionStorage
+    // Verify the renderedPreview flag is in sessionStorage
     const storedTabs = await testPage.evaluate((sid) => {
       const raw = window.sessionStorage.getItem(`kandev.openFiles.${sid}`);
       return raw ? JSON.parse(raw) : null;
@@ -230,7 +344,7 @@ test.describe("Markdown preview", () => {
     expect(storedTabs).not.toBeNull();
     const mdTab = storedTabs.find((t: { path: string }) => t.path.endsWith("persist-test.md"));
     expect(mdTab).toBeTruthy();
-    expect(mdTab.markdownPreview).toBe(true);
+    expect(mdTab.renderedPreview).toBe(true);
 
     // No settle needed before the reload: the assertions above already read
     // the flag back out of sessionStorage, so the write has demonstrably
@@ -259,8 +373,18 @@ test.describe("Markdown preview", () => {
     seedData,
     backend,
   }) => {
-    // Create a markdown file as an untracked file — it will show in Changes
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    // Keep this diff fixture separate from files left by earlier tests in the worker repo.
+    const repoDir = fs.mkdtempSync(path.join(backend.tmpDir, "repos", "markdown-diff-preview-"));
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoDir, env: gitEnv });
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Markdown diff preview fixture\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repoDir, env: gitEnv });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: repoDir, env: gitEnv });
+    const repository = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "Markdown Diff Preview E2E",
+    });
+
+    // Create a markdown file as an untracked file — it will show in Changes.
     const filePath = path.join(repoDir, "preview-from-diff.md");
     fs.writeFileSync(filePath, "# Preview From Diff\n\nThis file was created for the diff test.");
 
@@ -269,6 +393,7 @@ test.describe("Markdown preview", () => {
       apiClient,
       seedData,
       "Markdown Diff Preview Test",
+      { repositoryId: repository.id },
     );
 
     // Open Changes panel — the untracked .md file should appear in the file list.
@@ -404,21 +529,51 @@ test.describe("Markdown preview", () => {
     testPage,
     apiClient,
     seedData,
-    backend,
   }) => {
     const fileName = "wrapped-code-comment.md";
     const wrappedLine = Array.from(
       { length: 80 },
       (_, i) => `wrapped-word-${i.toString().padStart(2, "0")}`,
     ).join(" ");
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    fs.writeFileSync(path.join(repoDir, fileName), `${wrappedLine}\n`);
 
     const { session, sessionId } = await seedTaskWithSession(
       testPage,
       apiClient,
       seedData,
       "Markdown Code Wrapped Comment Test",
+      {
+        afterLoad: async (taskId, taskSessionId) => {
+          let worktreePath = "";
+          await expect
+            .poll(
+              async () => {
+                worktreePath = await taskRepositoryWorktreePath(
+                  apiClient,
+                  taskId,
+                  taskSessionId,
+                  seedData.repositoryId,
+                );
+                return Boolean(worktreePath && fs.existsSync(worktreePath));
+              },
+              {
+                timeout: 30_000,
+                message:
+                  "Waiting for the markdown task environment to expose its repository worktree",
+              },
+            )
+            .toBe(true);
+          if (!worktreePath || !fs.existsSync(worktreePath)) {
+            throw new Error("the markdown task session did not expose its repository worktree");
+          }
+          fs.writeFileSync(path.join(worktreePath, fileName), `${wrappedLine}\n`);
+          await testPage.evaluate((sid) => {
+            const refreshFiles = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState()
+              .bumpWorkspaceFilesRefresh;
+            if (!refreshFiles) throw new Error("E2E workspace file refresh action is unavailable");
+            refreshFiles(sid);
+          }, taskSessionId);
+        },
+      },
     );
     await testPage.evaluate(
       ({ sid, pathName, codeContent }) => {
@@ -444,6 +599,9 @@ test.describe("Markdown preview", () => {
       { sid: sessionId, pathName: fileName, codeContent: wrappedLine },
     );
 
+    // Let the new file's Git update activate Changes before choosing Files.
+    await session.clickTab("Changes");
+    await expect(session.changes.locator(`[data-changes-file="${fileName}"]`)).toBeVisible();
     await openFileInCode(testPage, session, fileName);
     await expect(testPage.locator(".view-line").first()).toContainText("wrapped-word-00", {
       timeout: 10_000,

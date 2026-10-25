@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-frontend-behavior"]
 plan: "plan.md"
-spec: "../../specs/tasks/archive-confirmation.md"
+spec: "../../specs/tasks/requirements/archive-confirmation.md"
 ---
 
 # Task 03: Archive Preference E2E and Verification
@@ -30,7 +30,7 @@ cd apps/web && pnpm run typecheck && pnpm run lint
 
 - `apps/web/e2e/tests/task/archive-confirmation-preference.spec.ts`
 - `apps/web/e2e/tests/task/mobile-archive-confirmation-preference.spec.ts`
-- `docs/specs/tasks/archive-confirmation.md`
+- `docs/specs/tasks/requirements/archive-confirmation.md`
 - `docs/plans/archive-confirmation-preference/*.md`
 
 ## Inputs

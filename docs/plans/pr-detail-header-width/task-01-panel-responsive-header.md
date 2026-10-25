@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/pr-detail-header-width/spec.md"
+spec: "../../specs/ui/requirements/pr-detail-header-width.md"
 ---
 
 # Task 01: Make the PR Detail Header Panel-Responsive
@@ -74,7 +74,7 @@ coupled responsive contract and belong in one Red-Green-Refactor cycle.
 
 ## Inputs
 
-- Scenarios in `docs/specs/pr-detail-header-width/spec.md`.
+- Scenarios in `docs/specs/ui/requirements/pr-detail-header-width.md`.
 - Frontend and mobile contracts in `plan.md`.
 - Shared header implementation in
   `apps/web/components/integrations/change-request-detail-header.tsx`.

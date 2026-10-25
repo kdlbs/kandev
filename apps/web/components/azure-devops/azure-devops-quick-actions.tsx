@@ -27,6 +27,11 @@ import {
   DEFAULT_AZURE_PULL_REQUEST_ACTIONS,
   DEFAULT_AZURE_WORK_ITEM_ACTIONS,
 } from "./azure-devops-workspace-defaults";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 
 type Translate = (key: string, values?: Record<string, unknown>) => string;
 
@@ -111,7 +116,7 @@ function ActionIconSelect({
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger
-        className="h-11 w-full cursor-pointer sm:h-8"
+        className={settingsControlClassName("w-full cursor-pointer")}
         aria-label={t("azuredevops:icon")}
         data-settings-dirty={dirty}
       >
@@ -233,7 +238,7 @@ function ActionRow({
         </Field>
         <Field label={t("azuredevops:label")}>
           <Input
-            className="h-11 w-full sm:h-8"
+            className={settingsControlClassName("w-full")}
             value={action.label}
             aria-label={t("azuredevops:actionLabelAria", { kind: kindTitle, index: index + 1 })}
             data-settings-dirty={action.label !== baseline?.label}
@@ -242,7 +247,7 @@ function ActionRow({
         </Field>
         <Field label={t("azuredevops:hint")} className="col-span-2 sm:col-span-1">
           <Input
-            className="h-11 w-full sm:h-8"
+            className={settingsControlClassName("w-full")}
             value={action.hint}
             aria-label={t("azuredevops:actionHintAria", { kind: kindTitle, index: index + 1 })}
             placeholder={t("azuredevops:hintOptional")}
@@ -253,8 +258,7 @@ function ActionRow({
         <Button
           type="button"
           variant="outline"
-          size="sm"
-          className="h-11 cursor-pointer text-xs sm:h-8"
+          className={settingsActionClassName("cursor-pointer")}
           onClick={onToggle}
         >
           {expanded ? t("azuredevops:hidePrompt") : t("azuredevops:editPrompt")}
@@ -263,7 +267,7 @@ function ActionRow({
           type="button"
           variant="ghost"
           size="icon"
-          className="h-11 w-full cursor-pointer text-destructive sm:h-8 sm:w-8"
+          className={controlSizingClassName("icon", "cursor-pointer text-destructive")}
           onClick={onRemove}
           aria-label={t("azuredevops:removeActionAria", {
             kind: t(KIND_LOWER_KEYS[kind]),
@@ -317,9 +321,8 @@ function ActionEditor({
       ))}
       <Button
         type="button"
-        size="sm"
         variant="outline"
-        className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+        className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}
         onClick={add}
       >
         <IconPlus className="h-4 w-4" />{" "}
@@ -454,9 +457,8 @@ export function AzureDevOpsQuickActionsSection({ workspaceId }: { workspaceId: s
       action={
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
+          className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}
           disabled={drafts.loading || !!drafts.loadError}
           onClick={drafts.reset}
         >

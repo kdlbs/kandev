@@ -15,6 +15,8 @@ import { applyProfileDuplicated } from "@/hooks/domains/settings/use-profile-dup
 import { errorMessage } from "@/components/settings/agent-profile-page-state";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
+import { getBackendReloadSnapshot } from "@/lib/platform/backend-reload-coordinator";
+import { isHandledApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 /**
@@ -29,6 +31,20 @@ export function profileSaveInvalidReason(
   if (!profileName.trim()) return translate("agents:profileNameRequired");
   if (modelConfigResolutionPending) return translate("agents:resolvingModelOptions");
   return undefined;
+}
+
+export function resolveProfileEditorInvalidReason(
+  reasons: {
+    nativeCodexUnavailable: boolean;
+    hasExternalConflict: boolean;
+    profileInvalidReason?: string;
+    providerInvalidReason?: string;
+  },
+  translate: (key: string) => string,
+): string | undefined {
+  if (reasons.nativeCodexUnavailable) return translate("agents:nativeCodexUnavailable");
+  if (reasons.hasExternalConflict) return translate("agents:profileExternalChangeInvalidReason");
+  return reasons.profileInvalidReason ?? reasons.providerInvalidReason;
 }
 
 type UseProfileDuplicateActionOptions = {
@@ -71,6 +87,7 @@ export function useProfileDuplicateAction({
       // it reports canLeave=false and we abort before posting.
       const saved = await saveAll();
       if (!saved.canLeave) {
+        if (getBackendReloadSnapshot().reloadRequired) return;
         // Surface whichever contributor is blocking the save (MCP error or
         // an invalid profile draft); when the coordinator gives no reason
         // (another save in flight, or newer changes appeared during the
@@ -106,6 +123,7 @@ export function useProfileDuplicateAction({
         router.push(`/settings/agents/${encodeURIComponent(agent.name)}/profiles/${created.id}`),
       );
     } catch (error) {
+      if (isHandledApiError(error)) return;
       toast({
         title: translate("agents:failedToDuplicateProfile"),
         description: errorMessage(error),

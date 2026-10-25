@@ -1,0 +1,123 @@
+"use client";
+
+import type { RefObject } from "react";
+import { IconTrash } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTranslation } from "react-i18next";
+
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { settingsActionClassName } from "@/components/settings/settings-control";
+import type { SavedLayout } from "@/lib/types/http";
+
+type LayoutProfileDeleteConfirmationProps = {
+  profile: SavedLayout;
+  isFinePointer: boolean;
+  open: boolean;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void | Promise<void>;
+};
+
+export function LayoutProfileDeleteConfirmation({
+  profile,
+  isFinePointer,
+  open,
+  anchorRef,
+  onOpenChange,
+  onConfirm,
+}: LayoutProfileDeleteConfirmationProps) {
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const title = t("settings:deleteLayoutProfileNamed", { name: profile.name });
+  const description = profile.is_default
+    ? t("settings:theBuiltInDefaultLayoutWill")
+    : t("settings:thisProfileWillBeRemovedWhen");
+  const cancelInlineDelete = () => {
+    onOpenChange(false);
+    queueMicrotask(() => anchorRef.current?.focus());
+  };
+
+  const fallback = !isFinePointer ? (
+    <InlineConfirmActions
+      density="touch"
+      testId="layout-profile-delete-inline-confirmation"
+      ariaLabel={title}
+      description={description}
+      cancelLabel={t("settings:cancel")}
+      confirmLabel={t("settings:delete")}
+      confirmAriaLabel={title}
+      confirmTestId="layout-profile-delete-confirm"
+      onCancel={cancelInlineDelete}
+      onClose={() => onOpenChange(false)}
+      onConfirm={onConfirm}
+    />
+  ) : (
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      title={title}
+      description={description}
+      cancelLabel={t("settings:cancel")}
+      confirmLabel={t("settings:delete")}
+      confirmAriaLabel={title}
+      confirmTestId="layout-profile-delete-confirm"
+      testId="layout-profile-delete-confirm-popover"
+      onOpenChange={onOpenChange}
+      onConfirm={onConfirm}
+    />
+  );
+  return (
+    <>
+      {(isMobile || isFinePointer || !open) && (
+        <DeleteProfileButton anchorRef={anchorRef} onClick={() => onOpenChange(true)} />
+      )}
+      <MobileActionConfirmation
+        open={open}
+        targetKey={profile.id}
+        title={title}
+        description={description}
+        cancelLabel={t("settings:cancel")}
+        confirmLabel={t("settings:delete")}
+        confirmAriaLabel={title}
+        confirmTestId="layout-profile-delete-confirm"
+        focusReturnRef={anchorRef}
+        onOpenChange={onOpenChange}
+        onConfirm={onConfirm}
+        fallback={fallback}
+      />
+    </>
+  );
+}
+
+function DeleteProfileButton({
+  anchorRef,
+  onClick,
+}: {
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          ref={anchorRef}
+          type="button"
+          size="icon"
+          variant="outline"
+          className={settingsActionClassName("cursor-pointer")}
+          aria-label={t("settings:deleteLayoutProfile")}
+          onClick={onClick}
+          data-testid="layout-profile-delete"
+        >
+          <IconTrash className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("settings:deleteThisCustomLayoutAfterConfirmation")}</TooltipContent>
+    </Tooltip>
+  );
+}

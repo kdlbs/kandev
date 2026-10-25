@@ -5,7 +5,7 @@ status: done
 wave: 9
 depends_on: ["06-publish-completion-foreground-yield", "07-consolidate-session-input-mode", "08-required-behavior-coverage-audit"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 09: Follow-up review and verification

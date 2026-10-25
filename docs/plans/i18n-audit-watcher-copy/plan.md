@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/i18n-audit-watcher-copy/spec.md
+spec: docs/specs/platform/requirements/i18n-audit-watcher-copy.md
 created: 2026-08-12
 status: completed
 ---

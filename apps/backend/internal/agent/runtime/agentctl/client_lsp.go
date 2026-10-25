@@ -27,5 +27,5 @@ func (c *Client) DialLSP(ctx context.Context, language string, autoInstall bool)
 	}
 	u.RawQuery = q.Encode()
 
-	return websocket.DefaultDialer.DialContext(ctx, u.String(), c.wsAuthHeaders())
+	return c.dialWebSocket(ctx, u.RequestURI(), c.wsAuthHeaders())
 }

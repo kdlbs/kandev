@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-layout-profiles.md
+spec: docs/specs/ui/requirements/task-layout-profiles.md
 created: 2026-08-02
 status: completed
 ---

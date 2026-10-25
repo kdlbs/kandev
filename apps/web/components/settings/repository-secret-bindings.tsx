@@ -8,6 +8,11 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useWorkspaceSecretOptions } from "@/hooks/domains/settings/use-workspace-secret-options";
+import {
+  settingsActionClassName,
+  settingsCredentialClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 import type { Repository, RepositorySecretBinding } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
@@ -76,7 +81,7 @@ function BindingRow({ binding, index, options, onUpdate, onRemove }: BindingRowP
           value={binding.key}
           onChange={(event) => onUpdate(index, { key: event.target.value })}
           placeholder={t("workspaces:environmentSecretKeyPlaceholder")}
-          className="min-h-11 font-mono text-xs"
+          className={settingsCredentialClassName("text-xs")}
           data-testid={`repository-secret-key-${index}`}
         />
       </div>
@@ -92,7 +97,7 @@ function BindingRow({ binding, index, options, onUpdate, onRemove }: BindingRowP
         >
           <SelectTrigger
             id={`repository-secret-value-${index}`}
-            className="min-h-11 min-w-0 text-xs"
+            className={settingsControlClassName("min-w-0 text-xs")}
             data-testid={`repository-secret-select-${index}`}
           >
             <SelectValue placeholder={t("workspaces:selectEnvironmentSecret")} />
@@ -116,7 +121,7 @@ function BindingRow({ binding, index, options, onUpdate, onRemove }: BindingRowP
         type="button"
         variant="ghost"
         size="icon"
-        className="h-11 w-11 cursor-pointer justify-self-end"
+        className="cursor-pointer justify-self-end"
         onClick={() => onRemove(index)}
         aria-label={t("workspaces:removeEnvironmentSecret", { key: binding.key || index + 1 })}
         data-testid={`repository-secret-remove-${index}`}
@@ -194,7 +199,7 @@ export function RepositorySecretBindings({ repository, onUpdate }: RepositorySec
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 cursor-pointer"
+        className={settingsActionClassName("cursor-pointer")}
         onClick={addBinding}
         data-testid="repository-secret-add"
       >

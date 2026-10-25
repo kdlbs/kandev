@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agent-stall-recovery/spec.md
+spec: docs/specs/agents/requirements/agent-stall-recovery.md
 decision: docs/decisions/2026-08-18-never-started-agent-stall-terminal.md
 created: 2026-07-29
 status: draft

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -37,6 +38,13 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 		return nil, "", ErrInvalidCredentials
 	}
 	s.limiter.Reset(limiterKey)
+	// A suspended organization refuses login outright rather than handing out
+	// a session that fails on the very next request. The message is distinct
+	// from ErrInvalidCredentials on purpose: the credentials were correct, and
+	// telling the user their password is wrong would send them to reset it.
+	if !s.orgUsable(ctx, user.OrgID) {
+		return nil, "", ErrOrgUnavailable
+	}
 	token, err := s.createSession(ctx, user.ID, userAgent, ip)
 	if err != nil {
 		return nil, "", err
@@ -101,7 +109,10 @@ func (s *Service) ResolveSessionToken(ctx context.Context, token, ip string) (au
 		}
 		_ = s.store.TouchSession(ctx, sess.ID, now, now.Add(s.SessionTTL()), refreshIP)
 	}
-	return authn.Identity{UserID: user.ID, Role: roleOf(user), SessionID: sess.ID}, true
+	if !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false
+	}
+	return identityOf(user, sess.ID, ""), true
 }
 
 // ResolveBearer authenticates an Authorization bearer credential when it is a
@@ -126,7 +137,10 @@ func (s *Service) ResolveBearer(ctx context.Context, token string) (authn.Identi
 	if record.LastUsedAt == nil || now.Sub(*record.LastUsedAt) > sessionTouchInterval {
 		_ = s.store.TouchAPIToken(ctx, record.ID, now)
 	}
-	return authn.Identity{UserID: user.ID, Role: roleOf(user), TokenID: record.ID}, true
+	if !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false
+	}
+	return identityOf(user, "", record.ID), true
 }
 
 // IdentityForUser resolves a stored user ID to the identity that user carries
@@ -148,12 +162,36 @@ func (s *Service) IdentityForUser(ctx context.Context, userID string) (authn.Ide
 	if err != nil {
 		return authn.Identity{}, false
 	}
-	return authn.Identity{UserID: user.ID, Role: roleOf(user)}, true
+	if !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false
+	}
+	return identityOf(user, "", ""), true
 }
 
 // ListSessions returns the user's sessions for the account page.
 func (s *Service) ListSessions(ctx context.Context, userID string) ([]*store.Session, error) {
 	return s.store.ListSessionsByUser(ctx, userID)
+}
+
+// SessionIPs returns each distinct raw session IP belonging to the user.
+func (s *Service) SessionIPs(ctx context.Context, userID string) ([]string, error) {
+	sessions, err := s.ListSessions(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(sessions))
+	ips := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session.IP == "" {
+			continue
+		}
+		if _, exists := seen[session.IP]; exists {
+			continue
+		}
+		seen[session.IP] = struct{}{}
+		ips = append(ips, session.IP)
+	}
+	return ips, nil
 }
 
 // RevokeSession deletes one of the user's sessions.
@@ -191,4 +229,49 @@ func (s *Service) createSession(ctx context.Context, userID, userAgent, ip strin
 		return "", err
 	}
 	return token, nil
+}
+
+// ErrIdentityUnavailable reports that a user lookup could not decide: a store
+// failure, or authentication being disabled.
+var ErrIdentityUnavailable = errors.New("identity lookup unavailable")
+
+// ResolveUserIdentity is IdentityForUser with the failure kinds separated:
+// ok is false with a nil error when the account is missing, disabled or its
+// organization is unusable, and the error is ErrIdentityUnavailable when the
+// lookup itself could not decide.
+func (s *Service) ResolveUserIdentity(ctx context.Context, userID string) (authn.Identity, bool, error) {
+	if s == nil || userID == "" || s.Mode() == ModeDisabled {
+		return authn.Identity{}, false, ErrIdentityUnavailable
+	}
+	user, err := s.users.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return authn.Identity{}, false, nil
+	}
+	if err != nil {
+		return authn.Identity{}, false, errors.Join(ErrIdentityUnavailable, err)
+	}
+	if user.Status != usermodels.StatusActive || !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false, nil
+	}
+	return identityOf(user, "", ""), true, nil
+}
+
+// UserDisplayName returns the name shown for a user, falling back to the email
+// when no display name is set. ok is false with a nil error when the account
+// does not exist.
+func (s *Service) UserDisplayName(ctx context.Context, userID string) (string, bool, error) {
+	if s == nil || userID == "" {
+		return "", false, nil
+	}
+	user, err := s.users.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if user.DisplayName != "" {
+		return user.DisplayName, true, nil
+	}
+	return user.Email, true, nil
 }

@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
@@ -98,7 +99,9 @@ describe("FileEditorPanel image preview", () => {
   it("updates displayed image content when a reused preview tab switches files", async () => {
     act(() => seedImage("docs/first.png", "first-image"));
     const { rerender } = render(
-      <FileEditorPanel panelId={PREVIEW_PANEL_ID} params={{ path: "docs/first.png" }} />,
+      <TooltipProvider>
+        <FileEditorPanel panelId={PREVIEW_PANEL_ID} params={{ path: "docs/first.png" }} />
+      </TooltipProvider>,
     );
 
     expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("first-image");
@@ -107,7 +110,11 @@ describe("FileEditorPanel image preview", () => {
     });
 
     act(() => seedImage("docs/second.png", "second-image"));
-    rerender(<FileEditorPanel panelId={PREVIEW_PANEL_ID} params={{ path: "docs/second.png" }} />);
+    rerender(
+      <TooltipProvider>
+        <FileEditorPanel panelId={PREVIEW_PANEL_ID} params={{ path: "docs/second.png" }} />
+      </TooltipProvider>,
+    );
 
     expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("second-image");
   });
@@ -118,19 +125,23 @@ describe("FileEditorPanel image preview", () => {
       seedImage(SHARED_IMAGE_PATH, REPO_B_CONTENT, "repo-b");
     });
     const { rerender } = render(
-      <FileEditorPanel
-        panelId={PREVIEW_PANEL_ID}
-        params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
-      />,
+      <TooltipProvider>
+        <FileEditorPanel
+          panelId={PREVIEW_PANEL_ID}
+          params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe(REPO_A_CONTENT);
 
     rerender(
-      <FileEditorPanel
-        panelId={PREVIEW_PANEL_ID}
-        params={{ path: SHARED_IMAGE_PATH, repo: "repo-b" }}
-      />,
+      <TooltipProvider>
+        <FileEditorPanel
+          panelId={PREVIEW_PANEL_ID}
+          params={{ path: SHARED_IMAGE_PATH, repo: "repo-b" }}
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe(REPO_B_CONTENT);
@@ -140,10 +151,12 @@ describe("FileEditorPanel image preview", () => {
     act(() => seedImage(SHARED_IMAGE_PATH, REPO_A_CONTENT, "repo-a"));
 
     render(
-      <FileEditorPanel
-        panelId={PREVIEW_PANEL_ID}
-        params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
-      />,
+      <TooltipProvider>
+        <FileEditorPanel
+          panelId={PREVIEW_PANEL_ID}
+          params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
+        />
+      </TooltipProvider>,
     );
 
     const props = JSON.parse(
@@ -163,10 +176,12 @@ describe("FileEditorPanel image preview", () => {
     act(() => seedImage(SHARED_IMAGE_PATH, REPO_A_CONTENT, "repo-a"));
 
     render(
-      <FileEditorPanel
-        panelId={PREVIEW_PANEL_ID}
-        params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
-      />,
+      <TooltipProvider>
+        <FileEditorPanel
+          panelId={PREVIEW_PANEL_ID}
+          params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).getAttribute("data-worktree-path")).toBe(

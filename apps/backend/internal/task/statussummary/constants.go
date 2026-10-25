@@ -29,6 +29,7 @@ const (
 	prStatePending  = "pending"
 	prStateAwaiting = "awaiting_review"
 	prStateReady    = "ready"
+	prStateQueued   = "queued"
 	prStatePassing  = "passing"
 	prStateNeutral  = "neutral"
 	prStateOpen     = "open"

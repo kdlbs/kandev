@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-fallback-boot-context"]
 plan: "plan.md"
-spec: "../../specs/missing-task-route-recovery/spec.md"
+spec: "../../specs/tasks/requirements/missing-task-route-recovery.md"
 ---
 
 # Task 02: Add unavailable-route recovery UI and E2E

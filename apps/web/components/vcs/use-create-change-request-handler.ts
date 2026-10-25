@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -31,6 +31,8 @@ type ChangeRequestDialogState = {
   setBranchPushed: (value: boolean) => void;
   repo: string | undefined;
   setOpen: (value: boolean) => void;
+  captureOwner: () => object;
+  owns: (owner: object) => boolean;
 };
 
 function openCreatedChangeRequest({
@@ -49,14 +51,24 @@ function openCreatedChangeRequest({
   void openExternalLink(url).catch(() => undefined);
 }
 
+function reopenPushedBranch(dialog: ChangeRequestDialogState, owned: boolean) {
+  if (!owned) return;
+  dialog.setBranchPushed(true);
+  dialog.setOpen(true);
+}
+
 export function useCreateChangeRequestHandler({
   dialog,
+  scope,
+  taskId,
   baseBranch,
   createChangeRequest,
   defaultTerminology,
   supportsDraft,
 }: {
   dialog: ChangeRequestDialogState;
+  scope: object;
+  taskId: string | null;
   baseBranch: string | undefined;
   createChangeRequest: CreateChangeRequest;
   defaultTerminology: ReturnType<typeof getChangeRequestTerminology>;
@@ -64,9 +76,16 @@ export function useCreateChangeRequestHandler({
 }) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
   const requestController = useRef<AbortController | null>(null);
+  const currentScope = useRef<object | null>(scope);
+  useLayoutEffect(() => {
+    currentScope.current = scope;
+    dialog.setBranchPushed(false);
+    return () => {
+      currentScope.current = null;
+    };
+  }, [scope, dialog.setBranchPushed]);
 
   useEffect(
     () => () => {
@@ -81,6 +100,8 @@ export function useCreateChangeRequestHandler({
     requestController.current?.abort();
     const controller = new AbortController();
     requestController.current = controller;
+    const owner = dialog.captureOwner();
+    const ownsForm = () => currentScope.current === scope && dialog.owns(owner);
     try {
       dialog.setOpen(false);
       try {
@@ -99,15 +120,14 @@ export function useCreateChangeRequestHandler({
           toast(getChangeRequestSuccessFeedback(result, effectiveDraft, defaultTerminology));
           openCreatedChangeRequest({
             url: result.pr_url,
-            taskId: activeTaskId,
+            taskId,
             repositoryScope: dialog.repo,
             rememberURL: setPendingPrUrlForTask,
           });
         } else {
           toast(getChangeRequestFailureFeedback(result, defaultTerminology));
           if (result.branch_pushed) {
-            dialog.setBranchPushed(true);
-            dialog.setOpen(true);
+            reopenPushedBranch(dialog, ownsForm());
             return;
           }
         }
@@ -119,7 +139,7 @@ export function useCreateChangeRequestHandler({
           variant: "error",
         });
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !ownsForm()) return;
       dialog.setTitle("");
       dialog.setBody("");
       dialog.setBranchPushed(false);
@@ -127,7 +147,8 @@ export function useCreateChangeRequestHandler({
       if (requestController.current === controller) requestController.current = null;
     }
   }, [
-    activeTaskId,
+    taskId,
+    scope,
     baseBranch,
     createChangeRequest,
     defaultTerminology,

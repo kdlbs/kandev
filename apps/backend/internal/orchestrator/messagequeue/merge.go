@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -30,7 +31,8 @@ var ErrMergeReferenceOverflow = errors.New("merge would exceed the per-message e
 // produced by the same sender task; workflow/server/system sources and
 // reserved in-flight targets are never mergeable.
 func mergeAllowed(source, target *QueuedMessage, queuedBy string) bool {
-	if target == nil || target.IsReservedInFlight() {
+	if target == nil || target.IsReservedInFlight() ||
+		hasPlanCommentAdmission(source.Metadata) || hasPlanCommentAdmission(target.Metadata) {
 		return false
 	}
 	if source.QueuedBy == QueuedByAgent {
@@ -47,11 +49,23 @@ func mergeAllowed(source, target *QueuedMessage, queuedBy string) bool {
 		source.QueuedBy == queuedBy && target.QueuedBy == queuedBy
 }
 
-// mergeEntryMetadata returns a copy of the target metadata with
-// MetadataEntityReferences replaced by the union of both entries' references,
-// normalized and deduplicated by canonical ref. The key is dropped when the
-// union is empty. Returns ErrMergeReferenceOverflow when the union would
-// exceed the per-message reference cap.
+func hasPlanCommentAdmission(metadata map[string]interface{}) bool {
+	for _, key := range []string{
+		plancomments.MetadataRefs,
+		plancomments.MetadataRequestFingerprint,
+		plancomments.MetadataClientQueueID,
+	} {
+		if _, ok := metadata[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeEntryMetadata returns a copy of the target metadata with additive
+// entity references and ordinary admission provenance replaced by their
+// normalized, deduplicated unions. Empty union keys are removed. Returns
+// ErrMergeReferenceOverflow when the entity-reference union exceeds its cap.
 func mergeEntryMetadata(target, source map[string]interface{}) (map[string]interface{}, error) {
 	merged := make(map[string]interface{}, len(target)+1)
 	for key, value := range target {
@@ -63,9 +77,18 @@ func mergeEntryMetadata(target, source map[string]interface{}) (map[string]inter
 	}
 	if len(union) == 0 {
 		delete(merged, MetadataEntityReferences)
-		return merged, nil
+	} else {
+		merged[MetadataEntityReferences] = union
 	}
-	merged[MetadataEntityReferences] = union
+	admissionIDs, ok := unionQueueAdmissionIDs(target, source)
+	if !ok {
+		return nil, ErrInvalidQueueAdmissionIDs
+	}
+	if len(admissionIDs) == 0 {
+		delete(merged, MetadataQueueAdmissionIDs)
+	} else {
+		merged[MetadataQueueAdmissionIDs] = admissionIDs
+	}
 	return merged, nil
 }
 

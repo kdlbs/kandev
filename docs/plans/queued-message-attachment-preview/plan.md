@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/prompt-attachments.md
+spec: docs/specs/tasks/requirements/prompt-attachments.md
 created: 2026-08-13
 status: completed
 ---

@@ -45,6 +45,39 @@ func TestRemoteContributionRoundTripsAndPreservesUnrelatedMetadata(t *testing.T)
 	}
 }
 
+func TestValidatePRBaseContributionIdentity(t *testing.T) {
+	binding := RemoteContribution{
+		Version: RemoteContributionVersion, Provider: RemoteContributionProviderGitHub,
+		Kind: RemoteContributionKindPullRequest, CanonicalURL: "https://github.com/upstream/widgets/pull/42",
+		Number: 42, State: RemoteContributionStateOpen, BaseBranch: "release", HeadBranch: "feature",
+		HeadSHA: "0123456789abcdef0123456789abcdef01234567", CollaborationAllowed: true,
+		SourceRepository: RemoteContributionRepository{
+			Host: "github.com", Path: "fork-owner/widgets",
+			RemoteURL: "https://github.com/fork-owner/widgets.git",
+		},
+	}
+	base := PRBase{Target: ComparisonTarget{
+		Version: ComparisonTargetVersion, Provider: ComparisonTargetProviderGitHub,
+		Kind: ComparisonTargetKindPullRequest, Number: 42, HeadBranch: "feature", TargetBranch: "release",
+		HeadRepository: ComparisonTargetRepository{
+			Host: "github.com", Path: "fork-owner/widgets", RemoteURL: binding.SourceRepository.RemoteURL,
+		},
+		TargetRepository: ComparisonTargetRepository{
+			Host: "github.com", Path: "upstream/widgets", RemoteURL: "https://github.com/upstream/widgets.git",
+		},
+	}}
+	if err := ValidatePRBaseContributionIdentity(&base, &binding); err != nil {
+		t.Fatalf("valid contribution whose attachment is the base repository: %v", err)
+	}
+
+	base.Target.HeadRepository = ComparisonTargetRepository{
+		Host: "github.com", Path: "other-fork/widgets", RemoteURL: "https://github.com/other-fork/widgets.git",
+	}
+	if err := ValidatePRBaseContributionIdentity(&base, &binding); err == nil {
+		t.Fatal("accepted a same-number PR from a different head repository")
+	}
+}
+
 func TestRemoteContributionRejectsUnsafeOrCredentialBearingValues(t *testing.T) {
 	base := RemoteContribution{
 		Version:      1,

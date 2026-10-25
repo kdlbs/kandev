@@ -29,6 +29,13 @@ const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is
 var (
 	overloadedCmdRe               = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
 	changesWalkthroughPromptRefRe = regexp.MustCompile(`^@changes-walkthrough(?:\s|$)`)
+	savedPromptDeliveryBlockRe    = regexp.MustCompile(
+		regexp.QuoteMeta("<kandev-system>EXPANDED PROMPT REFERENCES:") +
+			`[\s\S]*?</kandev-system>`,
+	)
+	savedPromptDeliveryDirectiveRe = regexp.MustCompile(
+		`(?m)^` + regexp.QuoteMeta(savedPromptDeliveryDirective) + `(?:\r?\n|</kandev-system>)`,
+	)
 )
 
 const changesWalkthroughPromptMarker = "Please create an agent-authored walkthrough of the current changes"
@@ -40,6 +47,19 @@ func isChangesWalkthroughRequest(prompt string) bool {
 		strings.Contains(cmd, "Available changed files:")
 	promptReference := changesWalkthroughPromptRefRe.MatchString(cmd)
 	return legacyPrompt || promptReference
+}
+
+// parseSavedPromptDeliveryScenario recognizes the test-only directive only
+// inside the exact backend-generated expansion block. The visible prompt and
+// browser-provided CONTEXT PROMPTS block are intentionally ignored, so an
+// untrusted copy cannot make the mock agent report a successful delivery.
+func parseSavedPromptDeliveryScenario(prompt string) (string, bool) {
+	for _, block := range savedPromptDeliveryBlockRe.FindAllString(prompt, -1) {
+		if savedPromptDeliveryDirectiveRe.MatchString(block) {
+			return savedPromptDeliveryScenario, true
+		}
+	}
+	return "", false
 }
 
 // parseOverloadedCmd reports whether the prompt is the /overloaded command and,
@@ -125,8 +145,10 @@ var transportLostErrorData = map[string]any{"error": "peer disconnected before r
 // transportLostCmdRe matches `/transport-lost` or `/e2e:transport-lost`,
 // optionally followed by `:N` — the number of consecutive prompts to fail
 // with the ACP peer-disconnected signature before recovering (default 1).
-// Use a large N (e.g. `/transport-lost:9`) to exhaust the retry budget and
-// fall through to the red recovery banner.
+// The signature lives only in the error's Data, which the generic
+// prompt-error projection never reads, so every failure presents as
+// terminal and exposes manual recovery; N does not drive an automatic
+// retry ladder here the way it does for `/overloaded`.
 var transportLostCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?transport-lost(?::(\d+))?$`)
 
 // parseTransportLostCmd reports whether the prompt is the /transport-lost
@@ -344,7 +366,7 @@ func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
 		toolKeyTaskID:          childTaskID,
 		"reply_to_question_id": questionID,
 	})
-	result, err := callMCPTool("kandev", "message_task_kandev", map[string]any{
+	result, err := e.callMCPTool("kandev", "message_task_kandev", map[string]any{
 		toolKeyTaskID:          childTaskID,
 		clarificationPromptKey: "Use the first safe option and continue.",
 		"reply_to_question_id": questionID,
@@ -365,6 +387,12 @@ func handlePrompt(e *emitter, prompt, model string) {
 
 	// Extract the user-facing content for command routing.
 	cmd := stripKandevSystem(prompt)
+	if script := ciAutomationScript(prompt, cmd); script != "" {
+		cmd = script
+	}
+	if scenario, ok := parseSavedPromptDeliveryScenario(prompt); ok {
+		cmd = "/e2e:" + scenario
+	}
 	if handleAutopilotParentQuestion(e, cmd) {
 		return
 	}
@@ -410,6 +438,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitSubagentSequence(e, model)
 	case strings.EqualFold(cmd, "/subtask") || strings.HasPrefix(strings.ToLower(cmd), "/subtask "):
 		emitCreateSubtask(e, cmd, model)
+	case strings.EqualFold(cmd, "/e2e:utility-profile"):
+		e.text("utility profile model: " + model)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
@@ -434,6 +464,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitBackgroundWork(e, cmd)
 	case strings.EqualFold(cmd, "/detached-background") || strings.HasPrefix(strings.ToLower(cmd), "/detached-background "):
 		emitDetachedBackgroundWork(e, cmd)
+	case strings.EqualFold(cmd, "/parked-fixture") || strings.HasPrefix(strings.ToLower(cmd), "/parked-fixture "):
+		emitParkedFixture(e, cmd)
 	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):
@@ -486,6 +518,11 @@ func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
 // open for the entire delay, so E2E can cover settled+background explicitly.
 func emitDetachedBackgroundWork(e *emitter, cmd string) {
 	d := parseCommandDuration(cmd, 8*time.Second)
+	backgroundCtx, cancel := context.WithCancel(context.Background())
+	release := func() {}
+	if e.registerDetachedWork != nil {
+		release = e.registerDetachedWork(e.sid, cancel)
+	}
 	e.text("Launching detached background work; this foreground turn is complete.")
 
 	taskToolID := nextToolID()
@@ -496,9 +533,72 @@ func emitDetachedBackgroundWork(e *emitter, cmd string) {
 
 	backgroundEmitter := &emitter{ctx: context.Background(), conn: e.conn, sid: e.sid}
 	go func() {
-		time.Sleep(d)
+		defer release()
+		defer cancel()
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-backgroundCtx.Done():
+		}
 		backgroundEmitter.completeDetachedWork()
 	}()
+}
+
+// emitParkedFixture is a task-09 (disambiguate-waiting) e2e-only fixture. It
+// registers a *shell-kind* detached background launch — a Bash/execute tool
+// call whose input carries run_in_background:true, the condition
+// claudeBackgroundLaunchRecognizer.RecognizesDetachedLaunch actually checks
+// (internal/agentctl/server/adapter/transport/acp/background_launch_recognizer.go)
+// and trackBackgroundToolUpdate keys its setObservedDetachedLaunch call on
+// (internal/orchestrator/event_handlers_streaming.go). This is deliberately
+// NOT /detached-background's async-subagent (Task-tool) launch shape: that
+// registers as BackgroundWorkKindSubagent, which the parked projection's
+// attestation term never sets — only the shell kind does.
+//
+// The attestation persists until the session's next turn starts (spec D3),
+// independent of any specific "duration", so unlike /detached-background
+// this fixture needs no background goroutine or completion signal — the
+// tool call itself completes immediately.
+//
+// The foreground turn (tool call + text) is delayed by settleDelay first:
+// completing the tool call and text immediately would settle the foreground
+// turn near-instantly, which would race the Playwright suite's own HTTP
+// round-trip to read the freshly-created session's ID and script its
+// BackgroundProbe answer sequence (POST /api/v1/_test/background-probe)
+// before settleParkedProjectionSync's synchronous first probe sample (spec
+// D2) fires at that settle. Usage: /parked-fixture [settleDelay], default 3s.
+func emitParkedFixture(e *emitter, cmd string) {
+	parts := strings.Fields(cmd)
+	settleDelay := 3 * time.Second
+	if len(parts) >= 2 {
+		settleDelay = parseDurationArg(parts[1], settleDelay)
+	}
+	time.Sleep(settleDelay)
+
+	toolID := nextToolID()
+	input := map[string]any{
+		rawInputCommandKey:  "sleep 999",
+		"run_in_background": true,
+	}
+	e.startTool(toolID, "Run detached background command", acp.ToolKindExecute, input)
+	e.completeTool(toolID, map[string]any{rawOutputKey: "started in background"})
+
+	e.text("Launching detached background work; this foreground turn is complete.")
+}
+
+// parseDurationArg parses raw as a Go duration, retrying with an "s" suffix
+// for a bare integer (e.g. "3" -> "3s"), and falls back to def on failure —
+// the same two-step parse parseBackgroundDuration applies to its own single
+// argument.
+func parseDurationArg(raw string, def time.Duration) time.Duration {
+	if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+		return parsed
+	}
+	if secs, err := time.ParseDuration(raw + "s"); err == nil && secs > 0 {
+		return secs
+	}
+	return def
 }
 
 // emitSleep sleeps for the requested duration (default 10s) then responds.
@@ -582,7 +682,11 @@ func emitError(e *emitter, model string) {
 func emitCrash(e *emitter, model string) {
 	randomDelay(model)
 	e.text("Processing your request...")
-	randomDelay(model)
+	// SessionUpdate notifications are not acknowledged by ACP. Give the
+	// backend time to persist the final visible update before terminating the
+	// process, especially when the mock agent is running under a loaded E2E
+	// shard.
+	fixedDelay(500)
 	fmt.Fprintln(os.Stderr, "mock-agent: simulating crash (exit 1)")
 	os.Exit(1)
 }
@@ -594,20 +698,19 @@ func emitSlowResponse(e *emitter, prompt, model string) {
 	steps := 5
 	stepDelay := totalDuration / time.Duration(steps)
 
-	emitThinking(e, model)
-	time.Sleep(stepDelay)
-
-	e.text(fmt.Sprintf("Running slow response (%s total)...", totalDuration))
-	time.Sleep(stepDelay)
-
-	emitReadFile(e, model)
-	time.Sleep(stepDelay)
-
-	emitCodeSearch(e, model)
-	time.Sleep(stepDelay)
-
-	e.text(fmt.Sprintf("Slow response complete after %s.", totalDuration))
-	time.Sleep(stepDelay)
+	for _, emit := range []func(){
+		func() { emitThinking(e, model) },
+		func() { e.text(fmt.Sprintf("Running slow response (%s total)...", totalDuration)) },
+		func() { emitReadFile(e, model) },
+		func() { emitCodeSearch(e, model) },
+		func() { e.text(fmt.Sprintf("Slow response complete after %s.", totalDuration)) },
+	} {
+		if e.ctx != nil && e.ctx.Err() != nil {
+			return
+		}
+		emit()
+		waitForDelay(e.ctx, int(stepDelay.Milliseconds()))
+	}
 }
 
 // emitRandomResponse generates a random mix of 2-5 events.
@@ -735,7 +838,7 @@ func emitCreateSubtask(e *emitter, cmd, model string) {
 	e.startTool(toolID, "create_task_kandev", acp.ToolKindOther, args)
 	randomDelay(model)
 
-	result, err := callMCPTool("kandev", "create_task_kandev", args)
+	result, err := e.callMCPTool("kandev", "create_task_kandev", args)
 	if err != nil {
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("Failed to create subtask: %v", err))

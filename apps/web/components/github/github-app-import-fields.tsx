@@ -37,24 +37,15 @@ export function GitHubAppImportIdentityFields({
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={t("github:nameInKandev")} error={errors.displayName}>
           <Input
-            className="h-11"
             value={values.displayName}
             onChange={(e) => update("displayName", e.target.value)}
           />
         </Field>
         <Field label={t("github:githubAppSlug")} error={errors.slug}>
-          <Input
-            className="h-11"
-            value={values.slug}
-            onChange={(e) => update("slug", e.target.value)}
-          />
+          <Input value={values.slug} onChange={(e) => update("slug", e.target.value)} />
         </Field>
         <Field label={t("github:githubOwnerLogin")} error={errors.ownerLogin}>
-          <Input
-            className="h-11"
-            value={values.ownerLogin}
-            onChange={(e) => update("ownerLogin", e.target.value)}
-          />
+          <Input value={values.ownerLogin} onChange={(e) => update("ownerLogin", e.target.value)} />
         </Field>
       </div>
       <RadioGroup
@@ -96,7 +87,6 @@ export function GitHubAppImportSecretFields({
       {(Object.keys(labels) as (keyof typeof labels)[]).map((name) => (
         <Field key={name} label={labels[name]} error={errors[name]}>
           <Input
-            className="h-11"
             type={name.includes("Secret") || name === "webhookSecret" ? "password" : "text"}
             autoComplete="off"
             value={values[name]}

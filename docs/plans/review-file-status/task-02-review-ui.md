@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-status-model"]
 plan: "plan.md"
-spec: "../../specs/ui/review-file-status.md"
+spec: "../../specs/ui/requirements/review-file-status.md"
 ---
 
 # Task 02: Review status UI

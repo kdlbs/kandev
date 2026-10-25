@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -209,6 +211,14 @@ func TestService_ResolvePromptReferencesSkipsListWithoutAtMention(t *testing.T) 
 		t.Fatalf("got %#v, want empty expansions", got)
 	}
 }
+func TestService_ResolvePromptReferencesRejectsOversizedPlainContent(t *testing.T) {
+	svc := NewService(panicListPromptsRepo{})
+
+	_, err := svc.ResolvePromptReferences(context.Background(), strings.Repeat("x", maxPromptContentBytes+1))
+	if !errors.Is(err, ErrInvalidPrompt) {
+		t.Fatalf("expected ErrInvalidPrompt, got %v", err)
+	}
+}
 
 func TestService_ResolvePromptReferencesSkipsUnknownInlineAndCycles(t *testing.T) {
 	svc, cleanup := createService(t)
@@ -265,6 +275,86 @@ func TestService_ResolvePromptReferencesMatchesStoredNames(t *testing.T) {
 			t.Fatalf("got[%d]=%#v, want %#v", i, got[i], want[i])
 		}
 	}
+}
+
+func TestService_ResolvePromptReferencesTreatsUnicodeNameCharactersAsPartOfReference(t *testing.T) {
+	svc, cleanup := createService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	if _, err := svc.CreatePrompt(ctx, "daily", "Daily prompt"); err != nil {
+		t.Fatalf("seed daily: %v", err)
+	}
+
+	got, err := svc.ResolvePromptReferences(ctx, "Ignore @dailyé @daily中 @daily\u0301, run @daily.")
+	if err != nil {
+		t.Fatalf("resolve references: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "daily" {
+		t.Fatalf("got %#v, want one daily expansion", got)
+	}
+}
+func TestService_ResolvePromptReferencesRejectsOverLimitInputs(t *testing.T) {
+	tests := []struct {
+		name    string
+		prompts int
+	}{
+		{name: "too many candidates", prompts: maxPromptReferenceNames + 1},
+		{name: "too many expansions", prompts: maxPromptReferenceExpansions + 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompts := make([]*models.Prompt, tt.prompts)
+			var content strings.Builder
+			for i := range prompts {
+				name := fmt.Sprintf("prompt-%04d", i)
+				prompts[i] = &models.Prompt{Name: name, Content: "content"}
+				if i < maxPromptReferenceExpansions+1 {
+					if content.Len() > 0 {
+						content.WriteByte(' ')
+					}
+					content.WriteString("@")
+					content.WriteString(name)
+				}
+			}
+
+			svc := NewService(expansionLimitRepo{prompts: prompts})
+			_, err := svc.ResolvePromptReferences(context.Background(), content.String())
+			if !errors.Is(err, ErrPromptReferenceLimit) {
+				t.Fatalf("expected ErrPromptReferenceLimit, got %v", err)
+			}
+
+		})
+	}
+}
+
+func TestService_ResolvePromptReferencesTranslatesCandidateLimit(t *testing.T) {
+	svc := NewService(candidateLimitRepo{})
+
+	_, err := svc.ResolvePromptReferences(context.Background(), "run @daily")
+	if !errors.Is(err, ErrPromptReferenceLimit) {
+		t.Fatalf("expected ErrPromptReferenceLimit, got %v", err)
+	}
+}
+
+type expansionLimitRepo struct {
+	promptstore.Repository
+	prompts []*models.Prompt
+}
+
+func (r expansionLimitRepo) ListPrompts(context.Context) ([]*models.Prompt, error) {
+	return r.prompts, nil
+}
+func (r expansionLimitRepo) ListPromptsForReferenceExpansion(context.Context, int, int, int, int, int) ([]*models.Prompt, bool, error) {
+	return r.prompts, false, nil
+}
+
+type candidateLimitRepo struct {
+	promptstore.Repository
+}
+
+func (candidateLimitRepo) ListPromptsForReferenceExpansion(context.Context, int, int, int, int, int) ([]*models.Prompt, bool, error) {
+	return nil, false, promptstore.ErrPromptReferenceCandidateLimit
 }
 
 // raceRepo simulates a TOCTOU loss against the SQLite UNIQUE index: the

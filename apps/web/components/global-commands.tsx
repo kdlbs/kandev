@@ -6,7 +6,14 @@ import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { useTheme } from "@/components/theme/app-theme";
 import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
-import { IconSun, IconMoon, IconMessageCircle, IconSparkles } from "@tabler/icons-react";
+import {
+  IconSun,
+  IconMoon,
+  IconMessageCircle,
+  IconSparkles,
+  IconArchive,
+} from "@tabler/icons-react";
+import { linkToArchivedTasks } from "@/lib/links";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import { PALETTE_NAVIGATION_GROUP_KEY } from "@/lib/navigation/surface-policy";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
@@ -14,6 +21,7 @@ import { searchKeywords } from "@/lib/commands/search-keywords";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
 import { usePluginShortcuts } from "@/hooks/use-plugin-shortcuts";
+import { useIntegrationShortcuts } from "@/hooks/use-integration-shortcuts";
 import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
@@ -116,8 +124,13 @@ export function GlobalCommands() {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId);
-  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config");
+  const handleOpenQuickChat = useQuickChatLauncher(activeWorkspaceId, "chat", {
+    silentFocusReturn: false,
+    toggleWhenOpen: true,
+  });
+  const handleOpenConfigChat = useQuickChatLauncher(activeWorkspaceId, "config", {
+    silentFocusReturn: false,
+  });
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
@@ -152,12 +165,24 @@ export function GlobalCommands() {
   const commands = useMemo<CommandItem[]>(
     () => [
       ...navigationCommands,
+      {
+        id: "nav-archived-tasks",
+        label: t("common:commandGoToArchivedTasks"),
+        group: t(GROUP_NAVIGATION),
+        icon: <IconArchive className="size-3.5" />,
+        keywords: searchKeywords(t, "common:commandGoToArchivedTasksKeywords"),
+        disabled: !activeWorkspaceId,
+        action: () => {
+          if (activeWorkspaceId) router.push(linkToArchivedTasks(activeWorkspaceId));
+        },
+      },
       buildThemeCommand(resolvedTheme, setTheme, t),
       quickChatCommand,
       configChatCommand,
     ],
     [
       navigationCommands,
+      activeWorkspaceId,
       router.push,
       resolvedTheme,
       setTheme,
@@ -168,11 +193,16 @@ export function GlobalCommands() {
   );
 
   useRegisterCommands(commands);
-  useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
   // Order matters: useAppShortcuts (core) must register its capture-phase
-  // keydown listener before usePluginShortcuts so core shortcuts win when a
-  // combo matches both — see the precedence note on each hook.
+  // keydown listener before the Quick Chat toggle and plugin shortcuts. This
+  // preserves core precedence, while the toggle still runs before xterm can
+  // consume a configured shortcut.
   useAppShortcuts();
+  useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat, {
+    capture: true,
+    stopPropagation: true,
+  });
+  useIntegrationShortcuts();
   usePluginShortcuts();
 
   return <SettingsDiscoveryCommands />;

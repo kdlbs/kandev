@@ -67,7 +67,7 @@ function renderConfigTab(agents: AgentProfile[], agent: AgentProfile) {
           ...defaultOfficeState.office,
           agentProfilesByWorkspaceId: { [WORKSPACE_ID]: agents },
         },
-        agentProfiles: { items: [PROFILE_OPTION], version: 0 },
+        agentProfiles: { items: [PROFILE_OPTION], version: 0, orderByAgent: {} },
       }}
     >
       <AgentConfigurationTab agent={agent} />
@@ -257,7 +257,7 @@ describe("AgentConfigurationTab draft navigation", () => {
             ...defaultOfficeState.office,
             agentProfilesByWorkspaceId: { [WORKSPACE_ID]: [manager, worker] },
           },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
+          agentProfiles: { items: [PROFILE_OPTION], version: 0, orderByAgent: {} },
         }}
       >
         <AgentConfigurationTab agent={manager} />
@@ -299,7 +299,7 @@ describe("AgentConfigurationTab concurrent save", () => {
             ...defaultOfficeState.office,
             agentProfilesByWorkspaceId: { [WORKSPACE_ID]: [manager, updatedWorker] },
           },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
+          agentProfiles: { items: [PROFILE_OPTION], version: 0, orderByAgent: {} },
         }}
       >
         <AgentConfigurationTab agent={updatedWorker} />

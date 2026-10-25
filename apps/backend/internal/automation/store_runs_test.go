@@ -21,7 +21,7 @@ func createTasksTable(t *testing.T, store *Store) {
 	// Without this table the whole query fails as missing-table and ListRuns
 	// silently falls back to the raw status, losing the archived/cancelled
 	// derivation these tests assert.
-	if _, err := store.db.Exec(`CREATE TABLE task_session_messages (id TEXT PRIMARY KEY, task_id TEXT NOT NULL DEFAULT '', author_type TEXT NOT NULL DEFAULT 'user', content TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'message', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+	if _, err := store.db.Exec(`CREATE TABLE task_session_messages (id TEXT PRIMARY KEY, task_id TEXT NOT NULL DEFAULT '', turn_id TEXT NOT NULL DEFAULT '', author_type TEXT NOT NULL DEFAULT 'user', content TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'message', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatal(err)
 	}
 	// PrunableRunTaskIDs only offers runs that still hold a checkout, and a
@@ -317,6 +317,51 @@ func TestListRuns_CarriesTheAgentsLastMessageAsSummary(t *testing.T) {
 	}
 	if runs[0].Summary != "Sweep complete across all 32 specs." {
 		t.Errorf("expected the agent's LAST message, got %q", runs[0].Summary)
+	}
+}
+
+func TestListRunsSummaryUsesTheRunTurn(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	createTasksTable(t, store)
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "turn-aware", WorkflowID: "wf-1", WorkflowStepID: "s-1"}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	insertTask(t, store, "task-turns", false)
+	if err := store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusSucceeded,
+		TaskID:       "task-turns",
+		SessionID:    "session-1",
+		TurnID:       "turn-1",
+		TriggerData:  json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seed := func(id, turnID, content string, at time.Time) {
+		t.Helper()
+		if _, err := store.db.Exec(
+			`INSERT INTO task_session_messages (id, task_id, turn_id, author_type, content, type, created_at) VALUES (?,?,?,?,?,?,?)`,
+			id, "task-turns", turnID, "agent", content, "message", at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Now().UTC()
+	seed("turn-1-message", "turn-1", "Summary for the first run", base)
+	seed("turn-2-message", "turn-2", "A newer summary from a different run", base.Add(time.Minute))
+
+	runs, err := store.ListRuns(ctx, a.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if runs[0].Summary != "Summary for the first run" {
+		t.Fatalf("summary = %q, want the exact bound turn's message", runs[0].Summary)
 	}
 }
 

@@ -13,7 +13,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -83,14 +85,15 @@ func TestExecuteStepTransitionRecordsEngineTransitionOnLegacyPath(t *testing.T) 
 }
 
 func stepTransitionRowsForTaskOrchestrator(t *testing.T, repo *sqliterepo.Repository, taskID string) []struct {
-	trigger   string
-	actorKind string
-	actorID   *string
-	sessionID *string
+	trigger      string
+	actorKind    string
+	actorID      *string
+	sessionID    *string
+	causingRunID *string
 } {
 	t.Helper()
 	rows, err := repo.DB().QueryContext(context.Background(), `
-		SELECT trigger, actor_kind, actor_id, session_id FROM task_step_transitions
+		SELECT trigger, actor_kind, actor_id, session_id, causing_run_id FROM task_step_transitions
 		WHERE task_id = ? ORDER BY occurred_at ASC, id ASC
 	`, taskID)
 	if err != nil {
@@ -99,19 +102,21 @@ func stepTransitionRowsForTaskOrchestrator(t *testing.T, repo *sqliterepo.Reposi
 	defer func() { _ = rows.Close() }()
 
 	var out []struct {
-		trigger   string
-		actorKind string
-		actorID   *string
-		sessionID *string
+		trigger      string
+		actorKind    string
+		actorID      *string
+		sessionID    *string
+		causingRunID *string
 	}
 	for rows.Next() {
 		var r struct {
-			trigger   string
-			actorKind string
-			actorID   *string
-			sessionID *string
+			trigger      string
+			actorKind    string
+			actorID      *string
+			sessionID    *string
+			causingRunID *string
 		}
-		if err := rows.Scan(&r.trigger, &r.actorKind, &r.actorID, &r.sessionID); err != nil {
+		if err := rows.Scan(&r.trigger, &r.actorKind, &r.actorID, &r.sessionID, &r.causingRunID); err != nil {
 			t.Fatalf("scan row: %v", err)
 		}
 		out = append(out, r)
@@ -161,7 +166,7 @@ func TestApplyTransitionCrossWorkflowRecordsDifferingWorkflowIDs(t *testing.T) {
 	stepGetter.steps["step-wf2"] = &wfmodels.WorkflowStep{
 		ID: "step-wf2", WorkflowID: "wf2", Name: "Target", Position: 0,
 	}
-	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{})
 
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step-wf2", "on_turn_complete"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
@@ -204,8 +209,13 @@ func TestApplyTransitionRecordsEngineTransitionFromSessionID(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "t1", "s1", "step1")
+			ctx = agentCompletionTransitionAttribution(ctx, watcher.AgentEventData{
+				OwnerKind: string(lifecycle.ExecutionOwnerRun),
+				RunID:     "run-cause-1",
+				SessionID: "s1",
+			})
 
-			store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+			store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 			if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", trigger); err != nil {
 				t.Fatalf("ApplyTransition: %v", err)
 			}
@@ -224,7 +234,35 @@ func TestApplyTransitionRecordsEngineTransitionFromSessionID(t *testing.T) {
 			if last.sessionID == nil || *last.sessionID != "s1" {
 				t.Fatalf("session_id = %v, want s1", last.sessionID)
 			}
+			if last.causingRunID == nil || *last.causingRunID != "run-cause-1" {
+				t.Fatalf("causing_run_id = %v, want run-cause-1", last.causingRunID)
+			}
 		})
+	}
+}
+
+func TestApplyTransitionRecordsCauseFromTaskOwnedOfficeExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	ctx = agentCompletionTransitionAttribution(ctx, watcher.AgentEventData{
+		OwnerKind:    string(lifecycle.ExecutionOwnerTask),
+		CausingRunID: "run-cause-task-owned",
+		SessionID:    "s1",
+	})
+
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
+	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	rows := stepTransitionRowsForTaskOrchestrator(t, repo, "t1")
+	last := rows[len(rows)-1]
+	if last.actorKind != string(steptelemetry.ActorAgent) {
+		t.Fatalf("actor_kind = %q, want agent", last.actorKind)
+	}
+	if last.causingRunID == nil || *last.causingRunID != "run-cause-task-owned" {
+		t.Fatalf("causing_run_id = %v, want run-cause-task-owned", last.causingRunID)
 	}
 }
 
@@ -241,7 +279,7 @@ func TestApplyTransitionOnChildrenCompletedRecordsSystemActorNotSession(t *testi
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_children_completed"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}
@@ -275,7 +313,7 @@ func TestApplyTransitionPreservesOuterCallerTrigger(t *testing.T) {
 		ActorID: "s1", SessionID: "s1",
 	})
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(deferredCtx, "t1", "s1", "step1", "step2", "on_enter"); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}
@@ -297,7 +335,7 @@ func TestApplyTransitionRepeatedToSameTargetWritesNoSecondRow(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", "on_turn_complete"); err != nil {
 		t.Fatalf("first ApplyTransition: %v", err)
 	}
@@ -328,7 +366,7 @@ func TestApplyTransitionOnUserCancellationRecordsHumanActorNotAgent(t *testing.T
 	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1", Role: authn.RoleMember})
 	cancelCtx := cancellationTransitionAttribution(ctx)
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(cancelCtx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}
@@ -360,7 +398,7 @@ func TestApplyTransitionOnUserCancellationWithNoIdentityRecordsSystemActor(t *te
 
 	cancelCtx := cancellationTransitionAttribution(context.Background())
 
-	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 	if err := store.ApplyTransition(cancelCtx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
 		t.Fatalf("ApplyTransition: %v", err)
 	}

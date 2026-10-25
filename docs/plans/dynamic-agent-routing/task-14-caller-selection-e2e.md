@@ -5,7 +5,7 @@ status: pending
 wave: 11
 depends_on: ["07-utility-profile-integration", "13-routed-session-e2e"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 14: Caller selection E2E

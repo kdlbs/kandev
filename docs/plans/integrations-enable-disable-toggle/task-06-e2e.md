@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["02-own-page-sliders", "03-index-page-sliders", "05-nav-availability"]
 plan: "plan.md"
-spec: "../../specs/integrations/enable-disable-toggle.md"
+spec: "../../specs/integrations/requirements/enable-disable-toggle.md"
 ---
 
 # Task 06: E2E coverage for index-page sliders and nav-hiding behavior

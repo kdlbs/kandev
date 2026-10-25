@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/webkit-task-dialog-rendering.md"
+spec: "../../specs/ui/requirements/webkit-task-dialog-rendering.md"
 ---
 
 # Task 01: Classify the Rendering Engine
@@ -54,7 +54,7 @@ None.
 ## Inputs
 
 - Classification and failure-mode requirements in
-  `docs/specs/ui/webkit-task-dialog-rendering.md`.
+  `docs/specs/ui/requirements/webkit-task-dialog-rendering.md`.
 - Existing early application bootstrap in `apps/web/src/main.tsx`.
 - Existing navigator-mocking pattern in `apps/web/lib/keyboard/utils.test.ts`.
 - Tauri's current macOS/Linux system-WebView boundary and Chromium/WebView2 exclusion requirement.

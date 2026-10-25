@@ -5,7 +5,7 @@ status: pending
 wave: 4
 depends_on: ["03-update-utility-consumers", "04-settings-profile-pickers"]
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 05: Prove utility profile workflows

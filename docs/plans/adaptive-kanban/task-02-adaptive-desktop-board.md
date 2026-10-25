@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-responsive-browser-contract"]
 plan: "plan.md"
-spec: "../../specs/ui/adaptive-kanban.md"
+spec: "../../specs/ui/requirements/adaptive-kanban.md"
 ---
 
 # Task 02: Adaptive desktop board

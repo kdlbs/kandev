@@ -14,6 +14,7 @@ import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { markSessionTabUserActivationIntent } from "@/components/task/session-tab-activation-intent";
+import { clearHiddenSessionPanel } from "./dockview-hidden-session-panels";
 import { useSessionPendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -36,11 +37,13 @@ export function shouldShowReopenStateIcon(
   foregroundActivity?: ForegroundActivity | null,
   hasPendingClarification = false,
   hasPendingPermission = false,
+  parkedOnBackgroundWork = false,
 ): boolean {
   if (state === "STARTING") return false;
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && (hasPendingClarification || hasPendingPermission)) return true;
   if (canRequestInput && foregroundActivity === "background") return true;
+  if (canRequestInput && parkedOnBackgroundWork) return true;
   if (canRequestInput) return false;
   return true;
 }
@@ -111,6 +114,7 @@ export function SessionReopenMenuItems({
       // Reopening a session within the same task = same env, so the env switch
       // action no-ops naturally. We just create the chat panel.
       markSessionTabUserActivationIntent(sessionId);
+      clearHiddenSessionPanel(api, sessionId);
       addSessionPanel(api, groupId ?? centerGroupId, sessionId, label);
     },
     [api, centerGroupId],
@@ -199,15 +203,15 @@ function SessionReopenMenuItem({
         session.foreground_activity,
         pending.clarification,
         pending.permission,
+        session.parked_on_background_work,
       ) && (
         <span className="shrink-0">
-          {getSessionStateIcon(
-            session.state,
-            "h-3 w-3",
-            session.foreground_activity,
-            pending.clarification,
-            pending.permission,
-          )}
+          {getSessionStateIcon(session.state, "h-3 w-3", {
+            foregroundActivity: session.foreground_activity,
+            hasPendingClarification: pending.clarification,
+            hasPendingPermission: pending.permission,
+            parkedOnBackgroundWork: session.parked_on_background_work,
+          })}
         </span>
       )}
     </DropdownMenuItem>

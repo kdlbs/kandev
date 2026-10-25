@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 // putting the hook's `t` in that dep array would re-issue the request on every
 // locale switch.
 import { t as staticT } from "@/lib/i18n";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 // Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
 // The `value`s are the wire filter ids sent to `listActivity`.
@@ -45,7 +46,9 @@ export function ActivityFeed({ workspaceId }: { workspaceId: string }) {
         title={t("office:activity")}
         action={
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-[140px] h-8 text-xs cursor-pointer">
+            <SelectTrigger
+              className={controlSizingClassName("standard", "w-[140px] text-xs cursor-pointer")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

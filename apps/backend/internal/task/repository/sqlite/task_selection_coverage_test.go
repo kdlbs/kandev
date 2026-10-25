@@ -30,8 +30,18 @@ func TestTaskCountsPullCandidatesQueueAndWorkflowPlacement(t *testing.T) {
 		{ID: "task-high", WorkspaceID: "workspace-selection", WorkflowID: "workflow-selection", WorkflowStepID: "step-feeder", Title: "High", Priority: "high", Position: 1},
 		{ID: "task-first-position", WorkspaceID: "workspace-selection", WorkflowID: "workflow-selection", WorkflowStepID: "step-feeder", Title: "First", Priority: "none", Position: 0},
 	} {
+		// CreateTask now assigns its own arrival position
+		// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28) and overwrites task.Position
+		// in place, so the fixture's intended value (this fixture deliberately
+		// puts two tasks at the same position to exercise the priority tiebreak
+		// below it) must be captured before the call, not read back off task
+		// afterward.
+		wantPosition := task.Position
 		if err := repo.CreateTask(ctx, task); err != nil {
 			t.Fatalf("CreateTask(%s): %v", task.ID, err)
+		}
+		if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE tasks SET position = ? WHERE id = ?`), wantPosition, task.ID); err != nil {
+			t.Fatalf("restore position(%s): %v", task.ID, err)
 		}
 	}
 	if count, err := repo.CountTasksByWorkflow(ctx, "workflow-selection"); err != nil || count != 3 {
@@ -240,12 +250,13 @@ func TestTaskMetadataWatcherFiltersDetachAndQuickChatExpiry(t *testing.T) {
 		{ID: "quick-expired", WorkspaceID: "workspace-task-extra", Title: "Expired", IsEphemeral: true},
 		{ID: "quick-fresh", WorkspaceID: "workspace-task-extra", Title: "Fresh", IsEphemeral: true},
 		{ID: "quick-config", WorkspaceID: "workspace-task-extra", Title: "Config", IsEphemeral: true, Metadata: map[string]any{"config_mode": true}},
+		{ID: "quick-coordinator", WorkspaceID: "workspace-task-extra", Title: "Coordinator", IsEphemeral: true, Origin: models.TaskOriginCoordinator},
 	} {
 		if err := repo.CreateTask(ctx, task); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := repo.db.Exec(`UPDATE tasks SET updated_at = ? WHERE id IN ('quick-expired', 'quick-config')`, cutoff.Add(-time.Hour)); err != nil {
+	if _, err := repo.db.Exec(`UPDATE tasks SET updated_at = ? WHERE id IN ('quick-expired', 'quick-config', 'quick-coordinator')`, cutoff.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.db.Exec(`UPDATE tasks SET updated_at = ? WHERE id = 'quick-fresh'`, cutoff.Add(time.Hour)); err != nil {
@@ -258,6 +269,10 @@ func TestTaskMetadataWatcherFiltersDetachAndQuickChatExpiry(t *testing.T) {
 	deleted, err := repo.DeleteExpiredQuickChatTask(ctx, "quick-fresh", cutoff)
 	if err != nil || deleted {
 		t.Fatalf("DeleteExpiredQuickChatTask(fresh) = %v, %v", deleted, err)
+	}
+	deleted, err = repo.DeleteExpiredQuickChatTask(ctx, "quick-coordinator", cutoff)
+	if err != nil || deleted {
+		t.Fatalf("DeleteExpiredQuickChatTask(coordinator) = %v, %v", deleted, err)
 	}
 	deleted, err = repo.DeleteExpiredQuickChatTask(ctx, "quick-expired", cutoff)
 	if err != nil || !deleted {

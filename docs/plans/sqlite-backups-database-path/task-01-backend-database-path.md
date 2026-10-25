@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/system-page/spec.md"
+spec: "../../specs/system-page/requirements/system-page.md"
 ---
 
 # Task 01: Route System backups to the SQLite path
@@ -44,7 +44,7 @@ Sequential. The constructors and the System composer share one path contract.
 
 ## Inputs
 
-- Spec: `docs/specs/system-page/spec.md`, Database, Backups, scenarios, failure modes, and persistence guarantees.
+- Spec: `docs/specs/system-page/requirements/system-page.md`, Database, Backups, scenarios, failure modes, and persistence guarantees.
 - Plan: `plan.md`, confirmed root cause and backend sections.
 - Existing pre-migration rule: `apps/backend/internal/persistence/provider.go` derives `backups/` from the live database path.
 - Issue: `https://github.com/kdlbs/kandev/issues/2679`.

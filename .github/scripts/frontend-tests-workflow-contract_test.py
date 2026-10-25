@@ -40,6 +40,22 @@ def run_tests_step(workflow: str) -> str:
     return remainder.partition(NEXT_STEP_MARKER)[0]
 
 
+def frontend_job(workflow: str) -> str:
+    """Return the frontend job body, up to the required gate."""
+    _, separator, remainder = workflow.partition("  frontend:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no frontend job")
+    return re.split(r"\n  [\w-]+:\n", remainder)[0]
+
+
+def frontend_gate_job(workflow: str) -> str:
+    """Return the required frontend gate body."""
+    _, separator, remainder = workflow.partition("  frontend-gate:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no frontend-gate job")
+    return remainder
+
+
 def trigger_block(workflow: str, trigger: str) -> str:
     """Return `trigger`'s block under `on:`, up to the next top-level key."""
     block = re.search(rf"(?m)^  {trigger}:\n(?:^ {{4}}.*\n|^\n)*", workflow)
@@ -49,6 +65,102 @@ def trigger_block(workflow: str, trigger: str) -> str:
 
 
 class FrontendTestsWorkflowContractTest(unittest.TestCase):
+    def test_compiler_heap_is_scoped_to_the_full_typecheck(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        step = job.partition("      - name: Run typecheck\n")[2].partition(NEXT_STEP_MARKER)[0]
+
+        self.assertIn("NODE_OPTIONS: --max-old-space-size=8192", step)
+        self.assertIn("run: pnpm --filter @kandev/web typecheck", step)
+        self.assertNotIn("NODE_OPTIONS", run_tests_step(workflow))
+        self.assertNotIn("NODE_OPTIONS", job.partition("    steps:\n")[0])
+        self.assertNotIn("NODE_OPTIONS", workflow.partition("jobs:\n")[0])
+
+    def test_cache_resolves_the_container_pnpm_store_before_restore(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        resolve_index = job.find("- name: Resolve pnpm store path")
+        cache_index = job.find("- name: Cache pnpm store")
+        install_index = job.find("- name: Install dependencies")
+
+        self.assertGreaterEqual(resolve_index, 0, "store resolution step is missing")
+        self.assertGreaterEqual(cache_index, 0, "cache step is missing")
+        self.assertGreaterEqual(install_index, 0, "dependency installation step is missing")
+        self.assertLess(resolve_index, cache_index)
+        self.assertLess(cache_index, install_index)
+        resolve_step = job[resolve_index:cache_index]
+        cache_step = job[cache_index:install_index]
+
+        self.assertIn("id: pnpm-store", resolve_step)
+        self.assertIn("pnpm store path --silent", resolve_step)
+        self.assertIn('pnpm --version', resolve_step)
+        self.assertIn('mkdir -p "${STORE_PATH}"', resolve_step)
+        self.assertIn('printf \'path=%s\\n\' "${STORE_PATH}"', resolve_step)
+        self.assertIn("path: ${{ steps.pnpm-store.outputs.path }}", cache_step)
+        self.assertIn("runner.os", cache_step)
+        self.assertIn("runner.arch", cache_step)
+        self.assertIn("steps.pnpm-store.outputs.version", cache_step)
+        self.assertIn("hashFiles('apps/pnpm-lock.yaml')", cache_step)
+        self.assertIn(
+            "restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-",
+            cache_step,
+        )
+        self.assertIn("continue-on-error: true", cache_step)
+
+    def test_cache_failure_does_not_replace_frozen_installation(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        cache_index = job.index("- name: Cache pnpm store")
+        install_index = job.index("- name: Install dependencies")
+        install_step = job[install_index:].partition(NEXT_STEP_MARKER)[0]
+
+        self.assertLess(cache_index, install_index)
+        self.assertIn("pnpm install --frozen-lockfile", install_step)
+
+    def test_static_checks_and_unit_shards_are_independent(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        for name in ("Run lint", "Run typecheck", "Build"):
+            self.assertIn(f"- name: {name}\n", job)
+        self.assertNotIn("- name: Run tests\n", job)
+        shards = workflow.split("  frontend_tests:\n", 1)[1].split("  frontend-gate:", 1)[0]
+        self.assertIn("needs: [changes]", shards)
+        self.assertIn("fail-fast: false", shards)
+        self.assertIn("matrix: ${{ fromJSON(needs.changes.outputs.plan).frontend_tests_matrix }}", shards)
+        self.assertIn("pnpm --filter @kandev/web run test --shard=", shards)
+        self.assertIn("NODE_ENV: production", shards)
+        self.assertIn("pnpm install --frozen-lockfile", shards)
+        self.assertNotIn("continue-on-error", run_tests_step(workflow))
+
+    def test_frontend_planner_covers_every_shard_once(self) -> None:
+        import json
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        families = workflow.split("families: >-\n", 1)[1].split("burst:", 1)[0]
+        family = next(f for f in json.loads(families) if f["name"] == "frontend_tests")
+        self.assertEqual(family["tier"], "standard")
+        self.assertEqual(family["instances"], [{"shard": n} for n in range(1, 3)])
+        step = run_tests_step(workflow)
+        self.assertIn('FRONTEND_TEST_SHARD: ${{ matrix.shard }}', step)
+        self.assertIn('--shard="${FRONTEND_TEST_SHARD}/2"', step)
+
+    def test_reports_are_required_and_partitioned(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        step = run_tests_step(workflow)
+        self.assertIn('--reporter=json', step)
+        self.assertIn('--outputFile="test-results-${FRONTEND_TEST_SHARD}.json"', step)
+        upload = workflow.split("      - name: Upload frontend test report\n", 1)[1].split("\n  frontend-gate:", 1)[0]
+        self.assertIn("if: always()", upload)
+        self.assertIn("if-no-files-found: error", upload)
+        self.assertIn("name: frontend-test-results-${{ matrix.shard }}", upload)
+        self.assertIn("path: apps/web/test-results-${{ matrix.shard }}.json", upload)
+        self.assertNotIn("continue-on-error", upload)
+
+    def test_required_gate_requires_every_frontend_verification_result(self) -> None:
+        gate = frontend_gate_job(WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn("needs: [changes, frontend, frontend_tests]", gate)
+        self.assertIn("FRONTEND_TESTS_RESULT: ${{ needs.frontend_tests.result }}", gate)
+        self.assertIn('"frontend_tests:${FRONTEND_TESTS_RESULT}"', gate)
+
     def test_test_step_reproduces_the_production_environment(self) -> None:
         step = run_tests_step(WORKFLOW.read_text(encoding="utf-8"))
 
@@ -60,7 +172,7 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
             "CI image sets no NODE_ENV, Vitest defaults it to 'test', and the "
             "suite passes with or without the pin.",
         )
-        self.assertIn("pnpm --filter @kandev/web test", step)
+        self.assertIn("pnpm --filter @kandev/web run test", step)
 
     def test_vitest_config_still_pins_the_mode(self) -> None:
         config = VITEST_CONFIG.read_text(encoding="utf-8")

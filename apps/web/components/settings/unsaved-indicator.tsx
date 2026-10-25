@@ -18,7 +18,11 @@ const dirtyButtonClass = "border-success/60 text-success hover:bg-success/10";
 
 export function UnsavedChangesBadge() {
   const { t } = useTranslation();
-  return <span className="text-xs text-success">{t("common:unsavedChanges")}</span>;
+  return (
+    <span role="status" className="text-xs text-success">
+      {t("common:unsavedChanges")}
+    </span>
+  );
 }
 
 export function UnsavedSaveButton({

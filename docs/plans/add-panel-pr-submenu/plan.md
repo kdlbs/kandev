@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/add-panel-pr-submenu.md
+spec: docs/specs/ui/requirements/add-panel-pr-submenu.md
 created: 2026-07-31
 status: draft
 ---

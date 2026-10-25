@@ -4,7 +4,7 @@ import { balancedExecutionProfileRouting } from "../../helpers/office-routing";
 /**
  * Phase 7 spec #2 — provider fallback under quota_limited.
  *
- * Scenario (per docs/specs/office-provider-routing/spec.md):
+ * Scenario (per docs/specs/office/requirements/routing.md):
  *   1. Workspace routing enabled with order `claude-acp → codex-acp`,
  *      tier `balanced`.
  *   2. Backend is launched with `KANDEV_PROVIDER_FAILURES=claude-acp:

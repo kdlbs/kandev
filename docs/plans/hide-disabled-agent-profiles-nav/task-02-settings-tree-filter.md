@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-hide-setting-hook-and-toggle"]
 plan: "plan.md"
-spec: "../../specs/agents/hide-disabled-profiles-nav.md"
+spec: "../../specs/agents/requirements/hide-disabled-profiles-nav.md"
 ---
 
 # Task 02: Filter disabled profiles from the settings left panel

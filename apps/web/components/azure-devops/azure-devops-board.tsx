@@ -111,12 +111,12 @@ function MobileColumnNavigator({
     setOpen(false);
   };
   return (
-    <div className="flex min-h-11 items-center gap-2">
+    <div className="flex items-center gap-2">
       <Button
         type="button"
         variant="outline"
         size="icon"
-        className="h-11 w-11 cursor-pointer"
+        className="cursor-pointer"
         aria-label={t("azuredevops:previousBoardColumn")}
         disabled={index === 0}
         onClick={() => onChange(columns[index - 1].id)}
@@ -126,7 +126,7 @@ function MobileColumnNavigator({
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 flex-1 cursor-pointer justify-between"
+        className="flex-1 cursor-pointer justify-between"
         data-testid="azure-board-column-picker"
         onClick={() => setOpen(true)}
       >
@@ -138,7 +138,7 @@ function MobileColumnNavigator({
         type="button"
         variant="outline"
         size="icon"
-        className="h-11 w-11 cursor-pointer"
+        className="cursor-pointer"
         aria-label={t("azuredevops:nextBoardColumn")}
         disabled={index >= columns.length - 1}
         onClick={() => onChange(columns[index + 1].id)}

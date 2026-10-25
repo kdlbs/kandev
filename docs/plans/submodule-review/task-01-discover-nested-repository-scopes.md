@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/submodule-review.md"
+spec: "../../specs/ui/requirements/submodule-review.md"
 ---
 
 # Task 01: Discover nested repository scopes

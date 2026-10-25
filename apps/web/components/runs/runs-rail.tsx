@@ -53,8 +53,13 @@ function RunRow({
       />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[13px] text-foreground">
-          {formatRelativeTime(run.created_at)}
+          {run.display_title || formatRelativeTime(run.created_at)}
         </span>
+        {run.display_title && (
+          <span className="truncate text-[11px] text-muted-foreground">
+            {formatRelativeTime(run.created_at)}
+          </span>
+        )}
         <span className="truncate text-xs text-muted-foreground">
           {t(statusLabelKey(run.status))}
         </span>

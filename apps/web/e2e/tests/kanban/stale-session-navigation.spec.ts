@@ -1,6 +1,22 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import type { ApiClient } from "../../helpers/api-client";
+
+async function waitForTaskInWorkspace(apiClient: ApiClient, workspaceId: string, title: string) {
+  await expect
+    .poll(
+      async () => {
+        const { tasks } = await apiClient.listTasks(workspaceId);
+        return tasks.some((task) => task.title === title);
+      },
+      {
+        timeout: 15_000,
+        message: `Task ${JSON.stringify(title)} was not visible in the workspace task list`,
+      },
+    )
+    .toBe(true);
+}
 
 /**
  * Regression test: navigating from a task with chat messages to a sessionless
@@ -35,6 +51,7 @@ test.describe("Stale session navigation", () => {
     // We wait for the chat message directly instead of polling session state
     // because the mock agent emits the message quickly; the backend session
     // state transition to COMPLETED/WAITING_FOR_INPUT can be slow in CI.
+    await waitForTaskInWorkspace(apiClient, seedData.workspaceId, "Task With Messages");
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -59,6 +76,7 @@ test.describe("Stale session navigation", () => {
     });
 
     // 4. Go back to kanban
+    await waitForTaskInWorkspace(apiClient, seedData.workspaceId, "Sessionless Task");
     await kanban.goto();
     await expect(kanban.board).toBeVisible({ timeout: 10_000 });
 

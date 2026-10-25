@@ -229,6 +229,17 @@ func (r *Repository) loadPendingClarificationResponseDeliveryBundle(
 	return messages, nil
 }
 
+// clearClarificationResponseDeliveryMarkers deliberately leaves updated_at
+// untouched: it only clears the internal delivery-recovery marker, not the
+// substantive answer (status/response), which completeClaimedClarificationMessages
+// already committed at the claim. Bumping updated_at here as well used to let
+// a concurrent loser's R2b reconstruction (resolver.go's reconstructWinnerResolution,
+// keyed on the same column) observe an earlier updated_at than the value the
+// winner itself gets stamped with afterward (finalizeClarificationResponseDelivery),
+// so the two sides could report different responded_at instants for one
+// answer -- caught by the REST-vs-MCP race in question_handlers_cross_entry_race_test.go.
+// Leaving the column fixed at the claim's timestamp makes it stable and
+// identical for every reader from the moment the claim commits.
 func (r *Repository) clearClarificationResponseDeliveryMarkers(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -236,11 +247,10 @@ func (r *Repository) clearClarificationResponseDeliveryMarkers(
 	messages []*models.Message,
 	terminalStatus string,
 ) error {
-	updatedAt := r.nowUTC()
 	statusExpr := dialect.JSONExtract(drv, "metadata", "status")
 	query := r.db.Rebind(fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = ?, updated_at = ?
+		SET metadata = ?
 		WHERE id = ? AND %s = ? AND %s
 	`, statusExpr, clarificationResponseDeliveryPendingPredicate(drv, "task_session_messages")))
 	finalizedMetadata := make([]map[string]interface{}, len(messages))
@@ -251,7 +261,7 @@ func (r *Repository) clearClarificationResponseDeliveryMarkers(
 		if marshalErr != nil {
 			return fmt.Errorf("marshal clarification message %s for delivery finalization: %w", message.ID, marshalErr)
 		}
-		result, updateErr := tx.ExecContext(ctx, query, string(raw), updatedAt, message.ID, terminalStatus)
+		result, updateErr := tx.ExecContext(ctx, query, string(raw), message.ID, terminalStatus)
 		if updateErr != nil {
 			return fmt.Errorf("finalize clarification response delivery for message %s: %w", message.ID, updateErr)
 		}
@@ -266,7 +276,6 @@ func (r *Repository) clearClarificationResponseDeliveryMarkers(
 	}
 	for i, message := range messages {
 		message.Metadata = finalizedMetadata[i]
-		message.UpdatedAt = updatedAt
 	}
 	return nil
 }

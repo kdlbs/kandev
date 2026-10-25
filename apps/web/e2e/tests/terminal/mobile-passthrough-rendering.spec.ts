@@ -59,8 +59,8 @@ test.describe("Mobile passthrough rendering", () => {
 
     // Switch away from Chat and back — mirrors the user flow that re-evaluates
     // isPassthroughMode from the (now snapshot-less) session row.
-    await testPage.getByRole("button", { name: "Plan" }).tap();
-    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await testPage.getByRole("button", { name: "Plan", exact: true }).tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
 
     await expect(session.passthroughTerminal).toBeVisible({ timeout: 15_000 });
     await expect(session.chat).toBeHidden();

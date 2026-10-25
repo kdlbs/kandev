@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/models"
 
 	"go.uber.org/zap"
 
@@ -212,7 +213,7 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, src WatcherSource, e
 	// Per-watcher throttle. Synchronous: we MUST acquire the slot before
 	// spawning the goroutine, otherwise a tight burst of bus events all
 	// read the same pre-creation DB count and overshoot the cap. See
-	// docs/specs/throttle-watcher-fanout/spec.md.
+	// docs/specs/tasks/system-design/wip-limit-pull-system.md.
 	//
 	// The slot covers the WHOLE dispatch pipeline, including the case where
 	// Dispatch returns early because Reserve loses the dedup race (no task
@@ -232,4 +233,19 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, src WatcherSource, e
 		defer release()
 		coord.Dispatch(context.WithoutCancel(ctx), src, evt)
 	}()
+}
+
+func (s *Service) dispatchOwnedWatcherEvent(ctx context.Context, src WatcherSource, evt any, creator string, fields ...zap.Field) {
+	request, err := src.BuildTaskRequest(evt)
+	if err != nil {
+		s.logger.Warn("invalid watcher task", zap.Error(err))
+		return
+	}
+	profileID, _ := request.Metadata[models.MetaKeyExecutorProfileID].(string)
+	ctx, err = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, request.WorkspaceID), creator, profileID)
+	if err != nil {
+		s.logger.Warn("watcher executor access denied", zap.Error(err))
+		return
+	}
+	s.dispatchWatcherEvent(ctx, src, evt, fields...)
 }

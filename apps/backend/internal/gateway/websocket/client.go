@@ -15,6 +15,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxConcurrentSessionGitRefreshes = 4
+
 const (
 	// Time allowed to write a message to the peer
 	writeWait = 10 * time.Second
@@ -32,7 +34,12 @@ const (
 	// Control frames (RPC responses and errors) use a separate bounded queue so
 	// high-volume session notifications cannot fill the queue and make a user
 	// action appear to time out.
-	controlSendBufferSize = 256
+	controlSendBufferSize   = 256
+	responseErrorKey        = "error"
+	sessionIDPayloadKey     = "session_id"
+	eventTypePayloadKey     = "type"
+	eventSequencePayloadKey = "sequence"
+	taskIDPayloadKey        = "task_id"
 )
 
 // Client represents a single WebSocket connection
@@ -42,20 +49,25 @@ type Client struct {
 	// anonymous connections (auth disabled and no synthetic identity set by
 	// the HTTP middleware — e.g. direct hub tests); synthetic in disabled
 	// mode; a real user when auth is enabled.
-	identity                authn.Identity
-	conn                    *websocket.Conn
-	hub                     *Hub
-	send                    chan []byte
-	controlSend             chan []byte
-	subscriptions           map[string]bool // Task IDs this client is subscribed to
-	sessionSubscriptions    map[string]bool // Session IDs this client is subscribed to
-	sessionFocus            map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
-	userSubscriptions       map[string]bool // User IDs this client is subscribed to
-	runSubscriptions        map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
-	systemMetricsSubscribed bool
-	mu                      sync.RWMutex
-	closed                  bool
-	logger                  *logger.Logger
+	identity                  authn.Identity
+	conn                      *websocket.Conn
+	hub                       *Hub
+	send                      chan []byte
+	controlSend               chan []byte
+	subscriptions             map[string]bool // Task IDs this client is subscribed to
+	sessionSubscriptions      map[string]bool // Session IDs this client is subscribed to
+	sessionFocus              map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
+	conversationSubscriptions map[string]conversationSubscription
+	userSubscriptions         map[string]bool // User IDs this client is subscribed to
+	runSubscriptions          map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
+	systemMetricsSubscribed   bool
+	mu                        sync.RWMutex
+	closed                    bool
+	logger                    *logger.Logger
+	gitRefreshMu              sync.Mutex
+	gitRefreshCancels         map[uint64]context.CancelFunc
+	gitRefreshNextID          uint64
+	gitRefreshClosed          bool
 
 	// Replaceable session.message.updated traffic is scheduled separately from
 	// semantic notifications so one noisy session cannot fill the shared FIFO.
@@ -81,30 +93,33 @@ type Client struct {
 // NewClient creates a new WebSocket client
 func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
 	return &Client{
-		ID:                      id,
-		identity:                identity,
-		conn:                    conn,
-		hub:                     hub,
-		send:                    make(chan []byte, 256),
-		controlSend:             make(chan []byte, controlSendBufferSize),
-		subscriptions:           make(map[string]bool),
-		sessionSubscriptions:    make(map[string]bool),
-		sessionFocus:            make(map[string]bool),
-		userSubscriptions:       make(map[string]bool),
-		runSubscriptions:        make(map[string]bool),
-		replaceableByKey:        make(map[queuedReplaceableKey]outboundNotification),
-		replaceableBySession:    make(map[string][]sessionNotificationQueueItem),
-		replaceableCurrentByKey: make(map[replaceableNotificationKey]queuedReplaceableKey),
-		notificationWake:        make(chan struct{}, 1),
-		logger:                  log.WithFields(zap.String("client_id", id)),
+		ID:                        id,
+		identity:                  identity,
+		conn:                      conn,
+		hub:                       hub,
+		send:                      make(chan []byte, 256),
+		controlSend:               make(chan []byte, controlSendBufferSize),
+		subscriptions:             make(map[string]bool),
+		sessionSubscriptions:      make(map[string]bool),
+		sessionFocus:              make(map[string]bool),
+		conversationSubscriptions: make(map[string]conversationSubscription),
+		userSubscriptions:         make(map[string]bool),
+		runSubscriptions:          make(map[string]bool),
+		replaceableByKey:          make(map[queuedReplaceableKey]outboundNotification),
+		replaceableBySession:      make(map[string][]sessionNotificationQueueItem),
+		replaceableCurrentByKey:   make(map[replaceableNotificationKey]queuedReplaceableKey),
+		notificationWake:          make(chan struct{}, 1),
+		gitRefreshCancels:         make(map[uint64]context.CancelFunc),
+		logger:                    log.WithFields(zap.String("client_id", id)),
 	}
 }
 
 // dispatchContext returns the hub's lifetime context carrying this client's
-// identity, so dispatched RPC handlers (workspace.list, task CRUD, …) and
-// subscription checks apply the same per-user scoping as HTTP requests.
+// identity and server-assigned connection ID. The latter is used by
+// connection-bound queue edit leases and never comes from the request payload.
 func (c *Client) dispatchContext() context.Context {
 	ctx := c.hub.DispatchContext()
+	ctx = ws.WithConnectionID(ctx, c.ID)
 	if c.identity.UserID != "" {
 		ctx = authn.WithIdentity(ctx, c.identity)
 	}
@@ -120,6 +135,7 @@ func (c *Client) dispatchContext() context.Context {
 // hub's lifetime context instead; see handleMessage.
 func (c *Client) ReadPump(_ context.Context) {
 	defer func() {
+		c.cancelSessionGitRefreshes()
 		c.hub.Unregister(c)
 		if err := c.conn.Close(); err != nil {
 			c.logger.Debug("failed to close websocket connection", zap.Error(err))
@@ -137,10 +153,11 @@ func (c *Client) ReadPump(_ context.Context) {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
+			// CloseNormalClosure (1000): Normal browser close
 			// CloseGoingAway (1001): Client navigating away
 			// CloseNoStatusReceived (1005): Client closed without status (normal browser close)
 			// CloseAbnormalClosure (1006): Abnormal close (network drop)
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
 				c.logger.Error("WebSocket read error", zap.Error(err))
 			}
 			break
@@ -154,11 +171,28 @@ func (c *Client) ReadPump(_ context.Context) {
 			continue
 		}
 
-		// Process the message in a goroutine to avoid blocking the read pump
-		// This allows concurrent message handling so long-running handlers
-		// (like orchestrator.prompt) don't block other requests (like workspace.tree.get)
-		go c.handleMessage(&msg)
+		if !c.handleSessionMembershipMessage(&msg) {
+			// Independent requests remain concurrent so long-running handlers
+			// do not block other requests.
+			go c.handleMessage(&msg)
+		}
 	}
+}
+
+// Session membership changes follow socket order. Snapshot loading does not
+// hold up subsequent membership changes or independent requests.
+func (c *Client) handleSessionMembershipMessage(msg *ws.Message) bool {
+	switch msg.Action {
+	case ws.ActionSessionSubscribe:
+		if sessionID, joined := c.registerSessionSubscription(msg); joined {
+			go c.sendSessionData(sessionID)
+		}
+	case ws.ActionSessionUnsubscribe:
+		c.handleSessionUnsubscribe(msg)
+	default:
+		return false
+	}
+	return true
 }
 
 // handleMessage processes an incoming message.
@@ -190,6 +224,12 @@ func (c *Client) handleMessage(msg *ws.Message) {
 		return
 	case ws.ActionSessionUnsubscribe:
 		c.handleSessionUnsubscribe(msg)
+		return
+	case ws.ActionSessionConversationSubscribe:
+		c.handleConversationSubscribe(msg)
+		return
+	case ws.ActionSessionConversationUnsubscribe:
+		c.handleConversationUnsubscribe(msg)
 		return
 	case ws.ActionSessionFocus:
 		c.handleSessionFocus(msg)
@@ -301,7 +341,17 @@ type UserSubscribeRequest struct {
 }
 
 type SessionSubscribeRequest struct {
-	SessionID string `json:"session_id"`
+	SessionID        string  `json:"session_id"`
+	Mode             string  `json:"mode,omitempty"`
+	ConsumerKind     string  `json:"consumer_kind,omitempty"`
+	PluginID         string  `json:"plugin_id,omitempty"`
+	Generation       int64   `json:"generation,omitempty"`
+	BindingToken     string  `json:"binding_token,omitempty"`
+	LastSeenSequence *uint64 `json:"last_seen_sequence,omitempty"`
+	ResumeToken      string  `json:"resume_token,omitempty"`
+	ReplaceCursor    bool    `json:"replace_cursor,omitempty"`
+	ConsumerID       string  `json:"consumer_id,omitempty"`
+	WireID           string  `json:"wire_id,omitempty"`
 }
 
 // ownUserTopic resolves the user-topic this client may subscribe to: its own
@@ -339,19 +389,29 @@ func (c *Client) handleUserSubscribe(msg *ws.Message) {
 }
 
 func (c *Client) handleSessionSubscribe(msg *ws.Message) {
+	if sessionID, joined := c.registerSessionSubscription(msg); joined {
+		c.sendSessionData(sessionID)
+	}
+}
+
+func (c *Client) registerSessionSubscription(msg *ws.Message) (string, bool) {
 	var req SessionSubscribeRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-		return
+		return "", false
 	}
 
 	if req.SessionID == "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-		return
+		return "", false
+	}
+	if req.ConsumerKind != "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "legacy session stream subscriptions are no longer supported", nil)
+		return "", false
 	}
 
 	if !c.maySubscribeSession(msg, req.SessionID) {
-		return
+		return "", false
 	}
 
 	newMembership := c.hub.SubscribeToSession(c, req.SessionID)
@@ -363,9 +423,7 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 
 	// Send initial session data only when this client newly joins. Duplicate
 	// subscribe requests are acknowledgements, not snapshot replay commands.
-	if newMembership {
-		c.sendSessionData(req.SessionID)
-	}
+	return req.SessionID, newMembership
 }
 
 // maySubscribeSession applies the per-user session scoping check, emitting the
@@ -502,6 +560,18 @@ func (c *Client) handleRunSubscribe(msg *ws.Message) {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "run_id is required", nil)
 		return
 	}
+
+	// Per-user scoping: a client may only observe runs in its own
+	// workspaces. Every hook error maps to the same fixed (code, message)
+	// pair below so an unknown run id and a foreign run id are
+	// indistinguishable on the wire (no existence leak).
+	if check := c.hub.authPolicy.Subscriptions.Run; check != nil {
+		if err := check(c.dispatchContext(), req.RunID); err != nil {
+			c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot subscribe to this run", nil)
+			return
+		}
+	}
+
 	c.hub.SubscribeToRun(c, req.RunID)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
@@ -536,7 +606,6 @@ func (c *Client) handleSystemMetricsSubscribe(msg *ws.Message) {
 	})
 	c.sendMessage(resp)
 }
-
 func (c *Client) handleSystemMetricsUnsubscribe(msg *ws.Message) {
 	c.hub.UnsubscribeFromSystemMetrics(c)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -552,14 +621,15 @@ func (c *Client) handleSessionUnsubscribe(msg *ws.Message) {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 		return
 	}
-
 	if req.SessionID == "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 		return
 	}
-
+	if req.ConsumerKind != "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "legacy session stream subscriptions are no longer supported", nil)
+		return
+	}
 	c.hub.UnsubscribeFromSession(c, req.SessionID)
-
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success":    true,
 		"session_id": req.SessionID,
@@ -636,13 +706,96 @@ func (c *Client) handleSessionGitRefresh(msg *ws.Message) {
 	if !c.maySubscribeSession(msg, req.SessionID) {
 		return
 	}
-
-	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"success":    true,
-		"session_id": req.SessionID,
-	})
+	mode := req.Mode
+	if mode == "" {
+		mode = "fresh"
+	}
+	if mode != "fresh" && mode != "recover" && mode != "replay" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "mode must be fresh, recover, or replay", nil)
+		return
+	}
+	ctx, finish, ok, atCapacity := c.beginSessionGitRefresh()
+	if !ok {
+		if atCapacity {
+			c.sendError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "Git status refresh capacity reached", nil)
+		}
+		return
+	}
+	defer finish()
+	result, err := c.hub.GetSessionGitRefreshData(ctx, req.SessionID, mode)
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil {
+		result = SessionGitRefreshResult{
+			SessionID:   req.SessionID,
+			Mode:        mode,
+			StatusState: "unavailable",
+			ErrorCode:   "status_unavailable",
+		}
+	}
+	result.SessionID = req.SessionID
+	result.Mode = mode
+	resp, responseErr := ws.NewResponse(msg.ID, msg.Action, result)
+	if responseErr != nil {
+		c.logger.Error("failed to encode session git refresh response", zap.Error(responseErr))
+		return
+	}
 	c.sendMessage(resp)
-	c.sendSessionGitData(req.SessionID)
+	for _, snapshot := range result.Snapshots {
+		if snapshot == nil || snapshot.Action != ws.ActionSessionGitEvent {
+			continue
+		}
+		payload, marshalErr := json.Marshal(snapshot)
+		if marshalErr != nil {
+			c.logger.Error("failed to marshal session git snapshot", zap.Error(marshalErr))
+			continue
+		}
+		c.sendBytes(payload)
+	}
+}
+
+func (c *Client) beginSessionGitRefresh() (context.Context, func(), bool, bool) {
+	ctx, cancel := context.WithCancel(c.dispatchContext())
+	c.gitRefreshMu.Lock()
+	if c.gitRefreshClosed {
+		c.gitRefreshMu.Unlock()
+		cancel()
+		return ctx, func() {}, false, false
+	}
+	if c.gitRefreshCancels == nil {
+		c.gitRefreshCancels = make(map[uint64]context.CancelFunc)
+	}
+	if len(c.gitRefreshCancels) >= maxConcurrentSessionGitRefreshes {
+		c.gitRefreshMu.Unlock()
+		cancel()
+		return ctx, func() {}, false, true
+	}
+	c.gitRefreshNextID++
+	refreshID := c.gitRefreshNextID
+	c.gitRefreshCancels[refreshID] = cancel
+	c.gitRefreshMu.Unlock()
+	finish := func() {
+		c.gitRefreshMu.Lock()
+		delete(c.gitRefreshCancels, refreshID)
+		c.gitRefreshMu.Unlock()
+		cancel()
+	}
+	return ctx, finish, true, false
+}
+
+func (c *Client) cancelSessionGitRefreshes() {
+	c.gitRefreshMu.Lock()
+	c.gitRefreshClosed = true
+	cancels := make([]context.CancelFunc, 0, len(c.gitRefreshCancels))
+	for id, cancel := range c.gitRefreshCancels {
+		cancels = append(cancels, cancel)
+		delete(c.gitRefreshCancels, id)
+	}
+	c.gitRefreshMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 }
 
 // handleSessionUnfocus handles session.unfocus — releases the focus mark for
@@ -739,8 +892,9 @@ func (c *Client) sendError(id, action, code, message string, details map[string]
 
 func (c *Client) closeSend() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.closeSendLocked()
+	c.mu.Unlock()
+	c.cancelSessionGitRefreshes()
 }
 
 func (c *Client) closeSendLocked() {

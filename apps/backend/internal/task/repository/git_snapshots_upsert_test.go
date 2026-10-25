@@ -9,8 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-// seedTaskAndSession creates the parent rows the git_snapshots foreign key
-// requires (task → task_session). Returns the session ID.
+// seedTaskAndSession creates the parent task, environment, and session rows
+// required by the environment-owned git snapshot table.
 func seedTaskAndSession(t *testing.T, ctx context.Context, repo *sqlite.Repository, taskID, sessionID string) {
 	t.Helper()
 	if err := repo.CreateTask(ctx, &models.Task{
@@ -22,11 +22,20 @@ func seedTaskAndSession(t *testing.T, ctx context.Context, repo *sqlite.Reposito
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	environmentID := "env-" + taskID
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:             sessionID,
-		TaskID:         taskID,
-		AgentProfileID: "profile-1",
-		State:          models.TaskSessionStateStarting,
+		ID:                sessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: environmentID,
+		AgentProfileID:    "profile-1",
+		State:             models.TaskSessionStateStarting,
 	}); err != nil {
 		t.Fatalf("create task session: %v", err)
 	}
@@ -725,16 +734,19 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 		t.Fatalf("upsert live: %v", err)
 	}
 
-	// Create an agent_completed snapshot.
+	// Create a non-live snapshot. An agent_completed write intentionally
+	// supersedes the live row in the same environment, so it cannot be used to
+	// exercise DeleteLiveMonitorSnapshots directly.
 	completed := &models.GitSnapshot{
-		SessionID:   sessionID,
-		Branch:      "feature",
-		HeadCommit:  "completed-head",
-		TriggeredBy: "agent_completed",
-		Metadata:    map[string]interface{}{"branch_additions": float64(5)},
+		SessionID:    sessionID,
+		SnapshotType: models.SnapshotTypeArchive,
+		Branch:       "feature",
+		HeadCommit:   "completed-head",
+		TriggeredBy:  "archive",
+		Metadata:     map[string]interface{}{"branch_additions": float64(5)},
 	}
 	if err := repo.CreateGitSnapshot(ctx, completed); err != nil {
-		t.Fatalf("create agent_completed: %v", err)
+		t.Fatalf("create non-live snapshot: %v", err)
 	}
 
 	// Verify both exist.
@@ -751,7 +763,7 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 		t.Fatalf("DeleteLiveMonitorSnapshots: %v", err)
 	}
 
-	// Only agent_completed should remain.
+	// Only the non-live snapshot should remain.
 	all, err = repo.GetGitSnapshotsBySession(ctx, sessionID, 0)
 	if err != nil {
 		t.Fatalf("list after delete: %v", err)
@@ -759,7 +771,7 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 	if len(all) != 1 {
 		t.Fatalf("expected 1 snapshot after delete, got %d", len(all))
 	}
-	if all[0].TriggeredBy != "agent_completed" {
-		t.Errorf("expected remaining snapshot to be agent_completed, got %q", all[0].TriggeredBy)
+	if all[0].TriggeredBy != "archive" {
+		t.Errorf("expected remaining snapshot to be archive, got %q", all[0].TriggeredBy)
 	}
 }

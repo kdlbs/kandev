@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow-settings-autosave/spec.md
+spec: docs/specs/tasks/requirements/workflow-settings-autosave.md
 created: 2026-07-14
 status: superseded
 superseded_by: docs/plans/settings-manual-save/plan.md

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workspaces/secret-scope-transfer.md"
+spec: "../../specs/workspaces/requirements/secret-scope-transfer.md"
 ---
 
 # Task 01: Backend Copy/Move Service and Store

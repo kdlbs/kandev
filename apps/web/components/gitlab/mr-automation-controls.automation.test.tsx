@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
-import type { TaskMR, TaskMRAutomationOptions, TaskMRLifecycleState } from "@/lib/types/gitlab";
+import type {
+  TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationOptionsForMR,
+  TaskMRLifecycleState,
+} from "@/lib/types/gitlab";
 
 const hookMocks = vi.hoisted(() => ({
   error: null as string | null,
@@ -36,6 +41,26 @@ const AUTO_FIX_LABEL = "Auto-fix CI and address comments";
 const AUTO_MERGE_LABEL = "Auto-merge when ready";
 const EDIT_PROMPT_LABEL = "Edit auto-fix prompt for this task";
 const PROMPT_TEXTAREA_LABEL = "Task auto-fix prompt";
+const PROJECT_PATH = "group/project";
+
+function makeMROptions(
+  overrides: Partial<TaskMRAutomationOptionsForMR> = {},
+): TaskMRAutomationOptionsForMR {
+  return {
+    task_id: "task-1",
+    repository_id: "",
+    project_path: PROJECT_PATH,
+    mr_iid: 7,
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
+}
 
 function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
   return {
@@ -51,6 +76,7 @@ function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAu
     review_reviewer_username: "",
     updated_at: "2026-06-18T10:00:00Z",
     mr_states: [],
+    mr_options: [makeMROptions()],
     ...overrides,
   };
 }
@@ -60,7 +86,7 @@ function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
     id: "assoc-1",
     task_id: "task-1",
     host: "https://gitlab.com",
-    project_path: "group/project",
+    project_path: PROJECT_PATH,
     mr_iid: 7,
     mr_url: "https://gitlab.com/group/project/-/merge_requests/7",
     mr_title: "Test MR",
@@ -89,7 +115,7 @@ function makeState(overrides: Partial<TaskMRLifecycleState> = {}): TaskMRLifecyc
   return {
     task_id: "task-1",
     repository_id: "",
-    project_path: "group/project",
+    project_path: PROJECT_PATH,
     mr_iid: 7,
     review_request_initialized: false,
     last_review_requested: false,
@@ -105,7 +131,7 @@ function makeState(overrides: Partial<TaskMRLifecycleState> = {}): TaskMRLifecyc
   };
 }
 
-function renderControls(mr: TaskMR | undefined = makeMR()) {
+function renderControls(mr: TaskMR = makeMR()) {
   return render(
     <TooltipProvider>
       <ToastProvider>
@@ -148,44 +174,67 @@ describe("MRAutomationControls — Automation section (AC1)", () => {
   it("toggling auto-fix on patches auto_fix_enabled", () => {
     renderControls();
     fireEvent.click(screen.getByLabelText(AUTO_FIX_LABEL));
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_fix_enabled: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({
+      repository_id: "",
+      project_path: PROJECT_PATH,
+      mr_iid: 7,
+      auto_fix_enabled: true,
+    });
   });
 
   it("toggling auto-merge on patches auto_merge_enabled", () => {
     renderControls();
     fireEvent.click(screen.getByLabelText(AUTO_MERGE_LABEL));
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_merge_enabled: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({
+      repository_id: "",
+      project_path: PROJECT_PATH,
+      mr_iid: 7,
+      auto_merge_enabled: true,
+    });
   });
 
   it("shows the round-help button only when auto-fix is enabled and a single MR is known", () => {
-    hookMocks.options = makeOptions({ auto_fix_enabled: false });
+    hookMocks.options = makeOptions({ mr_options: [makeMROptions({ auto_fix_enabled: false })] });
     renderControls();
     expect(screen.queryByTestId("mr-auto-fix-round-help")).toBeNull();
 
     cleanup();
     hookMocks.options = makeOptions({
-      auto_fix_enabled: true,
+      mr_options: [makeMROptions({ auto_fix_enabled: true })],
       mr_states: [makeState({ auto_fix_round_count: 3 })],
     });
     renderControls();
     expect(screen.getByTestId("mr-auto-fix-round-help")).toBeTruthy();
   });
 
-  it("still shows the round-help button when no single MR is provided", () => {
-    hookMocks.options = makeOptions({ auto_fix_enabled: true });
-    renderControls(undefined);
-    expect(screen.getByTestId("mr-auto-fix-round-help")).toBeTruthy();
-  });
-
   it("shows the auto-merge readiness help button only when auto-merge is enabled", () => {
-    hookMocks.options = makeOptions({ auto_merge_enabled: false });
+    hookMocks.options = makeOptions({
+      mr_options: [makeMROptions({ auto_merge_enabled: false })],
+    });
     renderControls();
     expect(screen.queryByTestId("mr-auto-merge-help")).toBeNull();
 
     cleanup();
-    hookMocks.options = makeOptions({ auto_merge_enabled: true });
+    hookMocks.options = makeOptions({ mr_options: [makeMROptions({ auto_merge_enabled: true })] });
     renderControls();
     expect(screen.getByTestId("mr-auto-merge-help")).toBeTruthy();
+  });
+
+  it("renders switches off when options have no entry for this MR", () => {
+    hookMocks.options = makeOptions({
+      mr_options: [
+        makeMROptions({
+          mr_iid: 99,
+          auto_fix_enabled: true,
+          auto_merge_enabled: true,
+        }),
+      ],
+    });
+    renderControls();
+    expect(screen.getByLabelText(AUTO_FIX_LABEL).getAttribute("data-state")).toBe("unchecked");
+    expect(screen.getByLabelText(AUTO_MERGE_LABEL).getAttribute("data-state")).toBe("unchecked");
+    expect(screen.queryByTestId("mr-auto-fix-round-help")).toBeNull();
+    expect(screen.queryByTestId("mr-auto-merge-help")).toBeNull();
   });
 
   it("disables both automation switches while loading", () => {

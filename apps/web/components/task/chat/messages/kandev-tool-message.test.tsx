@@ -2,50 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KandevToolMessage, hasKandevRenderer } from "./kandev-tool-message";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import { kandevToolCall } from "./kandev-tool-message.test-helpers";
 import { KANDEV_RENDERERS } from "./kandev/registry";
-
-// kandevToolCall constructs the kandev Message shape produced by the
-// orchestrator for an MCP tool_call. The shape mirrors live production data
-// observed on a real session:
-//   - `metadata.tool_name`    — NOT set
-//   - `metadata.title`        — raw tool name (`mcp__kandev__list_*_kandev`)
-//   - `comment.content`       — same raw tool name
-//   - `normalized.generic.name` — the ACP adapter's *category* ("other"),
-//                                 NOT the tool name
-// The matcher must therefore look at title/content, not generic.name —
-// matching on the wrong field is exactly the bug that shipped initially.
-function kandevToolCall(opts: {
-  toolName: string;
-  input?: Record<string, unknown>;
-  resultJson?: unknown;
-  status?: "pending" | "running" | "in_progress" | "complete" | "error";
-}): Message {
-  return {
-    id: "msg-1",
-    session_id: toSessionId("s1"),
-    task_id: toTaskId("t1"),
-    author_type: "agent",
-    content: opts.toolName,
-    type: "tool_call",
-    created_at: "2026-05-21T10:00:00Z",
-    metadata: {
-      tool_call_id: "tc-1",
-      title: opts.toolName,
-      status: opts.status ?? "complete",
-      normalized: {
-        kind: "generic",
-        generic: {
-          name: "other",
-          input: opts.input,
-          output:
-            opts.resultJson !== undefined
-              ? [{ type: "text", text: JSON.stringify(opts.resultJson) }]
-              : undefined,
-        },
-      },
-    },
-  };
-}
 
 describe("hasKandevRenderer", () => {
   it("matches a registered kandev tool", () => {
@@ -57,6 +15,12 @@ describe("hasKandevRenderer", () => {
     ).toBe(true);
     expect(
       hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__show_rich_output_kandev" })),
+    ).toBe(true);
+    expect(hasKandevRenderer(kandevToolCall({ toolName: "kandev: show_rich_output_kandev" }))).toBe(
+      true,
+    );
+    expect(
+      hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__propose_task_kandev" })),
     ).toBe(true);
   });
 
@@ -94,71 +58,6 @@ describe("KandevToolMessage host context", () => {
       expect.objectContaining({ sessionId: "session-1", onOpenFile }),
     );
   });
-
-  it("unwraps the real Codex ACP MCP arguments before rendering rich output", () => {
-    const html = renderToStaticMarkup(
-      <KandevToolMessage
-        comment={kandevToolCall({
-          toolName: "mcp.kandev.show_rich_output_kandev",
-          input: {
-            raw_input: {
-              server: "kandev",
-              tool: "show_rich_output_kandev",
-              arguments: {
-                version: 1,
-                title: "Nested presentation",
-                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
-              },
-            },
-          },
-        })}
-      />,
-    );
-
-    expect(html).toContain("Nested presentation");
-    expect(html).not.toContain("This presentation is unavailable.");
-  });
-
-  it("renders a CSV chart from the persisted tool-result snapshot", () => {
-    const html = renderToStaticMarkup(
-      <KandevToolMessage
-        comment={kandevToolCall({
-          toolName: "mcp__kandev__show_rich_output_kandev",
-          input: {
-            version: 1,
-            title: "CSV presentation",
-            blocks: [
-              {
-                type: "chart",
-                chart_type: "bar",
-                title: "Requests by route",
-                summary: "Request volume from the workspace CSV.",
-                csv: {
-                  path: "reports/routes.csv",
-                  x_column: "route",
-                  series: [{ column: "requests" }],
-                },
-              },
-            ],
-          },
-          resultJson: {
-            version: 1,
-            resolved_charts: [
-              {
-                block_index: 0,
-                labels: ["/api", "/health"],
-                series: [{ label: "requests", values: [2400, 800] }],
-              },
-            ],
-          },
-        })}
-      />,
-    );
-
-    expect(html).toContain("CSV presentation");
-    expect(html).toContain('data-testid="rich-output-chart-bar"');
-    expect(html).not.toContain("This presentation is unavailable.");
-  });
 });
 
 // State labels and titles reused across multiple tool-DTOs. Pulled to
@@ -166,6 +65,7 @@ describe("KandevToolMessage host context", () => {
 const COMPLETED = "COMPLETED";
 const FIX_LOGIN_BUG = "Fix login bug";
 const CHANGE_TOUR = "Change tour";
+const PERMISSION_ACTION_ROW = 'data-testid="permission-action-row"';
 
 // The expandable row only renders its body when expanded. For tests that
 // need to inspect the body, set status to "running" which auto-expands the
@@ -372,7 +272,9 @@ describe("KandevToolMessage document & question renderers", () => {
     );
     expect(html).toContain("Pick one");
     // Selected option gets the "default" Badge variant; unselected stays "outline".
-    expect(html).toMatch(/data-variant="default"[^>]*>A<\/span>/);
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    expect(root.querySelector('[data-variant="default"]')?.textContent).toBe("A");
   });
 
   it("does not render anything when the renderer is missing", () => {
@@ -466,6 +368,7 @@ function pendingPermissionMessage(toolCallId: string): Message {
     type: "permission_request",
     created_at: "2026-05-21T10:00:01Z",
     metadata: {
+      request_id: "req-1",
       pending_id: "pend-1",
       tool_call_id: toolCallId,
       action_type: "mcp_tool",
@@ -489,7 +392,7 @@ describe("KandevToolMessage permission UI", () => {
         permissionMessage={pendingPermissionMessage("tc-1")}
       />,
     );
-    expect(html).toContain('data-testid="permission-action-row"');
+    expect(html).toContain(PERMISSION_ACTION_ROW);
     expect(html).toContain('data-testid="permission-approve"');
     expect(html).toContain('data-testid="permission-reject"');
   });
@@ -503,8 +406,25 @@ describe("KandevToolMessage permission UI", () => {
         })}
       />,
     );
-    expect(html).not.toContain('data-testid="permission-action-row"');
+    expect(html).not.toContain(PERMISSION_ACTION_ROW);
     expect(html).not.toContain('data-testid="permission-approve"');
+  });
+
+  it("does not render active actions for a legacy permission without request identity", () => {
+    const permissionMessage = pendingPermissionMessage("tc-1");
+    delete (permissionMessage.metadata as Record<string, unknown>).request_id;
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "pending",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+        })}
+        permissionMessage={permissionMessage}
+      />,
+    );
+    expect(html).not.toContain(PERMISSION_ACTION_ROW);
+    expect(html).not.toContain('data-testid="permission-approve"');
+    expect(html).not.toContain('data-testid="permission-reject"');
   });
 
   it("renders an amber pending clock icon while waiting for approval", () => {
@@ -555,7 +475,7 @@ describe("KandevToolMessage resolved-permission overlay", () => {
       />,
     );
     expect(html).not.toContain("tabler-icon-clock");
-    expect(html).not.toContain('data-testid="permission-action-row"');
+    expect(html).not.toContain(PERMISSION_ACTION_ROW);
   });
 
   it("does NOT mark the tool complete just because the permission was approved", () => {

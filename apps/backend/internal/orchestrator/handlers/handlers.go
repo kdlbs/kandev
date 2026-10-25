@@ -3,12 +3,19 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskdto "github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -36,8 +43,11 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
 	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
+	d.RegisterFunc(ws.ActionSessionFork, h.wsForkConversation)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
+	d.RegisterFunc(ws.ActionSessionRecoverBatch, h.wsRejectRetiredRecoveryBatch)
+	d.RegisterFunc(ws.ActionSessionWorkspaceRecoveryGet, h.wsGetWorkspaceRecoveryStatus)
 	d.RegisterFunc(ws.ActionTaskLaunchRecover, h.wsRecoverTaskLaunch)
 	d.RegisterFunc(ws.ActionSessionResetContext, h.wsResetContext)
 	d.RegisterFunc(ws.ActionSessionStop, h.wsStopSession)
@@ -88,6 +98,9 @@ func (h *Handlers) wsRouteAction(ctx context.Context, msg *ws.Message) (*ws.Mess
 		if errors.Is(err, orchestrator.ErrRouteActionActiveTurn) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 		}
+		if errors.Is(err, orchestrator.ErrRouteActionRequiresDynamicProfile) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		h.logger.Warn("route action failed", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "route action failed", nil)
 	}
@@ -136,6 +149,28 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
+		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := recoveryInspectionConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
+			return guardResponse, responseErr
+		}
+		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
+			return archivedResponse, responseErr
+		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		intent := orchestrator.ResolveIntent(&req)
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
 		// not a fault: log WARN (no stack trace) so it does not masquerade as a
@@ -143,22 +178,62 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if orchestrator.IsBenignLaunchTeardownErr(err) {
 			h.logger.Warn("session launch aborted during shutdown",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.String("error", err.Error()))
 		} else {
 			h.logger.Error("failed to launch session",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.Error(err))
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+err.Error(), nil)
+		publicErr := err
+		if intent == orchestrator.IntentRestoreWorkspace {
+			publicErr = routingerr.SanitizeError(err)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+publicErr.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
+type wsForkConversationRequest struct {
+	TaskID          string `json:"task_id"`
+	SourceSessionID string `json:"session_id"`
+	TurnID          string `json:"turn_id"`
+	RequestID       string `json:"request_id"`
+}
+
+func (h *Handlers) wsForkConversation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsForkConversationRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SourceSessionID == "" || req.TurnID == "" || req.RequestID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, session_id, turn_id, and request_id are required", nil)
+	}
+	response, err := h.service.ForkConversation(ctx, orchestrator.ForkConversationRequest{
+		TaskID: req.TaskID, SourceSessionID: req.SourceSessionID,
+		TurnID: req.TurnID, RequestID: req.RequestID,
+	})
+	if err != nil {
+		if errors.Is(err, orchestrator.ErrCodexForkUnsupported) ||
+			errors.Is(err, orchestrator.ErrCodexForkActive) ||
+			errors.Is(err, orchestrator.ErrCodexForkUncertain) ||
+			errors.Is(err, orchestrator.ErrCodexForkInProgress) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found", nil)
+		}
+		h.logger.Warn("conversation fork failed", zap.String("session_id", req.SourceSessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "conversation fork failed", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
 type wsEnsureSessionRequest struct {
-	TaskID    string `json:"task_id"`
-	AutoStart *bool  `json:"auto_start,omitempty"`
+	TaskID           string                              `json:"task_id"`
+	AutoStart        *bool                               `json:"auto_start,omitempty"`
+	ActivationSource orchestrator.LaunchActivationSource `json:"activation_source,omitempty"`
 }
 
 // wsEnsureSession ensures a task has a session, honoring the auto_start override.
@@ -171,8 +246,13 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	resp, err := h.service.EnsureSession(ctx, req.TaskID, orchestrator.EnsureSessionOptions{AutoStart: req.AutoStart})
+	resp, err := h.service.EnsureSession(ctx, req.TaskID, orchestrator.EnsureSessionOptions{
+		AutoStart: req.AutoStart, ActivationSource: req.ActivationSource,
+	})
 	if err != nil {
+		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		h.logger.Error("failed to ensure session",
 			zap.String("task_id", req.TaskID),
 			zap.Error(err))
@@ -243,9 +323,130 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
+	InterruptedResume json.RawMessage               `json:"interrupted_resume,omitempty"`
+	TaskID            string                        `json:"task_id"`
+	SessionID         string                        `json:"session_id"`
+	Action            string                        `json:"action"`
+	IdempotencyKey    string                        `json:"idempotency_key,omitempty"`
+	ErrorStamp        string                        `json:"error_stamp,omitempty"`
+	SettingsPolicy    executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
+}
+
+type wsGetWorkspaceRecoveryStatusRequest struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume", "fresh_start", "runtime_retry", or "cancel_retry"
+}
+
+func (h *Handlers) wsGetWorkspaceRecoveryStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetWorkspaceRecoveryStatusRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
+	}
+	operation, runnerLive, err := h.service.GetWorkspaceRecoveryStatus(ctx, req.TaskID, req.SessionID)
+	if err != nil {
+		h.logger.Warn("failed to read workspace recovery status",
+			zap.String("task_id", req.TaskID), zap.String("session_id", req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to read workspace recovery status", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"workspace_recovery": taskdto.WorkspaceRecoveryFromOperation(operation, runnerLive),
+	})
+}
+
+func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var recoveryErr *orchestrator.ManagedCloneRelocationRecoveryError
+	if !errors.As(err, &recoveryErr) {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), recoveryErr.Details())
+}
+
+func recoveryInspectionConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	if !worktree.IsRecoveryInspectionContentionOnly(err) {
+		return nil, nil
+	}
+	var contention *worktree.RecoveryInspectionContentionError
+	if !errors.As(err, &contention) {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, contention.Error(), map[string]interface{}{
+		"kind": "recovery_inspection_busy",
+	})
+}
+
+func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var branchRecoveryErr *orchestrator.BranchRecoveryError
+	if !errors.As(err, &branchRecoveryErr) {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), branchRecoveryErr.Details())
+}
+
+// sessionRecoveryGuardConflictResponse surfaces the startup recovery guard's
+// two distinct refusal reasons: a retryable in-progress recovery maps to
+// CONFLICT (the caller should retry once recovery resolves), and a
+// non-retryable unstoppable-agent condition maps to UNAVAILABLE (only a
+// backend restart clears it).
+func sessionRecoveryGuardConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var guardErr *orchestrator.SessionRecoveryGuardError
+	if !errors.As(err, &guardErr) {
+		return nil, nil
+	}
+	code := ws.ErrorCodeUnavailable
+	if guardErr.Retryable {
+		code = ws.ErrorCodeConflict
+	}
+	return ws.NewError(msg.ID, msg.Action, code, err.Error(), guardErr.Details())
+}
+
+// restoreRequiredRecoveryResponse exposes the bounded continuity policy
+// needed by the shared recovery UI. Provider errors, journal contents and
+// internal recovery blocks remain server-side.
+func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID string) (*ws.Message, error) {
+	var reasoner interface{ RecoveryReason() string }
+	if !errors.As(err, &reasoner) {
+		return nil, nil
+	}
+	reason := reasoner.RecoveryReason()
+	switch reason {
+	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible", "unresolved_durable_work":
+	default:
+		return nil, nil
+	}
+	details := map[string]interface{}{
+		"kind":            "session_restore_required",
+		"recovery_action": "continue_from_history",
+		"reason":          reason,
+		"session_id":      sessionID,
+	}
+	if generationer, ok := reasoner.(interface{ RecoveryGeneration() int64 }); ok {
+		if generation := generationer.RecoveryGeneration(); generation > 0 {
+			details["generation"] = generation
+		}
+	}
+	return ws.NewError(
+		msg.ID,
+		msg.Action,
+		ws.ErrorCodeConflict,
+		"Session continuity requires explicit history continuation.",
+		details,
+	)
+}
+
+func taskArchivedConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	if !errors.Is(err, executor.ErrTaskArchived) {
+		return nil, nil
+	}
+	return ws.NewError(
+		msg.ID,
+		msg.Action,
+		ws.ErrorCodeConflict,
+		"Task is archived. Unarchive it before recovering this session.",
+		map[string]interface{}{"kind": "task_archived"},
+	)
 }
 
 // wsRecoverSession recovers a session by id (resume or fresh start).
@@ -260,6 +461,13 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if req.SettingsPolicy != executor.ResumeSettingsPolicyStrict &&
+		req.SettingsPolicy != executor.ResumeSettingsPolicyProviderRestored {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported session recovery settings policy", nil)
+	}
+	if req.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored && req.Action != "resume" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "provider-restored settings policy requires the explicit resume action", nil)
+	}
 	// Cancel an in-progress transient provider retry loop and surface
 	// the manual recovery banner. Distinct from resume/fresh_start: it does not
 	// relaunch the agent, it stops the backoff timer.
@@ -268,17 +476,70 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
+	if req.Action == "resume_interrupted" || len(req.InterruptedResume) > 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "interrupted session recovery is no longer supported", nil)
+	}
+	if req.Action == "retry_connection" {
+		resp, err := h.service.RetrySessionDelivery(ctx, req.TaskID, req.SessionID)
+		if err != nil {
+			h.logger.Error("failed to reconnect session delivery",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reconnect session delivery: "+err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, resp)
 	}
 
-	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)
+	if req.Action != "resume" && req.Action != "resume_new_branch" && req.Action != "fresh_start" && req.Action != "runtime_retry" && req.Action != "relocate_and_resume" && req.Action != "repair_workspace_inventory" && req.Action != "continue_from_history" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported session recovery action", nil)
+	}
+	if req.Action == "relocate_and_resume" && req.ErrorStamp == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required for managed clone recovery", nil)
+	}
+	if req.Action == "repair_workspace_inventory" && strings.TrimSpace(req.IdempotencyKey) == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "idempotency_key is required for workspace inventory repair", nil)
+	}
+
+	resp, err := h.service.RecoverSessionWithOptions(ctx, req.TaskID, req.SessionID, req.Action, orchestrator.RecoverSessionOptions{
+		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		SettingsPolicy: req.SettingsPolicy,
+		ErrorStamp:     req.ErrorStamp,
+	})
 	if err != nil {
+		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := recoveryInspectionConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := branchRecoveryConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
+			return guardResponse, responseErr
+		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		h.logger.Error("failed to recover session",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.String("action", req.Action),
 			zap.Error(err))
+		if errors.Is(err, models.ErrWorkspaceInventoryRecoveryInvalid) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Workspace inventory repair request is invalid", nil)
+		}
+		if errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) ||
+			errors.Is(err, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Workspace inventory repair could not prove an exclusive preserved checkout", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to recover session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -301,7 +562,7 @@ func (h *Handlers) wsRecoverTaskLaunch(ctx context.Context, msg *ws.Message) (*w
 	if req.ErrorStamp == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required", nil)
 	}
-	if req.Action != "mark_review_done" && req.TaskRepositoryID == "" {
+	if req.Action != "mark_review_done" && req.Action != "retry_launch" && req.TaskRepositoryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required for branch recovery", nil)
 	}
 	if req.Action == "pick_base_branch" && req.BaseBranch == "" {
@@ -348,7 +609,9 @@ func (h *Handlers) wsStopTask(ctx context.Context, msg *ws.Message) (*ws.Message
 }
 
 type wsPermissionRespondRequest struct {
+	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
+	RequestID string `json:"request_id"`
 	PendingID string `json:"pending_id"`
 	OptionID  string `json:"option_id,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
@@ -367,6 +630,12 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.RequestID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "request_id is required", nil)
+	}
 	if req.PendingID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "pending_id is required", nil)
 	}
@@ -381,7 +650,7 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 		zap.Bool("cancelled", req.Cancelled),
 		zap.Bool("rejected", req.Rejected))
 
-	if err := h.service.RespondToPermission(ctx, req.SessionID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
+	if err := h.service.RespondToPermission(ctx, req.TaskID, req.SessionID, req.RequestID, req.PendingID, req.OptionID, req.Cancelled, req.Rejected); err != nil {
 		h.logger.Error("failed to respond to permission", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to respond to permission: "+err.Error(), nil)
 	}

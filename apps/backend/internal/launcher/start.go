@@ -17,17 +17,20 @@ var (
 	newSupervisorFn = newSupervisor
 	launchBackendFn = launchRestartableBackend
 	waitForHealthFn = waitForHealth
+	waitForReadyFn  = waitForReady
 	attachSignalsFn = func(supervisor *processSupervisor) {
 		supervisor.attachSignals()
 	}
 	startParentWatchFn = func(supervisor *processSupervisor) *parentWatchdog {
-		watchdog := newParentWatchdogFromEnv(supervisor.shutdown, launcherExit)
+		watchdog := newParentWatchdogFromEnv(func(reason string) {
+			supervisor.shutdown(reason)
+		}, launcherExit)
 		watchdog.start()
 		return watchdog
 	}
 )
 
-func runStart(ctx context.Context, opts Options) int {
+func runStart(ctx context.Context, opts Options, build BuildInfo) int {
 	startupConfig, err := loadBootstrapConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -43,6 +46,12 @@ func runStart(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
+	endpoints, err := resolveBackendEndpoints(startupConfig, ports.BackendPort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	ports.BackendURL = endpoints.accessURL
 	if err := ensureDataDirForConfig(startupConfig); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -57,6 +66,7 @@ func runStart(ctx context.Context, opts Options) int {
 	}
 	return launchManaged(ctx, managedAppConfig{
 		Header:     "start mode: using local build",
+		Version:    normalizedBuildVersion(build.Version),
 		Mode:       "start",
 		Backend:    self,
 		BackendCWD: filepath.Dir(self),
@@ -64,18 +74,22 @@ func runStart(ctx context.Context, opts Options) int {
 		LogLevel:   logLevel,
 		Opts:       opts,
 		Startup:    startupConfig,
+		Endpoints:  endpoints,
 	})
 }
 
 type managedAppConfig struct {
 	Header     string
+	Version    string
 	Mode       string
 	Backend    string
 	BackendCWD string
+	BundleDir  string
 	Ports      portConfig
 	LogLevel   string
 	Opts       Options
 	Startup    *config.Config
+	Endpoints  backendEndpointSet
 }
 
 func resolveLogLevel(opts Options, configs ...*config.Config) string {
@@ -108,8 +122,21 @@ func resolveConsoleLogLevel(opts Options) string {
 }
 
 func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
+	if cfg.Endpoints.accessURL == "" {
+		if cfg.Startup != nil {
+			endpoints, err := resolveBackendEndpoints(cfg.Startup, cfg.Ports.BackendPort)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+				return 1
+			}
+			cfg.Endpoints = endpoints
+		} else {
+			cfg.Endpoints = endpointSetForAccessURL(cfg.Ports.BackendURL)
+		}
+	}
+	cfg.Ports.BackendURL = cfg.Endpoints.accessURL
 	ignoreBrokenPipeSignal()
-	logStartup(cfg.Header, cfg.Ports, resolveDatabasePathForConfig(cfg.Startup), cfg.LogLevel, serverHostForConfig(cfg.Startup))
+	logStartup(cfg.Header, cfg.Version, cfg.Ports, resolveDatabasePathForConfig(cfg.Startup), cfg.LogLevel, serverHostForConfig(cfg.Startup))
 	setLauncherShutdownDebug(cfg.Opts.Debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
 	shutdownDebugf("runManagedApp start mode=%q backend=%q backend_cwd=%q debug=%t", cfg.Mode, cfg.Backend, cfg.BackendCWD, cfg.Opts.Debug)
 
@@ -125,7 +152,11 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	env := backendEnvForConfig(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug, healthToken, nil, cfg.Startup)
+	var extraEnv []string
+	if cfg.BundleDir != "" {
+		extraEnv = append(extraEnv, "KANDEV_BUNDLE_DIR="+cfg.BundleDir)
+	}
+	env := backendEnvForConfig(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug, healthToken, extraEnv, cfg.Startup)
 	backend, dumpLogs, err := launchBackendFn(backendLaunchConfig{
 		Command:    cfg.Backend,
 		Args:       []string{"__backend"},
@@ -143,8 +174,19 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	}
 	shutdownDebugf("runManagedApp backend launched")
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(ctx, cfg.Ports.BackendURL, backend, healthTimeoutForConfig(healthTimeoutReleaseMS, cfg.Startup), healthToken, dumpLogs); err != nil {
+	readyURL, err := waitForHealthFn(ctx, cfg.Endpoints, backend, healthTimeoutForConfig(healthTimeoutReleaseMS, cfg.Startup), healthToken, dumpLogs)
+	if err != nil {
 		supervisor.shutdown("backend health failure")
+		fmt.Fprintln(os.Stderr, formatStartupFailure(err, cfg.Endpoints, cfg.Startup, backendLogPathForConfig(cfg.Startup), startupFailureStoppedBackend(err)))
+		return 1
+	}
+	if readyURL != "" {
+		cfg.Ports.BackendURL = readyURL
+	}
+	shutdownDebugf("runManagedApp backend healthy, waiting for readiness")
+	if err := waitForReadyFn(ctx, cfg.Ports.BackendURL, backend); err != nil {
+		supervisor.shutdown("backend readiness failure")
+		dumpLogs()
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
@@ -159,8 +201,9 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	return waitForAppExit(supervisor, backend)
 }
 
-func logStartup(header string, ports portConfig, dbPath, logLevel string, serverHosts ...string) {
+func logStartup(header, version string, ports portConfig, dbPath, logLevel string, serverHosts ...string) {
 	fmt.Println("[kandev] " + header)
+	fmt.Println("[kandev] version:", normalizedBuildVersion(version))
 	fmt.Println("[kandev] url:", ports.BackendURL)
 	serverHost := os.Getenv("KANDEV_SERVER_HOST")
 	if len(serverHosts) > 0 && serverHosts[0] != "" {
@@ -177,6 +220,13 @@ func logStartup(header string, ports portConfig, dbPath, logLevel string, server
 	if logLevel != "" {
 		fmt.Println("[kandev] log level:", logLevel)
 	}
+}
+
+func normalizedBuildVersion(version string) string {
+	if version == "" {
+		return "dev"
+	}
+	return version
 }
 
 func openBrowser(url string) {

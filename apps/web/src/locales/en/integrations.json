@@ -35,6 +35,7 @@
   "comments": "Comments",
   "commentCount_one": "{{count}} comment",
   "commentCount_other": "{{count}} comments",
+  "commentUrlCopied": "Comment URL copied",
   "commit": "Commit",
   "commitChangedFiles_one": "Commit {{count}} changed file",
   "commitChangedFiles_other": "Commit {{count}} changed files",
@@ -50,6 +51,8 @@
   "copyConfigToAnotherWorkspace": "Copy config to another workspace",
   "copyConfiguration": "Copy {{label}} configuration",
   "copyConfigWithCredentials": "Copy the {{label}} settings and credentials from <4>{{sourceName}}</4> into another workspace. This overwrites the target workspace's current {{label}} configuration. Watchers and automations are not copied.",
+  "copyChangeRequestUrl": "Copy pull request URL",
+  "copyCommentUrl": "Copy comment URL",
   "copyingConfigTo": "Copying {{label}} config to {{targetName}}…",
   "createAsDraft": "Create as draft",
   "createdSuccessfully": "{{longName}} created successfully",
@@ -66,6 +69,7 @@
   "creatingEllipsis": "Creating...",
   "creatingFrom": "Creating {{shortName}} from <4>{{displayBranch}}</4>",
   "creatingFromInto": "Creating {{shortName}} from <4>{{displayBranch}}</4> → <6>{{baseBranch}}</6>",
+  "changeRequestUrlCopied": "Pull request URL copied",
   "deleteSavedQueryNamed": "Delete {{label}} saved query",
   "describeYourChanges": "Describe your changes...",
   "description": "Description",
@@ -189,5 +193,8 @@
   "cursorPaginationSummary_one": "Page {{page}} · {{count}} result",
   "cursorPaginationSummary_other": "Page {{page}} · {{count}} results",
   "allRepositories": "All repositories",
-  "changeRequestCreationFailed": "Change-request creation failed"
+  "changeRequestCreationFailed": "Change-request creation failed",
+  "resultCount_one": "Result <count>{{count}}</count>",
+  "resultCount_other": "Results <count>{{count}}</count>",
+  "loadingResults": "Loading results…"
 }

@@ -1,0 +1,120 @@
+// Regression coverage for the silent-clarification-submit-failure fix:
+// a failed /respond POST must surface a retry affordance instead of a dead
+// button, and a 409 caused by the bundle going inactive must never be
+// reported to the user as a successful answer.
+import { test, expect } from "../../fixtures/test-base";
+import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
+import { watchWs } from "../../helpers/causal-waits";
+import { waitForSessionSettled } from "./quick-chat-helpers";
+
+test.describe("Clarification submit failure feedback", () => {
+  test("surfaces a failed submit with a retry that preserves the answer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const ws = watchWs(testPage);
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Submit Failure",
+      { scenario: "clarification" },
+    );
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for clarification retry");
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    let attempt = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempt += 1;
+      if (attempt === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "clarification response is temporarily unavailable",
+            code: "temporarily_unavailable",
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    const postgres = session.clarificationOption("PostgreSQL");
+    await postgres.click();
+
+    const errorBanner = testPage.getByTestId("clarification-submit-error");
+    await expect(errorBanner).toBeVisible({ timeout: 15_000 });
+    // The user's answer must survive the failed submit -- no re-typing on retry.
+    await expect(postgres).toHaveAttribute("data-selected", "true");
+    await expect(session.clarificationSkip()).toBeEnabled();
+    await expect(session.idleInput()).toHaveCount(0);
+
+    await session.clarificationCollapseToggle().click();
+    await expect(session.clarificationOverlay()).toBeHidden();
+    await session.clarificationCollapseToggle().click();
+    await expect(session.clarificationOverlay()).toBeVisible();
+
+    const settled = waitForSessionSettled(ws, sessionId);
+    await testPage.getByTestId("clarification-retry").click();
+
+    await settled;
+    await expect(errorBanner).toHaveCount(0);
+    await expect(session.idleInput()).toBeVisible();
+    expect(attempt).toBe(2);
+  });
+
+  test("late answer fallback sends affirmative answers after an inactive-bundle 409", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Expired Conflict",
+      { scenario: "clarification" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    let attempts = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "clarification request is no longer active",
+          code: "not_active",
+        }),
+      });
+    });
+
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for late clarification answer");
+    await session.clarificationOption("PostgreSQL").click();
+
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some(
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes("Question 1") &&
+              message.content.includes("PostgreSQL"),
+          );
+        },
+        { timeout: 30_000, message: "inactive answer should be admitted as a new message" },
+      )
+      .toBe(true);
+    expect(attempts).toBe(1);
+  });
+});

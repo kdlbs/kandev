@@ -11,7 +11,10 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
-const responseKeySuccess = "success"
+const (
+	responseKeySuccess = "success"
+	responseKeyPending = "pending"
+)
 
 func (h *TaskHandlers) httpGetTaskEnvironment(c *gin.Context) {
 	taskID := c.Param("id")
@@ -62,6 +65,11 @@ func (h *TaskHandlers) httpGetTaskEnvironmentLive(c *gin.Context) {
 			zap.Error(err))
 	} else if ssh != nil {
 		resp["ssh"] = ssh
+	}
+	if pluginExecutor, err := h.service.GetPluginExecutorEnvironmentStatus(c.Request.Context(), taskID); err != nil {
+		h.logger.Warn("failed to fetch live plugin executor status", zap.String("task_id", taskID), zap.Error(err))
+	} else if pluginExecutor != nil {
+		resp["plugin_executor"] = pluginExecutor
 	}
 	c.JSON(http.StatusOK, resp)
 }

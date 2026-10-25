@@ -6,7 +6,7 @@ wave: 3
 depends_on:
   - "02-resume-state-before-credentials"
 plan: "plan.md"
-spec: "../../specs/agent-resume-runtime-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-resume-runtime-recovery.md"
 ---
 
 # Task 04: Repair resume lease-boundary ordering
@@ -33,7 +33,7 @@ spec: "../../specs/agent-resume-runtime-recovery/spec.md"
 
 - `apps/backend/internal/orchestrator/executor/executor_resume.go`
 - `apps/backend/internal/orchestrator/executor/executor_resume_test.go`
-- `docs/specs/agent-resume-runtime-recovery/spec.md`
+- `docs/specs/agents/requirements/agent-resume-runtime-recovery.md`
 - `docs/plans/agent-resume-runtime-recovery/plan.md`
 
 ## Dependencies

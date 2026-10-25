@@ -145,6 +145,11 @@ type Adapter struct {
 
 	// Update channel
 	updatesCh chan AgentEvent
+	// Emission is serialized independently of mu so control events flush pending
+	// shell output without holding the adapter state lock during backpressure.
+	updateEmitMu       sync.Mutex
+	shellSnapshots     shellSnapshotState
+	shellSnapshotTimer *time.Timer
 
 	// notifQueue decouples the ACP SDK's notification goroutine from the
 	// per-notification processing we do in handleACPUpdate. The SDK's inbound
@@ -267,20 +272,49 @@ type Adapter struct {
 	// frontend mode selector can render available options.
 	availableModes []streams.SessionModeInfo
 
+	// currentModeID is the mode the agent last reported, from session
+	// creation/load or a current_mode_update. SetMode compares against it
+	// rather than echoing the requested mode.
+	currentModeID string
+	// modeSessionID and modeObservationGeneration identify reports from the
+	// active provider session. SetMode captures the generation before its RPC
+	// and accepts only a later report from that session.
+	modeSessionID             string
+	modeObservationGeneration uint64
+	// modeObserved closes on each mode report so a waiter can settle.
+	modeObserved chan struct{}
+	// A timed-out set_mode can report after the next request starts. ACP mode
+	// reports have no request ID, so an uncorrelated report cannot resolve an
+	// earlier uncertain result, even if it arrives while the adapter is idle.
+	modeOutcomeUncertain bool
+
 	// Available config options from the most recent session creation/load.
 	// Used by emitSetModelEvent to include cached options in the convergence
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
 
+	// sessionSettingsPolicy is host-selected provenance for unsolicited
+	// settings reports from the currently loaded session. Explicit setter
+	// outcomes are emitted separately without this marker.
+	sessionSettingsPolicy streams.SessionSettingsPolicy
+	// sessionSettingsGeneration is monotonic for this adapter across session transitions.
+	sessionSettingsGeneration uint64
+
 	dialect acpDialect
 
 	// Session configuration changes are serialized across model and option
 	// RPCs. configGeneration is incremented when a change begins so an older
 	// completion cannot overwrite a newer selection.
-	configChangeMu   sync.Mutex
-	configGeneration uint64
-	contextSamples   map[string]contextWindowSample
+	// Session transitions use a separate mutex because a reset must keep the
+	// adapter transitionally consistent from session/new through session/close.
+	sessionTransitionMu sync.Mutex
+	sessionCleanupDone  chan struct{}
+	sessionCleanupWg    sync.WaitGroup
+	modeChangeMu        sync.Mutex
+	configChangeMu      sync.Mutex
+	configGeneration    uint64
+	contextSamples      map[string]contextWindowSample
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -310,7 +344,16 @@ type Adapter struct {
 	// prompt response, so sendPrompt's normal complete emission never runs.
 	asyncTurnMu         sync.Mutex
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
+	cancelJoinTimeout   time.Duration
 	asyncTurnEpochs     map[string]uint64
+
+	// turnStartedAt records, per session, the time agentctl last dispatched
+	// session/prompt for it (human or synthetic). It is agentctl's own clock
+	// and never crosses the process boundary; the background-workload
+	// liveness probe compares descendant process start times against it.
+	// Guarded by asyncTurnMu and cleared on the same lifecycle as the
+	// asyncTurn maps above (new session, adapter close).
+	turnStartedAt map[string]time.Time
 
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
@@ -322,19 +365,31 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn          context.CancelCauseFunc
-	rpcDone          chan struct{}
-	abortCh          chan struct{}
-	handoffCh        chan struct{}
-	providerErrorCh  chan openCodeStderrDiagnostic
-	promptGeneration uint64
-	evidenceMu       sync.Mutex
-	codexSystemError bool
-	codexCapacity    bool
-	allowHandoff     bool
-	handedOff        bool
-	gateOwned        bool
-	finishing        bool
+	endTurn                     context.CancelCauseFunc
+	rpcDone                     chan struct{}
+	abortCh                     chan struct{}
+	handoffCh                   chan struct{}
+	providerErrorCh             chan openCodeStderrDiagnostic
+	promptGeneration            uint64
+	evidenceMu                  sync.Mutex
+	codexSystemError            bool
+	codexCapacity               bool
+	codexUsageLimit             *streams.ProviderError
+	cursorRetriableMsg          string
+	cursorRetriableComplete     bool
+	cursorRetriableAt           time.Time
+	continuationTools           map[string]bool
+	continuationPermissions     uint16
+	continuationPermissionTools map[string]struct{}
+	continuationUnsafe          bool
+	capacityTools               map[string]capacityToolEvidence
+	capacityUnknown             bool
+	capacityBackground          bool
+	capacityPermissions         int
+	allowHandoff                bool
+	handedOff                   bool
+	gateOwned                   bool
+	finishing                   bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -356,6 +411,31 @@ func (t *promptTurnState) codexCapacityFailure() bool {
 	return t.codexSystemError && t.codexCapacity
 }
 
+func (t *promptTurnState) observeCodexUsageLimit(providerError streams.ProviderError) {
+	if t == nil || !providerError.Valid() {
+		return
+	}
+	t.evidenceMu.Lock()
+	if t.codexUsageLimit == nil {
+		copy := providerError
+		t.codexUsageLimit = &copy
+	}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexUsageLimitFailure() (*streams.ProviderError, bool) {
+	if t == nil {
+		return nil, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if t.codexUsageLimit == nil {
+		return nil, false
+	}
+	copy := *t.codexUsageLimit
+	return &copy, true
+}
+
 func (t *promptTurnState) hasCodexSystemError() bool {
 	if t == nil {
 		return false
@@ -365,14 +445,53 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	return t.codexSystemError
 }
 
+func (t *promptTurnState) setCursorRetriable(msg string, complete bool) {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	if t.cursorRetriableMsg == "" {
+		t.cursorRetriableAt = time.Now().UTC()
+	}
+	t.cursorRetriableMsg = msg
+	t.cursorRetriableComplete = complete
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) clearCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.cursorRetriableMsg = ""
+	t.cursorRetriableComplete = false
+	t.cursorRetriableAt = time.Time{}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) cursorRetriableFailure() bool {
+	failure, _, _, _ := t.cursorRetriableFailureDetails()
+	return failure
+}
+
+func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
+	if t == nil {
+		return false, "", time.Time{}, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.cursorRetriableMsg != "", t.cursorRetriableMsg, t.cursorRetriableAt, t.cursorRetriableComplete
+}
+
 type asyncTurnFinalizer struct {
+	messageID   string
+	activeTools map[string]struct{}
 	timer       *time.Timer
 	seq         uint64
 	promptEpoch uint64
 }
 
-// promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
-// session/prompt RPC to end after a user cancel. Exposed as a var for tests.
+// promptCancelJoinTimeout is the production default and preserves existing direct-test behavior.
 var promptCancelJoinTimeout = 3 * time.Second
 
 // NewAdapter creates a new ACP protocol adapter.
@@ -400,11 +519,15 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		attachMgr:                 shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:         cfg.PromptCancelJoinTimeout,
 		asyncTurnEpochs:           make(map[string]uint64),
+		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
 	}
+	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
+	a.shellSnapshotTimer.Stop()
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	// Start the update worker before returning so any caller that connects
 	// the SDK (Initialize, or any future direct wiring) always has a live
@@ -463,9 +586,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 
@@ -475,7 +602,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -528,12 +655,55 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		AuthMethods:             authMethods,
 	})
 
+	if err := a.applyProviderGatewayAuth(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	return nil
+}
+
+// applyProviderGatewayAuth authenticates the agent against a Kandev-configured
+// OpenAI-compatible gateway (base URL + bearer key) right after initialize. It
+// is a no-op unless the launch carries provider gateway auth. A failure aborts
+// the connection rather than letting the agent silently fall back to its
+// built-in vendor endpoint.
+func (a *Adapter) applyProviderGatewayAuth(ctx context.Context) error {
+	gw := a.cfg.ProviderGatewayAuth
+	if gw == nil {
+		return nil
+	}
+	if _, err := a.acpConn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(gw.MethodID),
+		Meta:     gw.Meta,
+	}); err != nil {
+		return fmt.Errorf("OpenAI-compatible provider authentication failed: %w", err)
+	}
+	a.logger.Info("authenticated against OpenAI-compatible provider gateway",
+		zap.String("auth_method", gw.MethodID))
 	return nil
 }
 
 // GetAgentInfo returns information about the connected agent.
 func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
+}
+
+// SupportsSessionResume reports the ACP session/resume capability negotiated
+// during initialize. It is intentionally distinct from the static registry
+// resume setting used by Kandev's own conversation fallback.
+func (a *Adapter) SupportsSessionResume() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.SessionCapabilities.Resume != nil
+}
+
+// SupportsSessionLoad reports the ACP session/load capability negotiated during
+// initialize.
+func (a *Adapter) SupportsSessionLoad() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.LoadSession
 }
 
 // SetPendingContext sets the context to be injected into the next prompt.
@@ -571,6 +741,15 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
 		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
 	}
+}
+
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
+// non-empty currentModelFromConfig(availableConfigOptions) value at read time.
+func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentID, currentModelFromConfig(a.availableConfigOptions)
 }
 
 func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {
@@ -622,6 +801,15 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 // context makes the wait cancelable during shutdown. Do not hold a.mu while
 // waiting; Close needs the write lock to cancel the context and unblock us.
 func (a *Adapter) sendUpdate(event AgentEvent) {
+	a.updateEmitMu.Lock()
+	defer a.updateEmitMu.Unlock()
+	a.flushShellSnapshotLocked()
+	a.shellSnapshots = shellSnapshotState{}
+	a.sendUpdateNow(event)
+}
+
+func (a *Adapter) sendUpdateNow(event AgentEvent) {
+	event = streams.BoundGenericToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -657,6 +845,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event = streams.BoundGenericToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:
@@ -671,6 +860,7 @@ func (a *Adapter) Close() error {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
+		a.waitForSessionCleanup()
 		return nil
 	}
 	a.closed = true
@@ -692,6 +882,12 @@ func (a *Adapter) Close() error {
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}
+
+	// A successful reset returns before its best-effort session/close request,
+	// but adapter shutdown owns that worker and must drain it before returning.
+	// Synchronizing with the transition mutex first ensures a reset that is just
+	// committing its cleanup has registered the wait-group entry.
+	a.waitForSessionCleanup()
 
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open

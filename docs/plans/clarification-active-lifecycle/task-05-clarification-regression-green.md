@@ -11,7 +11,7 @@ depends_on:
     "04-pending-owner-navigation",
   ]
 plan: "plan.md"
-spec: "../../specs/clarification-active-lifecycle/spec.md"
+spec: "../../specs/tasks/requirements/clarification-active-lifecycle.md"
 ---
 
 # Task 05: Clarification regression green

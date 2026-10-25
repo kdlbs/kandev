@@ -5,7 +5,7 @@ status: draft
 wave: 2
 depends_on: ["01-loginpty-lifetime-policy"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 03: Shutdown wiring, reconcile coverage, and reload E2E

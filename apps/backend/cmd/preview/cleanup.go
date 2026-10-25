@@ -11,6 +11,7 @@ func runCleanup(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("cleanup", flag.ContinueOnError)
 	pr := fs.Int("pr", 0, "PR number (required)")
 	repo := fs.String("repo", envOr("GITHUB_REPOSITORY", ""), "owner/repo")
+	skipDescription := fs.Bool("skip-description", false, "skip removing the PR description section")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "preview cleanup: %v\n", err)
@@ -31,7 +32,7 @@ func runCleanup(ctx context.Context, args []string) int {
 		return 2
 	}
 	ghToken := os.Getenv("GH_TOKEN")
-	if ghToken == "" {
+	if ghToken == "" && !*skipDescription {
 		fmt.Fprintln(os.Stderr, "preview cleanup: GH_TOKEN is required")
 		return 2
 	}
@@ -46,6 +47,12 @@ func runCleanup(ctx context.Context, args []string) int {
 	if destroyErr != nil {
 		fmt.Fprintf(os.Stderr, "preview cleanup: destroy sprite: %v\n", destroyErr)
 		// Continue to update the PR description even if destroy failed.
+	}
+	if *skipDescription {
+		if destroyErr != nil {
+			return 1
+		}
+		return 0
 	}
 
 	if err := removeDescriptionSection(ctx, ghToken, *repo, *pr); err != nil {

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["05-wire-gitlab-provider"]
 plan: "plan.md"
-spec: "../../specs/gitlab-workflow-sync/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-workflow-sync.md"
 ---
 
 # Task 06: Workflow Sync Provider Selector

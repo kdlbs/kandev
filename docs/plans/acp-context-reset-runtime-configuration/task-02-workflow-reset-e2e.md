@@ -6,7 +6,7 @@ wave: 2
 depends_on:
   - "01-restore-runtime-configuration"
 plan: "plan.md"
-spec: "../../specs/ui/acp-model-configuration-summary.md"
+spec: "../../specs/ui/requirements/acp-model-configuration-summary.md"
 ---
 
 # Task 02: Cover Workflow Reset and Hydration

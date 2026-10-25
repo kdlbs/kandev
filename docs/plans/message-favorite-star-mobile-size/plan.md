@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-favorite-star-mobile-size.md
+spec: docs/specs/ui/requirements/message-favorite-star-mobile-size.md
 created: 2026-08-08
 status: done
 ---

@@ -75,12 +75,13 @@ func (a *DashboardReactivityAdapter) ApplyTaskMutation(
 // two packages.
 func convertChangeToMutation(c dashboard.TaskReactivityChange) TaskMutation {
 	out := TaskMutation{
-		NewStatus:     c.NewStatus,
-		NewAssigneeID: c.NewAssigneeID,
-		ReopenIntent:  c.ReopenIntent,
-		ResumeIntent:  c.ResumeIntent,
-		ActorID:       c.ActorID,
-		ActorType:     c.ActorType,
+		NewStatus:            c.NewStatus,
+		NewAssigneeID:        c.NewAssigneeID,
+		AssignmentGeneration: c.AssignmentGeneration,
+		ReopenIntent:         c.ReopenIntent,
+		ResumeIntent:         c.ResumeIntent,
+		ActorID:              c.ActorID,
+		ActorType:            c.ActorType,
 	}
 	if c.Comment != nil {
 		out.Comment = &MutationComment{

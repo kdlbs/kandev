@@ -147,8 +147,8 @@ func TestNoEscalation_EmptyRequest(t *testing.T) {
 
 func TestAllPermissionKeys(t *testing.T) {
 	keys := shared.AllPermissionKeys()
-	if len(keys) != 7 {
-		t.Errorf("expected 7 permission keys, got %d", len(keys))
+	if len(keys) != 8 {
+		t.Errorf("expected 8 permission keys, got %d", len(keys))
 	}
 }
 

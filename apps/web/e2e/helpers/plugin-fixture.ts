@@ -1,11 +1,16 @@
 import path from "node:path";
 import { type Page, expect } from "@playwright/test";
+import type { ApiClient } from "./api-client";
 
 export const PLUGIN_ID = "kandev-plugin-e2e";
 export const PACKAGE_PATH = path.resolve(
   __dirname,
   "../../../backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
 );
+
+export async function uninstallFixturePlugin(apiClient: ApiClient): Promise<void> {
+  await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+}
 
 export async function installFixturePlugin(page: Page): Promise<void> {
   await page.goto("/settings/plugins");

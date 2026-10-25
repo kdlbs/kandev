@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -103,6 +105,14 @@ type testDeps struct {
 
 func newTestDeps(t *testing.T) *testDeps {
 	t.Helper()
+	return newTestDepsWithLogger(t, logger.Default())
+}
+
+// newTestDepsWithLogger is newTestDeps with a caller-supplied logger, so a
+// test can read what the service itself logged — the only way to assert a
+// best-effort failure the service swallows on purpose.
+func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -140,6 +150,8 @@ func newTestDeps(t *testing.T) *testDeps {
 			parent_id TEXT DEFAULT '',
 			project_id TEXT DEFAULT '',
 			assignee_agent_profile_id TEXT DEFAULT '',
+			assignee_user_id TEXT NOT NULL DEFAULT '',
+			assignment_generation INTEGER NOT NULL DEFAULT 0,
 			labels TEXT DEFAULT '[]',
 			metadata TEXT DEFAULT '{}',
 			identifier TEXT DEFAULT '',
@@ -228,7 +240,6 @@ func newTestDeps(t *testing.T) *testDeps {
 		t.Fatalf("create office_task_labels table: %v", err)
 	}
 
-	log := logger.Default()
 	activity := shared.NewActivityLogger(repo, log)
 	agentSvc := &stubAgentReader{}
 	costSvc := &stubCostChecker{}
@@ -238,24 +249,37 @@ func newTestDeps(t *testing.T) *testDeps {
 
 	router := gin.New()
 	group := router.Group("/api/v1/office")
-	dashboard.RegisterRoutes(group, svc, repo, nil, log)
+	dashboard.RegisterRoutes(group, svc, repo, nil, nil, nil, log)
 
 	return &testDeps{db: db, repo: repo, svc: svc, router: router, agents: agentSvc, wfRepo: wfRepo}
 }
 
 // stubAgentReader returns nil/nil by default; tests that need agent
-// resolution (e.g. pending_approvers name lookup) populate `names`.
-type stubAgentReader struct{ names map[string]string }
+// resolution (e.g. pending_approvers name lookup) populate `names`. Tests
+// that need a caller to clear a permission check (e.g. can_assign_tasks)
+// also populate `roles`, keyed the same way. `instances` backs
+// ListAgentInstances for workspace-scoped listing tests.
+type stubAgentReader struct {
+	names     map[string]string
+	roles     map[string]string
+	instances []*models.AgentInstance
+}
 
 func (s *stubAgentReader) GetAgentInstance(_ context.Context, id string) (*models.AgentInstance, error) {
 	if name, ok := s.names[id]; ok {
-		return &models.AgentInstance{ID: id, Name: name}, nil
+		return &models.AgentInstance{ID: id, Name: name, Role: models.AgentRole(s.roles[id])}, nil
 	}
 	return nil, nil
 }
 
-func (s *stubAgentReader) ListAgentInstances(_ context.Context, _ string) ([]*models.AgentInstance, error) {
-	return nil, nil
+func (s *stubAgentReader) ListAgentInstances(_ context.Context, workspaceID string) ([]*models.AgentInstance, error) {
+	var out []*models.AgentInstance
+	for _, instance := range s.instances {
+		if instance != nil && instance.WorkspaceID == workspaceID {
+			out = append(out, instance)
+		}
+	}
+	return out, nil
 }
 
 func (s *stubAgentReader) ListAgentInstancesByIDs(_ context.Context, ids []string) ([]*models.AgentInstance, error) {
@@ -281,13 +305,38 @@ func insertTestTask(t *testing.T, db *sqlx.DB, id, wsID, title, state string, pr
 	t.Helper()
 	// Give every test task a deterministic workflow_step_id so the office
 	// participant lookup (which now resolves through the task's step) has
-	// a stable target.
+	// a stable target, and back it with a last-position "Done" workflow
+	// step so the approval gate's step-position check (which the approver
+	// tests here don't otherwise exercise) treats the task as ready to
+	// complete by default.
+	stepID := "step-" + id
+	seedTerminalWorkflowStep(t, db, stepID)
 	_, err := db.Exec(`
 		INSERT INTO tasks (id, workspace_id, title, state, priority, identifier, workflow_step_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-	`, id, wsID, title, state, intPriorityLabel(priority), id, "step-"+id)
+	`, id, wsID, title, state, intPriorityLabel(priority), id, stepID)
 	if err != nil {
 		t.Fatalf("insert task %s: %v", id, err)
+	}
+}
+
+// seedTerminalWorkflowStep backs stepID with a single-step workflow whose
+// step is last-by-position and named "Done" — the shape
+// IsTaskWorkflowStepTerminal treats as terminal.
+func seedTerminalWorkflowStep(t *testing.T, db *sqlx.DB, stepID string) {
+	t.Helper()
+	workflowID := "wf-" + stepID
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES (?, '', 'Test Workflow', datetime('now'), datetime('now'))
+	`, workflowID); err != nil {
+		t.Fatalf("seed workflow for step %s: %v", stepID, err)
+	}
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+		VALUES (?, ?, 'Done', 0, datetime('now'), datetime('now'))
+	`, stepID, workflowID); err != nil {
+		t.Fatalf("seed terminal workflow_step %s: %v", stepID, err)
 	}
 }
 
@@ -783,7 +832,7 @@ func TestListComments_PopulatesRunState(t *testing.T) {
 		}
 	}
 
-	finishedRun := &models.Run{
+	finishedRun := &runsmodels.Run{
 		ID:             "run-finished",
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
@@ -795,7 +844,7 @@ func TestListComments_PopulatesRunState(t *testing.T) {
 	if err := deps.repo.CreateRun(ctx, finishedRun); err != nil {
 		t.Fatalf("create finished run: %v", err)
 	}
-	failedRun := &models.Run{
+	failedRun := &runsmodels.Run{
 		ID:             "run-failed",
 		AgentProfileID: "a1",
 		Reason:         "task_comment",

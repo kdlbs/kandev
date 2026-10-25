@@ -135,7 +135,7 @@ export function ContextSelect({
       <label className="text-xs font-medium text-muted-foreground">{t("task:context")}</label>
       <div className="flex min-w-0 items-center gap-2">
         <Select value={value} onValueChange={onValueChange} disabled={isSummarizing}>
-          <SelectTrigger className="!h-11 w-full min-w-0 text-xs sm:!h-7">
+          <SelectTrigger className="w-full min-w-0 text-xs">
             <SelectValue>{isSummarizing ? t("task:summarizing") : displayLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -218,6 +218,7 @@ export function useDialogAttachments(disabled: boolean, workspaceId?: string | n
         }
         updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
+          expiresAt: uploaded.expires_at,
           uploadStatus: "ready",
           size: uploaded.size_bytes,
         });

@@ -1,3 +1,4 @@
+import { checkMCPStatusClarity } from "../../helpers/mcp-status-clarity";
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -152,4 +153,25 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
   }
 
   prCapture.flush();
+});
+
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.13, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.14, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.15, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.17, AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.14
+test("explains mixed connections and saved changes with stable customization", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(150_000);
+  await checkMCPStatusClarity({ page: testPage, apiClient, seedData, mobile: false });
+});
+
+// @covers AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.14
+test("tablet MCP connections contain multiline rows and center the touch header", async ({
+  tabletTestPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(150_000);
+  await tabletTestPage.setViewportSize({ width: 900, height: 1000 });
+  await checkMCPStatusClarity({ page: tabletTestPage, apiClient, seedData, mobile: true });
 });

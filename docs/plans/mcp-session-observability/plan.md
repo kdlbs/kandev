@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/mcp-session-observability/spec.md
+spec: docs/specs/platform/requirements/mcp-session-observability.md
 decision: docs/decisions/2026-07-30-session-owned-mcp-observability.md
 created: 2026-07-30
 status: draft

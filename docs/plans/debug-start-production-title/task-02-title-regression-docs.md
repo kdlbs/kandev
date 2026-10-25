@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-profile-selector-contract"]
 plan: "plan.md"
-spec: "../../specs/dev-preview-title-prefixes/spec.md"
+spec: "../../specs/platform/requirements/dev-preview-title-prefixes.md"
 ---
 
 # Task 02: Prove debug title behavior
@@ -47,7 +47,7 @@ Sequential. The browser assertion depends on the profile-selector behavior.
 
 ## Inputs
 
-- The title scenarios in `docs/specs/dev-preview-title-prefixes/spec.md`.
+- The title scenarios in `docs/specs/platform/requirements/dev-preview-title-prefixes.md`.
 - The mobile-parity conclusion in `plan.md`.
 - Existing fixture restart behavior in `apps/web/e2e/fixtures/backend.ts`.
 

@@ -6,6 +6,33 @@ const MAX_MESSAGES_PER_LOCALE = 1_000;
 const MAX_MESSAGE_LENGTH = 4_096;
 
 const registeredLocales = new Map<string, Set<string>>();
+export type PluginTranslationsSnapshot = Map<string, Map<string, Record<string, string>>>;
+
+export function snapshotPluginTranslations(): PluginTranslationsSnapshot {
+  return new Map(
+    [...registeredLocales].map(([pluginId, locales]) => [
+      pluginId,
+      new Map(
+        [...locales].map((locale) => [
+          locale,
+          { ...(i18n.getResourceBundle(locale, pluginTranslationNamespace(pluginId)) ?? {}) },
+        ]),
+      ),
+    ]),
+  );
+}
+
+export function restorePluginTranslations(snapshot: PluginTranslationsSnapshot): void {
+  for (const pluginId of registeredLocales.keys()) unregisterPluginTranslations(pluginId);
+  for (const [pluginId, locales] of snapshot) {
+    const registered = new Set<string>();
+    for (const [locale, catalog] of locales) {
+      i18n.addResourceBundle(locale, pluginTranslationNamespace(pluginId), catalog, false, true);
+      registered.add(locale);
+    }
+    registeredLocales.set(pluginId, registered);
+  }
+}
 
 export function pluginTranslationNamespace(pluginId: string): string {
   return `plugin-${pluginId}`;

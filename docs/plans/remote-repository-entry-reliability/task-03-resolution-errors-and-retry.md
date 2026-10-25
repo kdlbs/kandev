@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-public-provider-resolution"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 03: Remote resolution errors and retry
@@ -36,7 +36,7 @@ spec: "../../specs/tasks/multi-branch/spec.md"
 
 ## Inputs
 
-- `docs/specs/tasks/multi-branch/spec.md` — failure and retry scenarios.
+- `docs/specs/tasks/requirements/multi-branch.md` — failure and retry scenarios.
 - Existing per-URL abort and sequence guards in both hooks.
 
 ## Output contract

@@ -1,0 +1,287 @@
+{
+  "/health": {
+    "http_status": 200,
+    "body": {
+      "mode": "websocket+http",
+      "service": "kandev",
+      "status": "ok",
+      "version": "v0.97.0-175-g02ff0578357-dirty"
+    }
+  },
+  "/ready": {
+    "http_status": 200,
+    "body": {
+      "service": "kandev",
+      "startup": {
+        "phase": "ready",
+        "boot": 108048453710777,
+        "seq": 10,
+        "elapsed_ms": 64183,
+        "phase_elapsed_ms": 59291
+      },
+      "status": "ok",
+      "version": "v0.97.0-175-g02ff0578357-dirty"
+    }
+  },
+  "/api/v1/system/diagnostics/persistence": {
+    "http_status": 200,
+    "body": {
+      "driver": "sqlite3",
+      "state": "healthy",
+      "stores": [
+        {
+          "id": "schema-meta",
+          "owner_package": "internal/persistence",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843586201Z"
+        },
+        {
+          "id": "task",
+          "owner_package": "internal/task/repository/sqlite",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843586552Z"
+        },
+        {
+          "id": "workflow",
+          "owner_package": "internal/workflow/repository",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843586992Z"
+        },
+        {
+          "id": "analytics",
+          "owner_package": "internal/analytics/repository",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843587153Z"
+        },
+        {
+          "id": "agent-settings",
+          "owner_package": "internal/agent/settings/store",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843587674Z"
+        },
+        {
+          "id": "user",
+          "owner_package": "internal/user/store",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843587824Z"
+        },
+        {
+          "id": "notification",
+          "owner_package": "internal/notifications/store",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843588064Z"
+        },
+        {
+          "id": "editor",
+          "owner_package": "internal/editors/store",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843588235Z"
+        },
+        {
+          "id": "prompts",
+          "owner_package": "internal/prompts/store",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843588375Z"
+        },
+        {
+          "id": "utility",
+          "owner_package": "internal/utility/store",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843588605Z"
+        },
+        {
+          "id": "office",
+          "owner_package": "internal/office/repository/sqlite",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843588746Z"
+        },
+        {
+          "id": "terminal",
+          "owner_package": "internal/terminal/repository",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843588986Z"
+        },
+        {
+          "id": "quick-terminal",
+          "owner_package": "internal/quickterminal/repository",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843589337Z"
+        },
+        {
+          "id": "runtime-flags",
+          "owner_package": "internal/runtimeflags",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843589607Z"
+        },
+        {
+          "id": "auth",
+          "owner_package": "internal/auth/store",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843589667Z"
+        },
+        {
+          "id": "secrets",
+          "owner_package": "internal/secrets",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843589808Z"
+        },
+        {
+          "id": "system-settings",
+          "owner_package": "internal/system/settings",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843589968Z"
+        },
+        {
+          "id": "auth-hostnames",
+          "owner_package": "internal/auth/hostnames",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843590028Z"
+        },
+        {
+          "id": "organizations",
+          "owner_package": "internal/org",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843590088Z"
+        },
+        {
+          "id": "organization-units",
+          "owner_package": "internal/orgunit",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843590269Z"
+        },
+        {
+          "id": "message-queue",
+          "owner_package": "internal/orchestrator/messagequeue",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843590419Z"
+        },
+        {
+          "id": "task-share",
+          "owner_package": "internal/task/share",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843590649Z"
+        },
+        {
+          "id": "telemetry-contract",
+          "owner_package": "internal/telemetrycontract",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843590789Z"
+        },
+        {
+          "id": "delivery",
+          "owner_package": "internal/delivery",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.84359093Z"
+        },
+        {
+          "id": "storage",
+          "owner_package": "internal/system/storage",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.84359099Z"
+        },
+        {
+          "id": "plugin-instances",
+          "owner_package": "internal/plugins/instances",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.84359113Z"
+        },
+        {
+          "id": "plugin-marketplace",
+          "owner_package": "internal/plugins/marketplace",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.84359127Z"
+        },
+        {
+          "id": "plugin-settings",
+          "owner_package": "internal/plugins",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843591431Z"
+        },
+        {
+          "id": "plugin-state",
+          "owner_package": "internal/plugins/state",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843591491Z"
+        },
+        {
+          "id": "plugin-instance-state",
+          "owner_package": "internal/plugins/state",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843591661Z"
+        },
+        {
+          "id": "plugin-user-state",
+          "owner_package": "internal/plugins/state",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843591872Z"
+        },
+        {
+          "id": "canvas",
+          "owner_package": "internal/canvas",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843591932Z"
+        },
+        {
+          "id": "github",
+          "owner_package": "internal/github",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592092Z"
+        },
+        {
+          "id": "gitlab",
+          "owner_package": "internal/gitlab",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592152Z"
+        },
+        {
+          "id": "jira",
+          "owner_package": "internal/jira",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592202Z"
+        },
+        {
+          "id": "linear",
+          "owner_package": "internal/linear",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592252Z"
+        },
+        {
+          "id": "sentry",
+          "owner_package": "internal/sentry",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592312Z"
+        },
+        {
+          "id": "azure-devops",
+          "owner_package": "internal/azuredevops",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592473Z"
+        },
+        {
+          "id": "workflow-sync",
+          "owner_package": "internal/workflowsync",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592593Z"
+        },
+        {
+          "id": "office-config-sync",
+          "owner_package": "internal/office/configsync",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592643Z"
+        },
+        {
+          "id": "automation",
+          "owner_package": "internal/automation",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843592883Z"
+        },
+        {
+          "id": "coordinator",
+          "owner_package": "internal/coordinator",
+          "state": "healthy",
+          "last_checked_at": "2026-10-10T13:06:49.843593044Z"
+        }
+      ]
+    }
+  }
+}

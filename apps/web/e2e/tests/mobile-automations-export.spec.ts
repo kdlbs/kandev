@@ -18,10 +18,16 @@ test.describe("Automations export on mobile", () => {
     await automations.goto();
     await expect(automations.emptyState).toBeVisible({ timeout: 10_000 });
     await expect(automations.exportButton).toBeEnabled();
+    await expect(automations.newAutomationButton).toBeVisible();
 
-    const box = await automations.exportButton.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    const [exportBox, newAutomationBox] = await Promise.all([
+      automations.exportButton.boundingBox(),
+      automations.newAutomationButton.boundingBox(),
+    ]);
+    expect(exportBox).not.toBeNull();
+    expect(newAutomationBox).not.toBeNull();
+    expect(exportBox!.height).toBeGreaterThanOrEqual(44);
+    expect(newAutomationBox!.height).toBeCloseTo(exportBox!.height, 1);
 
     const downloadPromise = testPage.waitForEvent("download");
     await automations.exportButton.tap();

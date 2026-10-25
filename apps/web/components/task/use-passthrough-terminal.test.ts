@@ -1,18 +1,85 @@
+import { act, renderHook } from "@testing-library/react";
+import type { FitAddon } from "@xterm/addon-fit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildTerminalWsUrl } from "./use-passthrough-terminal";
+import { buildTerminalWsUrl, useFitAndResize } from "./use-passthrough-terminal";
 import {
   computeCanConnect,
   computeTerminalPaneState,
   isEnvironmentEnded,
+  resolveTouchScrollEnabled,
+  shouldGuardPassthroughEscape,
 } from "./passthrough-terminal";
 import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
 import type { Terminal } from "@xterm/xterm";
 
 const WS_BASE_URL = "ws://localhost:38429";
 
+function keyboardEvent(key: string, target: EventTarget, modifiers: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent("keydown", { key, ...modifiers });
+  Object.defineProperty(event, "target", { value: target });
+  return event;
+}
+
+describe("shouldGuardPassthroughEscape", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("@covers AC-UI-QUICK-TERMINAL-001.11 claims unmodified Escape from xterm", () => {
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    textarea.focus();
+
+    expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", textarea), textarea)).toBe(true);
+  });
+
+  it("does not claim modified Escape or Escape from another focused control", () => {
+    const textarea = document.createElement("textarea");
+    const button = document.createElement("button");
+    document.body.append(textarea, button);
+
+    expect(
+      shouldGuardPassthroughEscape(keyboardEvent("Escape", textarea, { ctrlKey: true }), textarea),
+    ).toBe(false);
+
+    button.focus();
+    expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", button), textarea)).toBe(false);
+  });
+
+  it("lets the dialog handle Escape after the passthrough connection ends", () => {
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    textarea.focus();
+
+    expect(shouldGuardPassthroughEscape(keyboardEvent("Escape", textarea), textarea, false)).toBe(
+      false,
+    );
+  });
+});
+
 describe("computeCanConnect", () => {
   it("lets the backend wait for an agent passthrough session that is not cached as ready", () => {
     expect(computeCanConnect("agent", "session-1", "session-1")).toBe(true);
+  });
+});
+
+describe("resolveTouchScrollEnabled", () => {
+  it("enables shell terminals by default for a coarse pointer", () => {
+    expect(resolveTouchScrollEnabled("shell", false)).toBe(true);
+  });
+
+  it("keeps the custom handler disabled for a fine pointer", () => {
+    expect(resolveTouchScrollEnabled("shell", true, true)).toBe(false);
+    expect(resolveTouchScrollEnabled("agent", true, true)).toBe(false);
+  });
+
+  it("keeps an explicit coarse-pointer opt-out", () => {
+    expect(resolveTouchScrollEnabled("shell", false, false)).toBe(false);
+  });
+
+  it("does not opt agent terminals in unless their caller requests it", () => {
+    expect(resolveTouchScrollEnabled("agent", false)).toBe(false);
+    expect(resolveTouchScrollEnabled("agent", false, true)).toBe(true);
   });
 });
 
@@ -57,6 +124,30 @@ describe("buildTerminalWsUrl", () => {
         sessionId: "session-1",
       }),
     ).toBe("ws://localhost:38429/terminal/session/session-1?mode=agent");
+  });
+});
+
+describe("useFitAndResize", () => {
+  it("sends a valid initial size when a forced resize precedes panel layout", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      width: 0,
+      height: 0,
+    } as DOMRect);
+    const terminal = { cols: 80, rows: 24, refresh: vi.fn() } as unknown as Terminal;
+    const sendResize = vi.fn();
+    const options = {
+      xtermRef: { current: terminal },
+      fitAddonRef: { current: { fit: vi.fn() } as unknown as FitAddon },
+      terminalRef: { current: container },
+      lastDimensionsRef: { current: { cols: 0, rows: 0 } },
+      sendResize,
+    };
+
+    const { result } = renderHook(() => useFitAndResize(options));
+    act(() => result.current(true));
+
+    expect(sendResize).toHaveBeenCalledWith(80, 24);
   });
 });
 
@@ -135,11 +226,84 @@ describe("startReconnectLoop", () => {
   });
 });
 
+describe("startReconnectLoop one-shot terminal completion", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each(["initial_command_completed", "environment_not_found"])(
+    "stops retrying after %s",
+    (reason) => {
+      vi.useFakeTimers();
+
+      const connectWebSocket = vi.fn(({ onSocketClose }) => {
+        onSocketClose({ code: 1000, reason } as CloseEvent);
+      });
+      const onDisconnected = vi.fn();
+      const stop = startReconnectLoop({
+        environmentId: "env-1",
+        wsBaseUrl: WS_BASE_URL,
+        mode: "shell",
+        terminalId: "shell-1",
+        label: undefined,
+        terminal: { reset: vi.fn() } as unknown as Terminal,
+        fitAndResize: vi.fn(),
+        wsRef: { current: null },
+        attachAddonRef: { current: null },
+        onConnected: vi.fn(),
+        onDisconnected,
+        connectWebSocket,
+      });
+
+      vi.advanceTimersByTime(150);
+      vi.advanceTimersByTime(10_000);
+
+      expect(connectWebSocket).toHaveBeenCalledTimes(1);
+      expect(onDisconnected).toHaveBeenCalledTimes(1);
+      expect(onDisconnected).toHaveBeenCalledWith({ code: 1000, reason });
+      stop();
+    },
+  );
+
+  it("continues retrying for other normal WebSocket closes", () => {
+    vi.useFakeTimers();
+
+    const connectWebSocket = vi.fn(({ onSocketClose }) => {
+      if (connectWebSocket.mock.calls.length === 1) {
+        onSocketClose({ code: 1000, reason: "normal close" } as CloseEvent);
+      }
+    });
+    const stop = startReconnectLoop({
+      environmentId: "env-1",
+      wsBaseUrl: WS_BASE_URL,
+      mode: "shell",
+      terminalId: "shell-1",
+      label: undefined,
+      terminal: { reset: vi.fn() } as unknown as Terminal,
+      fitAndResize: vi.fn(),
+      wsRef: { current: null },
+      attachAddonRef: { current: null },
+      onConnected: vi.fn(),
+      connectWebSocket,
+    });
+
+    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(300);
+
+    expect(connectWebSocket).toHaveBeenCalledTimes(2);
+    stop();
+  });
+});
+
 // The env handler refuses a shell on an ended session, identically every time.
 // Opening the socket anyway only restarts the 5s retry timer.
 describe("computeCanConnect on ended sessions", () => {
   it("refuses a shell terminal for an ended environment", () => {
     expect(computeCanConnect("shell", "env-1", "session-1", true)).toBe(false);
+  });
+
+  it("connects a shell terminal after workspace restoration", () => {
+    expect(computeCanConnect("shell", "env-1", "session-1", true, true)).toBe(true);
   });
 
   it("still connects a shell terminal for a live environment", () => {
@@ -205,12 +369,20 @@ describe("isEnvironmentEnded", () => {
 // actively false, and hides anything written into the pane behind it. "Ended"
 // has to outrank "connecting", or the user is told the opposite of the truth.
 describe("computeTerminalPaneState", () => {
+  it("shows confirmed removal even when cached workspace state says ready", () => {
+    expect(computeTerminalPaneState("shell", false, false, true, true)).toBe("ended");
+  });
   it("reports ended instead of connecting when the session is over", () => {
     expect(computeTerminalPaneState("shell", true, false)).toBe("ended");
   });
 
   it("still reports ended when a socket happens to be open", () => {
     expect(computeTerminalPaneState("shell", true, true)).toBe("ended");
+  });
+
+  it("reports a restored shell as connected or connecting instead of ended", () => {
+    expect(computeTerminalPaneState("shell", true, false, true)).toBe("connecting");
+    expect(computeTerminalPaneState("shell", true, true, true)).toBe("connected");
   });
 
   it("reports connecting only while a live session is not yet attached", () => {

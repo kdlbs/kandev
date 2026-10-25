@@ -35,3 +35,51 @@ func TestTaskPlanFromModelIncludesImplementationMarker(t *testing.T) {
 		t.Fatalf("expected implementation_started_by %q, got %v", actor, out.ImplementationStartedBy)
 	}
 }
+
+func TestTaskPlanRevisionFromModelComputesContentLengthInRunes(t *testing.T) {
+	// "héllo wörld 日本語" has multibyte runes; RuneCountInString must be used
+	// instead of len(), which would count UTF-8 bytes rather than characters.
+	content := "héllo wörld 日本語"
+	out := TaskPlanRevisionFromModel(&models.TaskPlanRevision{
+		ID:      "rev-1",
+		TaskID:  "task-1",
+		Title:   "Plan",
+		Content: content,
+	})
+
+	if out.ContentLength != 15 {
+		t.Fatalf("expected content_length 15 (rune count), got %d", out.ContentLength)
+	}
+}
+
+func TestTaskPlanRevisionMetaFromModelKeepsContentLengthAfterBlankingContent(t *testing.T) {
+	out := TaskPlanRevisionMetaFromModel(&models.TaskPlanRevision{
+		ID:      "rev-1",
+		TaskID:  "task-1",
+		Title:   "Plan",
+		Content: "12345",
+	})
+
+	if out.Content != "" {
+		t.Fatalf("expected content blanked for meta payload, got %q", out.Content)
+	}
+	if out.ContentLength != 5 {
+		t.Fatalf("expected content_length 5 to survive the content blank, got %d", out.ContentLength)
+	}
+}
+
+func TestTaskPlanRevisionFromModelIncludesWorkflowStepStamp(t *testing.T) {
+	out := TaskPlanRevisionFromModel(&models.TaskPlanRevision{
+		ID:                "rev-1",
+		TaskID:            "task-1",
+		Title:             "Plan",
+		Content:           "hi",
+		WorkflowStepID:    "step-1",
+		WorkflowStepName:  "Build",
+		WorkflowStepColor: "bg-blue-500",
+	})
+
+	if out.WorkflowStepID != "step-1" || out.WorkflowStepName != "Build" || out.WorkflowStepColor != "bg-blue-500" {
+		t.Fatalf("expected workflow step stamp to survive DTO conversion, got %+v", out)
+	}
+}

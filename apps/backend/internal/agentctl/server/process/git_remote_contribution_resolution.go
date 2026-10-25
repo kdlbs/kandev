@@ -21,7 +21,8 @@ const (
 func validateContributionLeaseFlag(arg string) error {
 	lease := strings.TrimPrefix(arg, contributionLeaseFlagPrefix)
 	branch, expectedHead, ok := strings.Cut(lease, ":")
-	if !ok || strings.Contains(expectedHead, ":") || !securityutil.IsValidBranchName(branch) || !isFullCommitSHA(expectedHead) {
+	if !ok || strings.Contains(expectedHead, ":") || !securityutil.IsValidBranchName(branch) ||
+		(expectedHead != "" && !isFullCommitSHA(expectedHead)) {
 		return fmt.Errorf("potentially unsafe flag: %s", arg)
 	}
 	return nil

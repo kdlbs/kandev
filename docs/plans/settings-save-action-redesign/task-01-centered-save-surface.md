@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 01: Centered save surface and reset
@@ -56,7 +56,7 @@ contract and must be validated together.
 
 ## Inputs
 
-- `docs/specs/ui/settings-manual-save.md` — centered surface, Reset, and state
+- `docs/specs/ui/requirements/settings-manual-save.md` — centered surface, Reset, and state
   semantics.
 - `docs/decisions/0046-settings-route-save-coordinator.md` — route-scoped
   contributor ownership and collision-host boundary.

@@ -11,6 +11,7 @@ describe("markdown preview comments", () => {
     const comment = buildMarkdownPreviewComment({
       filePath: "README.md",
       repositoryId: "repo-front",
+      repositoryName: "api",
       sessionId: "session-1",
       selectedText: "Rendered paragraph",
       text: "Tighten wording",
@@ -22,6 +23,7 @@ describe("markdown preview comments", () => {
       source: "diff",
       sessionId: "session-1",
       repositoryId: "repo-front",
+      repositoryName: "api",
       filePath: "README.md",
       startLine: 3,
       endLine: 5,

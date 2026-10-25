@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -10,6 +11,11 @@ import (
 // errKey is the JSON field name for error responses on this handler. Hoisted
 // out to satisfy goconst's repeated-string rule across the api package.
 const errKey = "error"
+
+// instanceNotFoundMessage is the shared 404 body for every instance-scoped
+// handler that looks an instance up by ID. Hoisted out to satisfy goconst's
+// repeated-string rule across the api package.
+const instanceNotFoundMessage = "instance not found"
 
 // RescanWorkspaceRequest is the body for POST /api/v1/workspace/rescan.
 //
@@ -21,6 +27,30 @@ const errKey = "error"
 type RescanWorkspaceRequest struct {
 	WorkDir              string   `json:"work_dir"`
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+}
+
+type WorkspaceRecoveryExclusionsRequest struct {
+	Paths []string `json:"paths"`
+}
+
+func (s *Server) handleSetWorkspaceRecoveryExclusions(c *gin.Context) {
+	var req WorkspaceRecoveryExclusionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: "invalid JSON body"})
+		return
+	}
+	if len(req.Paths) > 4096 {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: "too many workspace exclusions"})
+		return
+	}
+	for _, path := range req.Paths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == string(filepath.Separator) {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "workspace exclusions must be canonical absolute paths"})
+			return
+		}
+	}
+	s.procMgr.SetWorkspaceFileExclusions(req.Paths)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // handleRescanWorkspace re-runs repo discovery and reconciles trackers.

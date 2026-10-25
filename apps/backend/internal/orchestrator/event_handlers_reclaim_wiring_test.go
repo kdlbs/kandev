@@ -40,6 +40,14 @@ func (m *reclaimTrackingAgentManager) CleanupStaleExecutionBySessionID(_ context
 	return nil
 }
 
+func (m *reclaimTrackingAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, _ string,
+	_ time.Time,
+) error {
+	return m.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
+
 func (m *reclaimTrackingAgentManager) callCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -63,14 +71,14 @@ func (m *reclaimTrackingAgentManager) callsSnapshot() []string {
 	return append([]string(nil), m.calls...)
 }
 
-// TestSubtaskTerminalCollapse_ReclaimsProviderRuntime is the canonical
+// TestSubtaskTerminalSettle_ReclaimsProviderRuntime is the canonical
 // end-to-end wiring test: a child task whose last agent message did not
-// request input collapses to COMPLETED inside
+// request input remains WAITING_FOR_INPUT inside
 // setSessionWaitingForInputIfRequested. With no live agent process and no
 // active turn, reclaimIdleSession must fire on this synchronous settle
 // point, the executor row must flip to status=stopped with LocalPID=0,
 // and the resume_token/worktree_path must remain intact.
-func TestSubtaskTerminalCollapse_ReclaimsProviderRuntime(t *testing.T) {
+func TestSubtaskTerminalSettle_ReclaimsProviderRuntime(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -116,13 +124,13 @@ func TestSubtaskTerminalCollapse_ReclaimsProviderRuntime(t *testing.T) {
 	svc.handleAgentCompleted(ctx, watcherAgentCompletedData("child-task", "s-child", "exec-child"))
 	waitForStopCall(t, inner)
 
-	// 1. Session collapsed to COMPLETED (existing guard behavior).
+	// 1. Session remains promptable after a successful child completion.
 	updated, err := repo.GetTaskSession(ctx, "s-child")
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}
-	if updated.State != models.TaskSessionStateCompleted {
-		t.Fatalf("subtask terminal must collapse to COMPLETED, got %q", updated.State)
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("successful subtask must remain WAITING_FOR_INPUT, got %q", updated.State)
 	}
 
 	// 2. reclaim fired exactly once for this session.
@@ -146,6 +154,87 @@ func TestSubtaskTerminalCollapse_ReclaimsProviderRuntime(t *testing.T) {
 	}
 	if row.WorktreePath != worktree {
 		t.Fatalf("WorktreePath lost: got %q, want %q", row.WorktreePath, worktree)
+	}
+}
+
+func TestAgentCompletedAndIdleReaperKeepExecutionWithActiveLSPLease(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	seedSession(t, repo, "task-lsp-completed", "session-lsp-completed", "")
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-lsp-completed", SessionID: "session-lsp-completed", TaskID: "task-lsp-completed",
+		AgentExecutionID: "exec-lsp-completed", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, LocalPID: 8181,
+		CreatedAt: now.Add(-5 * time.Minute), UpdatedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("upsert execution row: %v", err)
+	}
+	inner := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunning:         false,
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), inner)
+	svc.turnService = &inactiveTurnService{}
+	svc.idleReaper = newIdleSessionReaper()
+	lease := &activeLSPLeaseForTest{
+		sessionID:      "session-lsp-completed",
+		executionID:    "exec-lsp-completed",
+		executionCheck: make(chan struct{}, 2),
+	}
+	svc.SetLSPLeaseLifecycle(lease)
+
+	svc.handleAgentCompleted(ctx, watcherAgentCompletedData("task-lsp-completed", "session-lsp-completed", "exec-lsp-completed"))
+	select {
+	case <-lease.executionCheck:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.completed cleanup did not check the exact execution's LSP lease")
+	}
+
+	// Exercise a stale-row reaper tick after normal turn completion. The lease
+	// remains authoritative even when the agent process probe reports dead.
+	svc.reclaimIdleSessionsOnce(ctx)
+	inner.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), inner.stopAgentWithReasonArgs...)
+	inner.mu.Unlock()
+	if len(stopCalls) != 0 {
+		t.Fatalf("agent.completed stopped the lease-owned execution: %+v", stopCalls)
+	}
+	row, err := repo.GetExecutorRunningBySessionID(ctx, "session-lsp-completed")
+	if err != nil {
+		t.Fatalf("load execution after reaper tick: %v", err)
+	}
+	if row.Status != models.ExecutorRunningStatusRunning || row.LocalPID != 8181 {
+		t.Fatalf("active lease execution changed after completion/reaper: status=%q pid=%d", row.Status, row.LocalPID)
+	}
+}
+
+func TestFailureCleanupStopsExecutionDespiteActiveLSPLease(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-lsp-failure", "session-lsp-failure", "")
+	inner := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), inner)
+	lease := &activeLSPLeaseForTest{sessionID: "session-lsp-failure", executionID: "exec-lsp-failure"}
+	svc.SetLSPLeaseLifecycle(lease)
+
+	if !svc.cleanupAgentExecutionWithReason(ctx, "exec-lsp-failure", "task-lsp-failure", "session-lsp-failure", "recoverable agent failure") {
+		t.Fatal("failed execution cleanup was deferred by an active LSP lease")
+	}
+	inner.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), inner.stopAgentWithReasonArgs...)
+	inner.mu.Unlock()
+	if len(stopCalls) != 1 || stopCalls[0].ExecutionID != "exec-lsp-failure" {
+		t.Fatalf("failure cleanup stop calls = %+v, want exact execution stop", stopCalls)
+	}
+	lease.mu.Lock()
+	stoppedLeases := append([]string(nil), lease.stoppedExecution...)
+	lease.mu.Unlock()
+	if len(stoppedLeases) != 1 || stoppedLeases[0] != "exec-lsp-failure" {
+		t.Fatalf("failure cleanup lease stops = %v, want exact execution lease stop", stoppedLeases)
 	}
 }
 

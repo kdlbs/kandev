@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
 
 const (
@@ -18,6 +19,7 @@ var (
 	ErrInventoryIncomplete = errors.New("workspace inventory is incomplete")
 	ErrRestoreConflict     = errors.New("workspace restore destination already exists")
 	ErrDeleteConfirmation  = errors.New("workspace permanent deletion requires DELETE confirmation")
+	ErrActiveWorktree      = errors.New("workspace contains an active Git worktree")
 )
 
 type OwnershipMarker struct {
@@ -65,6 +67,8 @@ type Config struct {
 	Now         func() time.Time
 	NewID       func() string
 	Pruner      WorktreePruner
+	Scanner     *filescan.Limiter
+	OnProgress  func(filescan.Progress)
 }
 
 type WorktreePruner interface {

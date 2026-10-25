@@ -128,6 +128,39 @@ func TestPack_PlatformOnly_IncludesOnlyHostBinary(t *testing.T) {
 	require.Equal(t, "kandev-plugin-pack-test", result.Manifest.ID)
 }
 
+func TestPack_PlatformOnly_KeepsOnlyExactPlatformWhenPathsAreShared(t *testing.T) {
+	dir := t.TempDir()
+	manifestYAML := `
+id: "kandev-plugin-pack-test"
+api_version: 1
+version: "1.0.0"
+display_name: "Pack Test Plugin"
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin"
+    darwin-amd64: "server/plugin"
+capabilities:
+  state: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(manifestYAML), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "server"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "server", "plugin"), []byte("binary"), 0o755))
+
+	var buf bytes.Buffer
+	require.NoError(t, Pack(dir, &buf, PackOptions{
+		PlatformOnly: true,
+		GOOS:         "linux",
+		GOARCH:       "amd64",
+	}))
+
+	result, err := pkgtar.Verify(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{
+		"linux-amd64": "server/plugin",
+	}, result.Manifest.Runtime.Executables)
+}
+
 func TestPack_MissingManifest_Errors(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "ui.js"), []byte("x"), 0o644))

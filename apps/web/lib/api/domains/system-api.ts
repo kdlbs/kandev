@@ -24,7 +24,10 @@ import type {
   StorageQuarantinePurgeScope,
   StorageSettingsResponse,
   UpdatesChannel,
+  RetentionSettings,
+  RetentionStatus,
 } from "@/lib/types/system";
+import type { AgentRuntimeAvailability, AgentRuntimeRetryRequest } from "@/lib/types/agent-runtime";
 
 const SYSTEM_BASE = "/api/v1/system";
 
@@ -58,6 +61,13 @@ export function openDataFolder(options?: ApiRequestOptions): Promise<{ path: str
 
 export function fetchDatabaseStats(options?: ApiRequestOptions): Promise<DatabaseStats> {
   return fetchJson<DatabaseStats>(`${SYSTEM_BASE}/database`, options);
+}
+
+export function retryDatabaseStats(options?: ApiRequestOptions): Promise<void> {
+  return fetchJson<void>(`${SYSTEM_BASE}/database/refresh`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
 }
 
 export function vacuumDatabase(options?: ApiRequestOptions): Promise<JobAcceptResponse> {
@@ -265,6 +275,20 @@ export function requestRestart(options?: ApiRequestOptions): Promise<RestartResp
   });
 }
 
+export function retryAgentRuntime(
+  request: AgentRuntimeRetryRequest,
+  options?: ApiRequestOptions,
+): Promise<AgentRuntimeAvailability> {
+  return fetchJson<AgentRuntimeAvailability>(`${SYSTEM_BASE}/agent-runtime/retry`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  });
+}
+
 // --- Storage maintenance ------------------------------------------------
 
 export function fetchStorageOverview(
@@ -413,6 +437,29 @@ export function purgeStorageQuarantine(
         scope,
         confirm: scope === "eligible" ? "DELETE ELIGIBLE" : "DELETE ALL NOW",
       }),
+    },
+  });
+}
+
+// --- Office run history retention ----------------------------------------
+
+export function fetchRetentionStatus(options?: ApiRequestOptions): Promise<RetentionStatus> {
+  return fetchJson<RetentionStatus>(`${SYSTEM_BASE}/retention`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function saveRetentionSettings(
+  settings: RetentionSettings,
+  options?: ApiRequestOptions,
+): Promise<RetentionSettings> {
+  return fetchJson<RetentionSettings>(`${SYSTEM_BASE}/retention`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PUT",
+      body: JSON.stringify(settings),
     },
   });
 }

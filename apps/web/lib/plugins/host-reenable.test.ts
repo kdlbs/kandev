@@ -25,6 +25,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     pluginId,
     React: {} as PluginHostApi["React"],
     jsx: {} as PluginHostApi["jsx"],
+    conversation: {} as PluginHostApi["conversation"],
     store: {
       getState: () => ({}) as never,
       setState: () => {},

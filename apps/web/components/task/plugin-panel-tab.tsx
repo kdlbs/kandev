@@ -1,8 +1,11 @@
 "use client";
 
+import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
+import { resolveTaskPanelTitle } from "@/lib/state/layout-manager/plugin-panels";
 
 /**
  * Tab chrome for a plugin task panel: the plugin's curated icon (if any)
@@ -13,11 +16,16 @@ import { resolvePluginIcon } from "@/lib/plugins/icons";
  */
 export function PluginPanelTab(props: IDockviewPanelHeaderProps) {
   usePluginRegistry();
+  const { i18n } = useTranslation();
   const pluginId = props.params?.pluginId as string | undefined;
   const panelKey = props.params?.panelKey as string | undefined;
   const registration =
     pluginId && panelKey ? pluginRegistry.getTaskPanel(pluginId, panelKey) : undefined;
   const Icon = resolvePluginIcon(registration?.icon);
+  const title = registration ? resolveTaskPanelTitle(registration, i18n) : (props.api.title ?? "");
+  useEffect(() => {
+    if (title && props.api.title !== title) props.api.setTitle(title);
+  }, [props.api, title]);
 
   return (
     <div data-testid="plugin-panel-tab" className="relative flex items-center gap-1.5">

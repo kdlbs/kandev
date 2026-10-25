@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-caret-preserving-clamp"]
 plan: "plan.md"
-spec: "../../specs/tasks/title-length-limit.md"
+spec: "../../specs/tasks/requirements/title-length-limit.md"
 ---
 
 # Task 03: Apply the hook to the rename and edit dialogs

@@ -5,7 +5,7 @@ status: done
 wave: 8
 depends_on: ["19-registration-e2e", "20-registration-documentation"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 21: Security And QA Verification

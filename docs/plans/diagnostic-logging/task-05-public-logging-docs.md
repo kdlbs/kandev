@@ -13,7 +13,7 @@ depends_on:
   - "09-remove-legacy-diagnostics"
   - "10-agent-diagnostic-materialization"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 05: Public logging documentation

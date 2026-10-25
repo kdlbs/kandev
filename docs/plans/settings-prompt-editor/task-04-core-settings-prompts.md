@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-shared-editor"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-prompt-editor.md"
+spec: "../../specs/ui/requirements/settings-prompt-editor.md"
 ---
 
 # Task 04: Migrate core settings prompts

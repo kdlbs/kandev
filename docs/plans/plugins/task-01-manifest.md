@@ -13,7 +13,7 @@ plan: docs/plans/plugins/plan.md
 Define the plugin manifest Go types and a validator, parsed from YAML.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "Data model / Plugin registration" (the
+- Spec `docs/specs/plugins/requirements/plugins.md` → "Data model / Plugin registration" (the
   YAML manifest: id, api_version, version, display_name, description, author,
   categories, base_url, endpoints{health,events,tools,webhooks},
   capabilities{events,api_read,api_write,state,secrets}, tools[], webhooks[],

@@ -1,31 +1,17 @@
 "use client";
 
-import {
-  Children,
-  memo,
-  useState,
-  useCallback,
-  useMemo,
-  type ComponentPropsWithoutRef,
-  type ReactNode,
-} from "react";
-import type { Components } from "react-markdown";
+import { memo, useState, useCallback, useMemo } from "react";
 import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
+import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
-import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
+import { SenderTaskBadge } from "./sender-task-badge";
+import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
-import { useAppStore } from "@/components/state-provider";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
-import { PromptPreview } from "@/components/task/chat/context-items/prompt-preview";
-import {
-  buildPromptMentionNames,
-  splitPreparedPromptMentionSegments,
-} from "@/lib/prompts/prompt-mention-segments";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,
@@ -33,12 +19,17 @@ import {
   type WorkflowStepMessageInfo,
 } from "./workflow-step-message-badge";
 import { AgentMessageContent } from "./agent-message-content";
-import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
+import {
+  usePromptMentionMarkdownComponents,
+  usePromptMentionNames,
+} from "./prompt-mention-components";
 import { entityReferencesFromMetadata } from "@/lib/entity-references/message-references";
-import type { EntityReference } from "@/lib/types/entity-reference";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
+import { useMessageTaskOrigin } from "./message-task-origin-context";
+import { WokenByEntry, wakeTurnIdOf } from "./woken-by-entry";
+import { taskMentionReferences } from "@/lib/tasks/task-mention-references";
 
 type ChatMessageProps = {
   comment: Message;
@@ -107,7 +98,7 @@ type UserMessageProps = {
 };
 
 type UserMessageMetadata = WorkflowMessageMetadata & {
-  attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
+  attachments?: UserMessageAttachment[];
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
@@ -116,211 +107,74 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_task_title?: string;
   sender_session_id?: string;
   sender_session_name?: string;
+  delivery_status?: string;
 };
 
-type PromptMentionMarkdownTag =
-  | "p"
-  | "li"
-  | "h1"
-  | "h2"
-  | "h3"
-  | "h4"
-  | "h5"
-  | "h6"
-  | "blockquote"
-  | "td"
-  | "th";
-
-type MarkdownChildrenProps<T extends PromptMentionMarkdownTag> = ComponentPropsWithoutRef<T> & {
-  children?: ReactNode;
-  node?: unknown;
-};
-
-function usePromptMentionNames() {
-  const prompts = useAppStore((state) => state.prompts.items);
-  return useMemo(() => prompts.map((prompt) => prompt.name), [prompts]);
+function userMessageAttachments(metadata: UserMessageMetadata | undefined) {
+  const attachments = metadata?.attachments || [];
+  return {
+    imageAttachments: attachments.filter((attachment) => attachment.type === "image"),
+    fileAttachments: attachments.filter((attachment) => attachment.type === "resource"),
+  };
 }
 
-function usePromptMentionMarkdownComponents(
-  promptNames: string[],
-  entityReferences: readonly EntityReference[],
-): Components | undefined {
-  return useMemo(() => {
-    const mentionNames = buildPromptMentionNames(promptNames);
-    const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences);
-    if (mentionNames.length === 0) {
-      return entityReferences.length === 0 ? undefined : baseComponents;
-    }
-    const renderChildren = (children: ReactNode, keyPrefix: string) =>
-      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix);
-    return {
-      ...baseComponents,
-      p: ({ children, node, ...props }: MarkdownChildrenProps<"p">) => {
-        void node;
-        return <p {...props}>{renderChildren(children, "p")}</p>;
-      },
-      li: ({ children, node, ...props }: MarkdownChildrenProps<"li">) => {
-        void node;
-        return <li {...props}>{renderChildren(children, "li")}</li>;
-      },
-      h1: ({ children, node, ...props }: MarkdownChildrenProps<"h1">) => {
-        void node;
-        return <h1 {...props}>{renderChildren(children, "h1")}</h1>;
-      },
-      h2: ({ children, node, ...props }: MarkdownChildrenProps<"h2">) => {
-        void node;
-        return <h2 {...props}>{renderChildren(children, "h2")}</h2>;
-      },
-      h3: ({ children, node, ...props }: MarkdownChildrenProps<"h3">) => {
-        void node;
-        return <h3 {...props}>{renderChildren(children, "h3")}</h3>;
-      },
-      h4: ({ children, node, ...props }: MarkdownChildrenProps<"h4">) => {
-        void node;
-        return <h4 {...props}>{renderChildren(children, "h4")}</h4>;
-      },
-      h5: ({ children, node, ...props }: MarkdownChildrenProps<"h5">) => {
-        void node;
-        return <h5 {...props}>{renderChildren(children, "h5")}</h5>;
-      },
-      h6: ({ children, node, ...props }: MarkdownChildrenProps<"h6">) => {
-        void node;
-        return <h6 {...props}>{renderChildren(children, "h6")}</h6>;
-      },
-      blockquote: ({ children, node, ...props }: MarkdownChildrenProps<"blockquote">) => {
-        void node;
-        return <blockquote {...props}>{renderChildren(children, "blockquote")}</blockquote>;
-      },
-      td: ({ children, node, ...props }: MarkdownChildrenProps<"td">) => {
-        void node;
-        return <td {...props}>{renderChildren(children, "td")}</td>;
-      },
-      th: ({ children, node, ...props }: MarkdownChildrenProps<"th">) => {
-        void node;
-        return <th {...props}>{renderChildren(children, "th")}</th>;
-      },
-    };
-  }, [promptNames, entityReferences]);
+function userMessageSenderTask(metadata: UserMessageMetadata | undefined): SenderTaskInfo | null {
+  if (!metadata?.sender_task_id) return null;
+  return {
+    id: metadata.sender_task_id,
+    snapshotTitle: metadata.sender_task_title || "",
+    sessionId: metadata.sender_session_id,
+    sessionName: metadata.sender_session_name,
+  };
 }
 
-function renderChildrenWithPromptMentions(
-  children: ReactNode,
-  promptNames: string[],
-  keyPrefix: string,
+function userMessageMetadataFlags(
+  metadata: UserMessageMetadata | undefined,
+  hasContent: boolean,
+  hasAttachments: boolean,
 ) {
-  return Children.toArray(children).flatMap((child, index) => {
-    if (typeof child !== "string") return child;
-    return renderTextWithPromptMentions(child, promptNames, `${keyPrefix}-${index}`);
-  });
-}
-
-function renderTextWithPromptMentions(text: string, promptNames: string[], keyPrefix: string) {
-  return splitPreparedPromptMentionSegments(text, promptNames).map((segment, index) => {
-    if (segment.kind === "text") return segment.value;
-    return (
-      <PromptMentionChip
-        key={`${keyPrefix}-prompt-${index}`}
-        name={segment.name}
-        value={segment.value}
-      />
-    );
-  });
-}
-
-const PROMPT_MENTION_CHIP_CLASS =
-  "inline rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1.5 py-0.5 font-mono text-[0.88em] font-semibold text-emerald-950 box-decoration-clone break-all dark:text-emerald-100";
-
-/**
- * Renders a saved-prompt @mention as a chip. When the referenced prompt is
- * loaded in the store, hovering the chip reveals its contents so the reader
- * doesn't need to switch to the raw message view.
- */
-function PromptMentionChip({ name, value }: { name: string; value: string }) {
-  const { t } = useTranslation();
-  const content = useAppStore(
-    useCallback(
-      (state) => state.prompts.items.find((prompt) => prompt.name === name)?.content ?? null,
-      [name],
-    ),
-  );
-
-  if (!content) {
-    return (
-      <span
-        data-testid="custom-prompt-mention"
-        data-prompt-name={name}
-        title={t("task:customPromptNamed", { name })}
-        className={PROMPT_MENTION_CHIP_CLASS}
-      >
-        {value}
-      </span>
-    );
-  }
-
-  return (
-    <HoverCard openDelay={300} closeDelay={0}>
-      <HoverCardTrigger asChild>
-        <span
-          data-testid="custom-prompt-mention"
-          data-prompt-name={name}
-          tabIndex={0}
-          className={cn(PROMPT_MENTION_CHIP_CLASS, "cursor-default")}
-        >
-          {value}
-        </span>
-      </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
-        <PromptPreview content={content} />
-      </HoverCardContent>
-    </HoverCard>
-  );
+  return {
+    hasPlanMode: !!metadata?.plan_mode,
+    hasReviewComments: !!metadata?.has_review_comments,
+    hasHiddenPrompts: !!metadata?.has_hidden_prompts,
+    hasContent,
+    hasAttachments,
+    deliveryBlocked: metadata?.delivery_status === "blocked",
+  };
 }
 
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
-  const imageAttachments = (metadata?.attachments || []).filter((att) => att.type === "image");
-  const fileAttachments = (metadata?.attachments || []).filter((att) => att.type === "resource");
-  const contextFiles = metadata?.context_files || [];
-  const hasPlanMode = !!metadata?.plan_mode;
-  const hasReviewComments = !!metadata?.has_review_comments;
-  const hasHiddenPrompts = !!metadata?.has_hidden_prompts;
+  const { imageAttachments, fileAttachments } = userMessageAttachments(metadata);
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
-  const senderTask: SenderTaskInfo | null = metadata?.sender_task_id
-    ? {
-        id: metadata.sender_task_id,
-        snapshotTitle: metadata.sender_task_title || "",
-        sessionId: metadata.sender_session_id,
-        sessionName: metadata.sender_session_name,
-      }
-    : null;
   const workflowMessage = workflowMessageInfoFromMetadata(metadata);
   return {
     imageAttachments,
     fileAttachments,
-    contextFiles,
-    hasPlanMode,
-    hasReviewComments,
-    hasHiddenPrompts,
-    hasContent,
-    hasAttachments,
-    senderTask,
+    contextFiles: metadata?.context_files || [],
+    ...userMessageMetadataFlags(metadata, hasContent, hasAttachments),
+    senderTask: userMessageSenderTask(metadata),
     workflowMessage,
   };
 }
 
 function UserContextBadges({
+  destinationTaskId,
   hasPlanMode,
   hasReviewComments,
   contextFiles,
   senderTask,
   workflowMessage,
+  deliveryBlocked,
 }: {
+  destinationTaskId: string;
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
+  deliveryBlocked: boolean;
 }) {
   const { t } = useTranslation();
   if (
@@ -328,13 +182,23 @@ function UserContextBadges({
     !hasReviewComments &&
     contextFiles.length === 0 &&
     !senderTask &&
-    !workflowMessage
+    !workflowMessage &&
+    !deliveryBlocked
   )
     return null;
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
       {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} />}
-      {senderTask && <SenderTaskBadge sender={senderTask} />}
+      {deliveryBlocked && (
+        <span
+          role="status"
+          data-testid="user-message-delivery-blocked"
+          className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
+        >
+          {t("task:deliveryMessageBlocked")}
+        </span>
+      )}
+      {senderTask && <SenderTaskBadge sender={senderTask} destinationTaskId={destinationTaskId} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
           <IconWand size={10} /> {t("task:planMode")}
@@ -431,6 +295,20 @@ function UserMessageAttachments({
   );
 }
 
+function useUserMentionComponents(comment: Message) {
+  const promptNames = usePromptMentionNames();
+  const entityReferences = useMemo(
+    () => entityReferencesFromMetadata(comment.metadata),
+    [comment.metadata],
+  );
+  const taskMentions = useMemo(
+    () => taskMentionReferences(comment.raw_content || comment.content),
+    [comment.raw_content, comment.content],
+  );
+  const components = usePromptMentionMarkdownComponents(promptNames, entityReferences);
+  return { components, taskMentions };
+}
+
 function UserMessageContent({
   comment,
   showRaw,
@@ -441,13 +319,9 @@ function UserMessageContent({
   onScrollToMessage,
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
-  const promptNames = usePromptMentionNames();
+  const taskOrigin = useMessageTaskOrigin();
+  const { components: promptMentionComponents, taskMentions } = useUserMentionComponents(comment);
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
-  const entityReferences = useMemo(
-    () => entityReferencesFromMetadata(comment.metadata),
-    [comment.metadata],
-  );
-  const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames, entityReferences);
   const {
     imageAttachments,
     fileAttachments,
@@ -459,17 +333,20 @@ function UserMessageContent({
     hasAttachments,
     senderTask,
     workflowMessage,
+    deliveryBlocked,
   } = parseUserMessageMetadata(comment);
 
   return (
     <div className="flex justify-end w-full overflow-hidden">
       <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden group">
         <UserContextBadges
+          destinationTaskId={comment.task_id}
           hasPlanMode={hasPlanMode}
           hasReviewComments={hasReviewComments}
           contextFiles={contextFiles}
           senderTask={senderTask}
           workflowMessage={workflowMessage}
+          deliveryBlocked={deliveryBlocked}
         />
         <div
           data-testid="user-message-bubble"
@@ -492,9 +369,11 @@ function UserMessageContent({
             content: comment.content,
             rawContent: comment.raw_content,
             promptMentionComponents,
+            taskMentions,
             taskId: comment.task_id,
             worktreePath,
             onOpenFile,
+            taskOrigin,
           })}
         </div>
         <MessageActions
@@ -507,7 +386,9 @@ function UserMessageContent({
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
           isFavorite={isFavorite}
-          onToggleFavorite={toggleFavorite}
+          onToggleFavorite={
+            comment.id === TASK_DESCRIPTION_SYNTHETIC_ID ? undefined : toggleFavorite
+          }
           onNavigatePrev={() => {
             if (userNavigation.previousId && onScrollToMessage)
               onScrollToMessage(userNavigation.previousId);
@@ -561,8 +442,8 @@ export const ChatMessage = memo(function ChatMessage({
     );
   }
 
-  if (comment.author_type === "user") {
-    return (
+  const ordinary =
+    comment.author_type === "user" ? (
       <UserMessageContent
         comment={comment}
         showRaw={showRaw}
@@ -572,19 +453,19 @@ export const ChatMessage = memo(function ChatMessage({
         onOpenFile={onOpenFile}
         onScrollToMessage={onScrollToMessage}
       />
+    ) : (
+      <AgentMessageContent
+        comment={comment}
+        showRaw={showRaw}
+        onToggleRaw={toggleRaw}
+        showRichBlocks={showRichBlocks}
+        sessionId={sessionId}
+        isTurnActive={isTurnActive}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+      />
     );
-  }
-
-  return (
-    <AgentMessageContent
-      comment={comment}
-      showRaw={showRaw}
-      onToggleRaw={toggleRaw}
-      showRichBlocks={showRichBlocks}
-      sessionId={sessionId}
-      isTurnActive={isTurnActive}
-      worktreePath={worktreePath}
-      onOpenFile={onOpenFile}
-    />
-  );
+  const wakeTurnId = wakeTurnIdOf(comment.metadata);
+  if (wakeTurnId) return <WokenByEntry comment={comment} turnId={wakeTurnId} fallback={ordinary} />;
+  return ordinary;
 });

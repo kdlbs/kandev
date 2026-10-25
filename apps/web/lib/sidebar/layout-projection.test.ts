@@ -1,0 +1,180 @@
+import { describe, expect, it } from "vitest";
+import { CoordinatorIcon } from "@/lib/coordinator/icon";
+import { defaultSidebarLayout, type SidebarLayout } from "./layout-types";
+import { materializeSidebarPluginNodes, projectSidebarLayout } from "./layout-projection";
+
+const SLACK_ID = "plugin:p:slack";
+
+const catalog = [
+  { target: { kind: "destination" as const, id: "github" }, label: "GitHub", available: true },
+  {
+    target: { kind: "destination" as const, id: SLACK_ID },
+    label: "Slack",
+    pluginItemId: "slack",
+    section: "integrations" as const,
+    source: "plugin" as const,
+    available: true,
+  },
+];
+
+const EXPECTED_NODE_IDS = [
+  "new-task",
+  "home",
+  "inbox",
+  "needs-you-inbox",
+  "coordinators",
+  "automations",
+  "canvases",
+  "integrations",
+  SLACK_ID,
+];
+const EXPECTED_NODE_LABELS = [
+  "New Task",
+  "Home",
+  "Office Inbox",
+  "Inbox",
+  "Coordinators",
+  "Automations",
+  "Canvases",
+  "Integrations",
+  "Slack",
+];
+
+describe("sidebar layout projection", () => {
+  it("keeps protected defaults and appends newly registered plugin entries", () => {
+    const projected = projectSidebarLayout(defaultSidebarLayout(), catalog, {
+      builtinLabels: {
+        home: "Home",
+        inbox: "Office Inbox",
+        needs_you_inbox: "Inbox",
+        coordinators: "Coordinators",
+        new_task: "New Task",
+        automations: "Automations",
+        canvases: "Canvases",
+        integrations: "Integrations",
+      },
+    });
+
+    expect(projected.nodes.map((node) => node.id)).toEqual(EXPECTED_NODE_IDS);
+    expect(projected.nodes.map((node) => node.label)).toEqual(EXPECTED_NODE_LABELS);
+    expect(projected.nodes.find((node) => node.id === SLACK_ID)).toMatchObject({
+      pluginItemId: "slack",
+    });
+    expect(projected.protectedNodeIds).toContain("tasks");
+  });
+
+  it("retains unavailable references in their saved position", () => {
+    const layout: SidebarLayout = {
+      ...defaultSidebarLayout(),
+      nodes: [
+        {
+          id: "group",
+          kind: "shortcuts",
+          visible: true,
+          name: "Pinned",
+          shortcuts: [
+            { id: "missing", target: { kind: "automation", id: "gone" } },
+            { id: "github", target: { kind: "destination", id: "github" } },
+          ],
+        },
+      ],
+    };
+
+    const projected = projectSidebarLayout(layout, catalog, { unavailableLabel: "Unavailable" });
+    const shortcuts = projected.nodes[0]?.shortcuts ?? [];
+
+    expect(shortcuts.map((shortcut) => shortcut.target.id)).toEqual(["gone", "github"]);
+    expect(shortcuts[0]).toMatchObject({ label: "Unavailable", available: false });
+    expect(shortcuts[1]).toMatchObject({ label: "GitHub", available: true });
+  });
+
+  it("materializes a hidden plugin node without hiding its pinned shortcut", () => {
+    const layout: SidebarLayout = {
+      ...defaultSidebarLayout(),
+      nodes: [
+        {
+          id: SLACK_ID,
+          kind: "plugin",
+          visible: false,
+          destinationId: SLACK_ID,
+        },
+        {
+          id: "group",
+          kind: "shortcuts",
+          visible: true,
+          name: "Pinned",
+          shortcuts: [{ id: "slack-pin", target: { kind: "destination", id: SLACK_ID } }],
+        },
+      ],
+    };
+    const materialized = materializeSidebarPluginNodes(layout, catalog);
+    const projected = projectSidebarLayout(materialized, catalog, {
+      unavailableLabel: "Unavailable",
+    });
+
+    expect(projected.nodes.find((node) => node.id === SLACK_ID)?.visible).toBe(false);
+    expect(projected.nodes.find((node) => node.id === "group")?.shortcuts[0]).toMatchObject({
+      label: "Slack",
+      available: true,
+    });
+  });
+});
+
+describe("sidebar layout eligibility", () => {
+  it("marks a saved plugin destination unavailable while retaining its placement", () => {
+    const layout: SidebarLayout = {
+      ...defaultSidebarLayout(),
+      nodes: [
+        {
+          id: "plugin:removed:home",
+          kind: "plugin",
+          visible: true,
+          destinationId: "plugin:removed:home",
+        },
+      ],
+    };
+
+    const projected = projectSidebarLayout(layout, catalog, { unavailableLabel: "Unavailable" });
+
+    expect(projected.nodes[0]).toMatchObject({
+      id: "plugin:removed:home",
+      label: "Unavailable",
+      available: false,
+    });
+  });
+
+  it("projects Coordinator metadata while keeping its saved choice unavailable when flagged off", () => {
+    const projected = projectSidebarLayout(
+      {
+        ...defaultSidebarLayout(),
+        nodes: [
+          {
+            id: "coordinators",
+            kind: "builtin",
+            visible: false,
+            destinationId: "coordinators",
+          },
+        ],
+      },
+      [],
+      {
+        unavailableLabel: "Unavailable",
+        builtinLabels: { coordinators: "Coordinators" },
+        builtinContext: {
+          hasWorkspace: true,
+          inOffice: false,
+          features: { coordinator: false, canvases: false, needsYouInbox: false },
+        },
+      },
+    );
+
+    expect(projected.nodes).toHaveLength(1);
+    expect(projected.nodes[0]).toMatchObject({
+      id: "coordinators",
+      label: "Coordinators",
+      icon: CoordinatorIcon,
+      available: false,
+      visible: false,
+    });
+  });
+});

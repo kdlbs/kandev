@@ -18,11 +18,13 @@ const (
 	QueueSendNowScopeEntry = "entry"
 	QueueSendNowScopeAll   = "all"
 
-	sendNowClaimRecoveryTimeout = 10 * time.Second
+	sendNowClaimRecoveryTimeout  = 10 * time.Second
+	sendNowWorkerShutdownTimeout = 500 * time.Millisecond
 )
 
 var (
 	ErrSendNowConflict           = errors.New("send-now operation is already in progress")
+	ErrSendNowEditConflict       = errors.New("send-now entry is being edited")
 	ErrSendNowQueueEmpty         = errors.New("send-now queue is empty")
 	ErrSendNowEntryNotFound      = errors.New("send-now entry is no longer pending")
 	ErrSendNowQueueChanged       = errors.New("send-now queue selection changed")
@@ -37,7 +39,17 @@ var (
 // shared cancellation coordinator, then the exact claim is handed to one
 // replacement prompt. The explicit Cancel path is deliberately not involved.
 func (s *Service) SendQueuedNow(ctx context.Context, sessionID, scope, entryID string) (int, error) {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	return s.sendQueuedNow(ctx, nil, sessionID, scope, entryID)
+}
+
+// SendQueuedNowForSession dispatches the selection only for the exact session incarnation.
+func (s *Service) SendQueuedNowForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, scope, entryID string) (int, error) {
+	return s.sendQueuedNow(ctx, &identity, identity.SessionID, scope, entryID)
+}
+
+func (s *Service) sendQueuedNow(ctx context.Context, identity *messagequeue.QueueSessionIdentity, sessionID, scope, entryID string) (int, error) {
+	// Dispatching a queued prompt puts an agent to work: session.prompt.
+	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
 		return 0, err
 	}
 	if err := validateSendNowInput(sessionID, scope, entryID); err != nil {
@@ -46,16 +58,19 @@ func (s *Service) SendQueuedNow(ctx context.Context, sessionID, scope, entryID s
 	if s.messageQueue == nil {
 		return 0, errors.New("message queue is not configured")
 	}
+	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
+		return 0, err
+	}
 
 	turnBefore, err := s.captureSendNowTurn(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
-	return s.sendQueuedNowAfterCapture(ctx, sessionID, scope, entryID, turnBefore)
+	return s.sendQueuedNowAfterCapture(ctx, identity, sessionID, scope, entryID, turnBefore)
 }
 
 type sendNowGuard struct {
-	lock    *sync.Mutex
+	lock    *cancelInFlightMutex
 	release func()
 	locked  bool
 }
@@ -82,6 +97,17 @@ func (guard *sendNowGuard) relock() {
 	guard.locked = true
 }
 
+func (guard *sendNowGuard) relockWithContext(ctx context.Context) error {
+	if guard.locked {
+		return nil
+	}
+	if err := lockMutexWithContext(ctx, guard.lock); err != nil {
+		return err
+	}
+	guard.locked = true
+	return nil
+}
+
 func (guard *sendNowGuard) close() {
 	guard.unlock()
 	guard.release()
@@ -89,6 +115,7 @@ func (guard *sendNowGuard) close() {
 
 func (s *Service) sendQueuedNowAfterCapture(
 	ctx context.Context,
+	identity *messagequeue.QueueSessionIdentity,
 	sessionID, scope, entryID, turnBefore string,
 ) (int, error) {
 	guard := newSendNowGuard(s, sessionID)
@@ -104,12 +131,13 @@ func (s *Service) sendQueuedNowAfterCapture(
 		return 0, err
 	}
 
-	taskID, sessionState, entries, err := s.loadSendNowSelection(ctx, sessionID, scope, entryID)
+	taskID, sessionState, entries, err := s.loadSendNowSelection(ctx, identity, sessionID, scope, entryID)
 	if err != nil {
 		return 0, err
 	}
 	return s.dispatchSendNowSelection(
 		ctx,
+		identity,
 		sessionID,
 		taskID,
 		sessionState,
@@ -117,7 +145,7 @@ func (s *Service) sendQueuedNowAfterCapture(
 		entries,
 		turnBefore,
 		guard.unlock,
-		guard.relock,
+		guard.relockWithContext,
 	)
 }
 
@@ -146,7 +174,7 @@ func (s *Service) restorePendingQueuedDispatchForSendNow(ctx context.Context, se
 			zap.String("queue_id", reservation.source.ID),
 			zap.Error(err),
 		)
-		s.publishQueueStatusEvent(ctx, sessionID)
+		s.publishQueueStatusEventForIdentity(ctx, reservation.identity)
 		return ErrSendNowQueueChanged
 	}
 	return s.supersedeQueuedDispatchForSendNow(sessionID, reservation)
@@ -157,9 +185,24 @@ func (s *Service) sendNowRestoreClaimForReservation(
 	reservation *queuedDispatchReservation,
 ) (*messagequeue.SendNowClaim, error) {
 	restore := &messagequeue.SendNowClaim{
+		Identity:          reservation.identity,
 		Sources:           []messagequeue.QueuedMessage{*reservation.source},
+		Dispatch:          messagequeue.QueuedMessage{SessionID: reservation.sessionID},
 		SourceGenerations: make(map[string]int64),
 	}
+	sessionGeneration, lifecycleGeneration, captured := reservation.source.ReservationGenerations()
+	if captured {
+		restore.SessionGeneration = sessionGeneration
+		if reservation.source.TaskID != "" {
+			restore.SourceGenerations[reservation.source.TaskID] = lifecycleGeneration
+		}
+		return restore, nil
+	}
+	sessionGeneration, err := s.messageQueue.SessionGeneration(ctx, reservation.sessionID)
+	if err != nil {
+		return nil, ErrSendNowQueueChanged
+	}
+	restore.SessionGeneration = sessionGeneration
 	if reservation.source.TaskID == "" {
 		return restore, nil
 	}
@@ -207,6 +250,7 @@ func (s *Service) verifySendNowTurn(ctx context.Context, sessionID, expectedTurn
 
 func (s *Service) loadSendNowSelection(
 	ctx context.Context,
+	identity *messagequeue.QueueSessionIdentity,
 	sessionID, scope, entryID string,
 ) (string, models.TaskSessionState, []messagequeue.QueuedMessage, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -216,7 +260,16 @@ func (s *Service) loadSendNowSelection(
 	if session == nil {
 		return "", "", nil, ErrSessionNotPromptable
 	}
-	entries, _, err := selectSendNowEntries(s.messageQueue.GetStatus(ctx, sessionID), scope, entryID)
+	var status *messagequeue.QueueStatus
+	if identity != nil {
+		status, err = s.messageQueue.Snapshot(ctx, *identity)
+		if err != nil {
+			return "", "", nil, err
+		}
+	} else {
+		status = s.messageQueue.GetStatus(ctx, sessionID)
+	}
+	entries, _, err := selectSendNowEntries(status, scope, entryID)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -228,16 +281,18 @@ func (s *Service) loadSendNowSelection(
 
 func (s *Service) dispatchSendNowSelection(
 	ctx context.Context,
+	identity *messagequeue.QueueSessionIdentity,
 	sessionID, taskID string,
 	sessionState models.TaskSessionState,
 	scope string,
 	entries []messagequeue.QueuedMessage,
 	turnBefore string,
-	unlockGuard, relockGuard func(),
+	unlockGuard func(),
+	relockGuard func(context.Context) error,
 ) (int, error) {
 	promptabilityErr := s.checkSessionPromptable(taskID, sessionID, sessionState)
-	if promptabilityErr == nil {
-		dispatched, err := s.claimAndDispatchSendNow(ctx, sessionID, scope, entries)
+	if turnBefore == "" && promptabilityErr == nil {
+		dispatched, err := s.claimAndDispatchSendNow(ctx, identity, sessionID, scope, entries)
 		if err != nil {
 			return 0, err
 		}
@@ -246,7 +301,21 @@ func (s *Service) dispatchSendNowSelection(
 		}
 		return len(entries), nil
 	}
-	if !errors.Is(promptabilityErr, ErrAgentPromptInProgress) {
+	if turnBefore == "" && sessionState == models.TaskSessionStateCreated {
+		// A queued destination has no running provider for promptTask to reach.
+		// Send Now is an explicit user action, so its worker starts the prepared
+		// session through the manual admission path. A failed start returns the
+		// claim to the queue, preserving the pending message for retry.
+		dispatched, err := s.claimAndDispatchSendNow(ctx, identity, sessionID, scope, entries)
+		if err != nil {
+			return 0, err
+		}
+		if !dispatched {
+			return 0, ErrSendNowQueueChanged
+		}
+		return len(entries), nil
+	}
+	if turnBefore == "" && !errors.Is(promptabilityErr, ErrAgentPromptInProgress) {
 		return 0, promptabilityErr
 	}
 
@@ -257,7 +326,7 @@ func (s *Service) dispatchSendNowSelection(
 		unlockGuard,
 		relockGuard,
 		func(actionCtx context.Context) (bool, error) {
-			return s.claimAndDispatchSendNow(actionCtx, sessionID, scope, entries)
+			return s.claimAndDispatchSendNow(actionCtx, identity, sessionID, scope, entries)
 		},
 		cancellationKindQueueSendNow,
 		turnBefore,
@@ -291,15 +360,23 @@ func selectSendNowEntries(status *messagequeue.QueueStatus, scope, entryID strin
 	return entries, entryIDs, nil
 }
 
-func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
-	claim, err := s.messageQueue.ClaimSendNow(ctx, sessionID, entries)
+func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *messagequeue.QueueSessionIdentity, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
+	var claim *messagequeue.SendNowClaim
+	var err error
+	if identity != nil {
+		claim, err = s.messageQueue.ClaimSendNowForSession(ctx, *identity, entries)
+	} else {
+		claim, err = s.messageQueue.ClaimSendNow(ctx, sessionID, entries)
+	}
 	if err != nil {
 		return false, mapSendNowClaimError(scope, err)
 	}
-	s.publishQueueStatusEvent(ctx, sessionID)
-	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
-	if reservation != nil {
-		reservation.liveEligible.Store(true)
+	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
+	var reservation *queuedDispatchReservation
+	if claim.Identity.SessionIncarnationID != "" {
+		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, claim.Identity, claim.Dispatch.ID, nil)
+	} else {
+		reservation = s.markQueuedDispatchInFlightWithSourceLocked(ctx, sessionID, claim.Dispatch.ID, nil)
 	}
 	if !s.launchSendNowClaim(claim, reservation) {
 		if restoreErr := s.restoreSendNowClaimWithRetry(context.Background(), claim); restoreErr != nil {
@@ -307,7 +384,7 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope 
 				zap.String("session_id", sessionID), zap.Error(restoreErr))
 		}
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
-		s.publishQueueStatusEvent(context.Background(), sessionID)
+		s.publishQueueStatusEventForIdentity(context.Background(), claim.Identity)
 		return false, nil
 	}
 	return true, nil
@@ -315,8 +392,8 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope 
 
 func mapSendNowClaimError(scope string, err error) error {
 	switch {
-	case errors.Is(err, messagequeue.ErrSendNowEmpty):
-		return ErrSendNowQueueChanged
+	case errors.Is(err, messagequeue.ErrEditConflict):
+		return ErrSendNowEditConflict
 	case errors.Is(err, messagequeue.ErrSendNowReservationConflict):
 		return ErrSendNowConflict
 	case errors.Is(err, messagequeue.ErrSendNowClaimChanged):
@@ -344,40 +421,66 @@ func (s *Service) launchSendNowClaim(
 	if s.sendNowCtx == nil {
 		s.sendNowCtx, s.sendNowCancel = context.WithCancel(context.Background())
 	}
+	if s.sendNowWorkers == nil {
+		s.sendNowWorkers = &sync.WaitGroup{}
+	}
 	workerCtx := s.sendNowCtx
-	s.sendNowWorkers.Add(1)
+	workers := s.sendNowWorkers
+	workers.Add(1)
 	s.sendNowMu.Unlock()
 	go func() {
-		defer s.sendNowWorkers.Done()
+		defer workers.Done()
 		s.executeSendNowClaimWithContext(workerCtx, claim, reservation)
 	}()
 	return true
 }
 
-func (s *Service) resetSendNowWorkers() {
+func (s *Service) resetSendNowWorkers() error {
 	s.sendNowMu.Lock()
 	defer s.sendNowMu.Unlock()
+	if s.sendNowDrain != nil {
+		select {
+		case <-s.sendNowDrain:
+		default:
+			return errors.New("previous Send Now workers are still recovering")
+		}
+	}
 	s.sendNowStopped = false
 	s.sendNowCtx, s.sendNowCancel = context.WithCancel(context.Background())
+	s.sendNowWorkers = &sync.WaitGroup{}
+	s.sendNowDrain = nil
+	return nil
 }
 
 func (s *Service) stopSendNowWorkers() {
 	s.sendNowMu.Lock()
 	s.sendNowStopped = true
 	cancel := s.sendNowCancel
+	workers := s.sendNowWorkers
+	done := s.sendNowDrain
+	startWait := workers != nil && done == nil
+	if startWait {
+		newDone := make(chan struct{})
+		done = newDone
+		s.sendNowDrain = newDone
+	}
 	s.sendNowMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	done := make(chan struct{})
-	go func() {
-		s.sendNowWorkers.Wait()
-		close(done)
-	}()
+	if workers == nil {
+		return
+	}
+	if startWait {
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
+	}
 	select {
 	case <-done:
-	case <-time.After(sendNowClaimRecoveryTimeout):
-		s.logger.Warn("timed out waiting for send-now workers during shutdown")
+	case <-time.After(sendNowWorkerShutdownTimeout):
+		s.logger.Warn("timed out waiting for Send Now workers; recovery remains owned by detached workers")
 	}
 }
 
@@ -397,14 +500,18 @@ func (s *Service) executeSendNowClaimWithContext(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(sessionID, claim.Dispatch.ID)
 	}
-	defer s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
+	ctx = s.queuedRecoveryContext(ctx, reservation)
+	defer func() {
+		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
+		s.drainQueuedDispatchIfPending(ctx, sessionID)
+	}()
 
 	restore := func() {
 		if err := s.restoreSendNowClaimWithRetry(ctx, claim); err != nil {
 			s.logger.Error("failed to restore send-now queue claim",
 				zap.String("session_id", sessionID), zap.Error(err))
 		}
-		s.publishQueueStatusEvent(ctx, sessionID)
+		s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	}
 	if s.isSessionResetInProgress(sessionID) {
 		restore()
@@ -416,7 +523,37 @@ func (s *Service) executeSendNowClaimWithContext(
 		restore()
 		return
 	}
-	if err := s.promptSendNowClaim(ctx, claim); err != nil {
+	if claim.Identity.SessionIncarnationID != "" {
+		current, err := s.messageQueue.ResolveSessionIdentity(
+			ctx,
+			claim.Identity.TaskID,
+			claim.Identity.SessionID,
+		)
+		if err != nil || current != claim.Identity {
+			s.logger.Info("discarding send-now dispatch for replaced session",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", claim.Identity.TaskID))
+			restore()
+			return
+		}
+	}
+	deliveryAttempted, err := s.promptSendNowClaim(ctx, claim)
+	if errors.Is(err, errSendNowInitialPromptUncertain) {
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
+		defer cancel()
+		recoveryErr := s.recordSessionRecoveryBlock(recoveryCtx, sessionID, "send_now", &sessionRecoveryRequiredError{
+			Block: &models.SessionRecoveryBlock{Reason: "unknown_send_now_outcome"},
+		})
+		s.logger.Warn("retained initial Send Now claim with uncertain acceptance",
+			zap.String("session_id", sessionID), zap.Error(errors.Join(err, recoveryErr)))
+		return
+	}
+	if err != nil {
+		var acceptedDispatch *acceptedPromptDispatchError
+		if deliveryAttempted || errors.As(err, &acceptedDispatch) {
+			s.settleAttemptedSendNowClaim(ctx, claim, err)
+			return
+		}
 		s.logger.Warn("send-now replacement prompt failed; restoring queue claim",
 			zap.String("session_id", sessionID), zap.Error(err))
 		restore()
@@ -425,10 +562,29 @@ func (s *Service) executeSendNowClaimWithContext(
 	if err := s.acknowledgeSendNowClaimWithRetry(ctx, claim); err != nil {
 		s.logger.Error("failed to acknowledge accepted send-now queue claim",
 			zap.String("session_id", sessionID), zap.Error(err))
-		s.publishQueueStatusEvent(context.Background(), sessionID)
+		s.publishQueueStatusEventForIdentity(context.Background(), claim.Identity)
 		return
 	}
-	s.publishQueueStatusEvent(ctx, sessionID)
+	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
+}
+
+func (s *Service) settleAttemptedSendNowClaim(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+	dispatchErr error,
+) {
+	sessionID := claim.Dispatch.SessionID
+	s.logger.Warn("send-now replacement prompt was attempted but handling failed; settling without restore",
+		zap.String("session_id", sessionID), zap.Error(dispatchErr))
+	if err := s.markSendNowClaimAcceptedWithRetry(ctx, claim); err != nil {
+		s.logger.Error("failed to persist accepted send-now queue claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	if err := s.acknowledgeSendNowClaimWithRetry(ctx, claim); err != nil {
+		s.logger.Error("failed to acknowledge accepted send-now queue claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	s.publishQueueStatusEvent(context.Background(), sessionID)
 }
 
 func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
@@ -442,82 +598,183 @@ func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
 	return nil
 }
 
-func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) error {
+//nolint:nestif // Send Now keeps transcript, ceiling, and created-session ownership in one dispatch boundary.
+func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) (bool, error) {
 	sessionID := claim.Dispatch.SessionID
-	attachments := make([]v1.MessageAttachment, len(claim.Dispatch.Attachments))
-	for i, attachment := range claim.Dispatch.Attachments {
-		attachments[i] = v1.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
-			Data:         attachment.Data,
-			MimeType:     attachment.MimeType,
-			Name:         attachment.Name,
-			SizeBytes:    attachment.SizeBytes,
-			DeliveryMode: attachment.DeliveryMode,
-		}
-	}
+	deliveryAttempted := false
+	attachments := queuedMessageAttachmentsToV1(claim.Dispatch.Attachments)
 	references := entityrefs.NormalizePersisted(claim.Dispatch.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(claim.Dispatch.Content, references)
-	if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
-		s.logger.Warn("failed to record send-now user message before prompt",
-			zap.String("session_id", sessionID), zap.Error(err))
-	} else if s.messageCreator != nil {
-		for i := range claim.Sources {
-			markQueuedUserMessageRecorded(&claim.Sources[i])
+	promptContent = appendStepHandoffToPrompt(promptContent, stepHandoffFromQueuedMetadata(claim.Dispatch.Metadata))
+	durablePlanComments := claim.HasDurablePlanComment()
+	if err := s.prepareSendNowTranscript(ctx, claim, attachments, durablePlanComments); err != nil {
+		return false, err
+	}
+	ceilingClaim, ceilingQueued, err := s.claimCeilingDeferredLaunch(
+		ctx, claim.Dispatch.TaskID, sessionID, ceilingClaimOwnerSendNow,
+	)
+	if err != nil {
+		return false, err
+	}
+	if ceilingQueued && ceilingClaim == nil {
+		return false, ErrCeilingLaunchClaimed
+	}
+	var currentTask *models.Task
+	if ceilingClaim != nil {
+		defer ceilingClaim.releaseIfHeld(ctx)
+		var taskErr error
+		currentTask, taskErr = s.repo.GetTask(ctx, claim.Dispatch.TaskID)
+		if taskErr != nil {
+			return false, fmt.Errorf("reload task before send now launch: %w", taskErr)
+		}
+		originalDeferral := ceilingClaim.deferral
+		boundDeferral, bindErr := s.enrichCeilingDeferralBinding(ctx, currentTask, originalDeferral)
+		if bindErr != nil {
+			return false, fmt.Errorf("bind deferred workflow entry before send now launch: %w", bindErr)
+		}
+		matches, compareErr := ceilingDeferralsEquivalentForAdmission(boundDeferral, originalDeferral)
+		if compareErr != nil {
+			return false, fmt.Errorf("compare deferred workflow entry before send now launch: %w", compareErr)
+		}
+		if !matches {
+			return false, fmt.Errorf("%w: deferred launch changed before Send Now", ErrCeilingLaunchSuperseded)
+		}
+		ceilingClaim.deferral = boundDeferral
+		ctx = withCeilingDispatchClaim(ctx, ceilingClaim)
+		if disposition, detail, validationErr := s.validateCeilingEntry(ctx, currentTask, ceilingClaim.deferral); validationErr != nil {
+			return false, validationErr
+		} else if disposition != ceilingEntryValid {
+			if detail == "" {
+				detail = "deferred workflow entry ownership is unavailable"
+			}
+			return false, fmt.Errorf("%w: %s", ErrCeilingLaunchSuperseded, detail)
 		}
 	}
-	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
-		// This transition is intentionally not rolled back if promptTask later
-		// rejects the replacement. The ordinary FIFO handoff uses the same
-		// ordering: workflow admission precedes executor prompt acceptance, and
-		// the restored claim is retried through the normal ready path.
-		s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)
+	var deferredLaunch *models.CeilingDeferral
+	if ceilingClaim != nil {
+		deferredLaunch = &ceilingClaim.deferral
+	}
+	deliveryProtocol, deliverySubmissionID, deliveryPayloadHash := claim.DeliverySubmission()
+
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err != nil {
+		return false, fmt.Errorf("load session before send now launch: %w", err)
+	} else if session != nil && session.State == models.TaskSessionStateCreated {
+		startOptions := startCreatedSessionOptions{
+			deliveryProtocol:     deliveryProtocol,
+			deliverySubmissionID: deliverySubmissionID,
+			deliveryPayloadHash:  deliveryPayloadHash,
+			deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
+				return s.messageQueue.SetPendingSendNowClaimDelivery(
+					updateCtx, claim, protocol, submissionID, payloadHash,
+				)
+			},
+		}
+		waitForAdmission := s.configureSendNowInitialAdmission(ctx, claim, &startOptions)
+		createdPrompt := promptContent
+		createdSkipMessageRecord := false
+		createdPlanMode := claim.Dispatch.PlanMode
+		createdAttachments := attachments
+		createdReferences := []v1.EntityReference(nil)
+		createdPromptReferenceContext := ""
+		if ceilingClaim != nil {
+			binding, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(ceilingClaim.deferral.Payload)
+			if bindingErr != nil {
+				return false, bindingErr
+			}
+			if bindingPresent {
+				startOptions.ceilingEntryBinding = &binding
+				// Mark this as a durable ceiling replay that Send Now has
+				// explicitly claimed. startCreatedSession must keep the strict
+				// committed-route validation; it must not use the prepared
+				// callback compatibility path for this exact record.
+				ctx = withCeilingEntryKind(ctx, ceilingClaim.deferral.Kind)
+			}
+			if deferredLaunch != nil {
+				input := sendNowCreatedLaunchInput(
+					currentTask,
+					deferredLaunch,
+					promptContent,
+					attachments,
+					claim.Dispatch.PlanMode,
+				)
+				createdPrompt = input.prompt
+				createdSkipMessageRecord = input.skipMessageRecord
+				createdPlanMode = input.planMode
+				createdAttachments = input.attachments
+				createdReferences = input.references
+				createdPromptReferenceContext = input.promptReferenceContext
+				startOptions.skipTaskDescriptionFallback = input.skipTaskDescriptionFallback
+				startOptions.promptAlreadyComposed = input.promptAlreadyComposed
+				startOptions.retryPrompt = input.retryPrompt
+				startOptions.preserveDirectPrompt = input.preserveDirectPrompt
+				if input.recordQueueMessage {
+					if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+						return false, fmt.Errorf("record Send Now continuation before created-session launch: %w", err)
+					}
+					markSendNowSourcesRecorded(claim)
+				}
+			}
+		}
+		execution, startErr := s.startCreatedSession(
+			ctx,
+			claim.Dispatch.TaskID,
+			sessionID,
+			"",
+			createdPrompt,
+			createdSkipMessageRecord || durablePlanComments,
+			createdPlanMode,
+			false,
+			createdAttachments,
+			createdReferences,
+			createdPromptReferenceContext,
+			startOptions,
+		)
+		if startErr != nil {
+			var acceptedDispatch *acceptedPromptDispatchError
+			if ceilingClaim != nil && errors.As(startErr, &acceptedDispatch) {
+				// The created-session path can return a handled post-dispatch
+				// error after agentctl accepted the prompt. The exact ceiling
+				// record is no longer replayable once that boundary was crossed.
+				ceilingClaim.settle(ctx)
+			}
+			return false, startErr
+		}
+		if execution == nil {
+			return false, errors.New("send-now launch did not dispatch a created session")
+		}
+		if admissionErr := waitForAdmission(); admissionErr != nil {
+			return false, admissionErr
+		}
+		if ceilingClaim != nil {
+			ceilingClaim.settle(ctx)
+		}
+		s.processSendNowTurnStart(ctx, claim)
+		return true, nil
 	}
 
-	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
-		claim.Dispatch.PlanMode, attachments, false, promptTaskOptions{claimEntryID: claim.Dispatch.ID})
-	return err
-}
-
-func (s *Service) restoreSendNowClaimWithRetry(
-	ctx context.Context,
-	claim *messagequeue.SendNowClaim,
-) error {
-	return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
-		return s.messageQueue.RestoreSendNowClaim(recoveryCtx, claim)
-	})
-}
-
-func (s *Service) acknowledgeSendNowClaimWithRetry(
-	ctx context.Context,
-	claim *messagequeue.SendNowClaim,
-) error {
-	return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
-		return s.messageQueue.AcknowledgeSendNowClaim(recoveryCtx, claim)
-	})
-}
-
-func (s *Service) retrySendNowClaimMutation(
-	ctx context.Context,
-	mutate func(context.Context) error,
-) error {
-	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
-	defer cancel()
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		if err = mutate(recoveryCtx); err == nil {
-			return nil
-		}
-		if attempt == 2 {
-			break
-		}
-		timer := time.NewTimer(100 * time.Millisecond)
-		select {
-		case <-recoveryCtx.Done():
-			timer.Stop()
-			return recoveryCtx.Err()
-		case <-timer.C:
+	_, err = s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
+		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
+			claimEntryID:           claim.Dispatch.ID,
+			afterClaim:             s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
+			afterDispatchAdmission: s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),
+			disableDispatchRetry:   durablePlanComments,
+			afterDispatch: func() error {
+				return s.markSendNowClaimAcceptedWithRetry(ctx, claim)
+			},
+			deliveryProtocol:     deliveryProtocol,
+			deliverySubmissionID: deliverySubmissionID,
+			deliveryPayloadHash:  deliveryPayloadHash,
+			deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
+				return s.messageQueue.SetPendingSendNowClaimDelivery(
+					updateCtx, claim, protocol, submissionID, payloadHash,
+				)
+			},
+		})
+	var acceptedDispatch *acceptedPromptDispatchError
+	if err == nil || deliveryAttempted || errors.As(err, &acceptedDispatch) {
+		if ceilingClaim != nil {
+			ceilingClaim.settle(ctx)
 		}
 	}
-	return err
+	return deliveryAttempted, err
 }

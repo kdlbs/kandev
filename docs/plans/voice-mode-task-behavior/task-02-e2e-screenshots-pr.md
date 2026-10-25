@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-consolidate-settings"]
 plan: "plan.md"
-spec: "../../specs/ui/voice-mode-task-behavior.md"
+spec: "../../specs/ui/requirements/voice-mode-task-behavior.md"
 ---
 
 # Task 02: Verify Responsive UI And Publish PR

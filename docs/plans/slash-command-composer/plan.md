@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/slash-command-composer.md
+spec: docs/specs/ui/requirements/slash-command-composer.md
 created: 2026-07-02
 status: implemented
 ---

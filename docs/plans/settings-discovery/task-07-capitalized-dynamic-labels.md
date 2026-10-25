@@ -5,7 +5,7 @@ status: completed
 wave: 7
 depends_on: ["06-browser-mobile-e2e"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 07: Capitalized dynamic Settings discovery labels

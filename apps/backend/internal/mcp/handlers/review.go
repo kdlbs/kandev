@@ -36,7 +36,7 @@ func (h *Handlers) SetReviewRunner(runner ReviewRunner) {
 // registerReviewHandlers registers the native code-review actions. Both the
 // agent-facing MCP publish action and the plain UI actions are gated on the
 // review service being wired.
-func (h *Handlers) registerReviewHandlers(d *ws.Dispatcher) int {
+func (h *Handlers) registerReviewHandlers(d mcpActionRegistrar) int {
 	if h.reviewService == nil {
 		return 0
 	}

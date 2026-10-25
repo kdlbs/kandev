@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-consistent-confirmation-entrypoints"]
 plan: "plan.md"
-spec: "../../specs/ui/terminal-close-feedback.md"
+spec: "../../specs/ui/requirements/terminal-close-feedback.md"
 parallelism: sequential
 ---
 

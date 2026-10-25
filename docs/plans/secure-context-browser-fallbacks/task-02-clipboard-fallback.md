@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-uuid-fallback"]
 plan: "plan.md"
-spec: "../../specs/secure-context-browser-fallbacks/spec.md"
+spec: "../../specs/auth/requirements/secure-context-browser-fallbacks.md"
 ---
 
 # Task 02: Clipboard fallback migration

@@ -120,6 +120,25 @@ func (r *Repository) ListActivityEntriesByType(ctx context.Context, workspaceID,
 	return entries, nil
 }
 
+// HasActivityToday reports whether an activity entry already exists for
+// workspaceID with this exact action and targetID, created at or after
+// dayStart. Used for AC-OFFICE-BUDGET-002.13/-004.8's at-most-once-per-
+// policy-per-UTC-day dedup bound; best-effort under concurrency like the
+// bound itself.
+func (r *Repository) HasActivityToday(
+	ctx context.Context, workspaceID, action, targetID string, dayStart time.Time,
+) (bool, error) {
+	var count int
+	err := r.ro.GetContext(ctx, &count, r.ro.Rebind(`
+		SELECT COUNT(*) FROM office_activity_log
+		WHERE workspace_id = ? AND action = ? AND target_id = ? AND created_at >= ?
+	`), workspaceID, action, targetID, dayStart)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // ListActivityEntriesByTarget returns activity entries for one target in a workspace.
 func (r *Repository) ListActivityEntriesByTarget(ctx context.Context, workspaceID, targetID string, limit int) ([]*models.ActivityEntry, error) {
 	if limit <= 0 {

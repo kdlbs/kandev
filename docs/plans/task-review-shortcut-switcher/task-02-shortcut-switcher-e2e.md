@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-held-review-switcher"]
 plan: "plan.md"
-spec: "../../specs/ui/task-review-shortcut.md"
+spec: "../../specs/ui/requirements/task-review-shortcut.md"
 ---
 
 # Task 02: Prove review shortcut switching end to end

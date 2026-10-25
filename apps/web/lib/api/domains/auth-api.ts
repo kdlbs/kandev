@@ -22,6 +22,8 @@ export type AuthSession = {
   last_seen_at: string;
   user_agent: string;
   ip: string;
+  hostname: string;
+  hostname_resolved_at: string | null;
   current: boolean;
 };
 

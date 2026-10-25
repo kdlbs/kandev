@@ -8,6 +8,8 @@ const TASK_ID = "task-1";
 const ACTION_CREATED = "task.plan.created";
 const ACTION_UPDATED = "task.plan.updated";
 const ACTION_DELETED = "task.plan.deleted";
+const ACTION_REVISION_CREATED = "task.plan.revision.created";
+const BASE_TIMESTAMP = "2026-04-20T00:00:00Z";
 
 function makePayload(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -16,14 +18,29 @@ function makePayload(overrides: Partial<Record<string, unknown>> = {}) {
     title: "Plan",
     content: "# Plan",
     created_by: "agent",
-    created_at: "2026-04-20T00:00:00Z",
-    updated_at: "2026-04-20T00:00:00Z",
+    created_at: BASE_TIMESTAMP,
+    updated_at: BASE_TIMESTAMP,
     ...overrides,
   };
 }
 
 function makeMessage(action: string, payload: Record<string, unknown>) {
   return { id: "msg-1", type: "notification", action, payload };
+}
+
+function makeRevisionPayload(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "rev-1",
+    task_id: TASK_ID,
+    revision_number: 1,
+    title: "Plan",
+    author_kind: "agent",
+    author_name: "Agent",
+    content_length: 42,
+    created_at: BASE_TIMESTAMP,
+    updated_at: BASE_TIMESTAMP,
+    ...overrides,
+  };
 }
 
 function makeStore(
@@ -35,6 +52,7 @@ function makeStore(
     taskPlans: { byTaskId: prevPlan ? { [TASK_ID]: prevPlan } : {} },
     setTaskPlan: vi.fn(),
     markTaskPlanSeen: vi.fn(),
+    upsertPlanRevision: vi.fn(),
     ...overrides,
   };
   return {
@@ -168,5 +186,55 @@ describe("task.plan.* handlers", () => {
 
     expect(store.getState().setTaskPlan).toHaveBeenCalledWith(TASK_ID, null);
     expect(store.getState().markTaskPlanSeen).toHaveBeenCalledWith(TASK_ID);
+  });
+});
+
+describe("task.plan.revision.created handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("carries content_length and workflow step badge into the store", () => {
+    const store = makeStore();
+    const handlers = registerTaskPlansHandlers(store);
+
+    const payload = makeRevisionPayload({
+      content_length: 123,
+      workflow_step_id: "step-1",
+      workflow_step_name: "In Review",
+      workflow_step_color: "#00ff00",
+    });
+    handlers[ACTION_REVISION_CREATED]!(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeMessage(ACTION_REVISION_CREATED, payload) as any,
+    );
+
+    expect(store.getState().upsertPlanRevision).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.objectContaining({
+        content_length: 123,
+        workflow_step_id: "step-1",
+        workflow_step_name: "In Review",
+        workflow_step_color: "#00ff00",
+      }),
+    );
+  });
+
+  it("omits step keys entirely when the task has no workflow step, so a coalesce merge cannot clobber an existing badge", () => {
+    const store = makeStore();
+    const handlers = registerTaskPlansHandlers(store);
+
+    const payload = makeRevisionPayload();
+    handlers[ACTION_REVISION_CREATED]!(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      makeMessage(ACTION_REVISION_CREATED, payload) as any,
+    );
+
+    const [, rev] = (store.getState().upsertPlanRevision as ReturnType<typeof vi.fn>).mock
+      .calls[0]!;
+    expect(Object.prototype.hasOwnProperty.call(rev, "workflow_step_id")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(rev, "workflow_step_name")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(rev, "workflow_step_color")).toBe(false);
+    expect(rev.content_length).toBe(42);
   });
 });

@@ -18,8 +18,13 @@ afterEach(async () => {
   await i18n.changeLanguage("en");
 });
 
-const repo = (name: string, success: boolean, error?: string): PerRepoOperationResult =>
-  ({ repository_name: name, success, error }) as PerRepoOperationResult;
+const repo = (
+  name: string,
+  success: boolean,
+  error?: string,
+  errorCode?: string,
+): PerRepoOperationResult =>
+  ({ repository_name: name, success, error, error_code: errorCode }) as PerRepoOperationResult;
 
 const noPlaceholders = (result: { title: string; description: string }) => {
   expect(result.title).not.toContain("{{");
@@ -74,6 +79,18 @@ describe("describePerRepo", () => {
 
     expect(one.description).toContain("1 repo:");
     expect(two.description).toContain("2 repos:");
+  });
+
+  it("uses localized recovery copy for a bounded publication failure", () => {
+    const result = describePerRepo(
+      [repo("api", false, "raw remote output", "empty_remote_remote_changed")],
+      "Push",
+    );
+
+    expect(result.description).toBe(
+      "Failed in 1 repo: api: The remote changed before the base branch was published. Refresh the task and try again.",
+    );
+    expect(result.description).not.toContain("raw remote output");
   });
 
   it("keeps every branch resolving after a locale switch", async () => {

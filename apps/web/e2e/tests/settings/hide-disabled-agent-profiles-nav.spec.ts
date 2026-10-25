@@ -1,7 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
+import { getMockAgent } from "../../helpers/agent-fixtures";
 
-// Covers docs/specs/agents/hide-disabled-profiles-nav.md's nav-visibility
-// scenarios: with "Hide disabled agent profiles from left panel navigation"
+// Covers docs/specs/agents/requirements/hide-disabled-profiles-nav.md's nav-visibility
+// scenarios: with "Hide disabled profiles from navigation"
 // off (the default), a disabled profile still shows in the Settings left
 // panel's Agents tree; turning the setting on hides it; re-enabling the
 // profile reveals it again — all without a reload.
@@ -13,23 +14,25 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
     test.setTimeout(120_000);
 
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const agent = getMockAgent(agents);
+    const profile = await apiClient.createAgentProfile(
+      agent.id,
+      `Navigation visibility ${test.info().testId}`,
+      { model: "mock-fast" },
+    );
     // The Settings tree's profile leaf is labelled with the profile name and
     // appends the "Disabled" badge while the profile is disabled — an
     // unanchored regex matches both states.
     const profileLink = new RegExp(escapeRegExp(profile.name));
 
     try {
-      // Disable the seeded profile via the API. The profile editor toggle
+      // Disable this test's unreferenced profile via the API. The profile editor toggle
       // itself is covered by agent-profile-disable.spec.ts.
       await apiClient.updateAgentProfile(profile.id, { enabled: false });
 
-      // The Settings sidebar defaults to the flat menu; the per-profile
-      // Agents tree only renders in a tree mode. Accordion opens the branch
-      // whose page owns the current route, so /settings/agents shows the
-      // profile leaves. Seeded before every navigation (the page boots the
-      // mode from localStorage on the first render).
+      // The Settings sidebar defaults to Accordion tree. Seed the mode before
+      // every navigation so this test remains independent of a remembered
+      // device preference.
       await testPage.addInitScript(() => {
         // getLocalStorage JSON-parses the value, so the mode must be stored
         // the way setLocalStorage would write it.
@@ -45,7 +48,8 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       const disabledLink = settingsTree.getByRole("link", { name: profileLink });
       await expect(disabledLink).toBeVisible({ timeout: 15_000 });
 
-      // The setting is off by default.
+      // The setting lives inside the Agent options surface and is off by default.
+      await testPage.getByRole("button", { name: "Options", exact: true }).click();
       const hideDisabledSwitch = testPage.locator("#hide-disabled-agent-profiles-in-nav");
       await expect(hideDisabledSwitch).toHaveAttribute("aria-checked", "false");
 
@@ -53,6 +57,7 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       // while the Agents row stays.
       await hideDisabledSwitch.click();
       await expect(hideDisabledSwitch).toHaveAttribute("aria-checked", "true");
+      await testPage.getByRole("button", { name: "Done", exact: true }).click();
       await expect(disabledLink).not.toBeVisible();
       await expect(settingsTree.getByRole("link", { name: /^Agents/ })).toBeVisible();
 
@@ -74,8 +79,13 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       await settingsTree.getByRole("button", { name: "Expand Mock" }).click();
       await expect(disabledLink).toBeVisible({ timeout: 15_000 });
     } finally {
-      // Always restore so worker-scoped seedData stays valid for later tests.
-      await apiClient.updateAgentProfile(profile.id, { enabled: true }).catch(() => {});
+      try {
+        await apiClient.deleteAgentProfile(profile.id, true);
+      } finally {
+        await testPage.evaluate(() => {
+          window.localStorage.removeItem("kandev:agents:hideDisabledInNav:v1");
+        });
+      }
     }
   });
 });

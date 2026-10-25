@@ -7,7 +7,7 @@ import {
   IconFolder,
   IconGitBranch,
   IconGitPullRequest,
-  IconHistory,
+  IconLayoutGrid,
   IconListCheck,
   IconNetwork,
 } from "@tabler/icons-react";
@@ -25,9 +25,16 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { reviewPanelId } from "@/lib/state/dockview-review-panel-id";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
-import type { ReviewItemSummary } from "@/lib/plugins/types";
+import { registrationIsVisible } from "./plugin-task-panel";
+import { resolveTaskPanelTitle } from "@/lib/state/layout-manager/plugin-panels";
+import type { PluginSessionKind, ReviewItemSummary } from "@/lib/plugins/types";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
+import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useTaskCanvases } from "@/hooks/domains/task/use-task-canvases";
+import { activateCanvasPanel, isDiscoverableTaskCanvas } from "./dockview-canvas-activation";
+import { canvasPresentationUserId } from "@/lib/canvas-presentation-storage";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
@@ -60,7 +67,6 @@ export const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
 export const MENU_ITEM_CLASS = "cursor-pointer text-xs";
 
 const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
-
 type ReviewMenuIdentity = Pick<ReviewItemSummary, "providerId" | "reviewKey"> &
   Partial<Pick<ReviewItemSummary, "connectionScope" | "repositoryId" | "changeRequestNumber">>;
 
@@ -188,20 +194,41 @@ function PRPanelMenuItems({ prs, onOpenPR }: { prs: TaskPR[]; onOpenPR: (pr: Tas
 }
 
 /** One "+" menu row per plugin-registered task panel (AC1), rendered after Plan. */
-function PluginTaskPanelMenuItems({ groupId }: { groupId: string }) {
+function PluginTaskPanelMenuItems({
+  groupId,
+  state,
+}: {
+  groupId: string;
+  state: AddPanelMenuState;
+}) {
   usePluginRegistry();
   const addPluginPanel = useDockviewStore((s) => s.addPluginPanel);
-  const panels = pluginRegistry.getTaskPanels();
+  const sessionId = useAppStore((store) => store.tasks.activeSessionId);
+  let sessionKind: PluginSessionKind = null;
+  if (sessionId) {
+    sessionKind = state.isPassthrough ? "passthrough" : "managed";
+  }
+  const panels = state.taskId
+    ? pluginRegistry.getTaskPanels().filter((registration) =>
+        registrationIsVisible(registration, {
+          taskId: state.taskId!,
+          sessionId,
+          sessionKind,
+          presentation: "desktop",
+        }),
+      )
+    : [];
 
   return (
     <>
       {panels.map((registration) => {
         const Icon = resolvePluginIcon(registration.icon);
+        const title = resolveTaskPanelTitle(registration);
         return (
           <DropdownMenuItem
             key={`${registration.pluginId}:${registration.id}`}
             onClick={() =>
-              addPluginPanel(registration.pluginId, registration.id, registration.title, {
+              addPluginPanel(registration.pluginId, registration.id, title, {
                 groupId,
               })
             }
@@ -209,7 +236,7 @@ function PluginTaskPanelMenuItems({ groupId }: { groupId: string }) {
             data-testid={`add-panel-plugin-item-${registration.pluginId}-${registration.id}`}
           >
             <Icon className={MENU_ICON_CLASS} />
-            {registration.title}
+            {title}
           </DropdownMenuItem>
         );
       })}
@@ -217,19 +244,46 @@ function PluginTaskPanelMenuItems({ groupId }: { groupId: string }) {
   );
 }
 
-/** "+" menu row that opens a prompt-history panel in the given group. */
-function PromptHistoryPanelMenuItem({ groupId }: { groupId: string }) {
-  const { t } = useTranslation();
-  const addPromptHistoryPanel = useDockviewStore((s) => s.addPromptHistoryPanel);
+function TaskCanvasMenuItems({ groupId, taskId }: { groupId: string; taskId: string | null }) {
+  const enabled = useFeature("canvases");
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const userId = useAppStore((state) => canvasPresentationUserId(state.auth));
+  const canvases = useTaskCanvases(taskId, workspaceId, enabled).filter(isDiscoverableTaskCanvas);
+  const api = useDockviewStore((s) => s.api);
+
+  if (!enabled || canvases.length === 0) return null;
+
   return (
-    <DropdownMenuItem
-      data-testid="add-panel-prompt-history-item"
-      onClick={() => addPromptHistoryPanel({ groupId })}
-      className={MENU_ITEM_CLASS}
-    >
-      <IconHistory className={MENU_ICON_CLASS} />
-      {t("task:promptHistory")}
-    </DropdownMenuItem>
+    <>
+      {canvases.map((canvas) => (
+        <DropdownMenuItem
+          key={canvas.id}
+          onClick={() =>
+            api &&
+            activateCanvasPanel(api, canvas, groupId, {
+              focusExisting: true,
+              presentation:
+                userId && taskId
+                  ? {
+                      identity: {
+                        userId,
+                        workspaceId: canvas.workspace_id,
+                        taskId,
+                        canvasId: canvas.id,
+                      },
+                      reason: "manual",
+                    }
+                  : undefined,
+            })
+          }
+          className={MENU_ITEM_CLASS}
+          data-testid={`add-panel-canvas-item-${canvas.id}`}
+        >
+          <IconLayoutGrid className={MENU_ICON_CLASS} />
+          {canvas.title}
+        </DropdownMenuItem>
+      ))}
+    </>
   );
 }
 
@@ -250,8 +304,8 @@ function missingBuiltInReviews(
 }
 
 /** Renders the dockview "+" menu: session/terminal reopen entries, browser,
- * VS Code, plan, port-forwarding toggle, plugin task panels, todos, prompt
- * history, changes/files, review panels, and repository scripts. */
+ * VS Code, plan, port-forwarding toggle, plugin task panels, task canvases,
+ * todos, changes/files, review panels, and repository scripts. */
 export function AddPanelMenuItems({
   groupId,
   state,
@@ -309,14 +363,14 @@ export function AddPanelMenuItems({
           {t("task:portForwarding")}
         </DropdownMenuCheckboxItem>
       )}
-      <PluginTaskPanelMenuItems groupId={groupId} />
+      <PluginTaskPanelMenuItems groupId={groupId} state={state} />
+      <TaskCanvasMenuItems groupId={groupId} taskId={state.taskId} />
       {!state.isPassthrough && (
         <DropdownMenuItem onClick={() => addTodosPanel({ groupId })} className={MENU_ITEM_CLASS}>
           <IconListCheck className={MENU_ICON_CLASS} />
           {t("common:todos")}
         </DropdownMenuItem>
       )}
-      {!state.isPassthrough && <PromptHistoryPanelMenuItem groupId={groupId} />}
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />

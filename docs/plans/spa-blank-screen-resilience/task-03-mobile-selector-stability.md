@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/mobile-task-navigation.md"
+spec: "../../specs/ui/requirements/mobile-task-navigation.md"
 decision: "../../decisions/2026-07-27-spa-failure-containment-and-deployment-recovery.md"
 ---
 

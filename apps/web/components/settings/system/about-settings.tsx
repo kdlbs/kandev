@@ -2,7 +2,7 @@
 
 import { Separator } from "@kandev/ui/separator";
 import { useTranslation } from "react-i18next";
-import { SettingsTarget } from "@/components/settings/settings-target";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { AboutCard } from "@/components/settings/system/about-card";
 import { LicensesList } from "@/components/settings/system/licenses-list";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
@@ -15,15 +15,14 @@ export function AboutSettings({ licenses }: { licenses: LicenseEntry[] }) {
     <div className="space-y-8">
       <AboutCard />
       <Separator />
-      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.licenses} className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold">{t("system:navLicenses")}</h3>
-          <p className="text-sm text-muted-foreground mt-1">
-            {t("system:licensesPageDescription")}
-          </p>
-        </div>
+      <SettingsGroup
+        title={t("system:navLicenses")}
+        description={t("system:licensesPageDescription")}
+        discoveryTargetId={SYSTEM_SETTINGS_TARGETS.licenses}
+        contentClassName="divide-y-0"
+      >
         <LicensesList entries={licenses} />
-      </SettingsTarget>
+      </SettingsGroup>
     </div>
   );
 }

@@ -566,13 +566,14 @@ test("rejects a DocsVideo attribute that points to missing media", async () => {
   );
 });
 
-test("rejects a broken local image nested inside a link", async () => {
+test("rejects a local image nested inside a link", async () => {
   const dir = await createDocs(
     {
       "index.md": validPage.replace(
         "Page body.",
-        "[![Missing](assets/missing.png)](guide.md)",
+        "[![Screenshot](assets/screenshot.png)](guide.md)",
       ),
+      "assets/screenshot.png": "image",
       "guide.md": validPage,
     },
     { pages: ["index", "guide"] },
@@ -580,8 +581,24 @@ test("rejects a broken local image nested inside a link", async () => {
 
   await assert.rejects(
     validatePublicDocs(dir),
-    /index.md links to missing local target: assets\/missing.png/,
+    /index.md uses a nested local image link: assets\/screenshot.png; Landing copies only a direct plain Markdown image/,
   );
+});
+
+test("accepts a direct local image with a separate full-size link", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "![Screenshot](assets/screenshot.png)\n\n[Open full size](guide.md)",
+      ),
+      "assets/screenshot.png": "image",
+      "guide.md": validPage,
+    },
+    { pages: ["index", "guide"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
 });
 
 test("accepts external, existing heading, and fenced-code links", async () => {
@@ -642,6 +659,20 @@ test("accepts heading fragments whose labels contain complete inline HTML", asyn
       "index.md": validPage.replace(
         "Page body.",
         "## Configure <span>profiles</span>\n\n[Profiles](#configure-profiles)",
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("accepts explicit HTML anchors for renamed section fragments", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        '<a id="old-section-title"></a>\n\n## New section title\n\n[Old link](#old-section-title)',
       ),
     },
     { pages: ["index"] },

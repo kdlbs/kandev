@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 01: Repair backend default inheritance
@@ -34,7 +34,7 @@ Implement the amended utility-agent binding contract before changing the setting
 - **Dependencies:** None.
 - **Parallelism:** sequential.
 - **Inputs:** The amended legacy migration, failure-mode, persistence, and scenario sections in
-  `docs/specs/agents/utility-agent-profiles.md`, plus ADR-2026-08-12-built-in-utility-default-inheritance.
+  `docs/specs/agents/requirements/utility-agent-profiles.md`, plus ADR-2026-08-12-built-in-utility-default-inheritance.
 - **Output contract:** Report the backend files changed, exact test commands and results, stale-ID
   and default-deletion behavior, and synchronized task/plan status.
 

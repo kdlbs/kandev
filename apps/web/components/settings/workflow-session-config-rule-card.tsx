@@ -22,6 +22,7 @@ import {
   defaultModelForAgent,
   operationRule,
 } from "./workflow-session-config-shared";
+import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 
 function modelSelectionForRule(
   rule: ConfigureSessionRule,
@@ -254,7 +255,7 @@ function SessionConfigRuleHeader({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="min-h-10 w-full cursor-pointer sm:flex-1"
+          className={settingsControlClassName("w-full cursor-pointer sm:flex-1")}
           data-testid={`session-config-agent-${index}`}
         >
           <SelectValue placeholder={t("workflows:chooseAgentFamily")} />
@@ -275,7 +276,7 @@ function SessionConfigRuleHeader({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="min-h-10 w-full cursor-pointer sm:w-44"
+          className={settingsControlClassName("w-full cursor-pointer sm:w-44")}
           data-testid={`session-config-operation-${index}`}
         >
           <SelectValue />
@@ -290,7 +291,9 @@ function SessionConfigRuleHeader({
         type="button"
         variant="ghost"
         size="sm"
-        className="min-h-10 cursor-pointer self-end text-destructive hover:text-destructive sm:self-auto"
+        className={settingsActionClassName(
+          "cursor-pointer self-end text-destructive hover:text-destructive sm:self-auto",
+        )}
         onClick={onRemove}
         disabled={readOnly}
         aria-label={t("workflows:removeAgentCondition", { index: index + 1 })}
@@ -358,7 +361,7 @@ function SessionConfigRuleSettings({
           disabled={readOnly}
           placeholder={t("workflows:chooseModelAndSessionSettings")}
           ariaLabel={t("workflows:settingsForAgent", { agent: rule.agent_name })}
-          triggerClassName="min-h-11 w-full sm:min-h-10"
+          triggerClassName={settingsControlClassName("w-full")}
         />
       ) : (
         <p className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground">

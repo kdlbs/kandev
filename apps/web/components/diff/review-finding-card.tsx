@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import {
   markdownComponents,
   normalizeMarkdown,
+  rehypePlugins,
   remarkPlugins,
 } from "@/components/shared/markdown-components";
 import { findingLocation } from "@/lib/review/format";
@@ -183,7 +184,11 @@ export function ReviewFindingCard(props: ReviewFindingCardProps) {
         className="prose prose-sm dark:prose-invert mt-1 max-w-none text-xs leading-relaxed [overflow-wrap:anywhere] [&_p]:my-1"
         data-testid="review-finding-body"
       >
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={markdownComponents}
+        >
           {normalizeMarkdown(finding.body)}
         </ReactMarkdown>
       </div>

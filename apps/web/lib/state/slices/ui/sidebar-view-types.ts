@@ -1,3 +1,5 @@
+import type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
+
 export type FilterDimension =
   | "archived"
   | "state"
@@ -22,9 +24,41 @@ export type FilterClause = {
   value: FilterValue;
 };
 
-export type SortKey = "state" | "updatedAt" | "lastActivityAt" | "createdAt" | "title" | "custom";
+export type SortKey =
+  | "state"
+  | "updatedAt"
+  | "lastActivityAt"
+  | "createdAt"
+  | "title"
+  | "running"
+  | "color"
+  | "custom";
 export type SortDirection = "asc" | "desc";
-export type SortSpec = { key: SortKey; direction: SortDirection };
+export type SidebarColorToken =
+  | "gray"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "cyan"
+  | "blue"
+  | "indigo"
+  | "purple"
+  | "pink";
+export type SortCriterion = {
+  key: Exclude<SortKey, "custom">;
+  direction: SortDirection;
+  color?: SidebarColorToken;
+};
+export type SortRule = SortCriterion | { key: "custom"; direction: SortDirection };
+export type SortSpec = {
+  key: SortKey;
+  direction: SortDirection;
+  color?: SidebarColorToken;
+  thenBy?: SortCriterion[];
+};
+
+export type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 
 export type GroupKey =
   | "none"
@@ -39,11 +73,17 @@ export type SidebarView = {
   name: string;
   filters: FilterClause[];
   sort: SortSpec;
+  sortWarningCount?: number;
   group: GroupKey;
+  groupIndent: boolean;
   collapsedGroups: string[];
+  taskRow?: SidebarTaskRowPresentation;
 };
 
 export type SidebarSliceState = {
+  syncPending?: boolean;
+  serverRevision?: number | null;
+  deferredServerState?: SidebarSliceState | null;
   views: SidebarView[];
   activeViewId: string;
   draft: SidebarViewDraft | null;
@@ -55,5 +95,8 @@ export type SidebarViewDraft = {
   baseViewId: string;
   filters: FilterClause[];
   sort: SortSpec;
+  sortWarningCount?: number;
   group: GroupKey;
+  groupIndent: boolean;
+  taskRow?: SidebarTaskRowPresentation;
 };

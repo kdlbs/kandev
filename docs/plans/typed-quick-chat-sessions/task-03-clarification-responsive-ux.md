@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/quick-chat-expiration.md"
+spec: "../../specs/tasks/requirements/quick-chat-expiration.md"
 ---
 
 # Task 03: Clarification Responsive UX

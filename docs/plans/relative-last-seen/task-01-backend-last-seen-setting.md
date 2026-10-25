@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/relative-last-seen/spec.md"
+spec: "../../specs/ui/requirements/relative-last-seen.md"
 ---
 
 # Task 01: Backend `last_seen_display` setting

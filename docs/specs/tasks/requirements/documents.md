@@ -1,0 +1,160 @@
+---
+status: active
+system: tasks
+created: 2026-04-29
+updated: 2026-10-21
+owners:
+  - cfl
+---
+# Task Documents Requirements
+
+## Overview
+
+This document is the migrated task-system source for the capability. The source detail below remains authoritative while the system is migrated into separate requirement and design records.
+
+## Requirements
+
+### REQ-TASKS-DOCUMENTS-001: Task Documents
+
+**Intent:** Preserve the observable task or workflow behavior recorded by the legacy specification.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DOCUMENTS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-DOCUMENTS-001.2:** When a plan write targets a missing task, the system shall return `not_found`, create no plan data, and expose no storage constraint details. This expected rejection shall create a debug entry and no error-level entry.
+
+### REQ-TASKS-DOCUMENTS-002: Attachment replacement failure preservation
+
+**Intent:** A rejected attachment upload shall leave the previously published
+attachment usable. Publication means that the task document's current metadata
+selects the bytes returned by its download endpoint.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DOCUMENTS-002.1:** When an upload's lookup, file preparation, or uncommitted metadata write fails, that operation shall return an error without altering the previously published document metadata or download bytes. This applies to replacements with the same or a different filename extension.
+- **AC-TASKS-DOCUMENTS-002.2:** When a first upload fails before publication, it shall expose no new attachment document or downloadable candidate. A successful first upload shall expose the complete submitted bytes and their filename, MIME type, and byte count.
+- **AC-TASKS-DOCUMENTS-002.3:** When a replacement succeeds, it shall retain the document ID and creation time, expose the complete new bytes and matching attachment metadata, and keep a single current document without creating attachment revisions. Existing attachments shall remain downloadable and deletable without re-upload.
+- **AC-TASKS-DOCUMENTS-002.4:** When an upload fails before attempting metadata publication, cleanup shall affect only its own definitely unpublished candidate. Once metadata publication has been attempted, any returned error shall retain the candidate bytes, including bytes a download already resolved before a later replacement or deletion. A later current attachment or missing document shall not authorize candidate removal. An independent successful operation remains authoritative; failure preservation shall not roll it back or remove its bytes.
+- **AC-TASKS-DOCUMENTS-002.5:** When the registered document HTTP upload route rejects a replacement, it shall return its existing error response and subsequent downloads shall still serve the published bytes and metadata. A successful replacement shall return the existing success payload shape and subsequent downloads shall serve the new bytes.
+
+The internal filename is not a public attachment identity. Binary attachments
+remain replace-only. Crash recovery, immediate reclamation of superseded files,
+cross-resource transactional rollback, arbitrary overlapping upload/delete
+serialization, and filesystem ACL preservation are outside this amendment.
+
+### REQ-TASKS-DOCUMENTS-003: Plan draft continuity during successful saves
+
+**Intent:** Acknowledging a submitted plan shall preserve newer typing in the
+same task's editor. The persisted plan and the live unsaved draft represent
+different points in the user's editing history. Snapshot refreshes shall also
+preserve plan state already observed through live publication.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DOCUMENTS-003.1:** When the user submits plan content A, types newer content B in the same task before that save succeeds, and receives their own save acknowledgement for A, the persisted plan shall contain A while the editor retains B and reports unsaved changes. The acknowledgement shall not remount the editor or reset its selection or focus.
+- **AC-TASKS-DOCUMENTS-003.2:** After that successful save settles, the retained B shall remain eligible for the next existing debounced autosave, which shall submit B for the same task without requiring more typing or an explicit save.
+- **AC-TASKS-DOCUMENTS-003.3:** When a successful save acknowledges the live submitted content and no newer typing exists, the editor shall remain unchanged, report no unsaved changes, and issue no redundant autosave. A subsequent edit shall autosave normally.
+- **AC-TASKS-DOCUMENTS-003.4:** A genuine external plan-content update shall continue to replace the local editor content through the existing external-update behavior, including when a different local draft exists. A plan deletion shall retain the existing empty-content behavior. An earlier completed, failed, or superseded own attempt shall not permanently exempt matching content from external synchronization.
+- **AC-TASKS-DOCUMENTS-003.5:** Autosave and explicit save shall provide the same acknowledgement protection. Overlapping own saves for one task shall preserve the existing latest-started save outcome; an older callback shall not replace newer typing, report an unpublished result as saved, or clear suppression belonging to a later rejected attempt, including repeated submissions of identical content.
+- **AC-TASKS-DOCUMENTS-003.6:** A task change, including a change to no task or a return to an earlier task, shall reset the local draft to the currently selected task's persisted content. A callback from the outgoing task view shall not alter the new view's draft, editor identity, or retry suppression. Existing legitimate background publication for the outgoing task shall remain supported.
+- **AC-TASKS-DOCUMENTS-003.7:** A failed save shall retain the live draft and the persisted baseline. Size rejection shall suppress only an unchanged automatic retry; changing the draft or explicitly saving shall remain available, and generic failures shall retain automatic retry eligibility, as defined by [plan-content-size-limit](plan-content-size-limit.md#req-tasks-plan-content-size-limit-003-a-user-sees-the-rejection-and-keeps-their-draft).
+- **AC-TASKS-DOCUMENTS-003.8:** Once this app store observes a plan creation, update, or deletion, a snapshot read started before that observation shall not replace that state or consume its unread indicator. For overlapping reads of the same task and store, only the latest started read may settle content, loading, or read errors. Later fresh reads, absence, and ordinary failures remain supported; tasks and independent app stores stay isolated. Retired reads shall not affect the selected task view after navigation.
+
+This contract applies to the existing task Plan editor on desktop and phone.
+It changes no editing affordances or navigation. It does not define arbitrary
+concurrent-writer reconciliation, conflict merging, transport ordering, or a
+new version policy. Its technical owner is the [task document persistence
+lifecycle](../system-design/plan-write-lifecycle.md#plan-draft-acknowledgement).
+Delivery is recorded in the [draft-continuity plan](../../../plans/preserve-plan-typing/plan.md) and [snapshot freshness repair](../../../plans/preserve-live-plans/plan.md).
+
+## Migrated source detail
+
+## Why
+
+Tasks currently support a single "plan" document via `task_plans` with revision history. But tasks often need multiple documents: a spec, a plan, implementation notes, review findings. The plan infrastructure (revisions, author tracking, revert) is solid but locked to one document per task. Generalizing plans into a multi-document system lets agents and users attach structured content to tasks without reinventing revision tracking.
+
+## What
+
+### Document model
+
+- A task has zero or more documents, each identified by a unique **key** within the task (e.g. `spec`, `plan`, `notes`, `review-findings`).
+- Each document has: key, type, title, content (markdown), author info, and revision history.
+- Document types: `plan`, `spec`, `notes`, `review`, `attachment`, `custom`. Type is metadata for display — all documents have the same capabilities.
+- The existing `task_plans` table is migrated to `task_documents`. The `task_plan_revisions` table becomes `task_document_revisions`. Existing plans become documents with `key=plan`, `type=plan`.
+
+### Revision history
+
+- Every update creates a new immutable revision (existing plan revision behavior, unchanged).
+- Revisions track: revision number, author kind (agent/user), author name, content snapshot.
+- Revert support: any prior revision can be restored (creates a new revision pointing back to the original).
+- Coalesce merge: rapid successive updates by the same author within a short window are merged into the latest revision (existing behavior, unchanged).
+
+### API
+
+```
+GET    /tasks/:id/documents                    → list all documents for a task
+GET    /tasks/:id/documents/:key               → get document by key (latest content)
+PUT    /tasks/:id/documents/:key               → create or update document (auto-revisions)
+DELETE /tasks/:id/documents/:key               → delete document and all revisions
+GET    /tasks/:id/documents/:key/revisions     → list revision history
+POST   /tasks/:id/documents/:key/revisions/:revId/restore → restore from prior revision
+```
+
+### Agent access
+
+- Agents create/read/update documents via `kandev doc create <task-id> <key> --type <type> --title <title>` with content from stdin or `--content` flag.
+- `kandev doc read <task-id> <key>` outputs the latest content.
+- `kandev doc list <task-id>` lists all documents for a task.
+- The MCP handler exposes matching tools.
+
+### UI
+
+- Task detail shows a "Documents" section below the description.
+- Each document rendered as a collapsible card with: type badge (PLAN, SPEC, etc.), title, revision count ("rev 3"), last updated timestamp.
+- Clicking a document expands to show rendered markdown content.
+- "New document" button opens a dialog with key, type, title, and content editor.
+- Revision history accessible via a dropdown on each document card.
+
+### Attachments
+
+- Documents with `type=attachment` store binary files (images, PDFs, etc.) rather than markdown text.
+- Attachment content is stored on disk (not in SQLite) under the attachment root, in a task-scoped directory. The internal filename is opaque; legacy `<key>.<ext>` paths remain readable. The persisted metadata selects the current file. This is separate from the workspace config directory (`<home>/workspaces/`) which is reserved for declarative config files that can be git-synced.
+- The DB row stores metadata only: key, filename, mime type, size bytes, disk path.
+- Upload via `POST /tasks/:id/documents/:key/upload` (multipart form). Max file size: 10MB.
+- Download via `GET /tasks/:id/documents/:key/download` (streams the file).
+- Attachments have no revision history; a successful upload replaces the current attachment. A rejected upload preserves the published attachment as defined by `REQ-TASKS-DOCUMENTS-002`.
+- Agents upload via `kandev doc upload <task-id> <key> <filepath>`.
+
+### Backward compatibility
+
+- Existing plan MCP tools (`plan_create`, `plan_update`, `plan_get`, `plan_list_revisions`) continue to work unchanged — they map to the document with `key=plan`.
+- Existing plan API endpoints (`GET/PUT/DELETE /tasks/:id/plan`, plan revision endpoints) continue to work as aliases to the document API with `key=plan`.
+- `TaskPlan` and `TaskPlanRevision` Go types are preserved as type aliases to the new document types. Existing code that uses these types compiles without changes.
+- The plan service methods (`WritePlanRevision`, `GetTaskPlan`, etc.) are preserved as wrappers around the document service.
+- No breaking changes to any existing plan usage.
+
+## Scenarios
+
+- **GIVEN** a task with no documents, **WHEN** an agent runs `kandev doc create TASK-1 spec --type spec --title "Feature Spec"`, **THEN** a document with key "spec" is created at revision 1.
+
+- **GIVEN** a task with a "plan" document at rev 2, **WHEN** the agent updates it, **THEN** rev 3 is created and the document shows "rev 3" in the UI.
+
+- **GIVEN** a task with documents [spec, plan, notes], **WHEN** viewing the task detail, **THEN** all three appear in the Documents section with their type badges and latest revision info.
+
+- **GIVEN** the existing plan API `PUT /tasks/:id/plan`, **WHEN** called, **THEN** it updates the document with `key=plan` (backward compatible).
+
+- **GIVEN** a document at rev 5, **WHEN** the user clicks "Restore rev 2", **THEN** rev 6 is created with rev 2's content and `revert_of_revision_id` pointing to rev 2.
+
+- **GIVEN** a task, **WHEN** an agent runs `kandev doc upload TASK-1 screenshot /tmp/bug.png`, **THEN** an attachment document is created with key "screenshot", the file is stored on disk, and the task detail shows it in the Documents section with a download link.
+
+- **GIVEN** the existing MCP tool `plan_create`, **WHEN** called with a task ID and content, **THEN** it creates/updates the document with `key=plan` (backward compatible, no behavior change).
+
+- **GIVEN** a missing or deleted task, **WHEN** a consumer writes its plan, **THEN** the response is `not_found`, no plan data exists, and no storage error is exposed.
+
+## Out of scope
+
+- Real-time collaborative editing (one writer at a time, last-write-wins)
+- Document templates (e.g. auto-populate spec template on creation)
+- Cross-task document linking (documents belong to one task)
+- Attachment revision history (attachments are replace-only, not versioned)
+- Image/file preview rendering in the UI (download link only for now)

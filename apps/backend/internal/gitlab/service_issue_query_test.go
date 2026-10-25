@@ -13,7 +13,7 @@ type captureIssueQueryClient struct {
 	listCalls   int
 }
 
-func (c *captureIssueQueryClient) ListIssues(_ context.Context, filter, customQuery string) ([]*Issue, error) {
+func (c *captureIssueQueryClient) ListIssues(_ context.Context, filter, customQuery, _ string) ([]*Issue, error) {
 	c.filter = filter
 	c.customQuery = customQuery
 	c.listCalls++

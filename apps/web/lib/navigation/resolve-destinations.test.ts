@@ -21,6 +21,18 @@ function ids(destinations: { id: string }[]): string[] {
 }
 
 describe("resolveDestinations", () => {
+  it.each(["palette", "mobileMenu"] as const)("honors fixed Threads Home in %s", (surface) => {
+    const home = resolveDestinations({ surface, ctx: { ...KANBAN, startupPage: "threads" } }).find(
+      (destination) => destination.id === "home",
+    );
+    expect(home?.href).toBe("/threads?workspace=ws-1");
+    const officeHome = resolveDestinations({
+      surface,
+      ctx: { ...OFFICE, startupPage: "threads" },
+    }).find((destination) => destination.id === "home");
+    expect(officeHome?.href).toBe("/office?workspaceId=ws-office");
+  });
+
   it("offers the sidebar's insight and integration destinations, in manifest order", () => {
     const resolved = resolveDestinations({
       surface: "sidebar",

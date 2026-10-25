@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-auto-merge-repository"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-auto-merge.md"
+spec: "../../specs/ui/requirements/message-queue-auto-merge.md"
 ---
 
 # Task 02: Integrate automatic merge admission

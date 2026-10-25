@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,6 +20,8 @@ func TestShouldPersistMetadataKey(t *testing.T) {
 		{name: "exact match executor_profile_id", key: "executor_profile_id", want: true},
 		{name: "exact match image_tag_override", key: MetadataKeyImageTagOverride, want: true},
 		{name: "exact match container_id", key: MetadataKeyContainerID, want: true},
+		{name: "exact match office agent identity", key: MetadataKeyOfficeAgentProfileID, want: true},
+		{name: "exact match Office causing run", key: MetadataKeyCausingRunID, want: true},
 		{name: "prefix env_secret_id_", key: "env_secret_id_SPRITES_API_TOKEN", want: true},
 		{name: "prefix env_secret_id_ another key", key: "env_secret_id_OPENAI_KEY", want: true},
 		{name: "not persistent task_description", key: "task_description", want: false},
@@ -33,6 +36,75 @@ func TestShouldPersistMetadataKey(t *testing.T) {
 			got := ShouldPersistMetadataKey(tt.key)
 			require.Equal(t, tt.want, got)
 		})
+	}
+}
+
+func TestKubernetesRuntimeMetadataKeysPersistWithoutLocalForward(t *testing.T) {
+	persistent := []string{
+		"kubernetes_task_owned",
+		"kubernetes_resource_ownership_version",
+		"auth_mode",
+		"kubeconfig_path",
+		"kube_context",
+		"namespace",
+		"request_timeout_seconds",
+		"kubernetes_namespace",
+		"kubernetes_pod_name",
+		"kubernetes_pod_uid",
+		"kubernetes_main_container",
+		"kubernetes_platform",
+		"kubernetes_workspace_mode",
+		"kubernetes_pvc_name",
+		"kubernetes_pvc_uid",
+		"kubernetes_pvc_created",
+		"kubernetes_agentctl_remote_port",
+		MetadataKeyKubernetesResourceExecutorID,
+		MetadataKeyKubernetesResourceProfileID,
+		MetadataKeyKubernetesResourceInstanceID,
+		MetadataKeyKubernetesResourceTaskID,
+		MetadataKeyKubernetesResourceSessionID,
+		MetadataKeyKubernetesResourceEnvironmentID,
+		"kubernetes_executor_config_hash",
+		"kubernetes_profile_config_hash",
+		"kubernetes_template_hash",
+		MetadataKeyKubernetesProfileSnapshot,
+	}
+	for _, key := range persistent {
+		require.True(t, ShouldPersistMetadataKey(key), "%s must survive same-session restart", key)
+		require.True(t, IsSessionScopedMetadataKey(key), "%s must not leak to a sibling session", key)
+	}
+	require.False(t, ShouldPersistMetadataKey("kubernetes_local_forward_port"),
+		"local forwards are process-local and must rotate after restart")
+}
+
+func TestOfficeAgentIdentityMetadataIsSessionScoped(t *testing.T) {
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyOfficeAgentProfileID),
+		"Office identity must survive same-session restart")
+	require.True(t, IsSessionScopedMetadataKey(MetadataKeyOfficeAgentProfileID),
+		"Office identity must not leak to a sibling session")
+}
+
+func TestPassthroughMCPClaimsArePersistentAndSessionScoped(t *testing.T) {
+	require.True(t, ShouldPersistMetadataKey(metadataKeyPassthroughMCPClaims),
+		"project MCP ownership must survive same-session backend recovery")
+	require.True(t, IsSessionScopedMetadataKey(metadataKeyPassthroughMCPClaims),
+		"project MCP ownership must not be copied into a sibling session")
+}
+
+func TestCausingRunMetadataIsSessionScoped(t *testing.T) {
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyCausingRunID),
+		"the causal run must survive a same-session runtime restart")
+	require.True(t, IsSessionScopedMetadataKey(MetadataKeyCausingRunID),
+		"the causal run must not leak into a sibling session")
+}
+
+func TestSSHRuntimeAPIMetadataIsPersistentAndSessionScoped(t *testing.T) {
+	for _, key := range []string{
+		MetadataKeySSHRuntimeAPILocalURL,
+		MetadataKeySSHRuntimeAPIRemotePort,
+	} {
+		require.True(t, ShouldPersistMetadataKey(key), "%s must survive same-session restart", key)
+		require.True(t, IsSessionScopedMetadataKey(key), "%s must not leak to sibling sessions", key)
 	}
 }
 
@@ -59,12 +131,14 @@ func TestFilterPersistentMetadata(t *testing.T) {
 			"task_description":                "should be dropped",
 			"env_secret_id_SPRITES_API_TOKEN": "secret-123",
 			MetadataKeyIsRemote:               true,
+			MetadataKeyCausingRunID:           "office-run-1",
 		}
 		got := FilterPersistentMetadata(src)
 		require.NotNil(t, got)
 		require.Equal(t, "kandev-abc", got["sprite_name"])
 		require.Equal(t, "secret-123", got["env_secret_id_SPRITES_API_TOKEN"])
 		require.Equal(t, true, got[MetadataKeyIsRemote])
+		require.Equal(t, "office-run-1", got[MetadataKeyCausingRunID])
 		require.NotContains(t, got, "task_description")
 	})
 }
@@ -76,6 +150,23 @@ func TestToAgentExecutionRecordsHistoryForWorkspaceRebindFallback(t *testing.T) 
 	})
 
 	require.True(t, execution.historyEnabled)
+}
+
+func TestToAgentExecutionRecordsHistoryForContextContinuation(t *testing.T) {
+	instance := &ExecutorInstance{InstanceID: "execution"}
+	execution := instance.ToAgentExecution(&ExecutorCreateRequest{
+		ForceContextContinuation: true,
+	})
+
+	require.True(t, execution.historyEnabled)
+}
+
+func TestToAgentExecutionFreezesStartupDisposition(t *testing.T) {
+	metadata := map[string]interface{}{MetadataKeyReuseExistingProcess: true}
+	execution := (&ExecutorInstance{InstanceID: "execution", Metadata: metadata}).ToAgentExecution(&ExecutorCreateRequest{})
+	metadata[MetadataKeyReuseExistingProcess] = false
+
+	require.Equal(t, AgentStartupReattachedExisting, execution.startupDispositionSnapshot())
 }
 
 func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
@@ -93,9 +184,34 @@ func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 	require.Equal(t, "/tmp/kandev-shim:/usr/bin", execution.RuntimeEnvironment()["PATH"])
 }
 
+func TestToAgentExecutionCarriesExecutorTypeForLocalityChecks(t *testing.T) {
+	execution := (&ExecutorInstance{InstanceID: "execution"}).ToAgentExecution(&ExecutorCreateRequest{
+		ExecutorType: string(models.ExecutorTypeWorktree),
+	})
+
+	require.Equal(t, string(models.ExecutorTypeWorktree), execution.ExecutorType)
+	require.Equal(t, string(models.ExecutorTypeWorktree), execution.metadataString(MetadataKeyExecutorType))
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyExecutorType))
+}
+
 func TestToAgentExecutionCapturesRunID(t *testing.T) {
 	execution := (&ExecutorInstance{InstanceID: "execution"}).ToAgentExecution(&ExecutorCreateRequest{
 		Env: map[string]string{"KANDEV_RUN_ID": "run-1"},
 	})
 	require.Equal(t, "run-1", execution.RunID)
+}
+
+func TestToAgentExecutionCarriesCausingRunID(t *testing.T) {
+	execution := (&ExecutorInstance{InstanceID: "execution"}).ToAgentExecution(&ExecutorCreateRequest{
+		Metadata: map[string]interface{}{MetadataKeyCausingRunID: "office-run-1"},
+	})
+	require.Equal(t, "office-run-1", execution.CausingRunID)
+}
+
+func TestToAgentExecutionDoesNotReuseRuntimeCausingRunMetadata(t *testing.T) {
+	execution := (&ExecutorInstance{
+		InstanceID: "execution",
+		Metadata:   map[string]interface{}{MetadataKeyCausingRunID: "stale-office-run"},
+	}).ToAgentExecution(&ExecutorCreateRequest{})
+	require.Empty(t, execution.CausingRunID)
 }

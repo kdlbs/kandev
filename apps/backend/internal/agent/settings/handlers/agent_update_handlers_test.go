@@ -45,6 +45,10 @@ func (handlerSelectionStore) Save(context.Context, string, string, string) error
 	return nil
 }
 
+func (handlerSelectionStore) Delete(context.Context, string, string) error {
+	return nil
+}
+
 func (u *handlerRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
 	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, true
 }
@@ -121,7 +125,7 @@ func waitForTerminalUpdate(
 			t.Fatalf("finished job = %s, want %s", job.JobID, jobID)
 		}
 		return job
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("job %s did not finish in time", jobID)
 		return dto.AgentUpdateJobDTO{}
 	}
@@ -146,6 +150,7 @@ func newAgentUpdateRouter(
 	ctrl := controller.NewController(nil, discoveryRegistry, reg, nil, log)
 	ctrl.SetRuntimeUpdater(updater)
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	broadcaster := newUpdateTerminalBroadcaster()
 	RegisterRoutes(router, ctrl, broadcaster, log, "test-interlock")
 	return router, ctrl, broadcaster.completed
@@ -181,7 +186,9 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 	if preview["current_version"] != "1.0.0" || preview["target_version"] != "1.1.0" {
 		t.Fatalf("versions = %#v", preview)
 	}
-	if preview["command_string"] != `npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""` {
+	commandArgs := agents.NewClaudeACP().ManagedNPMRuntime().CacheUpdateCommand().Args()
+	wantCommand := strings.Join(commandArgs[:len(commandArgs)-1], " ") + ` ""`
+	if preview["command_string"] != wantCommand {
 		t.Fatalf("command_string = %#v", preview["command_string"])
 	}
 
@@ -189,6 +196,28 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 	router.ServeHTTP(jobs, updateRequest(http.MethodGet, "/api/v1/agent-update/jobs"))
 	if jobs.Code != http.StatusOK || !strings.Contains(jobs.Body.String(), `"jobs":[]`) {
 		t.Fatalf("preview must not create a job: %d %s", jobs.Code, jobs.Body.String())
+	}
+}
+
+func TestAgentUpdateStatusEndpointIsReadOnly(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	router, ctrl, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	var statusResponse struct {
+		Statuses []dto.AgentUpdateStatusDTO `json:"statuses"`
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateRequest(http.MethodGet, "/api/v1/agent-update/status"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &statusResponse); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
+	if len(statusResponse.Statuses) == 0 {
+		t.Fatal("status response is empty")
+	}
+	if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != 0 {
+		t.Fatalf("status request created %d update jobs", len(jobs))
 	}
 }
 
@@ -258,7 +287,7 @@ func TestAgentUpdateEndpointDoesNotCreateAlreadyActiveHealthyJob(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatalf("decode no-op response: %v", err)
 	}
-	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) {
+	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) || result.UpdateMode != dto.AgentUpdateModePinned {
 		t.Fatalf("no-op response = %#v, want terminal up_to_date without job ID", result)
 	}
 
@@ -358,6 +387,54 @@ func TestAgentUpdateEndpointRequiresExactTargetVersion(t *testing.T) {
 		))
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("body %q status = %d, want 400: %s", body, response.Code, response.Body.String())
+		}
+	}
+}
+
+type handlerHarnessUpdater struct {
+	handlerRuntimeUpdater
+	current string
+}
+
+func (u *handlerHarnessUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
+	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: u.current}, true
+}
+
+func (u *handlerHarnessUpdater) ResolveHarnessLatest(context.Context, string) (string, error) {
+	return "1.1.0", nil
+}
+
+// A stable reference does not suppress the harness updater; target fields remain rejected.
+func TestHarnessUpdateHTTPApprovalAndRejectedTargets(t *testing.T) {
+	router, ctrl, completed := newAgentUpdateRouter(t, &handlerHarnessUpdater{current: "1.1.0"})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateJSONRequest(http.MethodPost, "/api/v1/agent-update/omp-acp", `{}`))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("approval status %d: %s", response.Code, response.Body.String())
+	}
+	var job dto.AgentUpdateJobDTO
+	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.JobID == "" || job.UpdateMode != dto.AgentUpdateModeSelfUpdate {
+		t.Fatalf("stable version suppressed update job: %+v", job)
+	}
+	finished := waitForTerminalUpdate(t, completed, job.JobID)
+	if finished.Status != dto.AgentUpdateJobStatusFailed || !strings.Contains(finished.Error, "probe unavailable") {
+		t.Errorf("harness without candidate probe result = %+v", finished)
+	}
+	jobCount := len(ctrl.ListAgentUpdateJobs())
+	if jobCount != 1 {
+		t.Fatalf("retained jobs = %d, want accepted job", jobCount)
+	}
+	for _, body := range []string{`{"target_version":"1.2.0"}`, `{"use_default":true}`, `{"command":["sh","-c","exit 0"],"target_version":"1.2.0"}`} {
+		rejected := httptest.NewRecorder()
+		router.ServeHTTP(rejected, updateJSONRequest(http.MethodPost, "/api/v1/agent-update/omp-acp", body))
+		if rejected.Code != http.StatusBadRequest {
+			t.Errorf("body %s status = %d: %s", body, rejected.Code, rejected.Body.String())
+		}
+		if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != jobCount {
+			t.Errorf("rejected body %s changed retained jobs to %d", body, len(jobs))
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kandev/kandev/internal/task/repository"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,6 +38,9 @@ type messageOrchestratorWithCancellation struct {
 }
 
 type cancellationListRepo struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	mockRepository
 	sessionsByTask []*models.TaskSession
 	pendingActions map[string]models.TaskPendingAction
@@ -62,7 +66,7 @@ func (o *orchestratorWithCancellation) CancellationPending(string) bool {
 	return o.pending
 }
 
-func (o messageOrchestratorWithCancellation) CancellationPending(sessionID string) bool {
+func (o *messageOrchestratorWithCancellation) CancellationPending(sessionID string) bool {
 	return o.pendingBySession[sessionID]
 }
 
@@ -185,6 +189,11 @@ func TestTaskSessionSummariesWithPendingActionsCentralizesInputGating(t *testing
 		{ID: "running", TaskID: "task-1", State: models.TaskSessionStateRunning},
 		{ID: "completed", TaskID: "task-1", State: models.TaskSessionStateCompleted},
 	}
+	observations := []*models.TaskSessionSummaryObservation{
+		{ID: "waiting", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput},
+		{ID: "running", TaskID: "task-1", State: models.TaskSessionStateRunning},
+		{ID: "completed", TaskID: "task-1", State: models.TaskSessionStateCompleted},
+	}
 	repo := &cancellationListRepo{
 		mockRepository: mockRepository{sessions: map[string]*models.TaskSession{}},
 		sessionsByTask: sessions,
@@ -202,7 +211,7 @@ func TestTaskSessionSummariesWithPendingActionsCentralizesInputGating(t *testing
 	}, nil, newTestLogger(t), service.RepositoryDiscoveryConfig{})
 	h := &TaskHandlers{service: svc, logger: newTestLogger(t)}
 
-	summaries, err := h.taskSessionSummariesWithPendingActions(context.Background(), sessions)
+	summaries, err := h.taskSessionSummariesWithPendingActions(context.Background(), observations)
 	require.NoError(t, err)
 	require.Len(t, summaries, 3)
 	require.Equal(t, string(models.TaskPendingActionClarification), *summaries[0].PendingAction)

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StorageMaintenanceSettings } from "@/lib/types/system";
-import { StoragePolicyCard } from "./storage-policy-card";
+import { StoragePolicyCard } from "./storage-policy-card-root";
 
 const settings: StorageMaintenanceSettings = {
   enabled: false,
@@ -12,7 +12,12 @@ const settings: StorageMaintenanceSettings = {
   quarantine_retention_hours: 168,
   workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
-  go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+  go_cache: {
+    enabled: false,
+    max_bytes: 16106127360,
+    adopted_path: "",
+    allow_cleanup_while_busy: false,
+  },
   docker: {
     dedicated_daemon_acknowledged: true,
     build_cache_enabled: true,
@@ -164,6 +169,45 @@ describe("External Go cache path", () => {
   });
 });
 
+describe("Temporary artifact policy", () => {
+  it("stages the opt-in scheduled cleanup setting", () => {
+    const onChange = vi.fn();
+    renderCard(false, onChange);
+
+    fireEvent.click(screen.getByTestId("storage-temporary-artifacts-enabled"));
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...settings,
+      temporary_artifacts: { enabled: true },
+    });
+    expect(
+      screen.getAllByText(
+        "Registered diagnostic bundles and utility working folders. Inactive for at least 24 hours.",
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("keeps the manual cleanup action reachable when scheduled cleanup is off", () => {
+    const clean = vi.fn();
+    render(
+      <TooltipProvider>
+        <StoragePolicyCard
+          settings={settings}
+          savedSettings={settings}
+          capabilities={capabilities}
+          pending={false}
+          onChange={vi.fn()}
+          onAdopt={vi.fn()}
+          onCleanTemporaryArtifacts={clean}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("storage-policy-temporary-artifacts-clean"));
+    expect(clean).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("StoragePolicyCard", () => {
   it("shows the dependency allowlist and keeps cleanup opt-in", () => {
     const onChange = renderCard();
@@ -306,7 +350,7 @@ describe("StoragePolicyCard dependency action", () => {
   });
 });
 
-describe("StoragePolicyCard interactions", () => {
+describe("StoragePolicyCard pending interactions", () => {
   it("disables policy controls while an action is pending", () => {
     renderCard(true);
 
@@ -339,7 +383,9 @@ describe("StoragePolicyCard interactions", () => {
       true,
     );
   });
+});
 
+describe("StoragePolicyCard interactions", () => {
   it("disables child fields when their cleanup option is off", () => {
     renderCard(false, vi.fn(), {
       ...settings,
@@ -376,7 +422,14 @@ describe("StoragePolicyCard interactions", () => {
   it("renders each maintenance group as a separate card", () => {
     renderCard();
 
-    for (const section of ["schedule", "workspaces", "go-cache", "docker", "quarantine"]) {
+    for (const section of [
+      "schedule",
+      "workspaces",
+      "go-cache",
+      "docker",
+      "quarantine",
+      "temporary-artifacts",
+    ]) {
       expect(
         screen.getByTestId(`storage-policy-section-${section}`).getAttribute("data-slot"),
       ).toBe("card");
@@ -404,10 +457,11 @@ describe("StoragePolicyCard interactions", () => {
       "Go build cache",
       "Docker cleanup",
       "Quarantine safety",
+      "Temporary Kandev files",
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }
-    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(18);
+    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(20);
   });
 });
 
@@ -456,5 +510,38 @@ describe("Go cache section copy", () => {
     expect(
       screen.getByText(`New host-local executions use ${capabilities.managed_go_cache_path}.`),
     ).toBeTruthy();
+  });
+
+  it("shows the busy-cleanup warning and saves the Go-only policy switch", () => {
+    const onChange = vi.fn();
+    renderCard(false, onChange);
+
+    expect(screen.getByTestId("storage-go-cache-busy-warning").textContent).toContain(
+      "Active builds may fail and need a retry.",
+    );
+    const toggle = screen.getByTestId("storage-go-cache-allow-busy");
+    expect(toggle.getAttribute("data-state")).toBe("unchecked");
+    expect(toggle.className).toContain("max-md:!h-11");
+    fireEvent.click(toggle);
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...settings,
+      go_cache: { ...settings.go_cache, allow_cleanup_while_busy: true },
+    });
+  });
+
+  it("marks the section dirty when the persisted busy-cleanup choice changes", () => {
+    const draft = {
+      ...settings,
+      go_cache: { ...settings.go_cache, allow_cleanup_while_busy: true },
+    };
+    renderCard(false, vi.fn(), draft, settings);
+
+    expect(
+      screen.getByTestId("storage-policy-section-go-cache").getAttribute("data-settings-dirty"),
+    ).toBe("true");
+    expect(
+      screen.getByTestId("storage-go-cache-allow-busy").getAttribute("data-settings-dirty"),
+    ).toBe("true");
   });
 });

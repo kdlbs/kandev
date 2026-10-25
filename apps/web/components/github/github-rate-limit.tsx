@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 import type { Locale } from "date-fns";
 import { IconAlertTriangle, IconGauge } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
-import type { GitHubRateLimitInfo, GitHubRateLimitSnapshot } from "@/lib/types/github";
+import type {
+  GitHubPRDiscoveryHealth,
+  GitHubRateLimitInfo,
+  GitHubRateLimitSnapshot,
+} from "@/lib/types/github";
 import { GitHubAccessHelp } from "./github-access-help";
+import { GitHubPRDiscoveryHealthDetails } from "./github-pr-discovery-health";
 import { useTranslation } from "react-i18next";
 // Locale-aware digit grouping; `toLocaleString("en-US")` pinned it to English.
 import { formatNumber } from "@/lib/i18n/formats";
@@ -60,9 +65,11 @@ function snapshotsFromInfo(info: GitHubRateLimitInfo): GitHubRateLimitSnapshot[]
 
 export function GitHubRateLimitDisplay({
   info,
+  discoveryHealth,
   onOpen,
 }: {
   info?: GitHubRateLimitInfo;
+  discoveryHealth?: GitHubPRDiscoveryHealth;
   onOpen?: () => void;
 }) {
   const { t } = useTranslation();
@@ -77,8 +84,13 @@ export function GitHubRateLimitDisplay({
       description={t("github:currentGithubApiRateAndQuery")}
       icon={<IconGauge className="h-4 w-4" data-testid="github-rate-limit-icon" />}
       content={
-        snapshots.length > 0 ? (
-          <RateLimitDetails snapshots={snapshots} exhausted={exhausted} />
+        snapshots.length > 0 || discoveryHealth?.state === "degraded" ? (
+          <div className="space-y-3">
+            <GitHubPRDiscoveryHealthDetails health={discoveryHealth} />
+            {snapshots.length > 0 && (
+              <RateLimitDetails snapshots={snapshots} exhausted={exhausted} />
+            )}
+          </div>
         ) : undefined
       }
       onOpen={onOpen}

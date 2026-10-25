@@ -1,9 +1,10 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dwell } from "../helpers/causal-waits";
+import { runFixtureCommand } from "./fixture-command";
 
 /**
  * Image used by the Docker E2E project. Built once per machine and reused.
@@ -15,21 +16,26 @@ export const E2E_ALPINE_IMAGE_TAG = "kandev-agent:e2e-alpine";
 /** Label value shared by resources created in this Playwright process. */
 export const E2E_DOCKER_SCOPE = `e2e-${process.pid}-${randomUUID().slice(0, 8)}`;
 const FAKE_LSP_SERVER = path.resolve(__dirname, "fake-lsp-server.mjs");
+const MANAGED_RUNTIME_NPX_WRAPPER = path.resolve(__dirname, "managed-runtime-npx.sh");
 const SCOPED_CONTAINER_CLEANUP_TIMEOUT_MS = 30_000;
 const SCOPED_CONTAINER_CLEANUP_POLL_MS = 250;
 const SCOPED_CONTAINER_CLEANUP_EMPTY_POLLS = 8;
 
 const E2E_DOCKERFILE = `FROM node:22-slim
 RUN apt-get update \\
- && apt-get install -y --no-install-recommends git ca-certificates curl \\
+ && apt-get install -y --no-install-recommends git ca-certificates curl bubblewrap \\
  && rm -rf /var/lib/apt/lists/*
 COPY --chmod=0755 fake-lsp-server.mjs /usr/local/bin/kotlin-lsp
+RUN rm -f /usr/local/bin/npx
+COPY --chmod=0755 managed-runtime-npx.sh /usr/local/bin/npx
 WORKDIR /workspace
 `;
 
 const E2E_ALPINE_DOCKERFILE = `FROM alpine:latest
 RUN apk add --no-cache bash ca-certificates curl git nodejs npm
 COPY --chmod=0755 fake-lsp-server.mjs /usr/local/bin/kotlin-lsp
+RUN rm -f /usr/local/bin/npx
+COPY --chmod=0755 managed-runtime-npx.sh /usr/local/bin/npx
 WORKDIR /workspace
 `;
 
@@ -64,9 +70,8 @@ function buildImage(tag: string, dockerfile: string): void {
   try {
     fs.writeFileSync(path.join(tmpDir, "Dockerfile"), dockerfile);
     fs.copyFileSync(FAKE_LSP_SERVER, path.join(tmpDir, "fake-lsp-server.mjs"));
-    execFileSync("docker", ["build", "-t", tag, tmpDir], {
-      stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
-    });
+    fs.copyFileSync(MANAGED_RUNTIME_NPX_WRAPPER, path.join(tmpDir, "managed-runtime-npx.sh"));
+    runFixtureCommand("docker", ["build", "-t", tag, tmpDir]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

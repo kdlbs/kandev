@@ -29,7 +29,7 @@ func TestPostgresTaskStatusSummarySchemaReplay(t *testing.T) {
 	if _, err := db.Exec(`DROP TABLE task_status_summaries`); err != nil {
 		t.Fatalf("drop summary table to simulate legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay postgres migrations: %v", err)
 	}
 
@@ -118,6 +118,17 @@ func TestPostgresTaskLastActivityBatch(t *testing.T) {
 		Content: "queued agent prompt", QueuedAt: base.Add(6 * time.Hour), QueuedBy: messagequeue.QueuedByAgent,
 	}, 10); err != nil {
 		t.Fatalf("insert postgres queued agent prompt: %v", err)
+	}
+	lifecycleCompletedAt := base.Add(8 * time.Hour)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-activity-postgres-lifecycle",
+		TaskSessionID: "session-activity-postgres",
+		TaskID:        "task-activity-postgres",
+		StartedAt:     base.Add(7 * time.Hour),
+		CompletedAt:   &lifecycleCompletedAt,
+		Metadata:      map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	}); err != nil {
+		t.Fatalf("create postgres lifecycle turn: %v", err)
 	}
 
 	got, err := repo.LoadTaskLastActivity(ctx, []string{"task-activity-postgres"})

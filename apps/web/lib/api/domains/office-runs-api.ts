@@ -58,6 +58,9 @@ export type RunRuntimeDetail = {
   session_id?: string;
   skills: Array<{
     skill_id: string;
+    display_name?: string;
+    slug?: string;
+    label_source?: string;
     version: string;
     content_hash: string;
     materialized_path: string;
@@ -81,6 +84,8 @@ export type RunRouting = {
   resolved_provider_id?: string;
   resolved_model?: string;
   blocked_status?: string;
+  session_recovery_block_id?: string;
+  session_recovery_reason?: string;
   earliest_retry_at?: string;
   attempts: RouteAttempt[];
 };
@@ -89,6 +94,7 @@ export type RunDetail = {
   id: string;
   id_short: string;
   agent_id: string;
+  agent_name?: string;
   reason: string;
   status: "queued" | "claimed" | "finished" | "failed" | "cancelled";
   cancel_reason?: string;
@@ -111,6 +117,8 @@ export type RunDetail = {
   summary_injected?: string;
   result_json?: string;
   context_snapshot?: string;
+  // Persisted when the run is created. Identifies the continuation-summary chain.
+  continuation_scope?: string;
   output_summary?: string;
   // Routing snapshot — omitted for legacy concrete-profile runs.
   routing?: RunRouting;
@@ -155,6 +163,8 @@ export type AgentLatestRun = {
 export type AgentRunActivityDay = {
   date: string;
   succeeded: number;
+  skipped: number;
+  unclassified: number;
   failed: number;
   other: number;
   total: number;
@@ -182,6 +192,7 @@ export type AgentTaskStatusDay = {
 export type AgentSuccessRateDay = {
   date: string;
   succeeded: number;
+  unclassified: number;
   total: number;
 };
 

@@ -34,9 +34,17 @@ type ProfileConfig struct {
 	ProfileName string               `json:"profile_name,omitempty"`
 	AgentID     string               `json:"agent_id,omitempty"`
 	AgentName   string               `json:"agent_name,omitempty"`
+	WorkspaceID string               `json:"-"`
 	Enabled     bool                 `json:"enabled"`
 	Servers     map[string]ServerDef `json:"servers"`
 	Meta        map[string]any       `json:"meta,omitempty"`
+}
+
+// ConfigPatch contains only the MCP document fields that can be changed by a
+// partial settings update. A nil pointer means that the field is preserved.
+type ConfigPatch struct {
+	Enabled *bool
+	Servers *map[string]ServerDef
 }
 
 type ResolvedServer struct {
@@ -48,6 +56,11 @@ type ResolvedServer struct {
 	Env     map[string]string
 	URL     string
 	Headers map[string]string
+	// Definition identity and origins are backend-owned evidence metadata.
+	// They are not part of the provider MCP protocol payload.
+	DefinitionID       string
+	DefinitionRevision int64
+	Origins            []SelectionOrigin
 }
 
 // Policy controls which MCP transports are allowed and how they should be rewritten.

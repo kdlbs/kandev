@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/archive-confirmation.md
+spec: docs/specs/tasks/requirements/archive-confirmation.md
 created: 2026-08-12
 status: complete
 ---
@@ -7,6 +7,11 @@ status: complete
 # Implementation Plan: Cascade Archive Navigation
 
 ## Overview
+
+Follow-up: [Task removal navigation](../task-removal-navigation/plan.md) replaces
+the visible wait on the outgoing task, strengthens navigation ownership, and
+extends protection to deletion. This completed package and its recorded test
+counts describe the earlier implementation; they are not new verification evidence.
 
 Make the shared archive switch logic aware of the full task tree selected by a
 cascade archive. The client will select only a live task outside that tree. If

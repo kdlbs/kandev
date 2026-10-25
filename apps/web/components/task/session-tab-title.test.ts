@@ -52,17 +52,17 @@ describe("resolveSessionTabTitle", () => {
     ).toBe(SPARK_MODEL_NAME);
   });
 
-  it("uses the live model config value when the generic current model is stale", () => {
+  it("prefers the authoritative current model over a contradictory model option", () => {
     expect(
       resolveSessionTabTitle({
         ...baseArgs,
-        currentModelId: DEFAULT_MODEL_ID,
+        currentModelId: SPARK_MODEL_ID,
         configOptions: [
           {
             type: "select",
             id: "model",
             name: "Model",
-            currentValue: SPARK_MODEL_ID,
+            currentValue: DEFAULT_MODEL_ID,
             options: [
               { value: DEFAULT_MODEL_ID, name: "Mock Default" },
               { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-log-failed-diagram-source"]
 plan: "plan.md"
-spec: "../../specs/ui/mermaid-rendering.md"
+spec: "../../specs/ui/requirements/mermaid-rendering.md"
 ---
 
 # Task 03: Deduplicate Task Mermaid Error Toasts
@@ -56,7 +56,7 @@ its streaming tests.
 
 ## Inputs
 
-- `docs/specs/ui/mermaid-rendering.md`
+- `docs/specs/ui/requirements/mermaid-rendering.md`
 - `docs/plans/mermaid-sequence-semicolon-rendering/plan.md`
 - `apps/web/AGENTS.md`
 - `.agents/skills/tdd/SKILL.md`

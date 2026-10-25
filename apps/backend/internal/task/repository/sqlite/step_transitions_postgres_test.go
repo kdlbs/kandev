@@ -5,6 +5,7 @@ package sqlite
 // KANDEV_TEST_POSTGRES_DSN is set; CI runs these in postgres-boot.
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -41,5 +42,20 @@ func TestPostgresStepTransitionsSchemaCreatesTableAndIsReplaySafe(t *testing.T) 
 	}
 	if err := repo.initStepTransitionsSchema(); err != nil {
 		t.Fatalf("replay initStepTransitionsSchema twice: %v", err)
+	}
+	for _, name := range []string{"idx_task_step_transitions_task_id", "idx_task_step_transitions_from_workflow", "idx_task_step_transitions_to_workflow"} {
+		var indexCount int
+		if err := db.Get(&indexCount, `SELECT COUNT(*) FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`, name); err != nil || indexCount != 1 {
+			t.Fatalf("index %s: count=%d err=%v", name, indexCount, err)
+		}
+	}
+	if _, err := db.Exec(db.Rebind(`INSERT INTO task_step_transitions
+		(task_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, contract_version, occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`), "task-pre-ledger-pg", "wf-pg", "draft", "test", "system", 1, now); err != nil {
+		t.Fatal(err)
+	}
+	groups, err := repo.ListWorkflowTransitionGroups(context.Background(), "ws-pre-ledger-pg", "wf-pg", "", 10)
+	if err != nil || len(groups) != 1 || groups[0].Kind != "entry" {
+		t.Fatalf("postgres groups = %+v, err=%v", groups, err)
 	}
 }

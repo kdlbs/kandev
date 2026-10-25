@@ -3,7 +3,7 @@ package sqlite
 import (
 	"fmt"
 
-	"github.com/kandev/kandev/internal/db/dialect"
+	internaldb "github.com/kandev/kandev/internal/db"
 )
 
 // dropRetiredSlackIntegration removes the storage the in-tree Slack
@@ -20,7 +20,9 @@ import (
 // migrations run before secrets.Provide creates it, and a fresh database has
 // nothing to clean up anyway.
 func (r *Repository) dropRetiredSlackIntegration() error {
-	r.migrate.Apply("drop_slack_configs", `DROP TABLE IF EXISTS slack_configs`)
+	if err := r.migrate.Apply("drop_slack_configs", `DROP TABLE IF EXISTS slack_configs`); err != nil {
+		return fmt.Errorf("drop retired slack configs: %w", err)
+	}
 	exists, err := r.secretsTableExists()
 	if err != nil {
 		return fmt.Errorf("drop retired slack integration: %w", err)
@@ -30,7 +32,9 @@ func (r *Repository) dropRetiredSlackIntegration() error {
 	}
 	// LIKE with a literal pattern rather than a bound parameter: this file is
 	// shared with PostgreSQL, whose placeholder syntax differs from SQLite's.
-	r.migrate.Apply("delete_slack_secrets", `DELETE FROM secrets WHERE id LIKE 'slack:%'`)
+	if err := r.migrate.Apply("delete_slack_secrets", `DELETE FROM secrets WHERE id LIKE 'slack:%'`); err != nil {
+		return fmt.Errorf("delete retired slack secrets: %w", err)
+	}
 	return nil
 }
 
@@ -39,13 +43,5 @@ func (r *Repository) dropRetiredSlackIntegration() error {
 // initialize independently, and on a fresh boot this repository's migrations
 // run first — so "absent" is the normal fresh-install case, not an error.
 func (r *Repository) secretsTableExists() (bool, error) {
-	query := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'secrets'`
-	if dialect.IsPostgres(r.db.DriverName()) {
-		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'secrets'`
-	}
-	var count int
-	if err := r.db.QueryRow(query).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	return internaldb.TableExists(r.db, "secrets")
 }

@@ -6,10 +6,6 @@ import type {
   ListAgentDiscoveryResponse,
   ListAvailableAgentsResponse,
   AgentProfileMcpConfig,
-  ListExecutorsResponse,
-  ListExecutorProfilesResponse,
-  ExecutorProfile,
-  ProfileEnvVar,
   NotificationProvidersResponse,
   NotificationProvider,
   EditorsResponse,
@@ -42,6 +38,7 @@ export {
   startHostShell,
   stopAgentLogin,
 } from "./host-shell-api";
+export { probeAgentProfile } from "./profile-capability-api";
 export type { AgentLoginSession, HostShellStartOptions } from "./host-shell-api";
 
 // User settings
@@ -103,151 +100,33 @@ export async function updateMessageQueueSettings(
     },
   });
 }
+export {
+  fetchSessionCapacitySettings,
+  updateSessionCapacitySettings,
+} from "./session-capacity-api";
 
-// Executors
-export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {
-  return fetchJson<ListExecutorsResponse>("/api/v1/executors", options);
-}
-
-export async function fetchExecutor(
-  executorId: string,
-  options?: ApiRequestOptions,
-): Promise<{ id: string; name: string; type: string; config?: Record<string, string> }> {
-  return fetchJson<{ id: string; name: string; type: string; config?: Record<string, string> }>(
-    `/api/v1/executors/${executorId}`,
-    options,
-  );
-}
-
-export async function createExecutor(
-  payload: {
-    name: string;
-    type: string;
-    config?: Record<string, string>;
-  },
-  options?: ApiRequestOptions,
-): Promise<{ id: string; name: string; type: string; config?: Record<string, string> }> {
-  return fetchJson<{ id: string; name: string; type: string; config?: Record<string, string> }>(
-    "/api/v1/executors",
-    {
-      ...options,
-      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-    },
-  );
-}
-
-export async function updateExecutor(
-  executorId: string,
-  payload: { name?: string; config?: Record<string, string> },
-  options?: ApiRequestOptions,
-): Promise<void> {
-  await fetchJson<void>(`/api/v1/executors/${executorId}`, {
-    ...options,
-    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-  });
-}
-
-// Executor profiles
-export async function listExecutorProfiles(
-  executorId: string,
-  options?: ApiRequestOptions,
-): Promise<ListExecutorProfilesResponse> {
-  return fetchJson<ListExecutorProfilesResponse>(
-    `/api/v1/executors/${executorId}/profiles`,
-    options,
-  );
-}
-
-export async function listAllExecutorProfiles(
-  options?: ApiRequestOptions,
-): Promise<ListExecutorProfilesResponse> {
-  return fetchJson<ListExecutorProfilesResponse>("/api/v1/executor-profiles", options);
-}
-
-export type ScriptPlaceholder = {
-  key: string;
-  description: string;
-  example: string;
-  executor_types: string[];
-};
-
-export async function listScriptPlaceholders(
-  options?: ApiRequestOptions,
-): Promise<{ placeholders: ScriptPlaceholder[] }> {
-  return fetchJson<{ placeholders: ScriptPlaceholder[] }>("/api/v1/script-placeholders", options);
-}
-
-export async function fetchDefaultScripts(
-  executorType: string,
-  options?: ApiRequestOptions,
-): Promise<{ prepare_script: string; cleanup_script: string }> {
-  return fetchJson<{ prepare_script: string; cleanup_script: string }>(
-    `/api/v1/executor-profiles/default-script?type=${encodeURIComponent(executorType)}`,
-    options,
-  );
-}
-
-export async function createExecutorProfile(
-  executorId: string,
-  payload: {
-    name: string;
-    mcp_policy?: string;
-    config?: Record<string, string>;
-    prepare_script?: string;
-    cleanup_script?: string;
-    env_vars?: ProfileEnvVar[];
-  },
-  options?: ApiRequestOptions,
-): Promise<ExecutorProfile> {
-  return fetchJson<ExecutorProfile>(`/api/v1/executors/${executorId}/profiles`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-  });
-}
-
-export async function updateExecutorProfile(
-  executorId: string,
-  profileId: string,
-  payload: {
-    name?: string;
-    mcp_policy?: string;
-    config?: Record<string, string>;
-    prepare_script?: string;
-    cleanup_script?: string;
-    env_vars?: ProfileEnvVar[];
-  },
-  options?: ApiRequestOptions,
-): Promise<ExecutorProfile> {
-  return fetchJson<ExecutorProfile>(`/api/v1/executors/${executorId}/profiles/${profileId}`, {
-    ...options,
-    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-  });
-}
-
-export async function deleteExecutorProfile(
-  executorId: string,
-  profileId: string,
-  options?: ApiRequestOptions,
-): Promise<{ success: boolean }> {
-  return fetchJson<{ success: boolean }>(`/api/v1/executors/${executorId}/profiles/${profileId}`, {
-    ...options,
-    init: { method: "DELETE", ...(options?.init ?? {}) },
-  });
-}
+export {
+  listExecutors,
+  fetchExecutor,
+  createExecutor,
+  updateExecutor,
+  deleteExecutor,
+  listExecutorProfiles,
+  listAllExecutorProfiles,
+  listScriptPlaceholders,
+  fetchDefaultScripts,
+  createExecutorProfile,
+  updateExecutorProfile,
+  deleteExecutorProfile,
+} from "./executor-api";
+export type { ScriptPlaceholder } from "./executor-api";
 
 // Agents
-import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
-
-function normalizeAgentResponse(agent: Agent): Agent {
-  return {
-    ...agent,
-    profiles: (agent.profiles ?? []).map((profile) => normalizeAgentProfile(profile)),
-  };
-}
+import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 
 export async function listAgents(options?: ApiRequestOptions): Promise<ListAgentsResponse> {
   const res = await fetchJson<ListAgentsResponse>("/api/v1/agents", options);
-  return { ...res, agents: (res.agents ?? []).map(normalizeAgentResponse) };
+  return { ...res, agents: (res.agents ?? []).map(normalizeAgentProfiles) };
 }
 
 export async function listAgentDiscovery(
@@ -282,6 +161,11 @@ export type CommandPreviewResponse = {
   supported: boolean;
   command: string[];
   command_string: string;
+  /**
+   * Which process the profile's CLI flags are appended to. Over ACP that is the
+   * bridge, not the agent CLI it wraps.
+   */
+  flag_destination?: "agent_cli" | "acp_bridge";
 };
 
 export async function previewAgentCommand(
@@ -339,6 +223,8 @@ export async function createCustomTUIAgent(
     command: string;
     description?: string;
     mcp_strategy?: string;
+    protocol?: string;
+    disable_bracketed_paste?: boolean;
   },
   options?: ApiRequestOptions,
 ): Promise<Agent> {
@@ -346,7 +232,7 @@ export async function createCustomTUIAgent(
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
-  return normalizeAgentResponse(res);
+  return normalizeAgentProfiles(res);
 }
 
 /**
@@ -381,7 +267,7 @@ export async function updateCustomTUIAgentMCPStrategy(
       ...(options?.init ?? {}),
     },
   });
-  return normalizeAgentResponse(res);
+  return normalizeAgentProfiles(res);
 }
 
 export async function fetchDynamicModels(
@@ -464,7 +350,7 @@ export async function createPrompt(
 
 export async function updatePrompt(
   promptId: string,
-  payload: { name?: string; content?: string },
+  payload: { name?: string; content?: string; allow_agent_edits?: boolean },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<CustomPrompt>(`/api/v1/prompts/${promptId}`, {

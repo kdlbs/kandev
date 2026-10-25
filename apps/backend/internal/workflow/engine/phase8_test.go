@@ -206,18 +206,18 @@ func (f *fakeWorkflowSwitcher) SwitchTaskWorkflow(ctx context.Context, taskID, w
 // dispatchRecorder captures DispatchTriggerFn invocations for assertions.
 type dispatchRecorder struct {
 	calls []struct {
-		TaskID, SessionID, OperationID string
-		Trigger                        Trigger
+		TaskID, SessionID, OperationID, SourceStepID string
+		Trigger                                      Trigger
 	}
 	err error
 }
 
 func (d *dispatchRecorder) fn() DispatchTriggerFn {
-	return func(_ context.Context, taskID, sessionID string, trigger Trigger, opID string) error {
+	return func(_ context.Context, taskID, sessionID string, trigger Trigger, opID, sourceStepID string) error {
 		d.calls = append(d.calls, struct {
-			TaskID, SessionID, OperationID string
-			Trigger                        Trigger
-		}{TaskID: taskID, SessionID: sessionID, OperationID: opID, Trigger: trigger})
+			TaskID, SessionID, OperationID, SourceStepID string
+			Trigger                                      Trigger
+		}{TaskID: taskID, SessionID: sessionID, OperationID: opID, SourceStepID: sourceStepID, Trigger: trigger})
 		return d.err
 	}
 }
@@ -265,6 +265,9 @@ func TestSwitchWorkflowCallback_HappyPath(t *testing.T) {
 	// Idempotency keys must be distinct so on_exit and on_enter both apply.
 	if rec.calls[0].OperationID == rec.calls[1].OperationID {
 		t.Errorf("on_exit and on_enter share operation id %q", rec.calls[0].OperationID)
+	}
+	if rec.calls[0].SourceStepID != "old-step" || rec.calls[1].SourceStepID != "old-step" {
+		t.Errorf("source step IDs = %q/%q, want old-step on both dispatches", rec.calls[0].SourceStepID, rec.calls[1].SourceStepID)
 	}
 }
 

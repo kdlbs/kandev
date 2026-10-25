@@ -14,9 +14,12 @@ export type FileBrowserHeaderProps = {
   expandedPathsSize: number;
   onCopyPath: (value: string) => void | Promise<void>;
   onStartCreate?: () => void;
-  onOpenFolder: () => void;
+  onOpenFolder: (opener?: HTMLButtonElement) => void;
+  isOpeningFolder?: boolean;
+  isFolderDisabled?: boolean;
   onCollapseAll: () => void;
   showCreateButton: boolean;
+  onUploadFiles?: (mode: "files" | "folder") => void;
   onAddSources?: (opener: HTMLButtonElement) => void;
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
   addSourcesDisabledReason?: string;
@@ -32,8 +35,11 @@ export function FileBrowserHeader({
   onCopyPath,
   onStartCreate,
   onOpenFolder,
+  isOpeningFolder,
+  isFolderDisabled,
   onCollapseAll,
   showCreateButton,
+  onUploadFiles,
   onAddSources,
   addSourcesButtonRef,
   addSourcesDisabledReason,
@@ -59,9 +65,12 @@ export function FileBrowserHeader({
       onCopyPath={onCopyPath}
       onStartCreate={onStartCreate}
       onOpenFolder={onOpenFolder}
+      isOpeningFolder={isOpeningFolder}
+      isFolderDisabled={isFolderDisabled}
       onStartSearch={() => search.setIsSearchActive(true)}
       onCollapseAll={onCollapseAll}
       showCreateButton={showCreateButton}
+      onUploadFiles={onUploadFiles}
       onAddSources={onAddSources}
       addSourcesButtonRef={addSourcesButtonRef}
       addSourcesDisabledReason={addSourcesDisabledReason}

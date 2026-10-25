@@ -2,19 +2,43 @@ import React, { createRef } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
+import { setChatDraftAttachments } from "@/lib/local-storage";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
+import { ComposerDisclosureContext } from "./composer-disclosure";
+import { useComposerDisclosure } from "./use-composer-disclosure";
+import * as files from "./file-attachment";
 
 const callerPlaceholder = "Continue working on the task...";
+const STAGED_ATTACHMENT_ID = "staged-attachment";
 
-function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
-  return renderHook(
-    () =>
+function renderInputState(
+  overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {},
+  autoHide = false,
+) {
+  const chatInputRef = createRef<ChatInputContainerHandle>();
+  let disclosure: ReturnType<typeof useComposerDisclosure>;
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    disclosure = useComposerDisclosure({ enabled: autoHide, sessionId: "session-1" });
+    return React.createElement(
+      ToastProvider,
+      null,
+      React.createElement(
+        ComposerDisclosureContext,
+        { value: autoHide ? disclosure : null },
+        children,
+      ),
+    );
+  }
+  const hook = renderHook(
+    (currentOverrides: Partial<Parameters<typeof useChatInputContainer>[0]>) =>
       useChatInputContainer({
-        ref: createRef<ChatInputContainerHandle>(),
+        ref: chatInputRef,
         sessionId: "session-1",
+        taskId: null,
         isSending: false,
         isStarting: false,
+        canQueueWhileStarting: false,
         isPreparingEnvironment: false,
         isMoving: false,
         isFailed: false,
@@ -32,26 +56,167 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
         showRequestChangesTooltip: false,
         onRequestChangesTooltipDismiss: undefined,
         onSubmit: vi.fn(),
-        ...overrides,
+        ...currentOverrides,
       }),
     {
-      wrapper: ({ children }) => React.createElement(ToastProvider, null, children),
+      initialProps: overrides,
+      wrapper: Wrapper,
     },
   );
+  return { ...hook, chatInputRef, disclosure: () => disclosure };
 }
 
+describe("useChatInputContainer disclosure activity", () => {
+  it("holds the composer while files are being processed before attachments exist", async () => {
+    localStorage.clear();
+    let finish!: (value: null) => void;
+    const processing = new Promise<null>((resolve) => {
+      finish = resolve;
+    });
+    const process = vi.spyOn(files, "processFile").mockReturnValueOnce(processing);
+    try {
+      const { result, disclosure } = renderInputState({}, true);
+      let added!: Promise<void>;
+      act(() => {
+        added = result.current.addFiles([new File(["draft"], "draft.txt")]);
+      });
+      expect(disclosure().expanded).toBe(true);
+      expect(disclosure().canCollapse).toBe(false);
+      await act(async () => {
+        finish(null);
+        await added;
+      });
+      expect(disclosure().canCollapse).toBe(true);
+    } finally {
+      process.mockRestore();
+      finish(null);
+    }
+  });
+
+  // @covers AC-UI-THREADS-DECK-005.4
+  it("reports native draft and context-picker activity to the Threads owner", () => {
+    localStorage.clear();
+    const { result, disclosure } = renderInputState({}, true);
+    expect(disclosure().expanded).toBe(false);
+    act(() => result.current.handleChange("kept draft"));
+    expect(disclosure().expanded).toBe(true);
+    act(() => disclosure().collapse());
+    expect(disclosure().expanded).toBe(false);
+    expect(result.current.value).toBe("kept draft");
+    act(() => {
+      disclosure().reveal();
+      result.current.setContextPopoverOpen(true);
+    });
+    expect(disclosure().expanded).toBe(true);
+  });
+
+  it.each(["isSending", "needsRecovery", "isFailed", "executorUnavailable"] as const)(
+    "forces the composer open and prevents collapse during %s",
+    (flag) => {
+      const { disclosure } = renderInputState({ [flag]: true }, true);
+      expect(disclosure().expanded).toBe(true);
+      expect(disclosure().canCollapse).toBe(false);
+    },
+  );
+});
+
+describe("useChatInputContainer opening attachment recovery", () => {
+  it("restores rejected opening attachment descriptors through the mounted handle", async () => {
+    localStorage.clear();
+    const attachment = {
+      type: "resource" as const,
+      attachment_id: STAGED_ATTACHMENT_ID,
+      mime_type: "text/plain",
+      name: "notes.txt",
+      size_bytes: 7,
+      delivery_mode: "path" as const,
+    };
+    const { chatInputRef } = renderInputState({ workspaceId: "workspace-1" });
+
+    act(() => {
+      setChatDraftAttachments("session-1", [
+        {
+          id: STAGED_ATTACHMENT_ID,
+          attachmentId: STAGED_ATTACHMENT_ID,
+          expiresAt: "2030-01-01T00:00:00.000Z",
+          mimeType: "text/plain",
+          fileName: "notes.txt",
+          size: 7,
+          isImage: false,
+          deliveryMode: "path",
+        },
+      ]);
+      chatInputRef.current?.restoreStagedAttachments?.([attachment]);
+    });
+
+    await waitFor(() =>
+      expect(chatInputRef.current?.getAttachments()).toEqual([
+        expect.objectContaining({
+          attachment_id: STAGED_ATTACHMENT_ID,
+          name: "notes.txt",
+          delivery_mode: "path",
+        }),
+      ]),
+    );
+  });
+});
+
+describe("useChatInputContainer restart", () => {
+  // @covers AC-TASKS-SESSION-TAB-RESTART-001.6
+  it("blocks restart submission while keeping a draft editable and defers to recovery afterward", () => {
+    const draftText = "draft kept during restart";
+    localStorage.clear();
+    const { result, rerender } = renderInputState({
+      isRestarting: true,
+      canQueueWhileStarting: true,
+    });
+    act(() => {
+      result.current.handleChange(draftText);
+    });
+
+    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.submitDisabled).toBe(true);
+    expect(result.current.submitDisabledReason).toBe("Restarting session...");
+    expect(result.current.value).toBe(draftText);
+
+    rerender({ isRestarting: false, needsRecovery: true });
+    expect(result.current.submitDisabled).toBe(true);
+    expect(result.current.value).toBe(draftText);
+
+    rerender({ isRestarting: false });
+    expect(result.current.submitDisabled).toBe(false);
+    expect(result.current.value).toBe(draftText);
+  });
+});
+
 describe("useChatInputContainer", () => {
-  it("disables the editor while the session is still STARTING", () => {
-    // The editor must stay uneditable until the agent reaches RUNNING — if
-    // the user can press Cmd+Enter mid-startup, the backend rejects with
-    // "Failed to send message to agent" because the agent process isn't
-    // ready yet. This is the regression from earlier rounds where the e2e
-    // quick-chat suite kept failing on race conditions.
+  it("@covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1 keeps editing available while startup blocks submission", () => {
     const { result } = renderInputState({ isStarting: true });
 
-    expect(result.current.isDisabled).toBe(true);
+    expect(result.current.isDisabled).toBe(false);
     expect(result.current.submitDisabled).toBe(true);
     expect(result.current.submitDisabledReason).toBeUndefined();
+  });
+
+  it("enables startup submission only when the selected session can queue", () => {
+    const { result } = renderInputState({ isStarting: true, canQueueWhileStarting: true });
+
+    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.submitDisabled).toBe(false);
+  });
+
+  it("preserves draft text when startup transitions to failed recovery", () => {
+    const { result, rerender } = renderInputState({ isStarting: true });
+
+    act(() => {
+      result.current.handleChange("my draft");
+    });
+
+    rerender({ isStarting: false, isFailed: true });
+
+    expect(result.current.value).toBe("my draft");
+    expect(result.current.isDisabled).toBe(true);
+    expect(result.current.submitDisabled).toBe(true);
   });
 
   it("surfaces the setup tooltip only while a container/sandbox is preparing", () => {

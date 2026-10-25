@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow-session-settings/spec.md
+spec: docs/specs/tasks/requirements/workflow-session-settings.md
 decision: docs/decisions/2026-08-01-workflow-session-original-configuration.md
 created: 2026-08-01
 status: complete

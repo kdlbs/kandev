@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/task-create-executor-default.md"
+spec: "../../specs/tasks/requirements/task-create-executor-default.md"
 ---
 
 # Task 01: Reset Executor on Source Transition

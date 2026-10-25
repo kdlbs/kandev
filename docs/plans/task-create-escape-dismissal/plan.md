@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/task-create-escape-dismissal.md
+spec: docs/specs/tasks/requirements/task-create-escape-dismissal.md
 created: 2026-08-19
 status: complete
 ---

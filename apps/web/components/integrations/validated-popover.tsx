@@ -91,7 +91,6 @@ function TriggerButton({
     return (
       <Button
         type="button"
-        size="sm"
         variant="outline"
         disabled={triggerDisabled}
         className="cursor-pointer px-2 gap-1"
@@ -110,7 +109,7 @@ function TriggerButton({
       size="icon"
       disabled={triggerDisabled}
       aria-label={triggerAriaLabel}
-      className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
+      className="cursor-pointer hover:bg-muted/40 text-slate-400"
       data-testid={triggerTestId}
       {...rest}
     >
@@ -157,7 +156,7 @@ function PopoverBody({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-8 text-xs"
+        className="text-xs"
         data-testid={testIdPrefix ? `${testIdPrefix}-input` : undefined}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
@@ -178,10 +177,9 @@ function PopoverBody({
       <div className="flex justify-end">
         <Button
           type="button"
-          size="sm"
           onClick={() => void onSubmit()}
           disabled={loading || !value.trim() || !!submitDisabled}
-          className="h-7 cursor-pointer"
+          className="cursor-pointer"
           data-testid={testIdPrefix ? `${testIdPrefix}-submit` : undefined}
         >
           {loading ? submittingLabel : submitLabel}

@@ -1,5 +1,11 @@
 import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
+import type { LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import {
+  toStoredChatDraftAttachments,
+  type StoredFileAttachment,
+} from "./stored-chat-draft-attachments";
+import { normalizeStoredFileTab } from "./local-storage-file-tabs";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -143,6 +149,12 @@ export function setKanbanPreviewState(state: Partial<KanbanPreviewState>): void 
       setLocalStorage(KANBAN_PREVIEW_KEYS.SELECTED_TASK, state.selectedTaskId);
     }
   }
+}
+
+/** Clear the persisted task-preview selection while preserving the user's saved width. */
+export function resetKanbanPreviewState(): void {
+  removeLocalStorage(KANBAN_PREVIEW_KEYS.OPEN);
+  removeLocalStorage(KANBAN_PREVIEW_KEYS.SELECTED_TASK);
 }
 
 const PLAN_NOTIFICATION_KEY = "kandev.plan.lastSeenByTask";
@@ -289,6 +301,11 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // `apps/web/e2e/helpers/dockview-persistence.ts`; bump both together.
 const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v3.";
 
+// The active profile is persisted separately from Dockview's serialized layout.
+// A copied Default profile can retain Default's group IDs, so the layout shape
+// alone cannot identify whether Changes auto-focus is allowed.
+const DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX = "kandev.dockview.env-layout-profile-v1.";
+
 // A serialized Dockview layout is geometry, not evidence of an intentional
 // pixel preference. Keep that preference separately so automatic restores can
 // recompute responsive defaults while genuine sash drags remain per-env.
@@ -309,14 +326,45 @@ export function getEnvLayout(envId: string): object | null {
   }
 }
 
-/** Save the dockview layout for a task environment. */
-export function setEnvLayout(envId: string, layout: object): void {
-  if (typeof window === "undefined") return;
+/** Save the dockview layout and report whether session storage accepted it. */
+export function setEnvLayout(envId: string, layout: object): boolean {
+  if (typeof window === "undefined") return false;
   try {
     window.sessionStorage.setItem(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`, JSON.stringify(layout));
+    return true;
   } catch {
     // Ignore write failures (storage full, blocked, etc.)
+    return false;
   }
+}
+
+function isLayoutProfileIdentity(value: unknown): value is LayoutProfileIdentity {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const profile = value as { kind?: unknown; id?: unknown };
+  return (
+    (profile.kind === "built-in" || profile.kind === "custom") &&
+    typeof profile.id === "string" &&
+    profile.id.length > 0
+  );
+}
+
+/** Read the profile identity saved with a task environment's layout. */
+export function getEnvLayoutProfile(envId: string): LayoutProfileIdentity | null {
+  const profile = getSessionStorage<LayoutProfileIdentity | null>(
+    `${DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX}${envId}`,
+    null,
+  );
+  return isLayoutProfileIdentity(profile) ? profile : null;
+}
+
+/** Save the profile identity that produced a task environment's layout. */
+export function setEnvLayoutProfile(envId: string, profile: LayoutProfileIdentity): void {
+  setSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX}${envId}`, profile);
+}
+
+/** Remove the profile identity saved for a task environment. */
+export function removeEnvLayoutProfile(envId: string): void {
+  removeSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PROFILE_PREFIX}${envId}`);
 }
 
 /** Read the manually-dragged right-panel width for a task env, or `null` if
@@ -494,6 +542,8 @@ export interface StoredFileTab {
   /** Multi-repo subpath (repository_name) so a restored tab re-fetches its
    *  content under the right repository after a refresh. */
   repo?: string;
+  renderedPreview?: boolean;
+  /** Legacy Markdown-only preview field accepted during one-way migration. */
   markdownPreview?: boolean;
   pinned?: boolean;
 }
@@ -519,14 +569,15 @@ export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
     let previewSeen = false;
     const normalized: StoredFileTab[] = [];
     for (let i = parsed.length - 1; i >= 0; i--) {
-      const t = parsed[i];
-      if (!t) continue;
-      const isPinned = t.pinned === true || t.pinned === undefined;
+      const tab = parsed[i];
+      if (!tab) continue;
+      const normalizedTab = normalizeStoredFileTab(tab);
+      const isPinned = normalizedTab.pinned === true || normalizedTab.pinned === undefined;
       if (isPinned) {
-        normalized.unshift({ ...t, pinned: true });
+        normalized.unshift({ ...normalizedTab, pinned: true });
       } else if (!previewSeen) {
         previewSeen = true;
-        normalized.unshift({ ...t, pinned: false });
+        normalized.unshift({ ...normalizedTab, pinned: false });
       }
     }
     return normalized;
@@ -540,7 +591,7 @@ export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void 
   if (typeof window === "undefined") return;
   try {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
-    window.sessionStorage.setItem(key, JSON.stringify(tabs));
+    window.sessionStorage.setItem(key, JSON.stringify(tabs.map(normalizeStoredFileTab)));
   } catch {
     // Ignore write failures
   }
@@ -587,18 +638,6 @@ const CHAT_DRAFT_ATTACHMENTS_KEY = "kandev.chatDraft.attachments";
 const CHAT_INPUT_HEIGHT_KEY = "kandev.chatInput.height";
 
 /** Stored attachment — same as FileAttachment but without `preview` (reconstructed on load) */
-type StoredFileAttachment = {
-  id: string;
-  attachmentId?: string;
-  /** Legacy inline data is read for backwards compatibility only. */
-  data?: string;
-  mimeType: string;
-  fileName: string;
-  size: number;
-  isImage: boolean;
-  deliveryMode?: "prompt" | "path";
-};
-
 /** Read the draft chat message text for a session, or `""` if none saved. */
 export function getChatDraftText(sessionId: string): string {
   return getSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, "");
@@ -649,42 +688,12 @@ function normalizeAttachmentDeliveryMode(
  *  stripping `preview` to halve storage cost. */
 export function setChatDraftAttachments(
   sessionId: string,
-  attachments: Array<{
-    id: string;
-    data?: string;
-    attachmentId?: string;
-    mimeType: string;
-    fileName: string;
-    size: number;
-    isImage: boolean;
-    deliveryMode?: "prompt" | "path";
-    preview?: string;
-  }>,
+  attachments: Array<StoredFileAttachment & { file?: File; preview?: string }>,
 ): void {
   if (attachments.length === 0) {
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
   } else {
-    // Store descriptors only. File bytes remain in backend private storage;
-    // legacy inline data is retained only when no descriptor exists.
-    const stored: StoredFileAttachment[] = attachments.flatMap(
-      ({ id, attachmentId, data, mimeType, fileName, size, isImage, deliveryMode }) => {
-        // A File object cannot survive sessionStorage. Do not persist an
-        // attachment until its descriptor or legacy inline bytes exist; the
-        // in-flight upload remains visible in the current composer only.
-        if (!attachmentId && !data) return [];
-        return [
-          {
-            id,
-            ...(attachmentId ? { attachmentId } : { data }),
-            mimeType,
-            fileName,
-            size,
-            isImage,
-            deliveryMode,
-          },
-        ];
-      },
-    );
+    const stored = toStoredChatDraftAttachments(attachments);
     if (stored.length === 0) {
       removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
     } else {
@@ -786,6 +795,7 @@ export function cleanupTaskStorage(
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
     removeSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`);
+    removeEnvLayoutProfile(envId);
     clearManualRightWidth(envId);
   }
 

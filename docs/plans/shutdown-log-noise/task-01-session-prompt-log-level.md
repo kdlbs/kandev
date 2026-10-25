@@ -5,7 +5,7 @@ status: pending
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/shutdown-log-noise/spec.md"
+spec: "../../specs/platform/requirements/shutdown-log-noise.md"
 parallelism: sequential
 ---
 

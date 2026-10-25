@@ -23,7 +23,12 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 // site; it is never rendered or logged.
 function shouldSuppressNotification(state: AppState, taskId: string | undefined): string | null {
   // Suppress when user is actively viewing this task.
-  if (document.visibilityState === "visible" && taskId && state.tasks.activeTaskId === taskId) {
+  if (
+    document.visibilityState === "visible" &&
+    document.hasFocus() &&
+    taskId &&
+    state.tasks.activeTaskId === taskId
+  ) {
     return "user is viewing this task";
   }
   return null;

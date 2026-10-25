@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-frontend-copy-move-dialog"]
 plan: "plan.md"
-spec: "../../specs/workspaces/secret-scope-transfer.md"
+spec: "../../specs/workspaces/requirements/secret-scope-transfer.md"
 ---
 
 # Task 04: E2E Coverage and Documentation

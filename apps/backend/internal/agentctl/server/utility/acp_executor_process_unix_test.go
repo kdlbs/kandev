@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -26,6 +27,8 @@ func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ACP_LEAK_MARKER", marker)
 
+	wrapper := filepath.Join(tmp, "independent-wrapper")
+	writeExecutable(t, wrapper, "#!/bin/sh\nexec \"$@\"\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
@@ -34,8 +37,9 @@ func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
 	resp, err := executor.Probe(ctx, &ProbeRequest{
 		AgentID: "mock-agent",
 		InferenceConfig: &InferenceConfigDTO{
-			Command: []string{"mock-agent"},
-			WorkDir: tmp,
+			Command:       []string{"mock-agent"},
+			LaunchWrapper: launchwrapper.Profile([]string{wrapper}),
+			WorkDir:       tmp,
 		},
 	})
 	if err != nil {
@@ -91,6 +95,53 @@ fi
 	}
 	if len(refreshed) != 1 || refreshed[0].ID != "opencode/fresh" {
 		t.Fatalf("refreshed models = %#v, want refreshed model list", refreshed)
+	}
+}
+
+func TestProbeOpenCodeModelsCleansDescendantThatRetainsOutputPipes(t *testing.T) {
+	tmp := t.TempDir()
+	agentPath := filepath.Join(tmp, openCodeCommand)
+	pidFile := filepath.Join(tmp, "child.pid")
+	writeExecutable(t, agentPath, `#!/bin/sh
+trap '' TERM
+sleep 30 &
+child=$!
+echo "$child" > "$OPENCODE_CHILD_PID_FILE"
+wait "$child"
+`)
+	t.Setenv("OPENCODE_CHILD_PID_FILE", pidFile)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := probeOpenCodeModels(ctx, agentPath, tmp, false)
+		result <- err
+	}()
+
+	waitUntil(t, time.Second, func() bool {
+		_, err := os.Stat(pidFile)
+		return err == nil
+	}, "OpenCode child pid was not written")
+	pid := readPID(t, pidFile)
+	t.Cleanup(func() {
+		if processRunning(pid) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("probe unexpectedly succeeded after its context expired")
+		}
+	case <-time.After(2 * time.Second):
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		<-result
+		t.Fatal("model discovery waited for a descendant to close its output pipes")
+	}
+	if processRunning(pid) {
+		t.Fatalf("descendant process %d remained alive after model discovery returned", pid)
 	}
 }
 

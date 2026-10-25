@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-structured-argv-transport"]
 plan: "plan.md"
-spec: "../../specs/office/agents.md"
+spec: "../../specs/office/requirements/agents.md"
 ---
 
 # Task 03: Restart and launch rollback safety

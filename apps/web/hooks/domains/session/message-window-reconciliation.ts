@@ -1,0 +1,146 @@
+import type { Message } from "@/lib/types/http";
+import { messageTimestampNanoseconds } from "@/lib/state/slices/session/message-timestamp";
+
+export type LatestMessageWindow = {
+  messages: Message[];
+  oldestCursor: string | null;
+};
+
+// Subscription refreshes retire rows only inside an overlapping response interval.
+export type MessageWindowAuthority = boolean | "overlap";
+
+const MICROSECONDS_PER_MILLISECOND = BigInt(1_000);
+
+/** Parse the same normalized-microsecond precision used by message pagination. */
+function timestampMicros(createdAt: string): bigint | null {
+  const match = createdAt.match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/,
+  );
+  if (!match) {
+    const parsed = Date.parse(createdAt);
+    return Number.isNaN(parsed) ? null : BigInt(parsed) * MICROSECONDS_PER_MILLISECOND;
+  }
+
+  const milliseconds = Date.parse(`${match[1]}${match[3]}`);
+  if (Number.isNaN(milliseconds)) return null;
+  const fraction = (match[2] ?? "").padEnd(6, "0").slice(0, 6);
+  return BigInt(milliseconds) * MICROSECONDS_PER_MILLISECOND + BigInt(fraction);
+}
+
+function compareMessages(a: Message, b: Message): number {
+  const aTimestamp = timestampMicros(a.created_at);
+  const bTimestamp = timestampMicros(b.created_at);
+  if (aTimestamp !== null && bTimestamp !== null) {
+    if (aTimestamp !== bTimestamp) return aTimestamp < bTimestamp ? -1 : 1;
+  } else if (a.created_at !== b.created_at) {
+    return a.created_at.localeCompare(b.created_at);
+  }
+  if (a.id < b.id) return -1;
+  if (a.id > b.id) return 1;
+  return 0;
+}
+
+function joinMessages(base: Message[], extras: Message[]): Message[] {
+  if (extras.length === 0) return base;
+  const baseIds = new Set(base.map((message) => message.id));
+  return [...base, ...extras.filter((message) => !baseIds.has(message.id))].sort(compareMessages);
+}
+
+function isPendingLocalMessage(message: Message): boolean {
+  return message.metadata?.client_queue_id !== undefined;
+}
+
+function hasWindowAuthority(authority: MessageWindowAuthority, overlaps: boolean): boolean {
+  return authority === true || (authority === "overlap" && overlaps);
+}
+
+/** Select matching row revisions independently of pagination membership. */
+function selectFetchedRevisions(
+  cachedAtRequest: Message[],
+  cachedAtResponse: Message[],
+  fetched: Message[],
+): Message[] {
+  const baselineById = new Map(cachedAtRequest.map((message) => [message.id, message]));
+  const currentById = new Map(cachedAtResponse.map((message) => [message.id, message]));
+  return fetched.map((incoming) => {
+    const current = currentById.get(incoming.id);
+    if (!current) return incoming;
+    const currentTimestamp = messageTimestampNanoseconds(current.updated_at);
+    const incomingTimestamp = messageTimestampNanoseconds(incoming.updated_at);
+    if (
+      currentTimestamp !== null &&
+      incomingTimestamp !== null &&
+      currentTimestamp !== incomingTimestamp
+    ) {
+      return incomingTimestamp > currentTimestamp ? incoming : current;
+    }
+    // Ties and uncomparable revisions cannot displace an immutable in-flight change.
+    if (current !== baselineById.get(incoming.id)) return current;
+    return currentTimestamp !== null && incomingTimestamp === null ? current : incoming;
+  });
+}
+
+/**
+ * Reconcile a bounded newest-page response with the session cache while
+ * preserving one contiguous pagination interval.
+ */
+export function reconcileLatestMessageWindow(params: {
+  cachedAtRequest: Message[];
+  cachedAtResponse: Message[];
+  fetched: Message[];
+  authoritative?: MessageWindowAuthority;
+}): LatestMessageWindow {
+  const { cachedAtRequest, cachedAtResponse, fetched, authoritative = false } = params;
+  if (fetched.length === 0) {
+    if (authoritative === true) {
+      const pendingLocal = cachedAtResponse.filter(isPendingLocalMessage);
+      return {
+        messages: pendingLocal,
+        oldestCursor: pendingLocal[0]?.id ?? null,
+      };
+    }
+    return {
+      messages: cachedAtResponse,
+      oldestCursor: cachedAtResponse[0]?.id ?? null,
+    };
+  }
+
+  const orderedFetched = [...fetched].sort(compareMessages);
+  const fetchedBoundary = orderedFetched[0];
+  const fetchedIds = new Set(orderedFetched.map((message) => message.id));
+  const overlapsCachedWindow = cachedAtRequest.some((message) => fetchedIds.has(message.id));
+  const selectedFetched = selectFetchedRevisions(cachedAtRequest, cachedAtResponse, orderedFetched);
+
+  if (hasWindowAuthority(authoritative, overlapsCachedWindow)) {
+    const cachedAtRequestIds = new Set(cachedAtRequest.map((message) => message.id));
+    const retained = cachedAtResponse.filter((message) => {
+      if (fetchedIds.has(message.id)) return false;
+      if (isPendingLocalMessage(message)) return true;
+      if (compareMessages(message, fetchedBoundary) < 0) return true;
+      if (authoritative === "overlap" && compareMessages(message, orderedFetched.at(-1)!) > 0) {
+        return true;
+      }
+      return !cachedAtRequestIds.has(message.id);
+    });
+    const messages = joinMessages(selectedFetched, retained);
+    return { messages, oldestCursor: messages[0]?.id ?? null };
+  }
+
+  if (overlapsCachedWindow) {
+    const messages = joinMessages(selectedFetched, cachedAtResponse);
+    return { messages, oldestCursor: messages[0]?.id ?? null };
+  }
+
+  const cachedAtRequestIds = new Set(cachedAtRequest.map((message) => message.id));
+  // A live row older than the fetched boundary belongs to the next page. If
+  // retained here, the row would sit before `oldestCursor` and leave a gap in
+  // the single contiguous interval represented by this window.
+  const liveAdditions = cachedAtResponse.filter(
+    (message) =>
+      !cachedAtRequestIds.has(message.id) &&
+      !fetchedIds.has(message.id) &&
+      compareMessages(message, fetchedBoundary) >= 0,
+  );
+  const messages = joinMessages(selectedFetched, liveAdditions);
+  return { messages, oldestCursor: fetchedBoundary.id };
+}

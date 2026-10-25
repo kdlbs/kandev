@@ -88,7 +88,8 @@ func parsePatternSpec(entry string) (PatternSpec, error) {
 // Parse splits a comma-separated user spec into trimmed, deduplicated,
 // non-empty patterns with the exact `:symlink` suffix stripped. Order is preserved
 // (first occurrence wins on dedupe). Commas inside `{...}` are treated as part
-// of the pattern (brace alternation), so `config/{local,dev}.yml` is parsed as
+// of the pattern (brace alternation), as are class commas and POSIX-escaped
+// commas, so `config/{local,dev}.yml` is parsed as
 // a single pattern. This is the copy-only view used by the remote-executor
 // path, where symlinks back to the host repo can't apply.
 func Parse(spec string) []string {
@@ -150,15 +151,29 @@ func ValidateSpec(spec string) error {
 	return nil
 }
 
-// splitTopLevelCommas splits s on commas that sit outside any `{...}` group,
-// so brace alternation patterns like `config/{local,dev}.yml` survive intact.
+// splitTopLevelCommas preserves character classes, brace alternation, and
+// escaped bytes. Backslashes are separators on Windows and escapes elsewhere.
 // Nested braces are tracked; an unbalanced `}` is treated as a literal.
 func splitTopLevelCommas(s string) []string {
 	out := make([]string, 0, 4)
 	depth := 0
+	canCloseClass := true
 	start := 0
 	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && filepath.Separator != '\\' {
+			i++
+			continue
+		}
 		switch s[i] {
+		case '[':
+			if canCloseClass {
+				end := classClosingBracket(s, i+1)
+				if end < 0 {
+					canCloseClass = false
+				} else {
+					i = end
+				}
+			}
 		case '{':
 			depth++
 		case '}':
@@ -174,6 +189,19 @@ func splitTopLevelCommas(s string) []string {
 	}
 	out = append(out, s[start:])
 	return out
+}
+
+// classClosingBracket ignores POSIX-escaped closing brackets. Once no closer
+// exists, no later opener can form a class, so the splitter scans that tail once.
+func classClosingBracket(s string, start int) int {
+	for i := start; i < len(s); i++ {
+		if s[i] == '\\' && filepath.Separator != '\\' {
+			i++
+		} else if s[i] == ']' {
+			return i
+		}
+	}
+	return -1
 }
 
 // Copy resolves each spec's pattern relative to sourceDir and copies (or, for
@@ -520,6 +548,23 @@ func (s *copyState) expandPattern(pattern string) error {
 		return s.handleMatch(joined, pattern)
 	}
 
+	// Exact escaped paths need full unescaping; doublestar's literal shortcut
+	// unescapes only metacharacters. Existing native paths keep priority above.
+	if literal, ok := unescapeLiteralPattern(pattern); ok {
+		if !filepath.IsAbs(literal) {
+			literal = filepath.Join(s.canonRoot, literal)
+		}
+		if _, err := os.Lstat(literal); err == nil {
+			return s.handleMatch(literal, pattern)
+		}
+	}
+
+	if normalized := unescapeGlobDirectoryCommas(pattern); normalized != pattern {
+		joined = normalized
+		if !filepath.IsAbs(joined) {
+			joined = filepath.Join(s.canonRoot, joined)
+		}
+	}
 	matches, err := doublestar.FilepathGlob(joined)
 	if err != nil {
 		s.warn("invalid pattern %q: %v", pattern, err)
@@ -542,6 +587,48 @@ func (s *copyState) expandPattern(pattern string) error {
 		}
 	}
 	return nil
+}
+
+func unescapeLiteralPattern(pattern string) (string, bool) {
+	if filepath.Separator == '\\' || !strings.Contains(pattern, `\`) {
+		return "", false
+	}
+	var literal strings.Builder
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '*', '?', '[', '{':
+			return "", false
+		case '\\':
+			i++
+			if i == len(pattern) {
+				return "", false
+			}
+		}
+		literal.WriteByte(pattern[i])
+	}
+	return literal.String(), true
+}
+
+// Only literal directory prefixes lose comma escapes; glob expressions retain
+// their escapes. Native paths are checked before this POSIX normalization.
+func unescapeGlobDirectoryCommas(pattern string) string {
+	if filepath.Separator == '\\' || !strings.Contains(pattern, `\,`) {
+		return pattern
+	}
+	_, glob := doublestar.SplitPattern(pattern)
+	prefixEnd := len(pattern) - len(glob)
+	var normalized strings.Builder
+	for i := 0; i < prefixEnd; i++ {
+		if pattern[i] == '\\' && i+1 < prefixEnd {
+			if pattern[i+1] != ',' {
+				normalized.WriteByte('\\')
+			}
+			i++
+		}
+		normalized.WriteByte(pattern[i])
+	}
+	normalized.WriteString(pattern[prefixEnd:])
+	return normalized.String()
 }
 
 // handleMatch dispatches a single literal/match path to file or directory copy.

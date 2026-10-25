@@ -1,9 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { createSubmoduleReviewFixture } from "./submodule-review-helpers";
+import {
+  createSubmoduleReviewFixture,
+  expectStickyReviewHeaderClearance,
+} from "./submodule-review-helpers";
 
 test.describe("Nested submodule Review on mobile", () => {
-  test.describe.configure({ retries: 1, timeout: 180_000 });
+  test.describe.configure({ timeout: 180_000 });
 
   test("keeps nested scope and diff context touch-reachable", async ({
     testPage,
@@ -25,9 +28,12 @@ test.describe("Nested submodule Review on mobile", () => {
       await session.waitForChatIdle({ timeout: 45_000 });
 
       const worktreePath = await fixture.waitForWorktree(apiClient);
-      fixture.applyNestedChanges(worktreePath);
+      await fixture.applyNestedChanges(worktreePath);
 
-      await testPage.getByRole("button", { name: "Changes" }).tap();
+      await testPage
+        .getByRole("navigation")
+        .getByRole("button", { name: /Changes$/ })
+        .tap();
       const changesPanel = testPage.getByTestId("mobile-changes-panel");
       await expect(changesPanel).toBeVisible({ timeout: 15_000 });
       await expect(changesPanel.getByText("README.md").first()).toBeVisible({
@@ -37,6 +43,17 @@ test.describe("Nested submodule Review on mobile", () => {
 
       const review = session.reviewDialog();
       await expect(review).toBeVisible({ timeout: 15_000 });
+      // The root working-tree diff can render before cumulative nested diffs.
+      // Wait for all three README sections before checking their scope labels.
+      await expect
+        .poll(
+          () =>
+            review
+              .locator('[data-testid="review-file-header"][data-file-path="README.md"]')
+              .count(),
+          { timeout: 45_000, message: "root and both nested review sections must load" },
+        )
+        .toBe(3);
       const repositoryLabels = review.getByTestId("review-file-repository");
       await expect(repositoryLabels).toHaveCount(2);
       await expect(repositoryLabels.filter({ hasText: /^vendor\/outer$/ })).toBeVisible();
@@ -44,6 +61,10 @@ test.describe("Nested submodule Review on mobile", () => {
         hasText: /^vendor\/outer\/vendor\/inner$/,
       });
       await expect(innerLabel).toBeVisible({ timeout: 15_000 });
+      await expect
+        .poll(() => session.reviewDiffText(), { timeout: 45_000 })
+        .toContain("parent working-tree change");
+      await expectStickyReviewHeaderClearance(review, "touch");
 
       const innerHeader = review
         .getByTestId("review-file-header")

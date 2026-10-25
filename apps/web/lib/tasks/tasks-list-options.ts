@@ -1,4 +1,5 @@
-import type { Task, TaskState } from "@/lib/types/http";
+import type { Task } from "@/lib/types/http";
+import type { TaskListFacetValue } from "@/lib/plugins/types";
 
 // Values only. These carried a parallel `label: "Updated newest"` alongside the
 // key maps below, described as a "fallback/debug value" — but the mobile menu
@@ -16,7 +17,7 @@ export const TASKS_LIST_SORT_OPTIONS = [
 ] as const;
 
 export const TASKS_LIST_GROUP_OPTIONS = [
-  { value: "state" },
+  { value: "workflow_step" },
   { value: "workflow" },
   { value: "repository" },
   { value: "none" },
@@ -24,9 +25,39 @@ export const TASKS_LIST_GROUP_OPTIONS = [
 
 export type TasksListSort = (typeof TASKS_LIST_SORT_OPTIONS)[number]["value"];
 export type TasksListGroup = (typeof TASKS_LIST_GROUP_OPTIONS)[number]["value"];
+export type TaskListFacetOption = `facet:${string}:${string}`;
+export type TasksListSortPreference = TasksListSort | TaskListFacetOption;
+export type TasksListGroupPreference = TasksListGroup | TaskListFacetOption;
 
 export const DEFAULT_TASKS_LIST_SORT: TasksListSort = "updated_desc";
-export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "state";
+export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "workflow_step";
+
+// i18n-exempt: internal client-only option namespace, never rendered as copy.
+export const TASK_LIST_FACET_PREFIX = "facet:";
+
+const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const FACET_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function encodeTaskListFacetOption(facet: {
+  pluginId: string;
+  id: string;
+}): TaskListFacetOption {
+  return `${TASK_LIST_FACET_PREFIX}${facet.pluginId}:${facet.id}`;
+}
+
+export function parseTaskListFacetOption(value: string): { pluginId: string; id: string } | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith(TASK_LIST_FACET_PREFIX)) return null;
+  const segments = trimmed.slice(TASK_LIST_FACET_PREFIX.length).split(":");
+  const [pluginId, id] = segments;
+  return segments.length === 2 && PLUGIN_ID_PATTERN.test(pluginId) && FACET_ID_PATTERN.test(id)
+    ? { pluginId, id }
+    : null;
+}
+
+export function isTaskListFacetOption(value: string): value is TaskListFacetOption {
+  return parseTaskListFacetOption(value) !== null;
+}
 
 // The only source of display copy for these options; resolved at render against
 // the `tasks:` catalog.
@@ -40,35 +71,29 @@ export const SORT_OPTION_LABEL_KEYS: Record<TasksListSort, string> = {
 };
 
 export const GROUP_OPTION_LABEL_KEYS: Record<TasksListGroup, string> = {
-  state: "tasks:groupByState",
+  workflow_step: "tasks:groupByWorkflowStep",
   workflow: "tasks:groupByWorkflow",
   repository: "tasks:groupByRepository",
   none: "tasks:groupByNone",
 };
 
-export const TASK_STATE_ORDER: TaskState[] = [
-  "CREATED",
-  "SCHEDULING",
-  "TODO",
-  "IN_PROGRESS",
-  "REVIEW",
-  "BLOCKED",
-  "WAITING_FOR_INPUT",
-  "COMPLETED",
-  "FAILED",
-  "CANCELLED",
-];
-
-export function parseTasksListSort(value: string | null | undefined): TasksListSort {
-  return TASKS_LIST_SORT_OPTIONS.some((option) => option.value === value)
-    ? (value as TasksListSort)
-    : DEFAULT_TASKS_LIST_SORT;
+export function parseTasksListSort(value: string | null | undefined): TasksListSortPreference {
+  const trimmed = value?.trim() ?? "";
+  if (TASKS_LIST_SORT_OPTIONS.some((option) => option.value === trimmed))
+    return trimmed as TasksListSort;
+  return isTaskListFacetOption(trimmed) ? trimmed : DEFAULT_TASKS_LIST_SORT;
 }
 
-export function parseTasksListGroup(value: string | null | undefined): TasksListGroup {
-  return TASKS_LIST_GROUP_OPTIONS.some((option) => option.value === value)
-    ? (value as TasksListGroup)
-    : DEFAULT_TASKS_LIST_GROUP;
+export function parseTasksListGroup(value: string | null | undefined): TasksListGroupPreference {
+  const trimmed = value?.trim() ?? "";
+  if (TASKS_LIST_GROUP_OPTIONS.some((option) => option.value === trimmed))
+    return trimmed as TasksListGroup;
+  return isTaskListFacetOption(trimmed) ? trimmed : DEFAULT_TASKS_LIST_GROUP;
+}
+
+export function resolveTasksListApiSort(value: string): TasksListSort {
+  const requested = parseTasksListSort(value);
+  return isTaskListFacetOption(requested) ? DEFAULT_TASKS_LIST_SORT : requested;
 }
 
 export function sortTasksForList(tasks: Task[], sort: TasksListSort): Task[] {
@@ -96,4 +121,41 @@ export function compareTasksForList(a: Task, b: Task, sort: TasksListSort): numb
 
 function compareDate(a: string, b: string): number {
   return Date.parse(a) - Date.parse(b);
+}
+
+export function sortTasksByFacet(
+  tasks: Task[],
+  facetKey: string,
+  values: Record<string, readonly TaskListFacetValue[]>,
+): Task[] {
+  return tasks
+    .map((task, index) => ({
+      task,
+      index,
+      label: firstFacetLabel(values[`${facetKey}:${task.id}`] ?? []),
+    }))
+    .sort((a, b) => {
+      if (!a.label && !b.label) return a.index - b.index;
+      if (!a.label) return 1;
+      if (!b.label) return -1;
+      return (
+        a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) || a.index - b.index
+      );
+    })
+    .map(({ task }) => task);
+}
+
+// The alphabetically smallest non-empty label (case-insensitive), not the first in array order:
+// it gives a multi-value task one stable sort position.
+export function firstFacetLabel(values: readonly TaskListFacetValue[]): string | null {
+  let first: string | null = null;
+  for (const { label } of values) {
+    if (
+      label &&
+      (first === null || label.localeCompare(first, undefined, { sensitivity: "base" }) < 0)
+    ) {
+      first = label;
+    }
+  }
+  return first;
 }

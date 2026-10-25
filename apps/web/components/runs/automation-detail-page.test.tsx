@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   getAutomationSummary: vi.fn(),
   listAutomationRuns: vi.fn(),
   triggerAutomation: vi.fn(),
+  stopAutomationRun: vi.fn(),
   push: vi.fn(),
   // The page follows the ACTIVE workspace: an automation belonging to another
   // one must not stay on screen after a switch.
@@ -42,6 +43,7 @@ vi.mock("@/lib/api/domains/automation-api", () => ({
   getAutomationSummary: mocks.getAutomationSummary,
   listAutomationRuns: mocks.listAutomationRuns,
   triggerAutomation: mocks.triggerAutomation,
+  stopAutomationRun: mocks.stopAutomationRun,
 }));
 
 vi.mock("@/lib/routing/client-router", () => ({
@@ -62,8 +64,8 @@ vi.mock("@/components/automations/automation-editor", () => ({
 // The transcript is the task chat stack. This suite is about which run the page
 // puts in the pane, so it asserts on the session the embed is handed.
 vi.mock("./run-transcript", () => ({
-  RunTranscript: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="run-transcript" data-session-id={sessionId} />
+  RunTranscript: ({ sessionId, turnId }: { sessionId: string; turnId?: string }) => (
+    <div data-testid="run-transcript" data-session-id={sessionId} data-turn-id={turnId ?? ""} />
   ),
 }));
 
@@ -126,6 +128,7 @@ beforeEach(() => {
   });
   mocks.listAutomationRuns.mockResolvedValue([run()]);
   mocks.triggerAutomation.mockResolvedValue({ triggered: true });
+  mocks.stopAutomationRun.mockResolvedValue({ run_id: "run-1", status: "failed" });
 });
 
 afterEach(() => {
@@ -202,7 +205,9 @@ describe("AutomationDetailPage", () => {
     fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
     expect(screen.getByTestId(PROMPT)).toBeTruthy();
   });
+});
 
+describe("AutomationDetailPage run selection", () => {
   it("honours an explicitly requested run", async () => {
     // "The run that failed overnight" is a thing people link each other to.
     mocks.listAutomationRuns.mockResolvedValue([
@@ -214,6 +219,39 @@ describe("AutomationDetailPage", () => {
 
     const transcript = await screen.findByTestId(TRANSCRIPT);
     expect(transcript.getAttribute(SESSION_ATTR)).toBe(SESSION_OLDER);
+  });
+
+  it("focuses the exact turn when two runs share a session", async () => {
+    mocks.listAutomationRuns.mockResolvedValue([
+      run({ id: "first", turn_id: "turn-1", session_id: "shared-session" }),
+      run({
+        id: "second",
+        turn_id: "turn-2",
+        session_id: "shared-session",
+        created_at: NEWEST_AT,
+      }),
+    ]);
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" runId="second" />);
+
+    const transcript = await screen.findByTestId(TRANSCRIPT);
+    expect(transcript.getAttribute("data-session-id")).toBe("shared-session");
+    expect(transcript.getAttribute("data-turn-id")).toBe("turn-2");
+  });
+
+  it("offers exact-run stop for a selected open run", async () => {
+    mocks.listAutomationRuns.mockResolvedValue([
+      run({ id: "open-run", status: "task_created", turn_id: "turn-open" }),
+    ]);
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+
+    const stop = await screen.findByTestId("automation-stop-run");
+    fireEvent.click(stop);
+
+    await waitFor(() =>
+      expect(mocks.stopAutomationRun).toHaveBeenCalledWith(AUTOMATION_ID, "open-run"),
+    );
   });
 
   it("falls back to the newest run when the requested one is not in the window", async () => {

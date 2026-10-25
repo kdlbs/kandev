@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["02-mcp-title-tool"]
 plan: "plan.md"
-spec: "../../specs/tasks/agent-generated-titles.md"
+spec: "../../specs/tasks/requirements/agent-generated-titles.md"
 ---
 
 # Task 05: Single-owner title handoff

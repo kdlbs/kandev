@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/quick-chat-expiration.md
+spec: docs/specs/tasks/requirements/quick-chat-expiration.md
 created: 2026-07-14
 status: implemented
 ---

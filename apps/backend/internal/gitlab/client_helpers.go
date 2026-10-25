@@ -4,8 +4,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 // rawMR is the JSON shape of a GitLab merge request as returned by the
@@ -27,7 +25,11 @@ type rawMR struct {
 	SourceBranch                string `json:"source_branch"`
 	TargetBranch                string `json:"target_branch"`
 	SHA                         string `json:"sha"`
-	References                  struct {
+	DiffRefs                    struct {
+		BaseSHA string `json:"base_sha"`
+		HeadSHA string `json:"head_sha"`
+	} `json:"diff_refs"`
+	References struct {
 		Full string `json:"full"`
 	} `json:"references"`
 	Author             rawUser    `json:"author"`
@@ -70,22 +72,29 @@ type rawProject struct {
 }
 
 type rawIssue struct {
-	ID          int64     `json:"id"`
-	IID         int       `json:"iid"`
-	ProjectID   int64     `json:"project_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	State       string    `json:"state"`
-	WebURL      string    `json:"web_url"`
-	Author      rawUser   `json:"author"`
-	Labels      []string  `json:"labels"`
-	Assignees   []rawUser `json:"assignees"`
+	ID          int64         `json:"id"`
+	IID         int           `json:"iid"`
+	ProjectID   int64         `json:"project_id"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	State       string        `json:"state"`
+	WebURL      string        `json:"web_url"`
+	Author      rawUser       `json:"author"`
+	Labels      []string      `json:"labels"`
+	Assignees   []rawUser     `json:"assignees"`
+	Milestone   *rawMilestone `json:"milestone"`
 	References  struct {
 		Full string `json:"full"`
 	} `json:"references"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	ClosedAt  *time.Time `json:"closed_at"`
+}
+
+// rawMilestone is GitLab's milestone sub-object on an issue. GitLab returns
+// milestone: null for an issue with no milestone.
+type rawMilestone struct {
+	Title string `json:"title"`
 }
 
 type rawDiscussion struct {
@@ -142,6 +151,10 @@ func convertRawMR(raw *rawMR) *MR {
 	if targetProjectID == 0 {
 		targetProjectID = raw.ProjectID
 	}
+	headSHA := raw.SHA
+	if raw.DiffRefs.HeadSHA != "" {
+		headSHA = raw.DiffRefs.HeadSHA
+	}
 	mr := &MR{
 		ID:                          raw.ID,
 		IID:                         raw.IID,
@@ -151,8 +164,9 @@ func convertRawMR(raw *rawMR) *MR {
 		WebURL:                      raw.WebURL,
 		State:                       state,
 		HeadBranch:                  raw.SourceBranch,
-		HeadSHA:                     raw.SHA,
+		HeadSHA:                     headSHA,
 		BaseBranch:                  raw.TargetBranch,
+		BaseSHA:                     raw.DiffRefs.BaseSHA,
 		AuthorUsername:              raw.Author.Username,
 		ProjectNamespace:            namespace,
 		ProjectPath:                 projectPath,
@@ -226,6 +240,10 @@ func convertRawIssue(raw *rawIssue) *Issue {
 			assignees = append(assignees, a.Username)
 		}
 	}
+	milestone := ""
+	if raw.Milestone != nil {
+		milestone = raw.Milestone.Title
+	}
 	return &Issue{
 		ID:               raw.ID,
 		IID:              raw.IID,
@@ -240,6 +258,7 @@ func convertRawIssue(raw *rawIssue) *Issue {
 		ProjectPath:      projectPath,
 		Labels:           append([]string(nil), raw.Labels...),
 		Assignees:        assignees,
+		Milestone:        milestone,
 		CreatedAt:        raw.CreatedAt,
 		UpdatedAt:        raw.UpdatedAt,
 		ClosedAt:         raw.ClosedAt,
@@ -485,9 +504,12 @@ func buildMRSearchQuery(filter, customQuery string) string {
 	return values.Encode()
 }
 
-func buildIssueSearchQuery(filter, customQuery string) string {
+func buildIssueSearchQuery(filter, customQuery, milestone string) string {
 	if customQuery != "" {
-		return customQuery
+		if milestone == "" {
+			return customQuery
+		}
+		return appendQueryParam(customQuery, "milestone", milestone)
 	}
 	values := url.Values{}
 	values.Set("state", gitlabStateOpened)
@@ -495,7 +517,30 @@ func buildIssueSearchQuery(filter, customQuery string) string {
 	if filter != "" {
 		appendFilter(values, filter)
 	}
+	if milestone != "" {
+		values.Set("milestone", milestone)
+	}
 	return values.Encode()
+}
+
+// appendQueryParam adds an escaped key/value pair to a raw query unless that
+// key already exists. URL fragments are kept at the end, outside the query.
+// This also preserves malformed-query behavior for callers that do not validate
+// their input at the HTTP boundary.
+func appendQueryParam(customQuery, key, value string) string {
+	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has(key) {
+		return customQuery
+	}
+	fragment := ""
+	if index := strings.IndexByte(customQuery, '#'); index >= 0 {
+		fragment = customQuery[index:]
+		customQuery = customQuery[:index]
+	}
+	encoded := url.QueryEscape(value)
+	if customQuery == "" {
+		return key + "=" + encoded + fragment
+	}
+	return customQuery + "&" + key + "=" + encoded + fragment
 }
 
 // filterTokenReviewRequested is the /gitlab page tab value that maps to
@@ -557,19 +602,6 @@ func appendFilter(values url.Values, filter string) {
 			values.Add(k, v)
 		}
 	}
-}
-
-// countDiffLines returns (additions, deletions) for one file's patch from the
-// MR /changes payload. GitLab's REST API carries no per-file line counts, so the
-// patch body has to be counted here.
-//
-// It counts only lines inside a `@@` hunk. The previous "+++"/"---" prefix test
-// was content-blind: GitLab returns `--- a/<path>` / `+++ b/<path>` headers ahead
-// of the first hunk, but so does a removed SQL comment (`-- x` arrives as
-// `--- x`) or an added C increment (`++n;` arrives as `+++n;`), and those were
-// dropped from the totals.
-func countDiffLines(diff string) (int, int) {
-	return unidiff.CountLines(diff)
 }
 
 func diffStatus(newFile, deletedFile, renamedFile bool) string {

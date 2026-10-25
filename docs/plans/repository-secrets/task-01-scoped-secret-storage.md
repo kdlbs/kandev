@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workspaces/repository-secrets.md"
+spec: "../../specs/workspaces/requirements/repository-secrets.md"
 ---
 
 # Task 01: Add Scoped Secret Storage

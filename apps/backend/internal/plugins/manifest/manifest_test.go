@@ -3,6 +3,8 @@ package manifest
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const validManifestYAML = `
@@ -57,6 +59,68 @@ func TestParse_ValidManifestParsesID(t *testing.T) {
 	}
 }
 
+func TestValidate_StaticWebAppManifestPassesWithoutBackend(t *testing.T) {
+	m, err := Parse([]byte(`
+id: canvas-board
+api_version: 2
+version: 1.0.0
+display_name: Canvas Board
+description: A static board
+author: test
+ui:
+  web_apps:
+    - key: main
+      title: Task board
+      entry: ui/index.html
+      placements: [task-canvas, workspace-canvas]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if !m.IsStaticWebAppOnly() {
+		t.Fatal("IsStaticWebAppOnly() = false, want true")
+	}
+}
+
+func TestValidate_WebAppRejectsUnsafeEntryAndUnknownPlacement(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{Key: "main", Title: "Board", Entry: "../index.html", Placements: []string{"admin"}}}
+	err := m.Validate()
+	if err == nil || !strings.Contains(err.Error(), "ui.web_apps") || !strings.Contains(err.Error(), "unsupported placement") {
+		t.Fatalf("Validate() error = %v, want web-app entry and placement errors", err)
+	}
+}
+
+func TestValidate_WebAppNormalizesNetworkOrigins(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{
+		Key: "main", Title: "Board", Entry: "ui/index.html",
+		Placements:     []string{WebAppPlacementTask},
+		NetworkOrigins: []string{"https://API.example.com"},
+	}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if got := m.UI.WebApps[0].NetworkOrigins; len(got) != 1 || got[0] != "https://api.example.com" {
+		t.Fatalf("network origins = %#v, want canonical HTTPS origin", got)
+	}
+}
+
+func TestValidate_WebAppRejectsInvalidNetworkOrigin(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{
+		Key: "main", Title: "Board", Entry: "ui/index.html",
+		Placements:     []string{WebAppPlacementTask},
+		NetworkOrigins: []string{"https://api.example.com/v1"},
+	}}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "network_origins") {
+		t.Fatalf("Validate() error = %v, want network origin error", err)
+	}
+}
+
 // TestParse_UserStateCapabilityRoundTrips pins capabilities.user_state
 // (Approach D1 / AC17): a plugin declaring host-provided per-user storage
 // parses with Capabilities.UserState set.
@@ -78,6 +142,48 @@ func TestParse_UserStateCapabilityDefaultsFalse(t *testing.T) {
 	m := validManifest(t)
 	if m.Capabilities.UserState {
 		t.Fatalf("Capabilities.UserState = true, want false (not declared in fixture)")
+	}
+}
+
+// TestParse_WebhookAccessRoundTrips pins that webhooks[].access parses
+// (AC10): the auth gate reads this field to decide whether a webhook is
+// reachable without a caller identity.
+func TestParse_WebhookAccessRoundTrips(t *testing.T) {
+	input := strings.Replace(validManifestYAML, `method: "POST"`, "method: \"POST\"\n    access: public", 1)
+	m, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	encoded, err := yaml.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal() unexpected error: %v", err)
+	}
+	m, err = Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse(round trip) unexpected error: %v", err)
+	}
+	if len(m.Webhooks) != 1 || m.Webhooks[0].EffectiveAccess(m.APIVersion) != WebhookAccessPublic {
+		t.Fatalf("Webhooks[0].EffectiveAccess() = %+v, want a single public webhook", m.Webhooks)
+	}
+}
+
+func TestWebhookAccessDefaultIsVersioned(t *testing.T) {
+	webhook := Webhook{Key: "events"}
+	if got := webhook.EffectiveAccess(LegacyAPIVersion); got != WebhookAccessPublic {
+		t.Fatalf("v1 EffectiveAccess() = %q, want public", got)
+	}
+	if got := webhook.EffectiveAccess(CurrentAPIVersion); got != WebhookAccessAuthenticated {
+		t.Fatalf("v2 EffectiveAccess() = %q, want authenticated", got)
+	}
+}
+
+func TestValidateAcceptsSupportedAPIVersions(t *testing.T) {
+	for _, version := range []int{LegacyAPIVersion, CurrentAPIVersion} {
+		m := validManifest(t)
+		m.APIVersion = version
+		if err := m.Validate(); err != nil {
+			t.Fatalf("api_version %d: Validate() unexpected error: %v", version, err)
+		}
 	}
 }
 
@@ -242,6 +348,116 @@ repository_providers: [" bitbucket "]
 	}
 }
 
+func TestValidateExecutorProvidersRequireCapability(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+executor_providers:
+  - key: example
+    display_name: Example
+    description: Example remote runtime
+    contract_version: 1
+    supported_state_versions: [1]
+    profile_schema: {type: object, properties: {region: {type: string}}}
+    resource_state_schema: {type: object, properties: {handle: {type: string}}}
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "executor_provider") {
+		t.Fatalf("Validate() error = %v, want executor-provider capability rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersAcceptBoundedScalarSchemas(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`handle: {type: string}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if len(m.ExecutorProviders) != 1 || m.ExecutorProviders[0].Capabilities.Retention != "bounded" {
+		t.Fatalf("ExecutorProviders = %+v, want one bounded provider", m.ExecutorProviders)
+	}
+}
+
+func TestValidateExecutorProvidersRejectSecretResourceState(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`token: {type: string, secret: true}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "cannot declare secret state") {
+		t.Fatalf("Validate() error = %v, want secret resource-state rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersRejectDuplicateKeys(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`handle: {type: string}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	m.ExecutorProviders = append(m.ExecutorProviders, m.ExecutorProviders[0])
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate executor provider key") {
+		t.Fatalf("Validate() error = %v, want duplicate provider identity rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersRejectUnsupportedContractVersion(t *testing.T) {
+	m, err := Parse([]byte(validExecutorProviderManifest(`handle: {type: string}`)))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	m.ExecutorProviders[0].ContractVersion++
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "is unsupported") {
+		t.Fatalf("Validate() error = %v, want unsupported contract version rejection", err)
+	}
+}
+
+func TestValidateExecutorProvidersRejectOversizedSchema(t *testing.T) {
+	manifest := validExecutorProviderManifest(`handle: {type: string}`)
+	manifest = strings.Replace(manifest, "profile_schema: {type: object, properties: {region: {type: string, enum: [eu-west-1, us-east-1]}}}",
+		"profile_schema:\n      type: object\n      description: \""+strings.Repeat("x", MaxExecutorProviderSchemaBytes)+"\"\n      properties: {region: {type: string}}", 1)
+	m, err := Parse([]byte(manifest))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("Validate() error = %v, want schema size rejection", err)
+	}
+}
+
+func validExecutorProviderManifest(resourceProperties string) string {
+	return `
+id: example.remote
+api_version: 2
+version: 1.0.0
+display_name: Example remote provider
+description: Test provider manifest
+author: kandev
+categories: [tools]
+runtime:
+  type: binary
+  executables: {linux-amd64: server/plugin}
+capabilities:
+  executor_provider: true
+executor_providers:
+  - key: microvm
+    display_name: MicroVM
+    description: Isolated remote execution environment
+    localized_messages: {expired: provider.environment.expired}
+    contract_version: 1
+    supported_state_versions: [1, 2]
+    profile_schema: {type: object, properties: {region: {type: string, enum: [eu-west-1, us-east-1]}}}
+    resource_state_schema: {type: object, additionalProperties: false, properties: {` + resourceProperties + `}}
+    capabilities:
+      files: true
+      git: true
+      reattach: true
+      retention: bounded
+      maximum_lifetime_seconds: 28800
+`
+}
+
 func TestValidate_RejectsDuplicateReferenceSource(t *testing.T) {
 	m, err := Parse([]byte(validManifestYAML + `
 reference_sources:
@@ -388,6 +604,21 @@ func TestValidate_AgentToolContract(t *testing.T) {
 	}
 }
 
+func TestValidate_ManagedAgentToolRequiresExplicitWorkspaceCapability(t *testing.T) {
+	m := managedManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name: "read_task", Description: "Read one task.",
+		Surfaces: []string{AgentToolSurfaceManaged}, InputSchema: map[string]any{"type": "object"},
+	}}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "managed_agent_tools") {
+		t.Fatalf("Validate() error = %v, want managed_agent_tools capability requirement", err)
+	}
+	m.Capabilities.APIWrite = append(m.Capabilities.APIWrite, "managed_agent_tools")
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() with explicit capability: %v", err)
+	}
+}
+
 func TestValidate_RejectsAgentToolsOnLegacyRemotePlugin(t *testing.T) {
 	m := validManifest(t)
 	m.AgentTools = []AgentTool{{
@@ -529,7 +760,7 @@ func TestValidate_RejectsInvalidManifests(t *testing.T) {
 		},
 		{
 			name:    "unsupported api_version",
-			mutate:  func(m *Manifest) { m.APIVersion = 2 },
+			mutate:  func(m *Manifest) { m.APIVersion = CurrentAPIVersion + 1 },
 			wantErr: "api_version",
 		},
 		{

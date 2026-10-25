@@ -54,6 +54,7 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 		return nil, err
 	}
 	updatedAt := r.nowUTC()
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = ?
@@ -66,7 +67,7 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = task_session_messages.task_session_id
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
 		  )
 		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
@@ -74,7 +75,7 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 	`, clarificationDetachedMetadataExpr(drv),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
 		clarificationNotDetachedPredicate(drv),
-		turnAuthorityPredicate(drv, "turn_row"))
+		predicate, orderBy)
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("detach active clarification messages: %w", err)
@@ -111,6 +112,7 @@ func (r *Repository) ExpireActiveClarificationBundle(
 		return nil, err
 	}
 	updatedAt := r.nowUTC()
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = ?
@@ -123,7 +125,7 @@ func (r *Repository) ExpireActiveClarificationBundle(
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = task_session_messages.task_session_id
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
 		  )
 		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
@@ -131,7 +133,7 @@ func (r *Repository) ExpireActiveClarificationBundle(
 	`, clarificationExpiredMetadataExpr(drv),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"),
-		turnAuthorityPredicate(drv, "turn_row"))
+		predicate, orderBy)
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID, pendingID)
 	if err != nil {
 		return nil, fmt.Errorf("expire active clarification messages: %w", err)
@@ -150,11 +152,147 @@ func (r *Repository) ExpireActiveClarificationBundle(
 	return messages, nil
 }
 
+// ReattachActiveClarificationBundle clears the detached marker from one exact
+// pending bundle after a live waiter re-adopted it, so the projection and the
+// orchestrator's live-clarification guard stop treating the bundle as
+// abandoned. Only pending, currently detached rows on the session's current
+// durable turn change; a superseded, terminal, or never-detached bundle is
+// left untouched and yields no rows.
+func (r *Repository) ReattachActiveClarificationBundle(
+	ctx context.Context,
+	sessionID, pendingID string,
+) ([]*models.Message, bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin clarification reattach: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	drv := r.db.DriverName()
+	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
+		return nil, false, err
+	}
+	if err := lockClarificationSessionRow(ctx, tx, drv, sessionID); err != nil {
+		return nil, false, err
+	}
+	updatedAt := r.nowUTC()
+	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = ?
+		WHERE task_session_id = ?
+		  AND type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		  AND %s = ?
+		  AND %s
+		  AND NOT (%s)
+		  AND turn_id = (
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY %s
+			LIMIT 1
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_session_messages bundle
+			WHERE %s = ?
+			  AND (
+				bundle.type != 'clarification_request'
+				OR bundle.task_session_id != task_session_messages.task_session_id
+				OR bundle.turn_id != task_session_messages.turn_id
+			  )
+		  )
+		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
+		          content, requests_input, type, metadata, created_at, updated_at
+	`, clarificationReattachedMetadataExpr(drv),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"),
+		nonTerminalSessionPredicate("task_session_messages"),
+		clarificationNotDetachedPredicate(drv),
+		predicate, orderBy, bundlePendingIDExpr)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID, pendingID, pendingID)
+	if err != nil {
+		return nil, false, fmt.Errorf("reattach active clarification messages: %w", err)
+	}
+	messages, _, err := scanMessageRows(rows, 0)
+	closeErr := rows.Close()
+	if err != nil {
+		return nil, false, fmt.Errorf("scan reattached clarification messages: %w", err)
+	}
+	if closeErr != nil {
+		return nil, false, fmt.Errorf("close reattached clarification rows: %w", closeErr)
+	}
+	active, err := r.activeClarificationBundleExists(ctx, tx, drv, sessionID, pendingID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit clarification reattach: %w", err)
+	}
+	return messages, active, nil
+}
+
+func (r *Repository) activeClarificationBundleExists(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	drv, sessionID, pendingID string,
+) (bool, error) {
+	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
+	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
+	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
+	query := fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM task_session_messages m
+			WHERE m.task_session_id = ?
+			  AND m.type = 'clarification_request'
+			  AND %[1]s = ?
+			  AND COALESCE(%[2]s, '') IN ('', 'pending')
+			  AND %[3]s
+			  AND m.turn_id = (
+				SELECT turn_row.id
+				FROM task_session_turns turn_row
+				WHERE turn_row.task_session_id = m.task_session_id
+				  AND %[4]s
+				ORDER BY %[5]s
+				LIMIT 1
+			  )
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM task_session_messages bundle
+				WHERE %[6]s = ?
+				  AND (
+					bundle.type != 'clarification_request'
+					OR bundle.task_session_id != m.task_session_id
+					OR bundle.turn_id != m.turn_id
+				  )
+			  )
+		)
+	`, pendingIDExpr, statusExpr, nonTerminalSessionPredicate("m"), predicate, orderBy, bundlePendingIDExpr)
+	var active bool
+	if err := tx.GetContext(ctx, &active, r.db.Rebind(query), sessionID, pendingID, pendingID); err != nil {
+		return false, fmt.Errorf("check active clarification bundle: %w", err)
+	}
+	return active, nil
+}
+
 func clarificationDetachedMetadataExpr(driverName string) string {
 	if dialect.IsPostgres(driverName) {
 		return "jsonb_set(metadata::jsonb, '{agent_disconnected}', 'true'::jsonb)::text"
 	}
 	return "json_set(metadata, '$.agent_disconnected', json('true'))"
+}
+
+// clarificationReattachedMetadataExpr removes the detached marker so the row
+// reads exactly like a bundle whose waiter never went away.
+func clarificationReattachedMetadataExpr(driverName string) string {
+	if dialect.IsPostgres(driverName) {
+		return "(metadata::jsonb - 'agent_disconnected')::text"
+	}
+	return "json_remove(metadata, '$.agent_disconnected')"
 }
 
 func clarificationExpiredMetadataExpr(driverName string) string {
@@ -308,15 +446,29 @@ func (r *Repository) lockClarificationBundleTurnWrites(
 	// same rows before evaluating the non-terminal claim predicate forces one
 	// side to observe the other's committed state.
 	for _, sessionID := range sessionIDs {
-		var lockedSessionID string
-		if err := tx.GetContext(
-			ctx,
-			&lockedSessionID,
-			r.db.Rebind(`SELECT id FROM task_sessions WHERE id = ? FOR UPDATE`),
-			sessionID,
-		); err != nil {
-			return fmt.Errorf("lock clarification session %q: %w", sessionID, err)
+		if err := lockClarificationSessionRow(ctx, tx, driverName, sessionID); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func lockClarificationSessionRow(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	driverName, sessionID string,
+) error {
+	if !dialect.IsPostgres(driverName) {
+		return nil
+	}
+	var lockedSessionID string
+	if err := tx.GetContext(
+		ctx,
+		&lockedSessionID,
+		`SELECT id FROM task_sessions WHERE id = $1 FOR UPDATE`,
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("lock clarification session %q: %w", sessionID, err)
 	}
 	return nil
 }
@@ -345,6 +497,7 @@ func (r *Repository) loadRestorableClarificationBundle(
 ) ([]*models.Message, error) {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	// A pending ID spanning message types, sessions, or turns is malformed. The
 	// NOT EXISTS guard intentionally makes the whole bundle ineligible to restore.
 	query := fmt.Sprintf(`
@@ -360,7 +513,7 @@ func (r *Repository) loadRestorableClarificationBundle(
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = m.task_session_id
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
 		  )
 		  AND NOT EXISTS (
@@ -377,7 +530,7 @@ func (r *Repository) loadRestorableClarificationBundle(
 	`, pendingIDExpr,
 		nonTerminalSessionPredicate("m"),
 		clarificationResponseDeliveryPendingPredicate(drv, "m"),
-		turnAuthorityPredicate(drv, "turn_row"),
+		predicate, orderBy,
 		bundlePendingIDExpr,
 	)
 	rows, err := tx.QueryxContext(
@@ -406,6 +559,7 @@ func (r *Repository) restoreClarificationMessages(
 ) error {
 	updatedAt := r.nowUTC()
 	statusExpr := dialect.JSONExtract(drv, "metadata", "status")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	updateQuery := r.db.Rebind(fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = ?, updated_at = ?
@@ -417,14 +571,14 @@ func (r *Repository) restoreClarificationMessages(
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = task_session_messages.task_session_id
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
 		  )
 	`,
 		statusExpr,
 		clarificationResponseDeliveryPendingPredicate(drv, "task_session_messages"),
 		nonTerminalSessionPredicate("task_session_messages"),
-		turnAuthorityPredicate(drv, "turn_row"),
+		predicate, orderBy,
 	))
 	restoredMetadataByMessage := make([]map[string]interface{}, len(messages))
 	for i, message := range messages {
@@ -468,9 +622,6 @@ func (r *Repository) claimActiveClarificationBundle(
 	tx *sqlx.Tx,
 	drv, pendingID string,
 ) (int64, error) {
-	pendingIDExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id")
-	statusExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "status")
-	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
 	// A pending ID spanning message types, sessions, or turns is malformed. The
 	// NOT EXISTS guard intentionally makes the whole bundle ineligible to claim.
 	// Detached rows are intentionally eligible: agent_disconnected means the
@@ -479,34 +630,7 @@ func (r *Repository) claimActiveClarificationBundle(
 	// it is replaced with the requested terminal status before this transaction
 	// commits or is rolled back with the transaction.
 	claimAt := r.nowUTC()
-	claimQuery := fmt.Sprintf(`
-		UPDATE task_session_messages
-		SET metadata = %s, updated_at = ?
-		WHERE %s = ?
-		  AND type = 'clarification_request'
-		  AND COALESCE(%s, '') IN ('', 'pending')
-		  AND %s
-		  AND turn_id = (
-			SELECT turn_row.id
-			FROM task_session_turns turn_row
-			WHERE turn_row.task_session_id = task_session_messages.task_session_id
-			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
-			LIMIT 1
-		  )
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM task_session_messages bundle
-			WHERE %s = ?
-			  AND (
-				bundle.type != 'clarification_request'
-				OR bundle.task_session_id != task_session_messages.task_session_id
-				OR bundle.turn_id != task_session_messages.turn_id
-			  )
-		  )
-	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
-		nonTerminalSessionPredicate("task_session_messages"),
-		turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
+	claimQuery := clarificationClaimQuery(drv)
 	// pendingID is bound once for the outer bundle and once for the malformed-
 	// bundle NOT EXISTS guard.
 	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), claimAt, pendingID, pendingID)
@@ -520,12 +644,50 @@ func (r *Repository) claimActiveClarificationBundle(
 	return claimedRows, nil
 }
 
+// clarificationClaimQuery builds the shared claim statement for execution and
+// the query-plan regression test. Both paths must use the same predicates.
+func clarificationClaimQuery(driverName string) string {
+	pendingIDExpr := dialect.JSONExtract(driverName, "task_session_messages.metadata", "pending_id")
+	statusExpr := dialect.JSONExtract(driverName, "task_session_messages.metadata", "status")
+	bundlePendingIDExpr := dialect.JSONExtract(driverName, "bundle.metadata", "pending_id")
+	predicate, orderBy := currentTurnAuthority(driverName, "turn_row")
+	return fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = ?
+		WHERE %s = ?
+		  AND type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		  AND %s
+		  AND turn_id = (
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY %s
+			LIMIT 1
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_session_messages bundle
+			WHERE %s = ?
+			  AND (
+				bundle.type != 'clarification_request'
+				OR bundle.task_session_id != task_session_messages.task_session_id
+				OR bundle.turn_id != task_session_messages.turn_id
+			  )
+		  )
+	`, dialect.JSONSet(driverName, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
+		nonTerminalSessionPredicate("task_session_messages"),
+		predicate, orderBy, bundlePendingIDExpr)
+}
+
 func (r *Repository) loadClaimedClarificationBundle(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	drv, pendingID string,
 ) ([]*models.Message, error) {
 	claimedStatusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(fmt.Sprintf(`
 		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
 		       m.content, m.requests_input, m.type, m.metadata, m.created_at, m.updated_at
@@ -536,12 +698,12 @@ func (r *Repository) loadClaimedClarificationBundle(
 			FROM task_session_turns turn_row
 			WHERE turn_row.task_session_id = m.task_session_id
 			  AND %s
-			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			ORDER BY %s
 			LIMIT 1
 		  )
 		ORDER BY m.created_at ASC, m.id ASC
 	`, dialect.JSONExtract(drv, "m.metadata", "pending_id"), claimedStatusExpr,
-		turnAuthorityPredicate(drv, "turn_row"))), pendingID, clarificationStatusResponding)
+		predicate, orderBy)), pendingID, clarificationStatusResponding)
 	if err != nil {
 		return nil, fmt.Errorf("load claimed clarification bundle: %w", err)
 	}

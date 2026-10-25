@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-scoped-secret-storage"]
 plan: "plan.md"
-spec: "../../specs/workspaces/repository-secrets.md"
+spec: "../../specs/workspaces/requirements/repository-secrets.md"
 ---
 
 # Task 02: Persist Repository Secret Bindings

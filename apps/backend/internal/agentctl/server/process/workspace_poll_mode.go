@@ -1,6 +1,8 @@
 package process
 
 import (
+	"context"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -51,6 +53,29 @@ const defaultSlowPollInterval = 30 * time.Second
 // via SetPollMode pushing on pollModeChanged.
 const pausedTickInterval = 60 * time.Second
 
+// Slow-mode idle backoff. Each polling loop counts its consecutive completed
+// scans that observed no change. The first slowBackoffStartTicks of them keep
+// the base interval; each later one doubles it, capped at
+// slowBackoffMaxMultiplier times the base. An observed change resets that
+// loop, and any SetPollMode push resets both, so a workspace with activity or
+// renewed interest returns to the base cadence. Fast and paused modes never
+// back off.
+const (
+	slowBackoffStartTicks    = 2
+	slowBackoffMaxMultiplier = 10
+)
+
+// slowPollInterval returns the slow-mode wait after idleTicks consecutive
+// unchanged scans.
+func slowPollInterval(idleTicks uint32) time.Duration {
+	if idleTicks <= slowBackoffStartTicks {
+		return defaultSlowPollInterval
+	}
+	shift := min(idleTicks-slowBackoffStartTicks, 4)
+	multiplier := min(uint32(1)<<shift, slowBackoffMaxMultiplier)
+	return defaultSlowPollInterval * time.Duration(multiplier)
+}
+
 // pollIntervals returns the file-monitor and git-poll intervals for a mode,
 // plus whether the mode is paused (in which case the body should skip git work).
 func (wt *WorkspaceTracker) pollIntervals(mode PollMode) (filePoll, gitPoll time.Duration, paused bool) {
@@ -58,7 +83,7 @@ func (wt *WorkspaceTracker) pollIntervals(mode PollMode) (filePoll, gitPoll time
 	case PollModeFast:
 		return wt.filePollInterval, wt.gitPollInterval, false
 	case PollModeSlow:
-		return defaultSlowPollInterval, defaultSlowPollInterval, false
+		return slowPollInterval(wt.slowIdleMonitorTicks.Load()), slowPollInterval(wt.slowIdleGitPollTicks.Load()), false
 	case PollModePaused:
 		return pausedTickInterval, pausedTickInterval, true
 	default:
@@ -74,10 +99,33 @@ func (wt *WorkspaceTracker) GetPollMode() PollMode {
 	return wt.pollMode
 }
 
-// SetPollMode updates the poll mode. Calling with the current mode is a no-op.
-// Transitioning into PollModeFast (from any other mode) wakes both polling loops
-// immediately so the focused user sees fresh git state without waiting up to
-// the slow-poll interval for the next tick.
+// resetSlowBackoff returns both polling loops to the base slow interval and
+// reports whether either loop's slow interval had been lengthened.
+func (wt *WorkspaceTracker) resetSlowBackoff() bool {
+	monitorIdle := wt.slowIdleMonitorTicks.Swap(0)
+	gitIdle := wt.slowIdleGitPollTicks.Swap(0)
+	return max(monitorIdle, gitIdle) > slowBackoffStartTicks
+}
+
+// noteSlowPollIdle records one completed scan for the loop that owns
+// idleTicks: a change resets the loop to the base interval and an unchanged
+// scan lets its next slow interval grow.
+func noteSlowPollIdle(idleTicks *atomic.Uint32, changed bool) {
+	if changed {
+		idleTicks.Store(0)
+		return
+	}
+	idleTicks.Add(1)
+}
+
+// SetPollMode updates the poll mode. Calling with the current mode does not
+// change the mode. Transitioning into PollModeFast (from any other mode) wakes
+// both polling loops immediately so the focused user sees fresh git state
+// without waiting up to the slow-poll interval for the next tick.
+//
+// Every push, including one that repeats the current mode, resets the
+// slow-mode backoff. When that shortens a lengthened slow interval, the loops
+// are woken so their timers re-arm at the base interval.
 func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	if !mode.IsValid() {
 		wt.logger.Warn("ignoring invalid poll mode", zap.String("mode", string(mode)))
@@ -91,9 +139,20 @@ func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	// what the grace demotion exists to detect the absence of.
 	wt.pollModePushed = true
 	wt.disarmPollModeGraceLocked()
+	backoffShortened := wt.resetSlowBackoff()
+	if mode == PollModeFast {
+		// Focus is an explicit visible-user retry after an access denial.
+		wt.accessDenied.Store(false)
+	}
+	if mode == PollModeSlow && wt.accessDenied.Load() {
+		mode = PollModePaused
+	}
 	prev := wt.pollMode
 	if prev == mode {
 		wt.pollModeMu.Unlock()
+		if backoffShortened && mode == PollModeSlow {
+			wt.wakePollLoops()
+		}
 		return
 	}
 	wt.pollMode = mode
@@ -102,20 +161,36 @@ func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	wt.wakePollLoops()
 }
 
-// demoteUnpushedPollMode drops the tracker to slow once pollModeGracePeriod
-// elapses with no explicit SetPollMode. Fires at most once — the timer is not
-// rearmed — so a later push always wins.
-func (wt *WorkspaceTracker) demoteUnpushedPollMode() {
+// demoteUnpushedPollMode performs the one startup-grace scan, then pauses the
+// tracker when no gateway mode ever arrived. Fires at most once — the timer is
+// not rearmed — so a later push always wins. The caller owns the context so
+// Stop can cancel both the scan and the transition before it publishes.
+func (wt *WorkspaceTracker) demoteUnpushedPollMode(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	wt.pollModeMu.Lock()
 	wt.pollModeGraceTimer = nil
-	if wt.pollModePushed || wt.pollMode == PollModeSlow {
+	if ctx.Err() != nil || wt.pollModePushed || wt.pollMode == PollModePaused {
 		wt.pollModeMu.Unlock()
 		return
 	}
-	wt.pollMode = PollModeSlow
 	wt.pollModeMu.Unlock()
 
-	wt.logger.Info("no poll mode pushed within grace period, demoting to slow",
+	wt.RefreshWorkspace(withWorkspaceTrigger(ctx, "startup_grace"), "startup_grace")
+	if ctx.Err() != nil {
+		return
+	}
+
+	wt.pollModeMu.Lock()
+	if ctx.Err() != nil || wt.pollModePushed {
+		wt.pollModeMu.Unlock()
+		return
+	}
+	wt.pollMode = PollModePaused
+	wt.pollModeMu.Unlock()
+
+	wt.logger.Info("no poll mode pushed within grace period, final scan complete, pausing workspace polling",
 		zap.Duration("grace", wt.pollModeGrace),
 		zap.String("workDir", wt.workDir))
 	wt.wakePollLoops()

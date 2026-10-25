@@ -1,6 +1,47 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+
+const promptState = vi.hoisted(() => {
+  const state = {
+    promptName: "daily",
+    promptContent: "Review the daily report",
+    items: [] as Array<{ name: string; content: string }>,
+    snapshot: { prompts: { items: [] as Array<{ name: string; content: string }> } },
+    listeners: new Set<() => void>(),
+  };
+  return Object.assign(state, {
+    notify() {
+      state.snapshot = { prompts: { items: state.items } };
+      state.listeners.forEach((listener) => listener());
+    },
+  });
+});
+const MENTION_TESTID = "custom-prompt-mention";
+const { triggerFileDownload } = vi.hoisted(() => ({ triggerFileDownload: vi.fn() }));
+vi.mock("@/components/state-provider", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useAppStore: (selector: (state: typeof promptState.snapshot) => unknown) => {
+      const snapshot = useSyncExternalStore(
+        (listener) => {
+          promptState.listeners.add(listener);
+          return () => promptState.listeners.delete(listener);
+        },
+        () => promptState.snapshot,
+        () => promptState.snapshot,
+      );
+      return selector(snapshot);
+    },
+  };
+});
+
+vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
+  useCustomPrompts: () => ({ prompts: promptState.items, loaded: true, loading: false }),
+}));
+
+vi.mock("@/lib/utils/file-download", () => ({ triggerFileDownload }));
+
 import { AnchoredLastPromptBar } from "./anchored-last-prompt-bar";
 
 const BAR_TESTID = "anchored-last-prompt-bar";
@@ -8,11 +49,40 @@ const EXPAND_TESTID = "anchored-last-prompt-expand";
 const TEXT_TESTID = "anchored-last-prompt-text";
 const CONTENT_TESTID = "anchored-last-prompt-content";
 const SHORT_TEXT = "fix the bug";
+const OVERSIZED_TAIL = "prompt-239";
 const LONG_TEXT =
   "Please refactor the authentication module to support OAuth as well as the existing session cookie flow, and add tests.";
 const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
 const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
 const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+type AnchoredResizeRecord = {
+  callback: ResizeObserverCallback;
+  elements: Element[];
+};
+const anchoredResizeRecords: AnchoredResizeRecord[] = [];
+class CapturingResizeObserver implements ResizeObserver {
+  readonly root = null;
+  readonly callback: ResizeObserverCallback;
+  readonly elements: Element[] = [];
+  readonly boxOptions = undefined;
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    anchoredResizeRecords.push({ callback, elements: this.elements });
+  }
+  observe(element: Element) {
+    this.elements.push(element);
+  }
+  unobserve() {}
+  disconnect() {}
+}
+
+function fireAnchoredResize(element: Element) {
+  for (const record of anchoredResizeRecords) {
+    if (record.elements.includes(element)) {
+      act(() => record.callback([], {} as ResizeObserver));
+    }
+  }
+}
 
 function renderBar(
   overrides: Partial<Parameters<typeof AnchoredLastPromptBar>[0]> = {},
@@ -31,8 +101,17 @@ function renderBar(
   );
 }
 
+beforeEach(() => {
+  anchoredResizeRecords.length = 0;
+  vi.stubGlobal("ResizeObserver", CapturingResizeObserver);
+  promptState.items = [{ name: promptState.promptName, content: promptState.promptContent }];
+  promptState.notify();
+});
 afterEach(() => {
   cleanup();
+  triggerFileDownload.mockReset();
+  anchoredResizeRecords.length = 0;
+  vi.unstubAllGlobals();
   restorePromptMeasurements();
 });
 
@@ -113,6 +192,129 @@ describe("AnchoredLastPromptBar", () => {
     screen.getByText(SHORT_TEXT);
   });
 
+  it("renders a recognized saved-prompt alias as a prompt chip", () => {
+    renderBar({ promptText: `Review @${promptState.promptName}` });
+
+    const mention = screen.getByTestId(MENTION_TESTID);
+    expect(mention.textContent).toBe(`@${promptState.promptName}`);
+    expect(mention.getAttribute("data-prompt-name")).toBe(promptState.promptName);
+  });
+
+  it("keeps an unknown alias as ordinary text", () => {
+    renderBar({ promptText: "Review @missing" });
+
+    expect(screen.queryByTestId(MENTION_TESTID)).toBeNull();
+    expect(screen.getByText("Review @missing")).toBeTruthy();
+  });
+
+  it("updates alias recognition and the open preview after prompt-store changes", () => {
+    promptState.items = [];
+    promptState.notify();
+    const { rerender } = renderBar({ promptText: `Review @${promptState.promptName}` });
+
+    expect(screen.queryByTestId(MENTION_TESTID)).toBeNull();
+
+    promptState.items = [{ name: promptState.promptName, content: "Initial prompt content" }];
+    promptState.notify();
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <AnchoredLastPromptBar
+          promptText={`Review @${promptState.promptName}`}
+          isVisible={true}
+          onScrollUp={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const mention = screen.getByTestId(MENTION_TESTID);
+    expect(mention.getAttribute("tabindex")).toBe("0");
+    fireEvent.click(mention);
+    expect(screen.getByText("Initial prompt content")).toBeTruthy();
+
+    promptState.items = [{ name: promptState.promptName, content: "Updated prompt content" }];
+    promptState.notify();
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <AnchoredLastPromptBar
+          promptText={`Review @${promptState.promptName}`}
+          isVisible={true}
+          onScrollUp={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("Updated prompt content")).toBeTruthy();
+    expect(screen.queryByText("Initial prompt content")).toBeNull();
+    expect(screen.getByTestId(MENTION_TESTID).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("closes an open prompt preview when the anchored bar becomes hidden", () => {
+    const { rerender } = renderBar({ promptText: `Review @${promptState.promptName}` });
+    fireEvent.click(screen.getByTestId(MENTION_TESTID));
+    expect(screen.getByText(promptState.promptContent)).toBeTruthy();
+
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <AnchoredLastPromptBar
+          promptText={`Review @${promptState.promptName}`}
+          isVisible={false}
+          onScrollUp={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByText(promptState.promptContent)).toBeNull();
+  });
+});
+
+function assertOversizedAnchoredCopies() {
+  setPromptMeasurements(40, 80);
+  const prompt = Array.from({ length: 240 }, (_, index) => `prompt-${index}`).join("\n");
+  const view = renderBar({ promptText: prompt, isVisible: false });
+
+  const bar = screen.getByTestId(BAR_TESTID);
+  const preview = screen.getByTestId(TEXT_TESTID);
+  expect(bar.getAttribute("aria-hidden")).toBe("true");
+  expect(preview.textContent).not.toContain(OVERSIZED_TAIL);
+  expect(preview.querySelectorAll("br").length).toBeLessThanOrEqual(199);
+
+  view.rerender(
+    <TooltipProvider delayDuration={0}>
+      <AnchoredLastPromptBar promptText={prompt} isVisible={true} onScrollUp={vi.fn()} />
+    </TooltipProvider>,
+  );
+  const openPreview = screen.getByTestId(TEXT_TESTID);
+  expect(openPreview.textContent).not.toContain(OVERSIZED_TAIL);
+  expect(screen.getByTestId("bounded-message-preview-download")).toBeTruthy();
+
+  fireEvent.click(screen.getByTestId(EXPAND_TESTID));
+  expect(screen.getByTestId(TEXT_TESTID).getAttribute("data-expanded")).toBe("true");
+  expect(screen.getByTestId(TEXT_TESTID).textContent).not.toContain(OVERSIZED_TAIL);
+  fireEvent.click(screen.getByTestId("bounded-message-preview-download"));
+  expect(triggerFileDownload).toHaveBeenCalledWith({
+    fileName: "kandev-last-prompt.txt",
+    content: prompt,
+    isBinary: false,
+  });
+
+  view.rerender(
+    <TooltipProvider delayDuration={0}>
+      <AnchoredLastPromptBar
+        promptText="replacement prompt"
+        isVisible={true}
+        onScrollUp={vi.fn()}
+      />
+    </TooltipProvider>,
+  );
+  expect(screen.getByTestId(TEXT_TESTID).textContent).toContain("replacement prompt");
+  expect(screen.getByTestId(TEXT_TESTID).textContent).not.toContain(OVERSIZED_TAIL);
+}
+
+describe("AnchoredLastPromptBar expanded content", () => {
+  it("bounds hidden, collapsed, and expanded oversized prompt copies", () => {
+    assertOversizedAnchoredCopies();
+  });
+
   it("renders the pinned copy with the user-message Markdown treatment", () => {
     renderBar({
       promptText: "Use `terraform apply`.\n\n## Steps\n\n- Validate the plan",
@@ -128,6 +330,21 @@ describe("AnchoredLastPromptBar", () => {
     setPromptMeasurements(40, 40);
     renderBar({ promptText: LONG_TEXT });
 
+    expect(screen.queryByTestId(EXPAND_TESTID)).toBeNull();
+  });
+  it("updates the expand affordance when mounted text geometry changes", () => {
+    setPromptMeasurements(40, 40);
+    renderBar({ promptText: LONG_TEXT });
+    const textEl = screen.getByTestId(TEXT_TESTID);
+
+    expect(screen.queryByTestId(EXPAND_TESTID)).toBeNull();
+
+    setPromptMeasurements(40, 80);
+    fireAnchoredResize(textEl);
+    expect(screen.getByTestId(EXPAND_TESTID)).toBeTruthy();
+
+    setPromptMeasurements(40, 40);
+    fireAnchoredResize(textEl);
     expect(screen.queryByTestId(EXPAND_TESTID)).toBeNull();
   });
 

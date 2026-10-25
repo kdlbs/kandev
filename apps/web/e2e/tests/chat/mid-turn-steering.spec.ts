@@ -1,16 +1,62 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+import {
+  seedRunningGeneratingSession,
+  type SeedRunningGeneratingSessionOptions,
+} from "../../helpers/generating-session";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
-import { SessionPage } from "../../pages/session-page";
-import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
 
 registerSeparateQueueRows(test);
 
+let sessionToStopAfterTest: { taskId: string; sessionId: string } | undefined;
+
+async function seedSteeringSession(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  options: SeedRunningGeneratingSessionOptions = {},
+) {
+  return seedRunningGeneratingSession(testPage, apiClient, seedData, title, {
+    ...options,
+    onSessionCreated: (identity) => {
+      sessionToStopAfterTest = identity;
+    },
+  });
+}
+
+test.afterEach(async ({ apiClient }) => {
+  const identity = sessionToStopAfterTest;
+  sessionToStopAfterTest = undefined;
+  if (!identity) return;
+
+  const readState = async () => {
+    const { sessions } = await apiClient.listTaskSessions(identity.taskId);
+    return sessions.find((session) => session.id === identity.sessionId)?.state ?? "MISSING";
+  };
+  const terminalStates = /^(CANCELLED|COMPLETED|FAILED|WAITING_FOR_INPUT|MISSING)$/;
+  if (terminalStates.test(await readState())) return;
+
+  await apiClient
+    .stopSession({
+      session_id: identity.sessionId,
+      reason: "mid-turn-steering e2e cleanup",
+      force: true,
+    })
+    .catch(() => undefined);
+  await expect
+    .poll(readState, {
+      timeout: 20_000,
+      message: "The mid-turn steering session should stop before the next test",
+    })
+    .toMatch(terminalStates);
+});
+
 // End-to-end coverage for the mid-turn steering composer contract
-// (docs/specs/platform/mid-turn-steering.md). CONTRIBUTING.md requires Playwright
+// (docs/specs/platform/requirements/mid-turn-steering.md). CONTRIBUTING.md requires Playwright
 // coverage for UI changes; this exercises the flag-gated decision and the real
 // steer dispatch path through the mock agent, which advertises promptQueueing.
 //
@@ -18,52 +64,8 @@ registerSeparateQueueRows(test);
 // tiptap placeholder is a cursor-anchored decoration and only renders under
 // focus, so asserting message delivery is the robust signal.
 
-interface SeedRunningGeneratingSessionOptions {
-  // Duration for the default `/sleep N` predecessor. Ignored when
-  // predecessorPrompt is set.
-  sleepSeconds?: number;
-  // Overrides the default `/sleep N` predecessor entirely — used by the
-  // folded/deferred tests to seed steer-fold-setup / steer-defer-setup
-  // instead.
-  predecessorPrompt?: string;
-}
-
-async function seedRunningGeneratingSession(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  title: string,
-  options: SeedRunningGeneratingSessionOptions = {},
-): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
-  const { sleepSeconds = 20, predecessorPrompt } = options;
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
-  // A no-tool sleep holds the foreground turn open and generating — the exact
-  // state that normally queues input, so it isolates the steering gate.
-  // steer-fold-setup/steer-defer-setup hold the same way, but differ in
-  // whether they answer on their own first (see the folded/deferred tests).
-  await session.sendMessage(predecessorPrompt ?? `/sleep ${sleepSeconds}`);
-  await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-  await waitForActiveSessionForegroundActivity(testPage, "generating");
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-  return { session, taskId: task.id, sessionId: task.session_id };
-}
-
 test.describe.serial("Claude mid-turn steering experiment", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test.describe("enabled", () => {
     test.beforeAll(async ({ backend }) => {
@@ -83,7 +85,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -126,7 +128,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session, taskId, sessionId } = await seedRunningGeneratingSession(
+      const { session, taskId, sessionId } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -135,7 +137,8 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       );
 
       await waitForActiveSessionSupportsSteering(testPage, true);
-      await apiClient.queueMessage(taskId, sessionId, "already queued");
+      const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+      await apiClient.queueMessage(queueIdentity, "already queued");
 
       const chat = session.activeChat();
       await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
@@ -153,7 +156,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
     });
 
     // The two outcomes below replay the mid-turn steering spec's "folded" vs
-    // "deferred" outcome taxonomy (docs/specs/platform/mid-turn-steering.md)
+    // "deferred" outcome taxonomy (docs/specs/platform/requirements/mid-turn-steering.md)
     // via the dedicated mock-agent setup scenarios: steer-fold-setup never
     // answers on its own (task 08's mock-replay acceptance for "folded" —
     // pinned deterministically at the mock level by
@@ -174,7 +177,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -211,7 +214,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -265,7 +268,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,
@@ -287,7 +290,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const { session } = await seedRunningGeneratingSession(
+      const { session } = await seedSteeringSession(
         testPage,
         apiClient,
         seedData,

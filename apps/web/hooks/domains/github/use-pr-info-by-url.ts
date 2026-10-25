@@ -19,7 +19,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
  * Behavior:
  *   - `ensure(url)` triggers a PR-info fetch the first time a PR URL is
  *     seen; non-PR URLs (plain repo URLs / invalid input / empty string)
- *     are no-ops.
+ *     settle without fetching metadata.
  *   - Dedupes concurrent / repeat `ensure` calls per URL (mirrors the
  *     in-flight + loaded refs from `useBranchesByURL`).
  *   - `info(url)` returns the most-recently loaded PR info for `url`, or
@@ -208,6 +208,18 @@ function finalizeRequest(refs: Refs, url: string, request: RequestIdentity): voi
   if (!isCurrentRequest(refs, url, request)) return;
   refs.inFlightRef.current.delete(url);
   refs.abortersRef.current.delete(url);
+}
+
+function invalidateRegistryCache(refs: Refs, setState: SetState): void {
+  // Fence every old callback before cancellation can settle its request.
+  for (const [url, sequence] of refs.seqRef.current) {
+    refs.seqRef.current.set(url, sequence + 1);
+  }
+  refs.inFlightRef.current.clear();
+  refs.loadedRef.current.clear();
+  for (const controller of refs.abortersRef.current.values()) controller.abort();
+  refs.abortersRef.current.clear();
+  setState({});
 }
 
 function runGitHubInfoRequest(args: {
@@ -410,8 +422,8 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
       const url = rawUrl.trim();
       if (!url || !workspaceId) return;
       if (registryVersionRef.current !== registryVersion) {
+        invalidateRegistryCache(refsRef.current, setState);
         registryVersionRef.current = registryVersion;
-        loadedRef.current.delete(url);
       }
       if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
       const pr = parseGitHubPrUrl(url);
@@ -436,6 +448,7 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
         // info" so subsequent ensure() calls for the same URL no-op instead
         // of re-parsing on every call.
         loadedRef.current.add(url);
+        setState((prev) => ({ ...prev, [url]: { info: undefined, loading: false } }));
         return;
       }
       const refs = refsRef.current;

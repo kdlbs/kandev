@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { acknowledgeNotificationSave } from "./notification-save-reconciliation";
 import {
   createNotificationProvider,
   deleteNotificationProvider,
@@ -11,6 +12,7 @@ import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
+import { sendTestNotification } from "./notification-test-action";
 import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
 import { useAppStore } from "@/components/state-provider";
 import type { NotificationProvider } from "@/lib/types/http";
@@ -143,20 +145,80 @@ function isSameHydrationSource(
   );
 }
 
+type NotificationDraftHydrationOptions = {
+  loaded: boolean;
+  source: NotificationHydrationSource;
+  draft: NotificationDraft;
+  setProviders: (value: NotificationProvider[]) => void;
+  setBaselineProviders: (value: NotificationProvider[]) => void;
+  setNotificationEvents: (value: string[]) => void;
+  setAppriseEdits: (value: Record<string, string>) => void;
+  setAppriseNameEdits: (value: Record<string, string>) => void;
+};
+
+function useHydrateNotificationDraft({
+  loaded,
+  source,
+  draft,
+  setProviders,
+  setBaselineProviders,
+  setNotificationEvents,
+  setAppriseEdits,
+  setAppriseNameEdits,
+}: NotificationDraftHydrationOptions) {
+  const hydratedSource = useRef<NotificationHydrationSource | undefined>(undefined);
+
+  useEffect(() => {
+    if (!loaded || isSameHydrationSource(hydratedSource.current, source)) return;
+    if (hydratedSource.current && hasDraftChanges(draft)) return;
+
+    hydratedSource.current = source;
+    const nextProviders = source.providers ?? [];
+    setProviders(nextProviders);
+    setBaselineProviders(nextProviders);
+    setNotificationEvents(source.events ?? []);
+    const edits = buildAppriseEdits(nextProviders);
+    setAppriseEdits(edits.urls);
+    setAppriseNameEdits(edits.names);
+  }, [
+    draft.appriseEdits,
+    draft.appriseFormMode,
+    draft.appriseNameEdits,
+    draft.baselineProviders,
+    draft.pendingDeletes,
+    draft.providers,
+    draft.showAppriseForm,
+    loaded,
+    setAppriseEdits,
+    setAppriseNameEdits,
+    setBaselineProviders,
+    setNotificationEvents,
+    setProviders,
+    source.appriseAvailable,
+    source.events,
+    source.providers,
+  ]);
+}
+
 export function useNotificationsState() {
   const {
     providers: storeProviders,
     events: storeEvents,
     appriseAvailable: storeAppriseAvailable,
     loaded,
+    loading,
+    rescanApprise,
+    appriseRescanPending,
+    appriseRescanError,
+    appriseRescanResult,
   } = useNotificationProviders();
+  const appriseAvailable = storeAppriseAvailable ?? false;
   const setNotificationProviders = useAppStore((state) => state.setNotificationProviders);
   const [providers, setProviders] = useState<NotificationProvider[]>(() => storeProviders ?? []);
   const [baselineProviders, setBaselineProviders] = useState<NotificationProvider[]>(
     () => storeProviders ?? [],
   );
   const [notificationEvents, setNotificationEvents] = useState<string[]>(() => storeEvents ?? []);
-  const [appriseAvailable, setAppriseAvailable] = useState(() => storeAppriseAvailable ?? true);
   const [appriseName, setAppriseName] = useState("");
   const [appriseUrls, setAppriseUrls] = useState("");
   const [appriseEdits, setAppriseEdits] = useState<Record<string, string>>(
@@ -167,21 +229,17 @@ export function useNotificationsState() {
   );
   const [showAppriseForm, setShowAppriseForm] = useState(false);
   const [appriseFormMode, setAppriseFormMode] = useState<AppriseFormMode>("create");
+  const appriseFormIdentity = useRef<object>({});
   const [activeAppriseId, setActiveAppriseId] = useState<string | null>(null);
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
-  const hydratedSource = useRef<NotificationHydrationSource | undefined>(undefined);
-
-  useEffect(() => {
-    if (!loaded) return;
-    const source = {
+  useHydrateNotificationDraft({
+    loaded,
+    source: {
       providers: storeProviders,
       events: storeEvents,
       appriseAvailable: storeAppriseAvailable,
-    };
-    if (isSameHydrationSource(hydratedSource.current, source)) {
-      return;
-    }
-    const draft = {
+    },
+    draft: {
       providers,
       baselineProviders,
       appriseEdits,
@@ -189,32 +247,13 @@ export function useNotificationsState() {
       pendingDeletes,
       showAppriseForm,
       appriseFormMode,
-    };
-    if (hydratedSource.current && hasDraftChanges(draft)) {
-      return;
-    }
-    hydratedSource.current = source;
-    const nextProviders = storeProviders ?? [];
-    setProviders(nextProviders);
-    setBaselineProviders(nextProviders);
-    setNotificationEvents(storeEvents ?? []);
-    setAppriseAvailable(storeAppriseAvailable ?? true);
-    const edits = buildAppriseEdits(nextProviders);
-    setAppriseEdits(edits.urls);
-    setAppriseNameEdits(edits.names);
-  }, [
-    appriseEdits,
-    appriseFormMode,
-    appriseNameEdits,
-    baselineProviders,
-    loaded,
-    pendingDeletes,
-    providers,
-    showAppriseForm,
-    storeAppriseAvailable,
-    storeEvents,
-    storeProviders,
-  ]);
+    },
+    setProviders,
+    setBaselineProviders,
+    setNotificationEvents,
+    setAppriseEdits,
+    setAppriseNameEdits,
+  });
   return {
     providers,
     setProviders,
@@ -222,8 +261,13 @@ export function useNotificationsState() {
     setBaselineProviders,
     notificationEvents,
     setNotificationEvents,
+    loaded,
+    loading,
     appriseAvailable,
-    setAppriseAvailable,
+    rescanApprise,
+    appriseRescanPending,
+    appriseRescanError,
+    appriseRescanResult,
     appriseName,
     setAppriseName,
     appriseUrls,
@@ -238,6 +282,7 @@ export function useNotificationsState() {
     setAppriseFormMode,
     activeAppriseId,
     setActiveAppriseId,
+    appriseFormIdentity,
     pendingDeletes,
     setPendingDeletes,
     setNotificationProviders,
@@ -249,26 +294,20 @@ export type { AppriseFormMode };
 export type PermissionRefresh = (error?: unknown) => void | Promise<void>;
 
 export function useSaveRequest(state: NotificationsState) {
+  const currentState = useRef(state);
+  currentState.current = state;
   const {
     providers,
     baselineProviders,
-    setProviders,
-    setBaselineProviders,
-    setAppriseEdits,
-    setAppriseNameEdits,
     pendingDeletes,
-    setPendingDeletes,
     setNotificationProviders,
     showAppriseForm,
     appriseFormMode,
     appriseName,
-    setAppriseName,
     appriseUrls,
-    setAppriseUrls,
-    setShowAppriseForm,
-    setActiveAppriseId,
   } = state;
   return useRequest(async () => {
+    const formIdentity = state.appriseFormIdentity.current;
     const createDraft =
       showAppriseForm && appriseFormMode === "create"
         ? { name: appriseName, urls: parseAppriseUrls(appriseUrls) }
@@ -304,33 +343,17 @@ export function useSaveRequest(state: NotificationsState) {
     setNotificationProviders({
       items: nextProviders,
       events: state.notificationEvents,
-      appriseAvailable: state.appriseAvailable,
       loaded: true,
       loading: false,
     });
-    setProviders(nextProviders);
-    setBaselineProviders(nextProviders);
-    setAppriseEdits((prev) => {
-      const next = { ...prev };
-      for (const p of nextProviders) {
-        if (p.type === "apprise") next[p.id] = formatAppriseUrls(p.config?.urls);
-      }
-      return next;
+    acknowledgeNotificationSave({
+      submitted: state,
+      current: currentState.current,
+      accepted: nextProviders,
+      edits: buildAppriseEdits(nextProviders),
+      created,
+      formIdentity,
     });
-    setAppriseNameEdits((prev) => {
-      const next = { ...prev };
-      for (const p of nextProviders) {
-        if (p.type === "apprise") next[p.id] = p.name;
-      }
-      return next;
-    });
-    setPendingDeletes(new Set());
-    if (created) {
-      setAppriseName("");
-      setAppriseUrls("");
-      setShowAppriseForm(false);
-      setActiveAppriseId(null);
-    }
     return created ? [...updated, created] : updated;
   });
 }
@@ -395,6 +418,7 @@ function useAppriseProviderActions(state: NotificationsState) {
   };
 
   const openAppriseForm = (mode: AppriseFormMode, provider?: NotificationProvider) => {
+    state.appriseFormIdentity.current = {};
     setAppriseFormMode(mode);
     setActiveAppriseId(provider?.id ?? null);
     if (provider) {
@@ -413,6 +437,7 @@ function useAppriseProviderActions(state: NotificationsState) {
   };
 
   const closeAppriseForm = () => {
+    state.appriseFormIdentity.current = {};
     setShowAppriseForm(false);
     setActiveAppriseId(null);
     setAppriseName("");
@@ -504,18 +529,7 @@ export function useNotificationsActions(
     }
   };
 
-  const handleTestNotification = async () => {
-    if (typeof Notification === "undefined") return;
-    let permission = Notification.permission;
-    if (permission === "default") {
-      permission = await Notification.requestPermission();
-      bumpPermission();
-    }
-    if (permission !== "granted") return;
-    new Notification(t("settings:testNotificationTitle"), {
-      body: t("settings:testNotificationBody"),
-    });
-  };
+  const handleTestNotification = () => sendTestNotification(bumpPermission);
 
   const handleTestProvider = async (providerId: string) => {
     try {
@@ -526,6 +540,7 @@ export function useNotificationsActions(
   };
 
   const discard = () => {
+    state.appriseFormIdentity.current = {};
     const edits = buildAppriseEdits(state.baselineProviders);
     state.setProviders(state.baselineProviders);
     state.setAppriseEdits(edits.urls);

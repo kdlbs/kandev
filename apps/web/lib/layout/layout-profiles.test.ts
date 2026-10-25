@@ -10,6 +10,7 @@ import {
   getBuiltInLayoutOverride,
   getBuiltInLayoutOverrideId,
   getBuiltInLayoutProfile,
+  getLayoutProfileIdentity,
   getLayoutProfileCompatibility,
   isBuiltInLayoutOverride,
   renameLayoutProfile,
@@ -293,6 +294,16 @@ describe("layout profile defaults", () => {
 });
 
 describe("layout profile IDs", () => {
+  it("maps reserved overrides to their built-in identity", () => {
+    expect(getLayoutProfileIdentity({ id: getBuiltInLayoutOverrideId(DEFAULT_LAYOUT_ID) })).toEqual(
+      { kind: "built-in", id: DEFAULT_LAYOUT_ID },
+    );
+    expect(getLayoutProfileIdentity({ id: "layout-copied-default" })).toEqual({
+      kind: "custom",
+      id: "layout-copied-default",
+    });
+  });
+
   it("uses UUID-backed IDs", () => {
     const first = createLayoutProfileId();
     const second = createLayoutProfileId();
@@ -487,5 +498,61 @@ describe("immutable layout profile mutations", () => {
     const legacy = savedLayout({ layout: { columns: LEGACY_LAYOUT_VALUE } });
 
     expect(() => setDefaultLayoutProfile([legacy], legacy.id)).toThrow("reusable");
+  });
+});
+
+/**
+ * A profile saved by an earlier version can reference a panel component core
+ * no longer registers. Dropping it must not invalidate the whole profile: the
+ * retired id is not reusable, so leaving it in place would make
+ * `validateReusableLayout` report `unsupported-panel` and silently revert the
+ * user to the built-in default.
+ */
+describe("layout profiles with a retired panel", () => {
+  // A literal, not the `panel()` helper: the registry entry that helper reads
+  // is gone, so it would throw for an unrelated-looking reason.
+  const RETIRED_PANEL = {
+    id: "prompt-history",
+    component: "prompt-history",
+    title: "Prompt History",
+  };
+
+  /** The given layout with the retired panel as the only panel of its own group. */
+  function layoutWithRetiredGroup(panelIds: string[]): LayoutState {
+    const layout = reusableLayout(panelIds);
+    layout.columns[0].groups.push({
+      id: "retired-group",
+      panels: [RETIRED_PANEL],
+      activePanel: RETIRED_PANEL.id,
+    });
+    return layout;
+  }
+
+  it("validates and keeps the surviving panels when a group is left empty by the drop", () => {
+    const result = validateReusableLayout(layoutWithRetiredGroup(["chat", "files"]));
+
+    expect(result.valid).toBe(true);
+    if (!result.valid) return;
+    const panelIds = result.layout.columns.flatMap((column) =>
+      column.groups.flatMap((group) => group.panels.map((item) => item.id)),
+    );
+    expect(panelIds).toEqual(["chat", "files"]);
+  });
+
+  it("keeps applying a customized default that references the retired panel", () => {
+    const profile = savedLayout({
+      is_default: true,
+      layout: layoutWithRetiredGroup(["chat", "files"]),
+    });
+
+    const resolved = resolveEffectiveDefaultLayout([profile]);
+
+    expect(resolved.source).toBe("custom");
+    if (resolved.source !== "custom") return;
+    expect(
+      resolved.layout.columns.flatMap((column) =>
+        column.groups.flatMap((group) => group.panels.map((item) => item.id)),
+      ),
+    ).toEqual(["chat", "files"]);
   });
 });

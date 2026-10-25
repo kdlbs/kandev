@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/workspace-git-status.md
+spec: docs/specs/platform/requirements/workspace-git-status.md
 created: 2026-07-30
 status: implemented
 ---

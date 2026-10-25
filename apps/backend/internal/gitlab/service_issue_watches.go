@@ -2,12 +2,16 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"net/url"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // CreateIssueWatch persists a new issue watch.
@@ -48,6 +52,10 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	store := s.requireStore()
 	if store == nil {
 		return nil, errStoreUnavailable
+	}
+
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+		return nil, err
 	}
 	if err := store.CreateIssueWatch(ctx, iw); err != nil {
 		return nil, fmt.Errorf("create issue watch: %w", err)
@@ -94,13 +102,48 @@ func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*
 	return store.ListIssueWatches(ctx, workspaceID)
 }
 
-// ListAllIssueWatches returns every issue watch.
+// ListAllIssueWatches returns every issue watch the caller may see. For a
+// scoped caller that is only their own workspaces' watches; for an
+// identity-less internal caller (unscoped) it is every watch, as before auth.
 func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	store := s.requireStore()
 	if store == nil {
 		return nil, errStoreUnavailable
 	}
-	return store.ListAllIssueWatches(ctx)
+	watches, err := store.ListAllIssueWatches(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterIssueWatchesByAccess(ctx, watches)
+}
+
+// filterIssueWatchesByAccess keeps only watches whose workspace the caller may
+// access. Access decisions are memoized per workspace so a long list costs one
+// authorize call per distinct workspace, not one per watch. Only an
+// ErrWorkspaceNotFound denial drops a watch; any other authorizer error (a
+// transient DB failure, say) is propagated so the caller sees the failure
+// rather than a silently truncated 200.
+func (s *Service) filterIssueWatchesByAccess(ctx context.Context, watches []*IssueWatch) ([]*IssueWatch, error) {
+	decision := make(map[string]bool)
+	visible := make([]*IssueWatch, 0, len(watches))
+	for _, w := range watches {
+		allowed, seen := decision[w.WorkspaceID]
+		if !seen {
+			switch err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); {
+			case err == nil:
+				allowed = true
+			case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+				allowed = false
+			default:
+				return nil, err
+			}
+			decision[w.WorkspaceID] = allowed
+		}
+		if allowed {
+			visible = append(visible, w)
+		}
+	}
+	return visible, nil
 }
 
 // UpdateIssueWatch applies a partial update.
@@ -134,6 +177,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
 	}
 	if err := validateWatchMaxInflight(iw.MaxInflightTasks); err != nil {
+		return err
+	}
+
+	if _, err := s.executorActorContext(ctx, iw.CreatedByUserID, iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
 		return err
 	}
 	return store.UpdateIssueWatch(ctx, iw)
@@ -229,6 +276,12 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if watch == nil {
 		return nil, fmt.Errorf("watch is nil")
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	if !watch.Enabled {
 		return nil, nil
 	}
@@ -287,7 +340,7 @@ func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue,
 			filter += "&labels=" + url.QueryEscape(strings.Join(watch.Labels, ","))
 		}
 	}
-	issues, err := client.ListIssues(ctx, filter, customQuery)
+	issues, err := client.ListIssues(ctx, filter, customQuery, "")
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
 	}

@@ -38,6 +38,14 @@ func (c *Client) ReconcileWorkspace(ctx context.Context, sourceRoots ...[]string
 	}{WorkspaceSourceRoots: firstSourceRoots(sourceRoots)})
 }
 
+// SetWorkspaceRecoveryExclusions updates the live tracker filter with exact
+// artifact paths authorized by the backend's durable recovery registry.
+func (c *Client) SetWorkspaceRecoveryExclusions(ctx context.Context, paths []string) error {
+	return c.updateWorkspace(ctx, "/api/v1/workspace/recovery-exclusions", "recovery exclusions", struct {
+		Paths []string `json:"paths"`
+	}{Paths: paths})
+}
+
 // RebindWorkspace replaces agentctl's workspace root and every tracker after
 // lifecycle has stopped the native child. It is deliberately not a best-effort
 // rescan: callers must treat a failure as an adoption failure and roll back.

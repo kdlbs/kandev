@@ -108,6 +108,54 @@ func TestCreateHistory_NullableFromStepAndActor(t *testing.T) {
 	}
 }
 
+// TestListHistoryBySession_PreMigrationRowOmitsHandoffAndBlockersKeys covers
+// AC-002.7: a row written before this capability shipped (metadata carrying
+// only signal_source/signal_summary, the pre-existing shape) round-trips
+// through the JSON metadata column unchanged — signal_handoff and
+// signal_blockers must stay absent keys, not materialize as empty-string or
+// null entries, so a consumer's "absent-by-default" read is correct without
+// needing a migration to backfill them.
+func TestListHistoryBySession_PreMigrationRowOmitsHandoffAndBlockersKeys(t *testing.T) {
+	repo, sqlxDB := setupTestRepoWithDB(t)
+	ctx := context.Background()
+
+	if _, err := sqlxDB.Exec(`INSERT INTO task_sessions (id) VALUES ('sess-pre-migration')`); err != nil {
+		t.Fatalf("failed to insert test session: %v", err)
+	}
+
+	history := &models.SessionStepHistory{
+		SessionID: "sess-pre-migration",
+		ToStepID:  "step-old",
+		Trigger:   models.StepTransitionTriggerManual,
+		Metadata: map[string]interface{}{
+			"signal_source":  "agent",
+			"signal_summary": "old-shaped row from before handoff/blockers existed",
+		},
+	}
+	if err := repo.CreateHistory(ctx, history); err != nil {
+		t.Fatalf("CreateHistory failed: %v", err)
+	}
+
+	result, err := repo.ListHistoryBySession(ctx, "sess-pre-migration")
+	if err != nil {
+		t.Fatalf("ListHistoryBySession failed: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 history row, got %d", len(result))
+	}
+
+	got := result[0]
+	if got.Metadata["signal_summary"] != "old-shaped row from before handoff/blockers existed" {
+		t.Errorf("Metadata[signal_summary] = %v, want the seeded pre-migration summary", got.Metadata["signal_summary"])
+	}
+	if _, ok := got.Metadata["signal_handoff"]; ok {
+		t.Errorf("Metadata[signal_handoff] = %v, want the key absent for a pre-migration row", got.Metadata["signal_handoff"])
+	}
+	if _, ok := got.Metadata["signal_blockers"]; ok {
+		t.Errorf("Metadata[signal_blockers] = %v, want the key absent for a pre-migration row", got.Metadata["signal_blockers"])
+	}
+}
+
 func TestListHistoryBySession_OrderedByCreatedAt(t *testing.T) {
 	repo, sqlxDB := setupTestRepoWithDB(t)
 	ctx := context.Background()

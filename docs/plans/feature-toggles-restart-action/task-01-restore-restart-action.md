@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/feature-toggles/spec.md"
+spec: "../../specs/platform/requirements/feature-toggles.md"
 ---
 
 # Task 01: Restore Feature Toggles restart action

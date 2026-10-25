@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/agentprofile"
 	"sync"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -12,14 +13,16 @@ import (
 
 // EnsureSessionResponse describes the outcome of EnsureSession.
 type EnsureSessionResponse struct {
-	Success        bool   `json:"success"`
-	TaskID         string `json:"task_id"`
-	SessionID      string `json:"session_id,omitempty"`
-	State          string `json:"state"`
-	AgentProfileID string `json:"agent_profile_id,omitempty"`
-	Source         string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start | skipped_terminal_pr
-	NewlyCreated   bool   `json:"newly_created"`            // true when a new session was created by this call
-	WorkspacePath  string `json:"workspace_path,omitempty"` // effective workspace path (for quick-chat sessions without worktrees)
+	Success               bool   `json:"success"`
+	TaskID                string `json:"task_id"`
+	SessionID             string `json:"session_id,omitempty"`
+	State                 string `json:"state"`
+	AgentProfileID        string `json:"agent_profile_id,omitempty"`
+	Source                string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start | skipped_terminal_pr
+	NewlyCreated          bool   `json:"newly_created"`            // true when a new session was created by this call
+	WorkspacePath         string `json:"workspace_path,omitempty"` // effective workspace path (for quick-chat sessions without worktrees)
+	ActivationDisposition string `json:"activation_disposition,omitempty"`
+	ActivationReason      string `json:"activation_reason,omitempty"`
 }
 
 // EnsureSessionOptions holds optional parameters for EnsureSession.
@@ -35,6 +38,9 @@ type EnsureSessionOptions struct {
 	// upgraded into an agent start. Absent (nil) keeps the step-derived
 	// decision.
 	AutoStart *bool
+	// ActivationSource distinguishes passive task opening from an explicit
+	// launch action. A passive open never resumes an existing session.
+	ActivationSource LaunchActivationSource
 }
 
 // ensureLocks serializes EnsureSession calls per task id so concurrent callers
@@ -79,10 +85,23 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	if len(opts) > 0 {
 		o = opts[0]
 	}
+	if err := validateLaunchActivationSource(o.ActivationSource); err != nil {
+		return nil, err
+	}
+
+	// A passive task open must follow the session already selected by a
+	// deferred launch. Returning the ordinary primary session here would make
+	// the browser inspect the parked predecessor while the queued destination
+	// remained hidden, and a later open could attempt a second launch.
+	if o.ActivationSource == LaunchActivationSourceSessionOpen {
+		if queued, handled := s.queuedEnsureResponse(ctx, taskID); handled {
+			return queued, nil
+		}
+	}
 
 	if existing := s.findExistingSession(ctx, taskID); existing != nil {
-		if o.EnsureExecution {
-			s.tryEnsureExecution(ctx, existing.SessionID)
+		if o.EnsureExecution && o.ActivationSource != LaunchActivationSourceSessionOpen {
+			s.tryEnsureExecution(ctx, existing.SessionID, seam3CallShapeViewing, launchOriginManual, "")
 		}
 		return existing, nil
 	}
@@ -106,13 +125,14 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	}
 
 	launchResp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID:          taskID,
-		Intent:          intent,
-		AgentProfileID:  agentProfileID,
-		WorkflowStepID:  task.WorkflowStepID,
-		LaunchWorkspace: true,
-		AutoStart:       intent == IntentStart,
-		NoAgentLaunch:   o.AutoStart != nil && !*o.AutoStart,
+		TaskID:           taskID,
+		Intent:           intent,
+		AgentProfileID:   agentProfileID,
+		WorkflowStepID:   task.WorkflowStepID,
+		LaunchWorkspace:  true,
+		AutoStart:        intent == IntentStart,
+		NoAgentLaunch:    o.AutoStart != nil && !*o.AutoStart,
+		ActivationSource: o.ActivationSource,
 	})
 	if err != nil {
 		return nil, err
@@ -125,24 +145,121 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 		// found to have a terminal pull request. Keep ensure idempotent and let
 		// the task-owned launch error card render without creating a session.
 		return &EnsureSessionResponse{
-			Success:        true,
-			TaskID:         taskID,
-			State:          launchResp.State,
-			AgentProfileID: agentProfileID,
-			Source:         "skipped_terminal_pr",
-			NewlyCreated:   false,
+			Success:               true,
+			TaskID:                taskID,
+			State:                 launchResp.State,
+			AgentProfileID:        agentProfileID,
+			Source:                "skipped_terminal_pr",
+			NewlyCreated:          false,
+			ActivationDisposition: launchResp.ActivationDisposition,
+			ActivationReason:      launchResp.ActivationReason,
 		}, nil
 	}
 
 	return &EnsureSessionResponse{
-		Success:        true,
-		TaskID:         taskID,
-		SessionID:      launchResp.SessionID,
-		State:          launchResp.State,
-		AgentProfileID: agentProfileID,
-		Source:         source,
-		NewlyCreated:   true,
+		Success:               true,
+		TaskID:                taskID,
+		SessionID:             launchResp.SessionID,
+		State:                 launchResp.State,
+		AgentProfileID:        agentProfileID,
+		Source:                source,
+		NewlyCreated:          true,
+		ActivationDisposition: launchResp.ActivationDisposition,
+		ActivationReason:      launchResp.ActivationReason,
 	}, nil
+}
+
+// queuedEnsureResponse returns the exact destination owned by a durable
+// automatic launch deferral. handled is true whenever the task has a ceiling
+// record, including malformed or orphaned records: passive inspection must
+// remain read-only and must not fall back to creating or resuming another
+// session when ownership cannot be established.
+func (s *Service) queuedEnsureResponse(ctx context.Context, taskID string) (*EnsureSessionResponse, bool) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return queuedEnsureOwnershipUnavailableResponse(taskID, "", ""), true
+	}
+	if !models.HasCeilingDeferredIntent(task) {
+		return nil, false
+	}
+	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	deferral, err := models.ReadCeilingDeferral(record)
+	if err != nil {
+		return queuedEnsureOwnershipUnavailableResponse(taskID, "", ""), true
+	}
+	return s.queuedEnsureResponseForDeferral(ctx, taskID, task, deferral), true
+}
+
+func (s *Service) queuedEnsureResponseForDeferral(
+	ctx context.Context,
+	taskID string,
+	task *models.Task,
+	deferral models.CeilingDeferral,
+) *EnsureSessionResponse {
+	sessionID := models.CeilingDeferralSessionID(task, deferral)
+	agentProfileID := stringField(deferral.Payload, metaKeyAgentProfileID)
+	if queuedEnsureOwnershipUnavailable(task, deferral, sessionID) {
+		return queuedEnsureOwnershipUnavailableResponse(taskID, sessionID, agentProfileID)
+	}
+	if sessionID == "" {
+		return queuedEnsureCapacityResponse(taskID, agentProfileID)
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID {
+		return queuedEnsureOwnershipUnavailableResponse(taskID, sessionID, agentProfileID)
+	}
+
+	response := s.existingResponse(ctx, taskID, session, "existing_queued")
+	response.ActivationDisposition = activationDispositionQueued
+	response.ActivationReason = "session_capacity"
+	return response
+}
+
+func queuedEnsureOwnershipUnavailable(
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	sessionID string,
+) bool {
+	_, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
+	workflowOrigin := bindingPresent || stringField(deferral.Payload, metaKeyWorkflowStepID) != "" ||
+		int64Field(deferral.Payload, "workflow_entry_id") > 0
+	if deferral.Kind == models.CeilingLaunchStart {
+		if _, routePresent := models.LoadWorkflowSessionRoute(task.Metadata); routePresent {
+			workflowOrigin = true
+		}
+	}
+	return bindingErr != nil || (workflowOrigin && (sessionID == "" ||
+		(bindingPresent && !models.CeilingDeferralTargetsSession(task, deferral, sessionID))))
+}
+
+func queuedEnsureOwnershipUnavailableResponse(
+	taskID, sessionID, agentProfileID string,
+) *EnsureSessionResponse {
+	return &EnsureSessionResponse{
+		Success:               true,
+		TaskID:                taskID,
+		SessionID:             sessionID,
+		AgentProfileID:        agentProfileID,
+		State:                 string(models.TaskSessionStateCreated),
+		Source:                "queued",
+		NewlyCreated:          false,
+		ActivationDisposition: activationDispositionSuppressed,
+		ActivationReason:      autoResumeBlockedOwnershipUnavailable,
+	}
+}
+
+func queuedEnsureCapacityResponse(taskID, agentProfileID string) *EnsureSessionResponse {
+	return &EnsureSessionResponse{
+		Success:               true,
+		TaskID:                taskID,
+		State:                 string(models.TaskSessionStateCreated),
+		AgentProfileID:        agentProfileID,
+		Source:                "queued",
+		NewlyCreated:          false,
+		ActivationDisposition: activationDispositionQueued,
+		ActivationReason:      "session_capacity",
+	}
 }
 
 // findExistingSession returns the task's existing session for advanced-mode
@@ -151,7 +268,7 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 // singleton human user). For kanban tasks, it falls back to the existing
 // is_primary-first lookup. Returns nil when no matching session exists.
 func (s *Service) findExistingSession(ctx context.Context, taskID string) *EnsureSessionResponse {
-	if office := s.findOfficeSessionForResume(ctx, taskID); office != nil {
+	if office, isOffice := s.findOfficeSessionForResume(ctx, taskID); isOffice {
 		return office
 	}
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
@@ -168,24 +285,36 @@ func (s *Service) findExistingSession(ctx context.Context, taskID string) *Ensur
 }
 
 // findOfficeSessionForResume implements the office-only branch of advanced-mode
-// resume. Returns nil when the task isn't office, when no per-agent session
-// has been created yet, or when no relevant agent identity is available.
-// (The "create on demand" branch is handled by EnsureSession's fallthrough,
-// not here — keeping findExistingSession a pure lookup.)
-func (s *Service) findOfficeSessionForResume(ctx context.Context, taskID string) *EnsureSessionResponse {
+// resume. The second return value reports whether the task is Office-owned.
+// Returns nil when no per-agent session has been created yet or when no
+// relevant agent identity is available. An Office task must not fall through to
+// the generic primary/newest lookup, because that lookup can return another
+// participant's session. When the task has no projected runner (for example,
+// a task created with only metadata.agent_profile_id), resolve the same profile
+// EnsureSession would use for creation and look up that exact session. The
+// "create on demand" branch is handled by EnsureSession after this pure lookup.
+func (s *Service) findOfficeSessionForResume(ctx context.Context, taskID string) (*EnsureSessionResponse, bool) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil || !task.IsFromOffice {
-		return nil
+		return nil, false
 	}
 	agentID := s.agentForViewer(ctx, task)
 	if agentID == "" {
-		return nil
+		// A task can be Office-owned without a projected runner. This is
+		// common for API-created review tasks whose concrete profile lives in
+		// metadata. Match the profile resolution used by EnsureSession so an
+		// already-created run session is reused while still avoiding a
+		// participant-agnostic newest-session fallback.
+		agentID, _ = s.resolveTaskAgentProfile(ctx, task)
+	}
+	if agentID == "" {
+		return nil, true
 	}
 	sess, err := s.repo.GetTaskSessionByTaskAndAgent(ctx, taskID, agentID)
 	if err != nil || sess == nil {
-		return nil
+		return nil, true
 	}
-	return s.existingResponse(ctx, taskID, sess, "existing_office_agent")
+	return s.existingResponse(ctx, taskID, sess, "existing_office_agent"), true
 }
 
 // agentForViewer resolves the agent_profile_id whose session should be
@@ -244,42 +373,92 @@ func (s *Service) existingResponse(ctx context.Context, taskID string, sess *mod
 // Failures are logged but not propagated — the session is still usable for chat
 // even if the execution can't be resumed (file/terminal panels will show
 // appropriate "not available" states).
-func (s *Service) tryEnsureExecution(ctx context.Context, sessionID string) {
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		return
-	}
-	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
-		s.logger.Debug("ensure execution for existing session (non-fatal)",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
+//
+// callShape distinguishes this call's two production shapes (AC-47e): a seam-3
+// refusal is swallowed for the viewing shape (nothing to replay, nobody
+// waiting) but deferred for the queue-drain shape, which supplies
+// queuedMessageID so the deferred record can be matched back to its queued
+// message at retry time. An unrecognized shape defaults to deferring
+// (AC-47e1) — the unsafe direction here is silently dropping a launch, not
+// refusing one.
+func (s *Service) tryEnsureExecution(
+	ctx context.Context, sessionID string, callShape seam3CallShape, origin launchOrigin, queuedMessageID string,
+) {
+	_ = s.tryEnsureExecutionWithBinding(
+		ctx, sessionID, callShape, origin, queuedMessageID, ceilingEntryBindingFromContext(ctx),
+	)
 }
 
-// resolveTaskAgentProfile applies the 5-step resolution chain on the backend:
-// 1) task.metadata.agent_profile_id, 2) workflow step override,
-// 3) workflow default, 4) Office task assignee, 5) workspace default. Returns the resolved profile id
-// (or "" when none resolve) along with the workflow step it loaded (or nil).
-// Returning the step lets callers reuse it (e.g. to gate auto-start) without a
-// second DB lookup.
-func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep) {
-	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
-	if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
-		return v, step
+func (s *Service) tryEnsureExecutionWithBinding(
+	ctx context.Context, sessionID string, callShape seam3CallShape, origin launchOrigin, queuedMessageID string,
+	binding *models.CeilingWorkflowEntryBinding,
+) error {
+	if binding != nil {
+		ctx = withCeilingEntryBinding(ctx, binding)
 	}
-	if step != nil {
-		if id := s.resolveStepAgentProfile(ctx, step); id != "" {
-			return id, step
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return err
+	}
+	err = s.ensureSessionRunningWithBinding(ctx, sessionID, session, origin, binding)
+	if err == nil {
+		return nil
+	}
+	if refusal, ok := isSeam3Refusal(err); ok {
+		switch callShape {
+		case seam3CallShapeViewing:
+			return nil
+		case seam3CallShapeQueueDrain:
+			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal, binding)
+			return err
+		default:
+			s.logger.Zap().Warn("tryEnsureExecution saw an unrecognized seam-3 call shape; defaulting to deferring",
+				zap.String("session_id", sessionID), zap.String("call_shape", string(callShape)))
+			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal, binding)
+			return err
 		}
 	}
-	if task.AssigneeAgentProfileID != "" {
-		return task.AssigneeAgentProfileID, step
+	s.logger.Debug("ensure execution for existing session (non-fatal)",
+		zap.String("session_id", sessionID),
+		zap.Error(err))
+	return err
+}
+
+// resolveTaskAgentProfile resolves the task's agent profile in the order owned
+// by agentprofile.Resolve: workflow step override, workflow default,
+// task.metadata.agent_profile_id, Office task assignee, workspace default.
+// Returns the resolved profile id (or "" when none resolve) along with the
+// workflow step it loaded (or nil). Returning the step lets callers reuse it
+// (e.g. to gate auto-start) without a second DB lookup.
+func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep) {
+	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
+	in := agentprofile.Input{Assignee: task.AssigneeAgentProfileID}
+	if v, ok := task.Metadata["agent_profile_id"].(string); ok {
+		in.TaskMetadata = v
+	}
+	if step != nil {
+		in.HasStep = true
+		in.StepSessionTarget = step.SessionTarget != nil
+		if !in.StepSessionTarget {
+			var replaced bool
+			in.StepReplacement, replaced, in.StepProfile = s.stepProfileInputs(task, step)
+			if replaced && in.StepReplacement == "" {
+				in.StepSessionTarget = true
+			}
+			if !in.StepSessionTarget && in.StepReplacement == "" && in.StepProfile == "" {
+				in.WorkflowDefault = s.workflowDefaultProfile(ctx, step)
+			}
+		}
+	}
+	if id, src := agentprofile.Resolve(in); src != agentprofile.SourceNone {
+		return id, step
 	}
 	ws, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
-	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil && *ws.DefaultAgentProfileID != "" {
-		return *ws.DefaultAgentProfileID, step
+	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil {
+		in.WorkspaceDefault = *ws.DefaultAgentProfileID
 	}
-	return "", step
+	id, _ := agentprofile.Resolve(in)
+	return id, step
 }
 
 // lookupWorkflowStep loads a workflow step by id, returning nil when the id

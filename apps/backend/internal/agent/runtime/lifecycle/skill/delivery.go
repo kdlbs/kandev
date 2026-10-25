@@ -21,13 +21,21 @@ func (d *Deployer) deliver(_ context.Context, manifest *Manifest, executorType, 
 	switch executorType {
 	case "sprites":
 		return d.deliverSprites(manifest)
-	default:
+	case "k8s":
+		return d.deliverKubernetes(manifest)
+	case "ssh":
+		return d.deliverSSH(manifest)
+	case "", "local", "local_pc", "worktree", "local_docker", "remote_docker", "mock_remote":
 		// local_pc and local_docker share the same delivery: the
 		// worktree IS the agent's CWD inside the executor (Docker
 		// bind-mounts it; local_pc runs the agent in it directly), so
 		// writing skills under <worktree>/<projectSkillDir>/kandev-<slug>
 		// gets them in front of the agent's project-skill discovery.
 		return d.deliverLocal(manifest, worktreePath)
+	default:
+		d.logger.Warn("skill delivery skipped for unsupported executor",
+			zap.String("executor_type", executorType))
+		return DeployResult{}
 	}
 }
 
@@ -38,7 +46,7 @@ func (d *Deployer) deliver(_ context.Context, manifest *Manifest, executorType, 
 // inside and outside the container, so a single write satisfies both.
 func (d *Deployer) deliverLocal(manifest *Manifest, worktreePath string) DeployResult {
 	if worktreePath != "" && manifest.ProjectSkillDir != "" {
-		if err := injectSkills(worktreePath, manifest.ProjectSkillDir, manifest.Skills); err != nil {
+		if err := injectSkills(worktreePath, manifest.ProjectSkillDir, manifest.Skills, d.logger); err != nil {
 			d.logger.Warn("failed to inject skills into worktree",
 				zap.String("worktree", worktreePath),
 				zap.String("dir", manifest.ProjectSkillDir),
@@ -50,17 +58,36 @@ func (d *Deployer) deliverLocal(manifest *Manifest, worktreePath string) DeployR
 	return DeployResult{InstructionsDir: instructionsDir}
 }
 
-// deliverSprites serialises the manifest as JSON and stashes it on
-// the launch metadata. The Sprites executor reads the JSON during
-// post-create setup and uploads files into the sprite. We do NOT
-// write files to the host because the sprite runs in a remote sandbox.
+// deliverSprites serialises the manifest into launch metadata for upload by
+// the remote executor. It never writes remote runtime files on the host.
 func (d *Deployer) deliverSprites(manifest *Manifest) DeployResult {
 	dir := spritesInstructionsDir(manifest.WorkspaceSlug, manifest.AgentID)
+	return d.deliverRemote(manifest, dir, "sprites")
+}
+
+func (d *Deployer) deliverKubernetes(manifest *Manifest) DeployResult {
+	dir := kubernetesInstructionsDir(manifest.WorkspaceSlug, manifest.AgentID)
+	return d.deliverRemote(manifest, dir, "k8s")
+}
+
+// deliverSSH keeps the manifest in launch metadata. The SSH executor uploads
+// its files after the remote task workspace and agentctl instance exist; the
+// host-side worktree is not the SSH agent's workspace.
+func (d *Deployer) deliverSSH(manifest *Manifest) DeployResult {
+	result := d.deliverRemote(manifest, "", "ssh")
+	result.InstructionsDir = instructionsDirHost(d.basePath, manifest.WorkspaceSlug, manifest.AgentID)
+	d.writeInstructionFiles(manifest, result.InstructionsDir)
+	return result
+}
+
+func (d *Deployer) deliverRemote(manifest *Manifest, dir, executorType string) DeployResult {
 	rewriteManifestRefs(manifest, dir)
 	normalizeManifestSkills(manifest)
 	data, err := json.Marshal(manifest)
 	if err != nil {
-		d.logger.Warn("failed to marshal skill manifest for sprites", zap.Error(err))
+		d.logger.Warn("failed to marshal remote skill manifest",
+			zap.String("executor_type", executorType),
+			zap.Error(err))
 		return DeployResult{}
 	}
 	return DeployResult{

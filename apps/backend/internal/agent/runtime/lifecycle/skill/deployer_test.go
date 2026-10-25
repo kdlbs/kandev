@@ -344,6 +344,122 @@ func TestDeploy_KanbanProfile_NoSkillsNoOp(t *testing.T) {
 	}
 }
 
+func TestDeploy_AdditionalSkillSlugMaterializesForEmptyProfile(t *testing.T) {
+	base := t.TempDir()
+	worktree := t.TempDir()
+	reader := &fakeSkillReader{skills: map[string]*skill.Skill{
+		"kandev-step-decision": {Slug: "kandev-step-decision", Content: "# decision"},
+	}}
+	d := newDeployer(t, base, reader, &fakeInstructionLister{})
+
+	_, err := d.Deploy(context.Background(), skill.Request{
+		Profile: &settingsmodels.AgentProfile{
+			ID:      "office-p1",
+			AgentID: "claude-acp",
+		},
+		AdditionalSkillSlugs: []string{"kandev-step-decision"},
+		ExecutorType:         "local_pc",
+		WorkspacePath:        worktree,
+	})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	skillPath := filepath.Join(worktree, ".claude", "skills", "kandev-step-decision", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("additional decision skill was not materialized: %v", err)
+	}
+}
+
+func TestDeploy_SSHReturnsManifestWithoutWritingControlPlaneWorktree(t *testing.T) {
+	base := t.TempDir()
+	worktree := t.TempDir()
+	reader := &fakeSkillReader{skills: map[string]*skill.Skill{
+		"kandev-step-decision": {Slug: "kandev-step-decision", Content: "# decision"},
+	}}
+	d := newDeployer(t, base, reader, &fakeInstructionLister{})
+
+	res, err := d.Deploy(context.Background(), skill.Request{
+		Profile:      &settingsmodels.AgentProfile{ID: "ssh-p1", AgentID: "claude-acp"},
+		ExecutorType: "ssh", WorkspacePath: worktree,
+		AdditionalSkillSlugs: []string{"kandev-step-decision"},
+	})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	raw, ok := res.Metadata[skill.MetadataKeySkillManifestJSON].(string)
+	if !ok || raw == "" {
+		t.Fatalf("SSH delivery missing skill manifest: %#v", res.Metadata)
+	}
+	var manifest skill.Manifest
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		t.Fatalf("unmarshal SSH manifest: %v", err)
+	}
+	if len(manifest.Skills) != 1 || manifest.Skills[0].Slug != "kandev-step-decision" {
+		t.Fatalf("SSH manifest skills = %+v", manifest.Skills)
+	}
+	path := filepath.Join(worktree, ".claude", "skills", "kandev-step-decision", "SKILL.md")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("SSH delivery wrote control-plane worktree file %s", path)
+	}
+}
+
+func TestDeploy_DurableDecisionSkillIsNotMaterialized(t *testing.T) {
+	base := t.TempDir()
+	worktree := t.TempDir()
+	decision := &skill.Skill{Slug: "kandev-step-decision", Content: "# decision"}
+	reader := &fakeSkillReader{skills: map[string]*skill.Skill{
+		"kandev-step-decision": decision,
+		"decision-id":          decision,
+	}}
+	d := newDeployer(t, base, reader, &fakeInstructionLister{})
+
+	_, err := d.Deploy(context.Background(), skill.Request{
+		Profile: &settingsmodels.AgentProfile{
+			ID: "kanban-p1", AgentID: "claude-acp",
+			SkillIDs:      `["decision-id"]`,
+			DesiredSkills: `["kandev-step-decision"]`,
+		},
+		ExecutorType: "local_pc", WorkspacePath: worktree,
+	})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	path := filepath.Join(worktree, ".claude", "skills", "kandev-step-decision", "SKILL.md")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("durably selected decision skill was materialized at %s", path)
+	}
+}
+
+func TestDeploy_SeatThenNonSeatRemovesDecisionSkill(t *testing.T) {
+	base := t.TempDir()
+	worktree := t.TempDir()
+	reader := &fakeSkillReader{skills: map[string]*skill.Skill{
+		"kandev-step-decision": {Slug: "kandev-step-decision", Content: "# decision"},
+		"sk-review":            {Slug: "sk-review", Content: "# review"},
+	}}
+	d := newDeployer(t, base, reader, &fakeInstructionLister{})
+	profile := &settingsmodels.AgentProfile{ID: "p1", AgentID: "claude-acp"}
+	if _, err := d.Deploy(context.Background(), skill.Request{
+		Profile: profile, ExecutorType: "local_pc", WorkspacePath: worktree,
+		AdditionalSkillSlugs: []string{"kandev-step-decision"},
+	}); err != nil {
+		t.Fatalf("seat Deploy: %v", err)
+	}
+	decisionPath := filepath.Join(worktree, ".claude", "skills", "kandev-step-decision", "SKILL.md")
+	if _, err := os.Stat(decisionPath); err != nil {
+		t.Fatalf("seat decision skill missing: %v", err)
+	}
+	if _, err := d.Deploy(context.Background(), skill.Request{
+		Profile: profile, ExecutorType: "local_pc", WorkspacePath: worktree,
+	}); err != nil {
+		t.Fatalf("non-seat Deploy: %v", err)
+	}
+	if _, err := os.Stat(decisionPath); !os.IsNotExist(err) {
+		t.Fatalf("non-seat deployment left decision skill at %s", decisionPath)
+	}
+}
+
 // TestDeploy_KanbanProfileWithSkill_DeploysFiles verifies that a
 // kanban-flavoured profile (no DesiredSkills, no Role) that the user
 // later enriched with SkillIDs gets the same delivery treatment as

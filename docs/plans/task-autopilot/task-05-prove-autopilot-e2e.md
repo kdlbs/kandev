@@ -7,7 +7,7 @@ depends_on:
   - "03-build-parent-question-lifecycle"
   - "04-build-autopilot-ui"
 plan: "plan.md"
-spec: "../../specs/tasks/autopilot-mode.md"
+spec: "../../specs/tasks/requirements/autopilot-mode.md"
 ---
 
 # Task 05: Prove the Autopilot Lifecycle End to End

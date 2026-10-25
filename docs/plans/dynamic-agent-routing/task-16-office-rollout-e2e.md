@@ -5,7 +5,7 @@ status: pending
 wave: 11
 depends_on: ["10-office-routing-handoff", "13-routed-session-e2e"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 16: Office rollout E2E

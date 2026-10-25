@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["07-lint-cleanup"]
 plan: "plan.md"
-spec: "../../specs/tasks/multi-branch/spec.md"
+spec: "../../specs/tasks/requirements/multi-branch.md"
 ---
 
 # Task 08: Reduce Remote popover function size

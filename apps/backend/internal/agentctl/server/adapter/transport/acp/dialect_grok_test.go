@@ -175,7 +175,7 @@ func TestSetGrokModel_UsesSessionSetModel(t *testing.T) {
 	a := grokAdapterWithModels(t, models, config)
 	conn := &fakeGrokSetModelConn{}
 
-	if err := a.setModelWithConn(context.Background(), conn, "sess-grok", "grok-4.5", models, config); err != nil {
+	if err := a.setModelWithConn(context.Background(), conn, "sess-grok", "grok-4.5"); err != nil {
 		t.Fatalf("setModel: %v", err)
 	}
 	if len(conn.reqs) != 1 {
@@ -245,7 +245,7 @@ func TestSetGrokModel_IncompatibleHarnessAsksForNewSession(t *testing.T) {
 	}
 
 	err := a.setModelWithConn(
-		context.Background(), conn, "sess-grok", "grok-composer-2.5-fast", models, config,
+		context.Background(), conn, "sess-grok", "grok-composer-2.5-fast",
 	)
 	if err == nil || !strings.Contains(err.Error(), "Start a new session") {
 		t.Fatalf("setModel error = %v, want actionable new-session instruction", err)
@@ -283,8 +283,6 @@ func TestSetModelWithConn_GrokDriverAsksForNewSession(t *testing.T) {
 		conn,
 		"sess-grok",
 		"grok-composer-2.5-fast",
-		models,
-		config,
 	)
 	if err == nil || !strings.Contains(err.Error(), "Start a new session") {
 		t.Fatalf("SetModel error = %v, want actionable new-session instruction", err)
@@ -316,7 +314,7 @@ func TestSetModelWithConn_SerializesConcurrentGrokChanges(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() {
 		firstDone <- adapter.setModelWithConn(
-			context.Background(), conn, "sess-grok", "grok-first", models, config,
+			context.Background(), conn, "sess-grok", "grok-first",
 		)
 	}()
 	if got := <-conn.started; got != "grok-first" {
@@ -326,7 +324,7 @@ func TestSetModelWithConn_SerializesConcurrentGrokChanges(t *testing.T) {
 	secondDone := make(chan error, 1)
 	go func() {
 		secondDone <- adapter.setModelWithConn(
-			context.Background(), conn, "sess-grok", "grok-latest", models, config,
+			context.Background(), conn, "sess-grok", "grok-latest",
 		)
 	}()
 	select {
@@ -363,7 +361,7 @@ func TestSetModelWithConn_StaleGrokCompletionDoesNotMutateReplacementSession(t *
 	done := make(chan error, 1)
 	go func() {
 		done <- adapter.setModelWithConn(
-			context.Background(), conn, "sess-grok", "grok-stale", models, oldConfig,
+			context.Background(), conn, "sess-grok", "grok-stale",
 		)
 	}()
 	<-conn.started
@@ -519,7 +517,49 @@ func TestGrokUserMessageEchoIsSuppressedWithoutDroppingContext(t *testing.T) {
 	}
 }
 
-func TestGrokContextRetriesAfterFullUpdateChannel(t *testing.T) {
+// TestGrokContextParksOnFullUpdateChannelThenDelivers pins
+// AC-EXECUTORS-SURVIVAL-001.5/.6 for this COVERED site: a full updatesCh
+// must park emitDialectContextWindow rather than dropping the sample, and
+// deliver it once a consumer drains a slot -- replacing the old drop-and-
+// retry-on-next-notification behavior.
+func TestGrokContextParksOnFullUpdateChannelThenDelivers(t *testing.T) {
+	models := []modelInfo{{
+		ModelId: "grok-current",
+		Meta:    map[string]any{"totalContextTokens": float64(500_000)},
+	}}
+	a := grokAdapterWithModels(t, models, []streams.ConfigOption{{
+		Type: "select", ID: configOptionIDModel, Category: configOptionIDModel, CurrentValue: "grok-current",
+	}})
+	t.Cleanup(func() { _ = a.Close() })
+	a.updatesCh = make(chan AgentEvent, 1)
+	a.updatesCh <- AgentEvent{Type: streams.EventTypeMessageChunk}
+	meta := map[string]any{"totalTokens": float64(42_000)}
+
+	done := make(chan *AgentEvent, 1)
+	go func() { done <- a.emitDialectContextWindow("sess-grok", meta) }()
+
+	select {
+	case <-done:
+		t.Fatal("emitDialectContextWindow returned before the channel had room -- it must park, not drop")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	<-a.updatesCh // drain the pre-filled slot, freeing room for the parked send
+
+	select {
+	case event := <-done:
+		if event == nil || event.Type != streams.EventTypeContextWindow {
+			t.Fatalf("emitDialectContextWindow() = %#v after room freed up, want a context_window event", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("emitDialectContextWindow did not return promptly after the channel had room")
+	}
+}
+
+// TestGrokContextParkReleasesOnAdapterClose pins the pause-not-a-hang half:
+// a parked emitDialectContextWindow call must release once the adapter
+// closes, without ever delivering the event.
+func TestGrokContextParkReleasesOnAdapterClose(t *testing.T) {
 	models := []modelInfo{{
 		ModelId: "grok-current",
 		Meta:    map[string]any{"totalContextTokens": float64(500_000)},
@@ -531,16 +571,23 @@ func TestGrokContextRetriesAfterFullUpdateChannel(t *testing.T) {
 	a.updatesCh <- AgentEvent{Type: streams.EventTypeMessageChunk}
 	meta := map[string]any{"totalTokens": float64(42_000)}
 
-	if event := a.emitDialectContextWindow("sess-grok", meta); event != nil {
-		t.Fatalf("emitDialectContextWindow() = %#v with full channel, want nil", event)
-	}
-	if _, cached := a.contextSamples["sess-grok"]; cached {
-		t.Fatal("dropped context sample must not be cached")
-	}
-	<-a.updatesCh
+	done := make(chan *AgentEvent, 1)
+	go func() { done <- a.emitDialectContextWindow("sess-grok", meta) }()
 
-	if event := a.emitDialectContextWindow("sess-grok", meta); event == nil {
-		t.Fatal("same context sample must be retried after channel capacity returns")
+	select {
+	case <-done:
+		t.Fatal("emitDialectContextWindow returned before the channel had room or the adapter closed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("emitDialectContextWindow did not return promptly after Close")
 	}
 }
 

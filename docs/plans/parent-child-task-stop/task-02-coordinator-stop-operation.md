@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-execution-stop-semantics"]
 plan: "plan.md"
-spec: "../../specs/tasks/parent-child-task-stop.md"
+spec: "../../specs/tasks/requirements/parent-child-task-stop.md"
 ---
 
 # Task 02: Coordinator stop operation

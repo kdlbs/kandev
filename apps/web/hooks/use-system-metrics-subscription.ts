@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useWebSocketClient } from "@/lib/ws/connection";
 
 export function useSystemMetricsSubscription(enabled: boolean) {
+  const client = useWebSocketClient();
+
   useEffect(() => {
-    if (!enabled) return;
-    const client = getWebSocketClient();
-    if (!client) return;
+    if (!enabled || !client) return;
     return client.subscribeSystemMetrics();
-  }, [enabled]);
+  }, [client, enabled]);
 }

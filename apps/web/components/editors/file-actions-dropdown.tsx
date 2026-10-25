@@ -28,12 +28,16 @@ type FileActionsDropdownProps = {
   size?: "sm" | "xs" | "touch";
   /** Optional toast callback after copy */
   onCopied?: () => void;
+  /** Whether the menu includes its absolute worktree path copy action. */
+  includeCopyPath?: boolean;
 };
 
 type FileActionsMenuItemsProps = Pick<
   FileActionsDropdownProps,
   "filePath" | "sessionId" | "onCopied"
->;
+> & {
+  includeCopyPath?: boolean;
+};
 
 function fileActionsButtonClass(size: NonNullable<FileActionsDropdownProps["size"]>): string {
   if (size === "xs") return "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
@@ -96,6 +100,7 @@ function useFileActions({
   }, [openFolder]);
 
   return {
+    folderDisabled: !sessionId || !openFolder.available || openFolder.isLoading,
     defaultEditorId,
     enabledEditors,
     handleCopyPath,
@@ -106,8 +111,15 @@ function useFileActions({
 
 export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
   const { t } = useTranslation();
-  const { defaultEditorId, enabledEditors, handleCopyPath, handleOpenFolder, handleOpenInEditor } =
-    useFileActions(props);
+  const { includeCopyPath = true } = props;
+  const {
+    folderDisabled,
+    defaultEditorId,
+    enabledEditors,
+    handleCopyPath,
+    handleOpenFolder,
+    handleOpenInEditor,
+  } = useFileActions(props);
 
   return (
     <>
@@ -132,11 +144,17 @@ export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
         </DropdownMenuItem>
       )}
       <DropdownMenuSeparator />
-      <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleCopyPath}>
-        <IconCopy className="h-3.5 w-3.5" />
-        {t("editors:copyPath")}
-      </DropdownMenuItem>
-      <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleOpenFolder}>
+      {includeCopyPath && (
+        <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleCopyPath}>
+          <IconCopy className="h-3.5 w-3.5" />
+          {t("editors:copyPath")}
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuItem
+        className="cursor-pointer text-xs"
+        disabled={folderDisabled}
+        onSelect={handleOpenFolder}
+      >
         <IconFolderShare className="h-3.5 w-3.5" />
         {t("editors:openFolder")}
       </DropdownMenuItem>
@@ -149,6 +167,7 @@ export function FileActionsDropdown({
   sessionId,
   size = "xs",
   onCopied,
+  includeCopyPath,
 }: FileActionsDropdownProps) {
   const { t } = useTranslation();
   const btnClass = fileActionsButtonClass(size);
@@ -167,7 +186,12 @@ export function FileActionsDropdown({
         <TooltipContent>{t("editors:openWith")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-44">
-        <FileActionsMenuItems filePath={filePath} sessionId={sessionId} onCopied={onCopied} />
+        <FileActionsMenuItems
+          filePath={filePath}
+          sessionId={sessionId}
+          onCopied={onCopied}
+          includeCopyPath={includeCopyPath}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

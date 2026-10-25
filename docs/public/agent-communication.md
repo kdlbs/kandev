@@ -9,6 +9,10 @@ Agents running in separate Kandev tasks can talk to each other directly. One age
 
 Communication works across all relationship types: parent to child, child to parent, sibling to sibling, and tasks in entirely different workspaces or workflows ("projects"). The only requirement is that each agent knows the other task's full UUID.
 
+## Codex subagents are session-local
+
+With the experimental Codex app-server profile enabled, Codex can run child agents and background commands inside one Kandev session. Kandev shows their activity in that session; it does not create separate Kandev tasks or task IDs for them. Use `message_task_kandev` and the task-creation tools when work needs its own durable Kandev task and conversation.
+
 The examples below use canonical MCP protocol names ending in `_kandev`. An agent client may show a server-qualified alias; use the form exposed by that client.
 
 ## Quick path
@@ -38,14 +42,11 @@ list_related_tasks_kandev()
 message_task_kandev(task_id="<full UUID>", prompt="<message text>")
 ```
 
-By default, the message goes to the task's primary session. Advanced callers can pass
-`session_id` to target a specific session that belongs to that task, including a sibling
-session on their own task. `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`
-when an agent starts an additional session on an existing task; pass the `session_id` field to
-`message_task_kandev`. The returned `agent_profile_id` is the effective profile after workflow
-profile resolution. A pinned workflow-step profile wins first, followed by the workflow default
-on an unpinned step. Without a workflow launch profile, an explicit profile wins, and the existing
-inheritance rules apply when no profile is provided.
+By default, the message goes to the task's primary session. To target another session:
+
+- Pass its `session_id` to `message_task_kandev`. This also works for a sibling session on your task.
+- `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`. Pass its `session_id` to `message_task_kandev`.
+- The returned `agent_profile_id` is the effective profile after workflow resolution. A pinned step profile wins, then the workflow default. Without a workflow profile, an explicit profile wins before normal inheritance rules.
 
 Delivery behaviour depends on the target session's state at the moment of the call:
 
@@ -53,7 +54,8 @@ Delivery behaviour depends on the target session's state at the moment of the ca
 |---|---|---|
 | Running or starting | Message is queued; delivered when the current turn ends | `"queued"` |
 | Running or starting, direct parent uses `delivery_mode="interrupt"` | Kandev queues the message, then tries to interrupt the current turn and deliver it immediately | `"sent"` if interrupted and delivered immediately; otherwise `"queued"` |
-| Idle (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
+| Waiting on a live clarification, default or queued delivery | Message waits behind the question and is delivered after its turn finishes or the question detaches | `"queued"` |
+| Idle with no live clarification (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
 | Created (agent not yet started) | Agent is started with this message as its first prompt | `"started"` |
 | Failed or cancelled | Error is returned | N/A |
 
@@ -121,6 +123,29 @@ An autopilot root has no parent, so its task MCP profile contains no question
 tool. It must continue without asking the operator. A normal task keeps the
 operator-facing `ask_user_question_kandev` flow.
 
+Each `ask_user_question_kandev` question can set `allow_custom_text` to `false`
+when the user must select one of the offered options. If omitted, the user can
+also provide a free-text answer. Native Codex questions use the same setting
+that Codex provides for an "Other" answer.
+
+The tool returns answers keyed by question ID. An option selection includes
+`selected_option` (the option ID) and `selected_label` (the exact displayed label):
+
+```json
+{
+  "flow": {
+    "selected_option": "q1_opt1",
+    "selected_label": "A"
+  }
+}
+```
+
+Read the label to understand the user's choice. Keep the ID when you need to
+distinguish options with identical labels. If the ID cannot identify exactly
+one offered option with a nonempty label, `selected_label` is omitted.
+Free-text-only answers return `custom_text` without a selected label.
+Selections can also retain accompanying `custom_text`.
+
 ## Reading the thread
 
 `get_task_conversation_kandev(task_id)` returns the message history for any task you know the ID of. Use it to:
@@ -146,18 +171,15 @@ Task A (backend) was created by a coordinator. The coordinator also created Task
 
 ### The exchange
 
-```mermaid
-sequenceDiagram
-    participant A as Agent A (Backend)
-    participant B as Agent B (Frontend)
-    A->>B: message_task_kandev(B, "Proposing GET /items → {id, name}. Does this cover your needs?")
-    Note over B: idle → "sent" (new turn)
-    B->>A: message_task_kandev(A, "Need created_at too, ISO-8601 format please.")
-    Note over A: running → "queued" (next turn)
-    A->>B: message_task_kandev(B, "Agreed: GET /items → {id, name, created_at} (ISO-8601). Starting impl.")
-    Note over A,B: Contract agreed; both implement
-    A-->>A: get_task_conversation_kandev(B) to confirm spec
-```
+![Agent communication sequence: a backend agent proposes a GET items contract, the frontend agent requests created_at, the backend queues an agreement, and both agents implement after a conversation read-back.](../screenshots/agent-communication.svg)
+
+[Open full-size SVG diagram][agent-communication-diagram]
+
+[agent-communication-diagram]: ../../docs/screenshots/agent-communication.svg
+
+The sequence keeps the state changes beside the messages: an idle recipient is
+sent a new turn, a running sender queues its next turn, and a final read-back
+confirms the contract before implementation.
 
 ### Agent A's actual tool calls (turn by turn)
 
@@ -228,6 +250,43 @@ Task B processes each incoming message as a normal turn. When it receives Agent 
 
 **Avoid loops.** Do not enter an infinite exchange. Agree on a clear stopping condition (e.g. "reply with 'agreed' or a specific counter-proposal") and implement after at most two or three rounds.
 
+### Move a task with entry options
+
+`move_task_kandev` accepts an optional nested `entry_options` object for a one-time destination exception:
+
+```json
+{
+  "reset_context": true,
+  "instructions": "Start QA by reproducing the failing checkout test.",
+  "skip_step_prompt": true
+}
+```
+
+Kandev normalizes the object, omits empty optional strings, and validates the destination with its options.
+
+| Option | Effect |
+| --- | --- |
+| `reset_context` | Adds a reset. It cannot remove a reset required by the destination step. |
+| `instructions` | Adds one instruction block after the normal destination prompt. |
+| `skip_step_prompt` | Suppresses the destination prompt and task-description fallback. With instructions, the agent starts a turn with them. Without instructions, the task moves without starting a turn and remains idle. |
+
+- `disposition: "deferred"` means the source session is `RUNNING` or `STARTING` and a step change waits for the turn to end. Deferred options persist through the turn boundary, WIP promotion, and backend restart.
+- `disposition: "applied"` means a step change committed immediately, or the task was already at the requested workflow and step with no entry options. In that same-step case, Kandev returns the stored task without retrying or changing its position.
+- Every result includes `task`. An optioned step change also returns `move_id` and the accepted `entry_options`.
+- The top-level `prompt` remains an alias for `entry_options.instructions`. If both are non-empty, validation fails.
+- A prompt or `entry_options` is rejected for a manual destination, such as Waiting, Blocked, or Done, even when the task has a session. A manual step starts no work on entry.
+
+  This stricter rule applies only to agent calls. Move without options and record instructions in the task description or plan instead.
+
+  <details>
+  <summary>Steps that accept entry options</summary>
+
+  A step accepts options when it has an `auto_start_agent`, `queue_run`, `queue_run_for_each_participant`, or `run_code_review` entry action, or a pull source.
+
+  </details>
+- A rejected move names a recognized reason, such as a WIP limit, an active session, an archived task, a different workspace, or a step outside the requested workflow. Other failures return generic text.
+- Pull-request draft and review status are not generic move options.
+
 **No secrets or large dumps.** Messages are coordination, not a code-delivery channel. Do not send credentials, private keys, or large file contents through cross-task messages. Reference files by path; share access via the repository, not the message.
 
 **Failed/cancelled tasks cannot receive messages.** If `message_task_kandev` returns an error, the target task is in a terminal state. Create a fresh task with `create_task_kandev` and start over.
@@ -244,10 +303,20 @@ These tools complement cross-task communication for common coordination patterns
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
 | `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the effective profile after workflow resolution; use the `session_id` field to message the new session directly |
-| `move_task_kandev` | Hand off a task to the next workflow step with an optional prompt for the receiving agent |
+| `move_task_kandev` | Hand off a task to a workflow step with optional one-time entry options for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
-| `get_task_plan_kandev` | Read a task's plan; useful before messaging to share a structured proposal |
+| `get_task_plan_kandev` | Read the whole plan or an exact bounded range using `offset`/`limit`; pin later pages with `expected_version` |
+| `edit_task_plan_kandev` | Apply one exact, unique text edit to a reachable task plan |
+| `list_task_plan_revisions_kandev` | List bounded metadata for a reachable task plan's history |
+| `get_task_plan_revision_kandev` | Read one exact revision before a conditional restore |
+| `restore_task_plan_revision_kandev` | Restore a revision after checking current and source versions |
 | `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |
 | `ask_user_question_kandev` | Escalate to a human when agent negotiation cannot resolve a question |
+
+For focused plan changes, combine a bounded read with an exact edit or append.
+Ranges count Unicode code points and preserve the stored text. A partial read
+is a fragment, so never submit it as a whole-document replacement. See
+[partial plan reads](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for continuation and conflict handling.
 
 Related: [Coordinate Work](coordination.md), [Automation and MCP](automation-and-mcp.md), [Tasks and workflows](tasks-and-workflows.md).

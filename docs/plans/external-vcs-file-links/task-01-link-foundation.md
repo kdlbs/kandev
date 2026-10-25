@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/external-vcs-file-links.md"
+spec: "../../specs/ui/requirements/external-vcs-file-links.md"
 ---
 
 # Task 01: External VCS link foundation

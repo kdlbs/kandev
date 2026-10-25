@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/no-silent-model-fallback/spec.md"
+spec: "../../specs/agents/requirements/no-silent-model-fallback.md"
 ---
 
 # Task 01: Compact shared profile warning
@@ -57,7 +57,7 @@ Sequential. The unit and E2E assertions share the warning trigger contract.
 
 ## Inputs
 
-- `docs/specs/no-silent-model-fallback/spec.md`, section 8 and frontend test
+- `docs/specs/agents/requirements/no-silent-model-fallback.md`, section 8 and frontend test
   requirements.
 - `docs/decisions/2026-08-15-executor-authoritative-model-selection.md`, which
   keeps the host probe advisory and the executor authoritative.

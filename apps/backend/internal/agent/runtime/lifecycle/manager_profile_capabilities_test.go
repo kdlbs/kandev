@@ -85,12 +85,13 @@ func TestRuntimeNameOfNilBackend(t *testing.T) {
 
 func TestResolveProfileSessionConfigAndPolicyReadsProfileOnce(t *testing.T) {
 	resolver := &countingProfileResolver{info: &AgentProfileInfo{
-		ProfileID:     "profile-1",
-		Model:         "claude-opus-5",
-		Mode:          "plan",
-		ConfigOptions: map[string]string{"reasoning": "high"},
-		FallbackModel: "claude-sonnet-5",
-		AutoFallback:  true,
+		ProfileID:         "profile-1",
+		Model:             "claude-opus-5",
+		Mode:              "plan",
+		ConfigOptions:     map[string]string{"reasoning": "high"},
+		FallbackModel:     "claude-sonnet-5",
+		AutoFallback:      true,
+		RequireExactModel: true,
 	}}
 	mgr := newTestManager(t)
 	mgr.profileResolver = resolver
@@ -103,6 +104,7 @@ func TestResolveProfileSessionConfigAndPolicyReadsProfileOnce(t *testing.T) {
 	require.Equal(t, "claude-opus-5", policy.Model)
 	require.Equal(t, "claude-sonnet-5", policy.FallbackModel)
 	require.True(t, policy.AutoFallback)
+	require.True(t, policy.RequireExactModel)
 	require.Equal(t, int32(1), resolver.calls.Load(),
 		"session start needs config and policy together; a second read would be a wasted DB hit")
 }

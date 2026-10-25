@@ -95,6 +95,11 @@ export async function createKotlinTask(
     path.join(backend.tmpDir, "repos", options.repositoryDirectory ?? "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
+  // Task repositories use main unless a test explicitly supplies another
+  // branch. A preceding Git test can leave the shared seed repository checked
+  // out on a feature branch; committing the LSP fixture there makes the task's
+  // main checkout legitimately omit the file.
+  git.exec("git checkout -f main");
   for (const [index, filePath] of filePaths.entries()) {
     const isTypeScript = filePath.endsWith(".ts");
     const defaultContent = isTypeScript
@@ -131,6 +136,13 @@ export async function createKotlinTask(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 45_000,
+      message: "Kotlin task environment did not become ready",
+    })
+    .toBe("ready");
 
   const session = new SessionPage(page);
   if (options.navigate !== false) {
@@ -254,43 +266,110 @@ export async function readSessionModelSnapshots(
   }, fileName);
 }
 
-export async function openDesktopFile(
-  page: Page,
-  session: SessionPage,
-  filePath: string,
-): Promise<void> {
-  await session.clickTab("Files");
-  await expect(session.files).toBeVisible({ timeout: 10_000 });
-  const pathSegments = filePath.split("/");
-  for (let index = 1; index < pathSegments.length; index++) {
-    const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
-    await expect(ancestor).toBeVisible({ timeout: 15_000 });
-    if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
-      await ancestor.click();
-    }
-  }
-  const fileNode = session.fileTreeNode(filePath);
-  // Git status updates can auto-activate the Changes panel just after the
-  // file tree renders. Re-select Files and click only while the row is still
-  // visible so a late panel switch cannot turn a successful visibility check
-  // into a 180-second click timeout. Executor startup toasts can cover the
-  // dockview tab, so force that tab activation and keep the file-row click
-  // user-facing and actionability checked.
+async function openDesktopFileFromSearch(session: SessionPage, filePath: string): Promise<void> {
+  const searchInput = session.fileSearchInput();
+  const searchResult = session.fileSearchResult(filePath);
   await expect
     .poll(
       async () => {
         try {
           await session.clickTab("Files", { force: true });
-          if (!(await fileNode.isVisible())) return false;
-          await fileNode.click({ timeout: 2_000 });
+          if (!(await searchInput.isVisible())) {
+            await session.fileSearchButton().click({ timeout: 2_000 });
+          }
+          if (!(await searchInput.isVisible())) return false;
+          await searchInput.fill(path.posix.basename(filePath), { timeout: 2_000 });
+          if (!(await searchResult.isVisible())) return false;
+          await searchResult.click({ timeout: 2_000 });
+          await searchInput.press("Escape", { timeout: 2_000 });
           return true;
         } catch {
           return false;
         }
       },
-      { timeout: 30_000, intervals: [500, 1000, 2000] },
+      { timeout: 30_000, intervals: [100, 500, 1000], message: "opening the file from search" },
     )
     .toBe(true);
+}
+
+async function openDesktopFileSearch(session: SessionPage): Promise<"search" | false> {
+  const searchInput = session.fileSearchInput();
+  if (await searchInput.isVisible()) return "search";
+  if (!(await session.fileSearchButton().isVisible())) return false;
+  await session.fileSearchButton().click({ timeout: 2_000 });
+  return (await searchInput.isVisible()) ? "search" : false;
+}
+
+export async function openDesktopFile(
+  page: Page,
+  session: SessionPage,
+  filePath: string,
+): Promise<void> {
+  const pathSegments = filePath.split("/");
+  const fileNode = session.fileTreeNode(filePath);
+  // Git status updates can auto-activate the Changes panel just after the
+  // file tree renders. Re-select Files and click only while the row is still
+  // visible so a late panel switch cannot turn a successful visibility check
+  // into a 180-second click timeout. Virtualized trees can also omit a valid
+  // file row from the DOM, so use the exact file search in that case.
+  await expect
+    .poll(
+      async () => {
+        try {
+          await session.clickTab("Files", { force: true });
+          return await session.files.isVisible();
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000, message: "waiting for the Files panel to stay in the foreground" },
+    )
+    .toBe(true);
+  const existingSearch = session.fileSearchInput();
+  if (await existingSearch.isVisible()) {
+    await existingSearch.press("Escape");
+  }
+
+  let openMode: "tree" | "search" | false = false;
+  await expect
+    .poll(
+      async () => {
+        try {
+          await session.clickTab("Files", { force: true });
+          if (!(await session.files.isVisible())) return false;
+          if (await session.fileSearchInput().isVisible()) {
+            openMode = "search";
+            return openMode;
+          }
+          for (let index = 1; index < pathSegments.length; index++) {
+            const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
+            if (!(await ancestor.isVisible())) {
+              openMode = await openDesktopFileSearch(session);
+              return openMode;
+            }
+            if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
+              await ancestor.click();
+            }
+          }
+          if (await fileNode.isVisible()) {
+            await fileNode.click({ timeout: 2_000 });
+            openMode = "tree";
+            return openMode;
+          }
+          openMode = await openDesktopFileSearch(session);
+          return openMode;
+        } catch {
+          openMode = false;
+          return false;
+        }
+      },
+      { timeout: 30_000, intervals: [500, 1000, 2000] },
+    )
+    .toBeTruthy();
+
+  if (openMode === "search") {
+    await openDesktopFileFromSearch(session, filePath);
+  }
   await expect(page.locator(".dv-default-tab", { hasText: path.basename(filePath) })).toBeVisible({
     timeout: 10_000,
   });
@@ -341,6 +420,7 @@ export function installFakeKotlinLsp(
   options: {
     crashOnOpen?: boolean;
     holdInitialize?: boolean;
+    keepProgress?: boolean;
     progress?: {
       title: string;
       beginPercentage?: number;
@@ -358,10 +438,14 @@ export function installFakeKotlinLsp(
   fs.rmSync(initializeModePath(backend), { force: true });
   fs.rmSync(initializeReleasePath(backend), { force: true });
   if (options.crashOnOpen) fs.writeFileSync(crashModePath(backend), "1\n");
-  if (options.holdInitialize || options.progress) {
+  if (
+    options.holdInitialize ||
+    (options.progress && !options.keepProgress) ||
+    options.keepProgress
+  ) {
     fs.writeFileSync(
       initializeModePath(backend),
-      JSON.stringify({ progress: options.progress ?? null }),
+      JSON.stringify({ progress: options.progress ?? null, keepProgress: options.keepProgress }),
     );
   }
 }

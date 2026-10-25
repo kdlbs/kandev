@@ -9,21 +9,22 @@ not prohibited by this policy.
 
 ## Default Workflow
 
-1. Use a strong model for discovery, specs, plans, task files, and high-risk
-   design.
+1. Use a strong model for discovery, requirements, system designs, plans, work
+   orders, and high-risk decisions.
 2. At the completed-plan checkpoint, return control with a concise handoff. Do
    not call `ask_user_question_kandev` or ask the user to approve the package or
    switch models. The user reviews the artifacts, changes the model if desired,
    and sends a later explicit implementation request.
-3. Execute task files sequentially by default. Plans may label parallel-safe
+3. Execute work orders sequentially by default. Plans may label parallel-safe
    waves, but launch native subagents only after the user explicitly asks.
 4. Ask the user to switch back to a strong model only for an architectural,
    public-contract, persistence, or high-impact security decision.
 
 Do not create `.agents/agents`, `.codex/agents`, `.claude/agents`,
 `.cursor/agents`, or `.opencode/agents` files merely to route model tiers.
-The durable spec, plan, and task files are the model-switch handoff and the
-compact native-subagent work packet when the user authorizes delegation.
+The durable requirements, system designs, plans, and work orders are the
+model-switch handoff. A work order is the compact native-subagent packet when
+the user authorizes delegation.
 
 For planned implementation, the user explicitly authorizes native subagents.
 Use the model active in the selected primary session, use no full-history fork,

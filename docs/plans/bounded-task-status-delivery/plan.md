@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/bounded-task-status-delivery.md
+spec: docs/specs/platform/requirements/bounded-task-status-delivery.md
 created: 2026-08-01
 status: implemented
 ---
@@ -279,7 +279,7 @@ cd apps/web && pnpm e2e:run tests/chat/message-send-pressure.spec.ts \
 ## Documentation impact
 
 This plan adds the internal product contract
-`docs/specs/platform/bounded-task-status-delivery.md` and architecture decision
+`docs/specs/platform/requirements/bounded-task-status-delivery.md` and architecture decision
 `docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md`.
 No public documentation changes are expected: commands, settings, public APIs,
 and user-visible interaction patterns remain unchanged.

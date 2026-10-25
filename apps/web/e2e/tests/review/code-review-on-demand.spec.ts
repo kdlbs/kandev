@@ -1,5 +1,5 @@
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -32,6 +32,7 @@ test.describe("Native code review — on demand", () => {
     backend,
   }) => {
     await configureReviewer(apiClient, seedData.agentProfileId);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -67,14 +68,13 @@ test.describe("Native code review — on demand", () => {
     const changesTab = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTab).toBeVisible();
     await changesTab.click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-files-section").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
 
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
@@ -90,12 +90,14 @@ test.describe("Native code review — on demand", () => {
     await runButton.click();
 
     // Findings land as inline annotations in the diff.
-    const findingCard = dialog.getByTestId("review-finding-card").first();
+    const findingCard = dialog
+      .getByTestId("review-finding-card")
+      .filter({ hasText: "Unchecked value can be nil" });
     await expect(findingCard).toBeVisible({ timeout: 90_000 });
-    await expect(dialog.getByTestId("review-finding-title").first()).toContainText(
+    await expect(findingCard.getByTestId("review-finding-title")).toContainText(
       "Unchecked value can be nil",
     );
-    await expect(dialog.getByTestId("review-finding-severity-blocker").first()).toBeVisible();
+    await expect(findingCard.getByTestId("review-finding-severity-blocker")).toBeVisible();
     await expect(dialog.getByTestId("review-open-count")).toContainText("finding");
 
     await testPage.screenshot({
@@ -125,11 +127,9 @@ test.describe("Native code review — on demand", () => {
 
     // A finding is advisory: resolving it is the human's call and it persists.
     await findingCard.getByTestId("review-finding-resolve").click();
-    await expect(dialog.getByTestId("review-finding-card").first()).toHaveAttribute(
-      "data-finding-status",
-      "resolved",
-      { timeout: 15_000 },
-    );
+    await expect(findingCard).toHaveAttribute("data-finding-status", "resolved", {
+      timeout: 15_000,
+    });
 
     await testPage.screenshot({
       path: "e2e-artifacts/review-03-resolved.png",
@@ -143,18 +143,21 @@ test.describe("Native code review — on demand", () => {
     const changesTabAfterReload = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTabAfterReload).toBeVisible({ timeout: 30_000 });
     await changesTabAfterReload.click();
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const reopened = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reopened).toBeVisible();
-    await expect(reopened.getByTestId("review-finding-card").first()).toHaveAttribute(
-      "data-finding-status",
-      "resolved",
-      { timeout: 30_000 },
+    // The dialog renders only findings that can be anchored to the refreshed
+    // diff. Verify the persisted disposition through the same task-review
+    // snapshot used by the page backfill so an anchor refresh cannot hide a
+    // valid status transition from this regression check.
+    const reviewAfterReload = await apiClient.wsRequest<{
+      findings: Array<{ title: string; status: string }>;
+    }>("task.review.get", { task_id: task.id });
+    const resolvedFinding = reviewAfterReload.findings.find(
+      (finding) => finding.title === "Unchecked value can be nil",
     );
+    expect(resolvedFinding?.status).toBe("resolved");
   });
 
   test("explains how to configure a reviewer when none is available", async ({
@@ -163,6 +166,7 @@ test.describe("Native code review — on demand", () => {
     seedData,
     backend,
   }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     // No default utility agent/model and a disabled builtin: the run must fail
     // closed with an actionable message rather than a generic error.
     await apiClient.saveUserSettings({
@@ -195,13 +199,12 @@ test.describe("Native code review — on demand", () => {
     git.createFile(REVIEWED_FILE, "export const unreviewable = 1;\n");
 
     await testPage.getByTestId("dockview-tab-changes").click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-files-section").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();

@@ -4,9 +4,65 @@ import type { ApiClient } from "../../helpers/api-client";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
+import {
+  expectApproxWidth,
+  getDockviewContainerWidth,
+  getDockviewGroupWidth,
+} from "../../helpers/dockview-resize";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PR_NUMBER = 702;
+const RETIRED_DEFAULT_PROFILE_ID = "retired-panel-default";
+
+/**
+ * A default profile written before the Prompt history panel was removed: it
+ * still references the retired panel as the only panel of its own group, next
+ * to canonical panels that must keep restoring.
+ */
+function retiredPanelLayout() {
+  return {
+    columns: [
+      {
+        id: "center",
+        width: 1050,
+        groups: [
+          {
+            id: "group-center",
+            panels: [
+              {
+                id: "chat",
+                component: "chat",
+                title: "Agent",
+                tabComponent: "permanentTab",
+              },
+              { id: "todos", component: "todos", title: "Todos" },
+            ],
+            activePanel: "chat",
+          },
+          {
+            id: "group-retired",
+            panels: [
+              { id: "prompt-history", component: "prompt-history", title: "Prompt History" },
+            ],
+            activePanel: "prompt-history",
+          },
+        ],
+      },
+      {
+        id: "right",
+        pinned: true,
+        width: 350,
+        groups: [
+          {
+            id: "group-right",
+            panels: [{ id: "plan", component: "plan", title: "Plan" }],
+            activePanel: "plan",
+          },
+        ],
+      },
+    ],
+  };
+}
 
 type DockviewSnapshot = {
   panelIds: string[];
@@ -21,6 +77,7 @@ function noTerminalLayout() {
     columns: [
       {
         id: "center",
+        width: 1050,
         groups: [
           {
             id: "group-center",
@@ -91,6 +148,19 @@ async function openTask(page: Page, taskId: string): Promise<SessionPage> {
   await session.waitForLoad();
   await session.waitForDockviewReady();
   return session;
+}
+
+/**
+ * The Todos panel is preference-gated at runtime (`show_todo_list_panel`
+ * defaults to false), so the workbench removes a saved `todos` tab unless the
+ * user has the panel enabled. A layout round trip that asserts the tab must
+ * turn the preference on first.
+ */
+async function enableTodoListPanel(apiClient: ApiClient): Promise<void> {
+  const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+    show_todo_list_panel: true,
+  });
+  expect(response.ok).toBe(true);
 }
 
 async function seedAndLinkMockPR(apiClient: ApiClient, taskId: string): Promise<void> {
@@ -197,6 +267,9 @@ async function expectNoTerminalDefault(page: Page): Promise<void> {
     });
   const snapshot = await dockviewSnapshot(page);
   expect(snapshot.panelIds).not.toContain("terminal-default");
+  const containerWidth = await getDockviewContainerWidth(page);
+  const rightWidth = await getDockviewGroupWidth(page, "files");
+  expectApproxWidth(rightWidth, Math.round(containerWidth * 0.25), 12);
 }
 
 async function ordinaryShells(apiClient: ApiClient, taskId: string) {
@@ -392,14 +465,57 @@ test.describe("Task layout profile defaults", () => {
     await testPage
       .locator('[data-testid="layout-saved-delete"][data-layout-id="focused-default"]')
       .click({ force: true });
-    await expect(testPage.getByRole("alertdialog")).toContainText(
+    const confirmation = testPage.getByTestId("layout-saved-delete-confirm-popover");
+    await expect(confirmation).toContainText(
       "The built-in Default layout will become the default.",
     );
-    await testPage.getByRole("button", { name: "Cancel" }).click();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(1);
   });
 
-  test("adds Prompt History through the layout editor and restores it into a task", async ({
+  test("confirms custom layout-profile deletion at the selected profile action", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.saveUserSettings({
+      saved_layouts: [
+        {
+          id: "custom-layout-to-delete",
+          name: "Custom layout to delete",
+          is_default: true,
+          layout: noTerminalLayout(),
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    const deleteButton = testPage.getByTestId("layout-profile-delete");
+    await expect(deleteButton).toBeVisible();
+    await deleteButton.click();
+
+    const confirmation = testPage.getByTestId("layout-profile-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(1);
+
+    await deleteButton.click();
+    await testPage
+      .getByTestId("layout-profile-delete-confirm-popover")
+      .getByTestId("layout-profile-delete-confirm")
+      .click();
+    await expect(deleteButton).toHaveCount(0);
+
+    await layouts.save();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.saved_layouts)
+      .toEqual([]);
+  });
+
+  test("adds Todos through the layout editor and restores it into a task", async ({
     testPage,
     apiClient,
     seedData,
@@ -408,21 +524,69 @@ test.describe("Task layout profile defaults", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
 
-    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toHaveCount(0);
-    await layouts.addPanel("Prompt History");
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Todos" })).toHaveCount(0);
+    await layouts.addPanel("Todos");
 
     // The added panel survives save and is persisted in the default profile.
     await layouts.save();
     const saved = (await apiClient.getUserSettings()).settings.saved_layouts;
     expect(saved).toHaveLength(1);
-    expect(JSON.stringify(saved[0].layout)).toContain("prompt-history");
+    expect(JSON.stringify(saved[0].layout)).toContain("todos");
 
     // A new task opens with the edited default layout; the panel restores and renders.
-    const task = await createTaskWithSession(apiClient, seedData, "Prompt History Layout Task");
-    await openTask(testPage, task.id);
-    const tab = testPage.locator(".dv-tab", { hasText: "Prompt History" });
+    await enableTodoListPanel(apiClient);
+    const task = await createTaskWithSession(apiClient, seedData, "Todos Layout Task");
+    const session = await openTask(testPage, task.id);
+    const tab = testPage.locator(".dv-tab", { hasText: "Todos" });
     await expect(tab).toBeVisible({ timeout: 15_000 });
     await tab.click();
-    await expect(testPage.getByTestId("prompt-history-panel")).toBeVisible();
+    // The panel root's test id is `todos-panel` when it has entries and
+    // `todos-panel-empty-state` when it does not; this task's mock agent
+    // produces none, so match the panel surface either way.
+    await expect(testPage.getByTestId(/^todos-panel/)).toBeVisible();
+    await session.expectLayoutHealthy();
+  });
+
+  test("opens a task whose saved default profile still references the retired panel", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    await apiClient.saveUserSettings({
+      saved_layouts: [
+        {
+          id: RETIRED_DEFAULT_PROFILE_ID,
+          name: "Retired panel default",
+          is_default: true,
+          layout: retiredPanelLayout(),
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    // Settings first: the profile must keep applying, so it still carries the
+    // default badge and is never demoted to an unavailable legacy record.
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    const profileRow = testPage.getByTestId(`layout-profile-custom-${RETIRED_DEFAULT_PROFILE_ID}`);
+    await expect(profileRow).toBeVisible();
+    await expect(profileRow.getByText("Default", { exact: true })).toBeVisible();
+    await expect(profileRow.getByText("Unavailable", { exact: true })).toHaveCount(0);
+
+    // Then the task: the retired entry is dropped and every seeded panel is
+    // present, sized, and usable.
+    await enableTodoListPanel(apiClient);
+    const task = await createTaskWithSession(apiClient, seedData, "Retired Panel Layout Task");
+    const session = await openTask(testPage, task.id);
+    await expect(testPage.locator(".dv-tab", { hasText: "Prompt History" })).toHaveCount(0);
+    await expect(testPage.locator(".dv-tab", { hasText: "Plan" })).toBeVisible({
+      timeout: 15_000,
+    });
+    const todosTab = testPage.locator(".dv-tab", { hasText: "Todos" });
+    await expect(todosTab).toBeVisible();
+    await todosTab.click();
+    await expect(testPage.getByTestId(/^todos-panel/)).toBeVisible();
+    await session.expectLayoutHealthy();
   });
 });

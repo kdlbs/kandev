@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["04-frontend-plugin-registry", "05-dynamic-composer-reference-sources", "08-native-repository-provider", "09-native-link-review-surfaces", "10-cloud-dc-domain-auth"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 12: Plugin UI and native registrations

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-runtime-terminal-environment"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 02: Agentctl Shell and Process Environment
@@ -43,7 +43,7 @@ Sequential.
 
 ## Inputs
 
-- Spec: `docs/specs/integrations/github-authentication.md` — What, Failure Modes, Scenarios.
+- Spec: `docs/specs/integrations/requirements/github-authentication.md` — What, Failure Modes, Scenarios.
 - Plan: Agentctl shell and command launch section.
 - Existing patterns: `mergeAgentEnvIntoShellConfig`, `buildShellEnv`, `mergeEnvWithStrip`, and
   `gitEnvironment`.

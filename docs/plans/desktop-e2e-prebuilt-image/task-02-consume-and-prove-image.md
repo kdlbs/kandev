@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-prebuild-desktop-image"]
 plan: "plan.md"
-spec: "../../specs/e2e-duration-aware-sharding/spec.md"
+spec: "../../specs/platform/requirements/e2e-duration-aware-sharding.md"
 ---
 
 # Task 02: Consume And Prove The Desktop Image
@@ -50,7 +50,7 @@ sequential
 
 ## Inputs
 
-- `docs/specs/e2e-duration-aware-sharding/spec.md`, especially the desktop
+- `docs/specs/platform/requirements/e2e-duration-aware-sharding.md`, especially the desktop
   smoke bootstrap requirements.
 - `docs/plans/desktop-e2e-prebuilt-image/plan.md`, Desktop smoke workflow,
   Rollout, and Risks sections.

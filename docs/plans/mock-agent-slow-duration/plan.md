@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/mock-agent-slow-duration/spec.md
+spec: docs/specs/agents/requirements/mock-agent-slow-duration.md
 created: 2026-08-08
 status: done
 ---

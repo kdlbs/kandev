@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"testing"
-
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/user/models"
 	"go.uber.org/zap"
+	"reflect"
+	"testing"
 )
 
 func TestApplyBasicSettingsAppStatusBarVisibility(t *testing.T) {
@@ -80,4 +80,47 @@ func statusBarEnabledFromSettings(t *testing.T, settings *models.UserSettings) b
 		t.Fatalf("app_status_bar_enabled = %#v, want bool", payload["app_status_bar_enabled"])
 	}
 	return got
+}
+func TestResolveSessionHostnamesServiceRoundTrip(t *testing.T) {
+	enabled := true
+	settings := &models.UserSettings{}
+	req := &UpdateUserSettingsRequest{}
+	reqField := reflect.ValueOf(req).Elem().FieldByName("ResolveSessionHostnames")
+	if !reqField.IsValid() {
+		t.Fatal("ResolveSessionHostnames request field is missing")
+	}
+	reqField.Set(reflect.ValueOf(&enabled))
+	if err := applyBasicSettings(settings, req); err != nil {
+		t.Fatalf("apply basic settings: %v", err)
+	}
+
+	encoded, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("encode settings: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got, ok := payload["resolve_session_hostnames"].(bool); !ok || !got {
+		t.Fatalf("resolve_session_hostnames = %#v, want true", payload["resolve_session_hostnames"])
+	}
+}
+
+func TestPublishUserSettingsEventIncludesResolveSessionHostnames(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{ResolveSessionHostnames: true})
+
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if got, ok := eventData["resolve_session_hostnames"].(bool); !ok || !got {
+		t.Fatalf("resolve_session_hostnames = %#v, want true", eventData["resolve_session_hostnames"])
+	}
 }

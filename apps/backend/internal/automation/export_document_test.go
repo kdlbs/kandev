@@ -15,16 +15,20 @@ func fullyPopulatedExportAutomation(t *testing.T) exportAutomation {
 	}
 	promptNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "Do the thing"}
 	return exportAutomation{
-		Name:              "Daily Review",
-		Description:       "Runs every morning",
-		Enabled:           true,
-		MaxConcurrentRuns: 1,
-		TaskTitleTemplate: "Daily Review ({{trigger.timestamp}})",
-		Prompt:            promptNode,
-		AgentProfile:      &exportAgentProfile{AgentName: "Claude Code", Model: "opus[1m]", Mode: "auto"},
-		ExecutorProfile:   &exportExecutorProfile{Executor: "exec-worktree", Name: "Worktree"},
-		Workflow:          &exportWorkflow{Name: "Kanban", Step: "In Progress"},
-		Repositories:      []string{"kegmil-offline-first"},
+		Name:               "Daily Review",
+		Description:        "Runs every morning",
+		Enabled:            true,
+		MaxConcurrentRuns:  1,
+		ContinuationPolicy: ContinuationPolicyReuseThread,
+		TaskMode:           TaskModeNormalTask,
+		RepositoryMode:     RepositoryModeSelected,
+		TaskTitleTemplate:  "Daily Review ({{trigger.timestamp}})",
+		RetryPolicy:        exportRetryPolicy{Mode: RetryModeDisabled, MaxRetries: "0", DelaySeconds: "0", Backoff: RetryBackoffFixed, HistoryMode: RetryHistoryAttempts},
+		Prompt:             promptNode,
+		AgentProfile:       &exportAgentProfile{AgentName: "Claude Code", Model: "opus[1m]", Mode: "auto"},
+		ExecutorProfile:    &exportExecutorProfile{Executor: "exec-worktree", Name: "Worktree"},
+		Workflow:           &exportWorkflow{Name: "Kanban", Step: "In Progress"},
+		Repositories:       []string{"kegmil-offline-first"},
 		Triggers: []exportTrigger{
 			{Type: "scheduled", Enabled: true, Config: configNode},
 		},
@@ -33,7 +37,8 @@ func fullyPopulatedExportAutomation(t *testing.T) exportAutomation {
 
 // AC-40: top-level keys in fixed order version, type, automations, warnings (warnings
 // omitted here since empty); automation keys in fixed order name, description,
-// enabled, max_concurrent_runs, task_title_template, prompt, agent_profile,
+// enabled, max_concurrent_runs, continuation_policy, task_mode, repository_mode,
+// retry_policy, task_title_template, prompt, agent_profile,
 // executor_profile, workflow, repositories, triggers; trigger keys in fixed order
 // type, enabled, config.
 func TestMarshalExportDocument_AC40KeyOrder(t *testing.T) {
@@ -51,6 +56,10 @@ func TestMarshalExportDocument_AC40KeyOrder(t *testing.T) {
 		"description:",
 		"enabled:",
 		"max_concurrent_runs:",
+		"continuation_policy:",
+		"task_mode:",
+		"repository_mode:",
+		"retry_policy:",
 		"task_title_template:",
 		"prompt:",
 		"agent_profile:",
@@ -83,10 +92,11 @@ func TestMarshalExportDocument_WarningsKeyPresentWhenNonEmpty(t *testing.T) {
 // AC-4: keys omitted when empty are skipped without disturbing the order of the rest.
 func TestMarshalExportDocument_OmitsEmptyOptionalFields(t *testing.T) {
 	doc := newExportDocument([]exportAutomation{{
-		Name:              "Minimal",
-		Enabled:           false,
-		MaxConcurrentRuns: 1,
-		Triggers:          []exportTrigger{},
+		Name:               "Minimal",
+		Enabled:            false,
+		MaxConcurrentRuns:  1,
+		ContinuationPolicy: ContinuationPolicyNewTask,
+		Triggers:           []exportTrigger{},
 	}}, nil)
 	out, err := marshalExportDocument(doc)
 	if err != nil {
@@ -98,7 +108,7 @@ func TestMarshalExportDocument_OmitsEmptyOptionalFields(t *testing.T) {
 			t.Errorf("expected %q omitted for empty field, got:\n%s", absent, s)
 		}
 	}
-	assertKeysAppearInOrder(t, s, []string{"name:", "enabled:", "max_concurrent_runs:", "triggers:"})
+	assertKeysAppearInOrder(t, s, []string{"name:", "enabled:", "max_concurrent_runs:", "continuation_policy:", "task_mode:", "repository_mode:", "retry_policy:", "triggers:"})
 }
 
 // AC-12: indentation is 2 spaces per nesting level, not yaml.v3's package-level

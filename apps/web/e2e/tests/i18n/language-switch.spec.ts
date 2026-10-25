@@ -8,7 +8,7 @@ import { test, expect } from "../../fixtures/test-base";
  * externalization sweep: any plain-ASCII user-facing text under `pseudo` is a
  * literal that was never routed through `t()`.
  *
- * See docs/specs/platform/i18n.md and docs/i18n.md.
+ * See docs/specs/platform/requirements/i18n.md and docs/i18n.md.
  */
 
 const APPEARANCE_URL = "/settings/preferences/appearance";
@@ -83,6 +83,20 @@ test.describe("i18n language switcher", () => {
       displayLanguage: "顯示語言",
       screenshot: "traditional-chinese-hong-kong-locale-desktop",
       caption: "Settings > General > Appearance with Traditional Chinese (Hong Kong) active",
+    },
+    {
+      id: "ja",
+      option: "日本語",
+      displayLanguage: "表示言語",
+      screenshot: "japanese-locale-desktop",
+      caption: "Settings > General > Appearance with Japanese active",
+    },
+    {
+      id: "ko",
+      option: "한국어",
+      displayLanguage: "표시 언어",
+      screenshot: "korean-locale-desktop",
+      caption: "Settings > General > Appearance with Korean active",
     },
   ] as const) {
     test(`switching to ${locale.option} persists through reload and can restore English`, async ({

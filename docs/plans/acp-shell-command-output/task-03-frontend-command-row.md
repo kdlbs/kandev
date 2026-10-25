@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-normalization"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-shell-command-output.md"
+spec: "../../specs/ui/requirements/acp-shell-command-output.md"
 ---
 
 # Task 03: Frontend Command Output Row

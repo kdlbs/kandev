@@ -16,6 +16,17 @@ type Repository interface {
 	UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error
 }
 
+// atomicConfigPatcher is implemented by stores that can update selected MCP
+// columns without reading and rewriting the complete document first.
+type atomicConfigPatcher interface {
+	UpdateAgentProfileMcpConfigPatch(
+		context.Context,
+		string,
+		*bool,
+		*map[string]interface{},
+	) (*models.AgentProfileMcpConfig, error)
+}
+
 var (
 	ErrAgentNotFound        = errors.New("agent not found")
 	ErrAgentProfileNotFound = errors.New("agent profile not found")
@@ -65,6 +76,7 @@ func (s *Service) GetConfigByProfileID(ctx context.Context, profileID string) (*
 				ProfileName: profile.Name,
 				AgentID:     agent.ID,
 				AgentName:   agent.Name,
+				WorkspaceID: profile.WorkspaceID,
 				Enabled:     false,
 				Servers:     map[string]ServerDef{},
 				Meta:        map[string]any{},
@@ -78,6 +90,7 @@ func (s *Service) GetConfigByProfileID(ctx context.Context, profileID string) (*
 		ProfileName: profile.Name,
 		AgentID:     agent.ID,
 		AgentName:   agent.Name,
+		WorkspaceID: profile.WorkspaceID,
 		Enabled:     config.Enabled,
 		Servers:     castServerDefs(config.Servers),
 		Meta:        config.Meta,
@@ -128,8 +141,77 @@ func (s *Service) UpsertConfigByProfileID(ctx context.Context, profileID string,
 		ProfileName: profile.Name,
 		AgentID:     agent.ID,
 		AgentName:   agent.Name,
+		WorkspaceID: profile.WorkspaceID,
 		Enabled:     record.Enabled,
 		Servers:     config.Servers,
+		Meta:        config.Meta,
+	}, nil
+}
+
+// PatchConfigByProfileID applies a partial MCP document update atomically at
+// the storage boundary. Stores without the atomic extension fail explicitly;
+// they must not fall back to a read/merge/full-write sequence.
+//
+//nolint:cyclop // Validation and error translation stay at this service boundary.
+func (s *Service) PatchConfigByProfileID(ctx context.Context, profileID string, patch ConfigPatch) (*ProfileConfig, error) {
+	profile, err := s.repo.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentProfileNotFound
+		}
+		return nil, err
+	}
+	if profile == nil {
+		return nil, ErrAgentProfileNotFound
+	}
+
+	agent, err := s.repo.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
+	}
+	if agent == nil {
+		return nil, ErrAgentNotFound
+	}
+	if !agent.SupportsMCP {
+		return nil, ErrAgentMcpUnsupported
+	}
+	if patch.Enabled == nil && patch.Servers == nil {
+		return nil, errors.New("MCP config patch is empty")
+	}
+	patcher, ok := s.repo.(atomicConfigPatcher)
+	if !ok {
+		return nil, errors.New("atomic MCP config updates are unavailable")
+	}
+
+	var servers *map[string]interface{}
+	if patch.Servers != nil {
+		converted := castServerInterfaces(*patch.Servers)
+		servers = &converted
+	}
+	config, err := patcher.UpdateAgentProfileMcpConfigPatch(ctx, profile.ID, patch.Enabled, servers)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentProfileNotFound
+		}
+		if errors.Is(err, ErrAgentMcpUnsupported) {
+			return nil, ErrAgentMcpUnsupported
+		}
+		return nil, err
+	}
+	if config == nil {
+		return nil, errors.New("atomic MCP config update returned no config")
+	}
+	return &ProfileConfig{
+		ProfileID:   profile.ID,
+		ProfileName: profile.Name,
+		AgentID:     agent.ID,
+		AgentName:   agent.Name,
+		WorkspaceID: profile.WorkspaceID,
+		Enabled:     config.Enabled,
+		Servers:     castServerDefs(config.Servers),
 		Meta:        config.Meta,
 	}, nil
 }

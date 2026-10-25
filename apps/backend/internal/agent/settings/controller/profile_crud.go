@@ -19,22 +19,50 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
 const dynamicProfileKind = "dynamic"
 
+func cursorMCPAuthEnabled(value *bool) bool {
+	return value == nil || *value
+}
+
+func cursorPluginsMCPEnabled(value *bool) bool {
+	return value == nil || *value
+}
+
+func mcpSelectionModeOrInherit(mode *string) string {
+	if mode == nil || *mode == "" {
+		return dto.MCPSelectionModeInherit
+	}
+	return *mode
+}
+
+func selectedServersOrEmpty(servers *[]string) []string {
+	if servers == nil {
+		return []string{}
+	}
+	return append([]string{}, (*servers)...)
+}
+
+func mcpSelectionValues(mode *string, servers *[]string) (string, []string) {
+	return mcpSelectionModeOrInherit(mode), selectedServersOrEmpty(servers)
+}
+
 type CreateProfileRequest struct {
-	AgentID        string
-	Name           string
-	Model          string
-	FallbackModel  string
-	AutoFallback   bool
-	Mode           string
-	ConfigOptions  map[string]string
-	AllowIndexing  bool
-	AutoApprove    bool
-	CLIPassthrough bool
+	AgentID           string
+	Name              string
+	Model             string
+	FallbackModel     string
+	AutoFallback      bool
+	RequireExactModel bool
+	Mode              string
+	ConfigOptions     map[string]string
+	AllowIndexing     bool
+	AutoApprove       bool
+	CLIPassthrough    bool
 	// CLIFlags is the explicit list to persist. When nil, the profile is
 	// seeded from the agent's curated PermissionSettings() list so a fresh
 	// profile opens with the agent's recommended flags (all disabled by
@@ -44,7 +72,33 @@ type CreateProfileRequest struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
-	Dynamic       *dto.DynamicAgentProfileDTO
+	// ProviderKind / ProviderBaseURL / ProviderAPIKeySecretID configure an
+	// injected OpenAI-compatible provider. Empty ProviderKind = native.
+	ProviderKind            string
+	ProviderBaseURL         string
+	ProviderAPIKeySecretID  string
+	CursorMCPAuthEnabled    *bool
+	CursorPluginsMCPEnabled *bool
+	MCPSelectionMode        *string
+	MCPSelectedServers      *[]string
+	Dynamic                 *dto.DynamicAgentProfileDTO
+}
+
+// AgentProfileExists reports whether id names a profile. It exists so callers
+// that only need to validate a caller-supplied ID do not have to read and
+// discard a whole profile, and so a missing row is not reported as an error.
+func (c *Controller) AgentProfileExists(ctx context.Context, id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	profile, err := c.repo.GetAgentProfile(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return profile != nil, nil
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -59,6 +113,15 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if !agOk {
 		return nil, fmt.Errorf("unknown agent: %s", agent.Name)
 	}
+	if isDisabledOptionalAgent(agentConfig) {
+		return nil, ErrAgentFeatureDisabled
+	}
+	if err := validateRequireExactModelPolicy(req.Model, req.RequireExactModel, req.CLIPassthrough, agent.Name == agents.DynamicAgentID); err != nil {
+		return nil, err
+	}
+	if err := dto.ValidateMCPSelection(req.MCPSelectionMode, req.MCPSelectedServers); err != nil {
+		return nil, err
+	}
 	displayName, err := c.resolveDisplayName(agentConfig, agent.Name)
 	if err != nil {
 		return nil, err
@@ -71,6 +134,8 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		cliFlags = seedCLIFlags(agentConfig)
 	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
 		return nil, err
+	} else if err := validatePassthroughOnlyCLIFlags(agentConfig, req.CLIFlags, req.CLIPassthrough); err != nil {
+		return nil, err
 	}
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
 		return nil, err
@@ -81,28 +146,41 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
 		return nil, err
 	}
+	mcpSelectionMode, mcpSelectedServers := mcpSelectionValues(req.MCPSelectionMode, req.MCPSelectedServers)
 	profile := &models.AgentProfile{
-		AgentID:          req.AgentID,
-		Name:             req.Name,
-		AgentDisplayName: displayName,
-		Model:            req.Model,
-		FallbackModel:    strings.TrimSpace(req.FallbackModel),
-		AutoFallback:     req.AutoFallback,
-		Mode:             req.Mode,
-		ConfigOptions:    profileconfig.SanitizeConfigOptions(req.ConfigOptions),
-		AllowIndexing:    req.AllowIndexing,
-		AutoApprove:      req.AutoApprove,
-		CLIPassthrough:   req.CLIPassthrough,
-		Enabled:          true,
-		CLIFlags:         cliFlags,
-		EnvVars:          envVarsFromDTO(req.EnvVars),
-		CommandPrefix:    strings.TrimSpace(req.CommandPrefix),
-		UserModified:     true,
+		AgentID:                 req.AgentID,
+		Name:                    req.Name,
+		AgentDisplayName:        displayName,
+		Model:                   req.Model,
+		FallbackModel:           strings.TrimSpace(req.FallbackModel),
+		AutoFallback:            req.AutoFallback,
+		RequireExactModel:       req.RequireExactModel,
+		Mode:                    req.Mode,
+		ConfigOptions:           profileconfig.SanitizeConfigOptions(req.ConfigOptions),
+		AllowIndexing:           req.AllowIndexing,
+		AutoApprove:             req.AutoApprove,
+		CLIPassthrough:          req.CLIPassthrough,
+		CursorMCPAuthEnabled:    cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
+		CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(req.CursorPluginsMCPEnabled),
+		MCPSelectionMode:        mcpSelectionMode,
+		MCPSelectedServers:      mcpSelectedServers,
+		Enabled:                 true,
+		CLIFlags:                cliFlags,
+		EnvVars:                 envVarsFromDTO(req.EnvVars),
+		CommandPrefix:           strings.TrimSpace(req.CommandPrefix),
+		ProviderKind:            req.ProviderKind,
+		ProviderBaseURL:         req.ProviderBaseURL,
+		ProviderAPIKeySecretID:  req.ProviderAPIKeySecretID,
+		UserModified:            true,
+	}
+	if err := c.normalizeProviderConfig(ctx, profile, agent.Name); err != nil {
+		return nil, err
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
+	c.decorateProviderSupport(agent.Name, &result)
 	return &result, nil
 }
 
@@ -123,14 +201,18 @@ func (c *Controller) createDynamicProfile(
 		return nil, err
 	}
 	profile := &models.AgentProfile{
-		ID:               uuid.NewString(),
-		AgentID:          agent.ID,
-		Name:             strings.TrimSpace(req.Name),
-		AgentDisplayName: displayName,
-		Enabled:          true,
-		CLIFlags:         []models.CLIFlag{},
-		EnvVars:          []models.ProfileEnvVar{},
-		UserModified:     true,
+		ID:                      uuid.NewString(),
+		AgentID:                 agent.ID,
+		Name:                    strings.TrimSpace(req.Name),
+		AgentDisplayName:        displayName,
+		Enabled:                 true,
+		CursorMCPAuthEnabled:    cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
+		CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(req.CursorPluginsMCPEnabled),
+		MCPSelectionMode:        mcpSelectionModeOrInherit(req.MCPSelectionMode),
+		MCPSelectedServers:      selectedServersOrEmpty(req.MCPSelectedServers),
+		CLIFlags:                []models.CLIFlag{},
+		EnvVars:                 []models.ProfileEnvVar{},
+		UserModified:            true,
 	}
 	routes, err := c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
 	if err != nil {
@@ -321,16 +403,17 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 }
 
 type UpdateProfileRequest struct {
-	ID             string
-	Name           *string
-	Model          *string
-	FallbackModel  *string
-	AutoFallback   *bool
-	Mode           *string
-	ConfigOptions  *map[string]string
-	AllowIndexing  *bool
-	AutoApprove    *bool
-	CLIPassthrough *bool
+	ID                string
+	Name              *string
+	Model             *string
+	FallbackModel     *string
+	AutoFallback      *bool
+	RequireExactModel *bool
+	Mode              *string
+	ConfigOptions     *map[string]string
+	AllowIndexing     *bool
+	AutoApprove       *bool
+	CLIPassthrough    *bool
 	// Enabled replaces the value when non-nil. Nil means "leave unchanged".
 	Enabled *bool
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
@@ -341,19 +424,36 @@ type UpdateProfileRequest struct {
 	// CommandPrefix replaces the value when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the desired value on save.
 	CommandPrefix *string
-	Dynamic       *dto.DynamicAgentProfileDTO
-	Force         bool
+	// Provider* replace their value when non-nil. When any of the three is
+	// non-nil the provider configuration is re-validated and normalized.
+	ProviderKind            *string
+	ProviderBaseURL         *string
+	ProviderAPIKeySecretID  *string
+	CursorMCPAuthEnabled    *bool
+	CursorPluginsMCPEnabled *bool
+	MCPSelectionMode        *string
+	MCPSelectedServers      *[]string
+	Dynamic                 *dto.DynamicAgentProfileDTO
+	Force                   bool
+}
+
+func (req UpdateProfileRequest) touchesProvider() bool {
+	return req.ProviderKind != nil || req.ProviderBaseURL != nil || req.ProviderAPIKeySecretID != nil
 }
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 	return req.Enabled != nil && req.Name == nil && req.Model == nil &&
-		req.FallbackModel == nil && req.AutoFallback == nil && req.Mode == nil &&
+		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
-		req.CommandPrefix == nil && req.Dynamic == nil
+		req.CommandPrefix == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil &&
+		req.CursorPluginsMCPEnabled == nil && req.MCPSelectionMode == nil && req.MCPSelectedServers == nil && req.Dynamic == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
+	if err := dto.ValidateMCPSelection(req.MCPSelectionMode, req.MCPSelectedServers); err != nil {
+		return nil, err
+	}
 	profile, err := c.repo.GetAgentProfile(ctx, req.ID)
 	if err != nil {
 		return nil, ErrAgentProfileNotFound
@@ -393,6 +493,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if req.AutoFallback != nil {
 		profile.AutoFallback = *req.AutoFallback
 	}
+	if req.RequireExactModel != nil {
+		profile.RequireExactModel = *req.RequireExactModel
+	}
 	if req.Mode != nil {
 		profile.Mode = *req.Mode
 	}
@@ -407,6 +510,21 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
+	}
+	if req.CursorMCPAuthEnabled != nil {
+		profile.CursorMCPAuthEnabled = *req.CursorMCPAuthEnabled
+	}
+	if req.CursorPluginsMCPEnabled != nil {
+		profile.CursorPluginsMCPEnabled = *req.CursorPluginsMCPEnabled
+	}
+	if req.MCPSelectionMode != nil {
+		profile.MCPSelectionMode = *req.MCPSelectionMode
+	}
+	if req.MCPSelectedServers != nil {
+		profile.MCPSelectedServers = append([]string{}, (*req.MCPSelectedServers)...)
+	}
+	if err := validateRequireExactModelPolicy(profile.Model, profile.RequireExactModel, profile.CLIPassthrough, isDynamic); err != nil {
+		return nil, err
 	}
 	if req.Enabled != nil {
 		dynamicRefs, err := c.listDynamicProfileReferences(ctx, req.ID)
@@ -435,6 +553,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.UpdatedAt = updatedAt
 		result := toProfileDTO(profile)
+		c.decorateProviderSupportByAgentID(ctx, &result)
 		return &result, nil
 	}
 	if req.CLIFlags != nil {
@@ -442,6 +561,20 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.CLIFlags = cliFlagsFromDTO(*req.CLIFlags)
+	}
+	// Judge the flags the profile ends up with against the passthrough mode it
+	// ends up in. Validating only the submitted list let a partial update that
+	// just turns passthrough off keep an enabled flag that cannot reach the
+	// agent over ACP. profile.CLIPassthrough already carries the requested
+	// value at this point.
+	if req.CLIFlags != nil || req.CLIPassthrough != nil {
+		if agentConfig, ok := c.agentConfigForProfile(ctx, profile); ok {
+			if err := validatePassthroughOnlyCLIFlags(
+				agentConfig, cliFlagsToDTO(profile.CLIFlags), profile.CLIPassthrough,
+			); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if req.EnvVars != nil {
 		if err := validateProfileEnvVarDTOs(*req.EnvVars); err != nil {
@@ -458,10 +591,13 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
 	}
+	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
+		return nil, err
+	}
 	profile.UserModified = true
 	if dynamic != nil {
 		result, handled, atomicErr := c.updateDynamicProfileAtomically(
-			ctx, profile, dynamic, req.Dynamic.Version, dynamicRoutes,
+			ctx, profile, dynamic, req.Dynamic.Version, dynamicRoutes, req.Enabled,
 		)
 		if atomicErr != nil {
 			return nil, atomicErr
@@ -475,10 +611,11 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 	}
-	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
+	if err := c.repo.UpdateAgentProfileWithEnabledIntent(ctx, profile, req.Enabled); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
+	c.decorateProviderSupportByAgentID(ctx, &result)
 	if dynamicRepo != nil && dynamic != nil {
 		result.Dynamic, err = dynamicProfileDTO(dynamic, dynamicRoutes)
 		if err != nil {
@@ -488,18 +625,69 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	return &result, nil
 }
 
+// applyProviderConfigUpdate applies any provider-field overrides carried by req,
+// then re-normalizes the provider configuration when those fields changed or
+// when only the model changed on a profile that already routes through an
+// OpenAI-compatible provider. That last case matters because a model id
+// containing '/' otherwise slips back to the target CLI's built-in vendor
+// provider without ever being rejected.
+func (c *Controller) applyProviderConfigUpdate(
+	ctx context.Context, req UpdateProfileRequest, profile *models.AgentProfile,
+) error {
+	if req.touchesProvider() {
+		if req.ProviderKind != nil {
+			profile.ProviderKind = *req.ProviderKind
+		}
+		if req.ProviderBaseURL != nil {
+			profile.ProviderBaseURL = *req.ProviderBaseURL
+		}
+		if req.ProviderAPIKeySecretID != nil {
+			profile.ProviderAPIKeySecretID = *req.ProviderAPIKeySecretID
+		}
+	}
+	modelChangedOnProviderProfile := req.Model != nil &&
+		strings.TrimSpace(profile.ProviderKind) == models.ProviderKindOpenAICompatible
+	passthroughEnabledOnProviderProfile := req.CLIPassthrough != nil && *req.CLIPassthrough &&
+		strings.TrimSpace(profile.ProviderKind) == models.ProviderKindOpenAICompatible
+	if !req.touchesProvider() && !modelChangedOnProviderProfile && !passthroughEnabledOnProviderProfile {
+		return nil
+	}
+	agentName := ""
+	if ag, agErr := c.repo.GetAgent(ctx, profile.AgentID); agErr == nil && ag != nil {
+		agentName = ag.Name
+	}
+	return c.normalizeProviderConfig(ctx, profile, agentName)
+}
+
+// validateRequireExactModelPolicy validates the merged profile policy before
+// it reaches storage. Dynamic selectors and terminal passthrough profiles do
+// not own a concrete ACP model, so they cannot promise exact selection.
+func validateRequireExactModelPolicy(model string, requireExactModel, cliPassthrough, dynamic bool) error {
+	if !requireExactModel {
+		return nil
+	}
+	if dynamic || cliPassthrough {
+		return ErrRequireExactModelUnsupported
+	}
+	if strings.TrimSpace(model) == "" {
+		return ErrRequireExactModelNeedsModel
+	}
+	return nil
+}
+
 func (c *Controller) updateDynamicProfileAtomically(
 	ctx context.Context,
 	profile *models.AgentProfile,
 	dynamic *models.DynamicAgentProfile,
 	version int64,
 	routes []models.DynamicAgentRoute,
+	enabled *bool,
 ) (*dto.AgentProfileDTO, bool, error) {
 	atomicRepo, ok := c.repo.(store.AtomicDynamicProfileRepository)
 	if !ok {
 		return nil, false, nil
 	}
-	if err := atomicRepo.UpdateAgentProfileWithDynamic(ctx, profile, dynamic, version, routes); err != nil {
+	if err := atomicRepo.UpdateAgentProfileWithDynamicEnabledIntent(ctx, profile, dynamic, version, routes, enabled); err != nil {
 		return nil, true, err
 	}
 	result := toProfileDTO(profile)
@@ -552,6 +740,13 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 	if profileKind(source) == dynamicProfileKind {
 		return nil, ErrDynamicProfileDuplicationUnsupported
 	}
+	if storedAgent, err := c.repo.GetAgent(ctx, source.AgentID); err == nil && storedAgent != nil {
+		if agentConfig, ok := c.agentRegistry.Get(storedAgent.Name); ok && isDisabledOptionalAgent(agentConfig) {
+			return nil, ErrAgentFeatureDisabled
+		}
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	for attempt := 0; ; attempt++ {
 		// A source without an MCP row leaves the copy without one: the
 		// default-config semantics and boot EnsureDefaultMcpConfig cover
@@ -581,6 +776,7 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 		})
 		if err == nil {
 			result := toProfileDTO(clone)
+			c.decorateProviderSupportByAgentID(ctx, &result)
 			return &result, nil
 		}
 		// A source deleted between the snapshot read and the transaction is a
@@ -601,6 +797,14 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 			return nil, err
 		}
 	}
+}
+
+func isDisabledOptionalAgent(agentConfig agents.Agent) bool {
+	if agentConfig == nil || agentConfig.Enabled() {
+		return false
+	}
+	preserver, ok := agentConfig.(agents.StoredProfilePreserver)
+	return ok && preserver.PreserveStoredProfilesWhenDisabled()
 }
 
 // maxDuplicateRetries bounds the number of re-attempts after a concurrent
@@ -630,6 +834,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		Model:                      source.Model,
 		FallbackModel:              strings.TrimSpace(source.FallbackModel),
 		AutoFallback:               source.AutoFallback,
+		RequireExactModel:          source.RequireExactModel,
 		Mode:                       source.Mode,
 		ConfigOptions:              profileconfig.SanitizeConfigOptions(cloneStringMap(source.ConfigOptions)),
 		AllowIndexing:              source.AllowIndexing,
@@ -638,6 +843,13 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		CLIFlags:                   cloneCLIFlags(source.CLIFlags),
 		EnvVars:                    cloneEnvVars(source.EnvVars),
 		CommandPrefix:              source.CommandPrefix,
+		ProviderKind:               source.ProviderKind,
+		ProviderBaseURL:            source.ProviderBaseURL,
+		ProviderAPIKeySecretID:     source.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:       source.CursorMCPAuthEnabled,
+		CursorPluginsMCPEnabled:    source.CursorPluginsMCPEnabled,
+		MCPSelectionMode:           mcpSelectionModeOrInherit(&source.MCPSelectionMode),
+		MCPSelectedServers:         append([]string{}, source.MCPSelectedServers...),
 		UserModified:               true,
 		Enabled:                    source.Enabled,
 		WorkspaceID:                source.WorkspaceID,
@@ -771,6 +983,61 @@ func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 func validateCommandPrefix(prefix string) error {
 	if err := cliflags.ValidateCommandPrefix(prefix); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidCommandPrefix, err)
+	}
+	return nil
+}
+
+// providerSupported reports whether the profile's agent advertises a generic
+// OpenAI-compatible provider (base URL + bearer key) that Kandev can inject.
+func (c *Controller) providerSupported(agentName string) bool {
+	if c.agentRegistry == nil {
+		return false
+	}
+	ag, ok := c.agentRegistry.Get(agentName)
+	if !ok {
+		return false
+	}
+	return agents.OpenAICompatibleProviderSpecFor(ag) != nil
+}
+
+// normalizeProviderConfig validates and normalizes the provider fields on a
+// profile in place. When the kind is not openai_compatible every provider field
+// is cleared so a stale base URL or secret ref can never linger active. When it
+// is openai_compatible the agent must support it, the base URL must be an
+// absolute http(s) URL, and the model id must not contain '/' (the target CLI
+// routes a slash-prefixed model to its built-in vendor provider). The secret
+// ref, when set, must resolve to a global secret, and the base URL must then be
+// https or a loopback host so the bearer key is never sent in cleartext.
+func (c *Controller) normalizeProviderConfig(ctx context.Context, p *models.AgentProfile, agentName string) error {
+	if strings.TrimSpace(p.ProviderKind) != models.ProviderKindOpenAICompatible {
+		p.ProviderKind = models.ProviderKindNative
+		p.ProviderBaseURL = ""
+		p.ProviderAPIKeySecretID = ""
+		return nil
+	}
+	p.ProviderKind = models.ProviderKindOpenAICompatible
+	if !c.providerSupported(agentName) {
+		return fmt.Errorf("%w: agent %q does not support an OpenAI-compatible provider", ErrInvalidProviderConfig, agentName)
+	}
+	if p.CLIPassthrough {
+		return fmt.Errorf("%w: CLI passthrough cannot use an OpenAI-compatible provider", ErrInvalidProviderConfig)
+	}
+	p.ProviderBaseURL = strings.TrimSpace(p.ProviderBaseURL)
+	p.ProviderAPIKeySecretID = strings.TrimSpace(p.ProviderAPIKeySecretID)
+	validateBaseURL := acpprovider.ValidateBaseURL
+	if p.ProviderAPIKeySecretID != "" {
+		validateBaseURL = acpprovider.ValidateCredentialedBaseURL
+	}
+	if err := validateBaseURL(p.ProviderBaseURL); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidProviderConfig, err)
+	}
+	if strings.Contains(p.Model, "/") {
+		return fmt.Errorf("%w: model id %q must not contain '/'", ErrInvalidProviderConfig, p.Model)
+	}
+	if p.ProviderAPIKeySecretID != "" && c.secretStore != nil {
+		if err := secrets.ValidateGlobalReference(ctx, c.secretStore, p.ProviderAPIKeySecretID); err != nil {
+			return fmt.Errorf("%w: API key secret must be global", ErrInvalidProviderConfig)
+		}
 	}
 	return nil
 }
@@ -1052,7 +1319,7 @@ func (c *Controller) cleanupEphemeralTasks(ctx context.Context, profileID string
 	}
 }
 
-func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentDTO {
+func (c *Controller) toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentDTO {
 	profileDTOs := make([]dto.AgentProfileDTO, 0, len(profiles))
 	for _, profile := range profiles {
 		profileDTOs = append(profileDTOs, toProfileDTO(profile))
@@ -1069,14 +1336,19 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 	}
 	if agent.TUIConfig != nil {
 		result.TUIConfig = &dto.TUIConfigDTO{
-			Command:         agent.TUIConfig.Command,
-			DisplayName:     agent.TUIConfig.DisplayName,
-			Model:           agent.TUIConfig.Model,
-			Description:     agent.TUIConfig.Description,
-			CommandArgs:     agent.TUIConfig.CommandArgs,
-			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
-			MCPStrategy:     agent.TUIConfig.MCPStrategy,
+			Command:               agent.TUIConfig.Command,
+			DisplayName:           agent.TUIConfig.DisplayName,
+			Model:                 agent.TUIConfig.Model,
+			Description:           agent.TUIConfig.Description,
+			CommandArgs:           agent.TUIConfig.CommandArgs,
+			WaitForTerminal:       agent.TUIConfig.WaitForTerminal,
+			MCPStrategy:           agent.TUIConfig.MCPStrategy,
+			Protocol:              agent.TUIConfig.Protocol,
+			DisableBracketedPaste: agent.TUIConfig.DisableBracketedPaste,
 		}
+	}
+	if c.agentRegistry != nil {
+		_, result.InferenceCapable = c.agentRegistry.GetInferenceAgent(agent.Name)
 	}
 	return result
 }
@@ -1119,28 +1391,55 @@ func (c *Controller) decorateAgentDTO(ctx context.Context, result *dto.AgentDTO)
 
 func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
-		ID:               profile.ID,
-		AgentID:          profile.AgentID,
-		Kind:             profileKind(profile),
-		Name:             profile.Name,
-		AgentDisplayName: profile.AgentDisplayName,
-		Model:            profile.Model,
-		FallbackModel:    profile.FallbackModel,
-		AutoFallback:     profile.AutoFallback,
-		Mode:             profile.Mode,
-		ConfigOptions:    profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
-		AllowIndexing:    profile.AllowIndexing,
-		AutoApprove:      profile.AutoApprove,
-		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
-		EnvVars:          envVarsToDTO(profile.EnvVars),
-		CLIPassthrough:   profile.CLIPassthrough,
-		Enabled:          profile.Enabled,
-		CommandPrefix:    profile.CommandPrefix,
-		UserModified:     profile.UserModified,
-		WorkspaceID:      profile.WorkspaceID,
-		CreatedAt:        profile.CreatedAt,
-		UpdatedAt:        profile.UpdatedAt,
+		ID:                      profile.ID,
+		AgentID:                 profile.AgentID,
+		Kind:                    profileKind(profile),
+		Name:                    profile.Name,
+		AgentDisplayName:        profile.AgentDisplayName,
+		Model:                   profile.Model,
+		FallbackModel:           profile.FallbackModel,
+		AutoFallback:            profile.AutoFallback,
+		RequireExactModel:       profile.RequireExactModel,
+		Mode:                    profile.Mode,
+		ConfigOptions:           profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
+		AllowIndexing:           profile.AllowIndexing,
+		AutoApprove:             profile.AutoApprove,
+		CLIFlags:                cliFlagsToDTO(profile.CLIFlags),
+		EnvVars:                 envVarsToDTO(profile.EnvVars),
+		CLIPassthrough:          profile.CLIPassthrough,
+		Enabled:                 profile.Enabled,
+		CommandPrefix:           profile.CommandPrefix,
+		ProviderKind:            profile.ProviderKind,
+		ProviderBaseURL:         profile.ProviderBaseURL,
+		ProviderAPIKeySecretID:  profile.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:    profile.CursorMCPAuthEnabled,
+		CursorPluginsMCPEnabled: profile.CursorPluginsMCPEnabled,
+		MCPSelectionMode:        mcpSelectionModeOrInherit(&profile.MCPSelectionMode),
+		MCPSelectedServers:      append([]string{}, profile.MCPSelectedServers...),
+		UserModified:            profile.UserModified,
+		WorkspaceID:             profile.WorkspaceID,
+		CreatedAt:               profile.CreatedAt,
+		UpdatedAt:               profile.UpdatedAt,
 	}
+}
+
+// decorateProviderSupport sets the computed ProviderSupported flag on a single
+// profile DTO from the agent registry.
+func (c *Controller) decorateProviderSupport(agentName string, d *dto.AgentProfileDTO) {
+	d.ProviderSupported = c.providerSupported(agentName)
+}
+
+// decorateProviderSupportByAgentID resolves the profile's agent family from the
+// DTO's AgentID and sets the computed ProviderSupported flag. Mutation responses
+// (update, duplicate) run through this: the frontend swaps its cached profile
+// for the response, so an undecorated DTO hides the provider section until the
+// agent list is fetched again.
+func (c *Controller) decorateProviderSupportByAgentID(ctx context.Context, d *dto.AgentProfileDTO) {
+	ag, err := c.repo.GetAgent(ctx, d.AgentID)
+	if err != nil || ag == nil {
+		return
+	}
+	d.ProviderSupported = c.providerSupported(ag.Name)
 }
 
 func profileKind(profile *models.AgentProfile) string {

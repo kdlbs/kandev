@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -31,7 +31,7 @@ import { createFile } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
-import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import { searchKeywords } from "@/lib/commands/search-keywords";
 import type { CommandItem } from "@/lib/commands/types";
@@ -65,9 +65,10 @@ export function buildSessionCommands(
   isAgentRunning: boolean | undefined,
   cancelTurn: () => void,
   t: TFunction,
+  options: { suppressCancel?: boolean } = {},
 ): CommandItem[] {
   const items: CommandItem[] = [];
-  if (isAgentRunning)
+  if (isAgentRunning && !options.suppressCancel)
     items.push({
       id: "session-cancel",
       label: t("common:commandCancelTurn"),
@@ -308,7 +309,6 @@ type SessionCommandDialogsProps = {
   activeTaskId: string;
   activeTaskTitle: string;
   dialogs: ReturnType<typeof useCommandDialogState>;
-  archive: ReturnType<typeof useTaskArchiveConfirm>;
 };
 
 /** Dialogs the task-scoped palette commands open. */
@@ -316,7 +316,6 @@ function SessionCommandDialogs({
   activeTaskId,
   activeTaskTitle,
   dialogs,
-  archive,
 }: SessionCommandDialogsProps) {
   return (
     <>
@@ -331,13 +330,38 @@ function SessionCommandDialogs({
         parentTaskId={activeTaskId}
         parentTaskTitle={activeTaskTitle}
       />
-      <TaskArchiveConfirmFlow
-        taskId={activeTaskId}
-        archive={archive}
-        confirmTestId="palette-archive-confirm"
-      />
     </>
   );
+}
+
+function useArchiveCommandConfirmation(archive: ReturnType<typeof useTaskArchiveConfirm>) {
+  const archiveAnchorRef = useRef<HTMLElement>(null);
+  if (archive.target === null) return undefined;
+
+  return (
+    <TaskArchiveConfirmation
+      open
+      forceDialog
+      anchorRef={archiveAnchorRef}
+      taskId={archive.target.id}
+      taskTitle={archive.target.title}
+      executorType={archive.target.executorType}
+      isArchiving={archive.isPending}
+      onOpenChange={(open) => {
+        if (!open) archive.closeConfirm();
+      }}
+      onConfirm={archive.confirmArchive}
+      confirmTestId="palette-archive-confirm"
+    />
+  );
+}
+
+function useActiveTaskTitle(): string {
+  return useAppStore((s) => {
+    const id = s.tasks.activeTaskId;
+    if (!id) return "";
+    return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
+  });
 }
 
 export function SessionCommands({
@@ -355,16 +379,11 @@ export function SessionCommands({
   const gitWithFeedback = useGitWithFeedback();
 
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const activeTaskTitle = useAppStore((s) => {
-    const id = s.tasks.activeTaskId;
-    if (!id) return "";
-    return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
-  });
-
+  const activeTaskTitle = useActiveTaskTitle();
+  const isQuickChatOpen = useAppStore((s) => s.quickChat.isOpen);
   const dialogs = useCommandDialogState();
   const { openNewAgent, openSubtask } = dialogs;
   const cancelTurn = useCancelTurn(sessionId);
-
   const runGitWithFeedback = useCallback(
     async (
       operation: () => Promise<{ success: boolean; output: string; error?: string }>,
@@ -378,13 +397,15 @@ export function SessionCommands({
 
   const archive = useTaskArchiveConfirm(activeTaskId);
   const { requestArchive } = archive;
-
+  const archiveConfirmation = useArchiveCommandConfirmation(archive);
   // Session-scoped commands need a live session; task-scoped ones only need the
   // task, so they stay available while a session is still being ensured.
   const commands = useMemo<CommandItem[]>(() => {
     const sessionScoped = sessionId
       ? [
-          ...buildSessionCommands(isAgentRunning, cancelTurn, t),
+          ...buildSessionCommands(isAgentRunning, cancelTurn, t, {
+            suppressCancel: isQuickChatOpen,
+          }),
           ...(hasWorktree
             ? buildGitCommands({
                 git,
@@ -419,6 +440,7 @@ export function SessionCommands({
     cancelTurn,
     baseBranch,
     isAgentRunning,
+    isQuickChatOpen,
     hasWorktree,
     isPassthrough,
     isTaskArchived,
@@ -436,11 +458,13 @@ export function SessionCommands({
   if (!activeTaskId) return null;
 
   return (
-    <SessionCommandDialogs
-      activeTaskId={activeTaskId}
-      activeTaskTitle={activeTaskTitle}
-      dialogs={dialogs}
-      archive={archive}
-    />
+    <>
+      <SessionCommandDialogs
+        activeTaskId={activeTaskId}
+        activeTaskTitle={activeTaskTitle}
+        dialogs={dialogs}
+      />
+      {archiveConfirmation}
+    </>
   );
 }

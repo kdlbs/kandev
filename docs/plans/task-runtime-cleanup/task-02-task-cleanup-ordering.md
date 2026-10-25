@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: ["01-runtime-inventory"]
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-cleanup.md"
+spec: "../../specs/tasks/system-design/runtime-cleanup.md"
 ---
 
 # Task 02: Task Cleanup Ordering

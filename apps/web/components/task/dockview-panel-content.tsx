@@ -2,18 +2,26 @@
 
 import React, { useCallback, useEffect } from "react";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
+import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
+import { useResyncGitStatusOnTabActivate } from "@/hooks/use-resync-git-status-on-tab-activate";
 import { t } from "@/lib/i18n";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  HistoricalTurnDiffTarget,
+  OpenDiffOptions,
+} from "@/lib/state/diff-target-types";
 import { ChangesPanel } from "./changes-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";
@@ -25,9 +33,9 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
-import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
+import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 import { useTranslation } from "react-i18next";
 
 /** Resolve the chat panel's tab title: the session's agent label when present,
@@ -66,17 +74,34 @@ function useChatSessionTitle(panelId: string, sessionId: string | null) {
 
 /** Render the chat panel for the session from `params` or the active session,
  *  or a passthrough toolbar for passthrough sessions. */
-function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
+function ChatContent({
+  panelId,
+  params,
+  workspaceId,
+}: {
+  panelId: string;
+  params: Record<string, unknown>;
+  workspaceId?: string | null;
+}) {
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const { openFile } = useFileEditors();
+  const isVisible = usePanelActive(panelId);
+  const { openFile } = useFileEditors(isVisible);
+  const addDiffViewerPanel = useDockviewStore((state) => state.addDiffViewerPanel);
+  const setSelectedDiff = useDockviewStore((state) => state.setSelectedDiff);
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId);
-  const isVisible = usePanelActive(panelId);
+  const handleOpenHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      setSelectedDiff({ path: target.path ?? "", historical: target });
+      addDiffViewerPanel();
+    },
+    [addDiffViewerPanel, setSelectedDiff],
+  );
 
   if (isPassthrough) {
     return (
@@ -91,11 +116,14 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     <TaskChatPanel
       sessionId={sessionId}
       taskId={sessionId ? taskId : null}
+      workspaceId={workspaceId}
       statusTaskId={taskId}
       onOpenFile={openFile}
+      onOpenHistoricalDiff={handleOpenHistoricalDiff}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}
+      detailActive={isVisible}
       panelId={panelId}
     />
   );
@@ -113,13 +141,17 @@ function DiffViewerContent({
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
   const selectedRepositoryName =
     panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const selectedPRKey = panelKind === "file" ? (params?.prKey as string | undefined) : undefined;
+  const selectedChangeLayer =
+    panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
@@ -132,6 +164,7 @@ function DiffViewerContent({
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
       prKey={selectedPRKey}
+      changeLayer={selectedChangeLayer}
       sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -171,11 +204,13 @@ function ChangesContent({ panelId }: { panelId: string }) {
         source: options?.source,
         repositoryName: options?.repositoryName,
         prKey: options?.prKey,
+        changeLayer: options?.changeLayer,
       }),
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (target: CommitDetailTarget) => addCommitDetailPanel(target),
+    (target: CommitDetailTarget, fileNavigation?: CommitFileNavigationRequest) =>
+      addCommitDetailPanel(target, fileNavigation ? { fileNavigation } : undefined),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -185,6 +220,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
 
   return (
     <ChangesPanel
+      panelId={panelId}
       onOpenDiffFile={handleOpenDiffFile}
       onEditFile={handleEditFile}
       onOpenCommitDetail={handleOpenCommitDetail}
@@ -210,6 +246,22 @@ function PlanContent() {
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
+function CanvasContent({ params }: { params: Record<string, unknown> }) {
+  const enabled = useFeature("canvases");
+  if (!enabled) return null;
+  return (
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+      data-testid="canvas-panel-boundary"
+    >
+      <CanvasHostRoute
+        canvasId={typeof params.canvasId === "string" ? params.canvasId : ""}
+        embedded
+      />
+    </div>
+  );
+}
+
 const COMPONENT_ALIASES: Record<string, string> = {
   "diff-files": "changes",
   "all-files": "files",
@@ -226,11 +278,17 @@ function resolveComponent(component: string): string {
  * switch, so adding a panel type (like "plugin-panel") never trips the
  * function-complexity lint ceiling (R3, docs/plans/plugins).
  */
-type PanelRenderer = (panelId: string, params: Record<string, unknown>) => React.ReactNode;
+type PanelRenderer = (
+  panelId: string,
+  params: Record<string, unknown>,
+  workspaceId?: string | null,
+) => React.ReactNode;
 
 const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   sidebar: () => null,
-  chat: (panelId, params) => <ChatContent panelId={panelId} params={params} />,
+  chat: (panelId, params, workspaceId) => (
+    <ChatContent panelId={panelId} params={params} workspaceId={workspaceId} />
+  ),
   "diff-viewer": (panelId, params) => <DiffViewerContent panelId={panelId} params={params} />,
   "file-editor": (panelId, params) => <FileEditorPanel panelId={panelId} params={params} />,
   "commit-detail": (panelId, params) => <CommitDetailPanel panelId={panelId} params={params} />,
@@ -241,7 +299,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
-  "prompt-history": () => <PromptHistoryContent />,
+  canvas: (_panelId, params) => <CanvasContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),
@@ -262,6 +320,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
       presentation="desktop"
     />
   ),
+  "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)
@@ -270,8 +329,9 @@ export function renderPanel(
   panelId: string,
   component: string,
   params: Record<string, unknown>,
+  workspaceId?: string | null,
 ): React.ReactNode {
   const renderer = PANEL_RENDERERS[resolveComponent(component)];
-  if (renderer) return renderer(panelId, params);
+  if (renderer) return renderer(panelId, params, workspaceId);
   return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/feature-toggles/spec.md
+spec: docs/specs/platform/requirements/feature-toggles.md
 created: 2026-08-01
 status: completed
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/settings-profile-layout.md"
+spec: "../../specs/agents/requirements/settings-profile-layout.md"
 ---
 
 # Task 01: Profile row action presentation
@@ -46,7 +46,7 @@ slice.
 
 ## Inputs
 
-- Spec: `docs/specs/agents/settings-profile-layout.md`, especially the new
+- Spec: `docs/specs/agents/requirements/settings-profile-layout.md`, especially the new
   full-desktop and below-breakpoint scenarios.
 - Plan: `plan.md`, Frontend and Mobile design contract sections.
 - Existing patterns: `useResponsiveBreakpoint`, `useProfileDuplicate`, and

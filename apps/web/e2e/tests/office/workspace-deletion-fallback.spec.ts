@@ -24,7 +24,6 @@ test.describe("Office workspace deletion fallback navigation", () => {
       workflow_filter_id: "",
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
 
     await testPage.goto(`/office/workspace/settings?workspaceId=${onboarded.workspaceId}`);

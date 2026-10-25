@@ -7,7 +7,7 @@ depends_on:
   - "01-github-review-watch-response"
   - "02-shared-watcher-saved-baseline"
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 03: Prove pause and resume without refresh
@@ -43,7 +43,7 @@ Sequential.
 
 ## Inputs
 
-- `docs/specs/ui/settings-manual-save.md`
+- `docs/specs/ui/requirements/settings-manual-save.md`
 - `docs/plans/integration-watcher-save-state/plan.md`
 - `apps/web/e2e/helpers/api-client.ts`
 - Existing GitLab watcher desktop/mobile E2E patterns

@@ -40,27 +40,32 @@ type DirectoryListing struct {
 // covers every path the user could pick on that volume — but it's what
 // CodeQL recognises as a path-injection sanitizer, so the lint stays green.
 //
-// Hidden (".") directories are excluded.
-func (s *Service) ListDirectory(ctx context.Context, path string) (DirectoryListing, error) {
+// Hidden (".") directories are excluded unless includeHidden is set. The
+// caller owns that display decision so every in-app browser can reveal them
+// without a second listing path.
+func (s *Service) ListDirectory(ctx context.Context, path string, includeHidden bool) (DirectoryListing, error) {
 	if listing, handled, err := listVirtualDirectoryRoot(path); handled {
 		return listing, err
 	}
 
 	abs, err := resolveListingPath(path)
 	if err != nil {
+		s.logFilesystemFailure("repository.discovery.directory_listing", path, "picker_opened", err)
 		return DirectoryListing{}, err
 	}
 
 	entries, err := readSubdirsBoundedAtFilesystemRoot(abs)
 	if err != nil {
+		s.logFilesystemFailure("repository.discovery.directory_listing", abs, "picker_opened", err)
 		return DirectoryListing{}, err
 	}
 
 	_ = ctx
+	s.logFilesystemInfo("repository discovery directory listed", "repository.discovery.directory_listing", abs, "picker_opened")
 	return DirectoryListing{
 		Path:      abs,
 		Parent:    parentPath(abs),
-		Entries:   collectSubdirs(abs, entries),
+		Entries:   collectSubdirs(abs, entries, includeHidden),
 		Choosable: true,
 	}, nil
 }
@@ -157,15 +162,17 @@ func parentPath(abs string) string {
 }
 
 // collectSubdirs filters entries to immediate subdirectories, drops hidden
-// (dotfile) directories, and returns them sorted alphabetically (case-fold).
-func collectSubdirs(parent string, entries []os.DirEntry) []DirectoryEntry {
+// (dotfile) directories unless includeHidden is set, and returns them sorted
+// alphabetically (case-fold). The directory filter stays unconditional, so a
+// revealed listing never shows a file.
+func collectSubdirs(parent string, entries []os.DirEntry, includeHidden bool) []DirectoryEntry {
 	out := make([]DirectoryEntry, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
+		if !includeHidden && strings.HasPrefix(name, ".") {
 			continue
 		}
 		out = append(out, DirectoryEntry{

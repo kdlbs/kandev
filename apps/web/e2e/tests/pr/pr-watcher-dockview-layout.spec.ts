@@ -64,6 +64,58 @@ async function waitForReviewTaskCards(
     .toBe(expected);
 }
 
+async function waitForLayoutReady(session: SessionPage, timeout = 60_000): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        if (
+          await session
+            .anyIdleInput()
+            .isVisible()
+            .catch(() => false)
+        )
+          return "idle";
+        if (
+          await session
+            .recoveryFreshButton()
+            .isVisible()
+            .catch(() => false)
+        )
+          return "recovery";
+        if (
+          await session
+            .recoveryResumeButton()
+            .isVisible()
+            .catch(() => false)
+        )
+          return "recovery";
+        return "waiting";
+      },
+      {
+        timeout,
+        message: "the session layout did not reach an idle or recovery state",
+      },
+    )
+    .not.toBe("waiting");
+}
+
+async function ensurePlanModeAvailable(session: SessionPage): Promise<void> {
+  const planButton = session.activeChat().getByTestId("plan-mode-toggle-button");
+  if (!(await planButton.isVisible().catch(() => false))) {
+    const freshButton = session.recoveryFreshButton();
+    await expect(freshButton).toBeVisible({ timeout: 10_000 });
+    await freshButton.click();
+
+    const dialog = session.newSessionDialog();
+    if (await dialog.isVisible().catch(() => false)) {
+      await session.newSessionPromptInput().fill("/e2e:simple-message");
+      await session.newSessionStartButton().click();
+      await expect(dialog).not.toBeVisible({ timeout: 60_000 });
+    }
+  }
+  await expect(planButton).toBeVisible({ timeout: 60_000 });
+}
+
 test.describe("PR watcher dockview layout stability", () => {
   /**
    * Verifies the dockview layout stays correct when switching between
@@ -222,12 +274,12 @@ test.describe("PR watcher dockview layout stability", () => {
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
     await expect(session.sidebar).toBeVisible();
 
-    // Wait for the mock agent to complete and the layout to be stable before toggling
-    // plan mode. Without this, an in-flight layout restore could swallow the panel add.
-    // Use `waitForChatIdle` (vs. raw `idleInput().waitFor`) so the helper's
-    // reload-and-retry recovery covers the rare case where the WS-driven idle
-    // signal misses its window under shard pressure.
-    await session.waitForChatIdle({ timeout: 30_000 });
+    // Wait until the session has either become promptable or reported its
+    // recoverable startup state. Both states have a settled dockview layout;
+    // requiring promptability would make this layout test fail when an agent
+    // startup is the part that is under contention.
+    await waitForLayoutReady(session);
+    await ensurePlanModeAvailable(session);
 
     // --- Toggle plan mode on task 1 ---
     await session.togglePlanMode();

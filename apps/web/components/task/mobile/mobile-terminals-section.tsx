@@ -184,7 +184,13 @@ export const MobileTerminalsPicker = memo(function MobileTerminalsPicker({
         data-testid="mobile-terminals-pill"
         ariaLabel={t("task:activeTerminalTapToSwitch", { label })}
       />
-      <MobilePickerSheet open={open} onOpenChange={setOpen} title={t("task:terminals")}>
+      <MobilePickerSheet
+        key={sessionId}
+        open={open}
+        onOpenChange={setOpen}
+        title={t("task:terminals")}
+        confirmationHost
+      >
         <MobileTerminalsList sessionId={sessionId} onClose={() => setOpen(false)} />
       </MobilePickerSheet>
     </>

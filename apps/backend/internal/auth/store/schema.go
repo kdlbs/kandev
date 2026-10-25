@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -64,6 +65,19 @@ func (s *Store) initSchema() error {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("auth schema: %w", err)
 		}
+	}
+	// An invite mints a member of exactly one organization, so it carries the
+	// minting admin's org. CREATE TABLE IF NOT EXISTS is a no-op on an
+	// existing database, so the column also needs an ADD COLUMN (ADR 0027).
+	migrate := db.NewRequiredMigrateLogger(s.db, nil)
+	if err := migrate.Apply(
+		"auth_invites.org_id",
+		`ALTER TABLE auth_invites ADD COLUMN org_id TEXT NOT NULL DEFAULT ''`,
+	); err != nil {
+		return fmt.Errorf("auth schema migration: %w", err)
+	}
+	if err := migrate.Err(); err != nil {
+		return fmt.Errorf("auth schema migration: %w", err)
 	}
 	return nil
 }

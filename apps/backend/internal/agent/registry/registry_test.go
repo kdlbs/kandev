@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -263,6 +264,45 @@ func TestRegistry_LoadDefaults(t *testing.T) {
 	for _, ia := range reg.ListInferenceAgents() {
 		if ia.(agents.Agent).ID() == agents.DynamicAgentID {
 			t.Fatal("dynamic virtual family must not be exposed as an inference agent")
+		}
+	}
+}
+
+// TestAgentRuntimesBoundMCPStartupBudget guards every registered runtime
+// against anthropics/claude-code#91414: an MCP_TIMEOUT value large enough
+// for a tool-call budget also becomes the first-turn MCP prewait, blocking
+// the agent's first token for MCP_TIMEOUT-5000ms. A regression here is
+// invisible at runtime (the agent just looks slow to start), so it must
+// fail a test instead. Long-running blocking tool calls belong on
+// MCP_TOOL_TIMEOUT, which the CLI does not use as a prewait.
+func TestAgentRuntimesBoundMCPStartupBudget(t *testing.T) {
+	const maxStartupBudgetMS = 60000
+
+	log := newTestLogger()
+	reg := NewRegistry(log)
+	reg.LoadDefaults()
+
+	agentsList := reg.List()
+	if len(agentsList) == 0 {
+		t.Fatal("LoadDefaults registered no agents; cannot verify MCP_TIMEOUT invariant")
+	}
+
+	for _, a := range agentsList {
+		rt := a.Runtime()
+		if rt == nil {
+			continue
+		}
+		raw, ok := rt.Env["MCP_TIMEOUT"]
+		if !ok {
+			continue
+		}
+		ms, err := strconv.Atoi(raw)
+		if err != nil {
+			t.Errorf("%s: MCP_TIMEOUT = %q, want an integer", a.ID(), raw)
+			continue
+		}
+		if ms > maxStartupBudgetMS {
+			t.Errorf("%s: MCP_TIMEOUT = %d, want <= %d (startup budget, not a tool-call budget)", a.ID(), ms, maxStartupBudgetMS)
 		}
 	}
 }

@@ -32,6 +32,9 @@ export function AddLocalRepositoryDialog({
       isValidating={state.isValidating}
       canSave={state.canSave}
       onConfirm={state.handleConfirmLocalRepository}
+      desktopRuntime={state.desktopRuntime}
+      workspaceId={state.workspaceId}
+      onRefreshDiscovery={state.onRefreshDiscovery}
     />
   );
 }

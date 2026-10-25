@@ -9,6 +9,7 @@ export type {
   LayoutBranchNode,
   LayoutIntent,
   LayoutIntentPanel,
+  LayoutOrientation,
 } from "./types";
 
 // Constants
@@ -20,7 +21,6 @@ export {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
-  PROMPT_HISTORY_PANEL_ID,
   REUSABLE_PANEL_IDS,
   SIDEBAR_LOCK,
   KNOWN_PANEL_IDS,
@@ -59,7 +59,13 @@ export type { BuiltInPreset } from "./presets";
 export { computeColumnWidths, computeGroupHeights, getPinnedWidth } from "./sizing";
 
 // Serializer
-export { toSerializedDockview, fromDockviewApi, filterEphemeral } from "./serializer";
+export {
+  toSerializedDockview,
+  fromDockviewApi,
+  filterEphemeral,
+  isCenterColumn,
+  isRightColumn,
+} from "./serializer";
 
 // Session panel normalization for reusable saved layouts
 export {

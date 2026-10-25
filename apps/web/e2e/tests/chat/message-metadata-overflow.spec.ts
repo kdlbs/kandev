@@ -7,6 +7,7 @@ import { test, expect, type Locator, type Page } from "../../fixtures/test-base"
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SEEDED_MESSAGE, largeTurnMetadata } from "../../helpers/message-metadata-fixtures";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 /** Seeds a task, session, and overflow-sized turn metadata message. */
@@ -45,7 +46,7 @@ async function openMetadataDialog(
   await session.waitForLoad();
 
   const chat = session.activeChat();
-  await expect(chat.getByText(SEEDED_MESSAGE)).toBeVisible({ timeout: 15_000 });
+  await expect(chat.getByText(SEEDED_MESSAGE, { exact: true })).toBeVisible({ timeout: 15_000 });
 
   // Scope to the seeded message's own action row (mirrors the favorite spec).
   const messageBody = chat
@@ -62,6 +63,8 @@ async function openMetadataDialog(
   // fails the test if the selector ever resolves to more than one container.
   const entries = dialog.locator("> div.grid");
   await expect(entries).toBeVisible();
+  // Geometry assertions compare the dialog and its children after the opening animation.
+  await waitForFiniteAnimations(dialog);
   return {
     dialog,
     entries,

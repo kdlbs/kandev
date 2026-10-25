@@ -4,6 +4,11 @@
 **Date:** 2026-08-08
 **Area:** backend, frontend, protocol, operations
 
+## Recovery policy revision
+
+The [runtime replacement decision](2026-09-27-agentctl-runtime-replacement.md) replaces this record's monotonic availability and mandatory backend restart policy.
+The remaining crash-containment decisions remain applicable. The new implementation package is pending.
+
 ## Context
 
 The standalone `agentctl` process crashed with Go's fatal `concurrent map
@@ -54,7 +59,7 @@ full supervised Kandev restart, which creates a fresh backend and authenticated
 child together. The general backend health endpoint remains unchanged.
 
 The observable behavior is specified in
-[`docs/specs/platform/agent-runtime-availability.md`](../specs/platform/agent-runtime-availability.md).
+[`docs/specs/platform/requirements/agent-runtime-availability.md`](../specs/platform/requirements/agent-runtime-availability.md).
 
 ## Consequences
 

@@ -14,6 +14,42 @@ import (
 // TriggerType identifies the kind of trigger.
 type TriggerType string
 
+// RetryMode controls whether failed automation attempts are retried.
+type RetryMode string
+
+const (
+	RetryModeDisabled RetryMode = "disabled"
+	RetryModeFinite   RetryMode = "finite"
+	RetryModeInfinite RetryMode = "infinite"
+)
+
+// RetryBackoff controls how delay grows for subsequent retries.
+type RetryBackoff string
+
+const (
+	RetryBackoffFixed       RetryBackoff = "fixed"
+	RetryBackoffExponential RetryBackoff = "exponential"
+)
+
+// RetryHistoryMode controls how a retry chain is presented in automation
+// history.
+type RetryHistoryMode string
+
+const (
+	RetryHistoryAttempts RetryHistoryMode = "attempts"
+	RetryHistoryTimeline RetryHistoryMode = "timeline"
+)
+
+// RetryPolicy is the persisted automation retry configuration. Decimal
+// quantities remain strings on the wire to avoid JavaScript precision loss.
+type RetryPolicy struct {
+	Mode         RetryMode        `json:"mode"`
+	MaxRetries   string           `json:"max_retries"`
+	DelaySeconds string           `json:"delay_seconds"`
+	Backoff      RetryBackoff     `json:"backoff"`
+	HistoryMode  RetryHistoryMode `json:"history_mode"`
+}
+
 const (
 	TriggerTypeScheduled      TriggerType = "scheduled"
 	TriggerTypeGitHubPR       TriggerType = "github_pr"
@@ -21,33 +57,56 @@ const (
 	TriggerTypeGitHubPush     TriggerType = "github_push"
 	TriggerTypeGitHubCI       TriggerType = "github_ci"
 	TriggerTypeWebhook        TriggerType = "webhook"
+	TriggerTypePluginEvent    TriggerType = "plugin_event"
+	TriggerTypeManual         TriggerType = "manual"
 )
 
+// ManagedConversationDestination is a portable reference to an existing
+// installation-owned conversation. Installation identity remains host-owned
+// and is never part of an exported automation document.
+type ManagedConversationDestination struct {
+	PluginID    string `json:"plugin_id"`
+	InstanceKey string `json:"instance_key"`
+	Revision    uint64 `json:"revision"`
+}
+
 const (
-	automationAuthorLoginKey   = "author_login"
-	automationBaseBranchKey    = "base_branch"
-	automationBodyKey          = "body"
-	automationHeadBranchKey    = "head_branch"
-	automationHTMLURLKey       = "html_url"
-	automationRepoKey          = "repo"
-	defaultBranchMain          = "main"
-	exampleGitHubPRURL         = "https://github.com/acme/api/pull/7"
-	exampleRepositoryOwner     = "org/repo"
-	placeholderRepositoryOwner = "Repository (owner/name)"
-	triggerCategoryGitHub      = "github"
-	triggerDataSourceKey       = "source"
-	triggerDataSourceManual    = "manual"
+	automationAuthorLoginKey    = "author_login"
+	automationBaseBranchKey     = "base_branch"
+	automationBodyKey           = "body"
+	automationBranchKey         = "branch"
+	automationCheckNameKey      = "check_name"
+	automationConclusionKey     = "conclusion"
+	automationHeadBranchKey     = "head_branch"
+	automationHTMLURLKey        = "html_url"
+	automationMessageKey        = "message"
+	automationPRNumberKey       = "number"
+	automationMergedPRNumberKey = "pr_number"
+	automationSHAKey            = "sha"
+	automationTitleKey          = "title"
+	automationRepoKey           = "repo"
+	automationTaskIDKey         = "task_id"
+	defaultBranchMain           = "main"
+	exampleGitHubPRURL          = "https://github.com/acme/api/pull/7"
+	exampleRepositoryOwner      = "org/repo"
+	placeholderRepositoryOwner  = "Repository (owner/name)"
+	triggerCategoryGitHub       = "github"
+	triggerDataSourceKey        = "source"
+	triggerDataSourceManual     = "manual"
+	webhookBodyPlaceholderKey   = "webhook.body"
 )
 
 // RunStatus tracks the outcome of a trigger firing.
 type RunStatus string
 
 const (
-	RunStatusTriggered   RunStatus = "triggered"
-	RunStatusTaskCreated RunStatus = "task_created"
-	RunStatusSucceeded   RunStatus = "succeeded"
-	RunStatusFailed      RunStatus = "failed"
-	RunStatusSkipped     RunStatus = "skipped"
+	RunStatusTriggered             RunStatus = "triggered"
+	RunStatusTaskCreated           RunStatus = "task_created"
+	RunStatusScheduledRetry        RunStatus = "scheduled_retry"
+	RunStatusRetrySchedulingFailed RunStatus = "retry_scheduling_failed"
+	RunStatusSucceeded             RunStatus = "succeeded"
+	RunStatusFailed                RunStatus = "failed"
+	RunStatusSkipped               RunStatus = "skipped"
 	// RunStatusArchived is a read-time-derived terminal status: it is never
 	// written by a trigger-firing code path, only computed by ListRuns when
 	// a task_created run's generated task has been archived (archived_at
@@ -70,26 +129,114 @@ const (
 	RunStatusCancelled RunStatus = "cancelled"
 )
 
+// RetryState is the durable lifecycle state of one attempt.
+type RetryState string
+
+const (
+	RetryStateNone             RetryState = "none"
+	RetryStateScheduled        RetryState = "scheduled"
+	RetryStateClaimed          RetryState = "claimed"
+	RetryStateTriggered        RetryState = "triggered"
+	RetryStateSuperseded       RetryState = "superseded"
+	RetryStateExhausted        RetryState = "exhausted"
+	RetryStateCompleted        RetryState = "completed"
+	RetryStateCancelled        RetryState = "cancelled"
+	RetryStateSchedulingFailed RetryState = "scheduling_failed"
+)
+
+type RetryGroupState string
+
+const (
+	RetryGroupLive       RetryGroupState = "live"
+	RetryGroupSuperseded RetryGroupState = "superseded"
+	RetryGroupCancelled  RetryGroupState = "cancelled"
+	RetryGroupCompleted  RetryGroupState = "completed"
+)
+
+// ContinuationPolicy controls whether a firing receives an isolated task or
+// continues the automation's durable thread.
+type ContinuationPolicy string
+
+const (
+	ContinuationPolicyNewTask     ContinuationPolicy = "new_task"
+	ContinuationPolicyReuseThread ContinuationPolicy = "reuse_thread"
+)
+
+// TaskMode controls the destination selected by an automation firing.
+type TaskMode string
+
+const (
+	TaskModeAutomationRun       TaskMode = "automation_run"
+	TaskModeNormalTask          TaskMode = "normal_task"
+	TaskModeManagedConversation TaskMode = "managed_conversation"
+)
+
+// RepositoryMode controls how a firing chooses its repository environment.
+type RepositoryMode string
+
+const (
+	RepositoryModeWorkspaceDefault RepositoryMode = "workspace_default"
+	RepositoryModeSelected         RepositoryMode = "selected"
+	RepositoryModeNone             RepositoryMode = "none"
+)
+
+// AutomationRepository is one exact repository environment selected for an
+// automation. BaseBranch is persisted with the repository so dispatch never
+// depends on workspace repository ordering or a later default-branch change.
+type AutomationRepository struct {
+	RepositoryID string `json:"repository_id" db:"repository_id"`
+	BaseBranch   string `json:"base_branch" db:"base_branch"`
+}
+
+// ThreadAction describes how a dispatched run reached its task/session.
+type ThreadAction string
+
+const (
+	ThreadActionCreated  ThreadAction = "created"
+	ThreadActionResumed  ThreadAction = "resumed"
+	ThreadActionReplaced ThreadAction = "replaced"
+)
+
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
-	ID          string `json:"id" db:"id"`
-	WorkspaceID string `json:"workspace_id" db:"workspace_id"`
-	Name        string `json:"name" db:"name"`
-	Description string `json:"description" db:"description"`
-	// WorkflowID / WorkflowStepID are optional: no automation run is placed
-	// on a board, so no automation needs a starting column.
-	WorkflowID        string     `json:"workflow_id" db:"workflow_id"`
-	WorkflowStepID    string     `json:"workflow_step_id" db:"workflow_step_id"`
-	AgentProfileID    string     `json:"agent_profile_id" db:"agent_profile_id"`
-	ExecutorProfileID string     `json:"executor_profile_id" db:"executor_profile_id"`
-	Prompt            string     `json:"prompt" db:"prompt"`
-	TaskTitleTemplate string     `json:"task_title_template" db:"task_title_template"`
-	Enabled           bool       `json:"enabled" db:"enabled"`
-	MaxConcurrentRuns int        `json:"max_concurrent_runs" db:"max_concurrent_runs"`
-	WebhookSecret     string     `json:"-" db:"webhook_secret"`
-	LastTriggeredAt   *time.Time `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
-	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
+	CreatedByUserID string `json:"-" db:"created_by_user_id"`
+	ID              string `json:"id" db:"id"`
+	WorkspaceID     string `json:"workspace_id" db:"workspace_id"`
+	Name            string `json:"name" db:"name"`
+	Description     string `json:"description" db:"description"`
+	// TaskModeAutomationRun is coordinator-only and may omit a workflow. A
+	// TaskModeNormalTask must name a workflow so the generated task enters the
+	// normal task lifecycle and appears in the Kanban/sidebar.
+	TaskMode                         TaskMode                        `json:"task_mode" db:"task_mode"`
+	ManagedDestination               *ManagedConversationDestination `json:"managed_destination,omitempty" db:"-"`
+	ManagedOwnerInstallationID       string                          `json:"-" db:"managed_owner_installation_id"`
+	ManagedDestinationInstallationID string                          `json:"-" db:"managed_destination_installation_id"`
+	ManagedDestinationConversationID string                          `json:"-" db:"managed_destination_conversation_id"`
+	ManagedDestinationPluginID       string                          `json:"-" db:"managed_destination_plugin_id"`
+	ManagedDestinationInstanceKey    string                          `json:"-" db:"managed_destination_instance_key"`
+	ManagedDestinationRevision       uint64                          `json:"-" db:"managed_destination_revision"`
+	ResourceRevision                 uint64                          `json:"resource_revision" db:"resource_revision"`
+	RepositoryMode                   RepositoryMode                  `json:"repository_mode" db:"repository_mode"`
+	WorkflowID                       string                          `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID                   string                          `json:"workflow_step_id" db:"workflow_step_id"`
+	AgentProfileID                   string                          `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID                string                          `json:"executor_profile_id" db:"executor_profile_id"`
+	Prompt                           string                          `json:"prompt" db:"prompt"`
+	TaskTitleTemplate                string                          `json:"task_title_template" db:"task_title_template"`
+	Enabled                          bool                            `json:"enabled" db:"enabled"`
+	MaxConcurrentRuns                int                             `json:"max_concurrent_runs" db:"max_concurrent_runs"`
+	ContinuationPolicy               ContinuationPolicy              `json:"continuation_policy" db:"continuation_policy"`
+	RetryPolicy                      RetryPolicy                     `json:"retry_policy" db:"-"`
+	RetryPolicyJSON                  string                          `json:"-" db:"retry_policy"`
+	AutomationRevision               int64                           `json:"-" db:"automation_revision"`
+	// ContinuationTaskID is runtime state. It is intentionally omitted from
+	// the public automation JSON because the saved task is not portable
+	// configuration and may be deleted or replaced by the server.
+	ContinuationTaskID string     `json:"-" db:"continuation_task_id"`
+	WebhookSecret      string     `json:"-" db:"webhook_secret"`
+	LastTriggeredAt    *time.Time `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
+	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at" db:"updated_at"`
 
 	// LegacyBoardCard reports that this automation was created while the
 	// withdrawn execution_mode still decided where a firing landed, and that
@@ -101,18 +248,17 @@ type Automation struct {
 	// Derived in SQL (`execution_mode = 'task'`) rather than by reading the
 	// column into a field, so the raw mode never enters the Go model and
 	// cannot grow a firing-path branch: this is a migration-window notice,
-	// not a second destination. See docs/specs/office/automations-settings.md
+	// not a second destination. See docs/specs/office/requirements/automations-settings.md
 	// § Migration.
 	LegacyBoardCard bool `json:"legacy_board_card" db:"legacy_board_card"`
 
 	// Hydrated separately, not stored as columns on this table.
 	Triggers []AutomationTrigger `json:"triggers" db:"-"`
-	// RepositoryIDs is the ordered list of repositories to use for trigger
-	// firings, backed by the automation_repositories join table. Empty
-	// falls back to the workspace's first repository (for scheduled /
-	// webhook triggers) or the PR's repository (for github_pr triggers,
-	// which always override this field — see resolveAutomationRepository).
-	RepositoryIDs []string `json:"repository_ids" db:"-"`
+	// Repositories is the canonical ordered repository/base-branch selection.
+	// An empty list means task-owned scratch execution. RepositoryIDs remains a
+	// response compatibility projection for older clients.
+	Repositories  []AutomationRepository `json:"repositories" db:"-"`
+	RepositoryIDs []string               `json:"repository_ids" db:"-"`
 }
 
 // AutomationTrigger is a single trigger attached to an automation.
@@ -123,6 +269,7 @@ type AutomationTrigger struct {
 	Config          json.RawMessage `json:"config" db:"-"`
 	ConfigJSON      string          `json:"-" db:"config"`
 	Enabled         bool            `json:"enabled" db:"enabled"`
+	TriggerRevision int64           `json:"-" db:"trigger_revision"`
 	LastEvaluatedAt *time.Time      `json:"last_evaluated_at,omitempty" db:"last_evaluated_at"`
 	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at" db:"updated_at"`
@@ -130,29 +277,140 @@ type AutomationTrigger struct {
 
 // AutomationRun records a single trigger firing for audit/observability.
 type AutomationRun struct {
-	ID              string          `json:"id" db:"id"`
-	AutomationID    string          `json:"automation_id" db:"automation_id"`
-	TriggerID       string          `json:"trigger_id" db:"trigger_id"`
-	TriggerType     TriggerType     `json:"trigger_type" db:"trigger_type"`
-	TaskID          string          `json:"task_id,omitempty" db:"task_id"`
-	Status          RunStatus       `json:"status" db:"status"`
-	DedupKey        string          `json:"dedup_key" db:"dedup_key"`
-	TriggerData     json.RawMessage `json:"trigger_data" db:"-"`
-	TriggerDataJSON string          `json:"-" db:"trigger_data"`
-	ErrorMessage    string          `json:"error_message,omitempty" db:"error_message"`
-	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
+	ID                               string                `json:"id" db:"id"`
+	AutomationID                     string                `json:"automation_id" db:"automation_id"`
+	TriggerID                        string                `json:"trigger_id" db:"trigger_id"`
+	TriggerType                      TriggerType           `json:"trigger_type" db:"trigger_type"`
+	TaskID                           string                `json:"task_id,omitempty" db:"task_id"`
+	ManagedConversationID            string                `json:"managed_conversation_id,omitempty" db:"managed_conversation_id"`
+	ManagedDestinationInstallationID string                `json:"-" db:"managed_destination_installation_id"`
+	ManagedDestinationPluginID       string                `json:"-" db:"managed_destination_plugin_id"`
+	ManagedDestinationInstanceKey    string                `json:"-" db:"managed_destination_instance_key"`
+	ManagedDestinationRevision       uint64                `json:"-" db:"managed_destination_revision"`
+	Status                           RunStatus             `json:"status" db:"status"`
+	ManagedInputID                   string                `json:"managed_input_id,omitempty" db:"managed_input_id"`
+	DeliveryStatus                   ManagedDeliveryStatus `json:"delivery_status,omitempty" db:"delivery_status"`
+	DeliveryAttempts                 int                   `json:"-" db:"managed_delivery_attempts"`
+	DedupKey                         string                `json:"dedup_key" db:"dedup_key"`
+	TriggerData                      json.RawMessage       `json:"trigger_data" db:"-"`
+	TriggerDataJSON                  string                `json:"-" db:"trigger_data"`
+	ErrorMessage                     string                `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt                        time.Time             `json:"created_at" db:"created_at"`
+	Summary                          string                `json:"summary,omitempty" db:"summary"`
+	SessionID                        string                `json:"session_id,omitempty" db:"session_id"`
+	TurnID                           string                `json:"turn_id,omitempty" db:"turn_id"`
+	ThreadAction                     ThreadAction          `json:"thread_action,omitempty" db:"thread_action"`
+	ThreadReason                     string                `json:"thread_reason,omitempty" db:"thread_reason"`
+	DisplayTitle                     string                `json:"display_title,omitempty" db:"display_title"`
 
-	// Summary is the tail of the agent's last message on the generated task,
-	// read at list time and truncated for display. Every automation hides its
-	// task from the board, so without this the run row can report that
-	// something happened but never what — which is the one thing the reader
-	// of a scheduled report actually wants. Empty when the run never produced
-	// a task or the agent never spoke.
-	Summary string `json:"summary,omitempty" db:"summary"`
-	// SessionID is the run's primary conversation, empty when the task is gone
-	// or never started one. The detail view mounts the transcript from it.
-	SessionID string `json:"session_id,omitempty" db:"session_id"`
+	// DedupReason records why the dedup key ended up as it did (see
+	// CreateRun persists once at admission time and that terminal-status
+	// blanking never touches.
+	DedupReason string `json:"dedup_reason,omitempty" db:"dedup_reason"`
+	// RepositoryReason records why the webhook repository selector produced
+	// no binding (see the token catalog in event_handlers_automation.go).
+	// Empty whenever a repository was bound — the binding is its own record.
+	RepositoryReason          string     `json:"repository_reason,omitempty" db:"repository_reason"`
+	RetryGroupID              string     `json:"retry_group_id,omitempty" db:"retry_group_id"`
+	RetryParentRunID          string     `json:"retry_parent_run_id,omitempty" db:"retry_parent_run_id"`
+	AttemptNumber             int64      `json:"attempt_number,omitempty" db:"attempt_number"`
+	RetryState                RetryState `json:"retry_state,omitempty" db:"retry_state"`
+	RetryScheduledAt          *time.Time `json:"retry_scheduled_at,omitempty" db:"retry_scheduled_at"`
+	RetryClaimedAt            *time.Time `json:"retry_claimed_at,omitempty" db:"retry_claimed_at"`
+	RetryClaimExpiresAt       *time.Time `json:"-" db:"retry_claim_expires_at"`
+	RetryClaimToken           string     `json:"-" db:"retry_claim_token"`
+	RetryGroupGeneration      int64      `json:"retry_group_generation,omitempty" db:"retry_group_generation"`
+	RetryCancelledAt          *time.Time `json:"retry_cancelled_at,omitempty" db:"retry_cancelled_at"`
+	RetryBaseTitle            string     `json:"-" db:"retry_base_title"`
+	RetryFailurePhase         string     `json:"retry_failure_phase,omitempty" db:"retry_failure_phase"`
+	RetryFailureClass         string     `json:"retry_failure_class,omitempty" db:"retry_failure_class"`
+	RetryTaskIntentID         string     `json:"-" db:"retry_task_intent_id"`
+	RetryPolicySnapshot       string     `json:"-" db:"retry_policy_snapshot"`
+	RetryTriggerSnapshot      string     `json:"-" db:"retry_trigger_snapshot"`
+	RetryLaunchConfigSnapshot string     `json:"-" db:"retry_launch_config_snapshot"`
+	RetryLaunchConfigVersion  int64      `json:"-" db:"retry_launch_config_version"`
+	RetryResolvedPrompt       string     `json:"-" db:"retry_resolved_prompt"`
+	RetryResolvedTitle        string     `json:"-" db:"retry_resolved_title"`
+	RetryResolvedTriggerAt    *time.Time `json:"-" db:"retry_resolved_trigger_timestamp"`
+	RetryContinuationSnapshot string     `json:"-" db:"retry_continuation_snapshot"`
+	AutomationRevision        int64      `json:"-" db:"automation_revision"`
+	TriggerRevision           int64      `json:"-" db:"trigger_revision"`
 }
+
+// RetryGroup is the durable identity and generation fence for one firing.
+type RetryGroup struct {
+	ID                string          `json:"retry_group_id" db:"id"`
+	AutomationID      string          `json:"automation_id" db:"automation_id"`
+	TriggerID         string          `json:"trigger_id" db:"trigger_id"`
+	TriggerIDsJSON    string          `json:"-" db:"trigger_ids"`
+	Generation        int64           `json:"generation" db:"generation"`
+	State             RetryGroupState `json:"state" db:"state"`
+	SupersededByRunID string          `json:"-" db:"superseded_by_run_id"`
+	CreatedAt         time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+// RetryTaskIntent records intent before a task provider side effect.
+type RetryTaskIntent struct {
+	ID                  string     `json:"intent_id" db:"intent_id"`
+	RunID               string     `json:"-" db:"run_id"`
+	TaskID              string     `json:"-" db:"task_id"`
+	State               string     `json:"state" db:"state"`
+	GroupGeneration     int64      `json:"-" db:"group_generation"`
+	AutomationDeletedAt *time.Time `json:"-" db:"automation_deleted_at"`
+	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// RetryOperation is an idempotent external side-effect ledger row.
+type RetryOperation struct {
+	ID                string     `json:"operation_id" db:"operation_id"`
+	IntentID          string     `json:"-" db:"intent_id"`
+	RunID             string     `json:"-" db:"run_id"`
+	GroupGeneration   int64      `json:"-" db:"group_generation"`
+	Kind              string     `json:"kind" db:"operation_kind"`
+	State             string     `json:"state" db:"state"`
+	LeaseToken        string     `json:"-" db:"lease_token"`
+	LeaseExpiresAt    *time.Time `json:"-" db:"lease_expires_at"`
+	ExternalTaskID    string     `json:"-" db:"external_task_id"`
+	ExternalSessionID string     `json:"-" db:"external_session_id"`
+	ExternalTurnID    string     `json:"-" db:"external_turn_id"`
+	ResultJSON        string     `json:"-" db:"result_json"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// RetryOutbox is the durable publication record for an immutable run event.
+type RetryOutbox struct {
+	EventID         string     `json:"event_id" db:"event_id"`
+	RunID           string     `json:"-" db:"run_id"`
+	SnapshotVersion int64      `json:"snapshot_version" db:"snapshot_version"`
+	PayloadHash     string     `json:"-" db:"payload_hash"`
+	State           string     `json:"state" db:"state"`
+	LeaseToken      string     `json:"-" db:"lease_token"`
+	LeaseExpiresAt  *time.Time `json:"-" db:"lease_expires_at"`
+	EnqueuedAt      *time.Time `json:"enqueued_at,omitempty" db:"enqueued_at"`
+	AcknowledgedAt  *time.Time `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
+	Attempts        int        `json:"attempts" db:"attempts"`
+	SafeError       string     `json:"safe_error,omitempty" db:"safe_error"`
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// ManagedDeliveryStatus is read from the durable managed-input receipt. It is
+// independent from RunStatus: accepted input is not completed agent work.
+type ManagedDeliveryStatus string
+
+const (
+	ManagedDeliveryPending     ManagedDeliveryStatus = "pending_delivery"
+	ManagedDeliveryAccepted    ManagedDeliveryStatus = "accepted"
+	ManagedDeliveryRunning     ManagedDeliveryStatus = "running"
+	ManagedDeliveryCompleted   ManagedDeliveryStatus = "completed"
+	ManagedDeliveryFailed      ManagedDeliveryStatus = "failed"
+	ManagedDeliveryPaused      ManagedDeliveryStatus = "paused"
+	ManagedDeliveryUncertain   ManagedDeliveryStatus = "uncertain"
+	ManagedDeliveryUnavailable ManagedDeliveryStatus = "unavailable"
+)
 
 // WorkspaceAutomationRun is a run carrying just enough of its owning
 // automation to be readable outside that automation's own settings page.
@@ -164,18 +422,39 @@ type WorkspaceAutomationRun struct {
 	AutomationName string `json:"automation_name" db:"automation_name"`
 }
 
+type PendingRetrySummary struct {
+	Count int              `json:"count"`
+	Items []*AutomationRun `json:"items"`
+	Limit int              `json:"limit"`
+}
+
+type RetryHistoryAttempt struct {
+	RetryGroupID string           `json:"retry_group_id"`
+	TriggerIDs   []string         `json:"trigger_ids"`
+	Attempts     []*AutomationRun `json:"attempts"`
+	Completed    bool             `json:"completed"`
+}
+
+type RetryHistoryPage struct {
+	Scope         string                 `json:"scope"`
+	Items         []*RetryHistoryAttempt `json:"items"`
+	NextCursor    string                 `json:"next_cursor,omitempty"`
+	HighWaterMark string                 `json:"high_water_mark"`
+}
+
+type AutomationRunsPage struct {
+	Items      []*AutomationRun `json:"items"`
+	NextCursor string           `json:"next_cursor,omitempty"`
+}
+
 // AutomationSummary is one automation's health, answered per automation rather
 // than inferred from a capped feed: what it last said, and whether anything of
-// its own is still running. The runs list reads exactly these two facts.
+// its own is still running.
 type AutomationSummary struct {
-	AutomationID string `json:"automation_id"`
-	// OpenRuns counts the runs still outstanding under the same definition the
-	// concurrency cap uses, so "won't fire — still running" and the cap that
-	// causes it can never disagree.
-	OpenRuns int `json:"open_runs"`
-	// LastRun is nil when the automation has never run, or when its runs have
-	// all been deleted — both of which read as "no runs yet".
-	LastRun *AutomationRun `json:"last_run,omitempty"`
+	AutomationID   string              `json:"automation_id"`
+	OpenRuns       int                 `json:"open_runs"`
+	LastRun        *AutomationRun      `json:"last_run,omitempty"`
+	PendingRetries PendingRetrySummary `json:"pending_retries"`
 }
 
 // --- Trigger config types ---
@@ -221,13 +500,103 @@ type GitHubPRMergedTriggerConfig struct {
 
 // WebhookTriggerConfig holds configuration for webhook triggers.
 type WebhookTriggerConfig struct {
+	// FilterExpression is retained for wire compatibility with older clients
+	// but has no reader — Filters is the live predicate list.
 	FilterExpression string `json:"filter_expression,omitempty"`
+	// DedupKey is an optional dot path into the webhook payload. When set, a
+	// firing whose resolved (trimmed, non-empty) value repeats within this
+	// automation is suppressed; see admitTriggerLocked and DedupBinding.
+	DedupKey string `json:"dedup_key,omitempty"`
+	// Filters are evaluated in order before dedup; every predicate must pass
+	// for the trigger to fire. See EvaluateFilters.
+	Filters []WebhookFilter `json:"filters,omitempty"`
+	// Repository selects which already-configured repository a firing binds
+	// to, by matching a payload-derived value against each configured
+	// repository's Name. Nil means no selector is declared (today's
+	// behavior: whatever resolveAutomationRepository already resolves).
+	Repository       *WebhookRepositorySelector `json:"repository,omitempty"`
+	SafeJSONPointers []string                   `json:"safe_json_pointers,omitempty"`
 }
 
-// TaskOriginLookup answers the two facts a merged-PR event needs about the
-// task its PR was linked to. ok=false means the task could not be resolved
-// (absent or query error — the adapter collapses both into ok=false and logs
-// at the appropriate level).
+// WebhookFilterOp names a supported filter predicate operator.
+type WebhookFilterOp string
+
+const (
+	WebhookFilterOpEq        WebhookFilterOp = "eq"
+	WebhookFilterOpNe        WebhookFilterOp = "ne"
+	WebhookFilterOpIn        WebhookFilterOp = "in"
+	WebhookFilterOpNotIn     WebhookFilterOp = "not_in"
+	WebhookFilterOpExists    WebhookFilterOp = "exists"
+	WebhookFilterOpNotExists WebhookFilterOp = "not_exists"
+	WebhookFilterOpContains  WebhookFilterOp = "contains"
+)
+
+// WebhookFilter is one admission predicate evaluated against the webhook
+// payload. See EvaluateFilters for operator semantics and cardinality rules.
+type WebhookFilter struct {
+	Path   string          `json:"path"`
+	Op     WebhookFilterOp `json:"op"`
+	Values []string        `json:"values,omitempty"`
+}
+
+// WebhookRepositorySelector names the payload dot path whose resolved value
+// is matched, exactly and case-sensitively, against each of the automation's
+// already-configured repositories' Name. Declaring this is a commitment: an
+// unresolved or non-matching value binds no repository rather than falling
+// back to any other selection rule.
+type WebhookRepositorySelector struct {
+	SelectorPath string `json:"selector_path"`
+}
+
+// DedupBinding is the outcome of resolving a webhook trigger's dedup key for
+// one firing, produced by exactly one of the constructors below. It replaces
+// a bare string parameter on FireTrigger so every call site states which of
+// the three states it means, rather than relying on "" as an overloaded
+// sentinel for two different conditions (unresolved vs. not configured).
+type DedupBinding struct {
+	key        string
+	unresolved bool
+}
+
+// DedupKey produces a resolved, non-empty dedup key binding.
+func DedupKey(v string) DedupBinding { return DedupBinding{key: v} }
+
+// DedupUnresolved marks a firing whose trigger declared a dedup key path
+// that did not resolve to a non-empty value after trimming.
+func DedupUnresolved() DedupBinding { return DedupBinding{unresolved: true} }
+
+// DedupNotConfigured marks a firing whose trigger declared no dedup key
+// path at all.
+func DedupNotConfigured() DedupBinding { return DedupBinding{} }
+
+// Key returns the resolved dedup key, or "" when unresolved/not configured.
+func (d DedupBinding) Key() string { return d.key }
+
+// Reason returns the disposition token to persist on the run's DedupReason
+// column: "" when a key was resolved (the key is its own record),
+// "dedup_unresolved" when a declared path did not resolve, or
+// "dedup_not_configured" when no path was declared.
+func (d DedupBinding) Reason() string {
+	if d.key != "" {
+		return ""
+	}
+	if d.unresolved {
+		return dedupReasonUnresolved
+	}
+	return dedupReasonNotConfigured
+}
+
+const (
+	dedupReasonUnresolved    = "dedup_unresolved"
+	dedupReasonNotConfigured = "dedup_not_configured"
+)
+
+// TaskOriginLookup answers the task workspace and whether it is hidden
+// automation-run work. The merged-PR subscriber uses the same facts to avoid
+// loops, while run cleanup uses them to leave visible automation-created tasks
+// in the normal task lifecycle. ok=false means the task could not be resolved
+// (absent or query error; the adapter collapses both into ok=false and logs at
+// the appropriate level).
 type TaskOriginLookup interface {
 	TaskWorkspaceAndAutomationOrigin(ctx context.Context, taskID string) (
 		workspaceID string, isAutomationRun bool, ok bool,
@@ -238,18 +607,26 @@ type TaskOriginLookup interface {
 
 // CreateAutomationRequest is the payload for creating an automation.
 type CreateAutomationRequest struct {
-	WorkspaceID       string              `json:"workspace_id"`
-	Name              string              `json:"name"`
-	Description       string              `json:"description"`
-	WorkflowID        string              `json:"workflow_id"`
-	WorkflowStepID    string              `json:"workflow_step_id"`
-	AgentProfileID    string              `json:"agent_profile_id"`
-	ExecutorProfileID string              `json:"executor_profile_id"`
-	RepositoryIDs     []string            `json:"repository_ids"`
-	Prompt            string              `json:"prompt"`
-	TaskTitleTemplate string              `json:"task_title_template"`
-	MaxConcurrentRuns int                 `json:"max_concurrent_runs"`
-	Triggers          []CreateTriggerSpec `json:"triggers"`
+	ID                 string                          `json:"id,omitempty"`
+	WorkspaceID        string                          `json:"workspace_id"`
+	Name               string                          `json:"name"`
+	Description        string                          `json:"description"`
+	WorkflowID         string                          `json:"workflow_id"`
+	WorkflowStepID     string                          `json:"workflow_step_id"`
+	AgentProfileID     string                          `json:"agent_profile_id"`
+	ExecutorProfileID  string                          `json:"executor_profile_id"`
+	Repositories       []AutomationRepository          `json:"repositories,omitempty"`
+	RepositoryIDs      []string                        `json:"repository_ids"`
+	Prompt             string                          `json:"prompt"`
+	TaskTitleTemplate  string                          `json:"task_title_template"`
+	MaxConcurrentRuns  int                             `json:"max_concurrent_runs"`
+	ContinuationPolicy ContinuationPolicy              `json:"continuation_policy,omitempty"`
+	TaskMode           TaskMode                        `json:"task_mode,omitempty"`
+	ManagedDestination *ManagedConversationDestination `json:"managed_destination,omitempty"`
+	RepositoryMode     RepositoryMode                  `json:"repository_mode,omitempty"`
+	RetryPolicy        RetryPolicy                     `json:"retry_policy"`
+	Triggers           []CreateTriggerSpec             `json:"triggers"`
+	Enabled            *bool                           `json:"enabled,omitempty"`
 }
 
 // CreateTriggerSpec defines a trigger to add during automation creation.
@@ -267,13 +644,22 @@ type UpdateAutomationRequest struct {
 	WorkflowStepID    *string `json:"workflow_step_id,omitempty"`
 	AgentProfileID    *string `json:"agent_profile_id,omitempty"`
 	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
+	// Repositories replaces the exact repository/base-branch list when non-nil.
+	Repositories []AutomationRepository `json:"repositories,omitempty"`
 	// RepositoryIDs replaces the automation's repository list when non-nil.
 	// nil means "leave unchanged"; an explicit empty slice clears it.
-	RepositoryIDs     []string `json:"repository_ids,omitempty"`
-	Prompt            *string  `json:"prompt,omitempty"`
-	TaskTitleTemplate *string  `json:"task_title_template,omitempty"`
-	Enabled           *bool    `json:"enabled,omitempty"`
-	MaxConcurrentRuns *int     `json:"max_concurrent_runs,omitempty"`
+	RepositoryIDs                    []string                        `json:"repository_ids,omitempty"`
+	Prompt                           *string                         `json:"prompt,omitempty"`
+	TaskTitleTemplate                *string                         `json:"task_title_template,omitempty"`
+	Enabled                          *bool                           `json:"enabled,omitempty"`
+	MaxConcurrentRuns                *int                            `json:"max_concurrent_runs,omitempty"`
+	ContinuationPolicy               *ContinuationPolicy             `json:"continuation_policy,omitempty"`
+	TaskMode                         *TaskMode                       `json:"task_mode,omitempty"`
+	ManagedDestination               *ManagedConversationDestination `json:"managed_destination,omitempty"`
+	ManagedDestinationInstallationID string                          `json:"-"`
+	ManagedDestinationConversationID string                          `json:"-"`
+	RepositoryMode                   *RepositoryMode                 `json:"repository_mode,omitempty"`
+	RetryPolicy                      *RetryPolicy                    `json:"retry_policy,omitempty"`
 }
 
 // AddTriggerRequest adds a trigger to an existing automation.
@@ -307,11 +693,20 @@ type RevealWebhookSecretResponse struct {
 
 // AutomationTriggeredEvent is published when a trigger fires.
 type AutomationTriggeredEvent struct {
-	AutomationID string          `json:"automation_id"`
-	TriggerID    string          `json:"trigger_id"`
-	TriggerType  TriggerType     `json:"trigger_type"`
-	TriggerData  json.RawMessage `json:"trigger_data"`
-	DedupKey     string          `json:"dedup_key"`
+	RunID                  string          `json:"run_id"`
+	AutomationID           string          `json:"automation_id,omitempty"`
+	TriggerID              string          `json:"trigger_id,omitempty"`
+	TriggerType            TriggerType     `json:"trigger_type,omitempty"`
+	TriggerData            json.RawMessage `json:"trigger_data,omitempty"`
+	SafeTriggerData        json.RawMessage `json:"safe_trigger_data,omitempty"`
+	DedupKey               string          `json:"dedup_key,omitempty"`
+	RetryClaimToken        string          `json:"retry_claim_token,omitempty"`
+	RetryGroupGeneration   int64           `json:"retry_group_generation,omitempty"`
+	RetryExternalID        string          `json:"retry_external_id,omitempty"`
+	SnapshotVersion        int64           `json:"snapshot_version,omitempty"`
+	RetryAmbiguousRecovery bool            `json:"retry_ambiguous_recovery,omitempty"`
+	RetryOutboxEventID     string          `json:"retry_outbox_event_id,omitempty"`
+	RetryOutboxLeaseToken  string          `json:"retry_outbox_lease_token,omitempty"`
 }
 
 // RepositoryLookup resolves a repository's workspace ownership for

@@ -8,7 +8,7 @@ test.describe("System Logs page", () => {
     prCapture,
   }) => {
     test.setTimeout(45_000);
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=logs");
 
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(
@@ -45,7 +45,7 @@ test.describe("System Logs page", () => {
     prCapture,
   }) => {
     await testPage.setViewportSize({ width: 1440, height: 900 });
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=logs");
     await testPage.getByTestId("customize-diagnostic-bundle").click();
     const dialog = testPage.getByTestId("diagnostic-bundle-dialog");
     await expect(dialog).toBeVisible();
@@ -63,7 +63,7 @@ test.describe("System Logs page", () => {
     testPage,
   }) => {
     await testPage.setViewportSize({ width: 1440, height: 900 });
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=logs");
 
     const noMessages = testPage.getByText(
       "Standard bundles do not include chat transcripts, session messages, or agent messages.",
@@ -72,7 +72,7 @@ test.describe("System Logs page", () => {
       "Incidental text already written into a log entry is not automatically redacted. Review the ZIP before sharing.",
     );
     const description = testPage.getByText(
-      "Kandev asks your connected browser tabs for their bounded three-day console history, combines it with retained backend log files, and downloads one ZIP.",
+      "Download a ZIP containing server logs and up to three days of console messages from connected browser tabs.",
     );
     const action = testPage.getByTestId("customize-diagnostic-bundle");
     const [noMessagesBox, incidentalTextBox, descriptionBox, actionBox] = await Promise.all([

@@ -407,6 +407,7 @@ func TestService_SyncTaskMR_UpsertsFromMockClient(t *testing.T) {
 		State:      mrStateOpen,
 		WebURL:     "https://gitlab.example/acme/api/-/merge_requests/42",
 		HeadSHA:    "abc123",
+		BaseSHA:    "base456",
 		CreatedAt:  time.Now().UTC(),
 	})
 
@@ -414,7 +415,8 @@ func TestService_SyncTaskMR_UpsertsFromMockClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SyncTaskMR err = %v", err)
 	}
-	if row.MRTitle != "feat: thing" || row.HeadBranch != "feat/x" || row.BaseBranch != "main" {
+	if row.MRTitle != "feat: thing" || row.HeadBranch != "feat/x" || row.HeadSHA != "abc123" ||
+		row.BaseBranch != "main" || row.BaseSHA != "base456" {
 		t.Errorf("unexpected upserted row: %+v", row)
 	}
 	if row.LastSyncedAt == nil {

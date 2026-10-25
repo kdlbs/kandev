@@ -82,6 +82,8 @@ function createFormProps(workspaceMode: FormProps["workspaceMode"]): FormProps {
     workspaceId: "workspace-1",
     availableRepositories: [],
     worktreeBranch: "feature/parent",
+    isLocalExecutor: false,
+    freshBranchAvailable: false,
     profileOptions: [],
     executorProfileOptions: [],
     agentProfileId: "agent-profile",

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-reset-source-executor"]
 plan: "plan.md"
-spec: "../../specs/tasks/task-create-executor-default.md"
+spec: "../../specs/tasks/requirements/task-create-executor-default.md"
 ---
 
 # Task 02: Prove the Real Dialog Transition

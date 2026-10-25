@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow-sync-workspace-authz/spec.md
+spec: docs/specs/tasks/requirements/workflow-sync-workspace-authz.md
 created: 2026-08-06
 status: building
 ---

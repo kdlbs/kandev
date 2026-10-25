@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/task-sleep-inhibition.md"
+spec: "../../specs/platform/requirements/task-sleep-inhibition.md"
 ---
 
 # Task 01: Sleep-inhibition lifecycle service

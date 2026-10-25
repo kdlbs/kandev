@@ -38,7 +38,7 @@ Stall detection is advisory and recovery remains operator controlled:
   for a prompt generation; it does not repeat a notice every check.
 
 The observable behavior is specified in
-[`docs/specs/agent-stall-recovery/spec.md`](../specs/agent-stall-recovery/spec.md).
+[`docs/specs/agents/requirements/agent-stall-recovery.md`](../specs/agents/requirements/agent-stall-recovery.md).
 
 ## Consequences
 

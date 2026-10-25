@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -36,30 +37,31 @@ import (
 // controller branches on both shapes: sql.ErrNoRows for agents, and an
 // "agent profile not found" message for profiles.
 type fakeSettingsRepo struct {
-	agents     map[string]*models.Agent
-	agentOrder []string
-	profiles   map[string]*models.AgentProfile
-	mcpConfigs map[string]*models.AgentProfileMcpConfig
-
+	agents          map[string]*models.Agent
+	agentOrder      []string
+	profiles        map[string]*models.AgentProfile
+	mcpConfigs      map[string]*models.AgentProfileMcpConfig
+	profileOrders   map[string][]string
+	orderRevisions  map[string]int64
 	created         []*models.AgentProfile
 	updatedProfiles []*models.AgentProfile
 	deletedProfiles []string
 	updatedAgents   []*models.Agent
 	deletedAgents   []string
 	upsertedMcp     []*models.AgentProfileMcpConfig
-
-	// errs maps a repository method name to the error it should return.
-	errs map[string]error
-	seq  int
+	errs            map[string]error
+	seq             int
 }
 
 // newFakeSettingsRepo returns an empty in-memory settings repository.
 func newFakeSettingsRepo() *fakeSettingsRepo {
 	return &fakeSettingsRepo{
-		agents:     map[string]*models.Agent{},
-		profiles:   map[string]*models.AgentProfile{},
-		mcpConfigs: map[string]*models.AgentProfileMcpConfig{},
-		errs:       map[string]error{},
+		agents:         map[string]*models.Agent{},
+		profiles:       map[string]*models.AgentProfile{},
+		mcpConfigs:     map[string]*models.AgentProfileMcpConfig{},
+		profileOrders:  map[string][]string{},
+		orderRevisions: map[string]int64{},
+		errs:           map[string]error{},
 	}
 }
 
@@ -285,6 +287,19 @@ func (r *fakeSettingsRepo) UpdateAgentProfile(_ context.Context, profile *models
 	return nil
 }
 
+func (r *fakeSettingsRepo) UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := r.GetAgentProfile(ctx, profile.ID)
+		if err != nil {
+			return err
+		}
+		profile.Enabled = current.Enabled
+	} else {
+		profile.Enabled = *enabled
+	}
+	return r.UpdateAgentProfile(ctx, profile)
+}
+
 // DeleteAgentProfile implements the settings store interface for the handler tests.
 func (r *fakeSettingsRepo) DeleteAgentProfile(_ context.Context, id string) error {
 	if err := r.errs["DeleteAgentProfile"]; err != nil {
@@ -309,8 +324,79 @@ func (r *fakeSettingsRepo) ListAgentProfiles(_ context.Context, agentID string) 
 			out = append(out, p)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.SliceStable(out, func(i, j int) bool {
+		order := r.profileOrders[agentID]
+		position := func(profileID string) (int, bool) {
+			for index, id := range order {
+				if id == profileID {
+					return index, true
+				}
+			}
+			return 0, false
+		}
+		left, leftKnown := position(out[i].ID)
+		right, rightKnown := position(out[j].ID)
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		if leftKnown && left != right {
+			return left < right
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
+}
+func (r *fakeSettingsRepo) ReorderAgentProfiles(_ context.Context, agentID string, orderedIDs []string) (int64, bool, error) {
+	if err := r.errs["ReorderAgentProfiles"]; err != nil {
+		return 0, false, err
+	}
+	profiles, err := r.ListAgentProfiles(context.Background(), agentID)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(profiles) != len(orderedIDs) {
+		return 0, false, store.ErrProfileOrderSetMismatch
+	}
+	available := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		if profile.WorkspaceID == "" {
+			available[profile.ID] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(orderedIDs))
+	for _, id := range orderedIDs {
+		if _, ok := available[id]; !ok {
+			return 0, false, store.ErrProfileOrderSetMismatch
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return 0, false, store.ErrProfileOrderSetMismatch
+		}
+		seen[id] = struct{}{}
+	}
+	current := r.profileOrders[agentID]
+	changed := len(current) != len(orderedIDs)
+	for i := range orderedIDs {
+		if !changed && current[i] != orderedIDs[i] {
+			changed = true
+		}
+	}
+	if changed {
+		r.profileOrders[agentID] = append([]string(nil), orderedIDs...)
+		r.orderRevisions[agentID]++
+	}
+	return r.orderRevisions[agentID], changed, nil
+}
+
+func (r *fakeSettingsRepo) GetAgentProfileOrderSnapshots(ctx context.Context, agentIDs []string) (map[string]store.AgentProfileOrderSnapshot, error) {
+	result := make(map[string]store.AgentProfileOrderSnapshot, len(agentIDs))
+	for _, id := range agentIDs {
+		profiles, err := r.ListAgentProfiles(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		result[id] = store.AgentProfileOrderSnapshot{Profiles: profiles, Revision: r.orderRevisions[id]}
+	}
+	return result, nil
 }
 
 // HasDeletedAgentProfiles implements the settings store interface for the handler tests.
@@ -419,6 +505,27 @@ func (h *workspaceDuplicateHub) BroadcastToWorkspaceOrDrop(workspaceID string, m
 	h.workspaceMsgs[workspaceID] = append(h.workspaceMsgs[workspaceID], msg)
 }
 
+// syntheticSettingsIdentity is the single-user admin identity the auth
+// middleware installs when auth is disabled.
+func syntheticSettingsIdentity() authn.Identity {
+	return authn.Identity{UserID: "default", Role: authn.RoleAdmin, Synthetic: true}
+}
+
+// useSettingsIdentity puts an identity on every request. The agent and
+// agent-profile mutations are gated on org.config.manage, so a router built
+// without the production middleware chain has no identity at all and every
+// mutation answers 401 before reaching the handler under test.
+func useSettingsIdentity(router *gin.Engine, identity authn.Identity) {
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, identity)
+		c.Next()
+	})
+}
+
+func useSyntheticSettingsIdentity(router *gin.Engine) {
+	useSettingsIdentity(router, syntheticSettingsIdentity())
+}
+
 // newSettingsHarness wires the settings handlers to the given repo and hub and
 // returns the router plus the controller and agent registry, so a test can
 // register a deterministic agent implementation or attach a dependency checker.
@@ -426,6 +533,18 @@ func newSettingsHarness(
 	t *testing.T,
 	repo store.Repository,
 	hub Broadcaster,
+) (*gin.Engine, *controller.Controller, *registry.Registry) {
+	t.Helper()
+	return newSettingsHarnessAs(t, repo, hub, syntheticSettingsIdentity())
+}
+
+// newSettingsHarnessAs is newSettingsHarness with the caller's identity, for
+// tests that assert what a non-admin may and may not reach.
+func newSettingsHarnessAs(
+	t *testing.T,
+	repo store.Repository,
+	hub Broadcaster,
+	identity authn.Identity,
 ) (*gin.Engine, *controller.Controller, *registry.Registry) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -443,6 +562,7 @@ func newSettingsHarness(
 	}
 	ctrl := controller.NewController(repo, discoveryRegistry, reg, nil, log)
 	router := gin.New()
+	useSettingsIdentity(router, identity)
 	// Register through the production entry point so the install/update job
 	// stores are wired from the hub exactly as they are at startup — with a nil
 	// hub they stay unavailable, which is itself a behaviour under test.

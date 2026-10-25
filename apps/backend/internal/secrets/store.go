@@ -103,6 +103,18 @@ type ScopedSecretStore interface {
 	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
 }
 
+// WorkspaceSecretDeleter permits scoped deletion through stores whose default
+// Delete method intentionally accepts Global secrets only.
+type WorkspaceSecretDeleter interface {
+	DeleteForWorkspace(ctx context.Context, id, workspaceID string) error
+}
+
+// WorkspaceSecretUpdater permits scoped updates through stores whose default
+// Update method intentionally accepts Global secrets only.
+type WorkspaceSecretUpdater interface {
+	UpdateForWorkspace(ctx context.Context, id, workspaceID string, req *UpdateSecretRequest) error
+}
+
 // SecretTransferStore is implemented by stores that can atomically copy or
 // move a secret into another scope/workspace. It is a narrow optional
 // interface, separate from ScopedSecretStore, so scope-aware read and

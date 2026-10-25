@@ -5,7 +5,7 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mockRequest }),
 }));
 
-import { listWorkspaceAutomationRuns } from "./automation-api";
+import { listWorkspaceAutomationRuns, stopAutomationRun } from "./automation-api";
 
 const WORKSPACE = "ws-1";
 const ACTION = "automation.runs.list_workspace";
@@ -51,5 +51,20 @@ describe("listWorkspaceAutomationRuns", () => {
     mockRequest.mockResolvedValue(null);
 
     await expect(listWorkspaceAutomationRuns(WORKSPACE)).resolves.toEqual([]);
+  });
+});
+
+describe("stopAutomationRun", () => {
+  it("stops the exact automation run", async () => {
+    mockRequest.mockResolvedValue({ run_id: "run-7", status: "failed" });
+
+    await expect(stopAutomationRun("automation-1", "run-7")).resolves.toEqual({
+      run_id: "run-7",
+      status: "failed",
+    });
+    expect(mockRequest).toHaveBeenCalledWith("automation.run.stop", {
+      automation_id: "automation-1",
+      run_id: "run-7",
+    });
   });
 });

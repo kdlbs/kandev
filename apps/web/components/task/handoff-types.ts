@@ -9,10 +9,6 @@ export function buildHandoffInitialState(handoff: HandoffPreset): {
 } {
   return {
     selectedProfileId: handoff.targetProfileId,
-    contextValue: summarizeContextValue(handoff.sourceSessionId),
+    contextValue: "blank",
   };
-}
-
-export function summarizeContextValue(sessionId: string): string {
-  return `summarize:${sessionId}`;
 }

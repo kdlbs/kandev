@@ -45,7 +45,7 @@ test.describe("mobile task title hover on the Kanban card", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const taskSwitcher = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(taskSwitcher.getByText(childTitle)).toBeVisible({ timeout: 15_000 });
 

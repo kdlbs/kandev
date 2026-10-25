@@ -100,11 +100,53 @@ describe("wip queue helper", () => {
     ]);
   });
 
+  it("falls back an absent queuedAt to createdAt instead of sorting it last", () => {
+    // AC-TASKS-KANBAN-TASK-REORDERING-001.36: a task with no queuedAt reads as
+    // its own createdAt, not as "unknown, sort last" the way a genuinely
+    // missing/unparseable value does elsewhere in this comparator.
+    const neverQueued = task({
+      id: "never-queued",
+      queuedAt: null,
+      createdAt: "2026-08-12T07:00:00Z",
+    });
+    const queuedLater = task({
+      id: "queued-later",
+      queuedAt: "2026-08-12T09:00:00Z",
+      createdAt: "2026-08-12T10:00:00Z",
+    });
+
+    expect(compareWipQueueTasks(neverQueued, queuedLater)).toBeLessThan(0);
+    expect(
+      getDestinationQueue([queuedLater, neverQueued], "review").map((entry) => entry.task.id),
+    ).toEqual(["never-queued", "queued-later"]);
+  });
+
   it("orders missing timestamps deterministically without producing NaN", () => {
     const left = task({ id: "left", queuedAt: null, createdAt: null });
     const right = task({ id: "right", queuedAt: "not-a-date", createdAt: "not-a-date" });
 
     expect(compareWipQueueTasks(left, right)).toBeLessThan(0);
     expect(Number.isNaN(compareWipQueueTasks(left, right))).toBe(false);
+  });
+});
+
+describe("partitionWipTasks — admitted band order (AC.15)", () => {
+  it("keeps partitioned admitted tasks in step order, not raw array order", () => {
+    // The admitted band must sort by compareStepOrder the same way the
+    // queued band already does, so a caller computing drag/keyboard reorder
+    // indices off partitionWipTasks sees the step's true order rather than
+    // whatever order tasks happened to arrive in (e.g. creation order after
+    // a prior reorder changed it).
+    const tasks = [
+      task({ id: "a", wipAdmitted: true, queuedForStepId: undefined, position: 1 }),
+      task({ id: "b", wipAdmitted: true, queuedForStepId: undefined, position: 2 }),
+      task({ id: "c", wipAdmitted: true, queuedForStepId: undefined, position: 0 }),
+    ];
+
+    expect(partitionWipTasks(tasks, "review").admitted.map((item) => item.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
   });
 });

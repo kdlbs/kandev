@@ -6,6 +6,8 @@ Usage:
   python3 .github/scripts/lint-harness-files.py AGENTS.md .agents/skills/fix/SKILL.md
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import re

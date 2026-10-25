@@ -4,31 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
 import { Button } from "@kandev/ui/button";
-import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
-import {
-  IconDeviceFloppy,
-  IconLoader2,
-  IconTrash,
-  IconTextWrap,
-  IconTextWrapDisabled,
-  IconMessagePlus,
-  IconRefresh,
-  IconEye,
-} from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { formatDiffStats } from "@/lib/utils/file-diff";
-import { toRelativePath } from "@/lib/utils";
+import { IconMessagePlus } from "@tabler/icons-react";
 import { vscodeDark } from "@uiw/codemirror-theme-vscode";
 import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
-import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
-import {
-  ExternalVcsFileLink,
-  useExternalVcsFileStatus,
-} from "@/components/editors/external-vcs-file-link";
 import { registerCodeMirrorCursorRevealer } from "@/hooks/file-editor-cursor";
 import { useCodeMirrorEditorState } from "./use-codemirror-editor-state";
 import { useCodeMirrorWalkthroughRange } from "./use-codemirror-walkthrough-range";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
+import { CodeMirrorToolbar } from "./codemirror-editor-toolbar";
 import {
   clearCodeMirrorCursorFlash,
   codeMirrorCursorFlashExtension,
@@ -36,9 +20,6 @@ import {
   revealPendingCodeMirrorCursor,
 } from "./codemirror-cursor-navigation";
 import { useTranslation } from "react-i18next";
-
-const SAVE_SHORTCUT =
-  typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "\u2318" : "Ctrl";
 
 type FileEditorContentProps = {
   path: string;
@@ -52,256 +33,19 @@ type FileEditorContentProps = {
   taskId?: string | null;
   repositoryId?: string | null;
   worktreePath?: string;
+  isSymlink?: boolean;
   repo?: string;
   enableComments?: boolean;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
 };
-
-function CodeMirrorCommentBadge({
-  enableComments,
-  sessionId,
-  commentCount,
-}: {
-  enableComments: boolean;
-  sessionId?: string;
-  commentCount: number;
-}) {
-  const { t } = useTranslation();
-  if (!enableComments || !sessionId || commentCount <= 0) return null;
-
-  return (
-    <div className="flex items-center gap-1 px-2 py-1 text-xs text-primary">
-      <IconMessagePlus className="h-3.5 w-3.5" />
-      <span>{t("editors:commentCount", { count: commentCount })}</span>
-    </div>
-  );
-}
-
-function CodeMirrorWrapButton({
-  wrapEnabled,
-  onToggleWrap,
-}: {
-  wrapEnabled: boolean;
-  onToggleWrap: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onToggleWrap}
-          className={`h-8 w-8 p-0 cursor-pointer ${wrapEnabled ? "text-foreground" : "text-muted-foreground"}`}
-        >
-          {wrapEnabled ? (
-            <IconTextWrap className="h-4 w-4" />
-          ) : (
-            <IconTextWrapDisabled className="h-4 w-4" />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {wrapEnabled ? t("editors:disableWordWrap") : t("editors:enableWordWrap")}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function CodeMirrorReloadButton({
-  hasRemoteUpdate,
-  onReloadFromAgent,
-}: {
-  hasRemoteUpdate?: boolean;
-  onReloadFromAgent?: () => void;
-}) {
-  const { t } = useTranslation();
-  if (!hasRemoteUpdate || !onReloadFromAgent) return null;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 cursor-pointer gap-1 px-2 text-xs"
-          onClick={onReloadFromAgent}
-        >
-          <IconRefresh className="h-3.5 w-3.5" />
-          {t("editors:reload")}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("editors:applyLatestAgentChangesToFile")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function CodeMirrorDeleteButton({ onDelete }: { onDelete?: () => void }) {
-  const { t } = useTranslation();
-  if (!onDelete) return null;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onDelete}
-          className="h-8 w-8 p-0 cursor-pointer hover:text-destructive"
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("editors:deleteFile")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function CodeMirrorSaveButton({
-  isDirty,
-  isSaving,
-  onSave,
-}: {
-  isDirty: boolean;
-  isSaving: boolean;
-  onSave: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Button
-      size="sm"
-      variant="default"
-      onClick={onSave}
-      disabled={!isDirty || isSaving}
-      className="cursor-pointer gap-2"
-    >
-      {isSaving ? (
-        <>
-          <IconLoader2 className="h-4 w-4 animate-spin" />
-          {t("editors:saving")}
-        </>
-      ) : (
-        <>
-          <IconDeviceFloppy className="h-4 w-4" />
-          {t("common:save")}
-          <span className="text-xs text-muted-foreground">({SAVE_SHORTCUT}+S)</span>
-        </>
-      )}
-    </Button>
-  );
-}
-
-function CodeMirrorMarkdownPreviewButton({ onToggle }: { onToggle: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onToggle}
-          className="h-8 w-8 p-0 cursor-pointer"
-          data-testid="markdown-preview-toggle"
-        >
-          <IconEye className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("editors:previewMarkdown")}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/** Toolbar for the CodeMirror code editor. */
-function CodeMirrorToolbar({
-  path,
-  worktreePath,
-  isDirty,
-  isSaving,
-  diffStats,
-  wrapEnabled,
-  enableComments,
-  sessionId,
-  taskId,
-  repositoryId,
-  repositoryName,
-  commentCount,
-  hasRemoteUpdate,
-  onToggleWrap,
-  onSave,
-  onReloadFromAgent,
-  onDelete,
-  onToggleMarkdownPreview,
-}: {
-  path: string;
-  worktreePath?: string;
-  isDirty: boolean;
-  isSaving: boolean;
-  diffStats: { additions: number; deletions: number } | null;
-  wrapEnabled: boolean;
-  enableComments: boolean;
-  sessionId?: string;
-  taskId?: string | null;
-  repositoryId?: string | null;
-  repositoryName?: string;
-  commentCount: number;
-  hasRemoteUpdate?: boolean;
-  onToggleWrap: () => void;
-  onSave: () => void;
-  onReloadFromAgent?: () => void;
-  onDelete?: () => void;
-  onToggleMarkdownPreview?: () => void;
-}) {
-  const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
-  return (
-    <PanelHeaderBarSplit
-      left={
-        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <ScrollOnOverflow className="min-w-0 font-mono">
-            {toRelativePath(path, worktreePath)}
-          </ScrollOnOverflow>
-          {isDirty && diffStats && (
-            <span className="shrink-0 text-xs text-yellow-500">
-              {formatDiffStats(diffStats.additions, diffStats.deletions)}
-            </span>
-          )}
-        </div>
-      }
-      right={
-        <div className="flex items-center gap-1">
-          <CodeMirrorCommentBadge
-            enableComments={enableComments}
-            sessionId={sessionId}
-            commentCount={commentCount}
-          />
-          {onToggleMarkdownPreview && (
-            <CodeMirrorMarkdownPreviewButton onToggle={onToggleMarkdownPreview} />
-          )}
-          <CodeMirrorWrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
-          <CodeMirrorReloadButton
-            hasRemoteUpdate={hasRemoteUpdate}
-            onReloadFromAgent={onReloadFromAgent}
-          />
-          <ExternalVcsFileLink
-            filePath={path}
-            previousPath={fileStatus?.old_path}
-            status={fileStatus?.status}
-            taskId={taskId}
-            sessionId={sessionId}
-            repositoryId={repositoryName ? undefined : repositoryId}
-            repositoryName={repositoryName}
-            size="sm"
-          />
-          <CodeMirrorDeleteButton onDelete={onDelete} />
-          <CodeMirrorSaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
-        </div>
-      }
-    />
-  );
-}
 
 type CodeMirrorEditorState = ReturnType<typeof useCodeMirrorEditorState>;
 
@@ -354,6 +98,7 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const state = useCodeMirrorEditorState({
     path,
+    repo,
     content,
     originalContent,
     isDirty,
@@ -402,12 +147,17 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
     taskId,
     repositoryId,
     worktreePath,
+    isSymlink,
     repo,
     enableComments = false,
-    onToggleMarkdownPreview,
+    previewKind,
+    onTogglePreview,
+    onPreviewHtml,
+    isPublishingHtmlPreview,
     onSave,
     onReloadFromAgent,
     onDelete,
+    onDownload,
   } = props;
   const { wrapperRef, editorAreaRef, editorRef, state, walkthroughRange, handleCreateEditor } =
     useCodeMirrorCodeEditorSetup(props);
@@ -417,6 +167,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
       <CodeMirrorToolbar
         path={path}
         worktreePath={worktreePath}
+        isSymlink={isSymlink}
         isDirty={isDirty}
         isSaving={isSaving}
         diffStats={state.diffStats}
@@ -432,7 +183,11 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
         onSave={onSave}
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
-        onToggleMarkdownPreview={onToggleMarkdownPreview}
+        onDownload={onDownload}
+        previewKind={previewKind}
+        onTogglePreview={onTogglePreview}
+        onPreviewHtml={onPreviewHtml}
+        isPublishingHtmlPreview={isPublishingHtmlPreview}
       />
       <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">
         <CodeMirror

@@ -3,6 +3,8 @@
 import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { AgentLogo } from "@/components/agent-logo";
+import { resolveModelSelectorAgentName } from "./model-selector-provider";
 
 import {
   configOptionToModelOptions,
@@ -29,6 +31,7 @@ type SessionModelsEntry = {
   configOptions: ConfigOptionEntry[];
   configOptionsSettled?: boolean;
   configBaseline?: Record<string, string>;
+  settingsPolicy?: "provider_restored";
   /** Set when the session started on the profile's fallback model. */
   fallbackModel?: string;
 };
@@ -36,7 +39,21 @@ type SessionModelsEntry = {
 type ModelSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
+  showAgentIcon?: boolean;
 };
+
+function shouldHideModelSelector(input: {
+  sessionId: string | null;
+  configHydrated: boolean;
+  currentModel: string | null;
+  modelConfig: SelectConfigOption | undefined;
+  restoredModelUnknown: boolean;
+  modelOptionsCount: number;
+}): boolean {
+  if (!input.sessionId || !input.configHydrated) return true;
+  const restoredOptionsAvailable = input.restoredModelUnknown && input.modelOptionsCount > 0;
+  return !input.currentModel && !input.modelConfig && !restoredOptionsAvailable;
+}
 
 const debug = createDebugLogger("model-selector:gate");
 
@@ -141,19 +158,16 @@ export function hasCompleteDynamicConfig(
   const hasFlatModelList = !!sessionModelsData.models.length;
   const catalogSettled = sessionModelsData.configOptionsSettled === true;
   const hasLegacyAgentConfig = catalogSettled && isLegacyAgentConfig(session, agents);
-  // Keys written only by a prior agent type into persisted runtime metadata are
-  // not required for the selector to render: once the current agent's catalog
-  // has settled without advertising them, they are stale cross-agent leftovers
-  // that the backend replay also drops.
-  const profileRequired = session ? profileRequiredConfigKeys(session, agents) : new Set<string>();
-  const isPersistedOnlyStaleKey = (key: string): boolean =>
-    key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key) && !profileRequired.has(key);
+  // A settled catalog is authoritative for which non-agent config keys apply
+  // to the selected model.
+  const isUnadvertisedSettledKey = (key: string): boolean =>
+    key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key);
   return required.every(
     (key) =>
       available.has(key) ||
       (key === AGENT_CONFIG_KEY && hasLegacyAgentConfig) ||
       (key === MODEL_CONFIG_KEY && hasFlatModelList) ||
-      isPersistedOnlyStaleKey(key),
+      isUnadvertisedSettledKey(key),
   );
 }
 
@@ -253,12 +267,16 @@ function resolveProfileModel(profileId: string | null | undefined, agents: Agent
   return null;
 }
 
-function resolveCurrentModel(
+export function resolveCurrentModel(
   activeModel: string | null,
   acpCurrentModel: string | null,
   snapshotModel: string | null,
   profileModel: string | null,
+  settingsPolicy?: "provider_restored",
 ): string | null {
+  if (settingsPolicy === "provider_restored") {
+    return acpCurrentModel;
+  }
   return activeModel || acpCurrentModel || snapshotModel || profileModel;
 }
 
@@ -442,6 +460,7 @@ function resolveModelSelectorInputs({
     sessionModelsData?.currentModelId || null,
     resolveSnapshotModel(session?.agent_profile_snapshot),
     profileModel,
+    sessionModelsData?.settingsPolicy,
   );
   return { configOptions, currentModel, availableModels };
 }
@@ -484,6 +503,8 @@ function useModelSelectorState(sessionId: string | null) {
       ),
     [availableModels, currentModel, sessionModelsData?.fallbackModel],
   );
+  const restoredModelUnknown =
+    sessionModelsData?.settingsPolicy === "provider_restored" && !currentModel;
 
   const { handleModelChange, handleConfigChange } = useModelChangeHandlers(
     configOptions,
@@ -499,6 +520,7 @@ function useModelSelectorState(sessionId: string | null) {
     configHydrated: hasCompleteDynamicConfig(session, sessionModelsData, settingsAgents as Agent[]),
     requiredKeys: requiredConfigKeys(session, settingsAgents as Agent[]),
     rawConfigOptionIds: (sessionModelsData?.configOptions ?? []).map((o) => o.id),
+    restoredModelUnknown,
     handleModelChange,
     handleConfigChange,
   };
@@ -507,6 +529,7 @@ function useModelSelectorState(sessionId: string | null) {
 export const ModelSelector = memo(function ModelSelector({
   sessionId,
   triggerClassName,
+  showAgentIcon = false,
 }: ModelSelectorProps) {
   const { t } = useTranslation();
   const {
@@ -518,10 +541,36 @@ export const ModelSelector = memo(function ModelSelector({
     configHydrated,
     requiredKeys,
     rawConfigOptionIds,
+    restoredModelUnknown,
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
+  const agentName = useAppStore((state) =>
+    showAgentIcon
+      ? resolveModelSelectorAgentName(
+          sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
+          state.agentProfiles.items,
+        )
+      : null,
+  );
+  const providerIcon = useMemo(
+    () =>
+      agentName ? (
+        <span aria-hidden="true" className="flex shrink-0" data-testid="model-provider-icon">
+          <AgentLogo agentName={agentName} size={14} className="size-3.5 shrink-0" />
+        </span>
+      ) : undefined,
+    [agentName],
+  );
   const modelConfig = configOptions.find(isModelConfigOption);
+  const hideSelector = shouldHideModelSelector({
+    sessionId,
+    configHydrated,
+    currentModel,
+    modelConfig,
+    restoredModelUnknown,
+    modelOptionsCount: modelOptions.length,
+  });
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
   const currentModelSuffix = fallbackModel ? ` ${t("settings:modelFallbackSuffix")}` : undefined;
@@ -552,19 +601,20 @@ export const ModelSelector = memo(function ModelSelector({
       configOptionIds: configOptions.map((o) => o.id),
       rawConfigOptionIds,
       requiredKeys,
-      willHide: !sessionId || !configHydrated || (!currentModel && !modelConfig),
+      willHide: hideSelector,
     });
   }
-  if (!sessionId || !configHydrated || (!currentModel && !modelConfig)) return null;
+  if (hideSelector) return null;
 
   return (
     <ModelConfigSelector
+      providerIcon={providerIcon}
       modelOptions={modelOptions}
       currentModel={currentModel}
       configOptions={configOptions}
       onModelChange={onModelChange}
       onConfigChange={onConfigChange}
-      placeholder={t("common:model")}
+      placeholder={restoredModelUnknown ? t("common:unknown") : t("common:model")}
       ariaLabel={t("task:sessionModelSettings")}
       variant="compact"
       popoverSide="top"

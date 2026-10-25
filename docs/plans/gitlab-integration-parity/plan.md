@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/gitlab-integration/spec.md
+spec: docs/specs/integrations/requirements/gitlab-integration.md
 created: 2026-07-20
 status: done
 ---
@@ -14,7 +14,7 @@ shared task dispatcher and complete the task-link/upstream write contracts.
 User-facing watch, quick-launch, and MR review flows land after those contracts;
 provider-aware MR creation and integrated desktop/mobile E2E close the build.
 
-The legacy plan at `docs/specs/gitlab-integration/plan.md` describes the initial
+The legacy plan at `docs/plans/gitlab-integration/legacy-plan.md` describes the initial
 scaffold and is superseded by this plan for parity work.
 
 ## Backend

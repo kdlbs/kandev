@@ -26,6 +26,7 @@ import {
   IconBrandGithub,
   IconBrandGitlab,
   IconChartBar,
+  IconColumns,
   IconHexagon,
   IconHome,
   IconList,
@@ -33,19 +34,19 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
-import { linkToOfficeHome, linkToTaskOverview, linkToTasks } from "@/lib/links";
+import { linkToTaskOverview, linkToTasks, linkToThreads } from "@/lib/links";
+import { resolveHomeHref } from "./workspace-home";
 import { EVERYWHERE, MENU_AND_PALETTE, SIDEBAR_AND_MENU } from "./surface-policy";
 import type { Destination, NavContext } from "./types";
 
 /**
  * Where "home" is for the current mode and workspace — the office dashboard
- * inside Office, the workspace task overview otherwise. Exported so the
+ * inside Office, the chosen workspace home otherwise. Exported so the
  * topbar's home crumb (`useHomeAffordance`) and the manifest's home entry
  * resolve one rule and cannot disagree.
  */
 export function homeDestinationHref(ctx: NavContext): string {
-  if (!ctx.inOffice) return linkToTaskOverview({ workspaceId: ctx.workspaceId ?? undefined });
-  return linkToOfficeHome({ workspaceId: ctx.workspaceId ?? undefined });
+  return resolveHomeHref(ctx);
 }
 
 /**
@@ -65,18 +66,16 @@ export const APP_DESTINATIONS: Destination[] = [
     icon: IconHome,
     section: "primary",
     href: homeDestinationHref,
-    // The sidebar's primary nav still owns "go home" on desktop; the mobile
-    // menu offers it so shells without kanban's brand link (Settings, Office,
-    // plugin pages) keep a phone home row. Kanban's drawer opts out via
-    // omitSections.
+    // The sidebar owns desktop Home; shared navigation and listing menus
+    // expose the same destination on phones.
     surfaces: MENU_AND_PALETTE,
     palette: {
       id: "nav-home",
       labelKey: "common:commandGoToHome",
       keywordsKey: "common:commandGoToHomeKeywords",
-      // The palette has always sent users to the workspace-less overview; a
-      // manifest refactor is the wrong place to change where a command lands.
-      href: () => linkToTaskOverview(),
+      // Existing startup choices retain the palette's workspace-less overview.
+      href: (ctx) =>
+        ctx.startupPage === "threads" ? homeDestinationHref(ctx) : linkToTaskOverview(),
     },
   },
   {
@@ -93,6 +92,22 @@ export const APP_DESTINATIONS: Destination[] = [
       labelKey: "common:commandGoToAllTasks",
       keywordsKey: "common:commandGoToAllTasksKeywords",
       href: "/tasks",
+    },
+  },
+  {
+    id: "threads",
+    labelKey: "kanban:threads",
+    icon: IconColumns,
+    section: "primary",
+    href: (ctx) => linkToThreads(ctx.workspaceId ?? undefined),
+    // Same reasoning as Tasks: the View toggle owns this on a kanban shell, so
+    // the menu and palette exist for the shells that have no toggle.
+    surfaces: MENU_AND_PALETTE,
+    palette: {
+      id: "nav-threads",
+      labelKey: "common:commandGoToThreads",
+      keywordsKey: "common:commandGoToThreadsKeywords",
+      href: "/threads",
     },
   },
   {

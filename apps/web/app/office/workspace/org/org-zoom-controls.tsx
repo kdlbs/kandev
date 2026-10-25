@@ -18,12 +18,7 @@ export function OrgZoomControls({ onZoomIn, onZoomOut, onFit, onExport }: OrgZoo
     <div className="absolute top-4 right-4 z-10 flex flex-col gap-1">
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8 cursor-pointer"
-            onClick={onZoomIn}
-          >
+          <Button variant="outline" size="icon" className="cursor-pointer" onClick={onZoomIn}>
             <IconPlus className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
@@ -31,12 +26,7 @@ export function OrgZoomControls({ onZoomIn, onZoomOut, onFit, onExport }: OrgZoo
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8 cursor-pointer"
-            onClick={onZoomOut}
-          >
+          <Button variant="outline" size="icon" className="cursor-pointer" onClick={onZoomOut}>
             <IconMinus className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
@@ -44,7 +34,7 @@ export function OrgZoomControls({ onZoomIn, onZoomOut, onFit, onExport }: OrgZoo
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="outline" size="icon" className="h-8 w-8 cursor-pointer" onClick={onFit}>
+          <Button variant="outline" size="icon" className="cursor-pointer" onClick={onFit}>
             <IconArrowsMaximize className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
@@ -53,12 +43,7 @@ export function OrgZoomControls({ onZoomIn, onZoomOut, onFit, onExport }: OrgZoo
       {onExport && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8 cursor-pointer"
-              onClick={onExport}
-            >
+            <Button variant="outline" size="icon" className="cursor-pointer" onClick={onExport}>
               <IconDownload className="h-4 w-4" />
             </Button>
           </TooltipTrigger>

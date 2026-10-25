@@ -2,7 +2,6 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -47,6 +46,9 @@ test.describe("Session layout", () => {
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Maximize Test");
 
     // Default layout: all panels visible
+    // Git updates can focus Changes while the task settles. Select Files
+    // before asserting the default right-column panel.
+    await session.clickTab("Files");
     await session.expectDefaultLayout();
 
     // Type a command in the terminal
@@ -62,6 +64,7 @@ test.describe("Session layout", () => {
   });
 
   test("maximize survives page refresh", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(120_000);
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Refresh Test");
 
     // Type a command in the terminal, then maximize
@@ -76,8 +79,12 @@ test.describe("Session layout", () => {
     // After refresh: terminal should still be maximized
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.expectMaximized();
-    // Terminal reconnects to the same shell — our output should still be there
-    await session.expectTerminalHasText(TERMINAL_MARKER);
+    await session.expectTerminalConnected(60_000);
+    await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
+    // The restored terminal must also accept new input.
+    const restoredMarker = "KANDEV_E2E_MARKER_AFTER_REFRESH";
+    await session.typeInTerminal('printf "KANDEV_E2E_MARKER_AFTER_%s\\n" REFRESH');
+    await session.expectTerminalHasText(restoredMarker, 60_000);
   });
 
   test("task switching preserves maximize per session", async ({
@@ -119,17 +126,26 @@ test.describe("Session layout", () => {
     await sessionB.showSessionContext(30_000);
     await sessionB.waitForChatIdle({ timeout: 30_000 });
 
-    // Task B should have default (non-maximized) layout
+    // Git updates can legitimately focus Changes while the task settles. The
+    // maximize invariant is about group visibility, so select Files before
+    // asserting the default right-column panel.
+    await sessionB.clickTab("Files");
+
+    // Task B should have default (non-maximized) layout.
     await sessionB.expectDefaultLayout();
 
     // Navigate back to Task A's session URL — this triggers a full page load,
     // exercising the tryRestoreLayout path that restores maximize from sessionStorage.
     await testPage.goto(taskAUrl);
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+    await session.expectTerminalConnected(60_000);
 
-    // Task A should still be maximized with our output
+    // Task A retains its maximize state, scrollback, and terminal input.
     await session.expectMaximized();
-    await session.expectTerminalHasText(TERMINAL_MARKER);
+    await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
+    const restoredMarker = "KANDEV_E2E_MARKER_AFTER_TASK_SWITCH";
+    await session.typeInTerminal('printf "KANDEV_E2E_MARKER_AFTER_%s\\n" TASK_SWITCH');
+    await session.expectTerminalHasText(restoredMarker, 60_000);
   });
 
   test("closing maximized panel exits maximize and restores layout", async ({
@@ -142,6 +158,11 @@ test.describe("Session layout", () => {
     // Type a command in the terminal, then maximize
     await session.typeInTerminal(`echo ${TERMINAL_MARKER}`);
     await session.expectTerminalHasText(TERMINAL_MARKER);
+
+    // Git updates can focus Changes while the task settles. Select Files after
+    // the terminal command so closing the maximized terminal restores the
+    // layout this test asserts.
+    await session.clickTab("Files");
     await session.clickMaximize();
     await session.expectMaximized();
 
@@ -258,11 +279,9 @@ test.describe("Session tab cleanup", () => {
       )
       .toBe(true);
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card = kanban.taskCardByTitle("Single Session Tab Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
+    // The task is already complete. Open it directly because terminal tasks
+    // can be hidden by the board's current filters.
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);

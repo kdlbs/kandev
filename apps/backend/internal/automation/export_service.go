@@ -131,12 +131,46 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 		return exportAutomation{}, nil, err
 	}
 	warnings = append(warnings, triggerWarnings...)
+	policy, err := NormalizeRetryPolicy(a.RetryPolicy)
+	if err != nil {
+		return exportAutomation{}, nil, fmt.Errorf("normalize retry policy for automation %q: %w", a.ID, err)
+	}
 
 	return exportAutomation{
 		Name:              a.Name,
 		Description:       a.Description,
 		Enabled:           a.Enabled,
 		MaxConcurrentRuns: a.MaxConcurrentRuns,
+		ContinuationPolicy: func() ContinuationPolicy {
+			if a.ContinuationPolicy == "" {
+				return ContinuationPolicyNewTask
+			}
+			return a.ContinuationPolicy
+		}(),
+		TaskMode: func() TaskMode {
+			if a.TaskMode == "" {
+				return TaskModeAutomationRun
+			}
+			return a.TaskMode
+		}(),
+		ManagedDestination: func() *exportManagedConversationDestination {
+			if a.ManagedDestination == nil {
+				return nil
+			}
+			return &exportManagedConversationDestination{
+				PluginID: a.ManagedDestination.PluginID, InstanceKey: a.ManagedDestination.InstanceKey,
+			}
+		}(),
+		RepositoryMode: func() RepositoryMode {
+			if a.RepositoryMode == "" {
+				if len(a.RepositoryIDs) > 0 {
+					return RepositoryModeSelected
+				}
+				return RepositoryModeNone
+			}
+			return a.RepositoryMode
+		}(),
+		RetryPolicy:       exportRetryPolicy(policy),
 		TaskTitleTemplate: a.TaskTitleTemplate,
 		Prompt:            promptNode,
 		AgentProfile:      resolved.AgentProfile,

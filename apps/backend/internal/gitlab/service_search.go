@@ -25,21 +25,21 @@ func (s *Service) SearchUserMRsPaged(ctx context.Context, filter, customQuery st
 }
 
 // SearchUserIssues returns issues matching a filter for the configured user.
-func (s *Service) SearchUserIssues(ctx context.Context, filter, customQuery string) ([]*Issue, error) {
+func (s *Service) SearchUserIssues(ctx context.Context, filter, customQuery, milestone string) ([]*Issue, error) {
 	client := s.Client()
 	if client == nil {
 		return nil, ErrNoClient
 	}
-	return client.ListIssues(ctx, filter, customQuery)
+	return client.ListIssues(ctx, filter, customQuery, milestone)
 }
 
 // SearchUserIssuesPaged returns paginated issues.
-func (s *Service) SearchUserIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
+func (s *Service) SearchUserIssuesPaged(ctx context.Context, filter, customQuery, milestone string, page, perPage int) (*IssueSearchPage, error) {
 	client := s.Client()
 	if client == nil {
 		return nil, ErrNoClient
 	}
-	return client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)
+	return client.ListIssuesPaged(ctx, filter, customQuery, milestone, page, perPage)
 }
 
 // GetStats aggregates open MR / awaiting-review / open-issue counts.
@@ -85,7 +85,7 @@ func (s *Service) getStatsWithClient(ctx context.Context, client Client) (*Stats
 	} else if awaiting != nil {
 		awaitingMRs = awaiting.TotalCount
 	}
-	issues, err := client.ListIssuesPaged(ctx, "scope=assigned_to_me&state=opened", "", 1, 1)
+	issues, err := client.ListIssuesPaged(ctx, "scope=assigned_to_me&state=opened", "", "", 1, 1)
 	openIssues := 0
 	if err != nil {
 		s.logger.Warn("gitlab stats: open issues", zap.Error(err))

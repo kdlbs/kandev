@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/title-length-limit.md
+spec: docs/specs/tasks/requirements/title-length-limit.md
 created: 2026-08-01
 status: implemented
 ---

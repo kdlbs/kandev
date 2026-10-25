@@ -67,7 +67,7 @@ export function GitHubAppImportGuide({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-11 w-11 shrink-0 cursor-pointer"
+                  className="shrink-0 cursor-pointer"
                   aria-label={t("github:copy", { label })}
                   onClick={() => void copyValue(value)}
                 >
@@ -84,14 +84,14 @@ export function GitHubAppImportGuide({
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
         {settingsUrl ? (
-          <Button asChild variant="outline" className="h-11 cursor-pointer">
+          <Button asChild variant="outline" className="cursor-pointer">
             <a href={settingsUrl} target="_blank" rel="noreferrer">
               {t("github:openGithubAppSettings")}
               <IconExternalLink className="ml-2 h-4 w-4" />
             </a>
           </Button>
         ) : (
-          <Button type="button" variant="outline" className="h-11" disabled>
+          <Button type="button" variant="outline" disabled>
             {t("github:openGithubAppSettings")}
             <IconExternalLink className="ml-2 h-4 w-4" />
           </Button>

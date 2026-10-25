@@ -241,9 +241,6 @@ func (w *retryDailyWriter) Write(data []byte) (int, error) {
 	}
 	written, err := w.writer.Write(data)
 	if err != nil {
-		if errors.Is(err, errDailyBackendLogLimit) {
-			return written, err
-		}
 		_ = w.writer.Close()
 		w.writer = nil
 		w.nextRetry = w.now().Add(30 * time.Second)

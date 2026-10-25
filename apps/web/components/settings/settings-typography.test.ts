@@ -15,12 +15,13 @@ describe("settings typography contract", () => {
 
   it("uses the md breakpoint for compact desktop settings controls", () => {
     expect(SETTINGS_TYPOGRAPHY.control).toBe("text-sm md:text-xs");
-    expect(SETTINGS_TYPOGRAPHY.mobileAction).toBe("min-h-11 text-sm md:min-h-7 md:text-xs");
+    expect(SETTINGS_TYPOGRAPHY.mobileAction).toBe("text-sm md:text-xs");
   });
 
   it("gives editable controls and actions a mobile hitbox", () => {
-    expect(settingsControlClassName()).toContain("min-h-11");
+    expect(settingsControlClassName()).toContain("h-7");
+    expect(settingsControlClassName()).toContain("max-md:h-11");
     expect(settingsControlClassName()).toContain("md:text-xs");
-    expect(settingsActionClassName()).toContain("md:min-h-7");
+    expect(settingsActionClassName()).toContain("[@media(pointer:coarse)]:h-11");
   });
 });

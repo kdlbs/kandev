@@ -2,6 +2,12 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+
+// The card's save contributor is gated on org.config.manage. This suite renders
+// outside StateProvider, so the hook that reads the auth slice is stubbed to
+// the default install (auth disabled, which resolves to an administrator).
+vi.mock("@/hooks/domains/auth/use-is-admin", () => ({ useIsAdmin: () => true }));
+
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 
 const DIRTY_ATTRIBUTE = "data-settings-dirty";

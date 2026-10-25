@@ -1,7 +1,11 @@
 import { createRef } from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, fireEvent } from "@testing-library/react";
-import { ClarificationCustomInput } from "./clarification-overlay-parts";
+import {
+  CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
+  ClarificationCustomInput,
+  countRunes,
+} from "./clarification-overlay-parts";
 import { routePanelMouseDown } from "./route-panel-mouse-down";
 
 // Mutable pointer state so individual tests can flip to a touch device without
@@ -255,5 +259,113 @@ describe("ClarificationCustomInput on touch devices", () => {
     expect(button.disabled).toBe(true);
     fireEvent.click(button);
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// W4a: the rune counter must count Unicode code points, not UTF-16 code
+// units — every astral character (emoji, much CJK Extension B) is two UTF-16
+// units but one rune, so counting units would reject valid input early.
+describe("countRunes", () => {
+  it("counts an astral character (surrogate pair) as one rune, not two", () => {
+    const emoji = "\u{1F600}"; // grinning face, outside the BMP
+    expect(emoji.length).toBe(2); // UTF-16 code units
+    expect(countRunes(emoji)).toBe(1); // Unicode code points
+  });
+
+  it("counts plain ASCII 1:1", () => {
+    expect(countRunes("hello")).toBe(5);
+  });
+});
+
+// W4/W4a: the free-text input SHALL stop a human at the server's 2000-rune
+// cap (N8b) rather than letting a too-long answer reach the server and fail
+// with an opaque 400.
+describe("ClarificationCustomInput rune limit", () => {
+  const overLimitDraft = "a".repeat(CLARIFICATION_CUSTOM_TEXT_MAX_RUNES + 1);
+  const atLimitDraft = "a".repeat(CLARIFICATION_CUSTOM_TEXT_MAX_RUNES);
+
+  it("sets maxLength no lower than 4000 (double the rune cap) as a coarse backstop only", () => {
+    const { getByTestId } = render(<ClarificationCustomInput {...makeProps()} />);
+    const textarea = getByTestId(INPUT_TESTID) as HTMLTextAreaElement;
+    expect(textarea.maxLength).toBeGreaterThanOrEqual(4000);
+  });
+
+  it("disables the touch Send button once the draft exceeds the rune cap", () => {
+    pointer.isFinePointer = false;
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: overLimitDraft, onSubmit })} />,
+    );
+    const button = getByTestId(TOUCH_SUBMIT_TESTID) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("still allows sending a draft at exactly the rune cap (boundary: 2000 accepted)", () => {
+    pointer.isFinePointer = false;
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: atLimitDraft, onSubmit })} />,
+    );
+    const button = getByTestId(TOUCH_SUBMIT_TESTID) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
+  it("blocks plain Enter from submitting an over-limit draft", () => {
+    const onSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: overLimitDraft, onSubmit })} />,
+    );
+    pressEnter(getByTestId(INPUT_TESTID));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("blocks Cmd+Enter from finalizing an over-limit draft", () => {
+    const onSubmit = vi.fn();
+    const onRequestFinalSubmit = vi.fn();
+    const { getByTestId } = render(
+      <ClarificationCustomInput
+        {...makeProps({ draft: overLimitDraft, onSubmit, onRequestFinalSubmit })}
+      />,
+    );
+    pressEnter(getByTestId(INPUT_TESTID), { metaKey: true });
+    expect(onRequestFinalSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the boundary to the user once the draft is over the limit", () => {
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: overLimitDraft })} />,
+    );
+    const counter = getByTestId("clarification-input-rune-counter");
+    expect(counter.getAttribute("data-over-limit")).toBe("true");
+    // i18next leaves an unsubstituted placeholder verbatim in the rendered
+    // text when a t() call omits a key the string interpolates — assert the
+    // actual text, not just the data-over-limit flag, so a call site missing
+    // one of the string's placeholders (e.g. `max`) fails here instead of
+    // only being visible in a live screenshot.
+    expect(counter.textContent).toBe(
+      `1 character over the ${CLARIFICATION_CUSTOM_TEXT_MAX_RUNES}-character limit.`,
+    );
+    expect(counter.textContent).not.toContain("{{");
+  });
+
+  it("places the limit counter on a full-width row for narrow layouts", () => {
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: overLimitDraft })} />,
+    );
+    expect(getByTestId(ROW_TESTID).className).toContain("flex-wrap");
+    expect(getByTestId(INPUT_TESTID).className).toContain("min-w-0");
+    expect(getByTestId("clarification-input-rune-counter").parentElement?.className).toContain(
+      "w-full",
+    );
+  });
+
+  it("does not show a counter for a short draft far from the limit", () => {
+    const { queryByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: "short answer" })} />,
+    );
+    expect(queryByTestId("clarification-input-rune-counter")).toBeNull();
   });
 });

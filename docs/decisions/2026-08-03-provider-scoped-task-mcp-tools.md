@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-03
 - **Scope:** Backend, agentctl, protocol, GitHub, and GitLab integrations
-- **Related spec:** [Provider-Aware Review Automation Runtime](../specs/integrations/provider-aware-review-automation.md)
+- **Related spec:** [Provider-Aware Review Automation Runtime](../specs/integrations/requirements/provider-aware-review-automation.md)
 - **Related PR:** [#2125](https://github.com/kdlbs/kandev/pull/2125)
 
 ## Context

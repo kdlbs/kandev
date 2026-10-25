@@ -1,15 +1,25 @@
 // Package events provides event types and utilities for the Kandev event system.
 package events
 
+// PromptsChanged invalidates instance-wide saved prompt caches without carrying content.
+const PromptsChanged = "prompts.changed"
+
 // Event types for tasks
 const (
-	TaskCreated                    = "task.created"
-	TaskUpdated                    = "task.updated"
-	TaskStateChanged               = "task.state_changed"
-	TaskDeleted                    = "task.deleted"
-	TaskMoved                      = "task.moved" // Manual step change via MoveTask
-	TaskQueuePromoted              = "task.queue_promoted"
+	TaskCreated       = "task.created"
+	TaskUpdated       = "task.updated"
+	TaskStateChanged  = "task.state_changed"
+	TaskDeleted       = "task.deleted"
+	TaskMoved         = "task.moved" // Manual step change via MoveTask
+	TaskQueuePromoted = "task.queue_promoted"
+	// TaskReordered fires when a within-step band reorder commits
+	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.16). Payload:
+	// {workflow_step_id, band, revision, tasks: [{id, position}]}, the whole
+	// step's non-hidden tasks in both bands. Deliberately not task.moved
+	// (.21) and not one task.updated per task.
+	TaskReordered                  = "task.reordered"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
+	SessionTurnChangesUpdated      = "session.turn.changes.updated"
 	// TaskDependenciesResolved fires when a task's last unresolved dependency
 	// completes successfully. Payload: {task_id, resolved_by_task_id}.
 	TaskDependenciesResolved = "task.dependencies_resolved"
@@ -17,7 +27,36 @@ const (
 	// predecessor failed or was cancelled. Payload:
 	// {task_id, failed_task_id, failed_state}.
 	TaskDependencyFailed = "task.dependency_failed"
+	// TaskStalled fires when the session reconciliation sweep observes a task
+	// holding an active session with no live execution behind it and no
+	// session events or messages for longer than the stall threshold.
+	// Detection only: the event never accompanies a state transition, a
+	// synthesized decision, or a queued run. Payload:
+	// {task_id, workspace_id, session_ids, stalled_for, last_event_at}.
+	TaskStalled = "task.stalled"
 )
+
+// Event types for plugin-backed canvas lifecycle changes. Payloads contain
+// only canvas identity, scope, status, and release metadata. They never carry
+// source files, application state, or runtime capabilities.
+const (
+	CanvasCreated                   = "canvas.created"
+	CanvasUpdated                   = "canvas.updated"
+	CanvasReleaseActivated          = "canvas.release.activated"
+	CanvasReleasePermissionRequired = "canvas.release.permission_required"
+	CanvasPromoted                  = "canvas.promoted"
+	CanvasWorkspaceDataEnabled      = "canvas.workspace_data_enabled"
+	CanvasArchived                  = "canvas.archived"
+	CanvasRestored                  = "canvas.restored"
+	CanvasRemoved                   = "canvas.removed"
+)
+
+// CoordinatorUpdated fires after a proposal write (insert, claim, reclaim,
+// complete, fail or reject) or a stall upsert, never plain coordinator CRUD.
+// Payload: {workspace_id, coordinator_id, open_proposals}
+// (docs/specs/coordinator/system-design/proposals.md#events, Build decision
+// 13). Publishing sites land with tasks 03, 04 and 07.
+const CoordinatorUpdated = "coordinator.updated"
 
 // Event types for office task tree controls.
 const (
@@ -57,6 +96,7 @@ const (
 	MessageAdded   = "message.added"
 	MessageUpdated = "message.updated"
 	MessageDeleted = "message.deleted"
+	SessionRemoved = "session.removed"
 )
 
 // Event types for message queue
@@ -67,6 +107,13 @@ const (
 // Event types for task sessions
 const (
 	TaskSessionStateChanged = "task_session.state_changed"
+	// SessionPendingActionChanged carries the compact, workspace-scoped
+	// pending-action projection for one session. It contains no transcript
+	// content and lets inactive session selectors stay current.
+	SessionPendingActionChanged = "session.pending_action_changed"
+	// SessionWorkspaceRecoveryChanged carries the path-free recovery projection
+	// to every subscribed conversation bound to the same task environment.
+	SessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
 	// TaskSessionActivityChanged fires when a session's fine-grained activity
 	// flips — a RUNNING foreground turn moving between actively generating and
 	// idle-on-background-work, or detached background work starting/finishing
@@ -92,11 +139,13 @@ const TaskStatusSummaryUpdated = "task.status_summary.updated"
 
 // Event types for task plans
 const (
-	TaskPlanCreated         = "task_plan.created"
-	TaskPlanUpdated         = "task_plan.updated"
-	TaskPlanDeleted         = "task_plan.deleted"
-	TaskPlanRevisionCreated = "task_plan.revision.created"
-	TaskPlanReverted        = "task_plan.reverted"
+	TaskPlanCreated            = "task_plan.created"
+	TaskPlanUpdated            = "task_plan.updated"
+	TaskPlanDeleted            = "task_plan.deleted"
+	TaskPlanRevisionCreated    = "task_plan.revision.created"
+	TaskPlanReverted           = "task_plan.reverted"
+	TaskPlanCommentsChanged    = "task_plan.comments.changed"
+	TaskPreviewFeedbackChanged = "task.preview_feedback.changed"
 )
 
 // Event types for task walkthroughs (agent-authored guided code tours)
@@ -118,6 +167,7 @@ const (
 const (
 	TurnStarted   = "turn.started"
 	TurnCompleted = "turn.completed"
+	TurnRemoved   = "turn.removed"
 )
 
 // Event types for repositories
@@ -140,6 +190,13 @@ const (
 	RepositorySetDeleted = "repository_set.deleted"
 )
 
+// Event types for repository branch policies.
+const (
+	RepositoryBranchPolicyCreated = "repository_branch_policy.created"
+	RepositoryBranchPolicyUpdated = "repository_branch_policy.updated"
+	RepositoryBranchPolicyDeleted = "repository_branch_policy.deleted"
+)
+
 // Event types for repository scripts
 const (
 	RepositoryScriptCreated = "repository.script.created"
@@ -152,6 +209,10 @@ const (
 	ExecutorCreated = "executor.created"
 	ExecutorUpdated = "executor.updated"
 	ExecutorDeleted = "executor.deleted"
+	// ExecutorReachabilityChanged is published only when a probe or a
+	// connection-configuration reset actually changes the stored state or
+	// reason — a steady host never publishes.
+	ExecutorReachabilityChanged = "executor.reachability.changed"
 )
 
 // Event types for executor profiles
@@ -169,7 +230,9 @@ const (
 
 // Event types for users
 const (
-	UserSettingsUpdated = "user.settings.updated"
+	UserSettingsUpdated              = "user.settings.updated"
+	UserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
+	AuthSessionHostnameResolved      = "auth.session.hostname.resolved"
 )
 
 // PluginUserStateUpdated fires after a successful write/delete on a
@@ -185,6 +248,7 @@ const PluginUserStateUpdated = "plugin.user-state.updated"
 // every state transition and broadcast to all WebSocket clients.
 const (
 	SystemJobUpdate                 = "system.job.update"
+	SystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	AgentRuntimeAvailabilityChanged = "system.agent_runtime.availability_changed"
 )
 
@@ -206,8 +270,9 @@ const (
 const (
 	AgentStarted           = "agent.started"
 	AgentRunning           = "agent.running"
-	AgentBootReady         = "agent.boot_ready" // Agent's ACP session initialized, ready to receive its first prompt. Distinct from AgentReady so the orchestrator can tell a boot signal apart from a turn-end without flag-based disambiguation.
-	AgentReady             = "agent.ready"      // Agent finished a prompt turn, ready for follow-up
+	AgentBootReady         = "agent.boot_ready"  // Agent's ACP session initialized, ready to receive its first prompt. Distinct from AgentReady so the orchestrator can tell a boot signal apart from a turn-end without flag-based disambiguation.
+	AgentReady             = "agent.ready"       // Agent finished a prompt turn, ready for follow-up
+	AgentTurnFailed        = "agent.turn_failed" // Prompt failed while the execution remains usable
 	AgentCompleted         = "agent.completed"
 	AgentFailed            = "agent.failed"
 	AgentStalled           = "agent.stalled"
@@ -267,6 +332,16 @@ const (
 	AvailableCommandsUpdated = "available_commands.updated" // Available slash commands updated
 )
 
+// Event types for session launch warnings
+const (
+	// SessionLaunchWarning is published once, immediately before an SSH
+	// launch's CreateInstance call, when the target executor's stored
+	// reachability record is unreachable and the record is still within the
+	// probing window. It carries Kandev's own attribution of the target
+	// host, independent of whatever an agent process itself reports.
+	SessionLaunchWarning = "session.launch.warning"
+)
+
 // Event types for session mode
 const (
 	SessionModeChanged = "session_mode.changed" // Agent session mode changed
@@ -280,6 +355,8 @@ const (
 	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
 	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
 	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
+	BackgroundWorkUpdated               = "background_work.updated"                 // Background workload updated
+	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
 )
 
 // Event types for session todos (ACP plan entries)
@@ -289,6 +366,7 @@ const (
 
 const (
 	SessionPromptUsageUpdated = "session_prompt_usage.updated" // Prompt token usage updated
+	SessionUsageUpdated       = "session.usage_updated"        // A committed usage row changed session projections
 )
 
 // Event types for automations
@@ -299,26 +377,28 @@ const (
 
 // Event types for GitHub integration
 const (
-	GitHubPRFeedback           = "github.pr_feedback"             // PR has new feedback (UI notification only)
-	GitHubPRStateChanged       = "github.pr_state_changed"        // PR state changed (merged, closed, etc.)
-	GitHubNewReviewPR          = "github.new_pr_to_review"        // New PR found needing review
-	GitHubNewIssue             = "github.new_issue"               // New issue found matching issue watch
-	GitHubTaskPRUpdated        = "github.task_pr.updated"         // TaskPR record updated (for UI refresh)
-	GitHubTaskPRDeleted        = "github.task_pr.deleted"         // TaskPR association detached (for UI refresh)
-	GitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Task CI automation options updated
-	GitHubWatchEvent           = "github.watch.event"             // Watch created/deleted
-	GitHubRateLimitUpdated     = "github.rate_limit.updated"      // GitHub API rate-limit snapshot changed
-	GitHubPushReceived         = "github.push_received"           // Push webhook verified + installation resolved to workspaces
-	GitHubCheckRunCompleted    = "github.check_run_completed"     // Completed check_run webhook resolved to workspaces
+	GitHubPRFeedback               = "github.pr_feedback"                 // PR has new feedback (UI notification only)
+	GitHubPRStateChanged           = "github.pr_state_changed"            // PR state changed (merged, closed, etc.)
+	GitHubNewReviewPR              = "github.new_pr_to_review"            // New PR found needing review
+	GitHubNewIssue                 = "github.new_issue"                   // New issue found matching issue watch
+	GitHubTaskPRUpdated            = "github.task_pr.updated"             // TaskPR record updated (for UI refresh)
+	GitHubTaskPRDeleted            = "github.task_pr.deleted"             // TaskPR association detached (for UI refresh)
+	GitHubTaskCIOptionsUpdated     = "github.task_ci_options.updated"     // Task CI automation options updated
+	GitHubWatchEvent               = "github.watch.event"                 // Watch created/deleted
+	GitHubRateLimitUpdated         = "github.rate_limit.updated"          // GitHub API rate-limit snapshot changed
+	GitHubPRDiscoveryHealthUpdated = "github.pr_discovery_health.updated" // Workspace PR discovery health changed
+	GitHubPushReceived             = "github.push_received"               // Push webhook verified + installation resolved to workspaces
+	GitHubCheckRunCompleted        = "github.check_run_completed"         // Completed check_run webhook resolved to workspaces
 )
 
 // Event types for GitLab integration
 const (
-	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback (UI notification only)
+	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback
 	GitLabMRStateChanged = "gitlab.mr_state_changed" // MR state changed (merged, closed, etc.)
 	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
 	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
+	GitLabTaskMRDeleted  = "gitlab.task_mr.deleted"  // TaskMR association detached (for UI refresh)
 	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
 
 	// GitLabTaskMROptionsUpdated fires after a task's MR lifecycle
@@ -467,6 +547,16 @@ func BuildAgentCapabilitiesSubject(sessionID string) string {
 	return AgentCapabilitiesUpdated + "." + sessionID
 }
 
+// BuildSessionLaunchWarningSubject creates a session launch warning subject for a specific session
+func BuildSessionLaunchWarningSubject(sessionID string) string {
+	return SessionLaunchWarning + "." + sessionID
+}
+
+// BuildSessionLaunchWarningWildcardSubject creates a wildcard subscription for all session launch warning events
+func BuildSessionLaunchWarningWildcardSubject() string {
+	return SessionLaunchWarning + ".*"
+}
+
 // BuildAgentCapabilitiesWildcardSubject creates a wildcard subscription for all agent capabilities events
 func BuildAgentCapabilitiesWildcardSubject() string {
 	return AgentCapabilitiesUpdated + ".*"
@@ -480,6 +570,26 @@ func BuildSessionModelsSubject(sessionID string) string {
 // BuildSessionModelsWildcardSubject creates a wildcard subscription for all session models events
 func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
+}
+
+// BuildBackgroundWorkUpdatedSubject creates a subject for background work update events for a session
+func BuildBackgroundWorkUpdatedSubject(sessionID string) string {
+	return BackgroundWorkUpdated + "." + sessionID
+}
+
+// BuildBackgroundWorkUpdatedWildcardSubject creates a wildcard subscription for background work update events
+func BuildBackgroundWorkUpdatedWildcardSubject() string {
+	return BackgroundWorkUpdated + ".*"
+}
+
+// BuildBackgroundWorkOutputSubject creates a subject for background work output events for a session
+func BuildBackgroundWorkOutputSubject(sessionID string) string {
+	return BackgroundWorkOutput + "." + sessionID
+}
+
+// BuildBackgroundWorkOutputWildcardSubject creates a wildcard subscription for background work output events
+func BuildBackgroundWorkOutputWildcardSubject() string {
+	return BackgroundWorkOutput + ".*"
 }
 
 // BuildSessionModelFallbackSubject creates a session-specific fallback-model
@@ -544,6 +654,14 @@ func BuildSessionPromptUsageSubject(sessionID string) string {
 // BuildSessionPromptUsageWildcardSubject creates a wildcard subscription for all prompt usage events
 func BuildSessionPromptUsageWildcardSubject() string {
 	return SessionPromptUsageUpdated + ".*"
+}
+
+func BuildSessionUsageUpdatedSubject(sessionID string) string {
+	return SessionUsageUpdated + "." + sessionID
+}
+
+func BuildSessionUsageUpdatedWildcardSubject() string {
+	return SessionUsageUpdated + ".*"
 }
 
 // BuildOfficeRunEventSubject creates a per-run subject for run event

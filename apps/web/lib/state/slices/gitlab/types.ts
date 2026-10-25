@@ -3,7 +3,6 @@ import type {
   ReviewWatch,
   IssueWatch,
   MRWatch,
-  GitLabStats,
   GitLabActionPresets,
   GitLabStatus,
   TaskMRAutomationOptions,
@@ -29,14 +28,11 @@ export type GitLabActionPresetsState = {
   loading: boolean;
 };
 
-export type GitLabStatsState = {
-  data: GitLabStats | null;
-  loading: boolean;
-  loadedAt: number | null;
+export type GitLabStatusState = {
+  byWorkspaceId: Record<string, GitLabStatusEntry>;
 };
 
-export type GitLabStatusState = {
-  workspaceId: string | null;
+export type GitLabStatusEntry = {
   data: GitLabStatus | null;
   loading: boolean;
   loadedAt: number | null;
@@ -62,7 +58,6 @@ export type GitLabSliceState = {
   gitlabIssueWatches: GitLabIssueWatchesState;
   gitlabMRWatches: GitLabMRWatchesState;
   gitlabActionPresets: GitLabActionPresetsState;
-  gitlabStats: GitLabStatsState;
   gitlabStatus: GitLabStatusState;
   taskMRAutomation: TaskMRAutomationOptionsState;
 };
@@ -93,11 +88,9 @@ export type GitLabSliceActions = {
   setGitLabActionPresets: (workspaceId: string, presets: GitLabActionPresets) => void;
   setGitLabActionPresetsLoading: (loading: boolean) => void;
 
-  setGitLabStats: (stats: GitLabStats | null) => void;
-  setGitLabStatsLoading: (loading: boolean) => void;
-
-  setGitLabStatus: (workspaceId: string | null, status: GitLabStatus | null) => void;
-  setGitLabStatusLoading: (workspaceId: string | null, loading: boolean) => void;
+  setGitLabStatus: (workspaceId: string, status: GitLabStatus | null) => void;
+  setGitLabStatusLoading: (workspaceId: string, loading: boolean) => void;
+  resetGitLabStatus: (workspaceId: string) => void;
 
   setTaskMRAutomationOptions: (taskId: string, options: TaskMRAutomationOptions) => void;
   setTaskMRAutomationLoading: (taskId: string, loading: boolean) => void;

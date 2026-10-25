@@ -10,6 +10,7 @@
  * `hooks/use-app-destinations.ts`, which keeps the manifest unit-testable.
  */
 import type { ComponentType } from "react";
+import type { StartupPage } from "@/lib/types/http-user-settings";
 
 /**
  * Where a destination may be offered; every destination lists its surfaces
@@ -55,6 +56,7 @@ export type DestinationIcon = ComponentType<{ className?: string }>;
 export type NavContext = {
   workspaceId: string | null;
   inOffice: boolean;
+  startupPage?: StartupPage;
 };
 
 export type DestinationHref = string | ((ctx: NavContext) => string);

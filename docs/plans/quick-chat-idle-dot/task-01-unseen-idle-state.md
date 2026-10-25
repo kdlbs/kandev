@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/quick-chat-idle-dot/spec.md"
+spec: "../../specs/ui/requirements/quick-chat-idle-dot.md"
 ---
 
 # Task 01: Unseen-idle state in the UI slice

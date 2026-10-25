@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-port-dialog-browser-action"]
 plan: "plan.md"
-spec: "../../specs/port-proxy-browser-panel/spec.md"
+spec: "../../specs/ui/requirements/port-proxy-browser-panel.md"
 ---
 
 # Task 03: Browser navigation E2E coverage

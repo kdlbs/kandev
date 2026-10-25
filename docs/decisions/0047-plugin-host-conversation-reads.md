@@ -4,7 +4,7 @@
 - Date: 2026-07-21
 - Area: backend, protocol
 - Related: [0043 — Plugin host data API](0043-plugin-host-data-api.md) (the pattern
-  this extends), [docs/specs/plugins/spec.md](../specs/plugins/spec.md) ("Host data API")
+  this extends), [docs/specs/plugins/requirements/plugins.md](../specs/plugins/requirements/plugins.md) ("Host data API")
 
 ## Context
 

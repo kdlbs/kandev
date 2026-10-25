@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-candidate-query"]
 plan: "plan.md"
-spec: "../../specs/tasks/quick-chat-expiration.md"
+spec: "../../specs/tasks/requirements/quick-chat-expiration.md"
 ---
 
 # Task 02: Backend Expiration Service

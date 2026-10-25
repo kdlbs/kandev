@@ -14,6 +14,7 @@ import {
   SettingsErrorText,
 } from "@/components/settings/settings-typography";
 import type { DynamicErrorClass, DynamicErrorPolicy } from "@/lib/types/agent-profile";
+import { settingsControlClassName } from "./settings-control";
 
 const MAX_RETRIES = 10;
 const MAX_INITIAL_INTERVAL_SECONDS = 3600;
@@ -86,8 +87,8 @@ function DynamicPolicyOptionHelp({ option }: { option: "retry" | "wait" | "outco
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
-          className="size-11 shrink-0 cursor-help text-muted-foreground sm:size-7"
+          size="icon"
+          className="shrink-0 cursor-help text-muted-foreground"
           aria-label={t("agents:dynamicPolicyOptionInfo", { option: optionLabel })}
           onClick={() => setOpen((current) => !current)}
           data-testid={`dynamic-policy-option-help-${option}`}
@@ -180,7 +181,7 @@ export function DynamicPolicyEditor({
                 max={10}
                 value={policy.retry.maxRetries}
                 onChange={(event) => updateRetry({ maxRetries: Number(event.target.value) || 0 })}
-                className="min-h-11"
+                className={settingsControlClassName()}
                 aria-label={t("agents:dynamicPolicyMaxRetries")}
                 aria-invalid={retryMaxInvalid}
               />
@@ -198,7 +199,7 @@ export function DynamicPolicyEditor({
                 onChange={(event) =>
                   updateRetry({ initialIntervalSeconds: Number(event.target.value) || 0 })
                 }
-                className="min-h-11"
+                className={settingsControlClassName()}
                 aria-label={t("agents:dynamicPolicyInitialInterval")}
                 aria-invalid={retryIntervalInvalid}
               />
@@ -237,7 +238,7 @@ export function DynamicPolicyEditor({
               max={604800}
               value={policy.waitForReset.maxWaitSeconds}
               onChange={(event) => updateWait({ maxWaitSeconds: Number(event.target.value) || 0 })}
-              className="min-h-11"
+              className={settingsControlClassName()}
               aria-label={t("agents:dynamicPolicyMaxWait")}
               aria-invalid={Boolean(waitError)}
             />
@@ -253,7 +254,7 @@ export function DynamicPolicyEditor({
             value={policy.onExhausted}
             onValueChange={(value) => onChange({ onExhausted: value as "skip" | "stop" })}
           >
-            <SelectTrigger className="min-h-11 w-full" aria-label={outcomeLabel}>
+            <SelectTrigger className={settingsControlClassName("w-full")} aria-label={outcomeLabel}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

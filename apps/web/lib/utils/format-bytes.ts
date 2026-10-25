@@ -15,3 +15,20 @@ export function formatBytes(bytes: number | null | undefined): string {
   const value = bytes / Math.pow(1024, i);
   return `${value.toFixed(1)} ${units[i]}`;
 }
+
+/**
+ * Formats two byte counts for side-by-side display (e.g. "X, over the Y
+ * limit"), guaranteeing they never render as the same string when the
+ * underlying values differ. `formatBytes`'s one-decimal rounding collapses
+ * any two values within roughly the same 1/10-unit bucket to identical text
+ * (e.g. 262,144 and 262,150 both read "256.0 KB"), which is exactly the
+ * boundary a size-ceiling rejection needs to be legible at. Falls back to
+ * exact byte counts for both numbers only when the rounded forms would
+ * otherwise collide.
+ */
+export function formatDistinctByteSizes(a: number, b: number): [string, string] {
+  const formattedA = formatBytes(a);
+  const formattedB = formatBytes(b);
+  if (a === b || formattedA !== formattedB) return [formattedA, formattedB];
+  return [`${a} B`, `${b} B`];
+}

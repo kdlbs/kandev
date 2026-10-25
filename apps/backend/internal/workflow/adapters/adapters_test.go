@@ -31,6 +31,14 @@ type fakeRepo struct {
 	resolvedStepID string
 	resolvedTaskID string
 	lookedUpTaskID string
+
+	hasRoleSeat       bool
+	hasRoleSeatErr    error
+	hasRoleSeatCalled bool
+
+	ensuredSeat    *models.WorkflowStepParticipant
+	ensureSeatErr  error
+	ensureSeatArgs []string
 }
 
 func (f *fakeRepo) ListStepParticipantsForTask(_ context.Context, _, _ string) ([]*models.WorkflowStepParticipant, error) {
@@ -64,6 +72,19 @@ func (f *fakeRepo) ResolveCurrentRunner(_ context.Context, stepID, taskID string
 func (f *fakeRepo) GetTaskWorkflowStepID(_ context.Context, taskID string) (string, error) {
 	f.lookedUpTaskID = taskID
 	return f.taskStepID, f.stepErr
+}
+func (f *fakeRepo) HasRoleSeatForTaskWorkflow(_ context.Context, _, _, _ string) (bool, error) {
+	f.hasRoleSeatCalled = true
+	return f.hasRoleSeat, f.hasRoleSeatErr
+}
+func (f *fakeRepo) EnsureRoleSeat(
+	_ context.Context, workflowID, stepID, taskID, role, agentProfileID string,
+) (*models.WorkflowStepParticipant, bool, error) {
+	f.ensureSeatArgs = []string{workflowID, stepID, taskID, role, agentProfileID}
+	if f.ensureSeatErr != nil {
+		return nil, false, f.ensureSeatErr
+	}
+	return f.ensuredSeat, true, nil
 }
 
 func TestParticipantAdapter_TranslatesModelToEngineInfo(t *testing.T) {

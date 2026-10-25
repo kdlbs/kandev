@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-listing-display-preferences.md"
+spec: "../../specs/ui/requirements/task-listing-display-preferences.md"
 role: implementer
 model_tier: balanced
 ---

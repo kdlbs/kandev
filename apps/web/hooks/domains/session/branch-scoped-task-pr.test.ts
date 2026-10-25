@@ -12,6 +12,7 @@ const CURRENT_BRANCH = "feature/current";
 function taskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-2",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     repository_id: "repo-frontend",
     owner: "acme",

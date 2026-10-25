@@ -232,6 +232,24 @@ func TestFailingLaunchRepositoryID_UsesExactBranchToken(t *testing.T) {
 	}
 }
 
+func TestFailingLaunchRepositoryIdentityUsesPreparationError(t *testing.T) {
+	req := &LaunchAgentRequest{Repositories: []RepoSpec{
+		{RepositoryID: "repo-front", TaskRepositoryID: "tr-1", BaseBranch: "main"},
+		{RepositoryID: "repo-back", TaskRepositoryID: "tr-2", BaseBranch: "main"},
+	}}
+	launchErr := &lifecycle.RepositoryPreparationError{
+		RepositoryID:     "repo-back",
+		TaskRepositoryID: "tr-2",
+		RepositoryName:   "backend",
+		Cause:            errors.New("required refresh failed"),
+	}
+
+	repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, launchErr)
+	if repositoryID != "repo-back" || taskRepositoryID != "tr-2" {
+		t.Fatalf("failing launch identity = %q/%q, want repo-back/tr-2", repositoryID, taskRepositoryID)
+	}
+}
+
 func TestLaunchPreparedSession_MultiRepo_PersistsPerRepoEnvironmentAndWorktreeRows(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-multi-2"
@@ -323,12 +341,14 @@ func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment
 			{
 				TaskEnvironmentID: "env-existing",
 				RepositoryID:      "repo-front",
+				BranchSlug:        "main",
 				WorktreeID:        "wt-front",
 				Position:          0,
 			},
 			{
 				TaskEnvironmentID: "env-existing",
 				RepositoryID:      "repo-back",
+				BranchSlug:        "main",
 				WorktreeID:        "wt-back",
 				Position:          1,
 			},
@@ -375,6 +395,51 @@ func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment
 	}
 	if captured.Repositories[1].WorktreeID != "wt-back" {
 		t.Errorf("back WorktreeID = %q, want wt-back", captured.Repositories[1].WorktreeID)
+	}
+}
+
+func TestLaunchPreparedSession_ReuseRejectsIncompleteCanonicalRepositoryInventory(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-multi-incomplete-reuse"
+	sessionID := "session-multi-incomplete-reuse"
+	seedMultiRepoTask(t, repo, taskID)
+	seedWorktreeExecutor(repo)
+
+	environmentRepos := []*models.TaskEnvironmentRepo{{
+		TaskEnvironmentID: "env-incomplete",
+		RepositoryID:      "repo-front",
+		BranchSlug:        "main",
+		WorktreeID:        "wt-front",
+		Status:            "active",
+	}}
+	environment := &models.TaskEnvironment{
+		ID:           "env-incomplete",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos:        environmentRepos,
+	}
+	repo.taskEnvironments[environment.ID] = environment
+	repo.taskEnvironmentRepos[environment.ID] = environmentRepos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environment.ID,
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+
+	manager := &mockAgentManager{}
+	exec := newTestExecutor(t, manager, repo)
+	_, err := exec.LaunchPreparedSession(context.Background(),
+		&v1.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi"}, sessionID,
+		LaunchOptions{AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession error = %v, want workspace reuse unsafe", err)
+	}
+	if manager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", manager.launchAgentCallCount)
+	}
+	if got := repo.sessions[sessionID].TaskEnvironmentID; got != environment.ID {
+		t.Fatalf("session environment = %q, want %q", got, environment.ID)
 	}
 }
 
@@ -439,6 +504,44 @@ func TestResumeSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
 	}
 	if got, want := captured.McpProviders, []string{"github", "gitlab"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("McpProviders = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildResumeRequest_RejectsMismatchedEnvironmentInventory(t *testing.T) {
+	repo := newMockRepository()
+	const taskID = "task-resume-inventory-mismatch"
+	const sessionID = "session-resume-inventory-mismatch"
+	seedMultiRepoTask(t, repo, taskID)
+	seedWorktreeExecutor(repo)
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Resume"}
+	repo.taskEnvironments["env-mismatch"] = &models.TaskEnvironment{
+		ID:           "env-mismatch",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			TaskEnvironmentID: "env-mismatch",
+			RepositoryID:      "repo-unrelated",
+			BranchSlug:        "main",
+			WorktreeID:        "wt-unrelated",
+		}},
+	}
+	repo.taskEnvironmentRepos["env-mismatch"] = repo.taskEnvironments["env-mismatch"].Repos
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		RepositoryID:   "repo-front",
+		ExecutorID:     models.ExecutorIDWorktree,
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCancelled,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	_, _, _, _, _, err := exec.buildResumeRequest(context.Background(), repo.tasks[taskID].ToAPI(), repo.sessions[sessionID], false)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("buildResumeRequest error = %v, want ErrWorkspaceReuseUnsafe", err)
 	}
 }
 

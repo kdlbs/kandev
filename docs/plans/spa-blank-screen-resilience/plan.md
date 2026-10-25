@@ -1,7 +1,7 @@
 ---
-spec: docs/specs/ui/mobile-task-navigation.md
+spec: docs/specs/ui/requirements/mobile-task-navigation.md
 related_specs:
-  - docs/specs/system-page/spec.md
+  - docs/specs/system-page/requirements/system-page.md
 decision: docs/decisions/2026-07-27-spa-failure-containment-and-deployment-recovery.md
 created: 2026-07-27
 status: complete

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/quick-chat-repository-context.md"
+spec: "../../specs/tasks/requirements/quick-chat-repository-context.md"
 ---
 
 # Task 01: Backend quick-chat repository contract

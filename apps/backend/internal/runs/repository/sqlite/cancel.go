@@ -16,54 +16,81 @@ import (
 // and have its real finished_at overwritten.
 const cancellableRunStatuses = `status IN ('queued', 'claimed')`
 
+// CancelledRun identifies one row CancelRunsWhere actually cancelled,
+// carrying the fields a caller needs to classify the transition's
+// terminal shape (office_loop_terminal_total) without a second read.
+type CancelledRun struct {
+	ID             string
+	AgentProfileID string
+	SessionID      string
+	RequestedAt    time.Time
+}
+
 // CancelRunsWhere is the single writer of the terminal cancel state on the
 // runs table. CancelRun, BulkCancelRuns and the office repository's
-// CancelRunsForTasks are all thin selectors over it, so the guard above
-// cannot be bypassed by picking a different entry point.
+// CancelRunsForTasks and CancelDisplacedParticipantRun are all thin
+// selectors over it, so the guard above cannot be bypassed by picking a
+// different entry point.
 //
 // selector is an extra WHERE fragment ANDed onto the guard; it must be a
 // SQL literal owned by the calling repository method, using ? placeholders
 // (rebound here) for every value. Never interpolate caller-supplied data
 // into it. selectorArgs bind those placeholders, in order.
 //
-// Returns the number of rows actually cancelled: 0 means every run the
-// selector matched had already reached a terminal state.
+// Returns the rows actually cancelled: an empty slice means every run the
+// selector matched had already reached a terminal state. The guard and the
+// write are the same UPDATE statement (RETURNING reads the classification
+// columns off the rows it just changed), so there is no separate read a
+// row's status could change behind: a run that reaches a terminal state on
+// another connection is either fully visible to this statement or not, and
+// either way it cannot be cancelled by it.
 func (r *Repository) CancelRunsWhere(
 	ctx context.Context,
 	cancelReason string,
 	selector string,
 	selectorArgs ...interface{},
-) (int64, error) {
-	args := make([]interface{}, 0, len(selectorArgs)+2)
-	args = append(args, cancelReason, time.Now().UTC())
-	args = append(args, selectorArgs...)
-
+) ([]CancelledRun, error) {
 	query := fmt.Sprintf(`
 		UPDATE runs
 		SET status = 'cancelled', cancel_reason = ?, finished_at = ?
 		WHERE %s
 		  AND (%s)
+		RETURNING id, agent_profile_id, session_id, requested_at
 	`, cancellableRunStatuses, selector)
-
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	args := append([]interface{}{cancelReason, time.Now().UTC()}, selectorArgs...)
+	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return res.RowsAffected()
+	defer rows.Close() //nolint:errcheck
+
+	var cancelled []CancelledRun
+	for rows.Next() {
+		var row CancelledRun
+		if err := rows.Scan(&row.ID, &row.AgentProfileID, &row.SessionID, &row.RequestedAt); err != nil {
+			return nil, err
+		}
+		cancelled = append(cancelled, row)
+	}
+	return cancelled, rows.Err()
 }
 
 // CancelRun marks a run as cancelled with an optional cancel reason.
-// A run that already reached a terminal state is left untouched.
-func (r *Repository) CancelRun(ctx context.Context, id, cancelReason string) error {
-	_, err := r.CancelRunsWhere(ctx, cancelReason, `id = ?`, id)
-	return err
+// A run that already reached a terminal state is left untouched. Returns
+// whether this call actually cancelled the row, so a caller counting the
+// transition (office_loop_terminal_total) can tell a persisted change
+// from a no-op on a run that was already terminal.
+func (r *Repository) CancelRun(ctx context.Context, id, cancelReason string) (bool, error) {
+	rows, err := r.CancelRunsWhere(ctx, cancelReason, `id = ?`, id)
+	return len(rows) > 0, err
 }
 
-// BulkCancelRuns cancels multiple runs by ID with the given reason.
-// Runs in the set that already reached a terminal state are left untouched.
-func (r *Repository) BulkCancelRuns(ctx context.Context, ids []string, cancelReason string) error {
+// BulkCancelRuns cancels multiple runs by ID with the given reason,
+// returning the rows actually cancelled (see CancelRunsWhere). Runs in
+// the set that already reached a terminal state are left untouched.
+func (r *Repository) BulkCancelRuns(ctx context.Context, ids []string, cancelReason string) ([]CancelledRun, error) {
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
 	placeholders := make([]string, len(ids))
 	args := make([]interface{}, len(ids))
@@ -72,6 +99,5 @@ func (r *Repository) BulkCancelRuns(ctx context.Context, ids []string, cancelRea
 		args[i] = id
 	}
 	selector := fmt.Sprintf(`id IN (%s)`, strings.Join(placeholders, ","))
-	_, err := r.CancelRunsWhere(ctx, cancelReason, selector, args...)
-	return err
+	return r.CancelRunsWhere(ctx, cancelReason, selector, args...)
 }

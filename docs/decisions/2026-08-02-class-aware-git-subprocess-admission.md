@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-02
 - **Scope:** Backend and agentctl Git subprocess scheduling
-- **Related spec:** [Git Subprocess Admission](../specs/platform/git-subprocess-admission.md)
+- **Related spec:** [Git Subprocess Admission](../specs/platform/requirements/git-subprocess-admission.md)
 - **Related issue:** [#2150](https://github.com/kdlbs/kandev/issues/2150)
 
 ## Context

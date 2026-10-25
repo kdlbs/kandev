@@ -9,6 +9,18 @@ import "time"
 type GitStatusUpdate struct {
 	// Timestamp is when this status was captured.
 	Timestamp time.Time `json:"timestamp"`
+	// StatusState reports whether this repository has a usable live observation.
+	StatusState string `json:"status_state,omitempty"`
+	// FilesComplete distinguishes a complete empty membership snapshot from summary-only data.
+	FilesComplete bool `json:"files_complete"`
+	// DetailState reports whether secondary Git details are ready or still pending.
+	DetailState string `json:"detail_state,omitempty"`
+	// ErrorCode is a closed, sanitized status failure code.
+	ErrorCode string `json:"error_code,omitempty"`
+	// TrackerEpoch and SnapshotRevision order snapshots within one tracker lifetime.
+	TrackerID        string `json:"tracker_id,omitempty"`
+	TrackerEpoch     uint64 `json:"tracker_epoch,omitempty"`
+	SnapshotRevision uint64 `json:"snapshot_revision,omitempty"`
 
 	// RepositoryName identifies which repository this status belongs to when
 	// the agent's workspace contains multiple git repos as siblings (multi-repo
@@ -97,8 +109,39 @@ type GitStatusUpdate struct {
 	BranchDeletions int `json:"branch_deletions,omitempty"`
 }
 
+// FileChangeFacet is one layer of a mixed file change. A mixed path can have
+// one change between HEAD and the index plus another between the index and the
+// working tree.
+type FileChangeFacet struct {
+	// IsSymlink describes the destination entry, or the source for a deletion.
+	IsSymlink *bool `json:"is_symlink,omitempty"`
+
+	// Status indicates the layer status: "modified", "added", "deleted", or "renamed".
+	Status string `json:"status"`
+
+	// Additions is the number of added lines in this layer.
+	Additions int `json:"additions,omitempty"`
+
+	// Deletions is the number of deleted lines in this layer.
+	Deletions int `json:"deletions,omitempty"`
+
+	// OldPath is the original path for a rename in this layer.
+	OldPath string `json:"old_path,omitempty"`
+
+	// Diff contains the unified diff content for this layer.
+	Diff string `json:"diff,omitempty"`
+
+	// DiffSkipReason explains why this layer's diff was omitted or truncated.
+	DiffSkipReason string `json:"diff_skip_reason,omitempty"`
+	// DiffState distinguishes a pending diff from a ready empty diff.
+	DiffState string `json:"diff_state,omitempty"`
+}
+
 // FileInfo represents detailed information about a file's git status.
 type FileInfo struct {
+	// IsSymlink describes the destination entry, or the source for a deletion.
+	IsSymlink *bool `json:"is_symlink,omitempty"`
+
 	// Path is the file path relative to workspace root.
 	Path string `json:"path"`
 
@@ -124,6 +167,14 @@ type FileInfo struct {
 	// DiffSkipReason explains why diff content was omitted or truncated.
 	// Values: "too_large", "binary", "truncated", "budget_exceeded".
 	DiffSkipReason string `json:"diff_skip_reason,omitempty"`
+	// DiffState distinguishes a pending diff from a ready empty diff.
+	DiffState string `json:"diff_state,omitempty"`
+
+	// StagedChange and UnstagedChange preserve the two layers when the same
+	// path has both index and working-tree changes. Single-layer paths keep the
+	// compact legacy fields above and omit both facets.
+	StagedChange   *FileChangeFacet `json:"staged_change,omitempty"`
+	UnstagedChange *FileChangeFacet `json:"unstaged_change,omitempty"`
 }
 
 // GitCommitNotification is sent when a new commit is detected in the workspace.

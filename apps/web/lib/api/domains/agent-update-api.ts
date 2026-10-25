@@ -4,11 +4,22 @@ export type AgentUpdateJobStatus =
   | "queued"
   | "resolving"
   | "updating"
+  | "probing"
+  | "saving"
   | "refreshing"
   | "succeeded"
   | "failed";
 
-export type AgentUpdateOperation = "update" | "rollback" | "repair" | "up_to_date";
+export type AgentUpdateOperation =
+  | "update"
+  | "rollback"
+  | "repair"
+  | "up_to_date"
+  | "use_default"
+  | "migrate";
+export type AgentUpdateMode = "pinned" | "self_update";
+
+export type AgentUpdateCheckState = "update_available" | "up_to_date" | "unknown";
 
 export type AgentUpdateVersion = {
   version: string;
@@ -16,13 +27,22 @@ export type AgentUpdateVersion = {
 };
 
 export type AgentUpdateJob = {
+  update_mode?: AgentUpdateMode;
+  runtime_id?: string;
   job_id: string;
+  automatic?: boolean;
+  previous_version?: string;
   agent_name: string;
   status: AgentUpdateJobStatus;
-  operation?: AgentUpdateOperation;
+  operation?: AgentUpdateOperation | "";
   current_version?: string;
+  default_version?: string;
   active_version?: string;
+  effective_version?: string;
   target_version?: string;
+  target_family?: "v1" | "v2";
+  runtime_revision?: number;
+  migration?: boolean;
   output?: string;
   error?: string;
   refresh_error?: string;
@@ -31,11 +51,21 @@ export type AgentUpdateJob = {
 };
 
 export type AgentUpdatePreview = {
+  update_mode: AgentUpdateMode;
+  managed_fallback?: boolean;
   agent_name: string;
   package: string;
   current_version?: string;
+  default_version?: string;
   active_version?: string;
+  effective_version?: string;
   target_version: string;
+  family?: "v1" | "v2";
+  source?: "managed" | "native";
+  target_family?: "v1" | "v2";
+  runtime_revision?: number;
+  migration_available?: boolean;
+  stable_latest_version?: string;
   operation?: AgentUpdateOperation;
   available_versions?: AgentUpdateVersion[];
   command: string[];
@@ -54,19 +84,127 @@ export async function previewAgentUpdate(
   );
 }
 
+export async function previewAgentUpdateToFamily(
+  agentName: string,
+  family: "v2",
+  targetVersion?: string,
+  options?: ApiRequestOptions,
+): Promise<AgentUpdatePreview> {
+  const params = new URLSearchParams({ target_family: family });
+  if (targetVersion) params.set("target_version", targetVersion);
+  return fetchJson<AgentUpdatePreview>(
+    `/api/v1/agent-update/${encodeURIComponent(agentName)}/preview?${params}`,
+    options,
+  );
+}
+
+export async function previewAgentUpdateUseDefault(
+  agentName: string,
+  options?: ApiRequestOptions,
+): Promise<AgentUpdatePreview> {
+  return fetchJson<AgentUpdatePreview>(
+    `/api/v1/agent-update/${encodeURIComponent(agentName)}/preview?use_default=true`,
+    options,
+  );
+}
+
+type AgentUpdateRequest =
+  | { update_mode: "pinned"; target_version: string }
+  | { update_mode: "self_update" };
+
 export async function updateAgent(
   agentName: string,
-  targetVersion: string,
+  request: AgentUpdateRequest,
   options?: ApiRequestOptions,
 ): Promise<AgentUpdateJob> {
   return fetchJson<AgentUpdateJob>(`/api/v1/agent-update/${encodeURIComponent(agentName)}`, {
     ...options,
     init: {
       method: "POST",
-      body: JSON.stringify({ target_version: targetVersion }),
+      body: JSON.stringify(
+        request.update_mode === "self_update" ? {} : { target_version: request.target_version },
+      ),
       ...(options?.init ?? {}),
     },
   });
+}
+
+export async function updateAgentToFamily(
+  agentName: string,
+  targetVersion: string,
+  family: "v2",
+  expectedRuntimeRevision: number,
+  options?: ApiRequestOptions,
+): Promise<AgentUpdateJob> {
+  return fetchJson<AgentUpdateJob>(`/api/v1/agent-update/${encodeURIComponent(agentName)}`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify({
+        target_version: targetVersion,
+        target_family: family,
+        expected_runtime_revision: expectedRuntimeRevision,
+      }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
+export async function updateAgentUseDefault(
+  agentName: string,
+  options?: ApiRequestOptions,
+): Promise<AgentUpdateJob> {
+  return fetchJson<AgentUpdateJob>(`/api/v1/agent-update/${encodeURIComponent(agentName)}`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify({ use_default: true }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
+export type AgentRuntimeOutcome = {
+  id: string;
+  status: "running" | "succeeded" | "failed" | "interrupted";
+  previous_version: string;
+  target_version: string;
+  finished_at: string;
+};
+
+export type AgentUpdateStatus = {
+  update_mode?: AgentUpdateMode;
+  managed_fallback?: boolean;
+  display_name: string;
+  runtime_id: string;
+  owner: "kandev" | "external" | "none";
+  mechanism: string;
+  management: "managed" | "manual" | "unsupported";
+  source?: string;
+  guidance_url?: string;
+  current_version?: string;
+  available: boolean;
+  enabled: boolean;
+  auto_update_supported: boolean;
+  auto_update: boolean;
+  last_outcome?: AgentRuntimeOutcome;
+  agent_name: string;
+  package: string;
+  default_version: string;
+  active_version?: string;
+  effective_version: string;
+  latest_version?: string;
+  checked_at?: string;
+  check_state: AgentUpdateCheckState;
+  family?: "v1" | "v2";
+  runtime_revision?: number;
+  migration_available?: boolean;
+};
+
+export async function listAgentUpdateStatuses(
+  options?: ApiRequestOptions,
+): Promise<{ statuses: AgentUpdateStatus[] }> {
+  return fetchJson<{ statuses: AgentUpdateStatus[] }>("/api/v1/agent-update/status", options);
 }
 
 export async function listAgentUpdateJobs(
@@ -80,4 +218,10 @@ export async function getAgentUpdateJob(
   options?: ApiRequestOptions,
 ): Promise<AgentUpdateJob> {
   return fetchJson<AgentUpdateJob>(`/api/v1/agent-update/jobs/${jobId}`, options);
+}
+
+export async function setAgentAutomaticUpdates(agentName: string, enabled: boolean): Promise<void> {
+  await fetchJson(`/api/v1/agent-update/${encodeURIComponent(agentName)}/automatic`, {
+    init: { method: "PATCH", body: JSON.stringify({ enabled }) },
+  });
 }

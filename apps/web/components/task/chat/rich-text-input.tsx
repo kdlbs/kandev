@@ -31,7 +31,7 @@ export type RichTextInputHandle = {
   getValue: () => string;
   setValue: (value: string) => void;
   insertText: (text: string, from: number, to: number) => void;
-  getTextareaElement: () => HTMLTextAreaElement | null;
+  getTextareaElement: () => HTMLElement | null;
 };
 
 type RichTextInputProps = {

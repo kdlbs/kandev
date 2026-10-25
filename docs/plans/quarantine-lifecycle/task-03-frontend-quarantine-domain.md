@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-bulk-quarantine-api"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 03: Frontend quarantine domain

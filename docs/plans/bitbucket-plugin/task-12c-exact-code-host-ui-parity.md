@@ -5,7 +5,7 @@ status: completed
 wave: 3c
 depends_on: ["12b-github-parity-page"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 decision: "../../decisions/2026-08-06-plugin-code-host-dashboard-parity.md"
 ---
 

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: PodTemplate
+template:
+  spec:
+    automountServiceAccountToken: false
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: kandev-agent
+        image: ghcr.io/kdlbs/kandev-worker@sha256:REPLACE_WITH_PYTHON_DIGEST
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: PIP_CACHE_DIR
+            value: /workspace/.cache/pip
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            memory: 2Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL

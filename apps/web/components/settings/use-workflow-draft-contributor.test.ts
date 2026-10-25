@@ -108,6 +108,14 @@ beforeEach(() => {
 });
 
 describe("useWorkflowDraftContributor", () => {
+  it("normalizes optional workflow metadata in the save revision", () => {
+    renderContributor({
+      draftWorkflow: { ...savedWorkflow, description: null },
+    });
+
+    expect(contributor().revision).toContain('"workflow":["Workflow","","",""]');
+  });
+
   it("blocks coordinated saves while session model options are resolving", () => {
     renderContributor({ isSessionConfigResolutionPending: true });
 

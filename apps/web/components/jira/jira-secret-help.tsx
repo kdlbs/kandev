@@ -52,6 +52,9 @@ export function secretCopy(
       label: t("jira:sessionTokenValue"),
       placeholder: t("jira:pasteSessionTokenValue", { cookieName: SESSION_COOKIE_NAME }),
     },
+    // OAuth has no paste field (OAuthFields renders the connect button instead);
+    // this entry only satisfies the exhaustive Record<JiraAuthMethod, ...> type.
+    oauth: { label: t("jira:oauth2"), placeholder: "" },
   };
 }
 

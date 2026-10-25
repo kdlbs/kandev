@@ -2,13 +2,13 @@ package backendapp
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	mcpregistry "github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/registry"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -28,23 +29,29 @@ import (
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
+	dockerremote "github.com/kandev/kandev/internal/dockerremote"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
+	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
+	"github.com/kandev/kandev/internal/failedinbox"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -54,6 +61,7 @@ import (
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/integrations/workspacescope"
 	"github.com/kandev/kandev/internal/jira"
+	kuberneteshandlers "github.com/kandev/kandev/internal/kubernetes"
 	"github.com/kandev/kandev/internal/linear"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
@@ -61,11 +69,14 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
-	"github.com/kandev/kandev/internal/office"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/retention"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/org"
+	"github.com/kandev/kandev/internal/orgunit"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/profiles"
@@ -78,6 +89,7 @@ import (
 	"github.com/kandev/kandev/internal/sentry"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
+	"github.com/kandev/kandev/internal/startup"
 	systemsvc "github.com/kandev/kandev/internal/system"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -95,23 +107,32 @@ import (
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	"github.com/kandev/kandev/internal/workflowsync"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 const (
-	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
-	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
-	agentShutdownTimeout     = 20 * time.Second
-	httpShutdownTimeout      = 10 * time.Second
-	tracingShutdownTimeout   = 5 * time.Second
-	addedFieldKey            = "added"
-	branchFieldKey           = "branch"
-	branchAdditionsFieldKey  = "branch_additions"
-	branchDeletionsFieldKey  = "branch_deletions"
-	deletedFieldKey          = "deleted"
-	versionFieldKey          = "version"
-	kandevName               = "kandev"
-	startingStatus           = "starting"
+	desktopHealthTokenEnv              = "KANDEV_DESKTOP_HEALTH_TOKEN"
+	desktopHealthTokenHeader           = "X-Kandev-Desktop-Health-Token"
+	desktopRuntimeEnv                  = "KANDEV_DESKTOP_RUNTIME"
+	agentShutdownTimeout               = 20 * time.Second
+	httpShutdownTimeout                = 10 * time.Second
+	tracingShutdownTimeout             = 5 * time.Second
+	addedFieldKey                      = "added"
+	branchFieldKey                     = "branch"
+	branchAdditionsFieldKey            = "branch_additions"
+	branchDeletionsFieldKey            = "branch_deletions"
+	deletedFieldKey                    = "deleted"
+	versionFieldKey                    = "version"
+	serviceFieldKey                    = "service"
+	kandevName                         = "kandev"
+	startingStatus                     = "starting"
+	healthRoutePath                    = "/health"
+	readyRoutePath                     = "/ready"
+	websocketRoutePath                 = "/ws"
+	gitStatusReadyState                = "ready"
+	gitStatusLiveSourceUnavailableCode = "live_source_unavailable"
+	gitStatusRepositoryUnavailableCode = "repository_unavailable"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -151,6 +172,214 @@ func buildSessionGitDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *
 		}
 		return appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, nil, log), nil
 	}
+}
+
+func buildSessionGitRefreshProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) gateways.SessionGitRefreshProvider {
+	return func(ctx context.Context, sessionID, mode string) (gateways.SessionGitRefreshResult, error) {
+		return getSessionGitStatusRefresh(ctx, taskRepo, lifecycleMgr, log, sessionID, mode)
+	}
+}
+
+func getSessionGitStatusRefresh(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, sessionID, mode string) (gateways.SessionGitRefreshResult, error) {
+	result := gateways.SessionGitRefreshResult{
+		SessionID: sessionID, Mode: mode, StatusState: "unavailable", Snapshots: []*ws.Message{},
+	}
+	session, err := taskRepo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		result.ErrorCode = "session_unavailable"
+		return result, nil
+	}
+	result.TaskEnvironmentID = session.TaskEnvironmentID
+	sources, ok := resolveGitStatusSources(ctx, taskRepo, session, log)
+	if !ok {
+		result.ErrorCode = "environment_unavailable"
+		return result, nil
+	}
+	result.TaskEnvironmentID = sources.environmentID
+	if lifecycleMgr == nil {
+		result.ErrorCode = gitStatusLiveSourceUnavailableCode
+		return result, nil
+	}
+	return refreshGitStatusFromSources(ctx, taskRepo, lifecycleMgr, log, result, sources, sessionID, mode), nil
+}
+
+func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, result gateways.SessionGitRefreshResult, sources *gitStatusSources, sessionID, mode string) gateways.SessionGitRefreshResult {
+	budget := 2 * time.Second
+	if mode == "recover" {
+		budget = 60 * time.Second
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	live := false
+	for _, sourceSessionID := range sources.sessionIDs {
+		if rpcCtx.Err() != nil {
+			break
+		}
+		multi, sourceLive := getGitStatusRefreshFromSource(rpcCtx, taskRepo, lifecycleMgr, log, sources, sessionID, sourceSessionID, mode)
+		live = live || sourceLive
+		if multi == nil {
+			continue
+		}
+		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
+		if result.Success {
+			return result
+		}
+	}
+	if live && rpcCtx.Err() != nil {
+		result.ErrorCode = "status_timeout"
+	} else {
+		result.ErrorCode = gitStatusLiveSourceUnavailableCode
+	}
+	return result
+}
+
+func getGitStatusRefreshFromSource(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, sources *gitStatusSources, requestedSessionID, sourceSessionID, mode string) (*client.MultiRepoGitStatusResult, bool) {
+	execution, exists := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
+	if !exists || !executionMatchesGitStatusSource(sources, execution, sourceSessionID, log) || !isLiveGitStatusExecution(execution) {
+		return nil, false
+	}
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	if agentClient == nil {
+		releaseClient()
+		return nil, true
+	}
+	generation, err := agentClient.ConnectionGeneration(ctx)
+	if err != nil {
+		releaseClient()
+		return nil, true
+	}
+	streamGeneration := execution.StartupAttemptGeneration()
+	multi, queryErr := agentClient.GetGitStatusMultiRefresh(ctx, mode)
+	stillCurrent := revalidateSessionGitRefreshSource(ctx, taskRepo, lifecycleMgr, requestedSessionID, sources, sourceSessionID, execution, agentClient, generation, streamGeneration, log)
+	releaseClient()
+	if queryErr != nil || !stillCurrent || multi == nil || len(multi.Repos) == 0 {
+		return nil, true
+	}
+	return multi, true
+}
+
+func appendGitStatusRefreshSnapshots(result *gateways.SessionGitRefreshResult, sources *gitStatusSources, sessionID string, multi *client.MultiRepoGitStatusResult) {
+	for _, repo := range multi.Repos {
+		status := repo.Status
+		markFailedGitRepositoryUnavailable(&status)
+		if notification := buildGitStatusNotification(sessionID, sources.environmentID, repo.RepositoryName, status); notification != nil {
+			result.Snapshots = append(result.Snapshots, notification)
+		}
+		if isCompleteGitStatusResult(status) {
+			result.Success = true
+			result.StatusState = gitStatusReadyState
+		}
+	}
+	if !result.Success {
+		result.ErrorCode = "status_unavailable"
+	}
+}
+
+func markFailedGitRepositoryUnavailable(status *client.GitStatusResult) {
+	if status.Success {
+		return
+	}
+	status.StatusState = "unavailable"
+	status.FilesComplete = false
+	status.DetailState = "unavailable"
+	if status.ErrorCode == "" {
+		status.ErrorCode = gitStatusRepositoryUnavailableCode
+	}
+}
+
+func isCompleteGitStatusResult(status client.GitStatusResult) bool {
+	return status.Success && status.FilesComplete && (status.StatusState == gitStatusReadyState || status.StatusState == "")
+}
+
+func revalidateSessionGitRefreshSource(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	lifecycleMgr *lifecycle.Manager,
+	requestedSessionID string,
+	sources *gitStatusSources,
+	sourceSessionID string,
+	execution *lifecycle.AgentExecution,
+	agentClient *client.Client,
+	connectionGeneration string,
+	streamGeneration uint64,
+	log *logger.Logger,
+) bool {
+	if !hasGitStatusRefreshInputs(ctx, taskRepo, lifecycleMgr, execution, agentClient) {
+		return false
+	}
+	if !isCurrentGitStatusExecution(ctx, lifecycleMgr, sources, sourceSessionID, execution, streamGeneration, log) {
+		return false
+	}
+	if !matchesGitStatusConnectionGeneration(ctx, agentClient, connectionGeneration) {
+		return false
+	}
+	return requestedSessionUsesGitStatusSource(ctx, taskRepo, requestedSessionID, sources, sourceSessionID, log)
+}
+
+func hasGitStatusRefreshInputs(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, execution *lifecycle.AgentExecution, agentClient *client.Client) bool {
+	return ctx.Err() == nil && taskRepo != nil && lifecycleMgr != nil && execution != nil && agentClient != nil
+}
+
+func isCurrentGitStatusExecution(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, sourceSessionID string, execution *lifecycle.AgentExecution, streamGeneration uint64, log *logger.Logger) bool {
+	currentExecution, ok := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
+	if !ok || !sameGitStatusExecution(currentExecution, execution, streamGeneration) {
+		return false
+	}
+	return executionMatchesGitStatusSource(sources, currentExecution, sourceSessionID, log) && isLiveGitStatusExecution(currentExecution)
+}
+
+func sameGitStatusExecution(currentExecution, execution *lifecycle.AgentExecution, streamGeneration uint64) bool {
+	if currentExecution == nil || execution == nil {
+		return false
+	}
+	if currentExecution != execution || currentExecution.ID != execution.ID {
+		return false
+	}
+	if currentExecution.TaskEnvironmentID != execution.TaskEnvironmentID || currentExecution.WorkspacePath != execution.WorkspacePath {
+		return false
+	}
+	return currentExecution.StartupAttemptGeneration() == streamGeneration
+}
+
+func matchesGitStatusConnectionGeneration(ctx context.Context, agentClient *client.Client, expected string) bool {
+	currentGeneration, err := agentClient.ConnectionGeneration(ctx)
+	return err == nil && currentGeneration == expected
+}
+
+func requestedSessionUsesGitStatusSource(ctx context.Context, taskRepo *sqliterepo.Repository, requestedSessionID string, sources *gitStatusSources, sourceSessionID string, log *logger.Logger) bool {
+	requested, err := taskRepo.GetTaskSession(ctx, requestedSessionID)
+	if err != nil || requested == nil || requested.TaskEnvironmentID != sources.environmentID {
+		return false
+	}
+	currentSources, ok := resolveGitStatusSources(ctx, taskRepo, requested, log)
+	if !sameGitStatusRefreshScope(currentSources, sources, ok) {
+		return false
+	}
+	return sourceSessionStillEligible(currentSources.sessionIDs, sourceSessionID)
+}
+
+func sameGitStatusRefreshScope(currentSources, expected *gitStatusSources, ok bool) bool {
+	if !ok || currentSources.environmentID != expected.environmentID || currentSources.workspacePath != expected.workspacePath {
+		return false
+	}
+	if len(currentSources.workspacePaths) != len(expected.workspacePaths) {
+		return false
+	}
+	for path := range currentSources.workspacePaths {
+		if _, exists := expected.workspacePaths[path]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) bool {
+	for _, candidate := range sessionIDs {
+		if candidate == sourceSessionID {
+			return true
+		}
+	}
+	return false
 }
 
 const sessionIDPayloadKey = "session_id"
@@ -266,110 +495,246 @@ func appendSessionStateMessageWithCancellation(
 	return result
 }
 
-// appendLiveGitStatusMessage adds git status notification(s) by querying
-// agentctl for live status. Multi-repo workspaces emit one notification per
+// appendLiveGitStatusMessage adds git status notification(s) from the canonical
+// task-environment workspace. Multi-repo workspaces emit one notification per
 // repo (stamped with repository_name); single-repo emits a single untagged
-// notification. Falls back to DB snapshot if no execution exists (archived
-// sessions only — the snapshot is workspace-wide, not per-repo).
+// notification. A session without an environment has no authoritative status
+// scope and therefore emits nothing.
 func appendLiveGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, sessionID string, session *models.TaskSession, result []*ws.Message, log *logger.Logger) []*ws.Message {
-	if msgs := tryGetLiveGitStatus(ctx, lifecycleMgr, sessionID, log); len(msgs) > 0 {
+	sources, ok := resolveGitStatusSources(ctx, taskRepo, session, log)
+	if !ok {
+		return result
+	}
+	msgs, live := tryGetLiveGitStatusWithState(ctx, lifecycleMgr, sessionID, sources, log)
+	if live {
 		return append(result, msgs...)
 	}
-	return appendDBSnapshotGitStatus(ctx, taskRepo, sessionID, result, log)
+	return appendDBSnapshotGitStatus(ctx, taskRepo, sessionID, sources, result, log)
 }
 
 // tryGetLiveGitStatus attempts to get live git status from agentctl.
 // Returns one notification per repo (one entry for single-repo workspaces).
-// Returns nil when the session has no live execution or agentctl is stuck.
-func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, sessionID string, log *logger.Logger) []*ws.Message {
+// Returns nil when no eligible source has a live execution or agentctl is
+// stuck. Callers that need to distinguish a failed live query from an absent
+// live execution should use tryGetLiveGitStatusWithState.
+func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, requestedSessionID string, sources *gitStatusSources, log *logger.Logger) []*ws.Message {
+	msgs, _ := tryGetLiveGitStatusWithState(ctx, lifecycleMgr, requestedSessionID, sources, log)
+	return msgs
+}
+
+// tryGetLiveGitStatusWithState probes every eligible execution in the
+// environment under one deadline. The boolean is true as soon as an eligible
+// non-terminal execution is found, even when agentctl cannot answer. This
+// prevents a stale persisted snapshot from replacing an authoritative but
+// currently unavailable live source.
+func tryGetLiveGitStatusWithState(ctx context.Context, lifecycleMgr *lifecycle.Manager, requestedSessionID string, sources *gitStatusSources, log *logger.Logger) ([]*ws.Message, bool) {
 	if lifecycleMgr == nil {
-		return nil
+		return nil, false
+	}
+	if sources == nil || sources.environmentID == "" {
+		return nil, false
 	}
 
-	execution, ok := lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !ok {
-		log.Debug("no execution found for session, will fall back to DB snapshot",
-			zap.String("session_id", sessionID))
-		return nil
-	}
-
-	agentClient := execution.GetAgentCtlClient()
-	if agentClient == nil {
-		log.Debug("no agentctl client available for session, will fall back to DB snapshot",
-			zap.String("session_id", sessionID))
-		return nil
-	}
-
-	// Use bounded timeout to prevent blocking session hydration if agentctl is stuck.
+	// Bound the complete source probe, not each source independently. Shared
+	// environments can have several eligible executions, and a stuck agentctl
+	// must not add another two seconds for every sibling.
 	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	// Force fresh git query: cache can wedge when the poll loop misses a HEAD change.
-	multi, err := agentClient.GetGitStatusMultiFresh(rpcCtx)
+
+	live := false
+	for _, sourceSessionID := range sources.sessionIDs {
+		if err := rpcCtx.Err(); err != nil {
+			return nil, live
+		}
+		execution, ok := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
+		if !ok {
+			continue
+		}
+		if !executionMatchesGitStatusSource(sources, execution, sourceSessionID, log) {
+			continue
+		}
+		if !isLiveGitStatusExecution(execution) {
+			continue
+		}
+		live = true
+		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, lifecycleMgr, sources, execution, requestedSessionID, sourceSessionID, sources.environmentID, log); len(msgs) > 0 {
+			return msgs, true
+		}
+	}
+	return nil, live
+}
+
+func isLiveGitStatusExecution(execution *lifecycle.AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	switch execution.Status {
+	case v1.AgentStatusCompleted, v1.AgentStatusFailed, v1.AgentStatusStopped:
+		return false
+	default:
+		// An empty status is retained as live for recovered/legacy in-memory
+		// executions that have been registered but not promoted yet.
+		return true
+	}
+}
+
+func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifecycle.AgentExecution, sessionID string, log *logger.Logger) bool {
+	if execution == nil || sources == nil || sources.environmentID == "" {
+		return false
+	}
+	if execution.TaskEnvironmentID != "" && execution.TaskEnvironmentID != sources.environmentID {
+		log.Debug("rejecting live git status source",
+			zap.String("source_session_id", sessionID),
+			zap.String("task_environment_id", sources.environmentID),
+			zap.String("reason", "environment_mismatch"))
+		return false
+	}
+	if execution.WorkspacePath != sources.workspacePath {
+		if _, allowed := sources.workspacePaths[execution.WorkspacePath]; allowed {
+			return true
+		}
+		log.Debug("rejecting live git status source",
+			zap.String("source_session_id", sessionID),
+			zap.String("task_environment_id", sources.environmentID),
+			zap.String("reason", "workspace_mismatch"))
+		return false
+	}
+	return true
+}
+
+func tryGetLiveGitStatusFromExecution(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if agentClient == nil {
+		log.Debug("no agentctl client available for live git status",
+			zap.String("source_session_id", sourceSessionID))
+		return nil
+	}
+	connectionGeneration, err := agentClient.ConnectionGeneration(ctx)
 	if err != nil {
-		log.Debug("failed to get live git status, will fall back to DB snapshot",
-			zap.String("session_id", sessionID),
+		return nil
+	}
+	streamGeneration := execution.StartupAttemptGeneration()
+
+	// Force fresh git query: cache can wedge when the poll loop misses a HEAD change.
+	multi, err := agentClient.GetGitStatusMultiFresh(ctx)
+	if err != nil {
+		log.Debug("failed to get live git status",
+			zap.String("source_session_id", sourceSessionID),
 			zap.Error(err))
 		return nil
 	}
-	if multi == nil || !multi.Success || len(multi.Repos) == 0 {
+	if !isCurrentInitialGitStatusRead(ctx, lifecycleMgr, sources, execution, agentClient, connectionGeneration, sourceSessionID, streamGeneration, log) {
 		return nil
 	}
-
-	out := make([]*ws.Message, 0, len(multi.Repos))
-	for _, repo := range multi.Repos {
-		if !repo.Status.Success {
-			continue
-		}
-		notification := buildGitStatusNotification(sessionID, repo.RepositoryName, repo.Status)
-		if notification != nil {
-			out = append(out, notification)
-		}
+	if !hasGitStatusRepositories(multi) {
+		return nil
 	}
+	out := liveGitStatusNotifications(requestedSessionID, taskEnvironmentID, multi)
 	if len(out) == 0 {
 		return nil
 	}
 	log.Debug("got live git status from agentctl",
-		zap.String("session_id", sessionID),
+		zap.String("requested_session_id", requestedSessionID),
+		zap.String("source_session_id", sourceSessionID),
 		zap.Int("repos", len(out)))
 	return out
+}
+
+func isCurrentInitialGitStatusRead(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, execution *lifecycle.AgentExecution, agentClient *client.Client, connectionGeneration, sourceSessionID string, streamGeneration uint64, log *logger.Logger) bool {
+	return isCurrentGitStatusExecution(ctx, lifecycleMgr, sources, sourceSessionID, execution, streamGeneration, log) &&
+		matchesGitStatusConnectionGeneration(ctx, agentClient, connectionGeneration)
+}
+
+func hasGitStatusRepositories(multi *client.MultiRepoGitStatusResult) bool {
+	return multi != nil && multi.Success && len(multi.Repos) > 0
+}
+
+func liveGitStatusNotifications(requestedSessionID, taskEnvironmentID string, multi *client.MultiRepoGitStatusResult) []*ws.Message {
+	notifications := make([]*ws.Message, 0, len(multi.Repos))
+	for _, repo := range multi.Repos {
+		status := repo.Status
+		markFailedGitRepositoryUnavailable(&status)
+		if notification := buildGitStatusNotification(requestedSessionID, taskEnvironmentID, repo.RepositoryName, status); notification != nil {
+			notifications = append(notifications, notification)
+		}
+	}
+	return notifications
 }
 
 // buildGitStatusNotification packages a single repo's status as a WS event
 // the frontend can route through its existing git-status handler. The
 // repository_name is stamped on the inner status payload so the frontend
 // stores it under byEnvironmentRepo[envKey][repository_name].
-func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
+func buildGitStatusNotification(sessionID, taskEnvironmentID, repositoryName string, status client.GitStatusResult) *ws.Message {
+	if taskEnvironmentID == "" {
+		return nil
+	}
+	statusState := status.StatusState
+	detailState := status.DetailState
+	filesComplete := status.FilesComplete
+	if statusState == "" {
+		if status.Success {
+			statusState = gitStatusReadyState
+			filesComplete = true
+		} else {
+			statusState = "unavailable"
+		}
+	}
+	if detailState == "" {
+		if status.Success {
+			detailState = gitStatusReadyState
+		} else {
+			detailState = "unavailable"
+		}
+	}
+	errorCode := status.ErrorCode
+	if !status.Success && errorCode == "" {
+		errorCode = "status_unavailable"
+	}
 	statusPayload := map[string]interface{}{
 		branchFieldKey:          status.Branch,
 		"remote_branch":         status.RemoteBranch,
 		"head_commit":           status.HeadCommit,
 		"base_commit":           status.BaseCommit,
-		"ahead":                 status.Ahead,
-		"behind":                status.Behind,
-		"remote_ahead":          status.RemoteAhead,
-		"remote_behind":         status.RemoteBehind,
-		"remote_head_commit":    status.RemoteHeadCommit,
-		"files":                 status.Files,
-		"modified":              status.Modified,
-		addedFieldKey:           status.Added,
-		deletedFieldKey:         status.Deleted,
-		"untracked":             status.Untracked,
-		"renamed":               status.Renamed,
-		branchAdditionsFieldKey: status.BranchAdditions,
-		branchDeletionsFieldKey: status.BranchDeletions,
+		"status_state":          statusState,
+		"files_complete":        filesComplete,
+		"detail_state":          detailState,
+		"error_code":            errorCode,
+		"tracker_id":            status.TrackerID,
+		"tracker_epoch":         status.TrackerEpoch,
+		"snapshot_revision":     status.SnapshotRevision,
 		"comparison_target":     status.ComparisonTarget,
 		"comparison_status":     status.ComparisonStatus,
 		"comparison_error_code": status.ComparisonErrorCode,
 		"is_submodule":          status.IsSubmodule,
 	}
+	if filesComplete {
+		statusPayload["files"] = status.Files
+		statusPayload["modified"] = status.Modified
+		statusPayload[addedFieldKey] = status.Added
+		statusPayload[deletedFieldKey] = status.Deleted
+		statusPayload["untracked"] = status.Untracked
+		statusPayload["renamed"] = status.Renamed
+	}
+	if detailState == gitStatusReadyState {
+		statusPayload["ahead"] = status.Ahead
+		statusPayload["behind"] = status.Behind
+		statusPayload["remote_ahead"] = status.RemoteAhead
+		statusPayload["remote_behind"] = status.RemoteBehind
+		statusPayload["remote_head_commit"] = status.RemoteHeadCommit
+		statusPayload[branchAdditionsFieldKey] = status.BranchAdditions
+		statusPayload[branchDeletionsFieldKey] = status.BranchDeletions
+	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
 	}
 	gitEventData := map[string]interface{}{
-		"type":       "status_update",
-		"session_id": sessionID,
-		"timestamp":  status.Timestamp,
-		"status":     statusPayload,
+		"type":                "status_update",
+		"session_id":          sessionID,
+		"task_environment_id": taskEnvironmentID,
+		"timestamp":           status.Timestamp,
+		"status":              statusPayload,
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
 	if err != nil {
@@ -378,61 +743,118 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 	return notification
 }
 
-// appendDBSnapshotGitStatus appends a git status notification from DB snapshot.
-func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID string, result []*ws.Message, log *logger.Logger) []*ws.Message {
-	log.Debug("falling back to DB snapshot for git status",
-		zap.String("session_id", sessionID))
+// appendDBSnapshotGitStatus appends a git status notification from the newest
+// eligible DB snapshot. The selected source is always routed as the requested
+// subscription session.
+func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID string, sources *gitStatusSources, result []*ws.Message, log *logger.Logger) []*ws.Message {
+	if taskRepo == nil || sources == nil || sources.environmentID == "" {
+		return result
+	}
+	logFields := []zap.Field{zap.String("requested_session_id", sessionID)}
+	logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
+	log.Debug("falling back to DB snapshot for git status", logFields...)
 
-	latestSnapshot, err := taskRepo.GetLatestGitSnapshot(ctx, sessionID)
+	snapshots, err := taskRepo.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, []string{sources.environmentID})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// Expected for sessions that have not produced a snapshot yet.
-			return result
-		}
-		log.Warn("failed to load DB snapshot for session",
-			zap.String("session_id", sessionID),
+		log.Warn("failed to load DB snapshots for git status",
+			zap.String("requested_session_id", sessionID),
 			zap.Error(err))
 		return result
 	}
-	if latestSnapshot == nil {
-		log.Debug("no DB snapshot found for session",
-			zap.String("session_id", sessionID))
+	latestByRepository := newestGitStatusSnapshotsByRepository(snapshots)
+	if len(latestByRepository) == 0 {
+		log.Debug("no eligible DB snapshot found for git status",
+			zap.String("requested_session_id", sessionID))
 		return result
 	}
-
-	metadata := latestSnapshot.Metadata
-	gitEventData := map[string]interface{}{
-		"type":       "status_update",
-		"session_id": sessionID,
-		"timestamp":  metadata["timestamp"],
-		"status": map[string]interface{}{
-			branchFieldKey:          latestSnapshot.Branch,
-			"remote_branch":         latestSnapshot.RemoteBranch,
-			"head_commit":           latestSnapshot.HeadCommit,
-			"base_commit":           latestSnapshot.BaseCommit,
-			"ahead":                 latestSnapshot.Ahead,
-			"behind":                latestSnapshot.Behind,
-			"remote_ahead":          metadata["remote_ahead"],
-			"remote_behind":         metadata["remote_behind"],
-			"remote_head_commit":    metadata["remote_head_commit"],
-			"files":                 latestSnapshot.Files,
-			"modified":              metadata["modified"],
-			addedFieldKey:           metadata[addedFieldKey],
-			deletedFieldKey:         metadata[deletedFieldKey],
-			"untracked":             metadata["untracked"],
-			"renamed":               metadata["renamed"],
-			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
-			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
-			"comparison_target":     metadata["comparison_target"],
-			"comparison_status":     metadata["comparison_status"],
-			"comparison_error_code": metadata["comparison_error_code"],
-		},
+	repositoryNames := make([]string, 0, len(latestByRepository))
+	for repositoryName := range latestByRepository {
+		repositoryNames = append(repositoryNames, repositoryName)
 	}
-	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
-	if err == nil {
-		result = append(result, notification)
+	sort.Strings(repositoryNames)
+	for _, repositoryName := range repositoryNames {
+		snapshot := latestByRepository[repositoryName]
+		logFields := []zap.Field{
+			zap.String("requested_session_id", sessionID),
+			zap.String("source_session_id", snapshot.SessionID),
+		}
+		logFields = append(logFields, zap.String("task_environment_id", sources.environmentID))
+		if repositoryName != "" {
+			logFields = append(logFields, zap.String("repository_name", repositoryName))
+		}
+		log.Debug("selected DB snapshot for git status", logFields...)
+		if notification := buildGitSnapshotNotification(sessionID, repositoryName, snapshot); notification != nil {
+			result = append(result, notification)
+		}
 	}
 	return result
+}
+
+func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *models.GitSnapshot) *ws.Message {
+	if snapshot == nil || snapshot.TaskEnvironmentID == "" {
+		return nil
+	}
+	metadata := snapshot.Metadata
+	compactLive := snapshot.TriggeredBy == sqliterepo.TriggeredByLiveMonitor && snapshot.Files == nil
+	statusPayload := map[string]interface{}{
+		branchFieldKey:          snapshot.Branch,
+		"remote_branch":         snapshot.RemoteBranch,
+		"head_commit":           snapshot.HeadCommit,
+		"base_commit":           snapshot.BaseCommit,
+		"status_state":          gitStatusReadyState,
+		"files_complete":        true,
+		"detail_state":          gitStatusReadyState,
+		"comparison_target":     metadata["comparison_target"],
+		"comparison_status":     metadata["comparison_status"],
+		"comparison_error_code": metadata["comparison_error_code"],
+	}
+	if compactLive {
+		statusPayload["files_complete"] = false
+		statusPayload["error_code"] = "summary_only"
+		if metadata["status_state"] == gitStatusReadyState && metadata["detail_state"] == gitStatusReadyState {
+			statusPayload["status_state"] = gitStatusReadyState
+			statusPayload["detail_state"] = gitStatusReadyState
+			statusPayload["ahead"] = snapshot.Ahead
+			statusPayload["behind"] = snapshot.Behind
+			statusPayload["remote_ahead"] = metadata["remote_ahead"]
+			statusPayload["remote_behind"] = metadata["remote_behind"]
+			statusPayload["remote_head_commit"] = metadata["remote_head_commit"]
+			statusPayload[branchAdditionsFieldKey] = metadata[branchAdditionsFieldKey]
+			statusPayload[branchDeletionsFieldKey] = metadata[branchDeletionsFieldKey]
+		} else {
+			statusPayload["status_state"] = "unavailable"
+			statusPayload["detail_state"] = "unavailable"
+		}
+	} else {
+		statusPayload["files"] = snapshot.Files
+		statusPayload["ahead"] = snapshot.Ahead
+		statusPayload["behind"] = snapshot.Behind
+		statusPayload["remote_ahead"] = metadata["remote_ahead"]
+		statusPayload["remote_behind"] = metadata["remote_behind"]
+		statusPayload["remote_head_commit"] = metadata["remote_head_commit"]
+		statusPayload["modified"] = metadata["modified"]
+		statusPayload[addedFieldKey] = metadata[addedFieldKey]
+		statusPayload[deletedFieldKey] = metadata[deletedFieldKey]
+		statusPayload["untracked"] = metadata["untracked"]
+		statusPayload["renamed"] = metadata["renamed"]
+		statusPayload[branchAdditionsFieldKey] = metadata[branchAdditionsFieldKey]
+		statusPayload[branchDeletionsFieldKey] = metadata[branchDeletionsFieldKey]
+	}
+	if repositoryName != "" {
+		statusPayload["repository_name"] = repositoryName
+	}
+	gitEventData := map[string]interface{}{
+		"type":                "status_update",
+		"session_id":          sessionID,
+		"task_environment_id": snapshot.TaskEnvironmentID,
+		"timestamp":           metadata["timestamp"],
+		"status":              statusPayload,
+	}
+	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
+	if err != nil {
+		return nil
+	}
+	return notification
 }
 
 // appendContextWindowMessage adds a context window notification to result if available.
@@ -466,7 +888,20 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 	if lifecycleMgr == nil {
 		return result
 	}
-	commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
+	return appendAvailableCommandsMessageForCommands(
+		sessionID,
+		session,
+		lifecycleMgr.GetAvailableCommandsForSession(sessionID),
+		result,
+	)
+}
+
+func appendAvailableCommandsMessageForCommands(
+	sessionID string,
+	session *models.TaskSession,
+	commands []streams.AvailableCommand,
+	result []*ws.Message,
+) []*ws.Message {
 	if len(commands) == 0 {
 		return result
 	}
@@ -483,18 +918,29 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 
 // appendSessionModeMessage adds session mode state notification to result if cached.
 func appendSessionModeMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
-	if lifecycleMgr == nil {
+	var modeState *lifecycle.CachedModeState
+	if lifecycleMgr != nil {
+		modeState = lifecycleMgr.GetModeStateForSession(sessionID)
+	}
+	snapshot, hasSnapshot := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	if modeState == nil && hasSnapshot {
+		modeState = &lifecycle.CachedModeState{CurrentModeID: snapshot.CurrentModeID}
+	}
+	if modeState == nil {
 		return result
 	}
-	modeState := lifecycleMgr.GetModeStateForSession(sessionID)
-	if modeState == nil || (modeState.CurrentModeID == "" && len(modeState.AvailableModes) == 0) {
+	hasKnownMode := modeState.CurrentModeID != "" || len(modeState.AvailableModes) > 0
+	hasExplicitUnknownMode := hasSnapshot && (snapshot.SettingsAttemptID != "" ||
+		snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored)
+	if !hasKnownMode && !hasExplicitUnknownMode {
 		return result
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionModeChanged, lifecycle.SessionModeEventPayload{
-		TaskID:         session.TaskID,
-		SessionID:      sessionID,
-		CurrentModeID:  modeState.CurrentModeID,
-		AvailableModes: modeState.AvailableModes,
+		TaskID:                session.TaskID,
+		SessionID:             sessionID,
+		CurrentModeID:         modeState.CurrentModeID,
+		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
+		AvailableModes:        modeState.AvailableModes,
 	})
 	if err == nil {
 		result = append(result, notification)
@@ -502,29 +948,147 @@ func appendSessionModeMessage(sessionID string, session *models.TaskSession, lif
 	return result
 }
 
-// appendSessionModelsMessage adds session models state notification to result if cached.
+// appendSessionModelsMessage adds the current or persisted session model state to result.
 func appendSessionModelsMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
-	if lifecycleMgr == nil {
+	var modelState *lifecycle.CachedModelState
+	if lifecycleMgr != nil {
+		modelState = lifecycleMgr.GetModelStateForSession(sessionID)
+	}
+	return appendSessionModelsMessageFromState(
+		sessionID,
+		session,
+		modelState,
+		result,
+	)
+}
+
+func appendSessionModelsMessageFromState(sessionID string, session *models.TaskSession, modelState *lifecycle.CachedModelState, result []*ws.Message) []*ws.Message {
+	snapshot, hasSnapshot := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	providerRestored := hasSnapshot && snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored
+	hasAttemptSnapshot := hasSnapshot && snapshot.SettingsAttemptID != ""
+	var replayState lifecycle.CachedModelState
+	if modelState == nil {
+		if !hasSnapshot {
+			return result
+		}
+		replayState = lifecycle.CachedModelState{
+			CurrentModelID:       snapshot.CurrentModelID,
+			Models:               snapshot.Models,
+			ConfigOptions:        snapshot.ConfigOptions,
+			ConfigOptionsSettled: snapshot.ConfigOptionsSettled,
+		}
+	} else {
+		replayState = *modelState
+		if len(replayState.Models) == 0 &&
+			len(replayState.ConfigOptions) == 0 &&
+			!replayState.ConfigOptionsSettled {
+			if len(snapshot.Models) > 0 {
+				replayState.Models = snapshot.Models
+				if replayState.CurrentModelID == "" {
+					replayState.CurrentModelID = snapshot.CurrentModelID
+				}
+			}
+		}
+	}
+	applyPersistedSessionRuntimeConfigOverrides(session, &replayState)
+	replayState.ConfigOptionsSettled = replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled
+	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 &&
+		len(replayState.ConfigOptions) == 0 && !replayState.ConfigOptionsSettled && !providerRestored && !hasAttemptSnapshot {
 		return result
 	}
-	modelState := lifecycleMgr.GetModelStateForSession(sessionID)
-	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
-		return result
-	}
-	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
-		TaskID:               session.TaskID,
-		SessionID:            sessionID,
-		CurrentModelID:       modelState.CurrentModelID,
-		Models:               modelState.Models,
-		ConfigOptions:        modelState.ConfigOptions,
-		ConfigOptionsSettled: modelState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
-		ConfigBaseline:       sessionACPConfigBaseline(session),
+		TaskID:                session.TaskID,
+		SessionID:             sessionID,
+		AgentExecutionID:      snapshot.SettingsSourceExecutionID,
+		CurrentModelID:        replayState.CurrentModelID,
+		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
+		Models:                replayState.Models,
+		ConfigOptions:         replayState.ConfigOptions,
+		ConfigOptionsSettled:  replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		ConfigBaseline:        sessionACPConfigBaseline(session),
 	})
 	if err == nil {
 		result = append(result, notification)
 	}
 	return result
+}
+
+func applyPersistedSessionRuntimeConfigOverrides(session *models.TaskSession, state *lifecycle.CachedModelState) {
+	if session == nil || state == nil {
+		return
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
+	if !ok {
+		return
+	}
+
+	if overrides.Model != "" && sessionModelAvailable(state.Models, overrides.Model) {
+		state.CurrentModelID = overrides.Model
+	}
+	if len(state.ConfigOptions) == 0 {
+		return
+	}
+	state.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
+	for index := range state.ConfigOptions {
+		applyPersistedSessionConfigOption(state, &state.ConfigOptions[index], overrides)
+	}
+}
+
+func applyPersistedSessionConfigOption(
+	state *lifecycle.CachedModelState,
+	option *streams.ConfigOption,
+	overrides models.SessionRuntimeConfig,
+) {
+	if option.ID == "" || strings.EqualFold(option.ID, "mode") || strings.EqualFold(option.Category, "mode") {
+		return
+	}
+	value, exists := overrides.ConfigOptions[option.ID]
+	if isSessionModelOption(*option) && value == "" {
+		value = overrides.Model
+		exists = value != ""
+	}
+	if !exists || value == "" || !sessionConfigOptionSupportsValue(*option, value) {
+		return
+	}
+	option.CurrentValue = value
+	if isSessionModelOption(*option) {
+		state.CurrentModelID = value
+	}
+}
+
+func isSessionModelOption(option streams.ConfigOption) bool {
+	return strings.EqualFold(option.ID, "model") || strings.EqualFold(option.Category, "model")
+}
+
+func sessionModelAvailable(models []streams.SessionModelInfo, modelID string) bool {
+	for _, model := range models {
+		if model.ModelID == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionConfigOptionSupportsValue(option streams.ConfigOption, value string) bool {
+	if len(option.Options) == 0 {
+		return true
+	}
+	for _, choice := range option.Options {
+		if choice.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionSettingsProjectionPolicyFromSnapshot(
+	snapshot lifecycle.SessionModelsSnapshot,
+	hasSnapshot bool,
+) streams.SessionSettingsPolicy {
+	if hasSnapshot && snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
+		return streams.SessionSettingsPolicyProviderRestored
+	}
+	return streams.SessionSettingsPolicyStrict
 }
 
 func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
@@ -537,6 +1101,7 @@ func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
 type routeParams struct {
+	ctx                           context.Context
 	router                        *gin.Engine
 	gateway                       *gateways.Gateway
 	taskSvc                       *taskservice.Service
@@ -555,7 +1120,10 @@ type routeParams struct {
 	temporaryArtifacts            *tempartifacts.Registry
 	runtimeFlagsSvc               *runtimeflags.Service
 	dbPool                        *db.Pool
+	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
+	runtimeUpdateNotifier         e2eRuntimeUpdateNotifier
+	e2eRuntimeUpdateHooks         *e2eRuntimeUpdateHooks
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
 	agentRegistry                 *registry.Registry
@@ -573,6 +1141,7 @@ type routeParams struct {
 	addCleanup                    func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
+	commit                        string
 	webInternalURL                string
 	webTitlePrefix                string
 	devMode                       bool
@@ -582,7 +1151,9 @@ type routeParams struct {
 	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
+	sshReachabilityPoller         *reachabilitypkg.Poller
 	log                           *logger.Logger
+	progress                      *startup.Reporter
 }
 
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
@@ -596,10 +1167,35 @@ func registerRoutes(p routeParams) {
 	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
+	if attachments := p.taskSvc.AttachmentService(); attachments != nil {
+		planService.SetPreviewAttachmentCleaner(attachments)
+		planService.SetPreviewScreenshotValidator(attachments)
+	}
+	// Stamps each plan revision with the task's workflow step at write time.
+	planService.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: p.services.Workflow})
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
+	// Archive's batch session cancellation bypasses the orchestrator's own
+	// per-session state-transition chokepoint, so it needs an explicit hook to
+	// clear that session's parked-projection tracking (spec:
+	// docs/specs/disambiguate-waiting).
+	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
+	p.taskSvc.SetSessionCeilingReleaser(p.orchestratorSvc)
+	// Single resolver instance shared by the REST clarification routes and the
+	// external answer_question_kandev/list_pending_questions_kandev MCP tools
+	// (R3: both entry points must race through the same claim).
+	clarificationResolver := clarification.NewResolver(
+		clarificationStore,
+		p.taskRepo,
+		p.msgCreator,
+		p.taskSvc,
+		p.orchestratorSvc,
+		p.eventBus,
+		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
+		p.log,
+	)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
@@ -614,6 +1210,13 @@ func registerRoutes(p routeParams) {
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
+	p.taskSvc.SetAutoArchiveCoordinator(handoffSvc)
+	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
+	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
+	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
+	wireOfficeProjectRepositorySources(p.taskSvc, p.officeRepo)
+	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
+	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
 	// satisfied by adapters that delegate to existing services.
@@ -624,17 +1227,43 @@ func registerRoutes(p routeParams) {
 		}
 	}
 	handoffSvc.SetRunCanceller(p.orchestratorSvc)
+	handoffSvc.SetGitArchiveCapture(p.orchestratorSvc)
+	handoffSvc.SetSessionCeilingReleaser(p.orchestratorSvc)
 	// Cascade archive/delete must re-publish task.updated / task.deleted
 	// events; HandoffService walks the repo directly and bypasses the
 	// Service wrappers that normally publish these. Without this wiring
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	// Startup repair for the workspace_orphaned board marker: stamps historical
+	// unmarked orphaned tasks and clears stale claims left by a crashed clear.
+	// Must run after SetTaskEventPublisher above (publishing needs it) and
+	// before the gateway accepts clients.
+	handoffSvc.RepairOrphanedWorkspaceMarkers(context.Background())
+	handoffSvc.SetVacatedStepReconciler(p.taskSvc)
 	// Per-user scoping for the cascade is installed by
 	// TaskHandlers.SetHandoffService, which is the call that makes the archive /
 	// delete routes prefer the cascade over the guarded Service methods.
 	if p.services.Office != nil {
 		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
+	}
+	if p.services.Office != nil {
+		p.services.Office.SetTaskTreeDeleter(func(ctx context.Context, taskID string) error {
+			_, err := handoffSvc.DeleteTaskTree(ctx, taskID, false)
+			var postCommitErr *taskservice.CascadePostCommitError
+			if errors.As(err, &postCommitErr) {
+				return nil
+			}
+			return err
+		})
+	}
+	// Config sync's own tables (office_config_sync_configs,
+	// office_config_sync_manifest) have no FK/cascade onto the workspace
+	// row, so DeleteWorkspace must release them explicitly or the poller
+	// keeps running against — and resurrecting entities into — a deleted
+	// workspace (see the "Workspace deletion side tables" convention).
+	if p.services.Office != nil && p.services.OfficeSvcs != nil && p.services.OfficeSvcs.ConfigSync != nil {
+		p.services.Office.SetConfigSyncCleaner(p.services.OfficeSvcs.ConfigSync)
 	}
 	// Cascade archive/delete must tear down runtime resources
 	// (container, sandbox, worktree, executor_running rows) for every
@@ -642,6 +1271,7 @@ func registerRoutes(p routeParams) {
 	// runCanceller but its container leaks because the cascade bypasses
 	// Service.ArchiveTask's runAsyncTaskCleanup branch.
 	handoffSvc.SetTaskResourceCleaner(p.taskSvc)
+	p.orchestratorSvc.SetTaskLifecycleDeleter(p.taskSvc)
 	// Watch reset (Reset button on integration settings) cascade-deletes
 	// every task a watch previously created. The integrations re-use the
 	// shared HandoffService so the reset path goes through the same
@@ -665,6 +1295,7 @@ func registerRoutes(p routeParams) {
 		p.services.GitLab.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
+		p.services.GitLab.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.AzureDevOps != nil {
 		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
@@ -685,6 +1316,7 @@ func registerRoutes(p routeParams) {
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
+		p.services.Sentry.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.Automation != nil {
 		p.services.Automation.Service.SetRepositoryLookup(repoLookup)
@@ -700,20 +1332,31 @@ func registerRoutes(p routeParams) {
 
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService, handoffSvc)
-	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
-		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
+		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.services.SessionHostnameResolver, p.log)
 	}
 
-	// /health is a readiness probe, not a liveness probe. It only
-	// returns 200 after main has flipped the package-level `ready`
-	// flag — which happens after route registration, agent-registry
-	// seeding, the HTTP listener accepting connections, and (when
-	// KANDEV_E2E_MOCK is set) the testharness routes being mounted.
-	// Before that, return 503 so callers (including the e2e fixture's
-	// waitForHealth) keep polling instead of racing ahead and hitting
-	// 404s on routes that aren't wired yet.
-	p.router.GET("/health", healthHandler(p))
+	// /health is a liveness probe: it answers 200 unconditionally, matching
+	// the bootstrap handler's /health contract (internal/backendapp/
+	// httpserver.go) so the launcher's healthcheck never depends on startup
+	// progress. By the time this handler is reachable at all, ready is
+	// already true (see the comment on startGatewayAndServe's Store calls),
+	// but it does not gate on that flag — liveness must not depend on
+	// readiness, or the crash loop docs/specs/startup-listener-before-
+	// recovery/spec.md exists to fix comes back.
+	p.router.GET(healthRoutePath, healthHandler(p))
+
+	// /ready is a readiness probe. It returns 200 only after main has
+	// flipped the package-level `ready` flag — which happens after route
+	// registration, agent-registry seeding, the HTTP listener accepting
+	// connections, and (when KANDEV_E2E_MOCK is set) the testharness routes
+	// being mounted. Before that, return 503 so callers (including the e2e
+	// fixture's readiness wait and Kubernetes' readinessProbe) keep polling
+	// instead of racing ahead and hitting 404s on routes that aren't wired
+	// yet. See docs/specs/health-endpoint-version/spec.md for the exact
+	// contract this endpoint now owns.
+	p.router.GET(readyRoutePath, readyHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -750,7 +1393,7 @@ func registerRoutes(p routeParams) {
 		} else {
 			p.router.NoRoute(func(c *gin.Context) {
 				path := c.Request.URL.Path
-				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" {
+				if strings.HasPrefix(path, "/api/") || path == websocketRoutePath || path == healthRoutePath || path == readyRoutePath {
 					c.AbortWithStatus(http.StatusNotFound)
 					return
 				}
@@ -774,40 +1417,68 @@ func registerRoutes(p routeParams) {
 	}
 }
 
-// healthHandler serves GET /health. The response always carries the
-// process's running version — in both the ready and not-ready bodies — so an
-// operator can identify the build of a backend that is stuck starting, and so
-// a monitor never needs a credential to read it (see docs/specs/
-// health-endpoint-version/spec.md).
+// healthHandler serves GET /health, the liveness probe. It always answers
+// 200 with the process's running version — regardless of the `ready` flag —
+// mirroring the bootstrap handler's /health contract (httpserver.go) so the
+// launcher's healthcheck never depends on startup progress. See docs/specs/
+// health-endpoint-version/spec.md for the exact response contract.
 func healthHandler(p routeParams) gin.HandlerFunc {
-	// p.version is normally the package-level Version wired in by run()'s
-	// registerRoutes call. Falling back here keeps the never-empty guarantee
-	// (AC-11) true regardless of that call-site wiring, since standing up
-	// run()'s full DI graph in a test just to exercise that one field
-	// assignment is out of proportion to this change.
-	version := p.version
-	if version == "" {
-		version = Version
-	}
+	version := resolveVersion(p)
 	return func(c *gin.Context) {
-		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status":        startingStatus,
-				"service":       kandevName,
-				versionFieldKey: version,
-			})
-			return
-		}
 		if token := desktopHealthToken(); token != "" {
 			c.Header(desktopHealthTokenHeader, token)
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":        "ok",
-			"service":       kandevName,
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
 			"mode":          "websocket+http",
 			versionFieldKey: version,
 		})
 	}
+}
+
+// readyHandler serves GET /ready, the readiness probe. The response always
+// carries the process's running version — in both the ready and not-ready
+// bodies — so an operator can identify the build of a backend that is stuck
+// starting, and so a monitor never needs a credential to read it (see
+// docs/specs/health-endpoint-version/spec.md).
+func readyHandler(p routeParams) gin.HandlerFunc {
+	version := resolveVersion(p)
+	return func(c *gin.Context) {
+		body := gin.H{
+			serviceFieldKey: kandevName,
+			versionFieldKey: version,
+		}
+		if p.progress != nil {
+			body["startup"] = p.progress.Snapshot()
+		}
+		if !ready.Load() {
+			body[statusKey] = startingStatus
+			c.JSON(http.StatusServiceUnavailable, body)
+			return
+		}
+		if p.persistenceHealth != nil && !p.persistenceHealth.Healthy() {
+			body[statusKey] = startingStatus
+			body["reason"] = "persistence"
+			body["store_ids"] = p.persistenceHealth.UnhealthyStoreIDs()
+			c.JSON(http.StatusServiceUnavailable, body)
+			return
+		}
+		body[statusKey] = "ok"
+		c.JSON(http.StatusOK, body)
+	}
+}
+
+// resolveVersion returns p.version, falling back to the package-level
+// Version. p.version is normally wired in by run()'s registerRoutes call;
+// the fallback keeps the never-empty guarantee (AC-11) true regardless of
+// that call-site wiring, since standing up run()'s full DI graph in a test
+// just to exercise that one field assignment is out of proportion.
+func resolveVersion(p routeParams) string {
+	if p.version != "" {
+		return p.version
+	}
+	return Version
 }
 
 func desktopHealthToken() string {
@@ -841,15 +1512,17 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:                         "/api/v1",
-		WebSocketPath:                     "/ws",
+		WebSocketPath:                     websocketRoutePath,
 		LSPAutoInstallPreferenceLanguages: lspinstaller.AutoInstallPreferenceLanguages(),
 		Debug:                             debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
-		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
-		Locale:        i18n.FromRequest(req),
-		TitlePrefix:   strings.TrimSpace(titlePrefix),
+		NonProduction:               profiles.DetectEnvironment() != profiles.EnvProd,
+		Locale:                      i18n.FromRequest(req),
+		TitlePrefix:                 strings.TrimSpace(titlePrefix),
+		NativeFolderPickerAvailable: strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
+		DesktopRuntime:              strings.EqualFold(strings.TrimSpace(os.Getenv(desktopRuntimeEnv)), "true"),
 	}
 }
 
@@ -859,14 +1532,24 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	if route.Route == webapp.RouteTaskDetail && routeData == nil && canLoadTaskDetailFallback(req, p.authSvc) {
 		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
 	}
+	runtime := webRuntimeConfig(p.devMode, p.webTitlePrefix, req)
+	if p.systemSvc != nil && p.systemSvc.Info != nil {
+		runtime.BootID = p.systemSvc.Info.Info().BootID
+	}
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode, p.webTitlePrefix, req),
+		runtime,
 		initialState,
 	)
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
+	if err := webapp.NormalizeBootPayloadGraph(&payload); err != nil {
+		if p.log != nil {
+			p.log.Error("failed to normalize boot entities; using version 1 payload", zap.Error(err))
+		}
+		payload.Version = 1
+	}
 	return payload
 }
 
@@ -1046,14 +1729,26 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterMemberRoutes(p.router, p.taskSvc, p.log)
+	if p.services != nil && p.services.Org != nil {
+		org.NewController(p.services.Org, p.log).RegisterRoutes(p.router)
+	}
+	if p.services.OrgUnits != nil {
+		orgunit.NewController(p.services.OrgUnits, p.log).RegisterRoutes(p.router)
+	}
 	if p.services != nil {
 		registerMentionRoutes(p.router, p.services.Mentions)
 	}
 	workflowH := taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
+	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	configureWorkspaceAdoptionCaller(taskH)
+	taskH.SetBackgroundWorkEnabled(p.features.AgentBackgroundWork)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
+		taskH.SetAgentProfileRecentUseRecorder(p.services.User)
+		taskH.SetSidebarTaskSettingsReader(p.services.User)
 	}
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
@@ -1083,6 +1778,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	}
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositorySetRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterRepositoryBranchPolicyRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
@@ -1094,14 +1790,51 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.router, p.gateway.Dispatcher, p.taskSvc,
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
-	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
-	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.log)
+	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	if p.services != nil && p.services.Terminal != nil {
+		processHandlers.SetTerminalService(p.services.Terminal)
+	}
+	taskhandlers.RegisterWorkspaceFileRoutes(p.router, processHandlers)
+	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
 	if p.services.Share != nil {
 		p.services.Share.RegisterRoutes(p.router)
 		p.log.Debug("Registered Public Share Links handlers (HTTP)")
 	}
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
+}
+
+func configureMCPServices(
+	p routeParams,
+) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
+	if !ok {
+		return nil, nil, nil
+	}
+	mcpCatalog := mcpconfig.NewCatalogService(catalogRepo)
+	mcpCatalog.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	selectionRepo, ok := p.agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !ok {
+		return catalogRepo, mcpCatalog, nil
+	}
+	mcpSelectionService := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
+	mcpSelectionService.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	mcpSelectionService.SetOwnerValidator(mcpSelectionOwnerValidator(p))
+	mcpSelectionService.SetSessionResolutionContext(mcpSessionResolutionContext(p))
+	if stateRepo, ok := p.agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
+		mcpSelectionService.SetSessionMCPStateRepository(stateRepo)
+	}
+	if p.lifecycleMgr != nil {
+		mcpSelectionService.SetSessionMCPChangeNotifier(func(ctx context.Context, sessionID string) {
+			p.lifecycleMgr.RequestSessionMCPReconfiguration(ctx, sessionID)
+		})
+	}
+	mcpCatalog.SetSelectionRepository(selectionRepo)
+	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
+	if p.orchestratorSvc != nil {
+		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
+	}
+	return catalogRepo, mcpCatalog, mcpSelectionService
 }
 
 // registerSecondaryRoutes registers workflow, agent settings, user, notification, editor,
@@ -1111,13 +1844,41 @@ func registerSecondaryRoutes(
 	workflowCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
+	clarificationResolver *clarification.Resolver,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
-	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
+	mcpCatalogRepo, mcpCatalog, mcpSelectionService := configureMCPServices(p)
+	var marketplace *mcpregistry.MarketplaceService
+	if cache, ok := p.agentSettingsRepo.(mcpregistry.CacheStore); ok && mcpCatalogRepo != nil {
+		client, clientErr := mcpregistry.NewClient(mcpregistry.DefaultRegistryURL, nil)
+		if clientErr == nil {
+			syncer := mcpregistry.NewSyncService(client, cache)
+			marketplace = mcpregistry.NewMarketplaceService(syncer, mcpCatalog)
+			if p.addCleanup != nil {
+				marketplaceCtx, cancelMarketplace := context.WithCancel(context.Background())
+				syncer.Start(marketplaceCtx, time.Hour)
+				p.addCleanup(func() error {
+					cancelMarketplace()
+					return nil
+				})
+			}
+		}
+	}
+	agentsettingshandlers.RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		p.router,
+		p.agentSettingsController,
+		p.gateway.Hub,
+		p.log,
+		p.interimSettingsInterlockToken,
+		mcpCatalogRepo,
+		p.taskSvc.AuthorizeWorkspaceAccess,
+		marketplace,
+		mcpSelectionService,
+	)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
@@ -1161,10 +1922,34 @@ func registerSecondaryRoutes(
 		p.msgCreator,
 		p.taskRepo,
 		p.eventBus,
-		p.orchestratorSvc,
+		clarificationResolver,
 		p.log,
+		p.taskSvc,
+		p.taskRepo,
+		p.features.NeedsYouInbox,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	if p.features.Coordinator {
+		wireCoordinatorConversation(p)
+	}
+
+	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
+	p.log.Debug("Registered Failed Inbox handlers (HTTP)")
+
+	// Wire the plugin Host interaction write path (ADR 0052) onto the same
+	// orchestrator permission resolution and the same clarification resolver
+	// instance the REST route and the MCP handlers use, so a plugin's response
+	// is indistinguishable from a user's and takes the same durable claim.
+	// Deliberately here rather than in initOfficeServices: that returns early
+	// when features.office=false (the production default), while plugins run
+	// whenever services.Plugins is non-nil.
+	if p.services.Plugins != nil {
+		p.services.Plugins.SetInteractionResponder(pluginsInteractionResponderAdapter{
+			permissions:    p.orchestratorSvc,
+			clarifications: clarificationResolver,
+		})
+	}
 
 	if p.secretsSvc != nil {
 		secrets.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretsSvc, p.log)
@@ -1177,16 +1962,40 @@ func registerSecondaryRoutes(
 	}
 
 	if p.taskRepo != nil {
+		kuberneteshandlers.RegisterRoutes(
+			p.router,
+			p.gateway.Dispatcher,
+			p.taskRepo,
+			p.services.Task,
+			p.log,
+		)
+		p.log.Debug("Registered Kubernetes handlers (HTTP + WebSocket)")
+
+		// A nil *reachabilitypkg.Poller must not be passed directly as the
+		// sshhandlers.ReachabilityProber interface parameter — that would
+		// produce a non-nil interface holding a nil pointer, defeating the
+		// handler's own nil check and panicking on first use.
+		var reachabilityPoller sshhandlers.ReachabilityProber
+		if p.sshReachabilityPoller != nil {
+			reachabilityPoller = p.sshReachabilityPoller
+		}
 		sshhandlers.RegisterRoutes(
 			p.router,
 			p.gateway.Dispatcher,
 			p.taskRepo,
 			p.services.Task,
 			p.agentRegistry,
-			lifecycle.NewAgentctlResolver(p.log),
+			newSSHAgentctlResolver(p),
 			p.log,
+			p.taskRepo,
+			reachabilityPoller,
 		)
 		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
+
+		// The remote Docker connection test rides the same SSH transport, so
+		// it is mounted alongside the SSH routes.
+		dockerremote.RegisterRoutes(p.router, p.taskRepo, p.log)
+		p.log.Debug("Registered remote Docker handlers (HTTP)")
 	}
 
 	if p.services.GitHub != nil {
@@ -1196,9 +2005,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
 		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
+		p.log.Debug("Registered GitLab handlers (HTTP)")
 	}
 
 	if p.services.AzureDevOps != nil {
@@ -1231,26 +2040,55 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.Automation != nil {
+		if p.services.Plugins != nil {
+			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
+		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
 		p.log.Debug("Registered Automation handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.Plugins != nil {
+		p.gateway.SetPluginConversationService(p.services.Plugins)
 		if p.authSvc != nil {
 			// Lets an auth-capable plugin complete OIDC/SAML SSO: it asserts a
 			// validated external identity on its webhook response and the host
 			// mints + sets the session cookie (the plugin never sees the token).
 			p.services.Plugins.SetAuthLoginBridge(pluginSSOBridge{auth: p.authSvc})
 		}
-		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		conversationReaders := make([]plugins.ConversationReader, 0, 1)
+		if p.services.Task != nil {
+			conversationReaders = append(conversationReaders, p.services.Task)
+			p.services.Plugins.SetCapabilityApprovalWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
+				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage)
+			})
+			p.services.Plugins.SetHumanInteractionResponseAuthorizer(func(ctx context.Context, workspaceID string) error {
+				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSessionControl)
+			})
+		}
+		plugins.RegisterRoutes(
+			p.router,
+			p.services.Plugins,
+			p.services.Plugins.Deliverer(),
+			p.log,
+			conversationReaders...,
+		)
+		if p.features.Canvases {
+			plugins.RegisterWebAppRuntimeRoutes(p.router, p.services.Plugins.WebRuntime())
+			registerCanvasRoutes(p)
+		}
 		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 
-	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), dockerTaskTitleProvider(p.taskRepo, p.log), p.log)
+	docker.RegisterDockerRoutes(
+		p.router, p.lifecycleMgr.DockerClientProvider(),
+		dockerTaskTitleProvider(p.taskRepo, p.log), dockerSessionAuthorizer(p.taskSvc), p.log,
+	)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerHealthRoutes(p)
 	registerSystemRoutes(p)
+	registerRetentionRoutes(p)
 	if p.runtimeFlagsSvc != nil {
 		runtimeflags.RegisterRoutes(p.router, p.runtimeFlagsSvc)
 	}
@@ -1276,15 +2114,24 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
+	if p.features.Coordinator {
+		registerCoordinatorRoutes(p)
+	}
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator, p.eventBus,
+		p.agentRuntimeAvailability, p.lifecycleMgr, p.services.DeliveryRetention, p.ctx, p.log,
 	)
+	registerE2ERuntimeUpdateRoutes(
+		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
+	)
+	registerE2EStartupPageFixtureRoute(p.router, p.log)
+	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService
@@ -1299,50 +2146,36 @@ func registerSecondaryRoutes(
 			officeAgentSvc,
 			p.eventBus,
 			p.log,
+			p.orchestratorSvc,
+			p.taskSvc,
 		)
 		p.log.Info("E2E mock routes enabled at /api/v1/_test/* — DO NOT enable in production")
 	}
 
 	// Register office routes
 	if p.services.OfficeSvcs != nil {
-		api := p.router.Group("/api/v1/office")
-		api.Use(officeagents.AgentAuthMiddleware(p.services.OfficeSvcs.Agents))
-		api.Use(officeWorkspaceScopeMiddleware(p.authSvc, p.taskSvc))
-		office.RegisterAllRoutes(api, p.services.OfficeSvcs, p.log)
+		handoffDeps := buildHandoffDependencies(
+			p.taskSvc,
+			p.taskRepo,
+			workflowCtrl,
+			p.agentSettingsController,
+			p.orchestratorSvc,
+			p.services.OfficeSvcs.Dashboard,
+			p.authSvc,
+			p.log,
+		)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
 }
 
-// officeWorkspaceScopeMiddleware enforces per-user workspace ownership on
-// office routes that carry a `:wsId` param (opt-in auth). Office endpoints are
-// dual-consumed: sandbox agents authenticate with a workspace-scoped JWT
-// (validated + workspace-claim-checked by AgentAuthMiddleware, which sets an
-// agent caller in context — those requests skip this check), while browser
-// users authenticate with a session cookie and must own the target workspace.
-// Routes without a `:wsId` param (agent runtime callbacks, approval/routine by
-// ID) are not gated here; they remain governed by AgentAuthMiddleware.
-func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.Service) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
-			c.Next()
-			return
-		}
-		// Agent JWT callers are already constrained to their workspace claim.
-		if officeagents.CallerFromContext(c) != nil {
-			c.Next()
-			return
-		}
-		wsID := c.Param("wsId")
-		if wsID == "" {
-			c.Next()
-			return
-		}
-		if err := taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), wsID); err != nil {
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-			return
-		}
-		c.Next()
-	}
+func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
+	return lifecycle.NewAgentctlResolverWithOptions(p.log, lifecycle.AgentctlResolverOptions{
+		Version:   p.version,
+		Commit:    p.commit,
+		BundleDir: os.Getenv("KANDEV_BUNDLE_DIR"),
+		HomeDir:   p.homeDir,
+	})
 }
 
 // integrationWorkspacePrefixes are the workspace-scoped third-party
@@ -1413,6 +2246,51 @@ func workspaceIDFromPath(path string) string {
 	return rest
 }
 
+// dockerSessionAuthorizer scopes the Docker management endpoints to the
+// caller's own task sessions. Returning an untyped nil when the task service
+// is absent (partial builds) keeps the handlers failing closed instead of
+// calling through a typed-nil interface.
+func dockerSessionAuthorizer(taskSvc *taskservice.Service) docker.SessionAuthorizer {
+	if taskSvc == nil {
+		return nil
+	}
+	return taskSvc
+}
+
+// lifecycleAccessAuthorizer is the task-service surface the lifecycle manager's
+// per-user visibility checks are wired to. Narrowed to an interface so the
+// wiring itself is testable: the three single-ID checkers take the same
+// signature, so a crossed wire (session visibility installed in the task slot,
+// say) compiles and silently authorizes the wrong resource.
+type lifecycleAccessAuthorizer interface {
+	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
+	AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error
+	AuthorizeTaskAccess(ctx context.Context, taskID string) error
+	AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error
+	AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error
+	AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error
+}
+
+// wireLifecycleAccessCheckers installs every per-user visibility check on the
+// lifecycle manager. Kept together so a surface that needs a new kind of check
+// has one place to add it, rather than another setter call somewhere else in
+// startup that nothing asserts on.
+func wireLifecycleAccessCheckers(lifecycleMgr *lifecycle.Manager, access lifecycleAccessAuthorizer) {
+	lifecycleMgr.SetSessionAccessChecker(access.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(access.AuthorizeEnvironmentAccess)
+	lifecycleMgr.SetTaskAccessChecker(access.AuthorizeTaskAccess)
+	lifecycleMgr.SetTaskEnvironmentAccessChecker(access.AuthorizeTaskEnvironmentAccess)
+	// Execution surfaces (terminal, shell, file writes, VS Code, port
+	// previews) require session.exec, which a viewer does not hold. They are
+	// keyed either by session or by environment, so both slots get one.
+	lifecycleMgr.SetSessionExecAccessChecker(func(ctx context.Context, sessionID string) error {
+		return access.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionExec)
+	})
+	lifecycleMgr.SetEnvironmentExecAccessChecker(func(ctx context.Context, environmentID string) error {
+		return access.AuthorizeEnvironmentScope(ctx, environmentID, authz.ScopeSessionExec)
+	})
+}
+
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
 	return func(ctx context.Context, taskID string) (string, bool) {
 		if taskRepo == nil || taskID == "" {
@@ -1440,6 +2318,23 @@ func registerSystemRoutes(p routeParams) {
 	p.systemSvc.RegisterRoutes(p.router, p.log)
 }
 
+// registerRetentionRoutes mounts GET/PUT /api/v1/system/retention. It is a
+// separate group from systemSvc's own /api/v1/system group (rather than a
+// field on system.Service) because internal/office/retention cannot be
+// imported by internal/system without inverting the existing system ->
+// office dependency direction; gin allows two RouterGroups to share a path
+// prefix as long as no route collides, and none does here. Read/admin
+// split mirrors system.Service.RegisterRoutes: GET is member-readable,
+// PUT requires the admin-scoped settings-manage permission.
+func registerRetentionRoutes(p routeParams) {
+	if p.services == nil || p.services.Retention == nil {
+		return
+	}
+	read := p.router.Group("/api/v1/system")
+	admin := read.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
+	retention.RegisterRoutes(read, admin, p.services.Retention.Handler)
+}
+
 // registerHealthRoutes sets up the system health endpoint with all health checkers.
 func registerHealthRoutes(p routeParams) {
 	var githubProvider health.GitHubStatusProvider
@@ -1456,17 +2351,51 @@ func registerHealthRoutes(p routeParams) {
 		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
 		5*time.Minute,
 	)
+	var workflowSyncProvider health.WorkflowSyncStatusProvider
+	if p.services.WorkflowSync != nil {
+		workflowSyncProvider = workflowSyncHealthAdapter{svc: p.services.WorkflowSync}
+	}
 	checkers := []health.Checker{
 		health.NewGitExecutableChecker(),
 		githubChecker,
+		health.NewWorkflowSyncChecker(workflowSyncProvider),
 		health.NewAgentChecker(p.agentSettingsController),
 		osLimitsChecker,
 	}
 	if p.systemSvc != nil && p.systemSvc.StorageRuntime != nil {
 		checkers = append(checkers, p.systemSvc.StorageRuntime)
 	}
+	if p.services != nil && p.services.Retention != nil {
+		checkers = append(checkers, p.services.Retention.Checker)
+	}
 	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
+}
+
+// workflowSyncHealthAdapter bridges workflowsync.Service's own circuit
+// summary type to the structural shape consumed by the health package
+// without importing health into workflowsync (cycle), matching
+// githubWorkspaceHealthAdapter below.
+type workflowSyncHealthAdapter struct {
+	svc *workflowsync.Service
+}
+
+func (a workflowSyncHealthAdapter) WorkflowSyncCircuitSummary(
+	ctx context.Context,
+) (health.WorkflowSyncCircuitSummary, error) {
+	if a.svc == nil {
+		return health.WorkflowSyncCircuitSummary{}, nil
+	}
+	summary, err := a.svc.WorkflowSyncCircuitSummary(ctx)
+	if err != nil {
+		return health.WorkflowSyncCircuitSummary{}, err
+	}
+	return health.WorkflowSyncCircuitSummary{
+		Total:         summary.Total,
+		OpenAuth:      summary.OpenAuth,
+		OpenConfig:    summary.OpenConfig,
+		OpenTransient: summary.OpenTransient,
+	}, nil
 }
 
 type githubWorkspaceHealthAdapter struct {
@@ -1538,11 +2467,60 @@ func (a mcpTaskPRListerAdapter) ListTaskPRsByTaskIDs(
 				continue
 			}
 			infos = append(infos, mcphandlers.TaskPRInfo{
-				Number:   pr.PRNumber,
-				URL:      pr.PRURL,
-				Title:    pr.PRTitle,
-				State:    pr.State,
-				MergedAt: pr.MergedAt,
+				RepositoryID: pr.RepositoryID,
+				Number:       pr.PRNumber,
+				URL:          pr.PRURL,
+				Title:        pr.PRTitle,
+				State:        pr.State,
+				Draft:        pr.IsDraft,
+				BaseRef:      pr.BaseBranch,
+				HeadRef:      pr.HeadBranch,
+				HeadSHA:      pr.HeadSHA,
+				MergedAt:     pr.MergedAt,
+				ClosedAt:     pr.ClosedAt,
+			})
+		}
+		if len(infos) > 0 {
+			out[taskID] = infos
+		}
+	}
+	return out, nil
+}
+
+type mcpTaskMRListerAdapter struct {
+	gl *gitlab.Service
+}
+
+func (a mcpTaskMRListerAdapter) ListTaskMRsByTaskIDs(
+	ctx context.Context, taskIDs []string,
+) (map[string][]mcphandlers.TaskMRInfo, error) {
+	out := make(map[string][]mcphandlers.TaskMRInfo)
+	if a.gl == nil || len(taskIDs) == 0 {
+		return out, nil
+	}
+	byTask, err := a.gl.ListTaskMRsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	for taskID, mrs := range byTask {
+		infos := make([]mcphandlers.TaskMRInfo, 0, len(mrs))
+		for _, mr := range mrs {
+			if mr == nil {
+				continue
+			}
+			infos = append(infos, mcphandlers.TaskMRInfo{
+				RepositoryID: mr.RepositoryID,
+				Number:       mr.MRIID,
+				URL:          mr.MRURL,
+				Title:        mr.MRTitle,
+				State:        mr.State,
+				Draft:        mr.Draft,
+				BaseRef:      mr.BaseBranch,
+				BaseSHA:      mr.BaseSHA,
+				HeadRef:      mr.HeadBranch,
+				HeadSHA:      mr.HeadSHA,
+				MergedAt:     mr.MergedAt,
+				ClosedAt:     mr.ClosedAt,
 			})
 		}
 		if len(infos) > 0 {
@@ -1558,6 +2536,7 @@ func registerMCPAndDebugRoutes(
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
+	clarificationResolver *clarification.Resolver,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -1568,38 +2547,108 @@ func registerMCPAndDebugRoutes(
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	mcpHandlers.SetPluginService(p.services.Plugins)
+	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
+		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
+			p.services.Canvas, p.services.Plugins, p.taskSvc,
+			lifecycleCanvasExecutionResolver{manager: p.lifecycleMgr}, p.homeDir, p.log,
+		))
+	}
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	if p.agentSettingsController != nil {
+		mcpHandlers.SetAgentProfileVerifier(p.agentSettingsController)
+	}
+	if p.services.Automation != nil {
+		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+	}
+	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
+	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
+		p.log.Error("failed to build settings catalog", zap.Error(err))
+	} else {
+		mcpHandlers.SetSettingsCatalog(settingsRegistry)
+		var storageSettings settingsStorageService
+		if p.systemSvc != nil {
+			storageSettings = p.systemSvc.Storage
+		}
+		mcpHandlers.SetSettingsOperations(newSettingsOperations(
+			settingsRegistry,
+			p.agentSettingsController,
+			p.services.User,
+			settingsDomainDependencies{
+				broadcaster:   p.gateway.Hub,
+				authEnabled:   func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
+				task:          p.taskSvc,
+				workflow:      p.services.Workflow,
+				workflowCtrl:  wfCtrl,
+				prompts:       p.services.Prompts,
+				utility:       p.services.Utility,
+				editors:       p.services.Editor,
+				notifications: p.notificationCtrl,
+				runtimeFlags:  p.services.RuntimeFlags,
+				storage:       storageSettings,
+				automation:    automationServiceFromComponents(p.services.Automation),
+				agent:         p.agentSettingsController,
+				jira:          settingsJiraServiceFromPointer(p.services.Jira),
+				linear:        settingsLinearServiceFromPointer(p.services.Linear),
+				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
+				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
+				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
+				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
+			},
+		))
+	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
+	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
+	mcpHandlers.SetPromptReader(p.services.Prompts)
+	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	// list_pending_questions_kandev / answer_question_kandev (external MCP
+	// surface only). p.taskRepo already implements ClarificationBundleLister
+	// (ListUnresolvedClarificationBundles, FindMessagesByPendingID).
+	mcpHandlers.SetClarificationResolver(clarificationResolver, p.taskRepo)
 	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
 		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
 	}
 
-	// Enrich list_tasks responses with associated GitHub PRs (link, title,
-	// number, state) when the github service is available.
+	// Enrich task-listing responses with associated change requests when
+	// provider services are available.
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
 	}
+	if p.orchestratorSvc != nil {
+		mcpHandlers.SetTaskPRAutoFixOutcomeService(p.orchestratorSvc)
+	}
 	if p.services.GitLab != nil {
+		mcpHandlers.SetTaskMRLister(mcpTaskMRListerAdapter{gl: p.services.GitLab})
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
-	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
-		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Agents != nil {
+		mcpHandlers.SetTaskTransferCoordinatorAuthorizer(taskTransferCoordinatorAttestor{
+			tasks: p.taskSvc, sessions: p.taskRepo, agents: p.services.OfficeSvcs.Agents,
+		})
 	}
-
+	mcpHandlers.SetTaskChangeRequestReadService(newTaskChangeRequestReader(
+		p.taskSvc, p.services.GitHub, p.services.GitLab,
+	))
+	mcpHandlers.SetTaskChangeRequestAutomationService(newTaskChangeRequestAutomationCoordinator(
+		p.taskSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+	))
+	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
+		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
+		logger: p.log, singleUserIdentity: taskChangeLinkIdentityResolver(p.authSvc),
+	})
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so
 	// workspace-group state stays consistent across both surfaces.
 	if handoffSvc != nil {
 		mcpHandlers.SetHandoffService(handoffSvc)
 	}
-
 	// Native code review. The runner owns background review passes, so it is
 	// started here and drained on shutdown; the orchestrator gets it too, which
 	// is what enables the run_code_review workflow step action.
@@ -1607,7 +2656,11 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetReviewService(reviewParts.service)
 	mcpHandlers.SetReviewRunner(reviewParts.runner)
 	p.orchestratorSvc.SetReviewRunner(reviewParts.runner)
-	reviewParts.runner.Start(context.Background())
+	reviewCtx := p.ctx
+	if reviewCtx == nil {
+		reviewCtx = context.Background()
+	}
+	startup.AfterReady(reviewCtx, func() { reviewParts.runner.Start(reviewCtx) })
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
 			reviewParts.runner.Stop()
@@ -1623,6 +2676,18 @@ func registerMCPAndDebugRoutes(
 	}
 	p.log.Debug("Registered native code review (WebSocket + MCP)")
 
+	if p.services.Coordinator != nil {
+		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		wireCoordinatorLedger(p, p.services.Coordinator, mcpHandlers)
+		wireCoordinatorOutcomes(p, p.services.Coordinator)
+		wireCoordinatorDream(p, p.services.Coordinator)
+		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
+			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
+			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},
+			Messenger: mcpHandlers,
+		})
+	}
+
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
 
@@ -1630,16 +2695,23 @@ func registerMCPAndDebugRoutes(
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
 
 	// In-session MCP calls reach this same dispatcher over the agent's own WS
-	// stream, which carries no credential — so scope them to the user who owns
-	// the stream's task. Without this the handlers run with no identity, which
-	// the task service treats as an internal caller and serves unscoped.
+	// stream, which carries no credential. Always attach the server-derived
+	// task/session principal so automation self/workspace boundaries remain in
+	// force even when authentication is disabled or unavailable. Owner identity
+	// scoping is conditional because single-user installs intentionally retain
+	// their existing unscoped behavior.
+	mcpScopeResolver := mcpscope.NewResolver(
+		p.taskRepo,
+		p.authSvc,
+		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
+		p.log,
+	)
+	if p.services != nil && p.services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
+	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
-		p.lifecycleMgr.SetMCPIdentityScoper(mcpscope.NewResolver(
-			p.taskRepo,
-			p.authSvc,
-			func() bool { return p.authSvc.Mode() != auth.ModeDisabled },
-			p.log,
-		).Scope)
+		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")
 	}
 
@@ -1653,6 +2725,9 @@ func registerMCPAndDebugRoutes(
 	if p.devMode {
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
+		if p.dbPool != nil {
+			db.RegisterWriterPoolStats(p.dbPool)
+		}
 	}
 }
 
@@ -1665,7 +2740,7 @@ func registerExternalMCP(p routeParams) {
 	}
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
-	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
+	backendClient := mcpserver.NewExternalDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)

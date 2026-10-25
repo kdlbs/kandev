@@ -17,6 +17,8 @@ const effortTriggerTestId = "config-option-trigger-effort";
 const modelSettingsButtonName = "Model settings";
 const providerModelId = "gpt-5.6-sol";
 const providerModelName = "GPT-5.6-Sol";
+const copilotModelId = "claude-opus-5";
+const copilotModelName = "Claude Opus 5";
 const optionDescription = "Controls how much reasoning the model performs.";
 const effortOptionName = "Reasoning Effort";
 const makeModelOptions = (count: number) =>
@@ -26,6 +28,27 @@ const makeModelOptions = (count: number) =>
   }));
 
 describe("ModelConfigSelector", () => {
+  it("shows the provider icon in the trigger and open model heading", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "sonnet", name: "Sonnet" }]}
+        currentModel="sonnet"
+        onModelChange={() => {}}
+        providerIcon={<svg data-testid="provider-glyph" />}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: modelSettingsButtonName });
+    expect(within(trigger).getByTestId("provider-glyph")).toBeTruthy();
+    fireEvent.click(trigger);
+    const group = screen.getByRole("group", { name: "Model" });
+    const labelId = group.getAttribute("aria-labelledby");
+    expect(labelId).not.toBeNull();
+    const heading = document.getElementById(labelId!);
+    expect(heading).not.toBeNull();
+    expect(within(heading!).getByTestId("provider-glyph")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Sonnet" })).toBeTruthy();
+  });
+
   it("passes custom trigger classes to the button", () => {
     render(
       <ModelConfigSelector
@@ -99,6 +122,58 @@ describe("ModelConfigSelector", () => {
 
     expect(onConfigChange).toHaveBeenCalledWith("effort", "high");
     expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
+  });
+});
+
+describe("ModelConfigSelector selected options", () => {
+  it("puts the current model and nested config value first", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-1", name: "Model 1" },
+          { id: "model-2", name: "Model 2" },
+          { id: "model-3", name: "Model 3" },
+        ]}
+        currentModel="model-2"
+        onModelChange={() => {}}
+        onConfigChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent?.trim())).toEqual([
+      "Model 2",
+      "Model 1",
+      "Model 3",
+    ]);
+    expect(screen.getByTestId("model-config-selected-row").className).toContain("bg-card");
+    expect(screen.getByTestId("model-config-selected-row").className).toContain(
+      "border-primary/50",
+    );
+
+    fireEvent.click(screen.getByTestId(effortTriggerTestId));
+    const effortSection = screen.getByTestId(effortSectionTestId);
+    expect(
+      within(effortSection)
+        .getAllByRole("button")
+        .map((button) => button.textContent?.trim()),
+    ).toEqual(["Medium", "Low", "High"]);
+    expect(within(effortSection).getByRole("button", { name: "Medium" }).className).toContain(
+      "bg-card",
+    );
   });
 });
 
@@ -252,6 +327,38 @@ describe("ModelConfigSelector filtering", () => {
     expect(configOptionToModelOptions(modelConfig).map((model) => model.id)).toEqual([
       providerModelId,
       "gpt-5.6-terra",
+    ]);
+  });
+
+  it("drops a description that duplicates the model name and falls back to the id", () => {
+    const modelConfig: SelectConfigOption = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: copilotModelId,
+      category: "model",
+      options: [{ value: copilotModelId, name: copilotModelName, description: copilotModelName }],
+    };
+
+    expect(configOptionToModelOptions(modelConfig)).toEqual([
+      { id: copilotModelId, name: copilotModelName, description: copilotModelId },
+    ]);
+  });
+
+  it("keeps a distinct provider description", () => {
+    const modelConfig: SelectConfigOption = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: providerModelId,
+      category: "model",
+      options: [
+        { value: providerModelId, name: providerModelName, description: "Frontier coding model." },
+      ],
+    };
+
+    expect(configOptionToModelOptions(modelConfig)).toEqual([
+      { id: providerModelId, name: providerModelName, description: "Frontier coding model." },
     ]);
   });
 

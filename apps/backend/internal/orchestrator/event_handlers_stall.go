@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -17,23 +16,10 @@ const (
 	stallCancelTurnButtonTestID = "stall-cancel-turn-button"
 	metaKeyActionVisibility     = "action_visibility"
 	actionVisibilityRunning     = "running"
-	neverStartedNoticeContent   = "Agent produced no output since start."
 )
 
-// errAgentNeverStarted is the launch-failure error recorded when a stalled
-// prompt's agent has emitted zero events since dispatch. Its Error() string
-// is persisted as the session's error_message by recordSessionLaunchFailure;
-// it is not a missing-branch error, so no legacy branch guidance is created.
-var errAgentNeverStarted = errors.New("agent produced no output since start")
-
-// handleAgentStalled persists an advisory recovery affordance for a turn that
-// stalled after producing at least one agent event, leaving the prompt,
-// session, and task lifecycle unchanged. When the agent has produced no
-// output at all since the prompt was dispatched (payload.NeverStarted), the
-// condition is terminal and unrecoverable: the notice is posted as an error
-// and the session/task transition to FAILED via the same idempotent CAS path
-// used for launch failures. The activity epoch prevents a late event from
-// turning an old watchdog snapshot into a terminal failure.
+// handleAgentStalled preserves a silent turn and exposes controlled cancellation.
+// Execution, generation, and activity checks reject stale watchdog snapshots.
 func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.AgentStalledPayload) {
 	if s.messageCreator == nil || s.repo == nil || payload.TaskID == "" || payload.SessionID == "" {
 		return
@@ -86,27 +72,22 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 		metaKeySessionID: payload.SessionID,
 		metaKeyTaskID:    payload.TaskID,
 	}
-	messageType := string(v1.MessageTypeStatus)
-	if payload.NeverStarted {
-		messageType = string(v1.MessageTypeError)
-	} else {
-		metadata[metaKeyActionVisibility] = actionVisibilityRunning
-		metadata["actions"] = []map[string]interface{}{{
-			actionMetaKeyType:   "ws_request",
-			actionMetaKeyLabel:  "Cancel turn",
-			actionMetaKeyTestID: stallCancelTurnButtonTestID,
-			"params": map[string]interface{}{
-				"method":  "agent.cancel",
-				"payload": map[string]interface{}{"session_id": payload.SessionID},
-			},
-		}}
-	}
+	metadata[metaKeyActionVisibility] = actionVisibilityRunning
+	metadata["actions"] = []map[string]interface{}{{
+		actionMetaKeyType:   "ws_request",
+		actionMetaKeyLabel:  "Cancel turn",
+		actionMetaKeyTestID: stallCancelTurnButtonTestID,
+		"params": map[string]interface{}{
+			"method":  "agent.cancel",
+			"payload": map[string]interface{}{metaKeySessionID: payload.SessionID},
+		},
+	}}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
 		payload.TaskID,
 		stallNoticeContent(payload),
 		payload.SessionID,
-		messageType,
+		string(v1.MessageTypeStatus),
 		turnID,
 		metadata,
 		false,
@@ -116,15 +97,9 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 			zap.String("session_id", payload.SessionID),
 			zap.Error(err))
 	}
-	if payload.NeverStarted {
-		s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session)
-	}
 }
 
 func stallNoticeContent(payload lifecycle.AgentStalledPayload) string {
-	if payload.NeverStarted {
-		return neverStartedNoticeContent
-	}
 	tool := strings.TrimSpace(payload.ToolTitle)
 	if tool == "" {
 		tool = strings.TrimSpace(payload.ToolName)

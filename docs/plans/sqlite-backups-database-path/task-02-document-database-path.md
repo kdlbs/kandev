@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-database-path"]
 plan: "plan.md"
-spec: "../../specs/system-page/spec.md"
+spec: "../../specs/system-page/requirements/system-page.md"
 ---
 
 # Task 02: Document the SQLite backup location
@@ -42,7 +42,7 @@ Sequential. These pages document the result of Task 01.
 
 ## Inputs
 
-- Spec: `docs/specs/system-page/spec.md`, configured database path scenarios and persistence guarantees.
+- Spec: `docs/specs/system-page/requirements/system-page.md`, configured database path scenarios and persistence guarantees.
 - Plan: `plan.md`, public documentation and risk sections.
 - Docs type: `configuration.md` and `cli.md` are references. `operations.md` is a how-to guide. `feature-status.md` is a reference. `use-kandev.md` is a tutorial.
 

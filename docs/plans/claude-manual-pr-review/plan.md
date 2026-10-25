@@ -1,5 +1,5 @@
 ---
-spec: ../../specs/claude-fork-review-allowlist/spec.md
+spec: ../../specs/integrations/requirements/claude-fork-review-allowlist.md
 status: completed
 created: 2026-07-31
 ---

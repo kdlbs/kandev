@@ -76,7 +76,17 @@ Request actions:
 - `agent.session.load` — resume existing session
 - `agent.prompt` — send user message
 - `agent.cancel` — cancel current operation
-- `agent.permissions.respond` — respond to permission requests
+- `agent.permissions.list` — list immutable safe snapshots of live permission requests
+- `agent.permissions.resolve` — select one exact provider-offered option for one request generation
+- `agent.permissions.cancel` — cancel one exact request generation for internal UI/runtime flows
+- `agent.permissions.respond` — legacy response action retained for compatible internal callers
+
+The list/resolve contract keeps Kandev's generated `request_id` separate from the provider's
+`pending_id`. Both are required for mutation, so a stale response cannot act on a replacement that
+reuses the provider ID. Agentctl owns live answerability and the immutable offered options; the
+backend owns task/session authorization and the durable pre-delivery audit claim. Safe snapshots
+allowlist presentation fields and never include command environment, headers, raw MCP arguments,
+provider option metadata, or other hidden values.
 
 ### Agentctl → Backend (Events)
 

@@ -2,28 +2,55 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
-// Per-user workspace scoping (opt-in authentication).
+// Workspace access scoping.
 //
-// Every user-facing service entry point calls one of the authorize* helpers.
+// Reach and permission are two questions, answered in that order:
+//
+//   - Reach ("can this caller see the workspace at all") comes from the owner,
+//     an explicit workspace_members row, or membership of a unit above the
+//     one the workspace sits in. A
+//     caller who cannot reach a workspace gets the *NotFound sentinels — a
+//     foreign workspace is indistinguishable from a nonexistent one.
+//   - Permission ("may they do this particular thing") comes from
+//     authz.ResolveWorkspace, the single resolver. A caller who can read but
+//     lacks the action's scope gets ErrForbidden: existence is already known
+//     to them, so 403 leaks nothing and 404 would only confuse.
+//
 // Scoping keys off the request-context identity placed there by the auth
 // middleware:
 //   - no identity in ctx  → internal caller (event bus, pollers, office
 //     schedulers) → unscoped, exactly as before the auth feature. In-session
-//     agent MCP calls used to land here too; they now arrive with the task
-//     owner's identity attached by internal/mcp/scope.
+//     agent MCP calls arrive with the task owner's identity attached by
+//     internal/mcp/scope.
 //   - synthetic identity  → auth disabled → unscoped (today's behavior)
-//   - real identity       → workspaces are visible only to their owner;
-//     rows with an empty owner_id (created pre-auth) stay visible to everyone
-//     until the setup wizard claims them for the admin
-//
-// Denials use the *NotFound sentinels — a foreign workspace is
-// indistinguishable from a nonexistent one (no existence leak).
+//   - real identity       → resolved through authz
+
+// tenancyEnforced mirrors features.multiTenancy. It is a package-level value
+// set once at startup rather than threaded through every call: it is a
+// process-wide configuration fact, and plumbing it through would touch every
+// authorize* signature for no gain.
+var tenancyEnforced bool
+
+// SetTenancyEnforced records whether organizations are on.
+func SetTenancyEnforced(enforced bool) { tenancyEnforced = enforced }
+
+// callerOrgID returns the requesting identity's organization, empty for
+// internal/synthetic callers and when organizations are off.
+func callerOrgID(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return ""
+	}
+	return identity.OrgID
+}
 
 // callerScope returns the scoping user ID; ok=false means unscoped.
 func callerScope(ctx context.Context) (string, bool) {
@@ -34,55 +61,264 @@ func callerScope(ctx context.Context) (string, bool) {
 	return identity.UserID, true
 }
 
-func workspaceVisibleTo(workspace *models.Workspace, userID string) bool {
-	return workspace == nil || workspace.OwnerID == "" || workspace.OwnerID == userID
+// callerSubject builds the authz subject for the request identity.
+func callerSubject(ctx context.Context) authz.Subject {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return authz.Subject{Unscoped: true}
+	}
+	return authz.Subject{
+		UserID:          identity.UserID,
+		OrgID:           identity.OrgID,
+		OrgRole:         authz.NormalizeOrgRole(string(identity.Role)),
+		TenancyEnforced: tenancyEnforced,
+	}
 }
 
-// authorizeWorkspaceID checks visibility of a workspace by ID.
-func (s *Service) authorizeWorkspaceID(ctx context.Context, workspaceID string) error {
-	userID, scoped := callerScope(ctx)
-	if !scoped || workspaceID == "" {
-		return nil
+// workspaceDecision resolves what the caller may do in a workspace. It reads
+// the caller's membership row (a single primary-key lookup) and hands both to
+// the resolver.
+//
+// Any failure reading membership returns Denied rather than continuing with no
+// row: continuing would silently promote the caller to the org default role,
+// which is exactly how a transient database error becomes a privilege
+// escalation.
+func (s *Service) workspaceDecision(ctx context.Context, workspace *models.Workspace) authz.Decision {
+	subject := callerSubject(ctx)
+	if subject.Unscoped {
+		return authz.ResolveWorkspace(subject, authz.WorkspaceRef{})
+	}
+	if workspace == nil {
+		return authz.Denied()
+	}
+
+	ref := authz.WorkspaceRef{
+		OwnerID: workspace.OwnerID,
+		OrgID:   workspace.OrgID,
+	}
+	// The tenant boundary is absolute and is checked before owner or
+	// membership, so a foreign-org workspace is resolved without touching the
+	// member table at all.
+	if subject.OrgID != "" && workspace.OrgID != "" && subject.OrgID != workspace.OrgID {
+		return authz.Denied()
+	}
+	// Owner and unowned workspaces resolve without touching the tree.
+	if workspace.OwnerID == "" || workspace.OwnerID == subject.UserID {
+		return authz.ResolveWorkspace(subject, ref)
+	}
+
+	inherited, ok := s.inheritedRole(ctx, subject.UserID, workspace)
+	if !ok {
+		return authz.Denied()
+	}
+	ref.InheritedRole = inherited
+
+	member, err := s.workspaces.GetWorkspaceMember(ctx, workspace.ID, subject.UserID)
+	if err != nil {
+		s.logger.Warn("workspace membership lookup failed; denying access")
+		return authz.Denied()
+	}
+	if member != nil {
+		ref.MemberRole = authz.NormalizeWorkspaceRole(member.Role)
+	}
+	return authz.ResolveWorkspace(subject, ref)
+}
+
+// WorkspaceDecisionByID is the public resolver used by handlers that need the
+// caller's scopes for a workspace (DTO projection, scope gating).
+func (s *Service) WorkspaceDecisionByID(ctx context.Context, workspaceID string) (authz.Decision, error) {
+	if workspaceID == "" {
+		return authz.ResolveWorkspace(callerSubject(ctx), authz.WorkspaceRef{}), nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		return err
+		return authz.Denied(), err
 	}
-	if !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
-	}
-	return nil
+	return s.workspaceDecision(ctx, workspace), nil
 }
 
-// authorizeTaskID checks visibility of a task via its workspace.
+// authorizeWorkspaceID checks reach of a workspace by ID.
+func (s *Service) authorizeWorkspaceID(ctx context.Context, workspaceID string) error {
+	_, err := s.requireWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead, repoerrors.ErrWorkspaceNotFound)
+	return err
+}
+
+// AuthorizeWorkspaceScope enforces one scope on a workspace. Callers that only
+// need reach use authorizeWorkspaceID.
+func (s *Service) AuthorizeWorkspaceScope(ctx context.Context, workspaceID string, scope authz.Scope) error {
+	_, err := s.requireWorkspaceScope(ctx, workspaceID, scope, repoerrors.ErrWorkspaceNotFound)
+	return err
+}
+
+// requireWorkspaceScope resolves the decision and applies the 404-vs-403 rule.
+func (s *Service) requireWorkspaceScope(
+	ctx context.Context, workspaceID string, scope authz.Scope, notFound error,
+) (authz.Decision, error) {
+	if _, scoped := callerScope(ctx); !scoped || workspaceID == "" {
+		return authz.ResolveWorkspace(authz.Subject{Unscoped: true}, authz.WorkspaceRef{}), nil
+	}
+	workspace, err := s.workspaces.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return authz.Denied(), err
+	}
+	decision := s.workspaceDecision(ctx, workspace)
+	if !decision.CanRead() {
+		return decision, notFound
+	}
+	if !decision.Has(scope) {
+		return decision, ErrForbidden
+	}
+	return decision, nil
+}
+
+// authorizeTaskID checks reach of a task via its workspace.
 func (s *Service) authorizeTaskID(ctx context.Context, taskID string) error {
-	userID, scoped := callerScope(ctx)
-	if !scoped {
+	return s.authorizeTaskScope(ctx, taskID, authz.ScopeWorkspaceRead)
+}
+
+// AuthorizeTaskScope enforces one scope on the workspace owning a task.
+func (s *Service) AuthorizeTaskScope(ctx context.Context, taskID string, scope authz.Scope) error {
+	return s.authorizeTaskScope(ctx, taskID, scope)
+}
+
+// AuthorizeTaskPromptScope enforces the scope required to start a turn on a
+// task: session.prompt for an ordinary task, or workspace.manage for a
+// coordinator conversation task (docs/specs/coordinator/system-design/
+// copilot.md#attended-only) — only an explicit manager message may start a
+// turn there. Wired as the orchestrator's task-prompt checker
+// (SetTaskPromptChecker) so session.launch enforces the same restriction as
+// message.add, which is a separate transport this scope selection also
+// covers via authorizeMessageCreate.
+func (s *Service) AuthorizeTaskPromptScope(ctx context.Context, taskID string) error {
+	scope, err := s.coordinatorPromptScope(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeTaskScope(ctx, taskID, scope)
+}
+
+// coordinatorPromptScope resolves the scope required to start a turn on
+// taskID: session.prompt for an ordinary task, workspace.manage for a
+// coordinator conversation task. An unscoped (internal) caller is left alone
+// since authorizeTaskScope/authorizeTaskSessionScope already short-circuit for
+// it; the GetTask lookup here would be pure overhead for that path.
+func (s *Service) coordinatorPromptScope(ctx context.Context, taskID string) (authz.Scope, error) {
+	scope := authz.ScopeSessionPrompt
+	if _, scoped := callerScope(ctx); !scoped {
+		return scope, nil
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return scope, err
+	}
+	if task == nil {
+		return scope, repoerrors.ErrTaskNotFound
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		if task.WorkspaceID == "" {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
+		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) || (err == nil && workspace == nil) {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		if err != nil {
+			return scope, err
+		}
+		scope = authz.ScopeWorkspaceManage
+	}
+	return scope, nil
+}
+
+func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope authz.Scope) error {
+	if _, scoped := callerScope(ctx); !scoped {
 		return nil
 	}
 	task, err := s.tasks.GetTask(ctx, taskID)
 	if err != nil {
 		return err
 	}
+	if task == nil {
+		return repoerrors.ErrTaskNotFound
+	}
 	if task.WorkspaceID == "" {
 		return nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
-	if err != nil {
-		// A dangling workspace reference should not hide the task from the
-		// single user who can already see everything else about it.
-		return nil //nolint:nilerr // visibility fallback, not an operation failure
-	}
-	if !workspaceVisibleTo(workspace, userID) {
+	switch {
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+		// A task can outlive its workspace row during durable cleanup. Its
+		// own row remains readable because there is no workspace owner left
+		// to authorize against.
+		return nil
+	case err != nil:
+		return err
+	case workspace == nil:
 		return repoerrors.ErrTaskNotFound
+	}
+	decision := s.workspaceDecision(ctx, workspace)
+	if !decision.CanRead() {
+		return repoerrors.ErrTaskNotFound
+	}
+	if !decision.Has(scope) {
+		return ErrForbidden
 	}
 	return nil
 }
 
-// authorizeWorkflowID checks visibility of a workflow via its workspace.
+// authorizeWorkflowID checks reach of a workflow via its workspace.
 func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) error {
-	userID, scoped := callerScope(ctx)
-	if !scoped {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if workflow == nil {
+		return repoerrors.ErrWorkflowNotFound
+	}
+	if workflow.WorkspaceID == "" {
+		return nil
+	}
+	// A workflow whose workspace cannot be resolved has no owner to check
+	// against, so neither outcome below is "authorized". This used to be one
+	// `return nil` covering both, which handed any workflow ID that survived
+	// a failed lookup to whoever guessed it.
+	//
+	// The pre-auth unowned row is not this case: workspace_id == "" is
+	// answered above and stays visible to everyone. Here the workflow names a
+	// workspace that is not there — `workflows.workspace_id` carries no
+	// foreign key, so a deleted workspace can leave one behind — and an
+	// orphan belongs to nobody, which under per-user scoping means nobody
+	// sees it.
+	workspace, err := s.workspaces.GetWorkspace(ctx, workflow.WorkspaceID)
+	switch {
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+		// Collapse to the workflow's own not-found sentinel, same as the
+		// reachable-but-denied branch below: a caller must not be able to
+		// tell an orphaned workspace from a foreign-but-reachable one.
+		return repoerrors.ErrWorkflowNotFound
+	case err != nil:
+		// A failed lookup is not an answer at all: propagate it rather than
+		// letting a transient database error read as either allow or deny.
+		return err
+	}
+	if !s.workspaceDecision(ctx, workspace).CanRead() {
+		// Collapse to the workflow's own not-found sentinel, matching
+		// authorizeTaskScope's equivalent branch, so a workflow that exists in
+		// a workspace the caller cannot reach reads identically to one that
+		// does not exist at all.
+		return repoerrors.ErrWorkflowNotFound
+	}
+	return nil
+}
+
+// authorizeWorkflowScope checks reach and one action scope for a workflow.
+// Workflow access is resolved through its workspace so callers that can read
+// a board but cannot write its tasks receive ErrForbidden.
+func (s *Service) authorizeWorkflowScope(ctx context.Context, workflowID string, scope authz.Scope) error {
+	if _, scoped := callerScope(ctx); !scoped {
 		return nil
 	}
 	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
@@ -92,14 +328,7 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	if workflow.WorkspaceID == "" {
 		return nil
 	}
-	workspace, err := s.workspaces.GetWorkspace(ctx, workflow.WorkspaceID)
-	if err != nil {
-		return nil //nolint:nilerr // visibility fallback, not an operation failure
-	}
-	if !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
-	}
-	return nil
+	return s.AuthorizeWorkspaceScope(ctx, workflow.WorkspaceID, scope)
 }
 
 // AuthorizeTaskAccess is the public form of authorizeTaskID, consumed by the
@@ -108,32 +337,106 @@ func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error 
 	return s.authorizeTaskID(ctx, taskID)
 }
 
+// AuthorizeWorkflowAccess is the public form of authorizeWorkflowID, consumed
+// by the workflow service, whose step/export/import surface reaches workflows
+// by ID but does not own workspace permissions.
+func (s *Service) AuthorizeWorkflowAccess(ctx context.Context, workflowID string) error {
+	return s.authorizeWorkflowID(ctx, workflowID)
+}
+
+// AuthorizeWorkflowStepAccess resolves a step's owning workflow before
+// authorizing the workflow, so step-count endpoints cannot disclose another
+// workspace's task count.
+func (s *Service) AuthorizeWorkflowStepAccess(ctx context.Context, stepID string) error {
+	_, scoped := callerScope(ctx)
+	if !scoped {
+		return nil
+	}
+	if s.workflowStepGetter == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil {
+		return err
+	}
+	if step == nil || step.WorkflowID == "" {
+		return repoerrors.ErrTaskNotFound
+	}
+	return s.authorizeWorkflowID(ctx, step.WorkflowID)
+}
+
 // AuthorizeWorkspaceAccess is the public form of authorizeWorkspaceID,
 // consumed by the office route-scoping middleware.
 func (s *Service) AuthorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
 	return s.authorizeWorkspaceID(ctx, workspaceID)
 }
 
-// AuthorizeSessionAccess checks visibility of a task session via its task's
+// AuthorizeSessionAccess checks reach of a task session via its task's
 // workspace. Wired into the lifecycle manager so session-scoped surfaces
 // (files, processes, ports, vscode, terminal, LSP) are covered.
 func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) error {
-	_, scoped := callerScope(ctx)
-	if !scoped {
+	return s.AuthorizeSessionScope(ctx, sessionID, authz.ScopeWorkspaceRead)
+}
+
+// AuthorizeSessionScope enforces one scope on the workspace owning a session.
+// Execution surfaces (terminal, shell, file writes, port previews) use
+// authz.ScopeSessionExec so a viewer who may read a transcript never gets a
+// shell in the worktree.
+func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error {
+	if _, scoped := callerScope(ctx); !scoped && !executorUseScope(scope) {
 		return nil
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	return s.authorizeTaskID(ctx, session.TaskID)
+	if session == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	if executorUseScope(scope) {
+		if err := s.authorizeSessionExecutor(ctx, session); err != nil {
+			return err
+		}
+	}
+	return s.authorizeTaskScope(ctx, session.TaskID, scope)
 }
 
 // AuthorizeTaskSessionAccess checks that both identifiers are visible to the
 // caller and that the session belongs to the supplied task. Mismatches use the
 // task not-found sentinel so callers cannot enumerate another task's sessions.
 func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error {
-	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeWorkspaceRead)
+}
+
+// AuthorizeTaskSessionPromptAccess checks the task/session pair and enforces
+// its ordinary prompt scope or coordinator manager scope before admission.
+func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, sessionID string) error {
+	scope, err := s.coordinatorPromptScope(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, scope)
+}
+
+// AuthorizeSessionPromptAccess applies the task's prompt scope to a session,
+// including message replays whose task identity comes from the session row.
+func (s *Service) AuthorizeSessionPromptAccess(ctx context.Context, sessionID string) error {
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	return s.AuthorizeTaskSessionPromptAccess(ctx, session.TaskID, sessionID)
+}
+
+func (s *Service) authorizeTaskSessionScope(
+	ctx context.Context,
+	taskID, sessionID string,
+	scope authz.Scope,
+) error {
+	if err := s.authorizeTaskScope(ctx, taskID, scope); err != nil {
 		return err
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
@@ -143,25 +446,103 @@ func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessio
 	if session == nil || session.TaskID != taskID {
 		return repoerrors.ErrTaskNotFound
 	}
+	if executorUseScope(scope) || scope == authz.ScopeWorkspaceManage {
+		return s.authorizeSessionExecutor(ctx, session)
+	}
 	return nil
 }
 
-// AuthorizeEnvironmentAccess checks visibility of a task environment via its
-// task's workspace. Used by the terminal environment-shell route, which
+// AuthorizeTaskSessionIncarnationAccess additionally rejects a stale queue
+// identity after a textual session ID has been deleted and recreated.
+func (s *Service) AuthorizeTaskSessionIncarnationAccess(
+	ctx context.Context,
+	taskID, sessionID, incarnationID string,
+) error {
+	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return err
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != taskID || session.QueueIncarnationID != incarnationID {
+		return repoerrors.ErrTaskNotFound
+	}
+	return nil
+}
+
+// AuthorizeEnvironmentAccess checks reach of a task environment via its task's
+// workspace. Used by the terminal environment-shell route, which
 // resolves executions by environment ID rather than session ID.
 func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error {
-	_, scoped := callerScope(ctx)
-	if !scoped {
+	return s.AuthorizeEnvironmentScope(ctx, taskEnvironmentID, authz.ScopeWorkspaceRead)
+}
+
+// AuthorizeEnvironmentScope enforces one scope on a task environment.
+func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error {
+	if _, scoped := callerScope(ctx); !scoped && !executorUseScope(scope) {
 		return nil
 	}
 	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
 	if err != nil {
 		return err
 	}
-	return s.authorizeTaskID(ctx, env.TaskID)
+	if env == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	if executorUseScope(scope) {
+		if err := s.AuthorizeExecutorConfiguration(ctx, env.ExecutorID, env.ExecutorProfileID); err != nil {
+			return err
+		}
+	}
+	return s.authorizeTaskScope(ctx, env.TaskID, scope)
 }
 
-// authorizeRepositoryID checks visibility of a repository via its workspace.
+// AuthorizeTaskEnvironmentAccess checks that both identifiers are visible to
+// the caller and that the environment is one the task is actually bound to.
+// Mismatches use the task not-found sentinel, mirroring
+// AuthorizeTaskSessionAccess, so callers cannot enumerate environments by
+// pairing them against a task they do own.
+//
+// Authorizing the two IDs separately is not enough: both checks pass for a
+// caller who owns the task and, independently, owns some unrelated
+// environment, and the terminal route then merges state from the two.
+//
+// The relationship is deliberately not `env.TaskID == taskID`. inherit_parent
+// binds a subtask's session to the parent task's environment, and shared_group
+// binds every member of a workspace group to one canonical environment, so the
+// row's owning task is legitimately a different task in both. What establishes
+// the pair is a session of this task pointing at this environment.
+func (s *Service) AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return err
+	}
+	if err := s.AuthorizeEnvironmentAccess(ctx, taskEnvironmentID); err != nil {
+		return err
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return err
+	}
+	if env != nil && env.TaskID == taskID {
+		return nil
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if session != nil && session.TaskEnvironmentID == taskEnvironmentID {
+			return nil
+		}
+	}
+	return repoerrors.ErrTaskNotFound
+}
+
+// authorizeRepositoryID checks reach of a repository via its workspace.
 // Denials use ErrRepositoryNotFound (no existence leak).
 func (s *Service) authorizeRepositoryID(ctx context.Context, repositoryID string) error {
 	if _, scoped := callerScope(ctx); !scoped {
@@ -181,14 +562,39 @@ func (s *Service) authorizeRepositoryID(ctx context.Context, repositoryID string
 }
 
 // filterWorkspacesForCaller narrows a workspace list to the caller's view.
-func filterWorkspacesForCaller(ctx context.Context, workspaces []*models.Workspace) []*models.Workspace {
-	userID, scoped := callerScope(ctx)
-	if !scoped {
+//
+// The caller's whole membership map is read once here rather than per
+// workspace: a board render walks every workspace, so a per-row lookup would
+// be an N+1 on the hottest list in the product.
+func (s *Service) filterWorkspacesForCaller(ctx context.Context, workspaces []*models.Workspace) []*models.Workspace {
+	subject := callerSubject(ctx)
+	if subject.Unscoped {
 		return workspaces
 	}
+
+	memberRoles, err := s.workspaces.ListWorkspaceIDsForMember(ctx, subject.UserID)
+	if err != nil {
+		s.logger.Warn("workspace membership list failed; returning no workspaces")
+		return nil
+	}
+
+	inherited, ok := s.inheritedRolesFor(ctx, subject.UserID, workspaces)
+	if !ok {
+		return nil
+	}
+
 	visible := make([]*models.Workspace, 0, len(workspaces))
 	for _, workspace := range workspaces {
-		if workspaceVisibleTo(workspace, userID) {
+		if workspace == nil {
+			continue
+		}
+		ref := authz.WorkspaceRef{
+			OwnerID:       workspace.OwnerID,
+			OrgID:         workspace.OrgID,
+			MemberRole:    authz.NormalizeWorkspaceRole(memberRoles[workspace.ID]),
+			InheritedRole: inherited[workspace.ID],
+		}
+		if authz.ResolveWorkspace(subject, ref).CanRead() {
 			visible = append(visible, workspace)
 		}
 	}

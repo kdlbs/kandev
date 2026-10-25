@@ -44,13 +44,18 @@ test.describe("Sidebar status with secondary session", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task.
+    // 3. Prefer the board route when it has a card. A completed task can remain
+    // in the sidebar while its board column omits the card, so keep the direct
+    // task route as a stable fallback for this sidebar-status regression.
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    const card = kanban.taskCardByTitle(TASK_TITLE);
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
+    const card = kanban.taskCard(task.id);
+    if (await card.isVisible().catch(() => false)) {
+      await card.click();
+    } else {
+      await testPage.goto(`/t/${task.id}`);
+    }
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);

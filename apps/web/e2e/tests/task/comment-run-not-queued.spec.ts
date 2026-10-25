@@ -2,6 +2,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,7 @@ test.describe("Comment run sends directly when agent is idle", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
+    const gateway = watchWs(testPage);
 
     // 1. Create a task that produces plan content. Agent runs and finishes.
     const { session } = await seedTaskAndWaitForIdle(
@@ -121,7 +123,9 @@ test.describe("Comment run sends directly when agent is idle", () => {
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
 
     // 4. Agent is now idle. Add a plan comment and click Run.
+    const commentSent = gateway.waitForResponse("message.add");
     await addPlanCommentAndRun(testPage, session, "Refactor step 1 to use dependency injection");
+    await commentSent;
 
     // 5. The comment should NOT be queued — no queue indicator should appear.
     const queueIndicator = testPage.getByTitle("Cancel queued message");
@@ -129,13 +133,12 @@ test.describe("Comment run sends directly when agent is idle", () => {
 
     // 6. The comment should appear in the chat as a direct message.
     await expect(
-      session.chat.getByText("Refactor step 1 to use dependency injection", { exact: false }),
+      session.chat
+        .getByTestId("user-message-bubble")
+        .getByText("Refactor step 1 to use dependency injection", { exact: true }),
     ).toBeVisible({ timeout: 15_000 });
 
-    // 7. The agent should start processing (proves it was sent as message.add, not queued).
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-
-    // 8. Wait for agent to complete.
+    // 7. Wait for agent to complete after the direct message was accepted.
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
   });
 });

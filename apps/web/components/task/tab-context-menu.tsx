@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import {
   ContextMenu,
@@ -9,6 +8,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { useTabContextActions } from "./use-tab-context-actions";
 import { useTranslation } from "react-i18next";
 
 /** An item in the tab right-click context menu.
@@ -25,19 +25,13 @@ export type TabContextMenuParams = {
 };
 
 /** Default tab component — wraps DockviewDefaultTab with a right-click menu.
- *  Always provides "Close Others". Panels may inject additional items via
- *  props.params.contextMenuItems. */
+ *  Always provides "Close" and "Close Others". Panels may inject additional
+ *  items via props.params.contextMenuItems. */
 export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
   const { t } = useTranslation();
   const { api, containerApi } = props;
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
-
-  const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter(
-      (p) => p.id !== api.id && p.id !== "chat" && !p.id.startsWith("session:"),
-    );
-    for (const panel of toClose) containerApi.removePanel(panel);
-  }, [api, containerApi]);
+  const { handleClose, handleCloseOthers } = useTabContextActions(api, containerApi);
 
   const extraItems: TabContextMenuItem[] =
     (props.params as TabContextMenuParams | undefined)?.contextMenuItems ?? [];
@@ -52,11 +46,21 @@ export function ContextMenuTab(props: IDockviewPanelHeaderProps) {
       </ContextMenuTrigger>
       <ContextMenuContent>
         {extraItems.map((item) => (
-          <ContextMenuItem key={item.label} onSelect={item.onSelect} disabled={item.disabled}>
+          <ContextMenuItem
+            key={item.label}
+            className="cursor-pointer"
+            onSelect={item.onSelect}
+            disabled={item.disabled}
+          >
             {item.label}
           </ContextMenuItem>
         ))}
-        <ContextMenuItem onSelect={handleCloseOthers}>{t("task:closeOthers")}</ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleClose}>
+          {t("task:close")}
+        </ContextMenuItem>
+        <ContextMenuItem className="cursor-pointer" onSelect={handleCloseOthers}>
+          {t("task:closeOthers")}
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );

@@ -1,4 +1,4 @@
-import { createRef } from "react";
+import { createRef, type ComponentProps } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -7,12 +7,28 @@ import {
   WorkflowSection,
 } from "./task-create-dialog-form-body";
 import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog-types";
+import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
 
 afterEach(cleanup);
 
 vi.mock("@/components/workflow-selector-row", () => ({
-  WorkflowSelectorRow: ({ selectedWorkflowId }: { selectedWorkflowId: string | null }) => (
-    <button type="button">Workflow selector {selectedWorkflowId ?? "none"}</button>
+  WorkflowSelectorRow: ({
+    selectedWorkflowId,
+    previewWorkspaceId,
+    workflows,
+  }: {
+    selectedWorkflowId: string | null;
+    previewWorkspaceId?: string | null;
+    workflows: Array<{ id: string }>;
+  }) => (
+    <button
+      type="button"
+      data-testid="workflow-selector-mock"
+      data-preview-workspace-id={previewWorkspaceId ?? ""}
+      data-workflow-ids={workflows.map((item) => item.id).join(",")}
+    >
+      Workflow selector {selectedWorkflowId ?? "none"}
+    </button>
   ),
 }));
 
@@ -76,13 +92,14 @@ describe("WorkflowSection", () => {
 
   function renderWorkflowSection(
     effectiveWorkflowId: string | null,
-    workflows = [workflow, secondWorkflow],
+    workflows: Parameters<typeof WorkflowSection>[0]["workflows"] = [workflow, secondWorkflow],
   ) {
     return render(
       <WorkflowSection
         isCreateMode
         isTaskStarted={false}
         workflows={workflows}
+        previewWorkspaceId="workspace-1"
         snapshots={{}}
         effectiveWorkflowId={effectiveWorkflowId}
         onWorkflowChange={() => {}}
@@ -111,15 +128,50 @@ describe("WorkflowSection", () => {
     expect(screen.getByRole("button", { name: /workflow selector wf-1/i })).toBeTruthy();
     expect(screen.queryByTestId("task-create-dependency-slot")).toBeNull();
   });
+
+  // @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.5
+  it("passes the workspace and visible workflows while retaining locked behavior", () => {
+    renderWorkflowSection("wf-1", [
+      workflow,
+      secondWorkflow,
+      { id: "wf-hidden", name: "Hidden", hidden: true },
+    ]);
+
+    const selector = screen.getByTestId("workflow-selector-mock");
+    expect(selector.getAttribute("data-preview-workspace-id")).toBe("workspace-1");
+    expect(selector.getAttribute("data-workflow-ids")).toBe("wf-1,wf-2");
+
+    cleanup();
+    render(
+      <WorkflowSection
+        isCreateMode
+        isTaskStarted={false}
+        workflowLocked
+        workflows={[workflow, secondWorkflow]}
+        previewWorkspaceId="workspace-1"
+        snapshots={{}}
+        effectiveWorkflowId="wf-1"
+        onWorkflowChange={() => {}}
+        agentProfiles={[]}
+      />,
+    );
+    expect(screen.queryByTestId("workflow-selector-mock")).toBeNull();
+  });
 });
 
 function makeFs(): DialogFormState {
   return {
     blockedBy: [],
     setBlockedBy: () => undefined,
+    mcpServerIds: [],
+    setMcpServerIds: () => undefined,
+    mcpServerIdsDirty: false,
+    setMcpServerIdsDirty: () => undefined,
     taskName: "",
     autopilot: false,
     setAutopilot: () => {},
+    priority: "medium",
+    setPriority: () => {},
     setTaskName: () => {},
     hasTitle: false,
     setHasTitle: () => {},
@@ -132,7 +184,9 @@ function makeFs(): DialogFormState {
     currentDefaults: { name: "", description: "" },
     descriptionInputRef: createRef<TaskFormInputsHandle>(),
     repositories: [],
+    repositoriesDirty: false,
     setRepositories: () => {},
+    setRepositoriesDirty: () => {},
     addRepository: () => {},
     removeRepository: () => {},
     updateRepository: () => {},
@@ -142,6 +196,8 @@ function makeFs(): DialogFormState {
     setExecutorId: () => {},
     executorProfileId: "",
     setExecutorProfileId: () => {},
+    setExecutorProfileIdFromSeed: () => {},
+    seededExecutorProfileId: null,
     discoveredRepositories: [],
     setDiscoveredRepositories: () => {},
     discoverReposLoading: false,
@@ -150,6 +206,8 @@ function makeFs(): DialogFormState {
     setDiscoverReposLoaded: () => {},
     selectedWorkflowId: null,
     setSelectedWorkflowId: () => {},
+    workflowAgentOverrides: {},
+    setWorkflowAgentOverrides: () => {},
     fetchedSteps: null,
     setFetchedSteps: () => {},
     isCreatingSession: false,
@@ -191,10 +249,36 @@ function makeFs(): DialogFormState {
     setCurrentLocalBranchLoading: () => {},
     noRepository: false,
     setNoRepository: () => {},
+    preferLocalExecutor: false,
+    setPreferLocalExecutor: () => {},
     workspacePath: "",
     setWorkspacePath: () => {},
   };
 }
+
+describe("DialogPromptSection launch preview", () => {
+  it("forwards the launch preview to the prompt composer", () => {
+    taskFormInputsCalls.length = 0;
+    const launchPreview: TaskCreateLaunchPreview = {
+      stepId: "step-1",
+      stepName: "In Progress",
+      stepPrompt: "Run {{task_prompt}}",
+    };
+
+    render(
+      <DialogPromptSection
+        isSessionMode={false}
+        isTaskStarted={false}
+        initialDescription="Original prompt"
+        fs={makeFs()}
+        handleKeyDown={(() => {}) as never}
+        launchPreview={launchPreview}
+      />,
+    );
+
+    expect(taskFormInputsCalls.at(-1)?.launchPreview).toEqual(launchPreview);
+  });
+});
 
 describe("DialogPromptSection (CLI-mode parity)", () => {
   it("keeps a started task prompt locked", () => {
@@ -290,33 +374,208 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
   });
 });
 
+const SELECTOR_TEST_ID = "agent-selector-stub";
+const AgentSelectorStub = () => (
+  <button type="button" data-testid="agent-selector-stub">
+    selector
+  </button>
+);
+const ExecutorSelectorStub = () => <button type="button">executor</button>;
+const createEditSelectorsBaseProps: Omit<
+  ComponentProps<typeof CreateEditSelectors>,
+  "agentCompatState"
+> = {
+  isTaskStarted: false,
+  agentProfiles: [{ id: "agent-1", label: "Codex", agent_name: "codex" } as never],
+  agentProfilesLoading: false,
+  agentProfileOptions: [],
+  agentProfileId: "",
+  onAgentProfileChange: () => {},
+  isCreatingSession: false,
+  executorProfileOptions: [],
+  executorProfileId: "exec-profile-1",
+  onExecutorProfileChange: () => {},
+  executorsLoading: false,
+  AgentSelectorComponent: AgentSelectorStub,
+  ExecutorProfileSelectorComponent: ExecutorSelectorStub,
+  workflowAgentLocked: false,
+  executorProfileName: "Docker",
+  selectedAgentProfileName: null,
+  effectiveWorkflowName: null,
+  runnerEditable: true,
+  runnerIneligibleReason: "eligible",
+};
+
 describe("CreateEditSelectors", () => {
+  const WORKFLOW_NAME = "Development";
+  const EXECUTOR_NAME = "Fly";
+  const EMPTY_STATE_TEST_ID = "agent-profile-empty-state";
+  const baseProps = createEditSelectorsBaseProps;
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.4
   it("links credential setup to the selected executor profile", () => {
-    const EmptySelector = () => <button type="button">selector</button>;
+    render(<CreateEditSelectors {...baseProps} agentCompatState="none-compatible" />);
 
-    render(
-      <CreateEditSelectors
-        isTaskStarted={false}
-        agentProfiles={[{ id: "agent-1", label: "Codex", agent_name: "codex" } as never]}
-        agentProfilesLoading={false}
-        agentProfileOptions={[]}
-        agentProfileId=""
-        onAgentProfileChange={() => {}}
-        isCreatingSession={false}
-        executorProfileOptions={[]}
-        executorProfileId="exec-profile-1"
-        onExecutorProfileChange={() => {}}
-        executorsLoading={false}
-        AgentSelectorComponent={EmptySelector}
-        ExecutorProfileSelectorComponent={EmptySelector}
-        workflowAgentLocked={false}
-        noCompatibleAgent={true}
-        executorProfileName="Docker"
-      />,
+    expect(screen.getByTestId(EMPTY_STATE_TEST_ID).textContent).toContain(
+      "No compatible agent profiles",
     );
-
     expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
       "/settings/executors/exec-profile-1",
     );
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.1
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  it("keeps the selector and names the incompatible agent when another agent is compatible", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentProfileId="agent-1"
+        agentCompatState="selected-incompatible"
+        selectedAgentProfileName="OpenCode"
+        executorProfileName={EXECUTOR_NAME}
+      />,
+    );
+
+    expect(screen.getByTestId(SELECTOR_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID)).toBeNull();
+    const note = screen.getByTestId("agent-profile-incompatible-note").textContent ?? "";
+    expect(note).toContain("OpenCode");
+    expect(note).toContain(EXECUTOR_NAME);
+    expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
+      "/settings/executors/exec-profile-1",
+    );
+  });
+
+  it("keeps the selector and shows an unavailable note while replacement is pending", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentProfileId="agent-1"
+        agentCompatState={"selected-unavailable" as never}
+        selectedAgentProfileName="Disabled agent"
+        executorProfileName={EXECUTOR_NAME}
+      />,
+    );
+
+    expect(screen.getByTestId(SELECTOR_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("agent-profile-unavailable-note").textContent).toContain(
+      "Disabled agent",
+    );
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.5
+  it("names the workflow, agent, and executor when the workflow locks an incompatible agent", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentProfileId="agent-1"
+        agentCompatState="selected-incompatible"
+        workflowAgentLocked={true}
+        selectedAgentProfileName="OpenCode"
+        effectiveWorkflowName={WORKFLOW_NAME}
+        executorProfileName={EXECUTOR_NAME}
+      />,
+    );
+
+    const note = screen.getByTestId("agent-profile-incompatible-note").textContent ?? "";
+    expect(note).toContain(WORKFLOW_NAME);
+    expect(note).toContain("OpenCode");
+    expect(note).toContain(EXECUTOR_NAME);
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(EMPTY_STATE_TEST_ID)).toBeNull();
+    expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
+      "/settings/executors/exec-profile-1",
+    );
+  });
+});
+
+// REQ-TASKS-RUNNER-SWITCH-004: runner-editability gating is independent of
+// the agent-compatibility rendering exercised above, split into its own
+// block to keep each describe's setup focused.
+describe("CreateEditSelectors — runner editability (REQ-TASKS-RUNNER-SWITCH-004)", () => {
+  const RUNNER_NOTE_TEST_ID = "runner-ineligible-note";
+  const baseProps = createEditSelectorsBaseProps;
+
+  // AC-TASKS-RUNNER-SWITCH-004.3: runner editability is independent of
+  // isTaskStarted — the previous state-only gate must no longer govern it.
+  it("shows the executor selector for a started task that is still runner-editable", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        isTaskStarted={true}
+        runnerEditable={true}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "executor" })).toBeTruthy();
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RUNNER_NOTE_TEST_ID)).toBeNull();
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.2
+  it("presents the projected reason instead of the selector when not runner-editable", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        runnerEditable={false}
+        runnerIneligibleReason="session_exists"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "executor" })).toBeNull();
+    expect(screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent).toBeTruthy();
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.4b: never an empty reason or a raw code — an
+  // unrecognized reason renders the same copy as evaluation_unavailable.
+  it("falls back to the evaluation-unavailable copy for an unrecognized reason code", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        runnerEditable={false}
+        runnerIneligibleReason="some_future_reason_this_dialog_predates"
+      />,
+    );
+    const unrecognized = screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent;
+    cleanup();
+
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        runnerEditable={false}
+        runnerIneligibleReason="evaluation_unavailable"
+      />,
+    );
+    const known = screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent;
+
+    expect(unrecognized).toBeTruthy();
+    expect(unrecognized).toBe(known);
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.2: the reason is presented unconditionally
+  // whenever runner_editable is false — a started task is not a carve-out.
+  // session_exists is itself one of the ineligibility reasons, so this is
+  // the common shape for any task with a primary session, not an edge case.
+  it("shows the ineligible reason for a started, runner-ineligible task instead of rendering nothing", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        isTaskStarted={true}
+        runnerEditable={false}
+        runnerIneligibleReason="session_exists"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "executor" })).toBeNull();
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent).toBeTruthy();
   });
 });

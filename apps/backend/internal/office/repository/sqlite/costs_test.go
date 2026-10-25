@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -36,22 +37,15 @@ func seedTasksTable(t *testing.T, repo *sqlite.Repository, taskID, workspaceID s
 	}
 }
 
-// TestCreateCostTables_IndexesSessionID guards the boot-time cost of
-// internal/task/repository/sqlite's BackfillSessionTokensCachedIn, which
-// correlates task_sessions against office_cost_events on session_id. Without
-// this index that correlated subquery falls back to a full table scan per
-// task_sessions row (a measured ~450x slowdown at 4,000 sessions / 80,000
-// events - 76.72s vs 0.17s). The index lives here, not in the task
-// repository, because it indexes a table this repository owns.
-func TestCreateCostTables_IndexesSessionID(t *testing.T) {
+func TestCreateCostTables_DoesNotCreateUnusedSessionIDIndex(t *testing.T) {
 	repo := newTestRepo(t)
 
 	var name string
 	err := repo.ReaderDB().QueryRow(
 		`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'office_cost_events' AND sql LIKE '%session_id%'`,
 	).Scan(&name)
-	if err != nil {
-		t.Fatalf("expected an index on office_cost_events(session_id) to exist after repo init, got: %v", err)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("session_id index = %q, err=%v, want no index", name, err)
 	}
 }
 

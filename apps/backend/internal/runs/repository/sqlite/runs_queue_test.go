@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -29,10 +30,19 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	older := queueRunAt(t, repo, "older", "a1", now.Add(-30*time.Second))
-	newer := queueRunAt(t, repo, "newer", "a1", now.Add(-10*time.Second))
+	older := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "older", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, older.ID, now.Add(-30*time.Second))
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"merged":true}`)
+	newer := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "newer", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, newer.ID, now.Add(-10*time.Second))
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"t1","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce: %v", err)
 	}
@@ -42,11 +52,11 @@ func TestCoalesceRun_MergesIntoMostRecentQueuedRun(t *testing.T) {
 
 	got := mustGetRun(t, repo, newer.ID)
 	checkInt(t, "coalesced_count", got.CoalescedCount, 2)
-	checkString(t, "payload", got.Payload, `{"merged":true}`)
+	checkString(t, "payload", got.Payload, `{"task_id":"t1","merged":true}`)
 
 	untouched := mustGetRun(t, repo, older.ID)
 	checkInt(t, "older coalesced_count", untouched.CoalescedCount, 1)
-	checkString(t, "older payload", untouched.Payload, `{"task_id":"older"}`)
+	checkString(t, "older payload", untouched.Payload, `{"task_id":"t1"}`)
 
 	if n := countRuns(t, repo); n != 2 {
 		t.Errorf("%d rows after coalescing, want 2 (no new run may be created)", n)
@@ -71,6 +81,209 @@ func TestCoalesceRun_DoesNotMergeDifferentTaskRuns(t *testing.T) {
 	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
 }
 
+// TestCoalesceRun_ManualResumeAfterFailure_DoesNotMergeDifferentTaskRuns
+// pins the same task-scoping guarantee as
+// TestCoalesceRun_DoesNotMergeDifferentTaskRuns for the
+// manual_resume_after_failure reason: an agent auto-paused across several
+// tasks must queue one run per task instead of coalescing task-b's wake
+// into task-a's already-queued run and dropping task-a's launch.
+func TestCoalesceRun_ManualResumeAfterFailure_DoesNotMergeDifferentTaskRuns(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "task-a", AgentProfileID: "a1", Reason: "manual_resume_after_failure",
+		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
+	})
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "manual_resume_after_failure", 3600, `{"task_id":"task-b"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a different task, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+}
+
+// TestCoalesceRun_DoesNotMergeDifferentTaskRuns_ForOtherReasons pins the
+// same guarantee as TestCoalesceRun_DoesNotMergeDifferentTaskRuns for a
+// task-scoped reactivity reason other than "task_assigned" — e.g. two
+// blocked tasks unblocked by the same predecessor and assigned to the
+// same agent within the coalesce window must not merge into one run.
+func TestCoalesceRun_DoesNotMergeDifferentTaskRuns_ForOtherReasons(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "task-a-run", AgentProfileID: "a1", Reason: "task_blockers_resolved",
+		Payload: `{"task_id":"task-a"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_blockers_resolved", 3600, `{"task_id":"task-b"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a different task, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+}
+
+// TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates proves
+// the task-scoping predicate added for manual_resume_after_failure still
+// allows genuine duplicates (repeated wakes for the same task) to coalesce
+// onto one row.
+func TestCoalesceRun_ManualResumeAfterFailure_MergesSameTaskDuplicates(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "task-a", AgentProfileID: "a1", Reason: "manual_resume_after_failure",
+		Payload: `{"task_id":"task-a","attempt":1}`, Status: "queued", CoalescedCount: 1,
+	})
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "manual_resume_after_failure", 3600, `{"task_id":"task-a","attempt":2}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if !merged {
+		t.Fatal("coalesce = false for the same task, want true")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 2)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a","attempt":2}`)
+	if n := countRuns(t, repo); n != 1 {
+		t.Errorf("%d rows after coalescing, want 1 (no new run may be created)", n)
+	}
+}
+
+// TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun pins the other
+// direction of the same guarantee: a taskless incoming payload must not
+// absorb a queued run that carries a task_id, or it would silently
+// overwrite that task's launch.
+func TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	queued := queueRunAt(t, repo, "task-a", "a1", time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a taskless payload into a task-carrying run, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":"task-a"}`)
+}
+
+// TestCoalesceRun_MergesTasklessIntoTasklessRun pins the positive half of
+// the taskless guarantee that TestCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun
+// only pins negatively: a taskless incoming payload must still merge into a
+// taskless queued run, so heartbeat, routine_dispatch_* and agent_error wakes
+// keep coalescing instead of growing the queue unboundedly.
+func TestCoalesceRun_MergesTasklessIntoTasklessRun(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"empty object", `{}`},
+		{"other field set", `{"routine_id":"r1"}`},
+		{"explicit null task_id", `{"task_id":null}`},
+		{"present empty string task_id", `{"task_id":""}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			ctx := context.Background()
+
+			queued := mustCreateRun(t, repo, &runsmodels.Run{
+				ID: "taskless", AgentProfileID: "a1", Reason: "heartbeat",
+				Payload: tc.payload, Status: "queued", CoalescedCount: 1,
+			})
+			setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+			merged, err := repo.CoalesceRun(ctx, "a1", "heartbeat", 3600, `{"merged":true}`)
+			if err != nil {
+				t.Fatalf("coalesce: %v", err)
+			}
+			if !merged {
+				t.Fatalf("coalesce = false for taskless into taskless, want true")
+			}
+
+			got := mustGetRun(t, repo, queued.ID)
+			checkInt(t, "coalesced_count", got.CoalescedCount, 2)
+			checkString(t, "payload", got.Payload, `{"merged":true}`)
+		})
+	}
+}
+
+// TestCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun pins the R4-2
+// fix: a payload whose task_id is present but not a string (e.g. a number)
+// names some task, just not one taskIDFromPayload can compare textually. It
+// must not be classified taskless and must not silently absorb — and
+// overwrite the payload of — a genuinely taskless queued run.
+func TestCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "taskless", AgentProfileID: "a1", Reason: "custom_reason",
+		Payload: `{"note":"real taskless launch"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "custom_reason", 3600, `{"task_id":42}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true for a non-string task_id into a taskless run, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"note":"real taskless launch"}`)
+}
+
+// TestCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID pins the other
+// direction of TestCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun: a
+// queued row whose own task_id is malformed (present but not a string) must
+// not absorb an incoming request just because the malformed value's textual
+// form happens to equal the incoming task_id's string. Both dialects yield a
+// text-comparable value for a JSON number, so this predicate must inspect
+// the stored value's JSON type rather than only its text.
+func TestCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "malformed", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":42}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, queued.ID, time.Now().UTC())
+
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"42"}`)
+	if err != nil {
+		t.Fatalf("coalesce: %v", err)
+	}
+	if merged {
+		t.Fatal("coalesce = true into a queued row with a non-string task_id, want false")
+	}
+
+	got := mustGetRun(t, repo, queued.ID)
+	checkInt(t, "coalesced_count", got.CoalescedCount, 1)
+	checkString(t, "payload", got.Payload, `{"task_id":42}`)
+}
+
 // TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow pins the counter
 // arithmetic across several merges into the same run.
 func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {
@@ -79,7 +292,7 @@ func TestCoalesceRun_RepeatedCoalesceAccumulatesOnOneRow(t *testing.T) {
 	run := queueRunAt(t, repo, "target", "a1", time.Now().UTC().Add(-time.Second))
 
 	for i := range 3 {
-		merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"n":1}`)
+		merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 3600, `{"task_id":"target","n":1}`)
 		if err != nil {
 			t.Fatalf("coalesce %d: %v", i, err)
 		}
@@ -128,7 +341,7 @@ func TestCoalesceRun_HonoursTheWindow(t *testing.T) {
 	ctx := context.Background()
 	run := queueRunAt(t, repo, "stale", "a1", time.Now().UTC().Add(-10*time.Second))
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 5, `{"merged":true}`)
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_assigned", 5, `{"task_id":"stale","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce (narrow window): %v", err)
 	}
@@ -137,7 +350,7 @@ func TestCoalesceRun_HonoursTheWindow(t *testing.T) {
 	}
 	checkInt(t, "coalesced_count", mustGetRun(t, repo, run.ID).CoalescedCount, 1)
 
-	merged, err = repo.CoalesceRun(ctx, "a1", "task_assigned", 600, `{"merged":true}`)
+	merged, err = repo.CoalesceRun(ctx, "a1", "task_assigned", 600, `{"task_id":"stale","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce (wide window): %v", err)
 	}
@@ -156,19 +369,19 @@ func TestCoalesceRun_SkipsCommentKeyedRuns(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	plain := mustCreateRun(t, repo, &models.Run{
+	plain := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "plain", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t1"}`, Status: "queued", CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, plain.ID, now.Add(-20*time.Second))
-	keyed := mustCreateRun(t, repo, &models.Run{
+	keyed := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "keyed", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t1","comment_id":"cm-1"}`, Status: "queued",
 		CoalescedCount: 1, IdempotencyKey: strPtr("task_comment:cm-1"),
 	})
 	setRequestedAt(t, repo, keyed.ID, now.Add(-5*time.Second))
 
-	merged, err := repo.CoalesceRun(ctx, "a1", "task_comment", 600, `{"merged":true}`)
+	merged, err := repo.CoalesceRun(ctx, "a1", "task_comment", 600, `{"task_id":"t1","merged":true}`)
 	if err != nil {
 		t.Fatalf("coalesce: %v", err)
 	}
@@ -186,7 +399,7 @@ func TestCoalesceRun_SkipsCommentKeyedRuns(t *testing.T) {
 func TestCheckIdempotencyKey_WindowEdges(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "idem", AgentProfileID: "a1", Reason: "task_assigned",
 		IdempotencyKey: strPtr("wake:t1"),
 	})
@@ -225,11 +438,11 @@ func TestCheckIdempotencyKey_WindowEdges(t *testing.T) {
 func TestCheckIdempotencyKey_MatchesOnTheExactKey(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	mustCreateRun(t, repo, &models.Run{
+	mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "idem", AgentProfileID: "a1", Reason: "task_assigned",
 		IdempotencyKey: strPtr("wake:t1"),
 	})
-	mustCreateRun(t, repo, &models.Run{
+	mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "no-key", AgentProfileID: "a1", Reason: "task_assigned",
 	})
 
@@ -250,12 +463,12 @@ func TestCheckIdempotencyKey_MatchesOnTheExactKey(t *testing.T) {
 func TestCreateRun_DuplicateIdempotencyKeyIsRejected(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	first := mustCreateRun(t, repo, &models.Run{
+	first := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "first", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t1"}`, IdempotencyKey: strPtr("task_comment:cm-1"),
 	})
 
-	err := repo.CreateRun(ctx, &models.Run{
+	err := repo.CreateRun(ctx, &runsmodels.Run{
 		ID: "second", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t2"}`, IdempotencyKey: strPtr("task_comment:cm-1"),
 	})
@@ -270,13 +483,34 @@ func TestCreateRun_DuplicateIdempotencyKeyIsRejected(t *testing.T) {
 
 // TestScheduleRetry_RequeuesAndClearsTerminalTimestamps asserts every
 // column the retry write owns, from a run that had already finished.
+// session_id is seeded to simulate a post-start failure (the run reached
+// a real launch before failing) and must come back empty: a relaunch
+// that resolved the prior attempt's session would mint its runtime JWT
+// and prompt against a session the new attempt never owns (review round
+// 1, R1-1). error_message is seeded the same way and must also come back
+// empty: a run that later finishes successfully must not still carry the
+// previous attempt's error into a status='finished' row, which the run
+// detail UI renders as an unconditional tooltip regardless of status
+// (review round 2, R2-2).
 func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	run := queueRunAt(t, repo, "retryable", "a1", now.Add(-time.Hour))
+	if err := repo.UpdateRunRuntimeSnapshot(ctx, run.ID, "{}", "{}", "session-from-failed-attempt"); err != nil {
+		t.Fatalf("seed session_id: %v", err)
+	}
+	if err := repo.SetRunErrorMessageForTest(ctx, run.ID, "connection reset by peer"); err != nil {
+		t.Fatalf("seed error_message: %v", err)
+	}
 	setStatus(t, repo, run.ID, "failed", timePtr(now.Add(-30*time.Minute)), timePtr(now))
 	untouched := queueRunAt(t, repo, "bystander", "a1", now.Add(-time.Hour))
+	if err := repo.UpdateRunRuntimeSnapshot(ctx, untouched.ID, "{}", "{}", "session-still-running"); err != nil {
+		t.Fatalf("seed bystander session_id: %v", err)
+	}
+	if err := repo.SetRunErrorMessageForTest(ctx, untouched.ID, "bystander error"); err != nil {
+		t.Fatalf("seed bystander error_message: %v", err)
+	}
 
 	retryAt := time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
 	if err := repo.ScheduleRetry(ctx, run.ID, retryAt, 4); err != nil {
@@ -295,6 +529,8 @@ func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	if got.FinishedAt != nil {
 		t.Errorf("finished_at = %s, want nil", got.FinishedAt)
 	}
+	checkString(t, "session_id cleared", got.SessionID, "")
+	checkString(t, "error_message cleared", got.ErrorMessage, "")
 	checkString(t, "payload preserved", got.Payload, `{"task_id":"retryable"}`)
 
 	bystander := mustGetRun(t, repo, untouched.ID)
@@ -302,6 +538,8 @@ func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	if bystander.ScheduledRetryAt != nil {
 		t.Errorf("bystander scheduled_retry_at = %s, want nil", bystander.ScheduledRetryAt)
 	}
+	checkString(t, "bystander session_id untouched", bystander.SessionID, "session-still-running")
+	checkString(t, "bystander error_message untouched", bystander.ErrorMessage, "bystander error")
 }
 
 // TestScheduleRetry_WritesTheAttemptCountVerbatim pins that the caller
@@ -316,6 +554,103 @@ func TestScheduleRetry_WritesTheAttemptCountVerbatim(t *testing.T) {
 			t.Fatalf("schedule retry %d: %v", count, err)
 		}
 		checkInt(t, "retry_count", mustGetRun(t, repo, run.ID).RetryCount, count)
+	}
+}
+
+// TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// covers AC-OFFICE-BACKPRESSURE-001.7: a retried run must re-enter the
+// queue at recovery priority so it is not starved behind the same class
+// of work it kept losing to, unless it was already human.
+func TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	periodic := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "retry-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "routine_dispatch_cron", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassPeriodic,
+	})
+	human := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "retry-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassHuman,
+	})
+	setStatus(t, repo, periodic.ID, "failed", nil, timePtr(now))
+	setStatus(t, repo, human.ID, "failed", nil, timePtr(now))
+
+	if err := repo.ScheduleRetry(ctx, periodic.ID, now.Add(time.Minute), 1); err != nil {
+		t.Fatalf("schedule retry (periodic): %v", err)
+	}
+	if err := repo.ScheduleRetry(ctx, human.ID, now.Add(time.Minute), 1); err != nil {
+		t.Fatalf("schedule retry (human): %v", err)
+	}
+
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != runsmodels.PriorityClassRecovery {
+		t.Errorf("periodic run's priority_class after retry = %v, want PriorityClassRecovery", got)
+	}
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != runsmodels.PriorityClassHuman {
+		t.Errorf("human run's priority_class after retry = %v, want PriorityClassHuman (unchanged)", got)
+	}
+}
+
+// TestScheduleRetryIfClaimed_RequeuesWhenStillClaimed asserts the guarded
+// requeue behaves exactly like ScheduleRetry — same column writes, same
+// clearing of session_id/error_message — when the run is still the
+// 'claimed' status the caller read it as.
+func TestScheduleRetryIfClaimed_RequeuesWhenStillClaimed(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := queueRunAt(t, repo, "guarded", "a1", now.Add(-time.Hour))
+	setStatus(t, repo, run.ID, "claimed", timePtr(now.Add(-time.Minute)), nil)
+
+	wrote, err := repo.ScheduleRetryIfClaimed(ctx, run.ID, fixedRetryAt, 1)
+	if err != nil {
+		t.Fatalf("schedule retry if claimed: %v", err)
+	}
+	if !wrote {
+		t.Fatal("wrote = false, want true: run was still claimed")
+	}
+
+	got := mustGetRun(t, repo, run.ID)
+	checkString(t, "status", string(got.Status), "queued")
+	checkInt(t, "retry_count", got.RetryCount, 1)
+	if got.ClaimedAt != nil {
+		t.Errorf("claimed_at = %s, want nil", got.ClaimedAt)
+	}
+	if got.ScheduledRetryAt == nil || !got.ScheduledRetryAt.Equal(fixedRetryAt) {
+		t.Errorf("scheduled_retry_at = %v, want %s", got.ScheduledRetryAt, fixedRetryAt)
+	}
+}
+
+// TestScheduleRetryIfClaimed_NoopWhenNoLongerClaimed pins the guard this
+// method exists for: a run a concurrent writer already moved off
+// 'claimed' (simulating a task-tree cancel, workspace pause, or
+// participant eviction landing between the caller's read and this write)
+// must not be resurrected to 'queued', and none of its columns may move —
+// the caller has to see wrote=false and leave the row exactly as the
+// other writer left it.
+func TestScheduleRetryIfClaimed_NoopWhenNoLongerClaimed(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := queueRunAt(t, repo, "raced", "a1", now.Add(-time.Hour))
+	setStatus(t, repo, run.ID, "cancelled", timePtr(now.Add(-time.Minute)), timePtr(now))
+
+	wrote, err := repo.ScheduleRetryIfClaimed(ctx, run.ID, fixedRetryAt, 1)
+	if err != nil {
+		t.Fatalf("schedule retry if claimed: %v", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false: a concurrent writer already moved the run off claimed")
+	}
+
+	got := mustGetRun(t, repo, run.ID)
+	checkString(t, "status untouched", string(got.Status), "cancelled")
+	checkInt(t, "retry_count untouched", got.RetryCount, 0)
+	if got.ScheduledRetryAt != nil {
+		t.Errorf("scheduled_retry_at = %v, want nil (untouched)", got.ScheduledRetryAt)
 	}
 }
 
@@ -370,6 +705,40 @@ func TestRecoverStale_NothingToRecoverReportsZero(t *testing.T) {
 	}
 	if recovered != 0 {
 		t.Errorf("recovered = %d, want 0", recovered)
+	}
+}
+
+// TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// covers AC-OFFICE-BACKPRESSURE-001.7 for the recovery-sweep path: a
+// stuck run returned to queued must re-enter at recovery priority so it
+// can drain the pool, unless it was already human.
+func TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	cutoff := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+
+	periodic := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "stale-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "heartbeat", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassPeriodic,
+	})
+	human := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "stale-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: runsmodels.PriorityClassHuman,
+	})
+	setStatus(t, repo, periodic.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
+	setStatus(t, repo, human.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
+
+	if _, err := repo.RecoverStale(ctx, cutoff); err != nil {
+		t.Fatalf("recover stale: %v", err)
+	}
+
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != runsmodels.PriorityClassRecovery {
+		t.Errorf("periodic run's priority_class after recovery = %v, want PriorityClassRecovery", got)
+	}
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != runsmodels.PriorityClassHuman {
+		t.Errorf("human run's priority_class after recovery = %v, want PriorityClassHuman (unchanged)", got)
 	}
 }
 

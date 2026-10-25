@@ -2,7 +2,22 @@ package lifecycle
 
 import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// agentctlStartupConfigForExecutor keeps the host-only survival reaper out of
+// managed remote/container environments. The backend owns the renewal loop for
+// its host control server; a remote agentctl has no such loop and would reap
+// its own instances after the unowned timeout.
+func agentctlStartupConfigForExecutor(
+	startup commonconfig.AgentctlStartupConfig,
+	executorType string,
+) commonconfig.AgentctlStartupConfig {
+	if models.IsRemoteExecutorType(models.ExecutorType(executorType)) {
+		startup.AgentSurvivalEnabled = false
+	}
+	return startup
+}
 
 func validateAgentctlStartupConfig(startup commonconfig.AgentctlStartupConfig) error {
 	if !startup.Configured {

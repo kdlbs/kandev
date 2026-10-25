@@ -12,6 +12,8 @@ import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import type {
   ProviderProfile,
   ExecutionProfileSummary,
+  RoleMeta,
+  RoleTierMap,
   Tier,
   TierPerReason,
   WorkspaceRouting,
@@ -22,12 +24,20 @@ import {
   ProviderHealthBanner,
   ProviderOrderEditor,
   ProviderTierMapping,
+  RoleTierCard,
   RoutingEnableCard,
   WakeReasonTierCard,
 } from "./components";
 import { useTranslation } from "react-i18next";
 
 const DEFAULT_PROFILE: ProviderProfile = { tier_map: {} };
+
+// Stable fallback: a Zustand selector that returns a fresh `[]` on every call
+// (when `office.meta` hasn't loaded yet) breaks useSyncExternalStore's
+// reference-equality snapshot check and infinite-loops into React error #185
+// ("Maximum update depth exceeded"), caught by the route error boundary. See
+// EMPTY_PREVIEW / EMPTY_HEALTH in the sibling hooks for the same pattern.
+const EMPTY_ROLES: RoleMeta[] = [];
 
 function emptyConfig(): WorkspaceRouting {
   return {
@@ -42,6 +52,7 @@ function emptyConfig(): WorkspaceRouting {
 export default function ProviderRoutingPage() {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const roles = useAppStore((s) => s.office.meta?.roles ?? EMPTY_ROLES);
   const routing = useWorkspaceRouting(workspaceId);
   const health = useProviderHealth(workspaceId);
   const preview = useRoutingPreview(workspaceId);
@@ -85,6 +96,7 @@ export default function ProviderRoutingPage() {
     <PageBody
       draft={draft}
       setDraft={setDraft}
+      roles={roles}
       knownProviders={routing.knownProviders}
       executionProfiles={routing.executionProfiles}
       saving={saving}
@@ -102,6 +114,7 @@ export default function ProviderRoutingPage() {
 type PageBodyProps = {
   draft: WorkspaceRouting;
   setDraft: (cfg: WorkspaceRouting) => void;
+  roles: RoleMeta[];
   knownProviders: string[];
   executionProfiles: ExecutionProfileSummary[];
   saving: boolean;
@@ -117,6 +130,7 @@ type PageBodyProps = {
 function PageBody({
   draft,
   setDraft,
+  roles,
   knownProviders,
   executionProfiles,
   saving,
@@ -133,6 +147,7 @@ function PageBody({
   // Named `tier`, not `t`: a parameter called `t` shadows the translate function.
   const setTier = (tier: Tier) => setDraft({ ...draft, default_tier: tier });
   const setTierPerReason = (m: TierPerReason) => setDraft({ ...draft, tier_per_reason: m });
+  const setRoleTiers = (m: RoleTierMap) => setDraft({ ...draft, role_tiers: m });
   const setOrder = (next: string[]) => {
     const profiles = { ...draft.provider_profiles };
     for (const p of next) {
@@ -157,6 +172,13 @@ function PageBody({
       <DefaultTierSelector
         value={draft.default_tier}
         onChange={setTier}
+        disabled={sectionsDisabled}
+      />
+      <RoleTierCard
+        roles={roles}
+        config={draft}
+        value={draft.role_tiers ?? {}}
+        onChange={setRoleTiers}
         disabled={sectionsDisabled}
       />
       <WakeReasonTierCard

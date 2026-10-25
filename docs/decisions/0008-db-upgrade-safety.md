@@ -4,7 +4,9 @@
 **Date:** 2026-05-16
 **Area:** backend
 
-Spec: [db-upgrade-safety](../specs/db-upgrade-safety/spec.md)
+Related system design: [health endpoint version](../specs/platform/system-design/health-endpoint-version.md)
+
+Backup mechanism superseded by: [separate backups from compaction](2026-10-12-separate-sqlite-backups-from-compaction.md). Upgrade ordering and verification remain required.
 
 ## Context
 

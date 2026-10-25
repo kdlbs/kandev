@@ -53,7 +53,7 @@ test.describe("Mobile App status bar preference", () => {
       .toBe(false);
 
     await testPage.goto("/");
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
+    await testPage.getByTestId("app-nav-trigger").tap();
     await expect(testPage.getByTestId("mobile-home-status-button")).toHaveCount(0);
     await testPage.keyboard.press("Escape");
     await testPage.goto("/stats");

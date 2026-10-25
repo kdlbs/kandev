@@ -25,12 +25,14 @@ function makeStore(initial: Partial<AppState> = {}) {
       lastSessionByTaskId: {},
     },
     taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {} },
+    taskSessions: { items: {} },
     environmentIdBySessionId: {},
     setActiveSessionAuto: vi.fn(),
     removeTaskFromSidebarPrefs: vi.fn(),
     setTaskDeletedNotification: vi.fn(),
     upsertQuickChatSessionFromEvent: vi.fn(),
     removeQuickChatSessionsForTask: vi.fn(),
+    clearQueueStatus: vi.fn(),
     setOfficeRefetchTrigger: vi.fn(),
     ...initial,
   } as unknown as AppState;
@@ -143,7 +145,7 @@ it("removes archived tasks from the active kanban cache even when workflow focus
   expect(state.kanbanMulti.snapshots.wf1.tasks).toEqual([]);
 });
 
-it("adds an archived task to the workspace-scoped sidebar projection", () => {
+it("invalidates the sidebar query without accumulating an off-page archived row", () => {
   const store = makeStore({
     sidebarArchivedTasks: {
       itemsByWorkspaceId: {},
@@ -162,11 +164,11 @@ it("adds an archived task to the workspace-scoped sidebar projection", () => {
   );
 
   const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
-  expect(archived).toHaveLength(1);
-  expect(archived[0]).toMatchObject({ id: TASK_ID, workspaceId: "ws-1", isArchived: true });
+  expect(archived).toBeUndefined();
+  expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId?.["ws-1"]).toBe(1);
 });
 
-it("resolves the workspace from active task state when the archive event omits it", () => {
+it("uses the active task workspace to invalidate an archive event without a workspace", () => {
   const store = makeStore({
     kanban: {
       workflowId: "wf1",
@@ -188,12 +190,11 @@ it("resolves the workspace from active task state when the archive event omits i
     }),
   );
 
-  expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-active"]).toEqual([
-    expect.objectContaining({ id: TASK_ID, workspaceId: "ws-active", isArchived: true }),
-  ]);
+  expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-active"]).toBeUndefined();
+  expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId?.["ws-active"]).toBe(1);
 });
 
-it("preserves the resolved workspace on partial archived updates", () => {
+it("invalidates a cached archived row after an archive update without appending it again", () => {
   const store = makeStore({
     sidebarArchivedTasks: {
       itemsByWorkspaceId: {
@@ -213,13 +214,8 @@ it("preserves the resolved workspace on partial archived updates", () => {
     }),
   );
 
-  const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
-  expect(archived[0]).toMatchObject({
-    id: TASK_ID,
-    title: "Updated archived task",
-    workspaceId: "ws-1",
-    isArchived: true,
-  });
+  expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"]).toEqual([]);
+  expect(store.getState().sidebarArchivedTasks.revisionByWorkspaceId?.["ws-1"]).toBe(1);
 });
 
 it("clears active task state, pin, recent history, and sidebar prefs for archived task events", () => {
@@ -262,6 +258,43 @@ it.each(["/t/t1", "/tasks/t1"])("redirects away when archived on %s", (path) => 
 
   expect(window.location.pathname).toBe("/");
   expect(window.location.search).toBe("?home=overview");
+});
+
+it("leaves local removal navigation to the coordinator", () => {
+  window.history.replaceState({}, "", "/t/t1");
+  const store = makeStoreWithTask({
+    tasks: {
+      activeTaskId: TASK_ID,
+      activeSessionId: SESSION_ID,
+      pinnedSessionId: null,
+      lastSessionByTaskId: {},
+    },
+    taskRemoval: {
+      navigationRevision: 0,
+      operationsByToken: {
+        "removal-1": {
+          token: "removal-1",
+          action: "archive",
+          workspaceId: "ws-1",
+          taskIds: [TASK_ID],
+          requestIds: [TASK_ID],
+          outcomesByTaskId: { [TASK_ID]: "pending" },
+          departure: {
+            taskId: TASK_ID,
+            sessionId: SESSION_ID,
+            navigationRevision: 0,
+            origin: "detail",
+          },
+        },
+      },
+      pendingTokenByTaskId: { [TASK_ID]: "removal-1" },
+    },
+  } as unknown as Partial<AppState>);
+
+  archiveTask(store);
+
+  expect(window.location.pathname).toBe("/t/t1");
+  expect(window.location.search).toBe("");
 });
 
 it("does not redirect when a different task is archived", () => {

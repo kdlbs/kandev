@@ -14,6 +14,10 @@ function initializeMobileRepository(backend: BackendContext): string {
   fs.mkdirSync(repositoryPath, { recursive: true });
   const gitEnvironment = makeGitEnv(backend.tmpDir);
   execFileSync("git", ["init", "-b", "main"], { cwd: repositoryPath, env: gitEnvironment });
+  execFileSync("git", ["remote", "add", "origin", MOBILE_REMOTE], {
+    cwd: repositoryPath,
+    env: gitEnvironment,
+  });
   fs.writeFileSync(path.join(repositoryPath, MOBILE_FILE), "export const mobile = true;\n");
   execFileSync("git", ["add", "-A"], { cwd: repositoryPath, env: gitEnvironment });
   execFileSync("git", ["commit", "-m", "seed mobile provider repository"], {
@@ -79,7 +83,7 @@ test.describe("Mobile external VCS file link", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
-    await testPage.getByRole("button", { name: "Files" }).tap();
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${MOBILE_FILE}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
     await fileNode.tap();

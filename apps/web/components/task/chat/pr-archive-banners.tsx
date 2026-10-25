@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
-import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { useAppStore } from "@/components/state-provider";
+import { useScopedTaskPRResult } from "@/hooks/domains/github/scoped-task-pr-context";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import {
   markPRClosedBannerDismissed,
@@ -12,6 +13,8 @@ import {
   wasPRMergedBannerDismissed,
 } from "@/lib/local-storage";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { cn } from "@/lib/utils";
 
 // Presentational banner shared by PRMergedBanner / PRClosedBanner — an icon, a
 // message, and Archive + Dismiss controls. Colors/icon/testIds are supplied by
@@ -38,40 +41,70 @@ function ArchiveDismissBanner({
 }) {
   const { t } = useTranslation();
   const archive = useTaskArchiveConfirm(taskId);
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <>
-      <div data-testid={`${testIdPrefix}-banner`} className={containerClass}>
+      <div
+        data-testid={`${testIdPrefix}-banner`}
+        className={cn(
+          containerClass,
+          "min-w-[min(100%,20rem)] max-w-full basis-80 max-md:order-first max-md:basis-full",
+          archive.target && !isFinePointer && "flex-wrap",
+        )}
+      >
         {icon}
-        <span className="flex-1">{text}</span>
-        <button
-          type="button"
-          data-testid={`${testIdPrefix}-archive-button`}
-          onClick={archive.requestArchive}
-          className={archiveClass}
-        >
-          {t("task:archive")}
-        </button>
+        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{text}</span>
+        {(!archive.target || isFinePointer) && (
+          <button
+            ref={archiveAnchorRef}
+            type="button"
+            data-testid={`${testIdPrefix}-archive-button`}
+            onClick={archive.requestArchive}
+            className={cn(
+              "h-6 shrink-0 rounded px-1 max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
+              archiveClass,
+            )}
+          >
+            {t("task:archive")}
+          </button>
+        )}
         <button
           type="button"
           aria-label={t("task:dismiss")}
           data-testid={`${testIdPrefix}-dismiss-button`}
           onClick={onDismiss}
-          className={dismissClass}
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center max-md:size-11 [@media(pointer:coarse)]:size-11",
+            dismissClass,
+          )}
         >
           <IconX className="h-3 w-3" />
         </button>
+        <TaskArchiveConfirmation
+          open={archive.target !== null}
+          anchorRef={archiveAnchorRef}
+          taskId={taskId}
+          taskTitle={archive.target?.title}
+          executorType={archive.target?.executorType}
+          isArchiving={archive.isPending}
+          onOpenChange={(open) => {
+            if (!open) archive.closeConfirm();
+          }}
+          onConfirm={archive.confirmArchive}
+          confirmTestId={`${testIdPrefix}-archive-confirm`}
+        />
       </div>
-      <TaskArchiveConfirmFlow
-        taskId={taskId}
-        archive={archive}
-        confirmTestId={`${testIdPrefix}-archive-confirm`}
-      />
     </>
   );
 }
 
 export function PRMergedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const scoped = useScopedTaskPRResult(taskId);
+  const globalPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const taskPRs = scoped?.prs ?? globalPRs;
   const [dismissed, setDismissed] = useState(() => wasPRMergedBannerDismissed(taskId));
 
   const handleDismiss = useCallback(() => {
@@ -86,8 +119,12 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 
   const bannerText =
     taskPRs.length === 1
-      ? `PR #${taskPRs[0].pr_number} has been merged. You can archive this task.`
-      : `All ${taskPRs.length} PRs have been merged. You can archive this task.`;
+      ? t(isMobile ? "task:prMergedNoticeMobile" : "task:prMergedNotice", {
+          number: taskPRs[0].pr_number,
+        })
+      : t(isMobile ? "task:allPRsMergedNoticeMobile" : "task:allPRsMergedNotice", {
+          count: taskPRs.length,
+        });
 
   return (
     <ArchiveDismissBanner
@@ -104,7 +141,11 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 }
 
 export function PRClosedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const scoped = useScopedTaskPRResult(taskId);
+  const globalPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const taskPRs = scoped?.prs ?? globalPRs;
   const [dismissed, setDismissed] = useState(() => wasPRClosedBannerDismissed(taskId));
 
   const handleDismiss = useCallback(() => {
@@ -119,8 +160,12 @@ export function PRClosedBanner({ taskId }: { taskId: string }) {
 
   const bannerText =
     taskPRs.length === 1
-      ? `PR #${taskPRs[0].pr_number} was closed without merging. You can archive this task.`
-      : `All ${taskPRs.length} PRs were closed without merging. You can archive this task.`;
+      ? t(isMobile ? "task:prClosedNoticeMobile" : "task:prClosedNotice", {
+          number: taskPRs[0].pr_number,
+        })
+      : t(isMobile ? "task:allPRsClosedNoticeMobile" : "task:allPRsClosedNotice", {
+          count: taskPRs.length,
+        });
 
   return (
     <ArchiveDismissBanner

@@ -74,6 +74,55 @@ playwright-cli tracing-stop
 # Open trace to see DOM state when click was attempted
 ```
 
+### Raw CDP performance traces
+
+For performance measurements that need raw Chrome trace events, use a CDP
+session and `transferMode: ReturnAsStream`. `Tracing.tracingComplete` provides
+the stream handle after `Tracing.end`; decode each `IO.read` chunk as base64
+only when its `base64Encoded` flag is true, then close the stream. Guard the
+entire operation so tracing and the CDP session are cleaned up even when the
+measurement fails. Do not disable page script execution during the interaction
+because that changes the work being measured:
+
+```js
+const client = await page.context().newCDPSession(page);
+let tracingStarted = false;
+let stream;
+try {
+  const complete = new Promise(resolve =>
+    client.once('Tracing.tracingComplete', resolve),
+  );
+  await client.send('Tracing.start', {
+    transferMode: 'ReturnAsStream',
+    categories: 'devtools.timeline,v8.execute',
+  });
+  tracingStarted = true;
+  // Run the measured interaction here.
+  await client.send('Tracing.end');
+  ({ stream } = await complete);
+  for (;;) {
+    const chunk = await client.send('IO.read', { handle: stream });
+    const bytes = chunk.base64Encoded
+      ? Buffer.from(chunk.data, 'base64')
+      : Buffer.from(chunk.data);
+    processTraceChunk(bytes);
+    if (chunk.eof) break;
+  }
+} finally {
+  if (tracingStarted) {
+    try { await client.send('Tracing.end'); } catch {}
+  }
+  if (stream) {
+    try { await client.send('IO.close', { handle: stream }); } catch {}
+  }
+  try { await client.detach(); } catch {}
+}
+```
+
+In production code, use a bounded wait for `Tracing.tracingComplete` and keep
+the cleanup guards when the timeout fires. Do not parse every chunk as base64,
+and do not leave the CDP session attached after the trace.
+
 ### Analyzing Performance
 
 ```bash

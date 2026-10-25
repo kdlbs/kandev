@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 type managedTestAgent struct {
@@ -81,6 +82,79 @@ func TestUnavailableManagedAgentOmitsRuntimeMetadata(t *testing.T) {
 	}
 	if _, exists := payload["runtime_update"]; exists {
 		t.Fatal("runtime_update present for unavailable agent")
+	}
+}
+
+func TestAvailableAgentIgnoresMismatchedManagedRuntimeSelection(t *testing.T) {
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec: agents.ManagedNPMRuntimeSpec{
+			Package:        "@example/managed-acp",
+			DefaultVersion: "1.2.3",
+		},
+	}
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@other/managed-acp",
+		Version: "9.9.9",
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	item := ctrl.buildAvailableAgentDTO(
+		context.Background(),
+		ag,
+		discovery.Availability{Name: ag.ID(), Available: true},
+		time.Now(),
+	)
+	if item.RuntimeUpdate == nil {
+		t.Fatal("runtime_update missing")
+	}
+	if item.RuntimeUpdate.ActiveVersion != "" {
+		t.Fatalf("active_version = %q, want empty for mismatched selection", item.RuntimeUpdate.ActiveVersion)
+	}
+	if item.RuntimeUpdate.EffectiveVersion != "1.2.3" {
+		t.Fatalf("effective_version = %q, want default 1.2.3", item.RuntimeUpdate.EffectiveVersion)
+	}
+}
+
+type opencodeDiscoverySelectionStore struct {
+	*recoverySelectionStore
+	selection managedruntime.OpenCodeSelection
+}
+
+func (s *opencodeDiscoverySelectionStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.selection, true, nil
+}
+
+func TestAvailableOpenCodeRuntimeMetadataUsesSelectedFamily(t *testing.T) {
+	openCode := agents.NewOpenCodeACP()
+	store := &opencodeDiscoverySelectionStore{
+		recoverySelectionStore: newRecoverySelectionStore(),
+		selection: managedruntime.OpenCodeSelection{
+			SchemaVersion:         1,
+			Family:                managedruntime.OpenCodeFamilyV2,
+			Source:                managedruntime.OpenCodeSourceManaged,
+			Package:               managedruntime.OpenCodeV2Package,
+			SelectedVersion:       "2.0.19",
+			AppliedDefaultVersion: "2.0.18",
+			Revision:              3,
+		},
+	}
+	controller := newTestController(map[string]agents.Agent{openCode.ID(): openCode})
+	controller.SetManagedRuntimeSelectionStore(store)
+	controller.SetRuntimeUpdater(&fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "2.0.19"},
+		currentFound: true,
+	})
+
+	item := controller.buildRuntimeUpdateDTO(context.Background(), openCode, true)
+	if item == nil {
+		t.Fatal("runtime metadata missing")
+	}
+	if item.Package != managedruntime.OpenCodeV2Package || item.DefaultVersion != "2.0.18" ||
+		item.ActiveVersion != "2.0.19" || item.EffectiveVersion != "2.0.19" {
+		t.Fatalf("OpenCode runtime metadata = %+v, want selected v2 package and version", item)
 	}
 }
 

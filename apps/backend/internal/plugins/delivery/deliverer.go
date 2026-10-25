@@ -535,7 +535,7 @@ func (w *pluginWorker) logOverflow(dropped string) {
 // Logs and gives up (event is lost from the live-delivery path; a
 // subsequent health-poller error transition plus Flush is the recovery
 // path for further events, per the at-least-once/error-buffer semantics in
-// docs/specs/plugins/spec.md) if every attempt fails.
+// docs/specs/plugins/requirements/plugins.md) if every attempt fails.
 func (w *pluginWorker) deliverWithRetry(ctx context.Context, d Delivery) {
 	var lastErr error
 	attempts := 1 + len(w.deps.retryDelays)
