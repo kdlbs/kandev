@@ -795,6 +795,15 @@ func (s *Service) startCreatedSession(
 
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	exactProfile := false
+	var exactAssignment *ExactProfileLaunchDecision
+	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
+		return nil, err
+	} else if exact != nil {
+		exactAssignment = exact
+		agentProfileID = exact.AgentProfileID
+		exactProfile = true
+	}
 
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
@@ -862,9 +871,11 @@ func (s *Service) startCreatedSession(
 	// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
 	// the caller profile only when neither a step override nor a workflow
 	// default applies; either of those overrides a non-empty caller.
-	effectiveProfileID, err = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
-	if err != nil {
-		return nil, err
+	if !exactProfile {
+		effectiveProfileID, err = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if effectiveProfileID == "" {
@@ -912,6 +923,9 @@ func (s *Service) startCreatedSession(
 		s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
 		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)
 	}
+	if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+		return nil, err
+	}
 
 	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor).
 	if err := s.scheduleTaskForSession(ctx, taskID, sessionID); err != nil {
@@ -956,6 +970,36 @@ func (s *Service) startCreatedSession(
 		seam2Res.rekeyToSession(ctx, activeSession.ID)
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
+		if exactAssignment != nil {
+			effectiveProfileID = exactAssignment.AgentProfileID
+		}
+		if session.AgentProfileID != effectiveProfileID {
+			observedState := session.State
+			session.AgentProfileID = effectiveProfileID
+			session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}
+			if profileInfo, resolveErr := s.agentManager.ResolveAgentProfile(ctx, effectiveProfileID); resolveErr != nil {
+				s.logger.Warn("failed to resolve agent profile snapshot for redirected session",
+					zap.String("session_id", sessionID),
+					zap.String("profile_id", effectiveProfileID),
+					zap.Error(resolveErr))
+			} else if profileInfo != nil {
+				session.AgentProfileSnapshot = map[string]interface{}{
+					"id":             profileInfo.ProfileID,
+					"name":           profileInfo.ProfileName,
+					"agent_id":       profileInfo.AgentID,
+					"agent_name":     profileInfo.AgentName,
+					"model":          profileInfo.Model,
+					"mode":           profileInfo.Mode,
+					"config_options": maps.Clone(profileInfo.ConfigOptions),
+				}
+			}
+			if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
+				return nil, fmt.Errorf("persist redirected session profile: %w", err)
+			}
+		}
+		if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+			return nil, err
+		}
 	}
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
 
@@ -1083,6 +1127,9 @@ func (s *Service) startCreatedSession(
 	}
 	launchOptions := executor.LaunchOptions{
 		AgentProfileID:       effectiveProfileID,
+		ExactProfile:         exactAssignment != nil,
+		ExactProfileRevision: exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:    exactProfileModel(exactAssignment),
 		ExecutorID:           executorID,
 		Prompt:               effectivePrompt,
 		StartAgent:           true,
@@ -1116,6 +1163,7 @@ func (s *Service) startCreatedSession(
 			}
 			return nil, err
 		}
+		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
 		if initialTurnCreated {
@@ -1123,6 +1171,7 @@ func (s *Service) startCreatedSession(
 		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
+	s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
@@ -3556,6 +3605,23 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 		return nil, err
 	}
 	resumeCtx := cancellableResumeContext(attempt)
+	exactAssignment, err := s.resolveExactProfileAssignment(resumeCtx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if exactAssignment == nil && session.ExactProfileGeneration != 0 {
+		return nil, ErrExactProfileAssignmentInvalid
+	}
+	if exactAssignment != nil {
+		if session.AgentProfileID != exactAssignment.AgentProfileID ||
+			session.ExactProfileGeneration != exactAssignment.Generation ||
+			session.ExactProfileRevision != exactAssignment.Revision {
+			return nil, ErrExactProfileAssignmentInvalid
+		}
+		options.ExactProfile = true
+		options.ExactProfileModel = exactAssignment.Model
+		options.ExactProfileRevision = exactAssignment.Revision
+	}
 	decorateResumeFailure := func(failure error) error {
 		return s.withSessionRecoveryFailureIdentity(
 			resumeCtx, taskID, sessionID, attempt, attempt.execution(), failure,
@@ -3609,7 +3675,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 			}
 			if err != nil && errors.Is(err, ErrAgentNotReadyForPrompt) {
 				persistBranchRecovery()
-				return nil, decorateResumeFailure(err)
+				failure := decorateResumeFailure(err)
+				s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure)
+				return nil, failure
 			}
 		}
 		if err != nil {
@@ -3646,9 +3714,11 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 			// LaunchPreparedSession. Record this failure with the same state CAS,
 			// persisted recovery claim, and archive-safe task CAS as early launch.
 			err = s.branchRecoveryError(resumeCtx, taskID, sessionID, err)
-			return nil, decorateResumeFailure(s.handleSessionLaunchFailure(
+			failure := decorateResumeFailure(s.handleSessionLaunchFailure(
 				resumeCtx, taskID, sessionID, err, session,
 			))
+			s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure)
+			return nil, failure
 		}
 	}
 	if readySession == nil {
@@ -3670,6 +3740,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
+	s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 	seam4Res.consume()
 	persistBranchRecovery()
 	if err := s.activateResumedDynamicRoute(resumeCtx, readySession); err != nil {
@@ -6992,6 +7063,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if err != nil {
 		return nil, err
 	}
+	// Reject incompatible exact-profile requests before a cold resume can
+	// launch an agent. The model-switch path validates again immediately before
+	// switching so an assignment change during resume cannot escape the guard.
+	if err := s.validateExactProfileModelRequest(ctx, taskID, model, session); err != nil {
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		return nil, err
+	}
 
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.
 	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
@@ -8308,6 +8386,10 @@ func (s *Service) attemptModelSwitchForPrompt(
 	foregroundDispatch *foregroundDispatch, runBeforeDispatch func() error,
 	runAfterDispatchAdmission func() error, resumeAttempts ...*resumeAttempt,
 ) (result *PromptResult, handled bool, err error) {
+	if err := s.validateExactProfileModelRequest(ctx, taskID, model, session); err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
+		return nil, true, err
+	}
 	var resumeAttempt *resumeAttempt
 	if len(resumeAttempts) > 0 {
 		resumeAttempt = resumeAttempts[0]

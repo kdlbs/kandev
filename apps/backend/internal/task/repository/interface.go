@@ -267,6 +267,15 @@ type TaskRepository interface {
 	SwitchTaskRunner(ctx context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error)
 }
 
+// ExactProfileAssignmentRepository is the optional task-owned persistence
+// contract for launches bound to a concrete profile mutation token.
+type ExactProfileAssignmentRepository interface {
+	GetExactProfileAssignment(context.Context, string) (*models.ExactProfileAssignment, error)
+	AssignExactProfileAssignmentIfProfileCurrent(context.Context, *models.ExactProfileAssignment) (bool, error)
+	GetExactProfileLaunchReceipt(context.Context, string, string) (*models.ExactProfileLaunchReceipt, error)
+	RecordExactProfileLaunchReceipt(context.Context, *models.ExactProfileLaunchReceipt) (bool, error)
+}
+
 // ExactTaskOperationRepository atomically couples a task update to a durable
 // operation identity. It is an optional extension so other repository
 // implementations can adopt exact commands independently of the broad CRUD

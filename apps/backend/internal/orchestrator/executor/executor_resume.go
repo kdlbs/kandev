@@ -1022,6 +1022,9 @@ const (
 )
 
 type ResumeOptions struct {
+	ExactProfile                 bool
+	ExactProfileModel            string
+	ExactProfileRevision         int64
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -2118,6 +2121,9 @@ func newResumeLaunchRequest(
 		SessionID:                    session.ID,
 		TaskTitle:                    task.Title,
 		AgentProfileID:               executionProfileID,
+		ExactProfile:                 options.ExactProfile,
+		ExactProfileModel:            options.ExactProfileModel,
+		ExactProfileRevision:         options.ExactProfileRevision,
 		OfficeAgentProfileID:         session.AgentProfileID,
 		StartAgent:                   startAgent,
 		TaskDescription:              task.Description,

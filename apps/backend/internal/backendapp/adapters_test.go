@@ -57,6 +57,15 @@ func TestBuildLifecycleLaunchRequestForwardsCausingRunID(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestForwardsExactProfileSnapshot(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		ExactProfile: true, ExactProfileModel: "model-1", ExactProfileRevision: 42,
+	}, "/workspace", "profile-1")
+	if !got.ExactProfile || got.ExactProfileModel != "model-1" || got.ExactProfileRevision != 42 {
+		t.Fatalf("exact profile launch snapshot = %+v", got)
+	}
+}
+
 func TestOrchestratorLaunchContextForwardsCausingRunID(t *testing.T) {
 	got := orchestratorLaunchContext(officeservice.LaunchContext{
 		CausingRunID: "office-run-1",

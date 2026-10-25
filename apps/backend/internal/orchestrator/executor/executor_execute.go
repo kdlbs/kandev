@@ -2123,6 +2123,9 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			return nil, err
 		}
 		req.CausingRunID = opts.CausingRunID
+		req.ExactProfile = opts.ExactProfile
+		req.ExactProfileModel = opts.ExactProfileModel
+		req.ExactProfileRevision = opts.ExactProfileRevision
 		req.TaskScope, err = e.resolveTaskLaunchScope(ctx, task.ID)
 		if err != nil {
 			return nil, err

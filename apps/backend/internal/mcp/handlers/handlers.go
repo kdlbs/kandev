@@ -153,6 +153,14 @@ type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 }
 
+type ExactTaskProfileAssigner interface {
+	AssignExactTaskProfile(ctx context.Context, taskID, agentProfileID string, generation int64) (*orchestrator.ExactProfileLaunchDecision, error)
+}
+
+type exactTaskProfileGenerationReader interface {
+	ExactTaskProfileGeneration(context.Context, string) (int64, error)
+}
+
 // taskStepTransitionIDReader reads a task's latest step-transition ledger id.
 // The production task repository implements it; deferMoveTask type-asserts so a
 // fake that omits it simply keeps the legacy ordering behavior.
@@ -372,9 +380,10 @@ type Handlers struct {
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
-	agentPermissionSvc AgentPermissionService
-	taskTransferSvc    TaskTransferService
-	transferAuthorizer TaskTransferCoordinatorAuthorizer
+	agentPermissionSvc       AgentPermissionService
+	exactTaskProfileAssigner ExactTaskProfileAssigner
+	taskTransferSvc          TaskTransferService
+	transferAuthorizer       TaskTransferCoordinatorAuthorizer
 
 	// Optional coordinator.propose_task dependency (coordinator MCP surface
 	// only, set via SetCoordinatorService). Without it the action is not
@@ -383,6 +392,10 @@ type Handlers struct {
 	coordinatorSvc *coordinator.Service
 	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
 	coordinatorTurns CoordinatorTurnReader
+}
+
+func (h *Handlers) SetExactTaskProfileAssigner(assigner ExactTaskProfileAssigner) {
+	h.exactTaskProfileAssigner = assigner
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -597,6 +610,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPAssignExactTaskProfile, h.handleAssignExactTaskProfile)
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)

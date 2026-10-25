@@ -372,6 +372,17 @@ An active turn keeps its current MCP list. Existing task sessions save a desired
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
 
+### Assign an exact task profile
+
+`assign_exact_task_profile_kandev` binds a task to a specific enabled agent
+profile in the same workspace. Supply the task ID, profile ID, and next
+assignment generation. Kandev records the profile's current change token and
+checks it again before launching or resuming an agent. If the profile changes,
+is disabled, or is deleted, the governed launch stops; assign the intended
+profile again with a new generation. A model supplied in a prompt must match
+the assigned profile's model. Existing assignments that predate change-token
+tracking also require reassignment before they can govern a launch.
+
 ### Manage linked pull and merge requests
 
 Task MCP provides one shared contract for GitHub pull requests and GitLab merge
