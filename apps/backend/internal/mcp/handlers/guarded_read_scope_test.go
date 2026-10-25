@@ -188,6 +188,12 @@ func TestGuardedGuard_ExecutorProfileListingIsDenied(t *testing.T) {
 	assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
 }
 
+func TestGuardedGuard_AgentListingIsDenied(t *testing.T) {
+	f := newGuardedFixture(t)
+	guarded, _ := f.call(t, f.principal, ws.ActionMCPListAgents, map[string]any{})
+	assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+}
+
 func TestListWorkspacesIsConfinedForGuardedPrincipal(t *testing.T) {
 	f := newGuardedFixture(t)
 	list := func(principal mcpscope.Principal) []dto.WorkspaceDTO {

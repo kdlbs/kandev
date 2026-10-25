@@ -7,7 +7,7 @@ import (
 
 func TestGuardedToolClasses(t *testing.T) {
 	want := map[string]GuardedToolClass{
-		"list_workspaces": ClassRead, "list_agents": ClassRead, "get_task_document": ClassRead,
+		"list_workspaces": ClassRead, "list_agents": ClassDenied, "list_executor_profiles": ClassDenied, "get_task_document": ClassRead,
 		"step_complete": ClassSelf, "write_task_document": ClassSelf, "show_rich_output": ClassSelf,
 		"get_diagnostic_bundle": ClassSelf, "answer_question": ClassDenied, "publish_canvas": ClassDenied,
 		"list_plugin_tools": ClassDenied, "create_task": ClassChildWrite, "move_task": ClassChildWrite, "message_task": ClassChildWrite,

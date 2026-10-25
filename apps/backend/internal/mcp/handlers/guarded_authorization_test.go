@@ -178,7 +178,7 @@ func TestGuardedGuard_WrongTypesAndShapes(t *testing.T) {
 
 func TestGuardedGuard_NullAndEmptyPayloadIsEmptyObject(t *testing.T) {
 	f := newGuardedFixture(t)
-	for _, tool := range []string{ws.ActionMCPListWorkspaces, ws.ActionMCPListAgents} {
+	for _, tool := range []string{ws.ActionMCPListWorkspaces} {
 		for _, raw := range []string{"", "null", "{}"} {
 			guarded, replacement := f.call(t, f.principal, tool, json.RawMessage(raw))
 			require.Nil(t, guarded, tool+raw)

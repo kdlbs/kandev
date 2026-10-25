@@ -53,7 +53,7 @@ func buildGuardedTools() map[string]GuardedTool {
 		}
 	}
 	add(ClassRead, nil,
-		"list_workflows", "list_workflow_steps", "list_tasks", "list_repositories", "list_workspaces", "list_agents",
+		"list_workflows", "list_workflow_steps", "list_tasks", "list_repositories", "list_workspaces",
 		"get_task_conversation", "list_task_sessions", "get_task_plan",
 		"list_task_plan_revisions", "get_task_plan_revision", "get_walkthrough", "get_task_change_requests",
 		"get_task_pr_automation", "get_task_mr_automation",
@@ -77,7 +77,7 @@ func buildGuardedTools() map[string]GuardedTool {
 	add(ClassChildWrite, attrCallerT, "link_task_pr", "unlink_task_pr", "replace_task_pr", "manage_task_change_request")
 	add(ClassInternal, nil, "audit_task_transfer_attempt")
 	m["list_pending_questions"] = GuardedTool{Class: ClassRead, PinWorkspace: true}
-	add(ClassDenied, nil, "list_executor_profiles",
+	add(ClassDenied, nil, "list_executor_profiles", "list_agents",
 		"transfer_task", "archive_task", "delete_task", "resolve_agent_permission", "answer_question",
 		"list_plugin_tools", "invoke_plugin_tool", "publish_canvas",
 		"add_branch_to_task", "add_workspace_sources")
