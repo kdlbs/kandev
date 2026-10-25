@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-GUARDED-MESSAGE-QUEUE-001
   - REQ-TASKS-GUARDED-MESSAGE-QUEUE-002
+  - REQ-TASKS-GUARDED-MESSAGE-QUEUE-003
 ---
 
 # Guarded Message Queue Census and Disposition System Design
@@ -21,6 +22,7 @@ image customization.
 | --- | --- |
 | `REQ-TASKS-GUARDED-MESSAGE-QUEUE-001` | [Census and exact disposition](#census-and-exact-disposition), [Authorization](#authorization), [Failure and recovery](#failure-and-recovery) |
 | `REQ-TASKS-GUARDED-MESSAGE-QUEUE-002` | [Scheduled routine wake coalescing](#scheduled-routine-wake-coalescing), [Failure and recovery](#failure-and-recovery) |
+| `REQ-TASKS-GUARDED-MESSAGE-QUEUE-003` | [Session ownership recovery](#session-ownership-recovery), [Authorization](#authorization), [Failure and recovery](#failure-and-recovery) |
 
 ## Components and responsibilities
 
@@ -77,6 +79,23 @@ complete expanded prompt. Session scoping and reserved `queued_by` provenance
 remain part of the repository match. A matching pending row is replaced in
 place, preserving its immutable entry ID and FIFO position. Any distinct
 payload gets a distinct key, and non-scheduled sources never enter this path.
+
+## Session ownership recovery
+
+`messagequeue.RecoverTaskSessionQueue` moves eligible pending entries from the
+previous primary session to its replacement under the task repository's
+transaction boundary. Stored entry snapshots preserve the original body,
+attachment descriptors, provenance, and ordering. A task-scoped recovery
+receipt identifies the committed snapshot and lets a retry return the prior
+result instead of enqueueing duplicate work. Recovery rejects stale session
+incarnations and mismatched task/workspace ownership.
+
+`task.Repository.DeleteTaskSessionWithAttachments` verifies the exact session
+incarnation and checks the queue before removing the row. If queue work remains,
+the transaction fails without deleting the session or entries. Cleanup that
+archives retained session evidence closes the queue and archives the session in
+the same transaction, so a failed queue guard cannot leave a partially deleted
+session.
 
 ## Failure and recovery
 

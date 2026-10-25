@@ -21,19 +21,15 @@ documents, attachments, parent and dependency relationships, creation, launch,
 runtime state publication, workflow definitions and transitions, completion
 signals, and task scheduling.
 
-Turn change sets bind immutable repository intervals to capture policy,
-historical content availability, and transcript anchors. Workspaces supply
-checkout identity; runtime supplies ordered executor access.
+Turn change sets bind repository intervals to capture policy and transcript
+anchors. Workspaces own checkout identity; runtime owns ordered executor access.
 
 ## Exclusions
 
-- Agent identity, permissions, and runtime profiles belong to the
-  [agent system](../agents).
-- Repository and worktree ownership belongs to the
-  [workspace system](../workspaces).
-- Office-specific autonomous agent identities and dashboards belong to the
-  [Office system](../office).
-- Presentation-only behavior belongs to the [UI specifications](../ui).
+- Agent identities, permissions, and profiles belong to [agents](../agents).
+- Repositories and worktrees belong to [workspaces](../workspaces).
+- Office identities and dashboards belong to [Office](../office).
+- Presentation-only behavior belongs to [UI](../ui).
 
 ## Specification map
 
@@ -92,6 +88,7 @@ checkout identity; runtime supplies ordered executor access.
 - [Rich task title previews](requirements/rich-task-title-previews.md)
 - [Queued run scheduling](requirements/run-scheduling.md)
 - [Resume prompt queue](requirements/resume-prompt-queue.md)
+- [Guarded queue disposition](requirements/guarded-message-queue-disposition.md); [terminal session history](requirements/terminal-session-history.md)
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
 - [Managed Branch Compaction](requirements/managed-branch-compaction.md)
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)

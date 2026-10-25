@@ -44,6 +44,18 @@ distinct input remains lossless.
 - **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.3:** The system shall not routine-coalesce peer, task, human, webhook, pull-request event, or materially different scheduled payloads.
 - **AC-TASKS-GUARDED-MESSAGE-QUEUE-002.4:** Concurrent identical wake admission and admission after process restart shall retain at least one wake and shall not consume extra queue capacity.
 
+### REQ-TASKS-GUARDED-MESSAGE-QUEUE-003: Queue recovery across session ownership changes
+
+Accepted queued work must remain recoverable when a task changes its primary
+session or a queue entry is disposed through another supported path.
+
+#### Acceptance criteria
+
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-003.1:** When a task replaces its primary session, eligible pending entries shall be recovered in FIFO order with their original bodies, attachments, and trusted provenance intact.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-003.2:** Queue transfer and its durable receipt shall commit atomically; a failed transfer shall leave the source queue and target session unchanged.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-003.3:** Repeating a completed transfer request shall return its recorded result without admitting duplicate entries, and a stale or unauthorized request shall not read or mutate another task's queue.
+- **AC-TASKS-GUARDED-MESSAGE-QUEUE-003.4:** When exact session deletion finds pending queue entries, it shall reject the deletion and preserve the session and every queued entry.
+
 ## Exclusions
 
 - Reading queued message bodies through the census API.
@@ -51,3 +63,4 @@ distinct input remains lossless.
 - Removing a durable lifecycle row already reserved for delivery.
 - Coalescing distinct messages merely because they share a sender or target.
 - Cross-task, cross-session, or cross-workspace queue management.
+- Reassigning queued work to an unrelated session or changing its content during recovery.
