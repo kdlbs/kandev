@@ -798,7 +798,7 @@ func (s *Service) startCreatedSession(
 	exactProfile := false
 	var exactAssignment *ExactProfileLaunchDecision
 	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
-		return nil, err
+		return nil, s.recordExactProfileResolutionDenial(context.WithoutCancel(ctx), taskID, sessionID, err)
 	} else if exact != nil {
 		exactAssignment = exact
 		agentProfileID = exact.AgentProfileID
@@ -1136,18 +1136,19 @@ func (s *Service) startCreatedSession(
 		}()
 	}
 	launchOptions := executor.LaunchOptions{
-		AgentProfileID:       effectiveProfileID,
-		ExactProfile:         exactAssignment != nil,
-		ExactProfileRevision: exactAssignmentRevision(exactAssignment),
-		ExactProfileModel:    exactProfileModel(exactAssignment),
-		ExecutorID:           executorID,
-		Prompt:               effectivePrompt,
-		StartAgent:           true,
-		RefuseIfAgentRunning: options.refuseIfAgentRunning,
-		McpMode:              mcpMode,
-		Attachments:          attachments,
-		TurnID:               initialTurnID,
-		OnExecutionAdmitted:  options.onExecutionAdmitted,
+		AgentProfileID:         effectiveProfileID,
+		ExactProfile:           exactAssignment != nil,
+		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
+		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:      exactProfileModel(exactAssignment),
+		ExecutorID:             executorID,
+		Prompt:                 effectivePrompt,
+		StartAgent:             true,
+		RefuseIfAgentRunning:   options.refuseIfAgentRunning,
+		McpMode:                mcpMode,
+		Attachments:            attachments,
+		TurnID:                 initialTurnID,
+		OnExecutionAdmitted:    options.onExecutionAdmitted,
 	}
 	if err := s.configureInitialPromptDispatch(
 		ctx, sessionID, initialTurnID, initialTurnCreated, effectivePrompt, attachments, options, &launchOptions,

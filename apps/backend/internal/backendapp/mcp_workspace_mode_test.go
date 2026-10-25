@@ -87,6 +87,16 @@ func TestExternalMCPTaskModesReachPersistenceAndManagement(t *testing.T) {
 	httpServer := httptest.NewServer(router)
 	t.Cleanup(httpServer.Close)
 
+	// The production MCP composition must reach the orchestrator's guarded
+	// assignment API, even when this test has no agent manager configured.
+	assignResponse := postExternalWorkspaceModeMCPRequest(t, httpServer.URL+"/mcp", 49,
+		"assign_exact_task_profile_kandev", map[string]any{
+			"task_id": "missing-task", "agent_profile_id": "profile-1", "generation": 1,
+		})
+	require.Equal(t, http.StatusOK, assignResponse.StatusCode)
+	require.NotContains(t, assignResponse.Body, "exact task profile assignment is unavailable")
+	require.Contains(t, assignResponse.Body, "exact profile assignment is no longer valid")
+
 	// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.3
 	t.Run("inheritance requires parent through MCP", func(t *testing.T) {
 		before, err := harness.taskSvc.ListTasks(ctx, kanbanWorkflows[0].ID)

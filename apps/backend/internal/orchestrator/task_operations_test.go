@@ -144,7 +144,7 @@ func TestStartSessionForWorkflowStepRejectsUnboundExactSessionBeforePrompt(t *te
 		isAgentRunning: true,
 		isAgentReadyFn: func(context.Context, string) bool { return true },
 		resolveProfileInfo: &executor.AgentProfileInfo{
-			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: now.UnixNano(),
+			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: now.UnixNano(), Model: "exact-model",
 		},
 	}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
@@ -185,6 +185,7 @@ func TestLaunchWorkflowStepIncludesExactProfileLaunchReceipt(t *testing.T) {
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session: %v", err)
 	}
+	seedExactProfileSessionBinding(t, repo, session)
 	if _, err := repo.RecordExactProfileLaunchReceipt(ctx, &models.ExactProfileLaunchReceipt{
 		TaskID: "t-receipt", SessionID: "s-receipt", AgentProfileID: "profile-exact",
 		Generation: generation, ProfileRevision: now.UnixNano(), Model: "exact-model",
@@ -199,7 +200,7 @@ func TestLaunchWorkflowStepIncludesExactProfileLaunchReceipt(t *testing.T) {
 		isAgentRunning: true,
 		isAgentReadyFn: func(context.Context, string) bool { return true },
 		resolveProfileInfo: &executor.AgentProfileInfo{
-			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: now.UnixNano(),
+			ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: now.UnixNano(), Model: "exact-model",
 		},
 	}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)

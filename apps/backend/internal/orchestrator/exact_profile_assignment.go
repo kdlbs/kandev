@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -77,18 +78,21 @@ func (s *Service) validateExactProfileModelRequest(
 	taskID, requestedModel string,
 	session *models.TaskSession,
 ) error {
-	if requestedModel == "" || session == nil || session.ExactProfileGeneration == 0 {
+	if session == nil {
 		return nil
 	}
 	exact, err := s.resolveExactProfileAssignment(ctx, taskID)
 	if err != nil {
 		return err
 	}
+	if exact == nil && session.ExactProfileGeneration == 0 {
+		return nil
+	}
 	if exact == nil || session.AgentProfileID != exact.AgentProfileID ||
 		session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision {
 		return ErrExactProfileAssignmentInvalid
 	}
-	if requestedModel != exact.Model {
+	if requestedModel != "" && requestedModel != exact.Model {
 		return fmt.Errorf("%w: requested %q, assigned profile requires %q", ErrExactProfileModelMismatch, requestedModel, exact.Model)
 	}
 	return nil
@@ -134,7 +138,8 @@ func (s *Service) AssignExactTaskProfile(
 		return nil, ErrExactProfileAssignmentInvalid
 	}
 	profile, err := s.agentManager.ResolveAgentProfile(ctx, agentProfileID)
-	if err != nil || profile == nil || !profile.Enabled || profile.WorkspaceID != task.WorkspaceID || profile.Revision < 1 {
+	if err != nil || profile == nil || !profile.Enabled || profile.WorkspaceID != task.WorkspaceID ||
+		profile.Revision < 1 || strings.TrimSpace(profile.Model) == "" {
 		return nil, ErrExactProfileAssignmentInvalid
 	}
 	assignment := &models.ExactProfileAssignment{
@@ -169,7 +174,8 @@ func (a ExactProfileAssigner) Resolve(ctx context.Context, taskID, workspaceID s
 	}
 	profile, err := a.Profiles.ResolveAgentProfile(ctx, assignment.AgentProfileID)
 	if err != nil || profile == nil || profile.ProfileID != assignment.AgentProfileID ||
-		!profile.Enabled || profile.WorkspaceID != workspaceID || profile.Revision < 1 || profile.Revision != assignment.ProfileRevision {
+		!profile.Enabled || profile.WorkspaceID != workspaceID || profile.Revision < 1 ||
+		profile.Revision != assignment.ProfileRevision || strings.TrimSpace(profile.Model) == "" {
 		return nil, ErrExactProfileAssignmentInvalid
 	}
 	return &ExactProfileLaunchDecision{
@@ -207,6 +213,28 @@ func (s *Service) recordExactProfileLaunchReceipt(
 	return nil
 }
 
+func (s *Service) recordExactProfileResolutionDenial(
+	ctx context.Context, taskID, sessionID string, resolutionErr error,
+) error {
+	assignments, ok := s.repo.(exactProfileAssignmentStore)
+	if !ok {
+		return resolutionErr
+	}
+	stored, err := assignments.GetExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return errors.Join(resolutionErr, fmt.Errorf("load denied exact profile assignment: %w", err))
+	}
+	if stored == nil || !stored.Active {
+		return resolutionErr
+	}
+	denied := &ExactProfileLaunchDecision{
+		AgentProfileID: stored.AgentProfileID,
+		Generation:     stored.Generation,
+		Revision:       stored.ProfileRevision,
+	}
+	return errors.Join(resolutionErr, s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, denied, "", resolutionErr))
+}
+
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {
 	if exact == nil {
 		return ""
@@ -219,6 +247,13 @@ func exactAssignmentRevision(exact *ExactProfileLaunchDecision) int64 {
 		return 0
 	}
 	return exact.Revision
+}
+
+func exactAssignmentGeneration(exact *ExactProfileLaunchDecision) int64 {
+	if exact == nil {
+		return 0
+	}
+	return exact.Generation
 }
 
 func (s *Service) persistExactProfileSessionBinding(

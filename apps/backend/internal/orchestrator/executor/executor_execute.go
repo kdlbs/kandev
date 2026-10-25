@@ -3207,6 +3207,18 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	if !e.agentManager.IsAgentCommandConfigured(executionID) {
 		return nil, ErrAgentCommandMissing
 	}
+	if request.ExactProfile {
+		admitter, ok := e.agentManager.(interface {
+			AdmitExactProfilePreparedExecution(context.Context, string, string, string, int64, string) error
+		})
+		if !ok {
+			return nil, errors.New("agent manager cannot verify exact profile on prepared execution")
+		}
+		if err := admitter.AdmitExactProfilePreparedExecution(ctx, executionID,
+			request.WorkspaceID, request.AgentProfileID, request.ExactProfileRevision, request.ExactProfileModel); err != nil {
+			return nil, fmt.Errorf("verify prepared exact profile execution: %w", err)
+		}
+	}
 
 	if request.BeforeAgentStart != nil {
 		if err := request.BeforeAgentStart(ctx, executionID, prompt); err != nil {

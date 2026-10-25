@@ -771,14 +771,15 @@ const McpModeManagedConversation = "managed-conversation"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	ExactProfile         bool
-	ExactProfileModel    string
-	ExactProfileRevision int64
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	CausingRunID         string
-	ExecutorID           string
-	TurnID               string
+	ExactProfile           bool
+	ExactProfileGeneration int64
+	ExactProfileModel      string
+	ExactProfileRevision   int64
+	AgentProfileID         string
+	OfficeAgentProfileID   string
+	CausingRunID           string
+	ExecutorID             string
+	TurnID                 string
 	// DeliverySubmissionID binds a persisted direct first message to the
 	// initial agentctl prompt.
 	DeliverySubmissionID string

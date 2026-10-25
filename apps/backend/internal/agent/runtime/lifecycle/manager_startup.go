@@ -119,6 +119,15 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if execution.ExactProfile {
+		if _, _, err := m.resolveAgentProfile(ctx, &LaunchRequest{
+			AgentProfileID: execution.AgentProfileID, WorkspaceID: execution.WorkspaceID,
+			ExactProfile: true, ExactProfileRevision: execution.ExactProfileRevision,
+			ExactProfileModel: execution.ExactProfileModel,
+		}); err != nil {
+			return fmt.Errorf("verify exact profile before agent start: %w", err)
+		}
+	}
 	startupDisposition := execution.startupDispositionSnapshot()
 	defer func() {
 		if retErr != nil {

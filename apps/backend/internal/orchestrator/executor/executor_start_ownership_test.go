@@ -114,6 +114,49 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	}
 }
 
+func TestExistingWorkspaceStart_ExactProfileRequiresPreparedSnapshotAdmission(t *testing.T) {
+	ctx := context.Background()
+	var starts atomic.Int32
+	var admissions atomic.Int32
+	var allow atomic.Bool
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "execution-prepared", nil },
+		startAgentProcessFunc:        func(context.Context, string) error { starts.Add(1); return nil },
+		admitExactPreparedFunc: func(_ context.Context, executionID, workspaceID, profileID string, revision int64, model string) error {
+			admissions.Add(1)
+			if executionID != "execution-prepared" || workspaceID != "workspace-prepared" ||
+				profileID != "profile-exact" || revision != 3 || model != "model-exact" {
+				return errors.New("wrong exact snapshot")
+			}
+			if !allow.Load() {
+				return errors.New("prepared profile revision changed")
+			}
+			return nil
+		},
+	}
+	repo := newMockRepository()
+	exec := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: "task-prepared", WorkspaceID: "workspace-prepared"}
+	session := &models.TaskSession{ID: "session-prepared", TaskID: task.ID,
+		State: models.TaskSessionStateCreated, AgentProfileID: "profile-exact"}
+	repo.sessions[session.ID] = cloneMockTaskSession(session)
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{ID: "runtime-prepared", TaskID: task.ID,
+		SessionID: session.ID, Status: models.ExecutorRunningStatusPrepared, AgentExecutionID: "execution-prepared"}
+	request := &LaunchAgentRequest{TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		AgentProfileID: "profile-exact", ExactProfile: true, ExactProfileRevision: 3, ExactProfileModel: "model-exact"}
+	_, err := exec.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, "start", true, "", request,
+		nil, nil, nil, nil, false)
+	require.ErrorContains(t, err, "prepared profile revision changed")
+	require.EqualValues(t, 1, admissions.Load())
+	require.Zero(t, starts.Load())
+	allow.Store(true)
+	_, err = exec.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, "start", true, "", request,
+		nil, nil, nil, nil, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, admissions.Load())
+	require.Eventually(t, func() bool { return starts.Load() == 1 }, time.Second, time.Millisecond)
+}
+
 func TestExistingWorkspaceStart_BindsInitialDeliveryBeforeAdmission(t *testing.T) {
 	ctx := context.Background()
 	repo := newMockRepository()

@@ -33,6 +33,7 @@ type mockAgentManager struct {
 	setExecutionDescriptionFunc        func(ctx context.Context, agentExecutionID string, description string) error
 	setInitialDeliverySubmissionIDFunc func(ctx context.Context, agentExecutionID, submissionID string) error
 	setExecutionEnvFunc                func(ctx context.Context, agentExecutionID string, env map[string]string) error
+	admitExactPreparedFunc             func(context.Context, string, string, string, int64, string) error
 	executorProfileEnvFunc             func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
 	getExecutionIDForSessionFunc       func(ctx context.Context, sessionID string) (string, error)
 	listExecutionsForTaskFunc          func(taskID string) []lifecycle.ExecutionReference
@@ -88,6 +89,15 @@ func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID stri
 		return m.setExecutionEnvFunc(ctx, executionID, env)
 	}
 	return nil
+}
+
+func (m *mockAgentManager) AdmitExactProfilePreparedExecution(
+	ctx context.Context, executionID, workspaceID, profileID string, revision int64, model string,
+) error {
+	if m.admitExactPreparedFunc == nil {
+		return fmt.Errorf("prepared exact profile snapshot not configured")
+	}
+	return m.admitExactPreparedFunc(ctx, executionID, workspaceID, profileID, revision, model)
 }
 
 func (m *mockAgentManager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {

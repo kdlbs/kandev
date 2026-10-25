@@ -126,10 +126,11 @@ func (r *Repository) assignExactProfileAssignment(ctx context.Context, assignmen
 		return false, fmt.Errorf("begin exact profile assignment: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if qualifyProfile {
-		if err := r.qualifyExactProfileSnapshotTx(ctx, tx, assignment); err != nil {
-			return false, err
-		}
+	if err := r.lockExactProfileAssignmentTx(ctx, tx, assignment.TaskID); err != nil {
+		return false, err
+	}
+	if err := r.qualifyExactProfileAssignmentTx(ctx, tx, assignment, qualifyProfile); err != nil {
+		return false, err
 	}
 
 	var current models.ExactProfileAssignment
@@ -209,6 +210,25 @@ func (r *Repository) assignExactProfileAssignment(ctx context.Context, assignmen
 		return false, fmt.Errorf("commit exact profile assignment: %w", err)
 	}
 	return true, nil
+}
+
+func (r *Repository) lockExactProfileAssignmentTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`SELECT pg_advisory_xact_lock(hashtextextended('exact-profile-assignment:' || ?, 0))`), taskID); err != nil {
+		return fmt.Errorf("lock exact profile assignment: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) qualifyExactProfileAssignmentTx(
+	ctx context.Context, tx *sqlx.Tx, assignment *models.ExactProfileAssignment, qualify bool,
+) error {
+	if !qualify {
+		return nil
+	}
+	return r.qualifyExactProfileSnapshotTx(ctx, tx, assignment)
 }
 
 func (r *Repository) qualifyExactProfileSnapshotTx(ctx context.Context, tx *sqlx.Tx, assignment *models.ExactProfileAssignment) error {

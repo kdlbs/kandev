@@ -2336,8 +2336,7 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
 			review_status = ?, is_passthrough = ?, task_environment_id = ?,
-			is_primary = CASE WHEN ? = 1 THEN 0 ELSE is_primary END,
-			exact_profile_generation = ?, exact_profile_revision = ?
+			is_primary = CASE WHEN ? = 1 THEN 0 ELSE is_primary END
 		WHERE id = ?`
 	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
@@ -2347,7 +2346,6 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 		session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
 		dialect.BoolToInt(expectedUpdatedAt != nil && !session.IsPrimary),
-		session.ExactProfileGeneration, session.ExactProfileRevision,
 		session.ID}
 	if expected != nil {
 		query += " AND state = ?"

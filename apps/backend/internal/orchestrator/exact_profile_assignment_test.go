@@ -60,6 +60,20 @@ func TestAssignExactTaskProfileRejectsMissingTask(t *testing.T) {
 	}
 }
 
+func TestAssignExactTaskProfileRejectsEmptyModel(t *testing.T) {
+	repo := &exactAssignmentProfileProbeRepo{exactAssignmentWriteProbeRepo: &exactAssignmentWriteProbeRepo{}}
+	service := &Service{repo: repo, agentManager: &mockAgentManager{resolveProfileInfo: &executor.AgentProfileInfo{
+		ProfileID: "profile-1", WorkspaceID: "workspace-1", Enabled: true, Revision: 1,
+	}}, taskPromptCheck: func(context.Context, string) error { return nil }}
+	_, err := service.AssignExactTaskProfile(context.Background(), "task-1", "profile-1", 1)
+	if !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("assignment error = %v, want invalid exact profile assignment", err)
+	}
+	if repo.wrote {
+		t.Fatal("empty-model profile reached repository writer")
+	}
+}
+
 func TestExactProfileReceiptWriteErrorIsReturned(t *testing.T) {
 	writeErr := errors.New("receipt unavailable")
 	service := &Service{repo: &exactReceiptErrorRepo{err: writeErr}}
@@ -114,6 +128,12 @@ func (r *exactReceiptErrorRepo) RecordExactProfileLaunchReceipt(context.Context,
 type exactAssignmentWriteProbeRepo struct {
 	sessionExecutorStore
 	wrote bool
+}
+
+type exactAssignmentProfileProbeRepo struct{ *exactAssignmentWriteProbeRepo }
+
+func (*exactAssignmentProfileProbeRepo) GetTask(context.Context, string) (*models.Task, error) {
+	return &models.Task{ID: "task-1", WorkspaceID: "workspace-1"}, nil
 }
 
 func (*exactAssignmentWriteProbeRepo) GetTask(context.Context, string) (*models.Task, error) {

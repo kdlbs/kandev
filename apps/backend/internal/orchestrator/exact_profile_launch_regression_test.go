@@ -44,6 +44,41 @@ type exactReceiptFailingSessionRepo struct {
 	err error
 }
 
+func TestStartCreatedSessionRecordsDenialWhenAssignedProfileChanges(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorkspaceID = "ws1"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	const revision int64 = 42
+	seedExactProfileBindingSnapshot(t, repo, revision)
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agentMgr := &mockAgentManager{resolveProfileInfo: &executor.AgentProfileInfo{
+		ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: false, Revision: revision, Model: "exact-model",
+	}}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	if _, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile-exact", "start", false, false, true, nil, nil); !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("launch error = %v, want invalid exact profile", err)
+	}
+	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt == nil || receipt.Outcome != models.ExactProfileLaunchOutcomeFailedClosed || receipt.InferenceStarted || receipt.Generation != 1 {
+		t.Fatalf("denial receipt = %+v, want immutable failed_closed without inference", receipt)
+	}
+}
+
 func (r *exactReceiptFailingSessionRepo) RecordExactProfileLaunchReceipt(context.Context, *models.ExactProfileLaunchReceipt) (bool, error) {
 	return false, r.err
 }
@@ -445,6 +480,57 @@ func TestStartCreatedSession_RejectsExactAssignmentReplacedAtSessionBinding(t *t
 	}
 }
 
+func TestStartCreatedSessionRejectsReassignmentAfterBindingBeforeAgentStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorkspaceID = "ws1"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	const revision int64 = 42
+	seedExactProfileBindingSnapshot(t, repo, revision)
+	first := &models.ExactProfileAssignment{TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1}
+	if _, err := repo.AssignExactProfileAssignment(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.AgentProfileID = "profile-exact"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	launched := false
+	agentMgr := &mockAgentManager{
+		resolveProfileInfo: &executor.AgentProfileInfo{ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: revision, Model: "exact-model"},
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launched = true
+			next := *first
+			next.Generation = 2
+			if _, err := repo.AssignExactProfileAssignment(ctx, &next); err != nil {
+				return nil, err
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-reassigned"}, nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Exact", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	_, err = svc.StartCreatedSession(ctx, "task1", "session1", "profile-exact", "start", false, false, false, nil, nil)
+	if !launched || !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("launch prepared = %t, error = %v; want reassignment refusal before agent start", launched, err)
+	}
+	if len(agentMgr.startAgentProcessCalls) != 0 {
+		t.Fatalf("agent starts = %#v, want none", agentMgr.startAgentProcessCalls)
+	}
+}
+
 func TestStartCreatedSession_RejectsSessionProfileChangedAtExactBinding(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -574,6 +660,7 @@ func TestResumeTaskSession_RecordsFailedClosedReceiptWhenPromptReadinessFails(t 
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session: %v", err)
 	}
+	seedExactProfileSessionBinding(t, repo, session)
 	seedExecutorRunning(t, repo, session.ID, session.TaskID, session.AgentExecutionID)
 
 	agentMgr := &mockAgentManager{

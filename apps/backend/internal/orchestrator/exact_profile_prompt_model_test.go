@@ -8,8 +8,19 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func seedExactProfileSessionBinding(t *testing.T, repo *sqliterepo.Repository, session *models.TaskSession) {
+	t.Helper()
+	_, err := repo.DB().ExecContext(context.Background(), `UPDATE task_sessions
+		SET exact_profile_generation = ?, exact_profile_revision = ? WHERE id = ?`,
+		session.ExactProfileGeneration, session.ExactProfileRevision, session.ID)
+	if err != nil {
+		t.Fatalf("seed exact profile session binding: %v", err)
+	}
+}
 
 func TestPromptTask_RejectsModelOutsideExactProfileAssignment(t *testing.T) {
 	for _, supportsInPlaceSwitch := range []bool{true, false} {
@@ -41,6 +52,7 @@ func TestPromptTask_RejectsModelOutsideExactProfileAssignment(t *testing.T) {
 			if err := repo.UpdateTaskSession(ctx, session); err != nil {
 				t.Fatalf("update session: %v", err)
 			}
+			seedExactProfileSessionBinding(t, repo, session)
 			seedExecutorRunning(t, repo, session.ID, session.TaskID, "execution-exact-model")
 
 			var launchCalls int
@@ -83,6 +95,46 @@ func TestPromptTask_RejectsModelOutsideExactProfileAssignment(t *testing.T) {
 	}
 }
 
+func TestPromptTask_RejectsStaleExactBindingWithoutRequestedModel(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-exact-stale-prompt", "session-exact-stale-prompt", "step1")
+	revision := time.Now().UTC().UnixNano()
+	for generation := int64(1); generation <= 2; generation++ {
+		if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+			TaskID: "task-exact-stale-prompt", WorkspaceID: "ws1", AgentProfileID: "profile-exact",
+			ProfileRevision: revision, Generation: generation,
+		}); err != nil {
+			t.Fatalf("assign generation %d: %v", generation, err)
+		}
+	}
+	session, err := repo.GetTaskSession(ctx, "session-exact-stale-prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentProfileID = "profile-exact"
+	session.ExactProfileGeneration = 1
+	session.ExactProfileRevision = revision
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	seedExactProfileSessionBinding(t, repo, session)
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "execution-exact-stale-prompt")
+	agentMgr := &mockAgentManager{isAgentRunning: true, resolveProfileInfo: &executor.AgentProfileInfo{
+		ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true, Revision: revision, Model: "exact-model",
+	}}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	_, err = svc.PromptTask(ctx, session.TaskID, session.ID, "continue", "", false, nil, false)
+	if !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("PromptTask error = %v, want stale exact assignment rejection", err)
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("dispatched prompts = %#v, want none", agentMgr.capturedPrompts)
+	}
+}
+
 func TestPromptTask_RejectsExactProfileModelBeforeColdResume(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -106,6 +158,7 @@ func TestPromptTask_RejectsExactProfileModelBeforeColdResume(t *testing.T) {
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session: %v", err)
 	}
+	seedExactProfileSessionBinding(t, repo, session)
 	seedExecutorRunning(t, repo, session.ID, session.TaskID, "execution-exact-model-cold")
 
 	var launchCalls int
@@ -152,6 +205,7 @@ func TestAttemptModelSwitchForPrompt_RollsBackForegroundOnLateExactProfileReject
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session: %v", err)
 	}
+	seedExactProfileSessionBinding(t, repo, session)
 	agentMgr := &mockAgentManager{resolveProfileInfo: &executor.AgentProfileInfo{
 		ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true,
 		Revision: profileRevision.UnixNano(), Model: "exact-model",

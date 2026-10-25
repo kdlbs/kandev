@@ -672,6 +672,12 @@ func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID
 	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)
 }
 
+func (a *lifecycleAdapter) AdmitExactProfilePreparedExecution(
+	ctx context.Context, executionID, workspaceID, profileID string, revision int64, model string,
+) error {
+	return a.mgr.AdmitExactProfilePreparedExecution(ctx, executionID, workspaceID, profileID, revision, model)
+}
+
 // ExecutorProfileEnvForSession resolves the current executor profile
 // environment for a prepared workspace before its agent process starts.
 func (a *lifecycleAdapter) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
