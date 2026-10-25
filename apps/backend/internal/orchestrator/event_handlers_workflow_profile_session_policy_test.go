@@ -694,6 +694,7 @@ func TestPrepareWorkflowStepSession_QAToPRDoesNotReuseSolRuntime(t *testing.T) {
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, prStep.ID)
 	prSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, prStep, qaStep)
 	require.NoError(t, err)
 	require.True(t, switched)
@@ -742,6 +743,7 @@ func TestPrepareWorkflowStepSession_HumanQAToWorkReplacesExactProfileRuntimeOver
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, workStep.ID)
 	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, humanQAStep)
 	require.NoError(t, err)
 	require.True(t, switched)
@@ -808,6 +810,7 @@ func TestPrepareWorkflowStepSession_ExactProfileDoesNotPromoteParkedMismatchedRu
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, workStep.ID)
 	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, qaStep)
 	require.NoError(t, err)
 	require.True(t, switched)
@@ -875,6 +878,7 @@ func TestPrepareWorkflowStepSession_FallbackProfileDoesNotReuseUnauthorizedRunti
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, workStep.ID)
 	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, qaStep)
 	require.NoError(t, err)
 	require.True(t, switched)
