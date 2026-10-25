@@ -167,6 +167,8 @@ test.describe("Branch selector behavior with executor types", () => {
       const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
+      await expect(testPage.getByTestId("remote-repo-popover-content")).toHaveCount(0);
+      await expect(testPage.getByTestId("remote-repo-chip-trigger")).toBeFocused();
 
       // Select local executor profile
       const executorSelector = testPage.getByTestId("executor-profile-selector");

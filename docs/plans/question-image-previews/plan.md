@@ -1,6 +1,6 @@
 ---
 created: 2026-10-24
-status: in_progress
+status: complete
 requirements:
   - REQ-TASKS-QUESTION-IMAGES-001
   - REQ-TASKS-QUESTION-IMAGES-002
@@ -22,20 +22,19 @@ transport, accessible interface, and focused integration proof in that order.
 
 Read the [requirements](../../specs/tasks/requirements/question-image-previews.md)
 and [system design](../../specs/tasks/system-design/question-image-previews.md).
-The user authorized implementation after the design handoff. The original four work orders
-have implementation changes. Task 05 extends the package with choice images. Tasks 01 through 03 pass their local checks. Task 04
-remains incomplete because real executor checks and the broad handler suite are
-not verified in this environment. See each work order’s Results section.
-The user authorized a commit, push, and ready pull request on 2026-10-25.
-Delivery includes the validation limits recorded in Task 04.
+The user authorized implementation after the design handoff, then extended the
+package with optional choice images in Task 05. All five work orders have complete
+implementation and feature verification. Backend CI and real Docker/SSH image
+cases passed on `8745e76a84536a5fff3f238d2fcdb4bfa23029b2`; Task 04 records the
+workflow links and distinguishes that feature evidence from the aggregate E2E
+run's four additional flaky cases.
 
-[PR #4766](https://github.com/kdlbs/kandev/pull/4766) is open for review.
-PR follow-up reconciles the current base and corrects preview roots after workspace
-rebind, rescan, and rollback. See Task 02 for regression and merge validation.
-
-Task 05 is complete. Optional choice images preserve selection semantics, source
-authorization, reloads, history, and drafts. Its focused backend, unit, desktop,
-phone, and static checks passed. Task 04 remains incomplete for the reasons above.
+[PR #4766](https://github.com/kdlbs/kandev/pull/4766) is open and ready for review.
+The user authorized publication and continued CI/review follow-up on 2026-10-25.
+That follow-up corrected workspace preview roots, bounded browser reads, released
+workspace locks before decoding, and preserved the mounted task layout when draft
+ownership changes. Task 04 records the remaining fixture verification and PR gates.
+Windows/macOS file handling was compile-checked, not executed natively.
 
 ## Evidence and assumptions
 
@@ -254,7 +253,7 @@ The user guide explains inspection versus selection in `docs/public/use-kandev.m
 3. [Task 03: Render and inspect question images](task-03-question-image-interface.md), after 02.
 4. [Task 04: Prove integration and document usage](task-04-integration-and-docs.md), after 03.
 5. [Task 05: Add choice images](task-05-choice-images.md), after 01–03. Task 04's
-   remote validation gaps remain tracked independently. Task 05 does not change agentctl.
+   remote validation is recorded independently. Task 05 does not change agentctl.
 
 Each task owns a real verification boundary. Task 01 expands an optional wire
 contract. Task 02 proves the filesystem boundary before any automatic UI read.
@@ -305,7 +304,6 @@ records the later choice-image extension and its targeted checks.
 
 ## Next implementation step
 
-Complete Task 04 verification with a working Docker daemon, container fixture
-artifacts, and sufficient time for the full MCP handler suite. Review the existing
-changes in the ready pull request. The user authorized publication on 2026-10-25;
+No product implementation remains. Complete the ready PR's CI and automated-review
+follow-up on the latest head. The user authorized publication on 2026-10-25;
 that instruction replaces the earlier local-only delivery restriction.

@@ -1,7 +1,7 @@
 ---
 id: "04-integration-and-docs"
 title: "Prove integration and document usage"
-status: in_progress
+status: complete
 wave: 4
 depends_on:
   - "03-question-image-interface"
@@ -162,9 +162,10 @@ clarification tests, and current Docker/SSH fixtures.
 
 ## Results
 
-Implementation and public documentation are present. This work order remains
-**in progress** because real Docker/SSH execution and the full MCP handler suite
-have not passed in this environment. Nothing was committed or published.
+Implementation, public documentation, and feature verification are complete.
+The initial local handler/executor limits below were closed by CI on head
+`8745e76a84536a5fff3f238d2fcdb4bfa23029b2`. PR #4766 is open and ready for review.
+Additional CI fixture follow-up is recorded at the end of this work order.
 
 ### Passing evidence
 
@@ -210,7 +211,7 @@ node /tmp/check-question-image-package.cjs
 git diff --check
 ```
 
-### Incomplete checks
+### Initial local validation limits
 
 `go test ./internal/mcp/handlers` reached its default 10-minute package limit.
 `go test -timeout 30m ./internal/mcp/handlers` also timed out, during SQLite fixture
@@ -231,17 +232,16 @@ The managed preflight reported missing `apps/backend/bin/mock-agent-linux-amd64`
 Log: `/tmp/question-images-checks/kandev-run.e2e.5Nbm14z8.log`.
 The installed Docker 29.7.2 client's `docker info` also failed because
 `/var/run/docker.sock` does not exist. Log: `/tmp/question-images-docker-preflight.log`.
-Both Docker and SSH fixtures require that daemon. They remain unexecuted. Current
-agentctl client/API tests prove the common transport contract, not provider connectivity.
+Both Docker and SSH fixtures require that daemon. They were unexecuted locally.
+The later CI executor evidence below closes this connectivity gap; agentctl
+client/API tests alone do not prove provider connectivity.
 Windows and macOS binaries compile but were not run natively; see Task 02.
 
 ### Follow-through
 
-Run the full handler suite on an environment with a suitable time budget. Build
-the container fixture artifacts and run the two executor cases with a working
-Docker daemon. Reconcile these results before marking this work order or the plan
-complete. No further product-scope question is required. Issue #4667 remains open;
-this implementation keeps its existing answer envelope and question barrier.
+The later CI runs below completed the full backend suite and both executor cases.
+No further product-scope question is required. Issue #4667 remains open; this
+implementation keeps its existing answer envelope and question barrier.
 
 
 ### PR CI executor fixture correction
@@ -253,3 +253,48 @@ which runs in the authorized checkout, and restore its captured original value
 in `finally`. The image path, rendering assertions, and answer flow are unchanged.
 The local host has no Docker daemon; real Docker and SSH execution remains a CI
 gate for this correction.
+
+
+### Additional CI fixture stabilization
+
+CI run `40192890436` passed the original image, executor, layout, and mobile
+composer cases. Four other E2E cases passed only after retry and failed the
+strict flake gate. Their failure evidence led to these fixture corrections:
+
+- `apps/web/e2e/helpers/mcp-status-clarity.ts` keeps one status route installed
+  through all controlled report states. Removing it between states let live
+  `applied` responses enter a fixture that expected `deferred_restart` or saved
+  changes. Each intercepted read captures its scenario before awaiting the backend.
+- `apps/web/e2e/tests/task/plugin-repository-task-create.spec.ts` waits for the
+  repository popover to close and restore focus before opening the branch picker.
+  The failed trace showed the branch option detach and focus return to the
+  repository trigger.
+- `apps/web/e2e/tests/task/create-task-branch-selector.spec.ts` uses the same close
+  and focus boundary after a pasted repository URL, before opening the executor
+  picker. The failed trace waited for options after the selector had closed.
+
+These changes keep the assertions, application behavior, timeouts, and CI retry
+policy intact. Changed-file lint passed. Constrained verification uses one worker
+and two CPUs, three runs per failed case, with retries disabled.
+
+
+### Completed feature verification in CI
+
+For head `8745e76a84536a5fff3f238d2fcdb4bfa23029b2`, backend workflow
+[40192890300](https://github.com/kdlbs/kandev/actions/runs/40192890300) passed its
+complete package shards, including the MCP handler package. E2E workflow
+[40192890436](https://github.com/kdlbs/kandev/actions/runs/40192890436) passed both
+real Docker and SSH question-image cases, the original layout regressions, and
+all desktop/phone image cases. Its complete artifact audit found 4,242 cases
+passing on the first attempt, four additional flaky cases listed above, and 40
+skips. The flaky cases failed the overall E2E gate and remain part of PR follow-up;
+they are not presented as a clean CI run. Windows/macOS native execution remains
+outside this Linux validation, as recorded in Task 02.
+
+
+The constrained follow-up passed all 12 runs with retries disabled: three phone
+runs and nine desktop runs across the four affected cases. Each command used
+`taskset` to restrict the managed runner to two allowed CPUs and one worker.
+Logs: `/tmp/question-images-checks/kandev-run.e2e.8cCskM17.log` (3 phone cases) and
+`/tmp/question-images-checks/kandev-run.e2e.fTxRkb3m.log` (9 desktop cases).
+The latest full CI and review gates are tracked on PR #4766.
