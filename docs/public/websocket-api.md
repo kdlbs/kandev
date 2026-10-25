@@ -517,7 +517,8 @@ required boolean, `suppressed`. It requires task-write access and merges only th
 `bulk_session_removal_suppress_ensure` metadata key. While the value is `true`,
 passive task-open `session.ensure` leaves an empty task without creating a session.
 Remove All sets the value before deletion and attempts to clear it if deletion
-fails. An explicit new-session launch clears it after a session ID is created.
+fails. An explicit new-session launch attempts to clear it after a session ID is
+created; a failed clear is logged without undoing the launch.
 
 GitHub issue linking and unlinking preserve unrelated metadata and omitted task fields,
 including concurrent port-forwarding preference changes. A link replaces the complete
