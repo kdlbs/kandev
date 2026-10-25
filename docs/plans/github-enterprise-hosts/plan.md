@@ -335,6 +335,30 @@ Verification so far:
 Public guidance already covers these contracts; this repair does not add a new
 setup step or supported host. Live GHES/GHE.com testing remains unverified.
 
+### CI fixture repairs
+
+The first integration head, `b4d1e800`, exposed three test-fixture defects:
+
+- A legacy PAT rate-tracker test sent its fake token to the live GitHub API.
+  The resulting idle HTTP/2 connection failed the package leak check in three
+  CI jobs. The test now provides a controlled 401 response and checks that the
+  identity probe ran. The full GitHub race suite, including leak detection,
+  passes in 270.035 seconds.
+- Azure saved-view seeding raced the configuration save. A 500 ms injected
+  save delay reproduced the failure. The test now waits for the successful
+  configuration response before seeding, and retains the delay as a regression
+  stimulus. Three runs pass with retries disabled.
+- Mobile statistics recovered automatically while the test was measuring the
+  Retry button. Advancing the browser clock reproduced the missing-button
+  timeout. The fixture now keeps the outage active through automatic retries
+  until the test starts the manual retry. Three runs pass with retries disabled.
+
+The analytics aggregate deadline also failed once in CI. Its exact test passed
+three local race-enabled runs without changes. The walkthrough generator hit
+its external ten-minute deadline. Both require confirmation in the next CI run.
+All 118 browser reports were audited: only the Azure and mobile statistics
+tests had failed attempts; both passed on their CI retry.
+
 Focused backend rerun commands from `apps/backend` (PostgreSQL checks use
 `KANDEV_TEST_POSTGRES_DSN` pointing at the disposable test database):
 
