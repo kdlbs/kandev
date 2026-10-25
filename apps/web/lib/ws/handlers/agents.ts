@@ -11,6 +11,11 @@ import {
 } from "@/lib/state/slices/settings/types";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfile } from "@/lib/types/agent-profile";
+import {
+  acceptAgentOrdersFromSnapshot,
+  reconcileAgentOrders,
+  insertFirstInAgentGroup,
+} from "@/lib/settings/agent-profile-order";
 
 function buildProfileEntry(profile: unknown): AgentProfile {
   return normalizeAgentProfile(profile);
@@ -117,28 +122,31 @@ function handleProfileCreated(
   deletionTombstones.delete(normalized.id); // a genuinely newer create wins
   const agentId = getAgentId(profile);
   const agentStub = profileEventAgent(state, agentId, inferenceCapable);
-  const nextProfiles = [
-    ...state.agentProfiles.items.filter((p) => p.id !== normalized.id),
+  const nextProfiles = insertFirstInAgentGroup(
+    state.agentProfiles.items,
+    agentId,
     toAgentProfileOption(agentStub, normalized),
-  ];
+  );
   const nextAgents = state.settingsAgents.items.map((item) =>
     item.id === agentId
       ? {
           ...item,
           profiles: [
-            ...item.profiles.filter((p) => p.id !== normalized.id),
             buildProfileEntry(profile),
+            ...item.profiles.filter((p) => p.id !== normalized.id),
           ],
         }
       : item,
   );
+  const orderByAgent = acceptAgentOrdersFromSnapshot(state.agentProfiles.orderByAgent, nextAgents);
   return {
     agentProfiles: {
       ...state.agentProfiles,
       items: nextProfiles,
       version: state.agentProfiles.version + 1,
+      orderByAgent,
     },
-    settingsAgents: { items: nextAgents },
+    settingsAgents: { items: reconcileAgentOrders(nextAgents, orderByAgent) },
   };
 }
 
@@ -204,13 +212,15 @@ function handleProfileDeleted(
         }
       : item,
   );
+  const orderByAgent = acceptAgentOrdersFromSnapshot(state.agentProfiles.orderByAgent, nextAgents);
   return {
     agentProfiles: {
       ...state.agentProfiles,
       items: state.agentProfiles.items.filter((p) => p.id !== normalized.id),
       version: state.agentProfiles.version + 1,
+      orderByAgent,
     },
-    settingsAgents: { items: nextAgents },
+    settingsAgents: { items: reconcileAgentOrders(nextAgents, orderByAgent) },
   };
 }
 
@@ -330,6 +340,10 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
       });
     },
     "agent.profile.created": (message) => applyProfileCreatedEvent(store, message),
+    "agent.profiles.reordered": (message) => {
+      const { agent_id: agentId, profile_ids: profileIds, revision } = message.payload;
+      store.getState().acceptAgentProfileOrder(agentId, profileIds, revision);
+    },
     "agent.profile.updated": (message) => applyProfileUpdatedEvent(store, message),
     "agent.profile.deleted": (message) => {
       store.setState((state) => ({

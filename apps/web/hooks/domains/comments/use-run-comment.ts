@@ -29,7 +29,7 @@ import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
 import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
-import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { hasPendingPlanCommentMigration } from "./plan-comment-migration";
 
 /**
@@ -388,7 +388,7 @@ async function refreshPrimarySessionProjection(
   const stateAtRequestStart = storeApi.getState();
   const sessionsAtRequestStart = listedTaskSessions(stateAtRequestStart, taskId);
   const sessionIdsAtRequestStart = new Set(sessionsAtRequestStart.map((session) => session.id));
-  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(
+  const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
     stateAtRequestStart,
     taskId,
   );
@@ -411,7 +411,7 @@ async function refreshPrimarySessionProjection(
       (session) => !sessionIdsAtRequestStart.has(session.id) && !fetchedSessionIds.has(session.id),
     );
     const sessions = [...fetchedSessions, ...sessionsAddedDuringLoad];
-    storeApi.getState().setTaskSessionsForTask(taskId, sessions, activityEpochsAtRequestStart);
+    storeApi.getState().setTaskSessionsForTask(taskId, sessions, hydrationEpochsAtRequestStart);
     const primary = sessions.find((candidate) => candidate.is_primary);
     applyTaskPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);
     applySessionPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);
@@ -520,6 +520,7 @@ async function runSessionComment({
  */
 export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
+  const walkthroughRuns = useRef(new Map<string, Promise<{ queued: boolean }>>());
   const storeApi = useAppStoreApi();
   const pendingPlanCommentAdmissionRef = useRef<{ key: string; id: string } | null>(null);
 
@@ -545,8 +546,26 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
       }
       if (!sessionId) return { queued: false };
       try {
+        if (comment.source === "walkthrough") {
+          const stored = useCommentsStore.getState().byId[comment.id];
+          if (comment.status === "sent" || stored?.status === "sent") {
+            return { queued: false };
+          }
+          const existing = walkthroughRuns.current.get(comment.id);
+          if (existing) return await existing;
+          const submission = runSessionComment({
+            comment,
+            sessionId,
+            taskId,
+            storeApi,
+            markCommentsSent,
+          });
+          walkthroughRuns.current.set(comment.id, submission);
+          return await submission;
+        }
         return await runSessionComment({ comment, sessionId, taskId, storeApi, markCommentsSent });
       } catch (error) {
+        walkthroughRuns.current.delete(comment.id);
         console.error("Failed to send comment to agent:", error);
         throw error;
       }

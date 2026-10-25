@@ -13,10 +13,12 @@
 import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
+import { selectAgentIfNeeded } from "../chat/quick-chat-helpers";
 
 const DICTATED = "DICTATED";
 
@@ -158,57 +160,133 @@ test.describe("Mobile plugin composer actions", () => {
     await expectNoHorizontalOverflow(testPage);
   });
 
-  test("new session: the action is reachable inside the full-height dialog and launches a session", async ({
+  test.describe("new-session native launch", () => {
+    test.describe.configure({ retries: 0 });
+
+    test("new session: the action is reachable inside the full-height dialog and launches a session", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      const ws = watchWs(testPage);
+      await installFixturePlugin(testPage);
+
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Mobile new session composer",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+
+      const before = (await apiClient.listTaskSessions(task.id)).sessions;
+
+      await session.openMobileNewSessionDialog();
+      const dialog = session.newSessionDialog();
+      await expect(dialog).toBeVisible();
+
+      const description = dialog.getByTestId("task-description-input");
+      await expect(description).toBeVisible();
+
+      const composerAction = action(dialog);
+      await expect(composerAction).toHaveAttribute("data-surface", "new-session");
+      await expect(composerAction).toHaveAttribute("data-presentation", "mobile");
+      await expectTouchReachable(testPage, composerAction.getByTestId("e2e-composer-insert"));
+
+      await description.fill("head tail");
+      await caretBackFromEnd(description, " tail".length);
+
+      await composerAction.getByTestId("e2e-composer-insert").tap();
+      await expectTaskDescription(description, `head ${DICTATED} tail`);
+
+      const launched = ws.waitForResponse("session.launch");
+      await composerAction.getByTestId("e2e-composer-submit").tap();
+      const response = await launched;
+      expect(response.payload).toMatchObject({
+        success: true,
+        task_id: task.id,
+        session_id: expect.any(String),
+      });
+      const sessionId = String(response.payload.session_id);
+      expect(before.some((existing) => existing.id === sessionId)).toBe(false);
+      await expect(dialog).not.toBeVisible();
+
+      await expect
+        .poll(
+          async () => {
+            const [{ sessions }, { messages }] = await Promise.all([
+              apiClient.listTaskSessions(task.id),
+              apiClient.listSessionMessages(sessionId),
+            ]);
+            return {
+              sessions: sessions.filter(
+                (candidate) => !before.some((prior) => prior.id === candidate.id),
+              ),
+              promptCount: messages.filter(
+                (message) =>
+                  message.author_type === "user" && message.content === `head ${DICTATED} tail`,
+              ).length,
+            };
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual({
+          sessions: [expect.objectContaining({ id: sessionId, task_id: task.id })],
+          promptCount: 1,
+        });
+      await expectNoHorizontalOverflow(testPage);
+    });
+  });
+
+  test("Quick Chat: touch action inserts and sends the opening prompt", async ({
     testPage,
     apiClient,
-    seedData,
   }) => {
     await installFixturePlugin(testPage);
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
 
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Mobile new session composer",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    const before = (await apiClient.listTaskSessions(task.id)).sessions.length;
-
-    await session.openMobileNewSessionDialog();
-    const dialog = session.newSessionDialog();
-    await expect(dialog).toBeVisible();
-
-    const description = dialog.getByTestId("task-description-input");
-    await expect(description).toBeVisible();
-
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible();
+    await selectAgentIfNeeded(dialog, testPage);
+    const editor = dialog.getByTestId("task-description-input");
     const composerAction = action(dialog);
-    await expect(composerAction).toHaveAttribute("data-surface", "new-session");
+    await expect(composerAction).toHaveAttribute("data-surface", "quick-chat");
     await expect(composerAction).toHaveAttribute("data-presentation", "mobile");
     await expectTouchReachable(testPage, composerAction.getByTestId("e2e-composer-insert"));
 
-    await description.fill("head tail");
-    await caretBackFromEnd(description, " tail".length);
-
+    await editor.fill("head tail");
+    await caretBackFromEnd(editor, " tail".length);
     await composerAction.getByTestId("e2e-composer-insert").tap();
-    await expectTaskDescription(description, `head ${DICTATED} tail`);
+    await expect(editor).toHaveText(`head ${DICTATED} tail`);
 
+    const startResponse = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/quick-chat") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    );
     await composerAction.getByTestId("e2e-composer-submit").tap();
-    await expect(composerAction).toHaveAttribute("data-status", "submitted");
-
+    const started = (await (await startResponse).json()) as { session_id: string };
     await expect
-      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
-        timeout: 60_000,
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(started.session_id);
+        return messages.filter(
+          (message) =>
+            message.author_type === "user" && message.content === `head ${DICTATED} tail`,
+        ).length;
       })
-      .toBeGreaterThan(before);
+      .toBe(1);
     await expectNoHorizontalOverflow(testPage);
   });
 });

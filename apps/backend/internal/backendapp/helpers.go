@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	mcpregistry "github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/registry"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -28,6 +29,7 @@ import (
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/auth"
@@ -40,6 +42,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	dockerremote "github.com/kandev/kandev/internal/dockerremote"
@@ -109,24 +112,27 @@ import (
 )
 
 const (
-	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
-	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
-	desktopRuntimeEnv        = "KANDEV_DESKTOP_RUNTIME"
-	agentShutdownTimeout     = 20 * time.Second
-	httpShutdownTimeout      = 10 * time.Second
-	tracingShutdownTimeout   = 5 * time.Second
-	addedFieldKey            = "added"
-	branchFieldKey           = "branch"
-	branchAdditionsFieldKey  = "branch_additions"
-	branchDeletionsFieldKey  = "branch_deletions"
-	deletedFieldKey          = "deleted"
-	versionFieldKey          = "version"
-	serviceFieldKey          = "service"
-	kandevName               = "kandev"
-	startingStatus           = "starting"
-	healthRoutePath          = "/health"
-	readyRoutePath           = "/ready"
-	websocketRoutePath       = "/ws"
+	desktopHealthTokenEnv              = "KANDEV_DESKTOP_HEALTH_TOKEN"
+	desktopHealthTokenHeader           = "X-Kandev-Desktop-Health-Token"
+	desktopRuntimeEnv                  = "KANDEV_DESKTOP_RUNTIME"
+	agentShutdownTimeout               = 20 * time.Second
+	httpShutdownTimeout                = 10 * time.Second
+	tracingShutdownTimeout             = 5 * time.Second
+	addedFieldKey                      = "added"
+	branchFieldKey                     = "branch"
+	branchAdditionsFieldKey            = "branch_additions"
+	branchDeletionsFieldKey            = "branch_deletions"
+	deletedFieldKey                    = "deleted"
+	versionFieldKey                    = "version"
+	serviceFieldKey                    = "service"
+	kandevName                         = "kandev"
+	startingStatus                     = "starting"
+	healthRoutePath                    = "/health"
+	readyRoutePath                     = "/ready"
+	websocketRoutePath                 = "/ws"
+	gitStatusReadyState                = "ready"
+	gitStatusLiveSourceUnavailableCode = "live_source_unavailable"
+	gitStatusRepositoryUnavailableCode = "repository_unavailable"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -166,6 +172,214 @@ func buildSessionGitDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *
 		}
 		return appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, nil, log), nil
 	}
+}
+
+func buildSessionGitRefreshProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) gateways.SessionGitRefreshProvider {
+	return func(ctx context.Context, sessionID, mode string) (gateways.SessionGitRefreshResult, error) {
+		return getSessionGitStatusRefresh(ctx, taskRepo, lifecycleMgr, log, sessionID, mode)
+	}
+}
+
+func getSessionGitStatusRefresh(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, sessionID, mode string) (gateways.SessionGitRefreshResult, error) {
+	result := gateways.SessionGitRefreshResult{
+		SessionID: sessionID, Mode: mode, StatusState: "unavailable", Snapshots: []*ws.Message{},
+	}
+	session, err := taskRepo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		result.ErrorCode = "session_unavailable"
+		return result, nil
+	}
+	result.TaskEnvironmentID = session.TaskEnvironmentID
+	sources, ok := resolveGitStatusSources(ctx, taskRepo, session, log)
+	if !ok {
+		result.ErrorCode = "environment_unavailable"
+		return result, nil
+	}
+	result.TaskEnvironmentID = sources.environmentID
+	if lifecycleMgr == nil {
+		result.ErrorCode = gitStatusLiveSourceUnavailableCode
+		return result, nil
+	}
+	return refreshGitStatusFromSources(ctx, taskRepo, lifecycleMgr, log, result, sources, sessionID, mode), nil
+}
+
+func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, result gateways.SessionGitRefreshResult, sources *gitStatusSources, sessionID, mode string) gateways.SessionGitRefreshResult {
+	budget := 2 * time.Second
+	if mode == "recover" {
+		budget = 60 * time.Second
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	live := false
+	for _, sourceSessionID := range sources.sessionIDs {
+		if rpcCtx.Err() != nil {
+			break
+		}
+		multi, sourceLive := getGitStatusRefreshFromSource(rpcCtx, taskRepo, lifecycleMgr, log, sources, sessionID, sourceSessionID, mode)
+		live = live || sourceLive
+		if multi == nil {
+			continue
+		}
+		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
+		if result.Success {
+			return result
+		}
+	}
+	if live && rpcCtx.Err() != nil {
+		result.ErrorCode = "status_timeout"
+	} else {
+		result.ErrorCode = gitStatusLiveSourceUnavailableCode
+	}
+	return result
+}
+
+func getGitStatusRefreshFromSource(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, sources *gitStatusSources, requestedSessionID, sourceSessionID, mode string) (*client.MultiRepoGitStatusResult, bool) {
+	execution, exists := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
+	if !exists || !executionMatchesGitStatusSource(sources, execution, sourceSessionID, log) || !isLiveGitStatusExecution(execution) {
+		return nil, false
+	}
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	if agentClient == nil {
+		releaseClient()
+		return nil, true
+	}
+	generation, err := agentClient.ConnectionGeneration(ctx)
+	if err != nil {
+		releaseClient()
+		return nil, true
+	}
+	streamGeneration := execution.StartupAttemptGeneration()
+	multi, queryErr := agentClient.GetGitStatusMultiRefresh(ctx, mode)
+	stillCurrent := revalidateSessionGitRefreshSource(ctx, taskRepo, lifecycleMgr, requestedSessionID, sources, sourceSessionID, execution, agentClient, generation, streamGeneration, log)
+	releaseClient()
+	if queryErr != nil || !stillCurrent || multi == nil || len(multi.Repos) == 0 {
+		return nil, true
+	}
+	return multi, true
+}
+
+func appendGitStatusRefreshSnapshots(result *gateways.SessionGitRefreshResult, sources *gitStatusSources, sessionID string, multi *client.MultiRepoGitStatusResult) {
+	for _, repo := range multi.Repos {
+		status := repo.Status
+		markFailedGitRepositoryUnavailable(&status)
+		if notification := buildGitStatusNotification(sessionID, sources.environmentID, repo.RepositoryName, status); notification != nil {
+			result.Snapshots = append(result.Snapshots, notification)
+		}
+		if isCompleteGitStatusResult(status) {
+			result.Success = true
+			result.StatusState = gitStatusReadyState
+		}
+	}
+	if !result.Success {
+		result.ErrorCode = "status_unavailable"
+	}
+}
+
+func markFailedGitRepositoryUnavailable(status *client.GitStatusResult) {
+	if status.Success {
+		return
+	}
+	status.StatusState = "unavailable"
+	status.FilesComplete = false
+	status.DetailState = "unavailable"
+	if status.ErrorCode == "" {
+		status.ErrorCode = gitStatusRepositoryUnavailableCode
+	}
+}
+
+func isCompleteGitStatusResult(status client.GitStatusResult) bool {
+	return status.Success && status.FilesComplete && (status.StatusState == gitStatusReadyState || status.StatusState == "")
+}
+
+func revalidateSessionGitRefreshSource(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	lifecycleMgr *lifecycle.Manager,
+	requestedSessionID string,
+	sources *gitStatusSources,
+	sourceSessionID string,
+	execution *lifecycle.AgentExecution,
+	agentClient *client.Client,
+	connectionGeneration string,
+	streamGeneration uint64,
+	log *logger.Logger,
+) bool {
+	if !hasGitStatusRefreshInputs(ctx, taskRepo, lifecycleMgr, execution, agentClient) {
+		return false
+	}
+	if !isCurrentGitStatusExecution(ctx, lifecycleMgr, sources, sourceSessionID, execution, streamGeneration, log) {
+		return false
+	}
+	if !matchesGitStatusConnectionGeneration(ctx, agentClient, connectionGeneration) {
+		return false
+	}
+	return requestedSessionUsesGitStatusSource(ctx, taskRepo, requestedSessionID, sources, sourceSessionID, log)
+}
+
+func hasGitStatusRefreshInputs(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, execution *lifecycle.AgentExecution, agentClient *client.Client) bool {
+	return ctx.Err() == nil && taskRepo != nil && lifecycleMgr != nil && execution != nil && agentClient != nil
+}
+
+func isCurrentGitStatusExecution(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, sourceSessionID string, execution *lifecycle.AgentExecution, streamGeneration uint64, log *logger.Logger) bool {
+	currentExecution, ok := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
+	if !ok || !sameGitStatusExecution(currentExecution, execution, streamGeneration) {
+		return false
+	}
+	return executionMatchesGitStatusSource(sources, currentExecution, sourceSessionID, log) && isLiveGitStatusExecution(currentExecution)
+}
+
+func sameGitStatusExecution(currentExecution, execution *lifecycle.AgentExecution, streamGeneration uint64) bool {
+	if currentExecution == nil || execution == nil {
+		return false
+	}
+	if currentExecution != execution || currentExecution.ID != execution.ID {
+		return false
+	}
+	if currentExecution.TaskEnvironmentID != execution.TaskEnvironmentID || currentExecution.WorkspacePath != execution.WorkspacePath {
+		return false
+	}
+	return currentExecution.StartupAttemptGeneration() == streamGeneration
+}
+
+func matchesGitStatusConnectionGeneration(ctx context.Context, agentClient *client.Client, expected string) bool {
+	currentGeneration, err := agentClient.ConnectionGeneration(ctx)
+	return err == nil && currentGeneration == expected
+}
+
+func requestedSessionUsesGitStatusSource(ctx context.Context, taskRepo *sqliterepo.Repository, requestedSessionID string, sources *gitStatusSources, sourceSessionID string, log *logger.Logger) bool {
+	requested, err := taskRepo.GetTaskSession(ctx, requestedSessionID)
+	if err != nil || requested == nil || requested.TaskEnvironmentID != sources.environmentID {
+		return false
+	}
+	currentSources, ok := resolveGitStatusSources(ctx, taskRepo, requested, log)
+	if !sameGitStatusRefreshScope(currentSources, sources, ok) {
+		return false
+	}
+	return sourceSessionStillEligible(currentSources.sessionIDs, sourceSessionID)
+}
+
+func sameGitStatusRefreshScope(currentSources, expected *gitStatusSources, ok bool) bool {
+	if !ok || currentSources.environmentID != expected.environmentID || currentSources.workspacePath != expected.workspacePath {
+		return false
+	}
+	if len(currentSources.workspacePaths) != len(expected.workspacePaths) {
+		return false
+	}
+	for path := range currentSources.workspacePaths {
+		if _, exists := expected.workspacePaths[path]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) bool {
+	for _, candidate := range sessionIDs {
+		if candidate == sourceSessionID {
+			return true
+		}
+	}
+	return false
 }
 
 const sessionIDPayloadKey = "session_id"
@@ -343,7 +557,7 @@ func tryGetLiveGitStatusWithState(ctx context.Context, lifecycleMgr *lifecycle.M
 			continue
 		}
 		live = true
-		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, execution, requestedSessionID, sourceSessionID, sources.environmentID, log); len(msgs) > 0 {
+		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, lifecycleMgr, sources, execution, requestedSessionID, sourceSessionID, sources.environmentID, log); len(msgs) > 0 {
 			return msgs, true
 		}
 	}
@@ -376,6 +590,9 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 		return false
 	}
 	if execution.WorkspacePath != sources.workspacePath {
+		if _, allowed := sources.workspacePaths[execution.WorkspacePath]; allowed {
+			return true
+		}
 		log.Debug("rejecting live git status source",
 			zap.String("source_session_id", sessionID),
 			zap.String("task_environment_id", sources.environmentID),
@@ -385,7 +602,7 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 	return true
 }
 
-func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
+func tryGetLiveGitStatusFromExecution(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
 	agentClient, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if agentClient == nil {
@@ -393,6 +610,11 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 			zap.String("source_session_id", sourceSessionID))
 		return nil
 	}
+	connectionGeneration, err := agentClient.ConnectionGeneration(ctx)
+	if err != nil {
+		return nil
+	}
+	streamGeneration := execution.StartupAttemptGeneration()
 
 	// Force fresh git query: cache can wedge when the poll loop misses a HEAD change.
 	multi, err := agentClient.GetGitStatusMultiFresh(ctx)
@@ -402,20 +624,13 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 			zap.Error(err))
 		return nil
 	}
-	if multi == nil || !multi.Success || len(multi.Repos) == 0 {
+	if !isCurrentInitialGitStatusRead(ctx, lifecycleMgr, sources, execution, agentClient, connectionGeneration, sourceSessionID, streamGeneration, log) {
 		return nil
 	}
-
-	out := make([]*ws.Message, 0, len(multi.Repos))
-	for _, repo := range multi.Repos {
-		if !repo.Status.Success {
-			continue
-		}
-		notification := buildGitStatusNotification(requestedSessionID, taskEnvironmentID, repo.RepositoryName, repo.Status)
-		if notification != nil {
-			out = append(out, notification)
-		}
+	if !hasGitStatusRepositories(multi) {
+		return nil
 	}
+	out := liveGitStatusNotifications(requestedSessionID, taskEnvironmentID, multi)
 	if len(out) == 0 {
 		return nil
 	}
@@ -426,6 +641,27 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 	return out
 }
 
+func isCurrentInitialGitStatusRead(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, execution *lifecycle.AgentExecution, agentClient *client.Client, connectionGeneration, sourceSessionID string, streamGeneration uint64, log *logger.Logger) bool {
+	return isCurrentGitStatusExecution(ctx, lifecycleMgr, sources, sourceSessionID, execution, streamGeneration, log) &&
+		matchesGitStatusConnectionGeneration(ctx, agentClient, connectionGeneration)
+}
+
+func hasGitStatusRepositories(multi *client.MultiRepoGitStatusResult) bool {
+	return multi != nil && multi.Success && len(multi.Repos) > 0
+}
+
+func liveGitStatusNotifications(requestedSessionID, taskEnvironmentID string, multi *client.MultiRepoGitStatusResult) []*ws.Message {
+	notifications := make([]*ws.Message, 0, len(multi.Repos))
+	for _, repo := range multi.Repos {
+		status := repo.Status
+		markFailedGitRepositoryUnavailable(&status)
+		if notification := buildGitStatusNotification(requestedSessionID, taskEnvironmentID, repo.RepositoryName, status); notification != nil {
+			notifications = append(notifications, notification)
+		}
+	}
+	return notifications
+}
+
 // buildGitStatusNotification packages a single repo's status as a WS event
 // the frontend can route through its existing git-status handler. The
 // repository_name is stamped on the inner status payload so the frontend
@@ -434,28 +670,61 @@ func buildGitStatusNotification(sessionID, taskEnvironmentID, repositoryName str
 	if taskEnvironmentID == "" {
 		return nil
 	}
+	statusState := status.StatusState
+	detailState := status.DetailState
+	filesComplete := status.FilesComplete
+	if statusState == "" {
+		if status.Success {
+			statusState = gitStatusReadyState
+			filesComplete = true
+		} else {
+			statusState = "unavailable"
+		}
+	}
+	if detailState == "" {
+		if status.Success {
+			detailState = gitStatusReadyState
+		} else {
+			detailState = "unavailable"
+		}
+	}
+	errorCode := status.ErrorCode
+	if !status.Success && errorCode == "" {
+		errorCode = "status_unavailable"
+	}
 	statusPayload := map[string]interface{}{
 		branchFieldKey:          status.Branch,
 		"remote_branch":         status.RemoteBranch,
 		"head_commit":           status.HeadCommit,
 		"base_commit":           status.BaseCommit,
-		"ahead":                 status.Ahead,
-		"behind":                status.Behind,
-		"remote_ahead":          status.RemoteAhead,
-		"remote_behind":         status.RemoteBehind,
-		"remote_head_commit":    status.RemoteHeadCommit,
-		"files":                 status.Files,
-		"modified":              status.Modified,
-		addedFieldKey:           status.Added,
-		deletedFieldKey:         status.Deleted,
-		"untracked":             status.Untracked,
-		"renamed":               status.Renamed,
-		branchAdditionsFieldKey: status.BranchAdditions,
-		branchDeletionsFieldKey: status.BranchDeletions,
+		"status_state":          statusState,
+		"files_complete":        filesComplete,
+		"detail_state":          detailState,
+		"error_code":            errorCode,
+		"tracker_id":            status.TrackerID,
+		"tracker_epoch":         status.TrackerEpoch,
+		"snapshot_revision":     status.SnapshotRevision,
 		"comparison_target":     status.ComparisonTarget,
 		"comparison_status":     status.ComparisonStatus,
 		"comparison_error_code": status.ComparisonErrorCode,
 		"is_submodule":          status.IsSubmodule,
+	}
+	if filesComplete {
+		statusPayload["files"] = status.Files
+		statusPayload["modified"] = status.Modified
+		statusPayload[addedFieldKey] = status.Added
+		statusPayload[deletedFieldKey] = status.Deleted
+		statusPayload["untracked"] = status.Untracked
+		statusPayload["renamed"] = status.Renamed
+	}
+	if detailState == gitStatusReadyState {
+		statusPayload["ahead"] = status.Ahead
+		statusPayload["behind"] = status.Behind
+		statusPayload["remote_ahead"] = status.RemoteAhead
+		statusPayload["remote_behind"] = status.RemoteBehind
+		statusPayload["remote_head_commit"] = status.RemoteHeadCommit
+		statusPayload[branchAdditionsFieldKey] = status.BranchAdditions
+		statusPayload[branchDeletionsFieldKey] = status.BranchDeletions
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -526,27 +795,50 @@ func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *mo
 		return nil
 	}
 	metadata := snapshot.Metadata
+	compactLive := snapshot.TriggeredBy == sqliterepo.TriggeredByLiveMonitor && snapshot.Files == nil
 	statusPayload := map[string]interface{}{
 		branchFieldKey:          snapshot.Branch,
 		"remote_branch":         snapshot.RemoteBranch,
 		"head_commit":           snapshot.HeadCommit,
 		"base_commit":           snapshot.BaseCommit,
-		"ahead":                 snapshot.Ahead,
-		"behind":                snapshot.Behind,
-		"remote_ahead":          metadata["remote_ahead"],
-		"remote_behind":         metadata["remote_behind"],
-		"remote_head_commit":    metadata["remote_head_commit"],
-		"files":                 snapshot.Files,
-		"modified":              metadata["modified"],
-		addedFieldKey:           metadata[addedFieldKey],
-		deletedFieldKey:         metadata[deletedFieldKey],
-		"untracked":             metadata["untracked"],
-		"renamed":               metadata["renamed"],
-		branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
-		branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
+		"status_state":          gitStatusReadyState,
+		"files_complete":        true,
+		"detail_state":          gitStatusReadyState,
 		"comparison_target":     metadata["comparison_target"],
 		"comparison_status":     metadata["comparison_status"],
 		"comparison_error_code": metadata["comparison_error_code"],
+	}
+	if compactLive {
+		statusPayload["files_complete"] = false
+		statusPayload["error_code"] = "summary_only"
+		if metadata["status_state"] == gitStatusReadyState && metadata["detail_state"] == gitStatusReadyState {
+			statusPayload["status_state"] = gitStatusReadyState
+			statusPayload["detail_state"] = gitStatusReadyState
+			statusPayload["ahead"] = snapshot.Ahead
+			statusPayload["behind"] = snapshot.Behind
+			statusPayload["remote_ahead"] = metadata["remote_ahead"]
+			statusPayload["remote_behind"] = metadata["remote_behind"]
+			statusPayload["remote_head_commit"] = metadata["remote_head_commit"]
+			statusPayload[branchAdditionsFieldKey] = metadata[branchAdditionsFieldKey]
+			statusPayload[branchDeletionsFieldKey] = metadata[branchDeletionsFieldKey]
+		} else {
+			statusPayload["status_state"] = "unavailable"
+			statusPayload["detail_state"] = "unavailable"
+		}
+	} else {
+		statusPayload["files"] = snapshot.Files
+		statusPayload["ahead"] = snapshot.Ahead
+		statusPayload["behind"] = snapshot.Behind
+		statusPayload["remote_ahead"] = metadata["remote_ahead"]
+		statusPayload["remote_behind"] = metadata["remote_behind"]
+		statusPayload["remote_head_commit"] = metadata["remote_head_commit"]
+		statusPayload["modified"] = metadata["modified"]
+		statusPayload[addedFieldKey] = metadata[addedFieldKey]
+		statusPayload[deletedFieldKey] = metadata[deletedFieldKey]
+		statusPayload["untracked"] = metadata["untracked"]
+		statusPayload["renamed"] = metadata["renamed"]
+		statusPayload[branchAdditionsFieldKey] = metadata[branchAdditionsFieldKey]
+		statusPayload[branchDeletionsFieldKey] = metadata[branchDeletionsFieldKey]
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -596,7 +888,20 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 	if lifecycleMgr == nil {
 		return result
 	}
-	commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
+	return appendAvailableCommandsMessageForCommands(
+		sessionID,
+		session,
+		lifecycleMgr.GetAvailableCommandsForSession(sessionID),
+		result,
+	)
+}
+
+func appendAvailableCommandsMessageForCommands(
+	sessionID string,
+	session *models.TaskSession,
+	commands []streams.AvailableCommand,
+	result []*ws.Message,
+) []*ws.Message {
 	if len(commands) == 0 {
 		return result
 	}
@@ -613,18 +918,29 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 
 // appendSessionModeMessage adds session mode state notification to result if cached.
 func appendSessionModeMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
-	if lifecycleMgr == nil {
+	var modeState *lifecycle.CachedModeState
+	if lifecycleMgr != nil {
+		modeState = lifecycleMgr.GetModeStateForSession(sessionID)
+	}
+	snapshot, hasSnapshot := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	if modeState == nil && hasSnapshot {
+		modeState = &lifecycle.CachedModeState{CurrentModeID: snapshot.CurrentModeID}
+	}
+	if modeState == nil {
 		return result
 	}
-	modeState := lifecycleMgr.GetModeStateForSession(sessionID)
-	if modeState == nil || (modeState.CurrentModeID == "" && len(modeState.AvailableModes) == 0) {
+	hasKnownMode := modeState.CurrentModeID != "" || len(modeState.AvailableModes) > 0
+	hasExplicitUnknownMode := hasSnapshot && (snapshot.SettingsAttemptID != "" ||
+		snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored)
+	if !hasKnownMode && !hasExplicitUnknownMode {
 		return result
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionModeChanged, lifecycle.SessionModeEventPayload{
-		TaskID:         session.TaskID,
-		SessionID:      sessionID,
-		CurrentModeID:  modeState.CurrentModeID,
-		AvailableModes: modeState.AvailableModes,
+		TaskID:                session.TaskID,
+		SessionID:             sessionID,
+		CurrentModeID:         modeState.CurrentModeID,
+		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
+		AvailableModes:        modeState.AvailableModes,
 	})
 	if err == nil {
 		result = append(result, notification)
@@ -632,21 +948,24 @@ func appendSessionModeMessage(sessionID string, session *models.TaskSession, lif
 	return result
 }
 
-// appendSessionModelsMessage adds session models state notification to result if cached.
+// appendSessionModelsMessage adds the current or persisted session model state to result.
 func appendSessionModelsMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
-	if lifecycleMgr == nil {
-		return result
+	var modelState *lifecycle.CachedModelState
+	if lifecycleMgr != nil {
+		modelState = lifecycleMgr.GetModelStateForSession(sessionID)
 	}
 	return appendSessionModelsMessageFromState(
 		sessionID,
 		session,
-		lifecycleMgr.GetModelStateForSession(sessionID),
+		modelState,
 		result,
 	)
 }
 
 func appendSessionModelsMessageFromState(sessionID string, session *models.TaskSession, modelState *lifecycle.CachedModelState, result []*ws.Message) []*ws.Message {
 	snapshot, hasSnapshot := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	providerRestored := hasSnapshot && snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored
+	hasAttemptSnapshot := hasSnapshot && snapshot.SettingsAttemptID != ""
 	var replayState lifecycle.CachedModelState
 	if modelState == nil {
 		if !hasSnapshot {
@@ -671,24 +990,105 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 			}
 		}
 	}
+	applyPersistedSessionRuntimeConfigOverrides(session, &replayState)
 	replayState.ConfigOptionsSettled = replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled
 	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 &&
-		len(replayState.ConfigOptions) == 0 && !replayState.ConfigOptionsSettled {
+		len(replayState.ConfigOptions) == 0 && !replayState.ConfigOptionsSettled && !providerRestored && !hasAttemptSnapshot {
 		return result
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
-		TaskID:               session.TaskID,
-		SessionID:            sessionID,
-		CurrentModelID:       replayState.CurrentModelID,
-		Models:               replayState.Models,
-		ConfigOptions:        replayState.ConfigOptions,
-		ConfigOptionsSettled: replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
-		ConfigBaseline:       sessionACPConfigBaseline(session),
+		TaskID:                session.TaskID,
+		SessionID:             sessionID,
+		AgentExecutionID:      snapshot.SettingsSourceExecutionID,
+		CurrentModelID:        replayState.CurrentModelID,
+		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
+		Models:                replayState.Models,
+		ConfigOptions:         replayState.ConfigOptions,
+		ConfigOptionsSettled:  replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		ConfigBaseline:        sessionACPConfigBaseline(session),
 	})
 	if err == nil {
 		result = append(result, notification)
 	}
 	return result
+}
+
+func applyPersistedSessionRuntimeConfigOverrides(session *models.TaskSession, state *lifecycle.CachedModelState) {
+	if session == nil || state == nil {
+		return
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
+	if !ok {
+		return
+	}
+
+	if overrides.Model != "" && sessionModelAvailable(state.Models, overrides.Model) {
+		state.CurrentModelID = overrides.Model
+	}
+	if len(state.ConfigOptions) == 0 {
+		return
+	}
+	state.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
+	for index := range state.ConfigOptions {
+		applyPersistedSessionConfigOption(state, &state.ConfigOptions[index], overrides)
+	}
+}
+
+func applyPersistedSessionConfigOption(
+	state *lifecycle.CachedModelState,
+	option *streams.ConfigOption,
+	overrides models.SessionRuntimeConfig,
+) {
+	if option.ID == "" || strings.EqualFold(option.ID, "mode") || strings.EqualFold(option.Category, "mode") {
+		return
+	}
+	value, exists := overrides.ConfigOptions[option.ID]
+	if isSessionModelOption(*option) && value == "" {
+		value = overrides.Model
+		exists = value != ""
+	}
+	if !exists || value == "" || !sessionConfigOptionSupportsValue(*option, value) {
+		return
+	}
+	option.CurrentValue = value
+	if isSessionModelOption(*option) {
+		state.CurrentModelID = value
+	}
+}
+
+func isSessionModelOption(option streams.ConfigOption) bool {
+	return strings.EqualFold(option.ID, "model") || strings.EqualFold(option.Category, "model")
+}
+
+func sessionModelAvailable(models []streams.SessionModelInfo, modelID string) bool {
+	for _, model := range models {
+		if model.ModelID == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionConfigOptionSupportsValue(option streams.ConfigOption, value string) bool {
+	if len(option.Options) == 0 {
+		return true
+	}
+	for _, choice := range option.Options {
+		if choice.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionSettingsProjectionPolicyFromSnapshot(
+	snapshot lifecycle.SessionModelsSnapshot,
+	hasSnapshot bool,
+) streams.SessionSettingsPolicy {
+	if hasSnapshot && snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
+		return streams.SessionSettingsPolicyProviderRestored
+	}
+	return streams.SessionSettingsPolicyStrict
 }
 
 func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
@@ -701,6 +1101,7 @@ func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
 type routeParams struct {
+	ctx                           context.Context
 	router                        *gin.Engine
 	gateway                       *gateways.Gateway
 	taskSvc                       *taskservice.Service
@@ -721,6 +1122,8 @@ type routeParams struct {
 	dbPool                        *db.Pool
 	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
+	runtimeUpdateNotifier         e2eRuntimeUpdateNotifier
+	e2eRuntimeUpdateHooks         *e2eRuntimeUpdateHooks
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
 	agentRegistry                 *registry.Registry
@@ -738,6 +1141,7 @@ type routeParams struct {
 	addCleanup                    func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
+	commit                        string
 	webInternalURL                string
 	webTitlePrefix                string
 	devMode                       bool
@@ -810,6 +1214,7 @@ func registerRoutes(p routeParams) {
 	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
 	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
+	wireOfficeProjectRepositorySources(p.taskSvc, p.officeRepo)
 	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
@@ -1139,6 +1544,12 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
+	if err := webapp.NormalizeBootPayloadGraph(&payload); err != nil {
+		if p.log != nil {
+			p.log.Error("failed to normalize boot entities; using version 1 payload", zap.Error(err))
+		}
+		payload.Version = 1
+	}
 	return payload
 }
 
@@ -1332,9 +1743,12 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
 	workflowH.SetTaskParkedProvider(p.orchestratorSvc)
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	configureWorkspaceAdoptionCaller(taskH)
+	taskH.SetBackgroundWorkEnabled(p.features.AgentBackgroundWork)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
 		taskH.SetAgentProfileRecentUseRecorder(p.services.User)
+		taskH.SetSidebarTaskSettingsReader(p.services.User)
 	}
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
@@ -1377,6 +1791,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	if p.services != nil && p.services.Terminal != nil {
+		processHandlers.SetTerminalService(p.services.Terminal)
+	}
 	taskhandlers.RegisterWorkspaceFileRoutes(p.router, processHandlers)
 	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
@@ -1385,6 +1802,39 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Debug("Registered Public Share Links handlers (HTTP)")
 	}
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
+}
+
+func configureMCPServices(
+	p routeParams,
+) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
+	if !ok {
+		return nil, nil, nil
+	}
+	mcpCatalog := mcpconfig.NewCatalogService(catalogRepo)
+	mcpCatalog.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	selectionRepo, ok := p.agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !ok {
+		return catalogRepo, mcpCatalog, nil
+	}
+	mcpSelectionService := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
+	mcpSelectionService.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	mcpSelectionService.SetOwnerValidator(mcpSelectionOwnerValidator(p))
+	mcpSelectionService.SetSessionResolutionContext(mcpSessionResolutionContext(p))
+	if stateRepo, ok := p.agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
+		mcpSelectionService.SetSessionMCPStateRepository(stateRepo)
+	}
+	if p.lifecycleMgr != nil {
+		mcpSelectionService.SetSessionMCPChangeNotifier(func(ctx context.Context, sessionID string) {
+			p.lifecycleMgr.RequestSessionMCPReconfiguration(ctx, sessionID)
+		})
+	}
+	mcpCatalog.SetSelectionRepository(selectionRepo)
+	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
+	if p.orchestratorSvc != nil {
+		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
+	}
+	return catalogRepo, mcpCatalog, mcpSelectionService
 }
 
 // registerSecondaryRoutes registers workflow, agent settings, user, notification, editor,
@@ -1401,7 +1851,34 @@ func registerSecondaryRoutes(
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
-	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
+	mcpCatalogRepo, mcpCatalog, mcpSelectionService := configureMCPServices(p)
+	var marketplace *mcpregistry.MarketplaceService
+	if cache, ok := p.agentSettingsRepo.(mcpregistry.CacheStore); ok && mcpCatalogRepo != nil {
+		client, clientErr := mcpregistry.NewClient(mcpregistry.DefaultRegistryURL, nil)
+		if clientErr == nil {
+			syncer := mcpregistry.NewSyncService(client, cache)
+			marketplace = mcpregistry.NewMarketplaceService(syncer, mcpCatalog)
+			if p.addCleanup != nil {
+				marketplaceCtx, cancelMarketplace := context.WithCancel(context.Background())
+				syncer.Start(marketplaceCtx, time.Hour)
+				p.addCleanup(func() error {
+					cancelMarketplace()
+					return nil
+				})
+			}
+		}
+	}
+	agentsettingshandlers.RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		p.router,
+		p.agentSettingsController,
+		p.gateway.Hub,
+		p.log,
+		p.interimSettingsInterlockToken,
+		mcpCatalogRepo,
+		p.taskSvc.AuthorizeWorkspaceAccess,
+		marketplace,
+		mcpSelectionService,
+	)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
@@ -1452,6 +1929,10 @@ func registerSecondaryRoutes(
 		p.features.NeedsYouInbox,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	if p.features.Coordinator {
+		wireCoordinatorConversation(p)
+	}
 
 	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
 	p.log.Debug("Registered Failed Inbox handlers (HTTP)")
@@ -1504,7 +1985,7 @@ func registerSecondaryRoutes(
 			p.taskRepo,
 			p.services.Task,
 			p.agentRegistry,
-			lifecycle.NewAgentctlResolver(p.log),
+			newSSHAgentctlResolver(p),
 			p.log,
 			p.taskRepo,
 			reachabilityPoller,
@@ -1578,6 +2059,12 @@ func registerSecondaryRoutes(
 		conversationReaders := make([]plugins.ConversationReader, 0, 1)
 		if p.services.Task != nil {
 			conversationReaders = append(conversationReaders, p.services.Task)
+			p.services.Plugins.SetCapabilityApprovalWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
+				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage)
+			})
+			p.services.Plugins.SetHumanInteractionResponseAuthorizer(func(ctx context.Context, workspaceID string) error {
+				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSessionControl)
+			})
 		}
 		plugins.RegisterRoutes(
 			p.router,
@@ -1628,15 +2115,23 @@ func registerSecondaryRoutes(
 	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
+	if p.features.Coordinator {
+		registerCoordinatorRoutes(p)
+	}
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator, p.eventBus,
+		p.agentRuntimeAvailability, p.lifecycleMgr, p.services.DeliveryRetention, p.ctx, p.log,
+	)
+	registerE2ERuntimeUpdateRoutes(
+		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
+	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService
@@ -1672,6 +2167,15 @@ func registerSecondaryRoutes(
 		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
+}
+
+func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
+	return lifecycle.NewAgentctlResolverWithOptions(p.log, lifecycle.AgentctlResolverOptions{
+		Version:   p.version,
+		Commit:    p.commit,
+		BundleDir: os.Getenv("KANDEV_BUNDLE_DIR"),
+		HomeDir:   p.homeDir,
+	})
 }
 
 // integrationWorkspacePrefixes are the workspace-scoped third-party
@@ -2052,6 +2556,9 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	if p.agentSettingsController != nil {
+		mcpHandlers.SetAgentProfileVerifier(p.agentSettingsController)
+	}
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
 	}
@@ -2095,6 +2602,7 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)
+	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
 	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
@@ -2120,6 +2628,11 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskMRLister(mcpTaskMRListerAdapter{gl: p.services.GitLab})
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Agents != nil {
+		mcpHandlers.SetTaskTransferCoordinatorAuthorizer(taskTransferCoordinatorAttestor{
+			tasks: p.taskSvc, sessions: p.taskRepo, agents: p.services.OfficeSvcs.Agents,
+		})
+	}
 	mcpHandlers.SetTaskChangeRequestReadService(newTaskChangeRequestReader(
 		p.taskSvc, p.services.GitHub, p.services.GitLab,
 	))
@@ -2143,7 +2656,11 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetReviewService(reviewParts.service)
 	mcpHandlers.SetReviewRunner(reviewParts.runner)
 	p.orchestratorSvc.SetReviewRunner(reviewParts.runner)
-	reviewParts.runner.Start(context.Background())
+	reviewCtx := p.ctx
+	if reviewCtx == nil {
+		reviewCtx = context.Background()
+	}
+	startup.AfterReady(reviewCtx, func() { reviewParts.runner.Start(reviewCtx) })
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
 			reviewParts.runner.Stop()
@@ -2158,6 +2675,18 @@ func registerMCPAndDebugRoutes(
 		p.log.Info("cancelled review runs interrupted by restart", zap.Int("count", cancelled))
 	}
 	p.log.Debug("Registered native code review (WebSocket + MCP)")
+
+	if p.services.Coordinator != nil {
+		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		wireCoordinatorLedger(p, p.services.Coordinator, mcpHandlers)
+		wireCoordinatorOutcomes(p, p.services.Coordinator)
+		wireCoordinatorDream(p, p.services.Coordinator)
+		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
+			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
+			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},
+			Messenger: mcpHandlers,
+		})
+	}
 
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
@@ -2177,6 +2706,9 @@ func registerMCPAndDebugRoutes(
 		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
 		p.log,
 	)
+	if p.services != nil && p.services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)

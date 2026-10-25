@@ -2,6 +2,7 @@ import type { UISliceActions as UIA } from "./slices/ui/types";
 import type {
   SystemSliceActions,
   AutomationsSliceActions,
+  CoordinatorsSliceActions,
   FeaturesSliceActions,
   AuthSliceActions,
   GitHubSliceActions,
@@ -32,6 +33,7 @@ export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThre
   FeaturesSliceActions &
   AuthSliceActions &
   AutomationsSliceActions &
+  CoordinatorsSliceActions &
   PluginsSliceActions &
   ReviewSliceActions &
   NeedsYouInboxSliceActions &

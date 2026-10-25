@@ -59,13 +59,23 @@ export function isTaskDetailPath(pathname: string, taskId: string): boolean {
 }
 
 /** Replace the browser URL to reflect the active task (no navigation). */
-export function replaceTaskUrl(taskId: string): void {
+export function replaceTaskUrl(taskId: string, sessionId?: string): void {
   if (typeof window === "undefined") return;
-  window.history.replaceState({}, "", linkToTask(taskId));
+  window.history.replaceState({}, "", linkToTask(taskId, { sessionId }));
 }
 
 export function linkToTasks(workspaceId?: string): string {
   return workspaceId ? `/tasks?workspace=${workspaceId}` : "/tasks";
+}
+
+export function linkToArchivedTasks(workspaceId: string): string {
+  const params = new URLSearchParams({
+    workspace: workspaceId,
+    archive: "archived",
+    workflow: "all",
+    repository: "all",
+  });
+  return `/tasks?${params.toString()}`;
 }
 
 /**

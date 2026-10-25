@@ -130,6 +130,14 @@ headers): `kandev_session_<port>`, `kandev-active-workspace_<port>`,
 
 ## Failure modes
 
+- **Malformed workspace-selection encoding.** The browser `readCookie` helper in
+  `apps/web/lib/routing/route-bootstrap.ts` selects the last matching cookie
+  before decoding its value. A decoding failure returns `null`, allowing
+  `readScopedCookie`, validated legacy promotion, and the existing workspace
+  resolvers to continue. Earlier duplicate values are not revived. Cookie
+  names, port isolation, candidate validation, and unrelated cookies are unchanged
+  (AC-AUTH-FIX-MULTI-INSTANCE-COOKIE-ISOLATION-001.9).
+
 - **Proxy drops `X-Forwarded-Host` or rewrites a non-loopback hostname.**
   Two distinct failures: (1) when the effective host the backend derives the
   suffix from differs from the browser-visible origin (missing or incorrect

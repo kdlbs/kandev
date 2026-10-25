@@ -89,6 +89,9 @@ function buildRunErrorFromSession(s: TaskSession): RunError | null {
 
   error.failureCode = parsedLastError.code;
   error.failureDetails = parsedLastError.details;
+  error.startupReason = parsedLastError.startupReason;
+  error.startupAttempts = parsedLastError.startupAttempts;
+  error.startupNpmCode = parsedLastError.startupNpmCode;
   error.message = parsedLastError.message;
   error.taskRepositoryId = parsedLastError.taskRepositoryId;
   error.errorStamp = lastAgentErrorStamp(parsedLastError);

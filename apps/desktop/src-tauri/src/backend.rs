@@ -37,11 +37,20 @@ const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 const STARTUP_CONFLICT_MARKER_PREFIX: &[u8] = b"KANDEV_DESKTOP_CONFLICT_V1 ";
 const STARTUP_CONFLICT_LINE_LIMIT: usize = 16 * 1024;
 const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
+const REMOTE_HELPER_MANIFEST_SCHEMA_VERSION: u32 = 1;
+const REMOTE_HELPER_MANIFEST_MAX_BYTES: u64 = 64 * 1024;
+const REMOTE_HELPER_MAX_BYTES: u64 = 256 * 1024 * 1024;
 const REMOTE_AGENTCTL_HELPERS: [(&str, &str); 4] = [
     ("agentctl-linux-amd64", "agentctl linux/amd64 helper"),
     ("agentctl-linux-arm64", "agentctl linux/arm64 helper"),
     ("agentctl-darwin-arm64", "agentctl darwin/arm64 helper"),
     ("agentctl-darwin-amd64", "agentctl darwin/amd64 helper"),
+];
+const REMOTE_HELPER_MANIFEST_RECORDS: [(&str, &str); 4] = [
+    ("linux/amd64", "agentctl-linux-amd64.gz"),
+    ("linux/arm64", "agentctl-linux-arm64.gz"),
+    ("darwin/amd64", "agentctl-darwin-amd64.gz"),
+    ("darwin/arm64", "agentctl-darwin-arm64.gz"),
 ];
 
 #[derive(Clone)]
@@ -834,10 +843,138 @@ pub fn validate_runtime_dir(runtime_dir: &Path) -> Result<(), String> {
         &bin_dir.join(executable_name("agentctl")),
         "agentctl binary",
     )?;
-    for &(name, label) in REMOTE_AGENTCTL_HELPERS.iter() {
-        require_runtime_file(&bin_dir.join(name), label)?;
+    match read_remote_helper_manifest_variant(runtime_dir)? {
+        Some(RemoteHelperManifestVariant::Standard) => Ok(()),
+        Some(RemoteHelperManifestVariant::Full) | None => {
+            for &(name, label) in REMOTE_AGENTCTL_HELPERS.iter() {
+                require_runtime_file(&bin_dir.join(name), label)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct DesktopRemoteHelperManifest {
+    schema_version: u32,
+    version: String,
+    commit: String,
+    variant: RemoteHelperManifestVariant,
+    helpers: Vec<DesktopRemoteHelperRecord>,
+}
+
+#[derive(serde::Deserialize)]
+struct DesktopRemoteHelperRecord {
+    platform: String,
+    asset: String,
+    sha256: String,
+    size_bytes: u64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RemoteHelperManifestVariant {
+    Standard,
+    Full,
+}
+
+fn read_remote_helper_manifest_variant(
+    runtime_dir: &Path,
+) -> Result<Option<RemoteHelperManifestVariant>, String> {
+    let manifest_path = runtime_dir.join("remote-helpers.json");
+    let metadata = match std::fs::metadata(&manifest_path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(format!(
+                "could not inspect remote helper manifest at {}: {err}",
+                manifest_path.display()
+            ));
+        }
+    };
+    if !metadata.is_file() || metadata.len() > REMOTE_HELPER_MANIFEST_MAX_BYTES {
+        return Err(format!(
+            "remote helper manifest at {} is not a regular file within the size limit",
+            manifest_path.display()
+        ));
+    }
+    let bytes = std::fs::read(&manifest_path).map_err(|err| {
+        format!(
+            "could not read remote helper manifest at {}: {err}",
+            manifest_path.display()
+        )
+    })?;
+    let manifest: DesktopRemoteHelperManifest = serde_json::from_slice(&bytes).map_err(|err| {
+        format!(
+            "remote helper manifest at {} is invalid: {err}",
+            manifest_path.display()
+        )
+    })?;
+    if manifest.schema_version != REMOTE_HELPER_MANIFEST_SCHEMA_VERSION {
+        return Err(format!(
+            "remote helper manifest at {} uses unsupported schema version {}",
+            manifest_path.display(),
+            manifest.schema_version
+        ));
+    }
+    validate_remote_helper_manifest(&manifest, &manifest_path)?;
+    Ok(Some(manifest.variant))
+}
+
+fn validate_remote_helper_manifest(
+    manifest: &DesktopRemoteHelperManifest,
+    path: &Path,
+) -> Result<(), String> {
+    if manifest.version.trim().is_empty() || !is_full_git_sha(&manifest.commit) {
+        return Err(format!(
+            "remote helper manifest at {} has an invalid release identity",
+            path.display()
+        ));
+    }
+    if manifest.helpers.len() != REMOTE_HELPER_MANIFEST_RECORDS.len() {
+        return Err(format!(
+            "remote helper manifest at {} must contain exactly {} platform records",
+            path.display(),
+            REMOTE_HELPER_MANIFEST_RECORDS.len()
+        ));
+    }
+    for (platform, asset) in REMOTE_HELPER_MANIFEST_RECORDS {
+        let Some(record) = manifest
+            .helpers
+            .iter()
+            .find(|record| record.platform == platform)
+        else {
+            return Err(format!(
+                "remote helper manifest at {} is missing platform {platform}",
+                path.display()
+            ));
+        };
+        if record.asset != asset
+            || !is_lowercase_sha256(&record.sha256)
+            || record.size_bytes == 0
+            || record.size_bytes > REMOTE_HELPER_MAX_BYTES
+        {
+            return Err(format!(
+                "remote helper manifest at {} has an invalid record for {platform}",
+                path.display()
+            ));
+        }
     }
     Ok(())
+}
+
+fn is_full_git_sha(value: &str) -> bool {
+    matches!(value.len(), 40 | 64)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn require_runtime_file(path: &Path, label: &str) -> Result<(), String> {
@@ -1259,6 +1396,24 @@ fn executable_name(name: &str) -> OsString {
     }
 }
 
+fn temporary_test_window_command(executable: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .arg(TEMPORARY_TEST_ARGUMENT)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+fn launch_temporary_test_window(executable: &Path) -> Result<u32, String> {
+    crate::child_process::spawn_managed(
+        temporary_test_window_command(executable),
+        "temporary test window",
+    )
+    .map_err(|err| format!("Could not open a temporary Kandev test window: {err}"))
+}
+
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command]
 pub fn start_temporary_test_instance(
@@ -1268,14 +1423,7 @@ pub fn start_temporary_test_instance(
     state.require_conflict_startup(&webview)?;
     let executable = env::current_exe()
         .map_err(|err| format!("Could not locate the Kandev desktop application: {err}"))?;
-    Command::new(&executable)
-        .arg(TEMPORARY_TEST_ARGUMENT)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|err| format!("Could not open a temporary Kandev test window: {err}"))
+    launch_temporary_test_window(&executable).map(|_| ())
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -1577,6 +1725,88 @@ mod tests {
     }
 
     #[test]
+    fn manifest_bearing_standard_runtime_needs_only_host_binaries() {
+        let dir = temp_root("standard-runtime");
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
+        fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
+        fs::write(
+            dir.join("remote-helpers.json"),
+            desktop_helper_manifest(1, "standard"),
+        )
+        .expect("write manifest");
+
+        validate_runtime_dir(&dir).expect("validate standard runtime");
+    }
+
+    #[test]
+    fn manifest_bearing_full_runtime_requires_all_helpers() {
+        let dir = temp_root("full-runtime-missing-helpers");
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
+        fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
+        fs::write(
+            dir.join("remote-helpers.json"),
+            desktop_helper_manifest(1, "full"),
+        )
+        .expect("write manifest");
+
+        let err = validate_runtime_dir(&dir).expect_err("full runtime needs helpers");
+
+        assert!(
+            err.contains("agentctl linux/amd64 helper is missing"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn invalid_remote_helper_manifests_are_rejected() {
+        let mut unsupported_schema: serde_json::Value =
+            serde_json::from_slice(&desktop_helper_manifest(1, "standard")).unwrap();
+        unsupported_schema["schema_version"] = serde_json::json!(2);
+        let mut unsupported_variant: serde_json::Value =
+            serde_json::from_slice(&desktop_helper_manifest(1, "standard")).unwrap();
+        unsupported_variant["variant"] = serde_json::json!("compact");
+        for (name, contents) in [
+            ("empty", b"{}".to_vec()),
+            ("corrupt", b"not json".to_vec()),
+            (
+                "missing-contract-fields",
+                br#"{"schema_version":1,"variant":"standard"}"#.to_vec(),
+            ),
+            (
+                "unsupported-variant",
+                serde_json::to_vec(&unsupported_variant).unwrap(),
+            ),
+            (
+                "unsupported-schema",
+                serde_json::to_vec(&unsupported_schema).unwrap(),
+            ),
+        ] {
+            let dir = temp_root(&format!("invalid-manifest-{name}"));
+            let bin = dir.join("bin");
+            fs::create_dir_all(&bin).expect("create bin");
+            fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
+            fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
+            fs::write(dir.join("remote-helpers.json"), contents).expect("write manifest");
+
+            let err = validate_runtime_dir(&dir)
+                .expect_err(&format!("{name} manifest should be rejected"));
+
+            assert!(err.contains("remote helper manifest"), "{name}: {err}");
+        }
+    }
+
+    #[test]
+    fn legacy_complete_runtime_still_validates_without_manifest() {
+        let dir = temp_runtime_dir("legacy-complete-runtime");
+
+        validate_runtime_dir(&dir).expect("validate legacy complete runtime");
+    }
+
+    #[test]
     fn missing_darwin_helper_returns_readable_error() {
         let dir = temp_root("missing-darwin-helper");
         let bin = dir.join("bin");
@@ -1693,6 +1923,78 @@ mod tests {
             OsString::from("kandev"),
             OsString::from(TEMPORARY_TEST_ARGUMENT)
         ]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_launch_reaps_exited_gui_children() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("temporary-child-reaping");
+        let marker_dir = root.join("pids");
+        fs::create_dir(&marker_dir).expect("create child marker directory");
+        let executable = root.join("gui-standin");
+        let marker_path = shell_quote(&marker_dir);
+        let script = format!(
+            "#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = \"{TEMPORARY_TEST_ARGUMENT}\" ] || exit 71\nprintf '%s' \"$1\" > {marker_path}/\"$$\"\n"
+        );
+        fs::write(&executable, script).expect("write GUI stand-in");
+        let mut permissions = fs::metadata(&executable)
+            .expect("read GUI stand-in permissions")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&executable, permissions).expect("make GUI stand-in executable");
+
+        let conflict = StartupConflict {
+            version: 1,
+            target_kind: ConflictTargetKind::Home,
+            target_path: root.display().to_string(),
+            storage_kind: ConflictStorageKind::SqliteInHome,
+            database_path: Some(root.join("data/kandev.db").display().to_string()),
+            owner: None,
+        };
+        let state = BackendState::default();
+        *state
+            .startup_conflict
+            .lock()
+            .expect("startup conflict mutex poisoned") = Some(conflict.clone());
+        let error = launch_temporary_test_window(&root.join("missing-gui"))
+            .expect_err("missing GUI executable must be reported");
+        assert!(error.contains("Could not open a temporary Kandev test window"));
+        assert_eq!(state.startup_conflict(), Some(conflict));
+        assert!(state.can_start_temporary_test("tauri://localhost/"));
+
+        let pids = (0..17)
+            .map(|_| {
+                let pid = launch_temporary_test_window(&executable)
+                    .expect("spawn temporary GUI stand-in");
+                wait_for_file(&marker_dir.join(pid.to_string()));
+                assert_eq!(
+                    fs::read_to_string(marker_dir.join(pid.to_string()))
+                        .expect("read temporary argument marker"),
+                    TEMPORARY_TEST_ARGUMENT
+                );
+                pid
+            })
+            .collect::<Vec<_>>();
+        assert!(state.can_start_temporary_test("tauri://localhost/"));
+        let probes = pids
+            .into_iter()
+            .map(|pid| thread::spawn(move || (pid, pid_is_reaped_within_one_second(pid))))
+            .collect::<Vec<_>>();
+        let still_waitable = probes
+            .into_iter()
+            .filter_map(|probe| {
+                let (pid, reaped) = probe.join().expect("join exact-PID probe");
+                (!reaped).then_some(pid)
+            })
+            .collect::<Vec<_>>();
+
+        fs::remove_dir_all(root).expect("remove temporary child-reaping fixture");
+        assert!(
+            still_waitable.is_empty(),
+            "temporary GUI child statuses remained waitable: {still_waitable:?}"
+        );
     }
 
     #[test]
@@ -2299,11 +2601,85 @@ mod tests {
         dir
     }
 
+    fn desktop_helper_manifest(schema_version: u32, variant: &str) -> Vec<u8> {
+        let helpers: Vec<_> = REMOTE_HELPER_MANIFEST_RECORDS
+            .iter()
+            .map(|(platform, asset)| {
+                serde_json::json!({
+                    "platform": platform,
+                    "asset": asset,
+                    "sha256": "a".repeat(64),
+                    "size_bytes": 1,
+                })
+            })
+            .collect();
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": schema_version,
+            "version": "1.2.3",
+            "commit": "a".repeat(40),
+            "variant": variant,
+            "helpers": helpers,
+        }))
+        .expect("serialize remote helper manifest")
+    }
+
     fn temp_root(name: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!("kandev-desktop-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp root");
         dir
+    }
+
+    #[cfg(unix)]
+    fn shell_quote(path: &Path) -> String {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    }
+
+    #[cfg(unix)]
+    fn wait_for_file(path: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !path.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(path.is_file(), "timed out waiting for test child marker");
+    }
+
+    #[cfg(unix)]
+    fn pid_is_reaped_within_one_second(pid: u32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            if result == -1 {
+                let error = std::io::Error::last_os_error();
+                assert_eq!(error.raw_os_error(), Some(libc::ECHILD));
+                return true;
+            }
+            if Instant::now() >= deadline {
+                let mut status = 0;
+                let collected =
+                    unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
+                if collected == pid as libc::pid_t {
+                    return false;
+                }
+                if collected == -1
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+                {
+                    return true;
+                }
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                let _ = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, 0) };
+                return false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[cfg(unix)]

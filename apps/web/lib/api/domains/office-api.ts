@@ -158,6 +158,11 @@ function normalizeAgent(raw: unknown): AgentProfile {
     icon: agent.icon as string | undefined,
     status: agent.status as AgentStatus,
     reportsTo: stringField(agent, "reportsTo", "reports_to"),
+    executionAgentProfileId: stringField(
+      agent,
+      "executionAgentProfileId",
+      "execution_agent_profile_id",
+    ),
     permissions: parseJSONField(agent.permissions, {}),
     budgetMonthlyCents: numberField(agent, "budgetMonthlyCents", "budget_monthly_cents", 0),
     maxConcurrentSessions: numberField(
@@ -201,7 +206,7 @@ function stringifyJSONField(value: unknown): string | undefined {
 function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     name: data.name,
-    agent_profile_id: data.agentProfileId,
+    agent_profile_id: data.executionAgentProfileId ?? data.agentProfileId,
     role: data.role,
     icon: data.icon,
     reports_to: data.reportsTo,
@@ -418,14 +423,21 @@ export function getCostsByModel(workspaceId: string, options?: ApiRequestOptions
  * aggregations run concurrently on the backend with a snapshot-consistent
  * read, so the page reflects one moment in time.
  */
-export function getCostsBreakdown(workspaceId: string, options?: ApiRequestOptions) {
+export type CostDateRange = "mtd" | "30d";
+
+export function getCostsBreakdown(
+  workspaceId: string,
+  options?: ApiRequestOptions & { range?: CostDateRange },
+) {
+  const { range, ...requestOptions } = options ?? {};
+  const query = range ? `?range=${encodeURIComponent(range)}` : "";
   return fetchJson<{
     total_subcents: number;
     by_agent: CostBreakdownItemRaw[];
     by_project: CostBreakdownItemRaw[];
     by_model: CostBreakdownItemRaw[];
     by_provider: CostBreakdownItemRaw[];
-  }>(`${BASE}/workspaces/${workspaceId}/costs/breakdown`, options);
+  }>(`${BASE}/workspaces/${workspaceId}/costs/breakdown${query}`, requestOptions);
 }
 
 type CostBreakdownItemRaw = {

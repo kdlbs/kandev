@@ -2,11 +2,14 @@ import { devices, type Page } from "@playwright/test";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { backendFixture, type BackendContext } from "./backend";
+import { backendFixture, reportUnexpectedBackendFailure, type BackendContext } from "./backend";
+import { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
+export { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import { restoreSidebarLayout } from "../helpers/sidebar-layout";
 import type { WorkflowStep } from "../../lib/types/http";
 
 const DEFAULT_SIDEBAR_VIEW = {
@@ -176,6 +179,7 @@ async function waitForSeedAgentProfile(
 export const test = backendFixture.extend<
   {
     testPage: Page;
+    desktopTestPage: Page;
     tabletTestPage: Page;
     coarseDesktopTestPage: Page;
     prCapture: PrAssetCapture;
@@ -192,7 +196,7 @@ export const test = backendFixture.extend<
   // Worker-scoped API client
   apiClient: [
     async ({ backend }, use) => {
-      const client = new ApiClient(backend.baseUrl);
+      const client = new ApiClient(backend.baseUrl, backend.ensureReady);
       // Confirm the E2E mock routes mounted. They are gated by KANDEV_E2E_MOCK
       // in fixtures/backend.ts; if the env var isn't propagating, /api/v1/_test
       // returns 404 and every session-driven test would fail with a confusing
@@ -360,13 +364,41 @@ export const test = backendFixture.extend<
       // previous tests in this worker. Keep the seeded workflow and the seed
       // agent profile so the worker-scoped seedData fixture remains valid.
       await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+      // Refresh tracking refs after reset has stopped the previous tasks.
+      restoreSeedRepositoryOrigin(seedData);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
-      await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      const keepProfileIds = [seedData.agentProfileId];
+      const { agents } = await apiClient.listAgents();
+      const hasDynamicProfilesToClean = agents.some(
+        (agent) =>
+          agent.id === "dynamic" &&
+          agent.profiles?.some((profile) => {
+            const workspaceId = (profile as unknown as { workspace_id?: string }).workspace_id;
+            return !workspaceId && !keepProfileIds.includes(profile.id);
+          }),
+      );
+      const releaseDynamicRouting = hasDynamicProfilesToClean
+        ? await backend.useEnv({ KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING: "true" })
+        : undefined;
+      try {
+        await apiClient.cleanupTestProfiles(keepProfileIds, agents);
+      } finally {
+        await releaseDynamicRouting?.();
+      }
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
+      const { settings } = await apiClient.getUserSettings();
       await apiClient.saveUserSettings({
+        // Each test owns its sidebar layout, including collapsed navigation.
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision:
+            settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.revision ?? 0,
+        },
         workspace_id: seedData.workspaceId,
         workflow_filter_id: seedData.workflowId,
         keyboard_shortcuts: {},
+        message_time_display: "relative",
         enable_preview_on_click: false,
         confirm_task_archive: true,
         agent_generated_task_titles: false,
@@ -395,6 +427,9 @@ export const test = backendFixture.extend<
         // test renders cards with data-testid="pipeline-task-<id>" instead of
         // "task-card-<id>", breaking taskCardByTitle locators.
         kanban_view_mode: "",
+        // Column visibility belongs to each test, including the seeded workflow
+        // that survives reset. Hidden columns must not conceal later tasks.
+        kanban_hidden_step_ids: {},
         // Keep startup routing deterministic for tests that open bare home.
         startup_page: "task_overview",
         // Reset to the default (off). Prevent-auto-start tests flip this via
@@ -412,6 +447,7 @@ export const test = backendFixture.extend<
         // selection, and a stale selection can hide default-priority tasks in
         // unrelated tests that run later in the same worker.
         kanban_priority_filter_tokens: [],
+        kanban_hidden_step_ids: {},
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
@@ -429,6 +465,22 @@ export const test = backendFixture.extend<
     await setupPage(page, backend);
     await use(page);
     await context.close();
+  },
+
+  desktopTestPage: async ({ browser, backend, testPage }, use) => {
+    // Share the test's backend reset while observing it from a desktop context.
+    void testPage;
+    const context = await browser.newContext({
+      ...devices["Desktop Chrome"],
+      baseURL: backend.frontendUrl,
+    });
+    try {
+      const page = await context.newPage();
+      await setupPage(page, backend);
+      await use(page);
+    } finally {
+      await context.close();
+    }
   },
 
   tabletTestPage: async ({ browser, backend, testPage }, use) => {
@@ -471,7 +523,7 @@ export const test = backendFixture.extend<
   },
 
   integrationCleanup: [
-    async ({ apiClient, backend, seedData }, use) => {
+    async ({ apiClient, backend, seedData }, use, testInfo) => {
       await backend.ensureReady();
       const scoped = `workspace_id=${encodeURIComponent(seedData.workspaceId)}`;
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config?${scoped}`).catch(() => undefined);
@@ -509,38 +561,18 @@ export const test = backendFixture.extend<
       // GitLab reset removes origin from the shared seed checkout. Restore the
       // fixture's offline origin before the test so pull-enabled worktree
       // preparation starts from the same valid repository state every time.
-      restoreSeedRepositoryOrigin(seedData);
+      restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       try {
         await use();
       } finally {
+        reportUnexpectedBackendFailure(backend.tmpDir, testInfo);
         await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
-        restoreSeedRepositoryOrigin(seedData);
+        restoreSeedRepositoryOrigin(seedData, { refreshTrackingRefs: false });
       }
     },
     { auto: true },
   ],
 });
-
-/**
- * Restores the fixture's offline origin after a GitLab E2E cleanup removes it.
- * Refresh the remote-tracking refs because branch recovery must offer remote
- * branches, not only the local branch that remains checked out.
- */
-export function restoreSeedRepositoryOrigin(seedData: SeedData) {
-  const baseArgs = ["-C", seedData.repositoryPath, "remote"];
-  try {
-    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL], {
-      stdio: "ignore",
-    });
-  } catch {
-    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL], {
-      stdio: "ignore",
-    });
-  }
-  execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
-    stdio: "ignore",
-  });
-}
 
 /** Restores the shared seed checkout to the immutable fixture baseline. */
 export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
@@ -628,6 +660,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      message_time_display: "relative",
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
       confirm_task_archive: true,
@@ -662,6 +695,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       // selection, and a stale selection can hide default-priority tasks in
       // unrelated tests that run later in the same worker.
       kanban_priority_filter_tokens: [],
+      kanban_hidden_step_ids: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

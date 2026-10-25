@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -20,6 +21,7 @@ type unixDirectoryHandle struct {
 	parentFD int
 	targetFD int
 	target   string
+	path     string
 	once     sync.Once
 }
 
@@ -42,7 +44,7 @@ func OpenDirectoryNoFollow(root, target string) (DirectoryHandle, error) {
 	}
 	return &unixDirectoryHandle{
 		rootFD: rootFD, parentFD: parentFD, targetFD: targetFD,
-		target: filepath.Base(filepath.Clean(relative)),
+		target: filepath.Base(filepath.Clean(relative)), path: filepath.Clean(target),
 	}, nil
 }
 
@@ -64,7 +66,7 @@ func CreateDirectoryNoFollow(root, target string, mode os.FileMode) (DirectoryHa
 	}
 	return &unixDirectoryHandle{
 		rootFD: rootFD, parentFD: parentFD, targetFD: targetFD,
-		target: filepath.Base(filepath.Clean(relative)),
+		target: filepath.Base(filepath.Clean(relative)), path: filepath.Clean(target),
 	}, nil
 }
 
@@ -221,7 +223,70 @@ func (h *unixDirectoryHandle) OpenSubdirectory(name string) (DirectoryHandle, er
 		_ = unix.Close(rootFD)
 		return nil, err
 	}
-	return &unixDirectoryHandle{rootFD: rootFD, parentFD: parentFD, targetFD: targetFD, target: name}, nil
+	return &unixDirectoryHandle{
+		rootFD: rootFD, parentFD: parentFD, targetFD: targetFD,
+		target: name, path: filepath.Join(h.path, name),
+	}, nil
+}
+
+func (h *unixDirectoryHandle) CreateSubdirectory(name string, mode os.FileMode) (DirectoryHandle, error) {
+	if h == nil || h.targetFD < 0 {
+		return nil, errors.New("directory handle is closed")
+	}
+	if err := validateDirectoryEntryName(name); err != nil {
+		return nil, err
+	}
+	if err := unix.Mkdirat(h.targetFD, name, uint32(mode.Perm())); err != nil {
+		return nil, err
+	}
+	created, err := h.OpenSubdirectory(name)
+	if err != nil {
+		return nil, fmt.Errorf("pin created subdirectory %q: %w", name, err)
+	}
+	createdHandle, ok := created.(*unixDirectoryHandle)
+	if !ok {
+		_ = created.Close()
+		return nil, errors.New("created subdirectory has an unexpected handle type")
+	}
+	var entryInfo, handleInfo unix.Stat_t
+	if err := unix.Fstatat(h.targetFD, name, &entryInfo, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		_ = created.Close()
+		return nil, fmt.Errorf("inspect created subdirectory %q: %w", name, err)
+	}
+	if err := unix.Fstat(createdHandle.targetFD, &handleInfo); err != nil {
+		_ = created.Close()
+		return nil, fmt.Errorf("inspect pinned subdirectory %q: %w", name, err)
+	}
+	if entryInfo.Dev != handleInfo.Dev || entryInfo.Ino != handleInfo.Ino {
+		_ = created.Close()
+		return nil, fmt.Errorf("created subdirectory %q changed before it was pinned", name)
+	}
+	return created, nil
+}
+
+// ProcessPath returns a child-process path that resolves through the pinned
+// directory descriptor. ExtraFiles maps the returned file to inheritedFD.
+func (h *unixDirectoryHandle) ProcessPath(inheritedFD int) (string, *os.File, error) {
+	if h == nil || h.targetFD < 0 {
+		return "", nil, errors.New("directory handle is closed")
+	}
+	if inheritedFD < 3 {
+		return "", nil, errors.New("inherited directory descriptor must be at least 3")
+	}
+	fd, err := unix.Dup(h.targetFD)
+	if err != nil {
+		return "", nil, err
+	}
+	file := os.NewFile(uintptr(fd), "pinned-worktree-target")
+	if file == nil {
+		_ = unix.Close(fd)
+		return "", nil, errors.New("create pinned directory descriptor")
+	}
+	fdRoot := "/dev/fd"
+	if runtime.GOOS == "linux" {
+		fdRoot = "/proc/self/fd"
+	}
+	return filepath.Join(fdRoot, fmt.Sprint(inheritedFD)), file, nil
 }
 
 func (h *unixDirectoryHandle) LstatEntry(name string) (os.FileMode, error) {

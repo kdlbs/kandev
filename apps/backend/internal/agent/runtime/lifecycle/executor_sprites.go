@@ -112,14 +112,15 @@ type SpritesProxySession struct {
 
 // SpritesExecutor implements ExecutorBackend for Sprites.dev remote sandboxes.
 type SpritesExecutor struct {
-	secretStore      secrets.SecretStore
-	agentList        RemoteAuthAgentLister
-	agentctlResolver *AgentctlResolver
-	logger           *logger.Logger
-	agentctlPort     int
-	mu               sync.RWMutex
-	proxies          map[string]*SpritesProxySession
-	tokens           map[string]string // cached API tokens per instance
+	secretStore           secrets.SecretStore
+	agentList             RemoteAuthAgentLister
+	agentctlResolver      *AgentctlResolver
+	logger                *logger.Logger
+	agentctlPort          int
+	recoveryClientFactory func(string) *sprites.Client
+	mu                    sync.RWMutex
+	proxies               map[string]*SpritesProxySession
+	tokens                map[string]string // cached API tokens per instance
 }
 
 // NewSpritesExecutor creates a new Sprites runtime.
@@ -222,7 +223,7 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	launchCancel()
 
 	// Steps 1-3: Upload agentctl, credentials, prepare script
-	if err := r.stepSetupEnvironment(baseCtx, sprite, req, reconnect, report); err != nil {
+	if err := r.stepSetupEnvironment(baseCtx, sprite, req, reconnect, report, ctx); err != nil {
 		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
@@ -410,6 +411,7 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 	req *ExecutorCreateRequest,
 	reconnect bool,
 	report func(spritesStepKey, PrepareStep),
+	helperContexts ...context.Context,
 ) error {
 	if reconnect {
 		return nil
@@ -418,7 +420,12 @@ func (r *SpritesExecutor) stepSetupEnvironment(
 	// Step 1: Upload agentctl binary
 	step := beginStep("Uploading agent controller")
 	report(spriteStepUploadAgentctl, step)
-	if err := r.uploadAgentctl(ctx, sprite); err != nil {
+	helperCtx := ctx
+	if len(helperContexts) > 0 && helperContexts[0] != nil {
+		helperCtx = helperContexts[0]
+	}
+	helperProgress := func(step PrepareStep, _, _ int) { report(spriteStepResolveAgentctl, step) }
+	if err := r.uploadAgentctl(ctx, helperCtx, sprite, helperProgress); err != nil {
 		completeStepError(&step, err.Error())
 		report(spriteStepUploadAgentctl, step)
 		return err
@@ -587,8 +594,9 @@ func (r *SpritesExecutor) buildInstanceResult(
 	}
 }
 
-func (r *SpritesExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	return nil, nil
+func (r *SpritesExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
 }
 
 func (r *SpritesExecutor) GetInteractiveRunner() *process.InteractiveRunner {

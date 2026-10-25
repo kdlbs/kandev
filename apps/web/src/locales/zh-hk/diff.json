@@ -52,5 +52,14 @@
   "fileStatusModified": "已修改",
   "fileStatusMoved": "已移動",
   "fileStatusMovedFrom": "從 {{oldPath}} 移動而來",
-  "fileStatusUntracked": "未跟蹤"
+  "fileStatusUntracked": "未跟蹤",
+  "walkthroughComment": "評論",
+  "walkthroughPending": "待傳送",
+  "walkthroughSubmitted": "已提交",
+  "walkthroughCommentCount_one": "{{count}} 條評論",
+  "walkthroughCommentCount_other": "{{count}} 條評論",
+  "walkthroughSelectStep": "跳轉到步驟",
+  "walkthroughUntitledStep": "步驟 {{number}}",
+  "walkthroughStepOption_one": "{{number}}. {{title}}（{{count}} 條評論）",
+  "walkthroughStepOption_other": "{{number}}. {{title}}（{{count}} 條評論）"
 }

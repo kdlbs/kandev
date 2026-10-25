@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"os"
 	"strings"
 	"sync"
@@ -60,6 +61,9 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	legacyUpgrade := settingsExists && !connectionsExists
 	if err := s.initSchema(legacyUpgrade); err != nil {
 		return nil, fmt.Errorf("github schema init: %w", err)
+	}
+	if err := s.migrateExecutorCreators(); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -4685,6 +4689,7 @@ func normalizedString(value *string) string {
 
 // CreateReviewWatch creates a new review watch configuration.
 func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
+	rw.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if rw.ID == "" {
 		rw.ID = uuid.New().String()
 	}
@@ -4698,10 +4703,10 @@ func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	}
 	rw.ReposJSON = string(reposJSON)
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO github_review_watches (id, workspace_id, workflow_id, workflow_step_id, repos,
+		INSERT INTO github_review_watches (created_by_user_id, id, workspace_id, workflow_id, workflow_step_id, repos,
 			agent_profile_id, executor_profile_id, prompt, review_scope, custom_query, target_login,
 			enabled, poll_interval_seconds, cleanup_policy, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), rw.CreatedByUserID,
 		rw.ID, rw.WorkspaceID, rw.WorkflowID, rw.WorkflowStepID, rw.ReposJSON,
 		rw.AgentProfileID, rw.ExecutorProfileID, rw.Prompt, rw.ReviewScope, rw.CustomQuery, rw.TargetLogin,
 		rw.Enabled, rw.PollIntervalSeconds, rw.CleanupPolicy, rw.CreatedAt, rw.UpdatedAt)
@@ -5143,6 +5148,7 @@ func hydrateIssueWatch(iw *IssueWatch) {
 
 // CreateIssueWatch creates a new issue watch configuration.
 func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
+	iw.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if iw.ID == "" {
 		iw.ID = uuid.New().String()
 	}
@@ -5161,10 +5167,10 @@ func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 	}
 	iw.LabelsJSON = string(labelsJSON)
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO github_issue_watches (id, workspace_id, workflow_id, workflow_step_id, repos,
+		INSERT INTO github_issue_watches (created_by_user_id, id, workspace_id, workflow_id, workflow_step_id, repos,
 			agent_profile_id, executor_profile_id, prompt, labels, custom_query,
 			enabled, poll_interval_seconds, cleanup_policy, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), iw.CreatedByUserID,
 		iw.ID, iw.WorkspaceID, iw.WorkflowID, iw.WorkflowStepID, iw.ReposJSON,
 		iw.AgentProfileID, iw.ExecutorProfileID, iw.Prompt, iw.LabelsJSON, iw.CustomQuery,
 		iw.Enabled, iw.PollIntervalSeconds, iw.CleanupPolicy, iw.CreatedAt, iw.UpdatedAt)
@@ -5251,6 +5257,14 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 		iw.AgentProfileID, iw.ExecutorProfileID,
 		iw.Prompt, iw.LabelsJSON, iw.CustomQuery,
 		iw.Enabled, iw.PollIntervalSeconds, iw.CleanupPolicy, iw.LastPolledAt, iw.UpdatedAt, iw.ID)
+	return err
+}
+
+// UpdateIssueWatchLastPolledAt stamps poll progress without rewriting watch settings.
+func (s *Store) UpdateIssueWatchLastPolledAt(ctx context.Context, id string, polledAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE github_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`),
+		polledAt, polledAt, id)
 	return err
 }
 

@@ -1,8 +1,10 @@
 ---
-status: draft
+status: current
 system: tasks
+updated: 2026-10-04
 requirements:
   - REQ-TASKS-RESUME-PROMPT-QUEUE-001
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-002
 ---
 
 # Resume Prompt Queue System Design
@@ -17,8 +19,11 @@ the current queue storage, session incarnation, and agent readiness events.
 | `001.1`, `001.2`, `001.6`, `001.9` | Composer admission, Responsive behavior |
 | `001.3`, `001.4`, `001.5` | Server dispatch |
 | `001.7`, `001.8` | Failure and identity |
+| `001.10`, `001.11` | Workflow transitions during resume |
+| `002.1`, `002.2`, `002.3` | Expired runtime waits |
 
-All criterion suffixes refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001`.
+Criterion suffixes `001.*` refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001` and
+`002.*` to `AC-TASKS-RESUME-PROMPT-QUEUE-002`.
 
 ## Current behavior
 
@@ -88,6 +93,95 @@ dispatch-check failure does not report that a persisted prompt was rejected.
 Use existing structured logs for dispatch errors and existing queue status events
 for accepted, reserved, restored, and removed entries.
 
+## Workflow transitions during resume
+
+The task system owns this interaction because workflow transitions and prompt
+admission share the task session state. This section also applies to a direct
+`message.add` request that races with automatic resume after an idle suspension.
+The browser can choose direct submission before it receives the startup event.
+
+`MessageHandlers.wsAddMessage` evaluates `ProcessOnTurnStart` before prompt
+composition and dispatch. The resulting workflow step and recipient remain
+authoritative. Moving this evaluation after dispatch would select the wrong
+workflow instructions and completion-signal policy.
+
+`persistResumeStateWithOptions` claims `STARTING` before credential issuance.
+`ResumeSessionWithOptions` then persists its credential snapshot against that
+state and startup-attempt identity. These guards remain mandatory. The workflow
+transition must not change startup state merely to make the session promptable.
+
+### State preparation
+
+Use one workflow-specific state-preparation helper after recipient selection.
+Read the selected recipient's authoritative row instead of a pre-transition
+snapshot. Validate its task ownership before any state change.
+
+| Authoritative recipient state | Turn-start preparation |
+| --- | --- |
+| `STARTING` | Preserve the startup claim and its attempt metadata |
+| `RUNNING` | Preserve the admitted turn and its runtime projection |
+| `WAITING_FOR_INPUT` | Keep the existing ready state |
+| `CREATED` or `IDLE` | Retain existing preparation through a conditional waiting-state transition |
+| `FAILED`, `CANCELLED`, or `COMPLETED` | Preserve the terminal outcome and error |
+| Missing, foreign, unreadable, or unknown state | Report preparation failure without a state write |
+
+Use `transitionTaskSessionState` and its strict conditional persistence for an
+eligible state change. Bind the write to the observed state. If the write loses
+to startup, an admitted turn, or terminal settlement, preserve the winning row.
+Do not retry by writing `WAITING_FOR_INPUT` over the new state.
+
+Apply this rule to engine-backed `transitionLifecycleOnTurnStart`, the legacy
+`executeStepTransition` turn-start branch, and the engine's WIP deferral branch
+when its mode is turn-start. Keep actual turn-completion settlement unchanged.
+The helper must not invoke the general waiting-state path for a working session.
+That path also reconciles the task to Review and releases startup capacity.
+
+Recipient selection still uses `maybySwitchSessionForProfile`. An unchanged
+recipient retains its startup claim. A changed recipient uses its own current
+state and existing routing, transfer, and retirement rules. No source snapshot
+can authorize a waiting-state write to a different destination.
+
+### Delivery and failure
+
+After turn-start processing, ordinary prompt admission determines whether input
+runs immediately or waits. Reuse the existing startup queue and
+`MetaKeyTurnStartAlreadyProcessed` where direct-message fallback already
+processed the transition. Queue delivery must not evaluate that trigger again.
+
+Successful boot readiness remains the authority that ends startup. Preserve
+Auto-run OFF and existing clarification, cancellation, reset, WIP, and identity
+barriers. A genuine startup failure uses existing recovery feedback and prompt
+retention. Do not catch the resume persistence error and treat it as success.
+
+No database migration, wire change, new lock hierarchy, timer, runtime flag,
+or provider-specific path is required. Existing guarded startup and queue
+ownership contracts supply the boundary, so this correction needs no new ADR.
+Existing correlated state and launch logs provide diagnostic evidence without
+new prompt logging or metrics.
+
+### Regression evidence
+
+Backend tests place a barrier between the resume's early `STARTING` claim and
+credential-snapshot persistence. Execute the real turn-start transition while
+that barrier holds, then release persistence. Assert successful resume, retained
+conversation identity, one workflow transition, and one eventual prompt dispatch.
+
+Also cover a stale waiting snapshot followed by a concurrent startup claim.
+Cover a lost conditional write, terminal settlement, a genuine launch failure,
+legacy execution, WIP deferral, and an already-admitted `RUNNING` turn.
+
+Desktop E2E uses the real `message.add` action during a delayed resume to model
+the browser's stale direct-submission decision. Mobile E2E submits through the
+existing startup composer and proves queue delivery with a turn-start transition.
+A mock-agent resume delay occurs after credential-snapshot persistence. It
+proves lifecycle preservation during startup, but cannot replace the backend
+test of the credential boundary.
+
+See the [resume transition repair plan](../../../plans/session-resume-turn-start-race/plan.md)
+for exact tests and the incident trace. The earlier
+[resume queue package](../../../plans/resume-prompt-queue/plan.md) retains its
+completed delivery record.
+
 ## Failure and identity
 
 The queue remains server-owned after navigation, reload, or a resume failure.
@@ -102,6 +196,30 @@ Queue-full, unavailable identity, and rejected submissions preserve the draft.
 Existing queue reconciliation handles transport errors. This change does not
 introduce blind retries or promise provider-level exactly-once execution.
 Concurrent readiness and admission must not create duplicate dispatches.
+
+## Expired runtime waits
+
+`handleQueuedMessageExecutionError` decides whether a failed queued dispatch
+returns its entry to the queue or drops it. `ensureSessionRunning` bounds its
+waits before a prompt can be sent. For example, a caller that joins another
+caller's resume attempt waits at most `cancellationOperationTTL`. When such a
+wait expires, the error reaches the classifier as
+`failed to ensure session is running: context deadline exceeded`.
+`ErrSessionRuntimeUnavailable` wraps only the not-yet-launched case, so this
+error matched no retryable shape and the entry was dropped with a "message is
+lost" warning.
+
+The shared-resume wait and both readiness waits mark deadline errors only
+when their own bounded wait context has expired. `isEnsureSessionRunningTimeout`
+requires that private marker, the wrapped deadline, and the ensure-session
+classifier boundary. A provider or RPC deadline is not marked merely because
+the generic classifier wraps it; cancellation also retains its disposition.
+The predicate joins the existing retryable cases beside
+`ErrSessionRuntimeUnavailable`. The entry takes the existing requeue branch, so
+a reserved entry returns to the head of its own session incarnation and keeps
+its recorded-user-message marker. The next boot-ready or turn-ready trigger
+dispatches it. No timer or resume attempt is added (`002.2`). Other failures,
+including a provider rejection, keep the lost branch (`002.3`).
 
 ## Responsive behavior
 

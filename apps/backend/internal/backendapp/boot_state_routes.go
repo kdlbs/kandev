@@ -82,7 +82,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
 	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
-	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
+	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, usermodels.TasksListApiSort(tasksListSort))
 	routeData := map[string]any{
 		"activeWorkspaceId":        activeWorkspaceID,
 		"workflows":                workflowsToDTOs(workflows),
@@ -699,6 +699,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
 		"showScrollToStart":               settings.ShowScrollToStart,
 		"showTranscriptAutoScrollControl": settings.ShowTranscriptAutoScrollControl,
+		"showTurnChangedFiles":            settings.ShowTurnChangedFiles,
 		"showTodoListPanel":               settings.ShowTodoListPanel,
 
 		// Sub-option: only auto-pin when the agent's todo list is not empty.
@@ -730,12 +731,16 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontSize":                  nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":                changesPanelLayout(settings.ChangesPanelLayout),
 		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
+		"messageTimeDisplay":                usermodels.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
+		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"sidebarFastActionsEnabled":         settings.SidebarFastActionsEnabled,
+		"sidebarNewTaskStyle":               settings.SidebarNewTaskStyle,
 		"sidebarHoverEnabled":               settings.SidebarHoverEnabled,
 		"sidebarHoverDelayMs":               settings.SidebarHoverDelayMs,
 		"resolveSessionHostnames":           settings.ResolveSessionHostnames,
@@ -771,6 +776,8 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
+		"acp_idle_suspension_enabled":     workspace.ACPIdleSuspensionEnabled,
+		"acp_idle_timeout_minutes":        workspace.ACPIdleTimeoutMinutes,
 		"office_workflow_id":              nullString(workspace.OfficeWorkflowID),
 		"created_at":                      workspace.CreatedAt,
 		"updated_at":                      workspace.UpdatedAt,
@@ -833,7 +840,20 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 	}
 	return map[string]any{
 		"id":                          task.ID,
+		"workspaceId":                 task.WorkspaceID,
+		"workflowId":                  task.WorkflowID,
+		"origin":                      task.Origin,
+		"metadata":                    task.Metadata,
+		"isArchived":                  task.ArchivedAt != nil,
+		"isFromOffice":                task.IsFromOffice,
+		"primaryExecutorId":           task.PrimaryExecutorID,
+		"primaryExecutorProfileId":    task.PrimaryExecutorProfileID,
+		"primaryExecutorType":         task.PrimaryExecutorType,
+		"primaryExecutorName":         task.PrimaryExecutorName,
+		"isRemoteExecutor":            task.IsRemoteExecutor,
+		"foregroundActivity":          task.ForegroundActivity,
 		"workflowStepId":              task.WorkflowStepID,
+		"identifier":                  nullString(task.Identifier),
 		"title":                       task.Title,
 		"description":                 task.Description,
 		"position":                    task.Position,

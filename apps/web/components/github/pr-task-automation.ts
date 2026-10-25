@@ -33,16 +33,18 @@ export function getTaskPRAutomationSummary(
       details: [],
     };
   }
-  const details = activePRs.map((pr) => {
-    const automation = automationForPR(options, pr);
-    const repository = [pr.owner, pr.repo].filter(Boolean).join("/") || undefined;
-    return {
-      number: pr.pr_number,
-      ...(repository ? { repository } : {}),
-      autoFixEnabled: automation.autoFix,
-      autoMergeEnabled: automation.autoMerge,
-    };
-  });
+  const details = activePRs
+    .map((pr) => {
+      const automation = automationForPR(options, pr);
+      const repository = [pr.owner, pr.repo].filter(Boolean).join("/") || undefined;
+      return {
+        number: pr.pr_number,
+        ...(repository ? { repository } : {}),
+        autoFixEnabled: automation.autoFix,
+        autoMergeEnabled: automation.autoMerge,
+      };
+    })
+    .filter((detail) => detail.autoFixEnabled || detail.autoMergeEnabled);
   return {
     autoFixEnabled: details.some((detail) => detail.autoFixEnabled),
     autoMergeEnabled: details.some((detail) => detail.autoMergeEnabled),

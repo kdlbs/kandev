@@ -87,6 +87,17 @@ describe("Kubernetes E2E version pins", () => {
     }
   });
 
+  it("builds E2E runtimes with a SemVer identity accepted by helper manifests", () => {
+    const workflow = fs.readFileSync(
+      path.join(REPOSITORY_ROOT, ".github/workflows/e2e-tests.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain(
+      'VERSION="0.0.0-e2e.${GITHUB_SHA}" make -C apps/backend build-kandev',
+    );
+  });
+
   it("documents the fixture's public version and node-image pins", () => {
     const readme = fs.readFileSync(path.join(REPOSITORY_ROOT, "apps/web/e2e/README.md"), "utf8");
 

@@ -63,7 +63,7 @@ func (m *Manager) StopRunOwnerForRecovery(ctx context.Context, owner ExecutionOw
 		ContainerID: row.ContainerID, RuntimeName: row.Runtime, Metadata: row.Metadata,
 		WorkspacePath: row.WorktreePath, StopReason: "office_run_recovery",
 	}
-	if err := backend.StopInstance(ctx, instance, true); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, backend, instance, true); err != nil {
 		return fmt.Errorf("stop predecessor run execution: %w", err)
 	}
 	return m.runningWriter.RepairExecutorRunningDead(ctx, row.SessionID)

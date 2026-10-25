@@ -8,8 +8,12 @@ import type {
   CreateTaskResponse,
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  WorkspaceRepositoryPlacementPreview,
   Task,
+  SidebarTaskQuery,
+  SidebarTaskPageResponse,
   TaskPriority,
+  InitialWorkspaceLayout,
   MoveTaskResponse,
   ReorderBand,
   ReorderStepTasksResponse,
@@ -112,9 +116,11 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    mcp_server_ids?: string[];
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;
+    initial_workspace_layout?: InitialWorkspaceLayout;
     priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
@@ -201,6 +207,20 @@ export async function attachTaskWorkspaceSources(
   );
 }
 
+export async function previewTaskWorkspaceSources(
+  taskId: string,
+  payload: AttachTaskWorkspaceSourcesRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<WorkspaceRepositoryPlacementPreview>(
+    `/api/v1/tasks/${taskId}/workspace-sources/preview`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
 export async function updateTaskRepositoryBaseBranch(
   taskId: string,
   taskRepositoryId: string,
@@ -224,30 +244,55 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
+export type TaskWorkspaceCleanup = "delete" | "retain";
+
 export type DeleteTaskParams = {
+  allowUnverifiedWorkspaceChanges?: boolean;
+  workspaceCleanup?: TaskWorkspaceCleanup;
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  confirmationId?: string;
 };
 
 export type TaskDeletePreflightResponse = {
+  workspace_inspection?: "complete" | "unknown" | "not_requested";
   requires_discard_consent: boolean;
+  confirmation_id: string;
 };
 
 export async function getTaskDeletePreflight(
   taskIds: string[],
   cascade: boolean,
+  discardWorktreeChanges = false,
   options?: ApiRequestOptions,
+  cleanup: Pick<DeleteTaskParams, "workspaceCleanup" | "allowUnverifiedWorkspaceChanges"> = {},
 ) {
+  const { workspaceCleanup, allowUnverifiedWorkspaceChanges = false } = cleanup;
   return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
     ...options,
     cache: "no-store",
     init: {
       method: "POST",
-      body: JSON.stringify({ task_ids: taskIds, cascade }),
+      body: JSON.stringify({
+        task_ids: taskIds,
+        ...(allowUnverifiedWorkspaceChanges ? { allow_unverified_workspace_changes: true } : {}),
+        ...(workspaceCleanup ? { workspace_cleanup: workspaceCleanup } : {}),
+        cascade,
+        discard_worktree_changes: discardWorktreeChanges,
+      }),
       ...(options?.init ?? {}),
     },
   });
 }
+
+export type TaskDeletionResult = {
+  success: boolean;
+  workspace_cleanup?: TaskWorkspaceCleanup;
+  retention_operation_ids?: string[];
+  cleanup_operation_ids?: string[];
+  workspace_cleanup_pending?: boolean;
+  runtime_stop_pending?: boolean;
+};
 
 export async function deleteTask(
   taskId: string,
@@ -255,15 +300,45 @@ export async function deleteTask(
   options?: ApiRequestOptions,
 ) {
   const queryParams = new URLSearchParams();
+  if (params?.allowUnverifiedWorkspaceChanges)
+    queryParams.set("allow_unverified_workspace_changes", "true");
+  if (params?.workspaceCleanup) queryParams.set("workspace_cleanup", params.workspaceCleanup);
   if (params?.cascade) queryParams.set("cascade", "true");
   if (params?.discardWorktreeChanges) {
     queryParams.set("discard_worktree_changes", "true");
   }
   const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
-  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
+  const headers = new Headers(options?.init?.headers);
+  if (params?.confirmationId) {
+    headers.set("X-Kandev-Task-Delete-Confirmation", params.confirmationId);
+  }
+  return fetchJson<TaskDeletionResult | undefined>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
-    init: { method: "DELETE", ...(options?.init ?? {}) },
+    init: { method: "DELETE", ...options?.init, headers },
   });
+}
+
+/**
+ * Deletes a task after a native app action has already confirmed that outcome
+ * (for example, closing a quick-chat session). Dialog-driven deletion should
+ * pass its preview ticket directly to `deleteTask` instead.
+ */
+export async function deleteTaskAfterUserAction(
+  taskId: string,
+  params?: DeleteTaskParams,
+  options?: ApiRequestOptions,
+) {
+  const preview = await getTaskDeletePreflight(
+    [taskId],
+    params?.cascade ?? false,
+    params?.discardWorktreeChanges ?? false,
+    options,
+    {
+      workspaceCleanup: params?.workspaceCleanup,
+      allowUnverifiedWorkspaceChanges: params?.allowUnverifiedWorkspaceChanges,
+    },
+  );
+  return deleteTask(taskId, { ...params, confirmationId: preview.confirmation_id }, options);
 }
 
 /** One-shot values applied when a task enters the destination workflow step. */
@@ -287,6 +362,12 @@ export type MoveTaskPayload = {
   position?: number;
   entry_options?: WorkflowMoveEntryOptions | null;
   workflow_change?: WorkflowChangePayload | null;
+  completion_override?: TaskCompletionMoveOverride | null;
+};
+
+export type TaskCompletionMoveOverride = {
+  expected_revision: number;
+  reason: string;
 };
 
 /** Move response fields added by the one-shot entry-options transport. */
@@ -504,4 +585,19 @@ export async function listTasksByWorkspace(
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);
   return fetchJson<ListTasksResponse>(url.toString(), options);
+}
+
+export async function querySidebarTasks(
+  workspaceId: string,
+  query: SidebarTaskQuery,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SidebarTaskPageResponse>(`/api/v1/workspaces/${workspaceId}/sidebar/query`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify(query),
+      ...(options?.init ?? {}),
+    },
+  });
 }

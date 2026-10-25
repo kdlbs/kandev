@@ -8,6 +8,8 @@ import { taskRemovalCoversTask } from "@/lib/state/task-removal";
 /** Minimal task shape consumed by useEnsureTaskSession. */
 export type EnsureTaskInput = {
   id?: string | null;
+  isArchived?: boolean;
+  archiveStateKnown?: boolean;
   /** Snake_case workflow_step_id from the HTTP Task type. */
   workflowStepId?: string | null;
   /** Snake_case workflow_id from the HTTP Task type. */
@@ -50,19 +52,6 @@ export type UseEnsureTaskSessionResult = {
   retry: () => void;
 };
 
-/**
- * Ensures the task has at least one session by delegating to the backend's
- * idempotent `session.ensure` endpoint. The backend resolves the agent profile
- * (task metadata → workflow step → workflow → workspace default) and chooses
- * prepare vs start based on the workflow step's auto_start_agent action — the
- * frontend stays thin and contract-free.
- *
- * Behavior:
- * - No-op while sessions are still loading.
- * - No-op when the task already has at least one session.
- * - No-op when `enabled === false` or `task.id` is missing.
- * - Idempotent per task id within a mount; switching tasks resets the latch.
- */
 /**
  * Resolves the task's workflow step list and final-step decision for the
  * prevent-auto-start gate. Workflow-aware: the active workflow's steps
@@ -135,6 +124,32 @@ export function resolveFinalStepInfo(
   return { isFinalStep, stepsKnown };
 }
 
+function useEnsureRequestLifetime() {
+  const taskGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  return { taskGenerationRef, mountedRef };
+}
+
+/**
+ * Ensures the task has at least one session by delegating to the backend's
+ * idempotent `session.ensure` endpoint. The backend resolves the agent profile
+ * (task metadata → workflow step → workflow → workspace default) and chooses
+ * prepare vs start based on the workflow step's auto_start_agent action — the
+ * frontend stays thin and contract-free.
+ *
+ * Behavior:
+ * - No-op while sessions are still loading.
+ * - No-op when the task already has at least one session.
+ * - No-op when `enabled === false` or `task.id` is missing.
+ * - Same-task hydration preserves admitted responses.
+ * - Task changes or withdrawn admission reset response ownership and the latch.
+ */
 export function useEnsureTaskSession(
   task: EnsureTaskInput,
   opts?: { enabled?: boolean },
@@ -159,6 +174,8 @@ export function useEnsureTaskSession(
   const isRemovalPending = useAppStore((state) =>
     taskId && state.taskRemoval ? taskRemovalCoversTask(state.taskRemoval, taskId) : false,
   );
+  const canEnsure =
+    enabled && task?.archiveStateKnown !== false && task?.isArchived !== true && !isRemovalPending;
 
   const { isFinalStep, stepsKnown } = useMemo(
     () =>
@@ -172,20 +189,22 @@ export function useEnsureTaskSession(
   // doesn't refire, but switching tasks or calling retry() does.
   const launchedKeyRef = useRef<string | null>(null);
   const previousTaskIdRef = useRef<string | null>(taskId);
+  const { taskGenerationRef, mountedRef } = useEnsureRequestLifetime();
 
-  /* eslint-disable react-hooks/set-state-in-effect -- task changes must clear stale ensure-session errors before early returns */
+  /* eslint-disable react-hooks/set-state-in-effect -- task and admission changes must clear stale ensure-session errors before early returns */
   useEffect(() => {
-    if (previousTaskIdRef.current === taskId) return;
+    if (previousTaskIdRef.current === taskId && canEnsure) return;
     previousTaskIdRef.current = taskId;
+    taskGenerationRef.current += 1;
     launchedKeyRef.current = null;
     setStatus("idle");
     setError(null);
-  }, [taskId]);
+  }, [taskId, canEnsure]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   /* eslint-disable react-hooks/set-state-in-effect -- ensuring a session is a side effect; status mirrors that external work */
   useEffect(() => {
-    if (!enabled || !taskId || !isLoaded || isRemovalPending) return;
+    if (!canEnsure || !taskId || !isLoaded) return;
     if (sessions.length > 0) return;
     if (isTaskSessionAutoProvisioningSuppressed(taskId)) return;
     // Wait for the workflow steps to resolve before deciding the gate. This
@@ -196,8 +215,13 @@ export function useEnsureTaskSession(
     if (launchedKeyRef.current === key) return;
     launchedKeyRef.current = key;
 
-    // Cancel guard so a stale resolution can't overwrite a switched-away task.
-    let cancelled = false;
+    // Same-task hydration preserves the admitted request. Task changes,
+    // retries, admission loss, and unmount invalidate its response ownership.
+    const generation = taskGenerationRef.current;
+    const isCurrentAttempt = () =>
+      mountedRef.current &&
+      taskGenerationRef.current === generation &&
+      launchedKeyRef.current === key;
     setStatus("preparing");
     setError(null);
     const ensurePromise = isFinalStep
@@ -208,24 +232,20 @@ export function useEnsureTaskSession(
       : ensureTaskSession(taskId, { activationSource: "session_open" });
     ensurePromise
       .then(async () => {
-        if (cancelled || launchedKeyRef.current !== key) return;
+        if (!isCurrentAttempt()) return;
         // Force-reload: backend may have returned an existing_* source our initial list missed.
         await loadSessions(true);
-        if (cancelled || launchedKeyRef.current !== key) return;
+        if (!isCurrentAttempt()) return;
         setStatus("idle");
       })
       .catch((err: unknown) => {
-        if (cancelled || launchedKeyRef.current !== key) return;
+        if (!isCurrentAttempt()) return;
         setStatus("error");
         setError(err instanceof Error ? err : new Error(String(err)));
         // Keep the key latched. The retry token or a task change owns the next attempt.
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [
-    enabled,
+    canEnsure,
     taskId,
     isLoaded,
     loadSessions,
@@ -234,7 +254,6 @@ export function useEnsureTaskSession(
     preventAutoStart,
     stepsKnown,
     isFinalStep,
-    isRemovalPending,
   ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 

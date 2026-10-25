@@ -8,7 +8,9 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { waitForComposerQueueMode } from "../../helpers/type-while-busy";
+import { mockTurnGate } from "../../helpers/mock-turn-gate";
 import { SessionPage } from "../../pages/session-page";
+import { pasteOversizedMessage } from "./oversized-message-helpers";
 import {
   MESSAGE_PREVIEW_MAX_CODE_UNITS,
   MESSAGE_PREVIEW_MAX_LINES,
@@ -75,6 +77,25 @@ async function createTask(apiClient: ApiClient, seedData: SeedData, title: strin
   });
 }
 
+async function waitForStoredUserMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  content: string,
+  timeout = 90_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some(
+          (message) => message.author_type === "user" && message.content === content,
+        );
+      },
+      { timeout, message: "the complete user prompt should be stored" },
+    )
+    .toBe(true);
+}
+
 async function switchMobileTask(testPage: Page, title: string) {
   await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
@@ -90,9 +111,8 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
   seedData,
   backend,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   const { source, tail, firstLine } = oversizedMessage("MOBILE-OVERSIZED");
-  const slowPrompt = "/slow 30s";
   const firstTitle = `Mobile oversized message ${Date.now()}`;
   const task = await createTask(apiClient, seedData, firstTitle);
   if (!task.session_id) throw new Error("oversized mobile task has no session_id");
@@ -101,12 +121,14 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
   let session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await session.sendMessageViaButton(source);
+  await pasteOversizedMessage(testPage, session, source, tail);
+  await session.tapSubmitWhenReady();
+  await waitForStoredUserMessage(apiClient, task.session_id, source);
   await session.waitForChatIdle({ timeout: 60_000 });
 
   let chat = session.activeChat();
   const userBubble = chat.getByTestId("user-message-bubble").filter({ hasText: firstLine }).first();
-  await expect(userBubble).toBeVisible();
+  await expect(userBubble).toBeVisible({ timeout: 30_000 });
   await expectBounded(userBubble, tail);
   const userDownload = userBubble.getByRole("button", { name: "Download full text" });
   const userDownloadBox = await userDownload.boundingBox();
@@ -119,18 +141,6 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     "kandev-message.txt",
     path.join(backend.tmpDir, `mobile-message-${Date.now()}.txt`),
   );
-  await expect
-    .poll(
-      async () => {
-        const { messages } = await apiClient.listSessionMessages(task.session_id!);
-        return messages.some(
-          (message) => message.author_type === "user" && message.content === source,
-        );
-      },
-      { timeout: 30_000, message: "the complete mobile oversized prompt should be stored" },
-    )
-    .toBe(true);
-
   await testPage.reload();
   session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -158,69 +168,61 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     1,
   );
 
-  await session.sendMessageViaButton(slowPrompt);
-  await expect(chat.getByTestId("user-message-bubble").filter({ hasText: slowPrompt })).toBeVisible(
-    { timeout: 15_000 },
-  );
-  await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-  await waitForActiveSessionForegroundActivity(testPage, "generating");
-  await waitForComposerQueueMode(testPage, 30_000);
-  const queued = oversizedMessage("MOBILE-QUEUED");
-  const identity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
-  // Keep the preview available even if the agent finishes during the touch checks.
-  await apiClient.setQueueAutoRun(identity, false);
-  await apiClient.queueMessage(identity, queued.source);
-  await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
-  await chat.getByTestId("queue-chip").tap();
-  const panel = chat.getByTestId("queued-ghost-list");
-  await expect(panel).toBeVisible();
-  const row = panel.getByTestId("queue-entry");
-  await expect(row).toBeVisible();
-  await expectBounded(row, queued.tail);
+  const gate = mockTurnGate(backend.tmpDir, "Slow response complete");
+  try {
+    await session.sendMessageViaButton(gate.prompt);
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
+    await waitForComposerQueueMode(testPage, 30_000);
+    const queued = oversizedMessage("MOBILE-QUEUED");
+    const identity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
+    // Keep the queued source available until the blocking turn has been released.
+    await apiClient.setQueueAutoRun(identity, false);
+    await apiClient.queueMessage(identity, queued.source);
+    await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
+    await chat.getByTestId("queue-chip").tap();
+    const panel = chat.getByTestId("queued-ghost-list");
+    await expect(panel).toBeVisible();
+    const row = panel.getByTestId("queue-entry");
+    await expect(row).toBeVisible();
+    await expectBounded(row, queued.tail);
 
-  const expand = row.getByTestId("queue-entry-expand");
-  const expandBox = await expand.boundingBox();
-  expect(expandBox?.height).toBeGreaterThanOrEqual(44);
-  expect(expandBox?.width).toBeGreaterThanOrEqual(44);
-  await expand.tap();
-  await expect(expand).toHaveAttribute("aria-expanded", "true");
-  await expectBounded(row, queued.tail);
+    const expand = row.getByTestId("queue-entry-expand");
+    const expandBox = await expand.boundingBox();
+    expect(expandBox?.height).toBeGreaterThanOrEqual(44);
+    expect(expandBox?.width).toBeGreaterThanOrEqual(44);
+    await expand.tap();
+    await expect(expand).toHaveAttribute("aria-expanded", "true");
+    await expectBounded(row, queued.tail);
 
-  const queuedDownload = row.getByRole("button", { name: "Download full text" });
-  const queuedDownloadBox = await queuedDownload.boundingBox();
-  expect(queuedDownloadBox?.height).toBeGreaterThanOrEqual(44);
-  expect(queuedDownloadBox?.width).toBeGreaterThanOrEqual(44);
-  await expectTextDownload(
-    testPage,
-    queuedDownload,
-    queued.source,
-    "kandev-queued-message.txt",
-    path.join(backend.tmpDir, `mobile-queued-${Date.now()}.txt`),
-  );
-  await apiClient.clearQueue(identity);
-  await expect(chat.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
-  await expect(chat.getByText("Slow response complete", { exact: false })).toBeVisible({
-    timeout: 90_000,
-  });
-  await session.waitForChatIdle({ timeout: 90_000 });
-  await waitForAgentMessage(apiClient, task.session_id, "Slow response complete", 60_000);
-  await waitForSessionDone(
-    apiClient,
-    task.id,
-    task.session_id,
-    "the mobile follow-up session should finish",
-    60_000,
-  );
-  await expect
-    .poll(
-      async () => {
-        const { messages } = await apiClient.listSessionMessages(task.session_id!);
-        return messages.some(
-          (message) => message.author_type === "user" && message.content === slowPrompt,
-        );
-      },
-      { timeout: 30_000, message: "the mobile follow-up prompt should be stored" },
-    )
-    .toBe(true);
-  await assertNoDocumentHorizontalOverflow(testPage, "mobile queued oversized message flow");
+    const queuedDownload = row.getByRole("button", { name: "Download full text" });
+    const queuedDownloadBox = await queuedDownload.boundingBox();
+    expect(queuedDownloadBox?.height).toBeGreaterThanOrEqual(44);
+    expect(queuedDownloadBox?.width).toBeGreaterThanOrEqual(44);
+    await expectTextDownload(
+      testPage,
+      queuedDownload,
+      queued.source,
+      "kandev-queued-message.txt",
+      path.join(backend.tmpDir, `mobile-queued-${Date.now()}.txt`),
+    );
+    await apiClient.clearQueue(identity);
+    await expect(chat.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
+    await gate.release();
+    await expect(chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+      timeout: 90_000,
+    });
+    await session.waitForChatIdle({ timeout: 90_000 });
+    await waitForAgentMessage(apiClient, task.session_id, "Slow response complete", 60_000);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "the mobile follow-up session should finish",
+      60_000,
+    );
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile queued oversized message flow");
+  } finally {
+    await gate.release();
+  }
 });

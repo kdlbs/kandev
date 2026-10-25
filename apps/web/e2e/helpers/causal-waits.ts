@@ -117,8 +117,9 @@ export async function waitForHttp(
  * The echoed `action` is not enough to identify *your* round trip: several
  * `task.plan.get` requests can be in flight from different components, and a
  * reply to one sent before you started waiting would satisfy an action-only
- * match. {@link WsWatcher.waitForResponse} therefore correlates by `id`,
- * which is also what makes its arm-before-you-act guarantee real.
+ * match. {@link WsWatcher.waitForResponse} therefore correlates by `id` and
+ * can filter originating request payloads when several subjects share an
+ * action.
  */
 export type WsFrame = {
   id?: string;
@@ -126,12 +127,23 @@ export type WsFrame = {
   action?: string;
   eventType?: string;
   payload: Record<string, unknown>;
+  rawPayload?: unknown;
 };
 
 export type WaitForWsOptions = {
   timeout?: number;
   /** Narrow to one subject, e.g. `(p) => p.task_id === task.id`. */
   where?: (payload: Record<string, unknown>) => boolean;
+};
+
+export type WaitForWsResponseOptions = {
+  timeout?: number;
+  /** Track only requests whose payload matches this subject. */
+  requestWhere?: (payload: Record<string, unknown>) => boolean;
+  /** Ignore correlated responses until their data matches the expected change. */
+  where?: (payload: unknown) => boolean;
+  /** Start the response timeout after this operation completes. */
+  timeoutAfter?: Promise<unknown>;
 };
 
 export type WsWatcher = {
@@ -143,9 +155,10 @@ export type WsWatcher = {
   /**
    * Resolve when a WS request the client sends with this `action` *after
    * arming* gets its reply, correlated by frame `id`. Rejects if the backend
-   * answers with an `error` frame.
+   * answers with an `error` frame. `requestWhere`, when provided, filters request
+   * payloads before their IDs are tracked.
    */
-  waitForResponse(action: string, options?: { timeout?: number }): Promise<WsFrame>;
+  waitForResponse(action: string, options?: WaitForWsResponseOptions): Promise<WsFrame>;
 };
 
 function decodeFrame(payload: string | Buffer | Uint8Array): WsFrame | null {
@@ -163,6 +176,7 @@ function decodeFrame(payload: string | Buffer | Uint8Array): WsFrame | null {
       action: typeof parsed.action === "string" ? parsed.action : undefined,
       eventType: typeof parsed.event_type === "string" ? parsed.event_type : undefined,
       payload: body && typeof body === "object" ? (body as Record<string, unknown>) : {},
+      rawPayload: body,
     };
   } catch {
     return null; // binary terminal traffic and other non-JSON frames
@@ -248,18 +262,21 @@ function waitForEvent(
 function waitForResponse(
   channels: Channels,
   action: string,
-  options: { timeout?: number },
+  options: WaitForWsResponseOptions,
 ): Promise<WsFrame> {
-  const { timeout = DEFAULT_TIMEOUT } = options;
+  const { timeout = DEFAULT_TIMEOUT, timeoutAfter, requestWhere, where } = options;
   return new Promise<WsFrame>((resolve, reject) => {
     const requestIds = new Set<string>();
     const wait = armWsWait(
       timeout,
       () => `watchWs.waitForResponse: no reply to "${action}" within ${timeout}ms`,
       reject,
+      timeoutAfter,
     );
     wait.listen(channels.sent, (frame) => {
-      if (frame.action === action && frame.id) requestIds.add(frame.id);
+      if (frame.action !== action || !frame.id) return;
+      if (requestWhere && !requestWhere(frame.payload)) return;
+      requestIds.add(frame.id);
     });
     wait.listen(channels.received, (frame) => {
       if (!frame.id || !requestIds.has(frame.id)) return;
@@ -270,6 +287,7 @@ function waitForResponse(
         return;
       }
       if (frame.type !== "response") return;
+      if (where && !where(frame.rawPayload)) return;
       wait.dispose();
       resolve(frame);
     });
@@ -286,25 +304,48 @@ function armWsWait(
   timeout: number,
   message: () => string,
   reject: (error: Error) => void,
+  timeoutAfter?: Promise<unknown>,
 ): ArmedWait {
   const registered: Array<[Set<FrameListener>, FrameListener]> = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
   const unregister = () => {
     for (const [channel, listener] of registered) channel.delete(listener);
     registered.length = 0;
   };
-  const timer = setTimeout(() => {
+  const expire = () => {
+    if (disposed) return;
+    disposed = true;
     unregister();
     reject(new Error(message()));
-  }, timeout);
+  };
+  const startTimer = () => {
+    if (disposed || timer !== undefined) return;
+    timer = setTimeout(expire, timeout);
+  };
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    if (timer !== undefined) clearTimeout(timer);
+    unregister();
+  };
+
+  if (timeoutAfter) {
+    void timeoutAfter.then(startTimer, (error: unknown) => {
+      if (disposed) return;
+      dispose();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  } else {
+    startTimer();
+  }
+
   return {
     listen(channel, listener) {
       registered.push([channel, listener]);
       channel.add(listener);
     },
-    dispose() {
-      clearTimeout(timer);
-      unregister();
-    },
+    dispose,
   };
 }
 

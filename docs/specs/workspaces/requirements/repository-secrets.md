@@ -15,7 +15,7 @@ Repository setup and agent work often need credentials that are specific to a pr
 
 ### REQ-WORKSPACES-REPOSITORY-SECRETS-001: Repository and Workspace Secrets
 
-**Intent:** Repository setup and agent work often need credentials that are specific to a project: package registry tokens, deployment keys, test service credentials, or API keys. Today users must place those values on a shared agent or executor profile, even when only one workspace or repository needs them. This broadens access and becomes ambiguous when a task attaches several repositories.
+**Intent:** Provide project-scoped credentials through explicit workspace and repository authority.
 
 #### Acceptance criteria
 
@@ -32,18 +32,18 @@ Repository setup and agent work often need credentials that are specific to a pr
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.10:** A missing secret shall block fresh launch and cold resume. The error names the environment key and source, identifies the agent profile when available, and directs the user to select the secret again. A replacement with the same name shall not repair the reference automatically.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.11:** Reference lookup failures shall block deletion with a sanitized internal error. Secret authorization shall run before reference disclosure or a forced deletion.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.12:** Settings shall check references before enabling secret deletion. Existing references shall open a contained conflict dialog that lists visible resources and offers no destructive action. The final deletion request shall repeat the authoritative reference check.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.13:** Global and Workspace Secrets settings shall explain that saving a secret does not add it to a session environment. The guidance shall remain visible when secrets exist. Global guidance shall name agent profile, executor profile, and repository environment bindings. Workspace guidance shall name repository bindings and state that shared profiles cannot use Workspace secrets. The guidance shall be readable on desktop and phone without exposing secret values.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.14:** While the selected workspace and its supplied initial listing remain unchanged, starting, completing, or failing an unrelated Global secrets load shall preserve the Workspace Secrets metadata list, including successfully acknowledged creation, rename, and deletion. It shall not restart that workspace's loading state. This applies on desktop and phone.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.15:** Saving an edit to a Workspace secret shall persist a changed name, a changed value, or both through the workspace-scoped update path without reporting the secret missing. While that edit is open or its save is in flight, Settings shall replace the edited secret's list row with the edit form instead of showing its revealed value, and a reveal issued after the save completes shall return the updated value.
+
+REQ-WORKSPACES-REPOSITORY-SECRETS-002 is defined in [global-secret-metadata-lifetime.md](global-secret-metadata-lifetime.md).
 
 ## Migrated source detail
 
 ## Why
 
-Repository setup and agent work often need credentials that are specific to a project: package
-registry tokens, deployment keys, test service credentials, or API keys. Today users must place
-those values on a shared agent or executor profile, even when only one workspace or repository
-needs them. This broadens access and becomes ambiguous when a task attaches several repositories.
-
-Kandev needs a repository-level authority grant with workspace-scoped storage and a deterministic,
-fail-closed way to build one task environment.
+Project credentials need repository-level authority, workspace-scoped storage, and a
+deterministic, fail-closed task environment. The Overview describes the motivation.
 
 ## What
 
@@ -206,6 +206,13 @@ remove, and replace rows as part of the repository's existing manual-save flow. 
 shown as a missing reference rather than silently dropping the row.
 
 The selector never reveals values. Executor and agent profile selectors show Global secrets only.
+
+### Binding guidance
+
+Both Secrets settings pages explain that saving a secret only stores it. The Global page names
+agent profile, executor profile, and repository bindings. The Workspace page directs users to
+bind the secret to a repository in that workspace and states the shared-profile restriction.
+The guidance remains visible before and after a secret is created.
 
 ## Mobile design contract
 

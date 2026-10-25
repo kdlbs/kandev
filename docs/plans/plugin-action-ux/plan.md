@@ -30,6 +30,11 @@ and no mandatory plugin changes. The earlier investigation supplies the
 
 ## Inputs
 
+Follow-up: [issue #4220 modal focus repair](../plugin-modal-focus-restoration/plan.md)
+adds AC-PLUGINS-ACTION-UX-003.6 through .8. Its separate completed work order owns
+those regressions. The completed work orders in this package retain their
+original scope and verification results.
+
 - [Requirements](../../specs/plugins/requirements/plugin-action-ux.md)
 - [System design](../../specs/plugins/system-design/plugin-action-ux.md)
 - [Decision](../../decisions/2026-09-25-additive-plugin-action-chrome.md)

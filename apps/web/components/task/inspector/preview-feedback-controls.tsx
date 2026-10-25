@@ -68,6 +68,7 @@ function CaptureChoices({
         type="button"
         variant="outline"
         className={buttonClass}
+        aria-pressed={capture.mode === "text"}
         onClick={() => onChoose("text")}
         aria-label={t("task:previewSelectText")}
       >
@@ -78,6 +79,7 @@ function CaptureChoices({
         type="button"
         variant="outline"
         className={buttonClass}
+        aria-pressed={capture.mode === "element"}
         onClick={() => onChoose("element")}
         aria-label={t("task:previewSelectElement")}
       >
@@ -88,6 +90,7 @@ function CaptureChoices({
         type="button"
         variant="outline"
         className={buttonClass}
+        aria-pressed={capture.mode === "screenshot"}
         onClick={() => onChoose("screenshot")}
         aria-label={t("task:previewSelectScreenshot")}
       >
@@ -234,6 +237,7 @@ function Trigger({
       aria-label={label}
       title={label}
       data-testid="preview-feedback-trigger"
+      data-capture-mode={capture.mode ?? "none"}
     >
       <IconMessagePlus className="h-4 w-4 shrink-0" aria-hidden="true" />
       {capture.items.length > 0 && (

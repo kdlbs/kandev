@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db"
@@ -52,6 +54,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateProviderRouting(); err != nil {
 		return err
 	}
+	if err := r.migrateSessionRecoveryColumns(); err != nil {
+		return err
+	}
 	if err := r.migrateContinuationScope(); err != nil {
 		return err
 	}
@@ -70,11 +75,15 @@ func (r *Repository) runMigrations() error {
 	r.migrateRoutineCatchUp()
 	r.migrateBudgetPolicyRevision()
 	r.migrateWorkspacePauseSkipAttribution()
+	r.migrateDeferredAssignmentActor()
 	r.migrateLoopLivenessCausationID()
 	if err := r.migrateRetentionIndexes(); err != nil {
 		return err
 	}
 	if err := r.migrateAssignmentWakeRateIndexes(); err != nil {
+		return err
+	}
+	if err := r.migrateRunSessionClaimedIndex(); err != nil {
 		return err
 	}
 	if err := r.migrate.Err(); err != nil {
@@ -84,6 +93,22 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	return nil
+}
+
+// migrateDeferredAssignmentActor adds the actor snapshot needed to replay a
+// paused assignment with the same priority and assignment-rate semantics as
+// the live scheduler path. The fresh table definition includes these columns;
+// these idempotent ALTERs converge databases created by the first replay
+// implementation before the actor snapshot was added.
+func (r *Repository) migrateDeferredAssignmentActor() {
+	_ = r.migrate.Apply(
+		"office_deferred_assignments.actor_type",
+		`ALTER TABLE office_deferred_assignments ADD COLUMN actor_type TEXT NOT NULL DEFAULT ''`,
+	)
+	_ = r.migrate.Apply(
+		"office_deferred_assignments.actor_id",
+		`ALTER TABLE office_deferred_assignments ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''`,
+	)
 }
 
 // migrateRunSkillLabels adds the captured labels used by run history. The
@@ -321,8 +346,47 @@ func (r *Repository) migrateAssignmentWakeRateIndexes() error {
 	return r.migrate.Apply(
 		"idx_runs_assignment_rate_reason_requested",
 		`CREATE INDEX IF NOT EXISTS idx_runs_assignment_rate_reason_requested
-			ON runs(reason, requested_at)`,
+		ON runs(reason, requested_at)`,
 	)
+}
+
+// migrateRunSessionClaimedIndex supports the legacy GetRunBySessionAt lookup.
+// The partial predicate excludes rows without a session and matches the query.
+func (r *Repository) migrateRunSessionClaimedIndex() error {
+	return r.migrate.Apply(
+		"idx_runs_session_claimed",
+		`CREATE INDEX IF NOT EXISTS idx_runs_session_claimed
+			ON runs(session_id, claimed_at DESC) WHERE session_id != ''`,
+	)
+}
+
+// migrateSessionRecoveryColumns adds the indexed reference from an Office run
+// to the task-owned recovery block. Existing routing rows remain unchanged and
+// the columns stay NULL until a launch actually requires recovery.
+func (r *Repository) migrateSessionRecoveryColumns() error {
+	for _, migration := range []struct {
+		name   string
+		column string
+		stmt   string
+	}{
+		{name: "runs.session_recovery_block_id", column: "session_recovery_block_id", stmt: "ALTER TABLE runs ADD COLUMN session_recovery_block_id TEXT"},
+		{name: "runs.session_recovery_reason", column: "session_recovery_reason", stmt: "ALTER TABLE runs ADD COLUMN session_recovery_reason TEXT"},
+	} {
+		exists, err := db.ColumnExists(r.db, "runs", migration.column)
+		if err != nil {
+			return fmt.Errorf("inspect runs.%s: %w", migration.column, err)
+		}
+		if !exists {
+			if err := r.migrate.Apply(migration.name, migration.stmt); err != nil {
+				return err
+			}
+		}
+	}
+	if err := r.migrate.Apply("runs.session_recovery_block_index",
+		`CREATE INDEX IF NOT EXISTS idx_runs_session_recovery_block ON runs(session_recovery_block_id) WHERE session_recovery_block_id IS NOT NULL`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
@@ -357,7 +421,7 @@ func (r *Repository) backfillContinuationScopes() error {
 	}
 	for _, legacyRun := range legacyRuns {
 		scope := models.ContinuationScopeForRun(
-			&models.Run{ContextSnapshot: legacyRun.ContextSnapshot},
+			&runsmodels.Run{ContextSnapshot: legacyRun.ContextSnapshot},
 			legacyRun.AgentProfileID,
 		)
 		if _, err := r.db.Exec(r.db.Rebind(`
@@ -853,6 +917,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		stmt string
 	}{
 		{"archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`},
+		{"initial_workspace_layout", `ALTER TABLE tasks ADD COLUMN initial_workspace_layout TEXT NOT NULL DEFAULT ''`},
 		{"wip_admitted", `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`},
 		{"queued_for_step_id", `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`},
 		{"queued_at", `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`},
@@ -862,6 +927,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		{"assignee_user_id", `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`},
 		{"assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`},
 		{"workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`},
+		{"executor_actor_user_id", `ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := conn.ExecContext(ctx, column.stmt); err != nil && !db.IsDuplicateColumnError(err) {
@@ -895,7 +961,9 @@ func taskPriorityMigrationStatements() []string {
 		// still carry the column have it discarded by the SELECT below.
 		`CREATE TABLE tasks_priority_new (
 			id TEXT PRIMARY KEY,
+ executor_actor_user_id TEXT NOT NULL DEFAULT '',
 			workspace_id TEXT NOT NULL DEFAULT '',
+			initial_workspace_layout TEXT NOT NULL DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			workflow_agent_overrides TEXT,
@@ -940,7 +1008,7 @@ func taskPriorityMigrationStatements() []string {
 		// recreate dance. external_id is not COALESCEd — NULL is its
 		// meaningful "no identity" state.
 		`INSERT INTO tasks_priority_new (
-			id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
+			executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
 			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
@@ -948,7 +1016,7 @@ func taskPriorityMigrationStatements() []string {
 			checkout_agent_id, checkout_at, checkout_run_id,
 			external_id, external_id_settled_at, assignee_user_id, assignment_generation
 		) SELECT
-			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
+			COALESCE(executor_actor_user_id,''), id, COALESCE(workspace_id,''), COALESCE(initial_workspace_layout,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), workflow_agent_overrides, title, COALESCE(description,''),
 			COALESCE(state,'TODO'), 'medium', COALESCE(position,0),
 			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,

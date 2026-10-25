@@ -101,6 +101,46 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 }
 
+func TestHasTaskSessionsByAgentProfileIncludesCompletedSessions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-opencode-evidence", Title: "OpenCode evidence"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             "session-opencode-evidence",
+		TaskID:         "task-opencode-evidence",
+		AgentProfileID: "profile-opencode-evidence",
+		State:          models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-opencode-execution-evidence", Title: "OpenCode execution profile evidence"}); err != nil {
+		t.Fatalf("CreateTask for execution profile evidence: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                 "session-opencode-execution-evidence",
+		TaskID:             "task-opencode-execution-evidence",
+		ExecutionProfileID: "profile-opencode-execution-evidence",
+		State:              models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession for execution profile evidence: %v", err)
+	}
+
+	got, err := repo.HasTaskSessionsByAgentProfile(ctx, "profile-opencode-evidence")
+	if err != nil || !got {
+		t.Fatalf("HasTaskSessionsByAgentProfile = %v, %v; want true, nil", got, err)
+	}
+	got, err = repo.HasTaskSessionsByAgentProfile(ctx, "profile-unused")
+	if err != nil || got {
+		t.Fatalf("HasTaskSessionsByAgentProfile for unused profile = %v, %v; want false, nil", got, err)
+	}
+	got, err = repo.HasTaskSessionsByAgentProfile(ctx, "profile-opencode-execution-evidence")
+	if err != nil || !got {
+		t.Fatalf("HasTaskSessionsByAgentProfile for execution profile = %v, %v; want true, nil", got, err)
+	}
+}
+
 // ListLiveWorkspaceSessions backs the orphan-reap ownership check's other-task
 // path resolution. It must report the same effective (environment-overridden)
 // workspace_path as GetTaskSession/ListTaskSessions above, never the stale

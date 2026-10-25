@@ -145,6 +145,11 @@ type Adapter struct {
 
 	// Update channel
 	updatesCh chan AgentEvent
+	// Emission is serialized independently of mu so control events flush pending
+	// shell output without holding the adapter state lock during backpressure.
+	updateEmitMu       sync.Mutex
+	shellSnapshots     shellSnapshotState
+	shellSnapshotTimer *time.Timer
 
 	// notifQueue decouples the ACP SDK's notification goroutine from the
 	// per-notification processing we do in handleACPUpdate. The SDK's inbound
@@ -267,11 +272,34 @@ type Adapter struct {
 	// frontend mode selector can render available options.
 	availableModes []streams.SessionModeInfo
 
+	// currentModeID is the mode the agent last reported, from session
+	// creation/load or a current_mode_update. SetMode compares against it
+	// rather than echoing the requested mode.
+	currentModeID string
+	// modeSessionID and modeObservationGeneration identify reports from the
+	// active provider session. SetMode captures the generation before its RPC
+	// and accepts only a later report from that session.
+	modeSessionID             string
+	modeObservationGeneration uint64
+	// modeObserved closes on each mode report so a waiter can settle.
+	modeObserved chan struct{}
+	// A timed-out set_mode can report after the next request starts. ACP mode
+	// reports have no request ID, so an uncorrelated report cannot resolve an
+	// earlier uncertain result, even if it arrives while the adapter is idle.
+	modeOutcomeUncertain bool
+
 	// Available config options from the most recent session creation/load.
 	// Used by emitSetModelEvent to include cached options in the convergence
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
+
+	// sessionSettingsPolicy is host-selected provenance for unsolicited
+	// settings reports from the currently loaded session. Explicit setter
+	// outcomes are emitted separately without this marker.
+	sessionSettingsPolicy streams.SessionSettingsPolicy
+	// sessionSettingsGeneration is monotonic for this adapter across session transitions.
+	sessionSettingsGeneration uint64
 
 	dialect acpDialect
 
@@ -283,6 +311,7 @@ type Adapter struct {
 	sessionTransitionMu sync.Mutex
 	sessionCleanupDone  chan struct{}
 	sessionCleanupWg    sync.WaitGroup
+	modeChangeMu        sync.Mutex
 	configChangeMu      sync.Mutex
 	configGeneration    uint64
 	contextSamples      map[string]contextWindowSample
@@ -336,21 +365,31 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn           context.CancelCauseFunc
-	rpcDone           chan struct{}
-	abortCh           chan struct{}
-	handoffCh         chan struct{}
-	providerErrorCh   chan openCodeStderrDiagnostic
-	promptGeneration  uint64
-	evidenceMu        sync.Mutex
-	codexSystemError  bool
-	codexCapacity     bool
-	cursorRetriable   bool
-	cursorRetriableAt time.Time
-	allowHandoff      bool
-	handedOff         bool
-	gateOwned         bool
-	finishing         bool
+	endTurn                     context.CancelCauseFunc
+	rpcDone                     chan struct{}
+	abortCh                     chan struct{}
+	handoffCh                   chan struct{}
+	providerErrorCh             chan openCodeStderrDiagnostic
+	promptGeneration            uint64
+	evidenceMu                  sync.Mutex
+	codexSystemError            bool
+	codexCapacity               bool
+	codexUsageLimit             *streams.ProviderError
+	cursorRetriableMsg          string
+	cursorRetriableComplete     bool
+	cursorRetriableAt           time.Time
+	continuationTools           map[string]bool
+	continuationPermissions     uint16
+	continuationPermissionTools map[string]struct{}
+	continuationUnsafe          bool
+	capacityTools               map[string]capacityToolEvidence
+	capacityUnknown             bool
+	capacityBackground          bool
+	capacityPermissions         int
+	allowHandoff                bool
+	handedOff                   bool
+	gateOwned                   bool
+	finishing                   bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -372,6 +411,31 @@ func (t *promptTurnState) codexCapacityFailure() bool {
 	return t.codexSystemError && t.codexCapacity
 }
 
+func (t *promptTurnState) observeCodexUsageLimit(providerError streams.ProviderError) {
+	if t == nil || !providerError.Valid() {
+		return
+	}
+	t.evidenceMu.Lock()
+	if t.codexUsageLimit == nil {
+		copy := providerError
+		t.codexUsageLimit = &copy
+	}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexUsageLimitFailure() (*streams.ProviderError, bool) {
+	if t == nil {
+		return nil, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if t.codexUsageLimit == nil {
+		return nil, false
+	}
+	copy := *t.codexUsageLimit
+	return &copy, true
+}
+
 func (t *promptTurnState) hasCodexSystemError() bool {
 	if t == nil {
 		return false
@@ -381,15 +445,16 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	return t.codexSystemError
 }
 
-func (t *promptTurnState) setCursorRetriable() {
+func (t *promptTurnState) setCursorRetriable(msg string, complete bool) {
 	if t == nil {
 		return
 	}
 	t.evidenceMu.Lock()
-	if !t.cursorRetriable {
+	if t.cursorRetriableMsg == "" {
 		t.cursorRetriableAt = time.Now().UTC()
 	}
-	t.cursorRetriable = true
+	t.cursorRetriableMsg = msg
+	t.cursorRetriableComplete = complete
 	t.evidenceMu.Unlock()
 }
 
@@ -398,26 +463,29 @@ func (t *promptTurnState) clearCursorRetriable() {
 		return
 	}
 	t.evidenceMu.Lock()
-	t.cursorRetriable = false
+	t.cursorRetriableMsg = ""
+	t.cursorRetriableComplete = false
 	t.cursorRetriableAt = time.Time{}
 	t.evidenceMu.Unlock()
 }
 
 func (t *promptTurnState) cursorRetriableFailure() bool {
-	failure, _ := t.cursorRetriableFailureAt()
+	failure, _, _, _ := t.cursorRetriableFailureDetails()
 	return failure
 }
 
-func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
+func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
 	if t == nil {
-		return false, time.Time{}
+		return false, "", time.Time{}, false
 	}
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
-	return t.cursorRetriable, t.cursorRetriableAt
+	return t.cursorRetriableMsg != "", t.cursorRetriableMsg, t.cursorRetriableAt, t.cursorRetriableComplete
 }
 
 type asyncTurnFinalizer struct {
+	messageID   string
+	activeTools map[string]struct{}
 	timer       *time.Timer
 	seq         uint64
 	promptEpoch uint64
@@ -458,6 +526,8 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
 	}
+	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
+	a.shellSnapshotTimer.Stop()
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	// Start the update worker before returning so any caller that connects
 	// the SDK (Initialize, or any future direct wiring) always has a live
@@ -619,6 +689,23 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
+// SupportsSessionResume reports the ACP session/resume capability negotiated
+// during initialize. It is intentionally distinct from the static registry
+// resume setting used by Kandev's own conversation fallback.
+func (a *Adapter) SupportsSessionResume() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.SessionCapabilities.Resume != nil
+}
+
+// SupportsSessionLoad reports the ACP session/load capability negotiated during
+// initialize.
+func (a *Adapter) SupportsSessionLoad() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.LoadSession
+}
+
 // SetPendingContext sets the context to be injected into the next prompt.
 // This is used by the fork_session pattern for ACP agents that don't support session/load.
 // The context will be prepended to the first prompt sent to this session.
@@ -714,6 +801,15 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 // context makes the wait cancelable during shutdown. Do not hold a.mu while
 // waiting; Close needs the write lock to cancel the context and unblock us.
 func (a *Adapter) sendUpdate(event AgentEvent) {
+	a.updateEmitMu.Lock()
+	defer a.updateEmitMu.Unlock()
+	a.flushShellSnapshotLocked()
+	a.shellSnapshots = shellSnapshotState{}
+	a.sendUpdateNow(event)
+}
+
+func (a *Adapter) sendUpdateNow(event AgentEvent) {
+	event = streams.BoundGenericToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -749,6 +845,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event = streams.BoundGenericToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:

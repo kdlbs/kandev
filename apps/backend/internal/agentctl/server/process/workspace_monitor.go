@@ -105,6 +105,9 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	for {
 		filePoll, _, _ := wt.pollIntervals(wt.GetPollMode())
 		timer.Reset(filePoll)
+		if wt.pollTimerArmed != nil {
+			wt.pollTimerArmed("monitor", filePoll)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -200,7 +203,9 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		return false
 	}
 	*consecutiveFailures = 0
-	if currentState.changed(*lastState) {
+	changed := currentState.changed(*lastState)
+	noteSlowPollIdle(&wt.slowIdleMonitorTicks, changed)
+	if changed {
 		*lastState = currentState
 		wt.logger.Debug("workspace state changed, updating")
 
@@ -241,7 +246,7 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	// again because the index blob hash stays constant and the worktree hash
 	// is always shown as 0000000 (not computed). To detect subsequent changes
 	// to dirty files, we also include the mtime of each dirty file.
-	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "diff-files", "--name-only")
+	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "diff-files", "--name-only", "-z")
 	if err != nil {
 		wrapped := fmt.Errorf("git diff-files in %s: %w (stderr: %s)",
 			wt.workDir, err, stderr)
@@ -269,22 +274,22 @@ func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
 		return ""
 	}
 
-	lines := strings.Split(strings.TrimSpace(diffFilesOutput), "\n")
+	paths := strings.Split(diffFilesOutput, "\x00")
 	var hashInput strings.Builder
-	for _, file := range lines {
+	for _, file := range paths {
 		if file == "" {
 			continue
 		}
 		hashInput.WriteString(file)
+		hashInput.WriteByte(0)
 		// Include mtime so we detect content changes to already-dirty files
 		safePath, err := wt.sanitizePath(file)
-		if err != nil {
-			continue // Skip files with invalid paths
+		if err == nil {
+			if info, statErr := os.Stat(safePath); statErr == nil {
+				hashInput.WriteString(fmt.Sprintf("%d", info.ModTime().UnixNano()))
+			}
 		}
-		if info, err := os.Stat(safePath); err == nil {
-			hashInput.WriteString(fmt.Sprintf(":%d", info.ModTime().UnixNano()))
-		}
-		hashInput.WriteString(";")
+		hashInput.WriteByte(0)
 	}
 	return hashInput.String()
 }

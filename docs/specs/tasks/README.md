@@ -11,16 +11,19 @@ owners:
 
 ## Purpose
 
-The task and workflow system owns durable work items, task relationships,
-execution lifecycle, workflow steps, queued launches, and the contracts that
-move a task through its configured process.
+Owns durable work items, task relationships, execution lifecycle, workflow
+steps, queued launches, and task process contracts.
 
 ## Ownership
 
-This system owns task identity and metadata, task documents and attachments,
-parent and dependency relationships, task creation and launch behavior, task
+Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
+documents, attachments, parent and dependency relationships, creation, launch,
 runtime state publication, workflow definitions and transitions, completion
-signals, and task-scoped scheduling contracts.
+signals, and task scheduling.
+
+Turn change sets bind immutable repository intervals to capture policy,
+historical content availability, and transcript anchors. Workspaces supply
+checkout identity; runtime supplies ordered executor access.
 
 ## Exclusions
 
@@ -39,7 +42,7 @@ signals, and task-scoped scheduling contracts.
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Bounded Session History Storage](requirements/bounded-session-history.md)
-- [Task completion, conversation follow-ups, and workspace access](requirements/task-completion.md)
+- [Task completion and follow-ups](requirements/task-completion.md)
 
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
 - [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
@@ -92,6 +95,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
 - [Managed Branch Compaction](requirements/managed-branch-compaction.md)
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)
+- [Terminal target lifecycle](requirements/terminal-target-lifecycle.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Bulk Session Removal](requirements/bulk-session-removal.md)
@@ -99,12 +103,13 @@ signals, and task-scoped scheduling contracts.
 - [Guarded Exact-Task Retirement](requirements/guarded-exact-task-retirement.md)
 - [Restart-Orphaned Session Terminalization](requirements/restart-orphaned-session-terminalization.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
-- [Task Actions Menu on Preview and Detail Surfaces](requirements/task-actions-menu.md)
+- [Task actions menu surfaces](requirements/task-actions-menu.md)
 - [Task menu grouping](requirements/task-menu-grouping.md)
 - [Task Actions Menu In-Flight and Concurrency](requirements/task-actions-menu-concurrency.md)
 - [Task Actions Menu Action Outcomes](requirements/task-actions-menu-outcomes.md)
 - [Subtasks as Workflow Checklist](requirements/subtask-checklist.md)
 - [Subtask Completion Trigger](requirements/subtask-completion-trigger.md)
+- [Workflow PR Lifecycle Events](requirements/workflow-pr-lifecycle-events.md)
 - [Subtask detachment](requirements/subtask-detachment.md)
 - [Subtask re-parenting by drag and drop](requirements/subtask-reparenting-drag-drop.md)
 - [Task Subtree Controls](requirements/subtree-controls.md)
@@ -122,6 +127,7 @@ signals, and task-scoped scheduling contracts.
 - [Session stall visibility and orphan healing](requirements/session-stall-visibility.md)
 - [Task Launch Failure Recovery](requirements/task-launch-failure-recovery.md)
 - [Worktree metadata recovery](requirements/worktree-metadata-recovery.md)
+- [Audited cross-workspace task transfers](requirements/cross-workspace-task-transfer.md)
 - [Task priority visibility](requirements/task-priority-visibility.md)
 - [Threads task actions](requirements/threads-task-actions.md)
 - [Task Title Length Limit](requirements/title-length-limit.md)
@@ -133,7 +139,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
 - [Workflow Duplication](requirements/workflow-duplication.md)
 - [Explicit Workflow-Step Completion Signal](requirements/workflow-explicit-completion-signal.md)
-- [Workflow Profile Session Lifecycle and Recipients](requirements/workflow-profile-session-lifecycle.md)
+- [Workflow profile session lifecycle](requirements/workflow-profile-session-lifecycle.md)
 - [Agent decision recording](requirements/workflow-quorum-decision-recording-agent-surface.md)
 - [Quorum ordering and concurrency](requirements/workflow-quorum-decision-recording-concurrency.md)
 - [Quorum diagnostics](requirements/workflow-quorum-decision-recording-diagnostics.md)
@@ -156,7 +162,7 @@ signals, and task-scoped scheduling contracts.
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 
-- [Task completion, conversation follow-ups, and workspace access](system-design/task-completion.md)
+- [Task completion and follow-ups](system-design/task-completion.md)
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
@@ -170,6 +176,7 @@ signals, and task-scoped scheduling contracts.
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [Task model unification](system-design/model-unification.md)
+- [Workflow PR Lifecycle Events](system-design/workflow-pr-lifecycle-events.md)
 - [MCP Tool Name Stability](system-design/mcp-tool-name-stability.md)
 - [MCP workspace modes](system-design/mcp-workspace-mode.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
@@ -179,7 +186,7 @@ signals, and task-scoped scheduling contracts.
 - [Saved Prompt Delivery](system-design/saved-prompt-delivery.md)
 - [Passthrough Initial Prompt Turn Boundary](system-design/passthrough-initial-prompt-turn-boundary.md)
 - [Prompt attachments](system-design/prompt-attachments.md)
-- [Task Actions Menu on Preview and Detail Surfaces](system-design/task-actions-menu.md)
+- [Task actions menu surfaces](system-design/task-actions-menu.md)
 - [Task menu grouping](system-design/task-menu-grouping.md)
 - [Subtask re-parenting by drag and drop](system-design/subtask-reparenting-drag-drop.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
@@ -194,6 +201,7 @@ signals, and task-scoped scheduling contracts.
 - [Managed Branch Compaction](system-design/managed-branch-compaction.md)
 - [Task Cleanup Preparation](system-design/runtime-cleanup-preparation.md)
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
+- [Terminal target lifecycle](system-design/terminal-target-lifecycle.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Resume prompt queue](system-design/resume-prompt-queue.md)
@@ -208,6 +216,7 @@ signals, and task-scoped scheduling contracts.
 - [Session stall visibility and orphan healing](system-design/session-stall-visibility.md)
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
 - [Worktree metadata recovery](system-design/worktree-metadata-recovery.md)
+- [Audited cross-workspace task transfers](system-design/cross-workspace-task-transfer.md)
 - [Task Create Launch Preview](system-design/task-create-launch-preview.md)
 - [Task priority visibility](system-design/task-priority-visibility.md)
 - [Board priority sort and filter](system-design/board-priority-sort-filter.md)
@@ -218,7 +227,7 @@ signals, and task-scoped scheduling contracts.
 - [Workflow quorum decision recording](system-design/workflow-quorum-decision-recording.md)
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
-- [Workflow Profile Session Lifecycle and Recipients](system-design/workflow-profile-session-lifecycle.md)
+- [Workflow profile session lifecycle](system-design/workflow-profile-session-lifecycle.md)
 - [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
 - [Human Assignee](system-design/human-assignee.md)
 - [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)

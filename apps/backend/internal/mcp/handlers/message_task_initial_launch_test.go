@@ -40,6 +40,7 @@ func TestPeerMessageInitialLaunch_Delivery(t *testing.T) {
 		session,
 		"follow up during initial launch",
 		metadata,
+		false,
 	)
 
 	require.NoError(t, err)
@@ -287,6 +288,7 @@ func TestPeerMessageInitialLaunch_QueuesBeforeWorkflowTurnPreparation(t *testing
 	require.NoError(t, err)
 	taskBefore, err := taskSvc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
+	assert.Equal(t, "step-b", taskBefore.WorkflowStepID, "initial launch should own only the first on_turn_start transition")
 	stepReadsBefore := steps.reads.Load()
 
 	h := &Handlers{
@@ -345,12 +347,13 @@ func (g *peerMessageWorkflowStepGetter) GetStep(_ context.Context, stepID string
 }
 
 func (g *peerMessageWorkflowStepGetter) GetNextStepByPosition(_ context.Context, workflowID string, position int) (*wfmodels.WorkflowStep, error) {
+	var next *wfmodels.WorkflowStep
 	for _, step := range g.steps {
-		if step.WorkflowID == workflowID && step.Position > position {
-			return step, nil
+		if step.WorkflowID == workflowID && step.Position > position && (next == nil || step.Position < next.Position) {
+			next = step
 		}
 	}
-	return nil, nil
+	return next, nil
 }
 
 func (*peerMessageWorkflowStepGetter) GetPreviousStepByPosition(context.Context, string, int) (*wfmodels.WorkflowStep, error) {
@@ -372,6 +375,10 @@ type peerLaunchAgentManager struct {
 	processStarted   chan struct{}
 	followUpAccepted chan string
 	running          atomic.Bool
+	launchRequest    *executor.LaunchAgentRequest
+	beforeAdmission  func(context.Context, string, []v1.MessageAttachment) error
+	onDispatched     func()
+	onFailure        func()
 }
 
 func (m *peerLaunchAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
@@ -392,12 +399,34 @@ func (m *peerLaunchAgentManager) LaunchAgent(ctx context.Context, req *executor.
 			return nil, err
 		}
 	}
-	m.initialAccepted <- req.TaskDescription
+	m.launchRequest = req
 	return &executor.LaunchAgentResponse{AgentExecutionID: "execution-" + req.SessionID}, nil
 }
 
-func (m *peerLaunchAgentManager) StartAgentProcess(context.Context, string) error {
+func (m *peerLaunchAgentManager) RegisterInitialPromptAdmissionCallbacks(
+	_ string, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched, onFailure func(),
+) error {
+	m.beforeAdmission = beforeAdmission
+	m.onDispatched = onDispatched
+	m.onFailure = onFailure
+	return nil
+}
+
+func (m *peerLaunchAgentManager) StartAgentProcess(ctx context.Context, _ string) error {
+	if m.beforeAdmission != nil {
+		if err := m.beforeAdmission(ctx, m.launchRequest.TaskDescription, m.launchRequest.Attachments); err != nil {
+			if m.onFailure != nil {
+				m.onFailure()
+			}
+			return err
+		}
+	}
 	m.running.Store(true)
+	m.initialAccepted <- m.launchRequest.TaskDescription
+	if m.onDispatched != nil {
+		m.onDispatched()
+	}
 	m.processStarted <- struct{}{}
 	return nil
 }
@@ -481,6 +510,7 @@ func TestPeerMessageInitialLaunch_PreservesOlderFIFOEntry(t *testing.T) {
 
 	result, err := h.dispatchPreparedTaskMessage(
 		ctx, target.ID, session, "follow-up", map[string]interface{}{"sender_task_id": sender.ID},
+		false,
 	)
 
 	require.NoError(t, err)

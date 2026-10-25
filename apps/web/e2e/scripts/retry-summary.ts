@@ -13,6 +13,8 @@ import {
   type TimingStatus,
 } from "./e2e-timings";
 
+import { assertCatalogCoverage, readCatalogSnapshot } from "./native-catalog";
+
 export type RetryAttachment = TimingAttachment & {
   artifactName?: string;
   artifactUrl?: string;
@@ -394,6 +396,15 @@ function runCli(): void {
   });
   fs.mkdirSync(path.dirname(path.resolve(args.output)), { recursive: true });
   fs.writeFileSync(args.output, `${JSON.stringify(summary, null, 2)}\n`);
+  if (process.env.GITHUB_ACTIONS === "true" && !args.catalog) {
+    throw new Error("Required CI native catalog argument is missing");
+  }
+  if (args.catalog) {
+    assertCatalogCoverage(
+      readCatalogSnapshot(path.resolve(args.catalog), process.cwd()),
+      observations,
+    );
+  }
   console.log(
     `retry summary: ${summary.flake.flaky} flaky of ${summary.flake.executed} executed ` +
       `(${summary.flake.ratePerThousand} per 1000), ${summary.flake.unexpected} unexpected`,

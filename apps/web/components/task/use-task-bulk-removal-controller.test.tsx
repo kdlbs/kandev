@@ -135,7 +135,9 @@ describe("useTaskBulkRemovalController", () => {
     expect(removeById.mock.calls.map(([id]) => id)).toEqual(["second", "first"]);
     expect(result.current.bulkRemoval.pending).toBe(false);
   });
+});
 
+describe("useTaskBulkRemovalController refresh", () => {
   it("reports refresh failures as errors instead of saying sessions are loading", async () => {
     const state = {
       taskSessionsByTask: {
@@ -165,6 +167,31 @@ describe("useTaskBulkRemovalController", () => {
       title: "task:bulkRemovalUnavailable_error",
       variant: "error",
     });
+  });
+
+  it("offers a fresh count after its forced refresh settles while another read remains active", async () => {
+    const state = getState();
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => {
+          state.taskSessionsByTask.itemsByTaskId["task-1"] = [sessions[0]];
+          state.taskSessionsByTask.loadingByTaskId["task-1"] = true;
+        }),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("all", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(removeById).not.toHaveBeenCalled();
+    expect(result.current.bulkRemoval.snapshot?.targetIds).toEqual(["first"]);
+    expect(result.current.bulkRemoval.wasRefreshed).toBe(true);
   });
 
   it("dismisses Remove Others and reports a changed session when its selection disappears", async () => {

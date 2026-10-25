@@ -1,11 +1,46 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
+  mockStorageDiskCapacity,
   mockPartialSystemTemporaryOverview,
   mockTemporaryArtifactOverview,
+  mockTemporaryEntryBreakdown,
   seedSystemTemporaryFile,
 } from "../../helpers/storage-maintenance";
 
 test.describe("Mobile system temporary folders", () => {
+  test("shows temporary capacity warnings and keeps the details action touchable", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockStorageDiskCapacity(testPage);
+    await testPage.goto("/settings/system/storage");
+
+    const home = testPage.getByTestId("storage-disk-capacity-card");
+    await expect(home).toHaveAttribute("data-severity", "normal");
+    const temporary = testPage.getByTestId("storage-temporary-disk-capacity-0");
+    await expect(temporary).toHaveAttribute("data-severity", "critical");
+    await expect(temporary).toContainText("Temporary-file operations can fail");
+    const viewEntries = testPage.getByTestId("storage-disk-view-temporary");
+    const box = await viewEntries.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    await temporary.scrollIntoViewIfNeeded();
+    await prCapture.screenshot("mobile-system-temporary-capacity-warning", {
+      caption:
+        "Mobile Storage keeps the temporary filesystem warning visible before analysis details",
+    });
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      )
+      .toBe(true);
+
+    const trigger = testPage.getByTestId("storage-resource-system-temporary-trigger");
+    await expect(trigger).toBeVisible();
+    await viewEntries.tap();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
   test("keeps partial root details readable without horizontal overflow", async ({
     testPage,
     backend,
@@ -28,6 +63,40 @@ test.describe("Mobile system temporary folders", () => {
     await prCapture.screenshot("mobile-system-temporary-partial", {
       caption: "Mobile storage keeps partial temporary-folder details inline",
     });
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      )
+      .toBe(true);
+  });
+
+  test("shows entry ownership and reviews registered cleanup in a touch-sized flow", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockTemporaryEntryBreakdown(testPage);
+    await testPage.goto("/settings/system/storage");
+    const temporaryTrigger = testPage.getByTestId("storage-resource-system-temporary-trigger");
+    await temporaryTrigger.tap();
+    const entries = testPage.getByTestId("storage-temporary-entries");
+    await expect(entries).toContainText("build-output");
+    await expect(entries).toContainText("Not tracked by Kandev");
+    await expect(entries).toContainText("Unscanned usage is unknown");
+    const review = testPage.getByTestId("storage-temporary-review-cleanup");
+    const box = await review.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("mobile-system-temporary-largest-entries", {
+      caption: "Mobile Storage keeps entry names, ownership, and cleanup review readable inline",
+    });
+    await review.tap();
+    const cleanupTrigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
+    await expect(cleanupTrigger).toHaveAttribute("aria-expanded", "true");
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid),
+      )
+      .toBe("storage-resource-temporary-artifacts-trigger");
     await expect
       .poll(() =>
         testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

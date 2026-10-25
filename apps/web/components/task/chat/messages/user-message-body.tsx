@@ -2,8 +2,11 @@
 
 import { useMemo, useState } from "react";
 import type { Components } from "react-markdown";
+import type { TaskMentionReference } from "@/lib/tasks/task-mention-references";
+import { prepareTaskMentionContent, withTaskMentionTokens } from "./prompt-mention-components";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { Badge } from "@kandev/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { BoundedMessagePreview } from "./bounded-message-preview";
@@ -23,30 +26,105 @@ type UserMessageBodyOptions = {
   content: string;
   rawContent?: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
+  /** Message's originating task, from `MessageTaskOriginContext`. Only the
+   *  string `"coordinator"` triggers the About-prefix tag below. */
+  taskOrigin?: string;
 };
+
+// i18n-exempt: stable, coordinator-agent-facing wire marker (English, not i18n), not rendered as-is.
+const COORDINATOR_ABOUT_PREFIX = "About ";
+const COORDINATOR_ABOUT_SEPARATOR = ": ";
+// i18n-exempt: stable, coordinator-agent-facing wire marker (English, not i18n), not rendered as-is.
+const COORDINATOR_REFERENCED_PREFIX_RE =
+  /^About (.+?) \[(task|proposal|stall|workflow):([^\]\s]+)\]: /;
+
+type CoordinatorAboutPrefix = { id: string; remainder: string };
+
+/** Parses the referenced form, "About <id> [<kind>:<ref>]: ", added for
+ *  `get_coordinator_item_kandev` reads (docs/specs/coordinator/system-design/
+ *  copilot-panel.md#ask-about-this). `<id>` is the shortest run of non-newline
+ *  characters followed by a bracketed `task`/`proposal`/`stall`/`workflow` reference and
+ *  `: `, so an id containing its own `: `, `[` or `]` is still read back
+ *  whole, and a second bracketed-looking sequence later in the message is
+ *  never mistaken for the prefix's own. Returns `null` for content that does
+ *  not match, or whose matched remainder is empty. */
+function parseCoordinatorReferencedPrefix(content: string): CoordinatorAboutPrefix | null {
+  const match = COORDINATOR_REFERENCED_PREFIX_RE.exec(content);
+  if (!match) return null;
+  const remainder = content.slice(match[0].length);
+  if (!remainder) return null;
+  return { id: match[1], remainder };
+}
+
+/** Parses the legacy "About <id>: " prefix of earlier messages, predating the
+ *  bracketed reference. The id is the text between `About ` and the first
+ *  `: `; an id containing its own `: ` splits at that first occurrence (a
+ *  known, accepted limit). Returns `null` for content that does not start
+ *  with the prefix, has no `: ` separator, whose id is empty or spans a line
+ *  break, or whose matched remainder is empty. */
+function parseCoordinatorLegacyAboutPrefix(content: string): CoordinatorAboutPrefix | null {
+  if (!content.startsWith(COORDINATOR_ABOUT_PREFIX)) return null;
+  const separatorIndex = content.indexOf(
+    COORDINATOR_ABOUT_SEPARATOR,
+    COORDINATOR_ABOUT_PREFIX.length,
+  );
+  if (separatorIndex === -1) return null;
+  const id = content.slice(COORDINATOR_ABOUT_PREFIX.length, separatorIndex);
+  if (!id || /[\r\n]/.test(id)) return null;
+  const remainder = content.slice(separatorIndex + COORDINATOR_ABOUT_SEPARATOR.length);
+  if (!remainder) return null;
+  return { id, remainder };
+}
+
+/** Tries the referenced form first, then the legacy form of earlier messages
+ *  (docs/specs/coordinator/system-design/copilot-panel.md#ask-about-this). A
+ *  text matching neither, or whose matched remainder is empty, is not a
+ *  match: the caller renders it unchanged with no tag. */
+function parseCoordinatorAboutPrefix(content: string): CoordinatorAboutPrefix | null {
+  return parseCoordinatorReferencedPrefix(content) ?? parseCoordinatorLegacyAboutPrefix(content);
+}
+
+function CoordinatorAboutTag({ id }: { id: string }) {
+  return (
+    <Badge data-testid="coordinator-about-tag" variant="secondary" className="w-fit">
+      {t("chat:coordinatorAboutTag", { id })}
+    </Badge>
+  );
+}
 
 function UserMessageMarkdown({
   content,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
 }: {
   content: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 }) {
+  const prepared = useMemo(
+    () => prepareTaskMentionContent(content, taskMentions),
+    [content, taskMentions],
+  );
+  const components = useMemo(
+    () => withTaskMentionTokens(promptMentionComponents, prepared.tokens),
+    [promptMentionComponents, prepared.tokens],
+  );
   return (
     <div className="markdown-body markdown-body-user max-w-none">
       <MemoizedMarkdown
-        content={content}
+        content={prepared.content}
         taskId={taskId}
-        components={promptMentionComponents}
+        components={components}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
       />
@@ -59,6 +137,7 @@ function CollapsedInstructions({
   testId,
   instructions,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
@@ -67,6 +146,7 @@ function CollapsedInstructions({
   testId: string;
   instructions: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
@@ -91,6 +171,7 @@ function CollapsedInstructions({
             <UserMessageMarkdown
               content={preview}
               promptMentionComponents={promptMentionComponents}
+              taskMentions={taskMentions}
               taskId={taskId}
               worktreePath={worktreePath}
               onOpenFile={onOpenFile}
@@ -104,13 +185,17 @@ function CollapsedInstructions({
 
 function MessageSegments({
   content,
+  downloadSource = content,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
 }: {
   content: string;
+  downloadSource?: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
@@ -140,13 +225,14 @@ function MessageSegments({
             <BoundedMessagePreview
               key={`text-${index}`}
               source={segment.content}
-              downloadSource={content}
+              downloadSource={downloadSource}
               fileName="kandev-message.txt"
               preview={preview}
               renderContent={(previewContent) => (
                 <UserMessageMarkdown
                   content={previewContent}
                   promptMentionComponents={promptMentionComponents}
+                  taskMentions={taskMentions}
                   taskId={taskId}
                   worktreePath={worktreePath}
                   onOpenFile={onOpenFile}
@@ -167,12 +253,48 @@ function MessageSegments({
             testId={isMove ? "workflow-move-instructions-toggle" : "workflow-instructions-toggle"}
             instructions={segment.content}
             promptMentionComponents={promptMentionComponents}
+            taskMentions={taskMentions}
             taskId={taskId}
             worktreePath={worktreePath}
             onOpenFile={onOpenFile}
           />
         );
       })}
+    </div>
+  );
+}
+
+function CoordinatorAboutMessage({
+  id,
+  remainder,
+  content,
+  promptMentionComponents,
+  taskMentions,
+  taskId,
+  worktreePath,
+  onOpenFile,
+}: {
+  id: string;
+  remainder: string;
+  content: string;
+  promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
+  taskId: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <MessageSegments
+        content={remainder}
+        downloadSource={content}
+        promptMentionComponents={promptMentionComponents}
+        taskMentions={taskMentions}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+      />
+      <CoordinatorAboutTag id={id} />
     </div>
   );
 }
@@ -184,9 +306,11 @@ export function renderUserMessageBody({
   content,
   rawContent,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
+  taskOrigin,
 }: UserMessageBodyOptions): React.ReactNode {
   if (hasContent && showRaw) {
     const raw = rawContent || content;
@@ -201,10 +325,27 @@ export function renderUserMessageBody({
     );
   }
   if (hasContent) {
+    const coordinatorPrefix =
+      taskOrigin === "coordinator" ? parseCoordinatorAboutPrefix(content) : null;
+    if (coordinatorPrefix) {
+      return (
+        <CoordinatorAboutMessage
+          id={coordinatorPrefix.id}
+          remainder={coordinatorPrefix.remainder}
+          content={content}
+          promptMentionComponents={promptMentionComponents}
+          taskMentions={taskMentions}
+          taskId={taskId}
+          worktreePath={worktreePath}
+          onOpenFile={onOpenFile}
+        />
+      );
+    }
     return (
       <MessageSegments
         content={content}
         promptMentionComponents={promptMentionComponents}
+        taskMentions={taskMentions}
         taskId={taskId}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}

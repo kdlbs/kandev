@@ -113,3 +113,77 @@ func TestValidateStage_TokenTotalOverflow_ReturnsOverflow(t *testing.T) {
 		t.Errorf("validateStage = %q, want %q for an overflowing token total", reason, dropReasonOverflow)
 	}
 }
+
+func TestValidateStage_NativeUsageObservation(t *testing.T) {
+	reasoning := int64(80)
+	cacheWrite := int64(4)
+	valid := nativeUsageObservationPayload{
+		SchemaVersion: 1, Source: "response", ProviderThreadID: "thread-1",
+		ProviderTurnID: "provider-turn-1", ProviderResponseID: "response-1",
+		Scope: "child", Completeness: "exact", ReasoningOutputTokens: &reasoning,
+		ReportedCacheWriteTokens: &cacheWrite, PriceSuppressed: true,
+	}
+	tests := map[string]struct {
+		observation nativeUsageObservationPayload
+		turnID      string
+		usage       *promptUsagePayload
+	}{
+		"accept valid response detail": {valid, "turn-1", &promptUsagePayload{OutputTokens: 200}},
+		"reject unknown schema":        {func() nativeUsageObservationPayload { o := valid; o.SchemaVersion = 2; return o }(), "turn-1", &promptUsagePayload{OutputTokens: 200}},
+		"reject missing native thread": {func() nativeUsageObservationPayload { o := valid; o.ProviderThreadID = ""; return o }(), "turn-1", &promptUsagePayload{OutputTokens: 200}},
+		"reject reasoning beyond output": {func() nativeUsageObservationPayload {
+			o := valid
+			tooMany := int64(201)
+			o.ReasoningOutputTokens = &tooMany
+			return o
+		}(), "turn-1", &promptUsagePayload{OutputTokens: 200}},
+		"reject cache write priced as normal input": {func() nativeUsageObservationPayload { o := valid; o.PriceSuppressed = false; return o }(), "turn-1", &promptUsagePayload{OutputTokens: 200}},
+		"reject missing Kandev turn":                {valid, "", &promptUsagePayload{OutputTokens: 200}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			p := &usageEventPayload{
+				UsageEventID: "event-1", TaskID: "task-1", TurnID: tt.turnID, Usage: tt.usage,
+				UsageObservation: &tt.observation,
+			}
+			got := validateStage(p)
+			if name == "accept valid response detail" {
+				if got != "" {
+					t.Fatalf("validateStage = %q, want valid", got)
+				}
+			} else if got != dropReasonInvalid {
+				t.Fatalf("validateStage = %q, want %q", got, dropReasonInvalid)
+			}
+		})
+	}
+}
+
+func TestValidateStage_NativeFallbackRequiresEstimatedAndNoResponseID(t *testing.T) {
+	observation := &nativeUsageObservationPayload{
+		SchemaVersion: 1, Source: "turn_fallback", ProviderThreadID: "thread-1",
+		ProviderTurnID: "provider-turn-1", Scope: "direct", Completeness: "estimated",
+	}
+	for name, usage := range map[string]*promptUsagePayload{
+		"estimated fallback":     {InputTokens: 12, Estimated: true},
+		"non-estimated fallback": {InputTokens: 12},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := &usageEventPayload{UsageEventID: "event-1", TaskID: "task-1", TurnID: "turn-1", Usage: usage, UsageObservation: observation}
+			want := ""
+			if !usage.Estimated {
+				want = dropReasonInvalid
+			}
+			if got := validateStage(p); got != want {
+				t.Fatalf("validateStage = %q, want %q", got, want)
+			}
+		})
+	}
+	response := *observation
+	response.ProviderResponseID = "response-1"
+	if got := validateStage(&usageEventPayload{
+		UsageEventID: "event-2", TaskID: "task-1", TurnID: "turn-1",
+		Usage: &promptUsagePayload{InputTokens: 12, Estimated: true}, UsageObservation: &response,
+	}); got != dropReasonInvalid {
+		t.Fatalf("response-bearing fallback validateStage = %q, want %q", got, dropReasonInvalid)
+	}
+}

@@ -3,6 +3,11 @@
 This is the frozen interface every frontend + example task builds against. Do not
 diverge without updating this file.
 
+Remote executor providers are a server-side Go/gRPC plugin capability. They do
+not add browser APIs or grants. See the
+[remote executor provider contract](GRPC-CONTRACT.md#remote-executor-providers)
+and [manifest declarations](../../public/plugins-manifest.md#remote-executor-providers).
+
 ## Loading model
 
 1. Backend boot payload gains `plugins: ActivePlugin[]` where
@@ -119,6 +124,13 @@ interface PluginHostApi {
     baseUrl: string;
   };
   ui: PluginUIApi; // named curated host components; no open Record index
+  conversation: PluginConversationApi;
+  // Optional on older hosts. Browser reads use the authenticated task API and
+  // return bounded canonical projections; they do not expose app-store state.
+  queries?: PluginHostQueriesApi;
+  // Optional on older hosts. Issues a single-use receipt after native
+  // session.control authorization for a pending human interaction.
+  interactions?: PluginHostInteractionsApi;
   // Plugin-scoped locale and translation API. Components use the reactive
   // hook; registry getters may use the imperative translator.
   i18n: {
@@ -154,6 +166,8 @@ interface PluginHostApi {
   // (mounted once at the app root with its own tooltip provider and isolated
   // behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
+  // Closing restores focus to an available opener; nested modals keep focus
+  // inside the surviving surface.
   openModal(options: PluginModalOptions): PluginModalHandle;
   // Opens Kandev's native one-field task change-request linking workflow.
   // Provider code supplies copy, parsing, and mutation only; the host owns
@@ -311,7 +325,7 @@ interface PluginModalOptions {
 }
 
 interface PluginModalHandle {
-  close(): void; // closes this modal instance; no-op if already closed
+  close(): void; // closes this instance and restores focus when its opener remains available
 }
 
 interface PluginTaskLinkDialogOptions {
@@ -816,7 +830,7 @@ notification to the current plugin generation and task-panel session context.
       retry(): void;
     }
 
-    interface PluginSessionTurnsState {
+interface PluginSessionTurnsState {
       turns: readonly PluginConversationTurn[];
       loading: boolean;
       hydrated: boolean;
@@ -959,9 +973,8 @@ store or writes conversation history.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
 // the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
-// renders as an icon button in the sidebar footer's icon row and as a
-// labelled row in the phone menu's Utilities group, subject to the footer's
-// inline budget — an over-budget item is reached through the footer's
+// renders as a labelled item in the desktop footer's utilities menu and as a
+// labelled row in the phone menu's Utilities group. All desktop items use the
 // overflow menu instead of an inline button; "settings" is accepted but
 // renders on no surface. Hosts predating a section value, or seeing an
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
@@ -984,6 +997,186 @@ interface NavItem {
   path: string;
   icon?: PluginIcon;
   section?: PluginNavSection;
+}
+
+interface PluginTaskStatusSnapshot {
+  taskId: string;
+  title: string;
+  state: string;
+  workflowStepId?: string;
+  statusSummary?: {
+    revision: number;
+    foregroundActivity?: string;
+    activeSubagentCount?: number;
+    queuedPromptCount?: number;
+    completionGate?: { verifiedCount: number; criteriaCount: number; blocked: boolean };
+    activeError?: { preview: string; category?: string };
+  } | null;
+}
+
+interface PluginTaskUsageSnapshot {
+  taskId: string;
+  sessionId?: string;
+  tokensIn: number;
+  tokensCachedRead: number;
+  tokensCachedWrite: number;
+  tokensOut: number;
+  tokensThought: number;
+  tokensTotal: number;
+  /** Integer hundredths of a cent. */
+  costSubcents: number;
+  eventCount: number;
+  estimatedEventCount: number;
+  unpricedEventCount: number;
+  outputTokensComplete: boolean;
+  firstEventAt?: string | null;
+  lastEventAt?: string | null;
+}
+
+interface PluginQueryState<Value> {
+  data: Value | null;
+  loading: boolean;
+  error: string | null;
+  refetch(): Promise<void>;
+}
+
+interface PluginHostQueriesApi {
+  useTaskStatus(taskId: string | null): PluginQueryState<PluginTaskStatusSnapshot>;
+  useTaskUsage(taskId: string | null, sessionId?: string | null): PluginQueryState<PluginTaskUsageSnapshot>;
+}
+
+interface PluginManagedConversationSnapshot {
+  workspaceId: string;
+  instanceKey: string;
+  taskId: string;
+  sessionId: string | null;
+  revision: number;
+  sessionResourceVersion: string;
+  executionId?: string;
+  sessionState?: string;
+  state: "loading" | "ready" | "paused" | "disconnected" | "revoked" | "unsupported" | "unavailable" | "detached";
+  readOnly?: boolean;
+  statusReason?: string;
+  recoverySupported?: boolean;
+  recoveryReason?: string;
+  pendingInteractions: readonly PluginManagedConversationInteraction[];
+}
+
+interface PluginManagedConversationOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+interface PluginManagedConversationQuestion {
+  id: string;
+  title: string;
+  prompt?: string;
+  options?: readonly PluginManagedConversationOption[];
+}
+
+interface PluginManagedConversationClarificationAnswer {
+  questionId: string;
+  selectedOptions?: readonly string[];
+  customText?: string;
+}
+
+interface PluginManagedConversationInputIntent {
+  requestId: string;
+  idempotencyKey: string;
+  occurrenceKey: string;
+  origin: "human";
+  payload: string;
+}
+
+interface PluginHostV2ManagedAgentInputReceipt {
+  hostInputId: string;
+  occurrenceKey: string;
+  sequence: number;
+  origin: "human" | "automation" | "periodic" | "interaction";
+  payload: string;
+  conversationRevision: number;
+  state: "accepted" | "running" | "completed" | "failed" | "cancelled" | "uncertain";
+  executionId: string;
+}
+
+interface PluginManagedConversationController {
+  getStatus(): Promise<PluginManagedConversationSnapshot>;
+  listInputs(input: { sequenceCursor: number; limit: number }): Promise<{
+    inputs: readonly PluginHostV2ManagedAgentInputReceipt[];
+    nextSequenceCursor: number;
+    hasMore: boolean;
+  }>;
+  enqueue(input: PluginManagedConversationInputIntent & { expectedConversationRevision: number }): Promise<{ receipt: PluginHostV2ManagedAgentInputReceipt }>;
+  cancelInput(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    hostInputId: string;
+    expectedExecutionId?: string;
+  }): Promise<{ receipt: PluginHostV2ManagedAgentInputReceipt }>;
+  setPaused(input: { requestId: string; idempotencyKey: string; expectedConversationRevision: number; paused: boolean }): Promise<PluginManagedConversationSnapshot>;
+  recover(input: {
+    requestId: string;
+    idempotencyKey: string;
+    expectedConversationRevision: number;
+    expectedSessionResourceVersion: string;
+    expectedExecutionId: string;
+  }): Promise<PluginManagedConversationSnapshot>;
+  respondToPermission(input: {
+    requestId: string; interactionId: string; expectedResourceVersion: string;
+    optionId?: string; cancelled?: boolean; humanResponseReceiptId: string;
+  }): Promise<void>;
+  answerClarification(input: {
+    requestId: string; interactionId: string; expectedResourceVersion: string;
+    answers: readonly PluginManagedConversationClarificationAnswer[]; humanResponseReceiptId: string;
+  }): Promise<void>;
+}
+
+interface PluginManagedConversationInteraction {
+  id: string;
+  kind: "permission" | "clarification";
+  title: string;
+  context?: string;
+  expectedResourceVersion: string;
+  options?: readonly PluginManagedConversationOption[];
+  questions?: readonly PluginManagedConversationQuestion[];
+  agentDisconnected?: boolean;
+}
+
+interface PluginWorkspaceAgentChatProps {
+  conversation: PluginManagedConversationSnapshot;
+  controller: PluginManagedConversationController;
+  instances?: readonly { key: string; label: string }[];
+  onSelectInstance?(instanceKey: string): void;
+  tasksPanel?: React.ReactNode;
+  outcomesPanel?: React.ReactNode;
+  onStatus?(status: PluginManagedConversationSnapshot): void;
+}
+
+interface PluginHumanInteractionResponseInput {
+  workspaceId: string;
+  interactionId: string;
+  expectedResourceVersion: string;
+  response:
+    | { kind: "permission"; optionId: string; cancelled?: false }
+    | { kind: "permission"; optionId?: never; cancelled: true }
+    | { kind: "clarification"; answers: readonly PluginManagedConversationClarificationAnswer[] };
+}
+
+interface PluginHostInteractionsApi {
+  issueResponseReceipt(input: PluginHumanInteractionResponseInput): Promise<{
+    id: string;
+    interactionId: string;
+    resourceVersion: string;
+    expiresAt: string;
+  }>;
+}
+
+interface PluginUIApi {
+  WorkspaceAgentChat: React.ComponentType<PluginWorkspaceAgentChatProps>;
+  WorkspaceTaskStatus: React.ComponentType<{ taskId: string }>;
+  WorkspaceTaskUsage: React.ComponentType<{ taskId: string; sessionId?: string | null }>;
 }
 
 // Configuration for the kandev-style title bar the host renders above a plugin
@@ -1067,6 +1260,8 @@ interface PluginRegistry {
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
   // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // Only create-mode "task-create-input-actions" receives
+  // `registerTaskCreatedHandler`; it is absent from edit and new-session slots.
   // These composer slots, both topbars, sidebar workspace actions, and both
   // status-bar slots support host.ui.Action and ActionGroup. Existing raw
   // components remain valid and retain their current appearance.
@@ -1134,9 +1329,11 @@ interface PluginRegistry {
   // registered by the plugin currently being viewed, so your card appears on
   // your own settings page and never on another plugin's — no per-id gating
   // needed in your component.
-  registerComponent(
+  // `Props` can provide an imported SDK slot contract such as
+  // `PluginComposerSlotProps` instead of narrowing `slotProps` from `unknown`.
+  registerComponent<Props = { slotProps?: unknown }>(
     slot: string,
-    Component: React.ComponentType<{ slotProps?: unknown }>,
+    Component: React.ComponentType<Props>,
   ): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
@@ -1422,6 +1619,17 @@ interface PluginReviewPanelProps {
 
 type PluginPresentation = "desktop" | "mobile";
 
+interface PluginTaskCreatedIdentity {
+  readonly id: string;
+  readonly workspace_id: string;
+}
+type PluginTaskCreatedHandler = (
+  task: PluginTaskCreatedIdentity,
+) => void | Promise<void>;
+type RegisterPluginTaskCreatedHandler = (
+  handler: PluginTaskCreatedHandler,
+) => () => void;
+
 type PluginComposerSurface =
   | "task-chat"
   | "quick-chat"
@@ -1446,6 +1654,13 @@ interface PluginComposerSlotProps {
   submittable: boolean;
   disabledReason?: string;
   composer: PluginComposerCapability;
+  /**
+   * Create-mode task-create-input-actions only. Registrations belong to one
+   * open cycle and receive a frozen task identity after successful creation.
+   * Cleanup unregisters the handler; close or replacement revokes that cycle.
+   * Handler errors are logged and do not change or delay task creation.
+   */
+  registerTaskCreatedHandler?: RegisterPluginTaskCreatedHandler;
 }
 type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
 interface PluginTaskPanelConversationCapability {
@@ -1708,16 +1923,22 @@ logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 
 ### Task-list facets
 
-`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
-Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
-color? }[]`; `subscribe` invalidates the loaded page. Return each value at most once for a task,
-and keep one label and color for a value across all tasks. Facet sorting uses the first value label
-after a case-insensitive alphabetical comparison. Facets are page-local: no facet selection is
-persisted or sent to the backend. The host catches callback errors and revokes registrations and
-active subscriptions when the owning plugin unloads. A task with multiple values appears in each
-matching group; a task without a value appears in the host's `Ungrouped` section. Parent/child
-indentation is preserved only within a group both tasks match, so a matching child without its
-parent is rendered at that group's root.
+`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice after the built-in
+`/tasks` Sort and Group options. `getValues(context: TaskListFacetContext)` synchronously returns
+`{ value, label, color? }[]` for `{ taskId, workspaceId? }`; `subscribe` invalidates the loaded
+page. The facet label and value labels come from the plugin verbatim. Return each value at most
+once for a task, and keep one label and color for a value across all tasks. An entry with an
+empty label or value is ignored. Facet sorting orders the loaded page by each task's alphabetically first
+value label, case-insensitively, with tasks without values last. A task with multiple values
+appears in each matching group; a task without a value appears in the trailing `Unassigned`
+section. Parent/child indentation is rebuilt within each section.
+
+The host stores a facet selection as `facet:<pluginId>:<facetId>` in the existing
+`tasks_list_sort` or `tasks_list_group` user preference and the `/tasks` query. A facet identifier
+is never sent to a task-list query; ordering and grouping by values remain page-local. If the
+plugin is unavailable, the list and controls temporarily use their built-in defaults while
+the saved selection remains intact and resumes when the plugin registers again. The host
+catches callback errors and revokes registrations and active subscriptions on unload.
 
 ## Registry internals (host side)
 
@@ -1729,8 +1950,8 @@ re-render when registrations change. Every registration records the owning
 `getSettingsRoutes()`, `getSlotComponents(slot)`, `getWsHandlers(action)`,
 `getPluginName(pluginId)` (display name recorded by `forPlugin(id, name)`, used
 for derived page-chrome titles), `getTaskPanels()` / `getTaskPanel(pluginId, id)`,
-and `getTaskMenuActions(group?)`. `unregisterWsHandler(pluginId, action, handler)`
-removes exactly one WS handler (used by `host.storage.subscribe`'s returned
+and `getTaskMenuActions(group?)`, and `getTaskListFacets()` (each facet with its owning plugin id).
+`unregisterWsHandler(pluginId, action, handler)` removes exactly one WS handler (used by `host.storage.subscribe`'s returned
 unsubscribe) without disturbing the plugin's other registrations.
 
 Before `initialize`, the loader records `ActivePlugin.repositoryProviderIds` for the
@@ -1794,6 +2015,31 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   `user.settings.updated`).
 
 ## Security posture (documented, enforced where cheap)
+
+Backend exact commands use the optional Go `pluginsdk.ExactHost` extension. The
+frontend `PluginHostApi` does not expose privileged Host gRPC calls. The
+`PluginHostV2*` TypeScript interfaces are data contracts for a plugin's own
+backend-to-UI projection; they do not confer authority. See the
+[gRPC Host v2 contract](GRPC-CONTRACT.md#host-v2-exact-task-update) for exact
+task updates, source-identified creation, labels, human assignment, workflow
+moves, archive, and task completion criteria/evidence. See [task completion gates](GRPC-CONTRACT.md#host-v2-task-completion-gates) and [managed conversation lifetime](GRPC-CONTRACT.md#host-v2-managed-conversation-lifetime)
+for installation-scoped identity, revision checks, workspace approval, and
+retention behavior. Go plugins use the exact Host v2 methods for durable managed
+conversation input; the browser API does not expose these privileged calls. See
+[managed conversation inputs](GRPC-CONTRACT.md#host-v2-managed-conversation-inputs)
+for receipt, cancellation, and immediate-dispatch behavior. Go plugins can also
+manage installation-owned schedules with separate automation grants; see
+[managed conversation schedules](GRPC-CONTRACT.md#host-v2-managed-conversation-schedules)
+for schedule ownership, revision, delivery, and portable-binding rules. They can also
+use the optional snapshot-bound [exact workspace observation contract](GRPC-CONTRACT.md#host-v2-exact-workspace-observations)
+to reconcile tasks, sessions, interactions, sanitized messages, relations,
+pending moves, change-request evidence, and usage. These reads do not create a
+privileged browser API; a plugin must project any data its UI needs through its
+own backend. Exact run, stop, recovery, transition cancellation, and provider
+mode commands use the workspace-approved execution extension. Exact permission
+and clarification responses also require a short-lived human response receipt
+from the authenticated native UI; legacy v1 response methods return
+`PermissionDenied`. See [execution controls and human responses](GRPC-CONTRACT.md#host-v2-execution-controls-and-human-responses).
 
 Plugin JS runs in the kandev origin with store access — this is the accepted
 tradeoff of option C. v1 mitigations: only **active, operator-installed** plugins

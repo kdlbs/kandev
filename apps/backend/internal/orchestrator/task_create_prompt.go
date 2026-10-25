@@ -770,6 +770,13 @@ func (s *Service) launchInitialCreatePrompt(
 	initialReq.SessionID = admission.SessionID
 	initialReq.InitialCreatePrompt = false
 	autoStart := initialReq.AutoStart || initialReq.ActivationSource == LaunchActivationSourceSessionOpen
+	beforeAdmission, accepted, callbackErr := s.initialSubmissionDispatchCallbacks(
+		ctx, initialReq.TaskID, admission.SessionID, initialReq.Prompt,
+		initialReq.PlanMode, initialReq.Attachments,
+	)
+	if callbackErr != nil {
+		return nil, callbackErr
+	}
 	execution, err := s.startCreatedSession(
 		ctx,
 		initialReq.TaskID,
@@ -782,7 +789,11 @@ func (s *Service) launchInitialCreatePrompt(
 		initialReq.Attachments,
 		nil,
 		"",
-		startCreatedSessionOptions{initialCreatePrompt: true},
+		startCreatedSessionOptions{
+			initialCreatePrompt:     true,
+			beforeProviderAdmission: beforeAdmission,
+			onInitialPromptAccepted: accepted,
+		},
 	)
 	if err != nil {
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {

@@ -7,6 +7,7 @@ import {
   makeEmptyForm,
   maxInflightTasksString,
   parseMaxInflightTasks,
+  switchWatchWorkspace,
   type FormState,
 } from "./linear-issue-watch-form";
 import type { LinearIssueWatch } from "@/lib/types/linear";
@@ -130,5 +131,49 @@ describe("sortBy form mapping", () => {
 
   it("falls back to the empty default for a legacy watch with no sortBy", () => {
     expect(watchForm({}).sortBy).toBe("");
+  });
+});
+
+describe("project filter", () => {
+  // @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.3
+  it("round-trips stored projectIds through the form into the payload", () => {
+    const form = watchForm({ filter: { teamKey: "ENG", projectIds: ["p1", "p2"] } });
+    expect(form.projectIds).toEqual(["p1", "p2"]);
+    expect(buildWatchPayload(form)?.filter.projectIds).toEqual(["p1", "p2"]);
+  });
+
+  // @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.2
+  it("treats projects alone as a non-empty filter", () => {
+    expect(isWatchFormReady(readyForm({ teamKey: "", projectIds: ["p1"] }))).toBe(true);
+    expect(isWatchFormReady(readyForm({ teamKey: "", projectIds: [] }))).toBe(false);
+  });
+
+  it("omits projectIds from the payload when none are selected", () => {
+    expect(buildWatchPayload(readyForm())?.filter.projectIds).toBeUndefined();
+    expect(watchForm({ filter: { teamKey: "ENG" } }).projectIds).toEqual([]);
+  });
+});
+
+describe("switchWatchWorkspace", () => {
+  it("clears the previous workspace's Linear IDs and keeps the team key", () => {
+    const form = readyForm({
+      stateIds: ["s1"],
+      labelIds: ["l1"],
+      projectIds: ["p1"],
+      creatorId: "u1",
+      repositoryId: "repo-1",
+    });
+    const next = switchWatchWorkspace(form, "ws-2");
+    expect(next).toMatchObject({
+      workspaceId: "ws-2",
+      teamKey: "ENG",
+      stateIds: [],
+      labelIds: [],
+      projectIds: [],
+      creatorId: "",
+      workflowId: "",
+      repositoryId: "",
+    });
+    expect(switchWatchWorkspace(form, "ws-1")).toBe(form);
   });
 });

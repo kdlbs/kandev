@@ -179,6 +179,8 @@ var cronParser = cron.NewParser(
 // nextCronFire computes the next time the given cron expression fires strictly
 // after `after`, interpreted in the given timezone. An empty timezone means
 // UTC, so scheduling is deterministic regardless of the host's local clock.
+// A calendar schedule with no occurrence within cron's five-year search
+// horizon returns an error.
 //
 // Wall-clock schedules honor the timezone's DST transitions (a "0 9 * * *"
 // daily schedule always fires at 09:00 local, whether that is 13:00 or 14:00
@@ -228,6 +230,9 @@ func nextCronFire(expr, timezone string, after time.Time) (time.Time, error) {
 		// The repeated window is bounded by the offset delta, so this advances
 		// at most one candidate per matching schedule slot in that window.
 		candidate = spec.Next(candidate)
+	}
+	if candidate.IsZero() {
+		return time.Time{}, fmt.Errorf("cron schedule has no occurrence within the five-year search horizon")
 	}
 	return candidate, nil
 }

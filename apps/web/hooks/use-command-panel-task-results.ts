@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { listTasksByWorkspace } from "@/lib/api";
+import { listTasksByWorkspace, searchTaskConversations } from "@/lib/api";
 import type { CommandPanelMode } from "@/lib/commands/types";
-import type { Task } from "@/lib/types/http";
+import type {
+  ConversationTask as Task,
+  ConversationSearchState,
+} from "@/lib/types/conversation-search";
 import { MODE_COMMANDS, MODE_SEARCH_TASKS } from "@/components/command-panel-results";
 
 /** Task rows previewed alongside the commands in the commands scope. */
@@ -24,6 +27,7 @@ type InlineTaskSearchOptions = {
   steps: { id: string; position: number; show_in_command_panel?: boolean }[];
   setTaskResults: (tasks: Task[]) => void;
   setIsSearching: (searching: boolean) => void;
+  setConversationState?: (state: ConversationSearchState) => void;
 };
 
 function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
@@ -97,6 +101,7 @@ async function fetchMatchingTasks(
 
 export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
   const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
+  const { setConversationState } = opts;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const taskScopeRef = useRef(mode);
@@ -117,13 +122,15 @@ export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
 
+    setConversationState?.("ready");
+    if (!open || !workspaceId) {
+      setTaskResults([]);
+      setIsSearching(false);
+      return;
+    }
+
     // No search: load unarchived tasks in the visible workflow steps.
     if (!search.trim()) {
-      if (!open || !workspaceId) {
-        setTaskResults([]);
-        setIsSearching(false);
-        return;
-      }
       setIsSearching(true);
       const controller = new AbortController();
       abortRef.current = controller;
@@ -150,33 +157,22 @@ export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
 
     // Search with < 2 chars: clear results
     if (search.trim().length < 2) {
+      setConversationState?.("query_too_short");
       setTaskResults([]);
       setIsSearching(false);
       return;
     }
 
-    // Search: query API including archived
     setIsSearching(true);
-    debounceRef.current = setTimeout(async () => {
-      if (!workspaceId) {
-        setIsSearching(false);
-        return;
-      }
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const tasks = await fetchMatchingTasks(
-          workspaceId,
-          search.trim(),
-          resultLimit,
-          controller.signal,
-        );
-        if (!controller.signal.aborted) setTaskResults(tasks);
-      } catch {
-        if (!controller.signal.aborted) setTaskResults([]);
-      } finally {
-        if (!controller.signal.aborted) setIsSearching(false);
-      }
+    setTaskResults([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    debounceRef.current = setTimeout(() => {
+      searchTaskSources(
+        { workspaceId, search, setTaskResults, setIsSearching, setConversationState },
+        resultLimit,
+        controller.signal,
+      );
     }, 300);
 
     return () => {
@@ -192,5 +188,72 @@ export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
     stepPositionMap,
     setTaskResults,
     setIsSearching,
+    setConversationState,
   ]);
+}
+
+export function mergeTaskSearchResults(
+  metadata: Task[],
+  conversations: Task[],
+  limit: number,
+): Task[] {
+  const ordered = [
+    ...metadata.filter((task) => !task.archived_at),
+    ...conversations.filter((task) => !task.archived_at),
+    ...metadata.filter((task) => task.archived_at),
+    ...conversations.filter((task) => task.archived_at),
+  ];
+  const seen = new Set<string>();
+  return ordered
+    .filter((task) => {
+      if (seen.has(task.id)) return false;
+      seen.add(task.id);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function searchTaskSources(
+  opts: Pick<
+    InlineTaskSearchOptions,
+    "search" | "setTaskResults" | "setIsSearching" | "setConversationState"
+  > & { workspaceId: string },
+  resultLimit: number,
+  signal: AbortSignal,
+) {
+  const { workspaceId, search, setTaskResults, setIsSearching, setConversationState } = opts;
+  let pending = 2;
+  const settle = () => {
+    pending -= 1;
+    if (!signal.aborted && pending === 0) setIsSearching(false);
+  };
+  let metadata: Task[] = [];
+  let conversations: Task[] = [];
+  const publish = () => {
+    if (!signal.aborted)
+      setTaskResults(mergeTaskSearchResults(metadata, conversations, resultLimit));
+  };
+  void fetchMatchingTasks(workspaceId, search.trim(), resultLimit, signal)
+    .then((tasks) => {
+      metadata = tasks;
+      publish();
+    })
+    .catch(() => {
+      publish();
+    })
+    .finally(settle);
+  setConversationState?.("searching");
+  void searchTaskConversations(workspaceId, search.trim(), resultLimit, {
+    init: { signal: signal },
+  })
+    .then((response) => {
+      if (signal.aborted) return;
+      conversations = response.tasks;
+      setConversationState?.(response.has_more ? "limited" : response.state);
+      publish();
+    })
+    .catch(() => {
+      if (!signal.aborted) setConversationState?.("unavailable");
+    })
+    .finally(settle);
 }

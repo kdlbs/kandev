@@ -44,11 +44,13 @@ A fast task session can change state or persist a reply while the browser is wai
 - **AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-002.8:** Desktop, phone, and task preview shall expose equivalent recovery outcomes. Feedback shall preserve chat access and keyboard focus without horizontal overflow.
 - **AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-002.9:** Phone and coarse-pointer recovery controls shall have touch targets of at least 44 pixels. Progress shall have a localized status announcement.
 - **AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-002.10:** Permission and missing-session failures shall stop automatic retries. A successful empty history response shall still show the normal empty-conversation invitation.
+- **AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-002.11:** A background reconcile of a transcript already on screen, such as the turn-end refresh or a conversation revision-gap recovery, shall show no loading or retrying feedback and shall not shift the transcript. A failed reconcile shall still show unavailable feedback with Retry.
 
 ## Implementation plans
 
 - [Acknowledgement ordering](../../../plans/session-subscription-recovery/plan.md)
 - [Delayed session entry](../../../plans/session-entry-recovery/plan.md)
+- [Silent transcript refresh](../../../plans/silent-transcript-refresh/plan.md)
 
 ## Out of scope
 

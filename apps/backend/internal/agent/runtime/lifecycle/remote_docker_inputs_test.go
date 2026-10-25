@@ -64,7 +64,7 @@ func seedLocalCredential(t *testing.T, body string) agents.Agent {
 func TestRemoteContainerMountsNothing(t *testing.T) {
 	cm := newCMTest(t)
 	cm.kandevHomeDir = "/kandev-home"
-	cm.resolveAgentctlBinary = func() (string, error) {
+	cm.resolveAgentctlBinary = func(context.Context, PrepareProgressCallback) (string, error) {
 		t.Fatal("the remote provider resolved a backend-host agentctl path")
 		return "", nil
 	}

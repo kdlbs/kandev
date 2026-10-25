@@ -5,6 +5,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
+import { getSessionRestartStore } from "@/lib/session/session-restart-state";
 import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
 import type {
   TaskSessionActivityChangedPayload,
@@ -12,6 +13,7 @@ import type {
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
 const QUEUE_STATUS_ACTION = `message.queue.status_changed`;
+const AGENTCTL_READY_ACTION = "session.agentctl_ready";
 const CURRENT_INCARNATION = `incarnation-2`;
 const CURRENT_STATUS_EPOCH = `status-epoch-1`;
 
@@ -32,6 +34,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionAgentctlStatus: vi.fn(),
+    invalidateConfirmedConfigOptions: vi.fn(),
     setResumeSkipped: vi.fn(),
     clearLaunchWarning: vi.fn(),
     setSessionFailureNotification: vi.fn(),
@@ -1098,6 +1101,52 @@ describe("session.state_changed → active session switching with pins", () => {
   });
 });
 
+describe("session.state_changed during restart", () => {
+  // @covers AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.6
+  it.each([true, false])(
+    "preserves only the restarting selection and pin (target pending: %s)",
+    (restartingTarget) => {
+      const old = { id: "s-old", task_id: "t-1", state: "RUNNING" };
+      const sibling = {
+        id: "s-new",
+        task_id: "t-1",
+        state: "WAITING_FOR_INPUT",
+        started_at: "2026-10-19T12:00:00Z",
+      };
+      const store = makeStore({
+        tasks: {
+          activeTaskId: "t-1",
+          activeSessionId: old.id,
+          pinnedSessionId: old.id,
+          lastSessionByTaskId: {},
+        },
+        taskSessions: { items: { [old.id]: old, [sibling.id]: sibling } },
+        taskSessionsByTask: { itemsByTaskId: { "t-1": [old, sibling] } },
+      });
+      getSessionRestartStore(store).setState(
+        new Set([restartingTarget ? old.id : "s-other"]),
+        true,
+      );
+      const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+      handler({
+        id: "restart-cancelled",
+        type: "notification",
+        action: STATE_CHANGED_EVENT,
+        payload: { task_id: "t-1", session_id: old.id, new_state: "CANCELLED" },
+      });
+
+      if (restartingTarget) {
+        expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+        expect(store.setState).not.toHaveBeenCalled();
+      } else {
+        expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", sibling.id);
+        expect(store.setState).toHaveBeenCalled();
+      }
+    },
+  );
+});
+
 describe("session.state_changed → active session handoff on terminal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1447,12 +1496,12 @@ describe("session.state_changed → agentctl ready fallback", () => {
       sessionWorktreesBySessionId: { itemsBySessionId: {} },
       setSessionWorktrees: vi.fn(),
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: {
         task_id: "t-1",
@@ -1484,12 +1533,43 @@ describe("session.state_changed → agentctl ready fallback", () => {
       completeWorkspaceRestoration,
       bumpWorkspaceFilesRefresh,
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
+    });
+
+    expect(completeWorkspaceRestoration).toHaveBeenCalledWith(attempt);
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+  });
+
+  it("clears a failed workspace restore when the matching agentctl becomes ready", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "error",
+      details: "The workspace restore was interrupted.",
+    };
+    const completeWorkspaceRestoration = vi.fn(() => true);
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      completeWorkspaceRestoration,
+      bumpWorkspaceFilesRefresh,
+    });
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
     });
@@ -1557,12 +1637,12 @@ describe("session.state_changed → agentctl ready fallback", () => {
       setWorktree: vi.fn(),
       setSessionWorktrees: vi.fn(),
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: {
         task_id: "t-1",

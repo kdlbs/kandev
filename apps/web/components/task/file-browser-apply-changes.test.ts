@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { act } from "@testing-library/react";
 import type { FileTreeNode } from "@/lib/types/backend";
 
 const requestFileTreeMock = vi.fn();
@@ -22,6 +23,33 @@ const THM_OLD = "thm/old.txt";
 const THM_NEW = "thm/new.txt";
 const SRC_PATH = "src";
 const SRC_COMPONENTS_PATH = `${SRC_PATH}/components`;
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+it("ignores a file-watch refresh after its navigation owner retires", async () => {
+  let release!: (value: { root: FileTreeNode }) => void;
+  requestFileTreeMock.mockReturnValue(
+    new Promise((resolve) => {
+      release = resolve;
+    }),
+  );
+  const setTree = vi.fn();
+  const setLoadState = vi.fn();
+  let current = true;
+  applyFileChanges({
+    client: client(),
+    sessionId: SESSION_ID,
+    expandedPaths: new Set(),
+    changes: [{ path: "", operation: REFRESH_OP }],
+    setTree,
+    setLoadState,
+    isCurrent: () => current,
+  });
+  expect(requestFileTreeMock).toHaveBeenCalledTimes(1);
+  current = false;
+  await act(async () => release({ root: rootChildrenAfter() }));
+  expect(setTree).not.toHaveBeenCalled();
+  expect(setLoadState).not.toHaveBeenCalled();
+});
 
 beforeEach(async () => {
   vi.resetModules();

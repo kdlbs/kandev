@@ -36,9 +36,10 @@ function installComputedAnimationStyles(overrides: Partial<CSSStyleDeclaration> 
   } as CSSStyleDeclaration);
 }
 
-function installAnimate() {
+function makeAnimation() {
   let playState: AnimationPlayState = "running";
-  const animation = {
+  return {
+    effect: {},
     get playState() {
       return playState;
     },
@@ -52,6 +53,10 @@ function installAnimate() {
       playState = "running";
     }),
   } as unknown as Animation;
+}
+
+function installAnimate() {
+  const animation = makeAnimation();
   const animate = vi.fn(() => animation);
   Object.defineProperty(HTMLElement.prototype, "animate", {
     configurable: true,
@@ -200,13 +205,20 @@ describe("CompositorPulse", () => {
     expect(mediaQuery.addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
     setMatches(true);
     expect(animation.cancel).toHaveBeenCalledOnce();
+    expect(animation.effect).toBeNull();
     expect(pulse.style.animation).toBe("");
 
+    const replacement = makeAnimation();
+    animate.mockReturnValueOnce(replacement);
     setMatches(false);
     expect(animate).toHaveBeenCalledTimes(2);
     expect(pulse.style.animation).toBe("none");
+    expect(replacement.effect).not.toBeNull();
+    expect(replacement.cancel).not.toHaveBeenCalled();
 
     unmount();
+    expect(replacement.effect).toBeNull();
+    expect(replacement.cancel).toHaveBeenCalledOnce();
     expect(mediaQuery.removeEventListener).toHaveBeenCalledWith("change", expect.any(Function));
   });
 
@@ -221,6 +233,7 @@ describe("CompositorPulse", () => {
     unmount();
 
     expect(animation.cancel).toHaveBeenCalledOnce();
+    expect(animation.effect).toBeNull();
     expect(pulse.style.animation).toBe("");
   });
 });

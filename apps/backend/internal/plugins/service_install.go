@@ -78,11 +78,21 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	if (hadOldRec && len(oldRec.ExecutorProviders) > 0) || len(result.Manifest.ExecutorProviders) > 0 {
+		s.closeExecutorProviderAdmission(result.Manifest.ID)
+		defer s.reopenExecutorProviderAdmissionIfActive(result.Manifest.ID)
+	}
 	dispatchLock := s.dispatchLocks.lockFor(result.Manifest.ID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 
-	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	if hadOldRec {
+		if err := s.guardExecutorProviderUpgrade(ctx, oldRec, result.Manifest); err != nil {
+			_ = os.RemoveAll(result.InstallPath)
+			return nil, err
+		}
+	}
 	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
 		// pkgtar.Install has already atomically extracted exactly this new
 		// version before manifest-wide active-owner checks can run. Remove
@@ -177,7 +187,21 @@ func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
 	if err != nil {
 		return err
 	}
-	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC(), true)
+	s.approvalEffectMu.Lock()
+	rows, err := ledger.listByInstallation(rec.InstallationID)
+	if err == nil {
+		err = ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC(), true)
+	}
+	s.approvalEffectMu.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := s.invalidateManagedConversationPolicy(rec.InstallationID, row.WorkspaceID); err != nil {
+			return fmt.Errorf("plugins: manifest review could not cancel managed conversations in workspace %s: %w", row.WorkspaceID, err)
+		}
+	}
+	return nil
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version
@@ -372,12 +396,26 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	rec, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	if len(rec.ExecutorProviders) > 0 {
+		s.closeExecutorProviderAdmission(id)
+		defer s.reopenExecutorProviderAdmissionIfActive(id)
+	}
 	dispatchLock := s.dispatchLocks.lockFor(id)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 
-	rec, err := s.Get(id)
+	rec, err = s.Get(id)
 	if err != nil {
+		return err
+	}
+	// The dispatch write lease above drains allocation and cleanup RPCs before
+	// this authoritative inventory check. Keep it before runtime stop and secret
+	// deletion so a rejected uninstall leaves the provider usable for cleanup.
+	if err := s.guardExecutorProviderUninstall(ctx, rec); err != nil {
 		return err
 	}
 	if err := s.cancelAutomationDeliveries(id); err != nil {
@@ -405,6 +443,14 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err := s.deletePluginAgentConversations(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
+	}
+	if rec.InstallationID != "" {
+		if managed := s.managedAgentConversationDeps(); managed != nil {
+			if err := managed.DetachManagedForInstallation(ctx, rec.InstallationID); err != nil {
+				s.reconcileAbortedUninstall(id, wasRunning)
+				return fmt.Errorf("plugins: uninstall aborted, could not detach managed conversation transcripts: %w", err)
+			}
+		}
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)

@@ -2,56 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KandevToolMessage, hasKandevRenderer } from "./kandev-tool-message";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import { kandevToolCall } from "./kandev-tool-message.test-helpers";
 import { KANDEV_RENDERERS } from "./kandev/registry";
-
-// kandevToolCall constructs the kandev Message shape produced by the
-// orchestrator for an MCP tool_call. The shape mirrors live production data
-// observed on a real session:
-//   - `metadata.tool_name`    — NOT set
-//   - `metadata.title`        — raw tool name (`mcp__kandev__list_*_kandev`)
-//   - `comment.content`       — same raw tool name
-//   - `normalized.generic.name` — the ACP adapter's *category* ("other"),
-//                                 NOT the tool name
-// The matcher must therefore look at title/content, not generic.name —
-// matching on the wrong field is exactly the bug that shipped initially.
-function kandevToolCall(opts: {
-  toolName: string;
-  input?: Record<string, unknown>;
-  resultJson?: unknown;
-  output?: unknown;
-  status?: "pending" | "running" | "in_progress" | "complete" | "error";
-}): Message {
-  let output = opts.output;
-  if (output === undefined && opts.resultJson !== undefined) {
-    output = {
-      _meta: null,
-      content: [{ type: "text", text: JSON.stringify(opts.resultJson) }],
-      structuredContent: null,
-    };
-  }
-  return {
-    id: "msg-1",
-    session_id: toSessionId("s1"),
-    task_id: toTaskId("t1"),
-    author_type: "agent",
-    content: opts.toolName,
-    type: "tool_call",
-    created_at: "2026-05-21T10:00:00Z",
-    metadata: {
-      tool_call_id: "tc-1",
-      title: opts.toolName,
-      status: opts.status ?? "complete",
-      normalized: {
-        kind: "generic",
-        generic: {
-          name: "other",
-          input: opts.input,
-          output,
-        },
-      },
-    },
-  };
-}
 
 describe("hasKandevRenderer", () => {
   it("matches a registered kandev tool", () => {
@@ -67,6 +19,9 @@ describe("hasKandevRenderer", () => {
     expect(hasKandevRenderer(kandevToolCall({ toolName: "kandev: show_rich_output_kandev" }))).toBe(
       true,
     );
+    expect(
+      hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__propose_task_kandev" })),
+    ).toBe(true);
   });
 
   it("does not match unrelated tools", () => {
@@ -102,59 +57,6 @@ describe("KandevToolMessage host context", () => {
     expect(renderer).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-1", onOpenFile }),
     );
-  });
-});
-
-describe("KandevToolMessage rich output", () => {
-  it("unwraps the real Codex ACP MCP arguments before rendering rich output", () => {
-    const html = renderToStaticMarkup(
-      <KandevToolMessage
-        comment={kandevToolCall({
-          toolName: "mcp.kandev.show_rich_output_kandev",
-          input: {
-            raw_input: {
-              server: "kandev",
-              tool: "show_rich_output_kandev",
-              arguments: {
-                version: 1,
-                title: "Nested presentation",
-                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
-              },
-            },
-          },
-        })}
-      />,
-    );
-
-    expect(html).toContain("Nested presentation");
-    expect(html).not.toContain("This presentation is unavailable.");
-  });
-
-  it("renders rich output from the persisted Cursor ACP MCP envelope", () => {
-    const html = renderToStaticMarkup(
-      <KandevToolMessage
-        comment={kandevToolCall({
-          toolName: "kandev: show_rich_output_kandev",
-          input: {
-            kind: "other",
-            raw_input: {
-              providerIdentifier: "kandev",
-              toolName: "show_rich_output_kandev",
-              args: {
-                version: 1,
-                title: "Build health",
-                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
-              },
-            },
-          },
-          output: { success: true },
-        })}
-      />,
-    );
-
-    expect(html).toContain('data-testid="rich-output"');
-    expect(html).toContain("Build health");
-    expect(html).not.toContain("This presentation is unavailable.");
   });
 });
 

@@ -97,7 +97,9 @@ test.describe("Command Panel", () => {
     await expect(dialog.getByText("Go to Settings")).toBeVisible({ timeout: 5_000 });
 
     // Should NOT show a "Files" group — file search is now separate
-    await expect(dialog.getByText("Files").first()).not.toBeVisible({ timeout: 2_000 });
+    await expect(
+      dialog.locator("[cmdk-group-heading]").getByText("Files", { exact: true }),
+    ).toHaveCount(0);
   });
 
   test("common aliases find home commands", async ({ testPage }) => {
@@ -252,6 +254,21 @@ test.describe("Command Panel", () => {
       await session.waitForLoad();
       await session.waitForChatIdle({ timeout: 45_000 });
       await fixture.waitForWorktree(apiClient);
+      await expect
+        .poll(
+          async () => {
+            const response = await apiClient.wsRequest<{
+              results: Array<{ repository_name?: string }>;
+            }>("workspace.files.search", {
+              session_id: fixture.sessionId,
+              query: "README.md",
+              limit: 10,
+            });
+            return response.results.map((file) => file.repository_name ?? "").sort();
+          },
+          { timeout: 45_000, message: "root and nested submodule file inventories are ready" },
+        )
+        .toEqual(["", "vendor/outer", "vendor/outer/vendor/inner"]);
 
       await openFileSearch(testPage);
       const dialog = commandDialog(testPage);
@@ -259,7 +276,7 @@ test.describe("Command Panel", () => {
       await dialog.getByRole("combobox").fill("README.md");
 
       const groups = dialog.getByTestId("file-search-repo-group");
-      await expect(groups).toHaveCount(3, { timeout: 45_000 });
+      await expect(groups).toHaveCount(3);
       await expect(
         dialog.locator('[data-testid="file-search-repo-group"][data-repository=""]'),
       ).toBeVisible();

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -63,13 +64,27 @@ const (
 	PrepareStepSkipped   PrepareStepStatus = "skipped"
 )
 
+const PrepareStepKindRemoteHelperDownload = "remote_helper_download"
+
+const (
+	PrepareStepKindAgentMCPDiscovery    = "agent_mcp_discovery"
+	PrepareStepKindAgentMCPSelection    = "agent_mcp_selection"
+	PrepareStepKindAgentMCPCredentials  = "agent_mcp_credentials"
+	PrepareStepKindAgentMCPApproval     = "agent_mcp_approval"
+	PrepareStepKindAgentMCPVerification = "agent_mcp_verification"
+)
+
 // RepoPrepareSpec describes one repository for multi-repo environment preparation.
 // Mirrors the per-repo prepare fields that EnvPrepareRequest historically
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
-	TaskRepositoryID   string
-	RepositoryID       string
+	TaskRepositoryID string
+	RepositoryID     string
+	// CopyFiles is the repository's seeding spec. Carried here only so the
+	// preparer can report a seed the agent cannot reach in a multi-repository
+	// layout; materialization itself still happens in the worktree manager.
+	CopyFiles          string
 	RepositoryPath     string
 	RepoName           string
 	BaseBranch         string
@@ -109,6 +124,9 @@ type RepoPrepareSpec struct {
 	// persisted environment metadata. It may be non-empty even when BranchSlug
 	// is empty so primary branches can keep the flat legacy path.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
 }
 
 // EnvPrepareRequest contains the parameters for environment preparation.
@@ -164,6 +182,13 @@ type EnvPrepareRequest struct {
 	// It may be non-empty when BranchSlug is empty to preserve a flat path.
 	// Empty leaves the synthesized spec identity empty; worktree code falls back.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
+	// WorkspaceLayout controls the effective agent root for Worktree launches.
+	// Empty preserves legacy behavior until a validated environment row supplies
+	// its classification.
+	WorkspaceLayout string
 
 	// Repositories carries one entry per repository when the request is
 	// multi-repo. When non-empty it is the source of truth; the legacy
@@ -219,15 +244,21 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
-	Name          string            `json:"name"`
-	Command       string            `json:"command,omitempty"`
-	Status        PrepareStepStatus `json:"status"`
-	Output        string            `json:"output,omitempty"`
-	Error         string            `json:"error,omitempty"`
-	Warning       string            `json:"warning,omitempty"`
-	WarningDetail string            `json:"warning_detail,omitempty"`
-	StartedAt     *time.Time        `json:"started_at,omitempty"`
-	EndedAt       *time.Time        `json:"ended_at,omitempty"`
+	Name           string                         `json:"name"`
+	Kind           string                         `json:"kind,omitempty"`
+	MCPProvider    string                         `json:"mcp_provider,omitempty"`
+	MCPServerID    string                         `json:"mcp_server_id,omitempty"`
+	Diagnostic     *mcpconfig.NativeMCPDiagnostic `json:"mcp_diagnostic,omitempty"`
+	RemotePlatform string                         `json:"remote_platform,omitempty"`
+	FailureCode    string                         `json:"failure_code,omitempty"`
+	Command        string                         `json:"command,omitempty"`
+	Status         PrepareStepStatus              `json:"status"`
+	Output         string                         `json:"output,omitempty"`
+	Error          string                         `json:"error,omitempty"`
+	Warning        string                         `json:"warning,omitempty"`
+	WarningDetail  string                         `json:"warning_detail,omitempty"`
+	StartedAt      *time.Time                     `json:"started_at,omitempty"`
+	EndedAt        *time.Time                     `json:"ended_at,omitempty"`
 }
 
 // RepoWorktreeResult is the per-repository outcome of environment preparation.
@@ -236,6 +267,7 @@ type PrepareStep struct {
 type RepoWorktreeResult struct {
 	TaskRepositoryID          string `json:"task_repository_id,omitempty"`
 	RepositoryID              string `json:"repository_id"`
+	WorkspaceRelativePath     string `json:"workspace_relative_path,omitempty"`
 	BranchSlug                string `json:"branch_slug,omitempty"`
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
@@ -251,15 +283,18 @@ type RepoWorktreeResult struct {
 
 // EnvPrepareResult contains the result of environment preparation.
 type EnvPrepareResult struct {
-	Success       bool          `json:"success"`
-	Steps         []PrepareStep `json:"steps"`
-	WorkspacePath string        `json:"workspace_path,omitempty"`
-	ErrorMessage  string        `json:"error_message,omitempty"`
-	Duration      time.Duration `json:"duration"`
+	Success              bool          `json:"success"`
+	Steps                []PrepareStep `json:"steps"`
+	PreparationID        string        `json:"preparation_id,omitempty"`
+	PreparationStartedAt time.Time     `json:"preparation_started_at,omitempty"`
+	WorkspacePath        string        `json:"workspace_path,omitempty"`
+	ErrorMessage         string        `json:"error_message,omitempty"`
+	Duration             time.Duration `json:"duration"`
 
 	// Worktree fields (populated when worktree preparer runs).
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
 	WorktreeID                string `json:"worktree_id,omitempty"`
+	WorktreePath              string `json:"worktree_path,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
 	WorktreeBranchOwner       string `json:"-"`
 	WorktreeIntegrationRef    string `json:"-"`
@@ -326,6 +361,26 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 			"name": step.Name, "status": string(step.Status),
 			"output": output, "command": step.Command,
 		}
+		if step.Kind != "" {
+			entry["kind"] = step.Kind
+		}
+		if step.MCPProvider != "" {
+			entry["mcp_provider"] = step.MCPProvider
+		}
+		if step.MCPServerID != "" {
+			entry["mcp_server_id"] = step.MCPServerID
+		}
+		if step.RemotePlatform != "" {
+			entry["remote_platform"] = step.RemotePlatform
+		}
+		if step.FailureCode != "" {
+			entry["failure_code"] = step.FailureCode
+		}
+		if step.Diagnostic != nil {
+			if diagnostic := mcpconfig.NormalizeNativeMCPDiagnostic(step.Diagnostic, step.Diagnostic.Operation); diagnostic != nil {
+				entry["mcp_diagnostic"] = diagnostic
+			}
+		}
 		if step.Error != "" {
 			entry["error"] = step.Error
 		}
@@ -343,11 +398,18 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 		}
 		steps = append(steps, entry)
 	}
-	return map[string]interface{}{
+	serialized := map[string]interface{}{
 		"status": status, "steps": steps,
 		"error_message": result.ErrorMessage,
 		"duration_ms":   result.Duration.Milliseconds(),
 	}
+	if result.PreparationID != "" {
+		serialized["preparation_id"] = result.PreparationID
+	}
+	if !result.PreparationStartedAt.IsZero() {
+		serialized["preparation_started_at"] = result.PreparationStartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return serialized
 }
 
 // PreparerRegistry maps executor types (models.ExecutorType — the "local",

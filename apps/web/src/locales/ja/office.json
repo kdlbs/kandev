@@ -305,6 +305,7 @@
   "executorConfigurationSaved": "実行設定を保存しました",
   "executorPreference": "実行設定の優先設定",
   "executorType": "実行者タイプ",
+  "executionProfile": "実行プロファイル",
   "existingConfigurationFound": "既存の設定が見つかりました",
   "expand": "展開",
   "export": "エクスポート",
@@ -564,7 +565,7 @@
   "overrideTheWorkspaceTierOrProvider": "このエージェントのワークスペースティアまたはプロバイダー順序を上書きします。",
   "overrideWakeReasonTiers": "ウェイク理由ティアを上書き",
   "overrideWakeReasonTiersHelp": "これはまれです。バックグラウンド作業にこのエージェント専用の異なる動作が必要な場合にのみ上書きしてください。たとえば、定常的なチェックでも Frontier を使う必要があるセキュリティ重視のエージェントなどです。ほとんどのエージェントはワークスペースポリシーを継承すべきです。",
-  "overrideWhichModelTierRunsFor": "特定の種類のエージェント作業に対して、どのモデルティアを実行するかを上書きします。多くのユーザーはこれをワークスペースの既定値のままにします。バックグラウンドタスクは Economy、通常の実行は Balanced です。ハートビート、定期実行、予算アラートは常にバックグラウンドで動作するため、ここでより安価なティアを使うと、重要な作業に影響を与えずにコストを大幅に削減できます。",
+  "overrideWhichModelTierRunsFor": "ワークスペースの既定値を使うか、エージェントの作業の種類ごとにモデル階層を選択します。低コストのモデルでは結果が異なる場合があります。",
   "overrideWorkspacePolicyForThisAgent": "このエージェントのワークスペースポリシーを上書き",
   "overrideWorkspaceProviderOrder": "ワークスペースのプロバイダー順序を上書き",
   "overrideWorkspaceTier": "ワークスペースティアを上書き",
@@ -578,6 +579,7 @@
   "pauseAgent": "エージェントを一時停止",
   "pauseReasonPlaceholder": "このワークスペースを一時停止する理由は何ですか？",
   "pauseRequestFailed": "一時停止状態の更新に失敗しました。もう一度お試しください。",
+  "pauseStateLoading": "一時停止状態を読み込み中...",
   "pauseStateStale": "古い可能性があります",
   "pauseStateUnavailable": "一時停止状態を取得できません。ワークスペースが一時停止中かどうかは不明です。",
   "pauseUnavailable": "ワークスペースが選択されていません。",
@@ -721,7 +723,6 @@
   "routeOutcomeSkippedUserAction": "ユーザー操作のためスキップ",
   "routineActivated": "ルーチンを有効化しました",
   "routineCreated": "ルーチンを作成しました",
-  "routineCreatedWithoutSchedule": "ルーチンはスケジュールなしで作成されました: {{error}}",
   "routineDeleted": "ルーチンを削除しました",
   "routineFired": "ルーチンが実行されました",
   "routineNotFiring": "実行できません。ルーチンのステータスは {{status}} です",
@@ -1017,5 +1018,9 @@
   "failedToLoadRouteAttempts": "ルート試行の読み込み失敗",
   "failedToLoadRoutingConfig": "ルーティング設定の読み込み失敗",
   "failedToLoadRoutingPreview": "ルーティングプレビューの読み込み失敗",
-  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗"
+  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗",
+  "openSessionRecovery": "セッション復旧を開く",
+  "sessionRecoveryDescription": "この実行はセッションが復旧されるまで保留されています。Kandev はプロンプトを自動的に再送信しません。",
+  "sessionRecoveryReason": "理由: {{reason}}",
+  "sessionRecoveryRequired": "セッションの復旧が必要"
 }

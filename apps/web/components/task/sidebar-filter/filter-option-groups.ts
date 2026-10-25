@@ -14,3 +14,15 @@ export function buildOptionGroups<T extends { group?: string }>(
 export function hasGroupedOptions(options: Array<{ group?: string }>): boolean {
   return options.some((o) => o.group);
 }
+
+export function partitionSelectedOptions<T extends { value: string }>(
+  options: readonly T[],
+  selectedValues: ReadonlySet<string>,
+): { selected: T[]; unselected: T[] } {
+  const selected: T[] = [];
+  const unselected: T[] = [];
+  for (const option of options) {
+    (selectedValues.has(option.value) ? selected : unselected).push(option);
+  }
+  return { selected, unselected };
+}

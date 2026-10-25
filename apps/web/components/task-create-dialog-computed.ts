@@ -24,6 +24,7 @@ import {
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import { isExecutorProfileProviderAvailable } from "@/lib/executor-provider-display";
 import type { RemoteAuthSpec } from "@/lib/api/domains/settings-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
@@ -246,7 +247,9 @@ function useExecutorProfileCompat(
       dynamicRoutingEnabled,
     ],
   );
-  const noCompatibleAgent = agentCompatState !== "compatible";
+  const noCompatibleAgent =
+    agentCompatState !== "compatible" ||
+    !isExecutorProfileProviderAvailable(selectedExecutorProfile);
   const selectedAgentProfileName = selectedAgentProfile?.label ?? null;
   return {
     selectedExecutorProfile,

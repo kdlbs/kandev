@@ -194,6 +194,11 @@ func TestIsRestorableQuickChatTask(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "coordinator conversation",
+			task: &models.Task{IsEphemeral: true, Origin: models.TaskOriginCoordinator},
+			want: false,
+		},
+		{
 			name: "managed conversation",
 			task: &models.Task{
 				IsEphemeral: true,

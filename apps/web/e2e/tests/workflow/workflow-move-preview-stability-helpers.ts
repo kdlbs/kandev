@@ -84,6 +84,40 @@ export async function applyHarmlessPreviewUpdate(
   );
 }
 
+/** Waits for task and session projections to agree on a settled primary. */
+export async function waitForPreviewTaskSessionsLoaded(
+  page: Page,
+  taskId: string,
+  expectedPrimarySessionId?: string,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ currentTaskId, expectedPrimarySessionId }) => {
+      const state = (window as PreviewStoreWindow).__KANDEV_E2E_STORE__?.getState();
+      if (!state || state.connection.status !== "connected") return false;
+      if (state.taskSessionsByTask.loadedByTaskId[currentTaskId] !== true) return false;
+
+      const task = state.kanban.tasks.find((candidate) => candidate.id === currentTaskId);
+      if (!task?.primarySessionId) return false;
+      if (expectedPrimarySessionId && task.primarySessionId !== expectedPrimarySessionId)
+        return false;
+      const primarySession = (state.taskSessionsByTask.itemsByTaskId[currentTaskId] ?? []).find(
+        (session) => session.id === task.primarySessionId,
+      );
+      const settledStates = ["COMPLETED", "WAITING_FOR_INPUT"];
+      return (
+        primarySession?.state === task.primarySessionState &&
+        settledStates.includes(task.primarySessionState ?? "")
+      );
+    },
+    { currentTaskId: taskId, expectedPrimarySessionId },
+    {
+      timeout: 15_000,
+      message: `Preview task and primary session did not settle for task ${taskId}`,
+    },
+  );
+}
+
+/** Matches preview requests to their task and optional destination step. */
 export function movePreviewRequestPredicate(taskId: string, workflowStepId?: string) {
   return (request: { method(): string; url(): string; postDataJSON(): unknown }) => {
     if (

@@ -3,6 +3,7 @@ package retention
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/testutil"
@@ -124,6 +125,22 @@ func TestSweepSession_AliveFalseAfterSessionTerminated(t *testing.T) {
 	}
 	if _, err := adminPool.Writer().ExecContext(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
 		t.Fatalf("terminate victim backend: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var stillThere bool
+		if err := adminPool.Writer().GetContext(ctx, &stillThere,
+			`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid = $1)`, pid,
+		); err != nil {
+			t.Fatalf("poll pg_stat_activity: %v", err)
+		}
+		if !stillThere {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("backend %d still present in pg_stat_activity after 5s", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if victim.alive(ctx) {

@@ -17,17 +17,6 @@ async function seededAgentName(
 }
 
 test.describe("Org chart", () => {
-  test("org chart shows the seeded agent node", async ({ testPage, officeApi, officeSeed }) => {
-    const agentName = await seededAgentName(officeApi, officeSeed.agentId);
-    await testPage.goto("/office/workspace/org");
-    await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
-      timeout: 10_000,
-    });
-    await expect(testPage.getByText(agentName, { exact: true }).first()).toBeVisible({
-      timeout: 15_000,
-    });
-  });
-
   test("changing an agent's manager on the configuration tab re-parents it on the org chart", async ({
     testPage,
     officeApi,
@@ -53,12 +42,15 @@ test.describe("Org chart", () => {
     };
     expect(agents).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: officeSeed.agentId, name: "CEO" }),
+        expect.objectContaining({ id: officeSeed.agentId, name: agentName }),
         expect.objectContaining({ id: workerId, name: "Org Chart Reparent Target" }),
       ]),
     );
     await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
+    });
+    await expect(testPage.getByText(agentName, { exact: true }).first()).toBeVisible({
+      timeout: 15_000,
     });
     const edgesBefore = await testPage.getByTestId("org-edge").count();
 

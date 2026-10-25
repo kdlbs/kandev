@@ -28,6 +28,27 @@ This page is the startup-configuration reference. Executor-specific fields are c
 
 Startup sources are read once and later sources override earlier ones. Web settings are stored separately and do not join the YAML and environment-variable precedence chain.
 
+Persistent web preferences are stored separately from startup configuration. **Settings > Preferences > Task behavior > Conversation > Message time** controls whether transcript timestamps use relative, absolute short, or absolute long labels. The other form remains available on hover or by tapping the timestamp. This is a per-user preference stored in the database, not a `config.yaml` key or environment variable.
+
+## Startup progress and restored conversations
+
+Kandev finishes database initialization and local housekeeping before activating
+background schedulers, integrations, and conversation restoration. While startup
+is in progress, the browser startup page and restart dialog show the current
+operation, its elapsed time, and recent startup timings. Incomplete timing records
+are marked explicitly. The total startup time stops at readiness.
+
+Remote executors that cannot be reached remain pending for that session while
+Kandev becomes ready. Restoring independent conversations uses up to two slots;
+the visible selected conversation gets priority for the next available slot.
+Restoration keeps the original conversation and does not send an instruction or
+release queued messages. An interrupted instruction can retain an unknown outcome.
+
+The launcher also reports startup progress. `/ready` includes an optional bounded
+`startup.completed_steps` history for the current backend process. It contains
+step identifiers, labels, elapsed milliseconds, activation sequence numbers, and
+completion flags. History resets on the next backend start.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -99,7 +120,15 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
 
-`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new`, quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
+Conversation search uses SQLite FTS5 trigram indexing or PostgreSQL `pg_trgm`.
+Kandev attempts to install `pg_trgm` in the `public` schema at startup. If the
+application database role cannot install extensions, a database administrator can
+run `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;` in the Kandev
+database, then restart Kandev. Missing text-index support disables conversation
+search while task metadata search remains available. History is indexed after
+startup; the index uses additional disk space.
+
+`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new` and verifies its SQLite integrity. An invalid snapshot fails without replacing current data, interrupting database-backed work, or requiring a restart. After verification succeeds, restore quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
 ### Default SQLite continuity
 
@@ -148,10 +177,10 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                                                  |
-| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                  |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. `agentctl` and its per-session servers listen only on this host, so they stay on loopback by default. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                                                                                                                        |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -196,6 +225,31 @@ environment value falls back to `2h`, and non-positive values from a profile
 default are ignored, leaving the `2h` default in effect. The environment
 variable overrides YAML, and changes require a backend restart.
 
+
+### Backend delivery retention
+
+These startup values apply to SQLite and PostgreSQL. Restart the backend after a change.
+Invalid durations, zero values, and values outside the ranges stop startup.
+Environment values override YAML. These values do not configure the agentctl journal.
+
+| YAML key | Environment variable | Default | Range |
+| --- | --- | --- | --- |
+| `tasks.deliveryRetention.payloadGrace` | `KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE` | `1h` | `1m` to `720h` |
+| `tasks.deliveryRetention.replayAge` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE` | `24h` | `1h` to `720h` |
+| `tasks.deliveryRetention.replayEvents` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS` | `10000` | 100 to 100000 |
+| `tasks.deliveryRetention.interval` | `KANDEV_TASK_DELIVERY_RETENTION_INTERVAL` | `1m` | `10s` to `1h` |
+| `tasks.deliveryRetention.batchRows` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS` | `200` | 1 to 200 |
+| `tasks.deliveryRetention.batchBytes` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES` | `4194304` | 1048576 to 4194304 |
+
+`interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
+
+`batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
+
+Automatic cleanup preserves canonical history and unresolved recovery evidence.
+Grace controls eligible raw payload removal. Replay age and event count bound recent duplicate receipts.
+Safety checks apply at every configured value. Protected data has no forced expiry.
+See [delivery retention operations](operations.md#backend-delivery-retention) for backups, rollback, logs, and physical reclamation.
+
 ### Capacity and managed-process startup settings
 
 | YAML key                                   | Environment variable                              | Type and default                  | Current behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -235,7 +289,7 @@ through a private process contract.
 | `auth.sessionTTLHours`                 | `KANDEV_AUTH_SESSIONTTLHOURS`                     | `720`            | Compatibility session lifetime setting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `auth.cookieName`                      | `KANDEV_AUTH_COOKIE_NAME`                         | empty            | Session cookie base name. Empty (default) means the effective name is derived from the request host: `kandev_session` on a default-port host, `kandev_session_<port>` on a ported host. This isolates multiple instances on one host (see [authentication](authentication.md#multiple-instances-on-one-host)). A non-empty value is used verbatim (never port-suffixed) and disables automatic isolation, so it must be unique per cookie host. Precedence: environment over config file over default. |
 | `office.jwtSigningKey`                 | `KANDEV_OFFICE_JWTSIGNINGKEY`                     | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty            | Public HTTPS base URL used by remote executors to resolve GitHub credentials. Loopback HTTP is allowed for development.                                                                                                                                                                                                                                                                                                                                                                                |
+| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty            | Public HTTPS base URL of Kandev, used by remote executors to resolve GitHub credentials and by plugin remote executors to call the Kandev API. Loopback HTTP is allowed for development; plugin remote executors require a non-local HTTPS URL.                                                                                                                                                                                                                                                                                                                                                                                |
 
 Runtime feature flags are documented in [Runtime feature toggles](#runtime-feature-toggles); they are profile, environment, and database-backed controls, not canonical YAML settings.
 
@@ -325,6 +379,13 @@ Active and closed backend files use at most 256 MiB in total. Kandev removes the
 Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
 Debug output may contain repository paths, subprocess output, prompts, file content, and tool-call data. Treat it as sensitive.
+
+Managed agentctl children use `AGENTCTL_LOG_FORMAT=json` so their stdout
+records pass through the backend relay's privacy projection. Approved probe
+diagnostics remain in the message; unrelated structured fields are omitted. The
+backend overrides an inherited value. `AGENTCTL_LOG_FORMAT` still configures
+agentctl processes started independently; it does not change the backend's
+`logging.format` setting.
 
 ### Repository, worktree, and clone paths
 

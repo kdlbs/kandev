@@ -160,7 +160,7 @@ build_fe() {
 
 build_backend_host() {
   log "building backend (host)"
-  local targets=(build)
+  local targets=(build build-e2e-delivery-fixture)
   # Both real-runtime projects need Linux helpers; the deprecated docker alias
   # is normalized to containers before this point.
   is_container_project && targets+=(build-agentctl-linux build-mock-agent-linux)
@@ -190,7 +190,7 @@ build_backend_in_build_image() {
   docker run --rm -v "$REPO_ROOT":/work -w /work/apps/backend \
     -v kandev-gocache:/root/.cache/go-build -v kandev-gomod:/go/pkg/mod \
     "$BUILD_IMAGE" \
-    bash -lc "git config --global --add safe.directory /work 2>/dev/null; make build VERSION=dev-docker && chown -R $uid_gid /work/apps/backend/bin" \
+    bash -lc "git config --global --add safe.directory /work 2>/dev/null; make build build-e2e-delivery-fixture VERSION=dev-docker && chown -R $uid_gid /work/apps/backend/bin" \
     >/dev/null || die "in-container backend build failed"
 }
 
@@ -254,6 +254,12 @@ fi
 e2e_validate_shards "$SHARDS" || die "unsafe shard count rejected"
 e2e_validate_playwright_args "${PW_ARGS[@]}" || die "unsafe Playwright worker count rejected"
 
+if [[ "$PROJECT" == upgrade-desktop || "$PROJECT" == upgrade-mobile ]]; then
+  if [[ "${CI:-}" != true || "${GITHUB_ACTIONS:-}" != true || "${GITHUB_REF:-}" != refs/heads/main ]]; then
+    die "Release upgrade rehearsals run only in GitHub Actions on main"
+  fi
+fi
+
 # Resolve mode
 if [[ "$MODE" == auto ]]; then
   if docker_up && { [[ -n "$RUNTIME_IMAGE" ]] || docker image inspect kandev-ci:runtime-local >/dev/null 2>&1 || docker image inspect ghcr.io/kdlbs/kandev-ci:runtime-latest >/dev/null 2>&1; }; then
@@ -315,6 +321,23 @@ run_docker() {
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
   local container_flag=()
   is_container_project && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
+  local coordinator_mount=() observer_mount=() requires_coordinator=0 requires_observer=0
+  for arg in "${PW_ARGS[@]}"; do
+    case "$arg" in
+      *reference-coordinator*|*coordinator-compatibility*) requires_coordinator=1 ;;
+      *reference-observer*|*coordinator-compatibility*) requires_observer=1 ;;
+    esac
+  done
+  if [[ "$requires_coordinator" == 1 ]]; then
+    [[ -d "$REPO_ROOT/../kandev-plugin-coordinator-template" ]] \
+      || die "reference coordinator checkout is required at $REPO_ROOT/../kandev-plugin-coordinator-template"
+    coordinator_mount=(-v "$REPO_ROOT/../kandev-plugin-coordinator-template:/work/kandev-plugin-coordinator-template:ro")
+  fi
+  if [[ "$requires_observer" == 1 ]]; then
+    [[ -d "$REPO_ROOT/../kandev-plugin-observer" ]] \
+      || die "reference observer checkout is required at $REPO_ROOT/../kandev-plugin-observer"
+    observer_mount=(-v "$REPO_ROOT/../kandev-plugin-observer:/work/kandev-plugin-observer:ro")
+  fi
   local capture_flag=()
   [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
   local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\" --workers=1"
@@ -324,6 +347,8 @@ run_docker() {
     [[ "$i" != 0 ]] && shardflag="--shard=$i/$SHARDS"
     docker run --rm --ipc=host \
       -v "$REPO_ROOT":/work -w /work/apps/web \
+      ${coordinator_mount[@]+"${coordinator_mount[@]}"} \
+      ${observer_mount[@]+"${observer_mount[@]}"} \
       ${strict_flag[@]+"${strict_flag[@]}"} \
       ${container_flag[@]+"${container_flag[@]}"} \
       ${capture_flag[@]+"${capture_flag[@]}"} \

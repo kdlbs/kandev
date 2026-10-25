@@ -11,6 +11,7 @@ describe("CompositorSpin visibility", () => {
     const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
     let playState: AnimationPlayState = "running";
     const animation = {
+      effect: {},
       get playState() {
         return playState;
       },
@@ -30,7 +31,7 @@ describe("CompositorSpin visibility", () => {
     });
 
     try {
-      const { container } = render(
+      const { container, unmount } = render(
         <TooltipProvider>{getTaskStateIcon("IN_PROGRESS")}</TooltipProvider>,
       );
       const wrapper = container.querySelector(SPIN_SELECTOR) as HTMLElement;
@@ -42,6 +43,12 @@ describe("CompositorSpin visibility", () => {
       setDocumentVisibility("visible");
       expect(animation.play).toHaveBeenCalledOnce();
       expect(wrapper.style.animationPlayState).toBe("");
+      unmount();
+      expect(animation.cancel).toHaveBeenCalledOnce();
+      expect(animation.effect).toBeNull();
+      setDocumentVisibility("hidden");
+      setDocumentVisibility("visible");
+      expect(animation.play).toHaveBeenCalledOnce();
     } finally {
       restoreProperty(HTMLElement.prototype, "animate", originalAnimate);
       restoreProperty(document, "visibilityState", originalVisibilityState);

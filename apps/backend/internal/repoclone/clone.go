@@ -275,6 +275,48 @@ func (c *Cloner) WorkspaceProviderRepositoryPath(
 	return filepath.Join(parts...), nil
 }
 
+// ManagedCloneRelocationPaths returns the exact managed source candidates and
+// destination eligible for legacy-to-workspace relocation. Unsupported
+// repository sources return ok=false so callers can leave them untouched.
+func (c *Cloner) ManagedCloneRelocationPaths(repository *models.Repository) (
+	root, providerSource, ownerNameSource, destination string, ok bool, err error,
+) {
+	if repository == nil || strings.ToLower(strings.TrimSpace(repository.SourceType)) != "provider" {
+		return "", "", "", "", false, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(repository.Provider))
+	if provider != githubProvider && provider != gitlabProvider {
+		return "", "", "", "", false, nil
+	}
+	if strings.TrimSpace(repository.WorkspaceID) == "" || strings.TrimSpace(repository.ProviderHost) == "" ||
+		strings.TrimSpace(repository.ProviderOwner) == "" || strings.TrimSpace(repository.ProviderName) == "" {
+		return "", "", "", "", false, nil
+	}
+	root, err = c.ExpandedBasePath()
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	providerSource, err = c.ProviderRepoPath(provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	ownerNameSource, err = c.RepoPath(repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	destination, err = c.WorkspaceProviderRepositoryPath(
+		repository.WorkspaceID, provider, repository.ProviderHost, repository.ProviderScope,
+		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName,
+	)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	if filepath.Clean(providerSource) == filepath.Clean(destination) {
+		return "", "", "", "", false, nil
+	}
+	return root, providerSource, ownerNameSource, destination, true, nil
+}
+
 func stableIdentitySegment(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
@@ -735,6 +777,9 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 	mu.Lock()
 	defer mu.Unlock()
 
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
 	gitDir := filepath.Join(targetPath, ".git")
 	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
 		if verifyExistingOrigin {
@@ -745,7 +790,10 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
-	return targetPath, c.clone(ctx, cloneURL, targetPath, auth)
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return targetPath, err
+	}
+	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
 }
 
 // EnsureClonedWithBasicAuth retains the legacy basic-auth clone path.
@@ -779,6 +827,9 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 	mu := c.repoMu(targetPath)
 	mu.Lock()
 	defer mu.Unlock()
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
 	origin, err := gitCredentialOrigin(cloneURL)
 	if err != nil {
 		return targetPath, err
@@ -792,7 +843,10 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
-	return targetPath, c.clone(ctx, cloneURL, targetPath, auth)
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return targetPath, err
+	}
+	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
 }
 
 func gitCredentialOrigin(cloneURL string) (string, error) {
@@ -829,37 +883,6 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 		func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, auth) },
 	); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", redactCloneOutput(string(out), authToken(auth)), err)
-	}
-	return nil
-}
-
-func (c *Cloner) fetchWithHTTPHeader(ctx context.Context, repoPath, authURL, header string) {
-	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	args := []string{"-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags}
-	if out, err := c.runConfiguredGitCombined(ctx, gitFetchTimeout, args,
-		func(cmd *exec.Cmd) (func(), error) {
-			configureHTTPHeaderCommand(cmd, authURL, header)
-			return func() {}, nil
-		},
-	); err != nil {
-		c.logger.Warn("authenticated git fetch failed (non-fatal)",
-			zap.String("path", repoPath), zap.String("output", string(out)), zap.Error(err))
-	}
-}
-
-func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, header string) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fmt.Errorf("create parent directory: %w", err)
-	}
-	c.logger.Info("cloning authenticated repository", zap.String("url", redactCloneURL(cloneURL)), zap.String("target", targetPath))
-	args := []string{"clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath}
-	if out, err := c.runConfiguredGitCombined(ctx, gitCloneTimeout, args,
-		func(cmd *exec.Cmd) (func(), error) {
-			configureHTTPHeaderCommand(cmd, cloneURL, header)
-			return func() {}, nil
-		},
-	); err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
 	return nil
 }
@@ -907,14 +930,14 @@ func configureGitCommand(cmd *exec.Cmd, auth *cloneAuth) (func(), error) {
 	if err := validateCloneAuth(auth); err != nil {
 		return nil, err
 	}
-	helperPath, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
+	helperCommand, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
 	if err != nil {
 		return nil, err
 	}
 	env = append(env,
 		"GIT_CONFIG_COUNT=3",
 		"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
-		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperPath,
+		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperCommand,
 		"GIT_CONFIG_KEY_2=credential.useHttpPath", "GIT_CONFIG_VALUE_2=true",
 	)
 	env = append(env, helperEnv...)

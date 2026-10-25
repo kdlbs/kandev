@@ -41,6 +41,9 @@ func TestTaskSessionQueueIncarnationIsGeneratedProjectedAndRenewed(t *testing.T)
 	if err := repo.DeleteTaskSession(ctx, stored); err != nil {
 		t.Fatalf("DeleteTaskSession: %v", err)
 	}
+	if _, err := repo.db.ExecContext(ctx, `DELETE FROM agent_delivery_cleanup_jobs WHERE session_id = ? AND incarnation_id = ?`, stored.ID, stored.QueueIncarnationID); err != nil {
+		t.Fatalf("complete retirement for empty deleted incarnation: %v", err)
+	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
 		t.Fatalf("CreateTaskSession replacement: %v", err)
 	}

@@ -8,11 +8,14 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
@@ -82,6 +85,10 @@ func (f *fakeReconcileBackend) GetExecution(executionID string) (*lifecycle.Agen
 }
 
 func (f *fakeReconcileBackend) SetMcpMode(_ context.Context, _ string, _ string) error { return nil }
+
+func (f *fakeReconcileBackend) ExecuteBackgroundWorkAction(_ context.Context, _ string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error) {
+	return streams.BackgroundWorkActionResponse{Success: true, WorkID: req.WorkID, Action: req.Action}, nil
+}
 
 // evict removes an execution, simulating a backend restart that lost the
 // runtime's record of it.
@@ -165,7 +172,7 @@ func newReconcileHarness(t *testing.T) *reconcileHarness {
 	svc.SetBudgetChecker(officecosts.NewCostService(officeRepo, log, activity, svc, svc))
 
 	backend := newFakeReconcileBackend()
-	launcher := newOfficeRunSessionLauncher(officeRepo, backend, log)
+	launcher := newOfficeRunSessionLauncher(officeRepo, backend, nil, log)
 	svc.SetRunSessionLauncher(launcher)
 
 	return &reconcileHarness{svc: svc, repo: officeRepo, eb: eventBus, launcher: launcher, backend: backend}
@@ -230,7 +237,7 @@ func TestContinuationSummary_InterruptedAttemptRecoveredAtStartup_PreservesPrior
 	if err != nil || len(runs) != 2 {
 		t.Fatalf("list second run: runs=%#v err=%v", runs, err)
 	}
-	var second *officemodels.Run
+	var second *runsmodels.Run
 	for _, r := range runs {
 		if r.ID != first.ID {
 			second = r
@@ -266,7 +273,7 @@ func TestContinuationSummary_InterruptedAttemptRecoveredAtStartup_PreservesPrior
 	if err != nil {
 		t.Fatalf("list runs after reconcile: %v", err)
 	}
-	var secondAfterReconcile *officemodels.Run
+	var secondAfterReconcile *runsmodels.Run
 	for _, r := range runsAfterReconcile {
 		if r.ID == second.ID {
 			secondAfterReconcile = r

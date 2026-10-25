@@ -112,8 +112,9 @@ func TestObserveSessionCoresidency_WorkingSiblingLogsWarningAndIncrementsCounter
 	if strings.Contains(lowerMsg, "fail") {
 		t.Fatalf("warning message = %q, must not read as Kandev failing to prevent something it permits", warnings[0].Message)
 	}
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
-		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
+	// Other tests can still emit asynchronous observations into the global counter.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+1 {
+		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+1)
 	}
 }
 
@@ -149,9 +150,10 @@ func TestObserveSessionCoresidency_SiblingReadFailureRecordsSkipNotAbsence(t *te
 }
 
 // TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart pins the
-// LaunchPreparedSession wiring through the shared process-start hook. It waits
-// until StartAgentProcess is called, after the observation has run, and checks
-// that this launch recorded exactly one local warning.
+// wiring half of AC-004.1: LaunchPreparedSession calls the observation
+// before the agent process starts, for a real launch that otherwise
+// succeeds, not just the extracted helper. The process-start callback
+// synchronizes the assertion after the observation seam has run.
 func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
@@ -193,7 +195,6 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 		Description: "Test description",
 	}
 	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch)
-
 	if _, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
 		AgentProfileID: "profile-123",
 		Prompt:         "test prompt",
@@ -207,12 +208,16 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 		t.Fatal("timed out waiting for the agent process to start")
 	}
 
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
-		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
+	// Other tests can still emit asynchronous observations into the global counter.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+1 {
+		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+1)
 	}
-	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
+	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
+	}
+	if !strings.Contains(warnings[0].Message, "starting an agent while another session") {
+		t.Fatalf("warning message = %q, want the co-residency warning", warnings[0].Message)
 	}
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteLaunch {
@@ -221,7 +226,7 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 }
 
 // TestResumeSession_ObservesWorkingSiblingOnAgentStart pins the wiring
-// half of AC-004.1 for resume admission and asynchronous process startup.
+// half of AC-004.1 for resume process startup.
 func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -235,35 +240,44 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromZap: %v", err)
 	}
-	processStarted := make(chan struct{}, 1)
+	observedAtStart := make(chan int, 1)
+	finished := make(chan struct{})
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new"}, nil
 		},
 		startAgentProcessFunc: func(context.Context, string) error {
-			processStarted <- struct{}{}
+			observedAtStart <- logs.FilterMessageSnippet("starting an agent while another session").Len()
 			return nil
 		},
 	}
 	exec := NewExecutor(agentMgr, repo, log, ExecutorConfig{ShellPrefs: &mockShellPrefs{}})
 	exec.SetCapabilities(&mockCapabilities{})
+	exec.SetOnAgentProcessStarted(func(context.Context, string, string, string) { close(finished) })
 	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume)
 
 	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
 	select {
-	case <-processStarted:
+	case <-finished:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for the agent process to start")
+		t.Fatal("timed out waiting for resumed agent startup")
+	}
+	if observed := <-observedAtStart; observed != 1 {
+		t.Fatalf("co-residency observations before process start = %d, want 1", observed)
 	}
 
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
-		t.Fatalf("admitted[resume] counter = %d, want %d", after, before+1)
+	// Other tests can still emit asynchronous observations into the global counter.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after < before+1 {
+		t.Fatalf("admitted[resume] counter = %d, want at least %d", after, before+1)
 	}
-	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
+	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
+	}
+	if !strings.Contains(warnings[0].Message, "starting an agent while another session") {
+		t.Fatalf("warning message = %q, want the co-residency warning", warnings[0].Message)
 	}
 	fields := warnings[0].ContextMap()
 	if fields["site"] != sessionCoresidencySiteResume {
@@ -295,7 +309,6 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 		}, nil
 	}
 
-	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch)
 	var managerMu sync.Mutex
 	startedWithoutObservation := make(map[string]int)
 	started := make(chan string, 2)
@@ -343,12 +356,6 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 	managerMu.Unlock()
 	if startedBeforeObservation != 0 {
 		t.Fatalf("agent process started before co-residency observation for %d session(s): %v", startedBeforeObservation, startedWithoutObservation)
-	}
-	// The expvar is process-global, so unrelated asynchronous observations can
-	// increment it while this integration test is running. The exact warning
-	// count above scopes the two observations under test.
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+2 {
-		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+2)
 	}
 	if warnings := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(warnings) != 2 {
 		t.Fatalf("warning entries = %d, want 2", len(warnings))

@@ -1,5 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForSessionDone } from "../../helpers/session";
+import { waitForActiveTaskSession, waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription, readTaskDescription } from "../../pages/task-description-editor";
 import type { ApiClient } from "../../helpers/api-client";
@@ -312,6 +314,14 @@ test.describe("Plugin-backed canvases on mobile", () => {
 
       const canvas = await waitForTaskCanvas(apiClient, taskId, canvasTitle);
       canvasIds.push(canvas.id);
+      await waitForActiveTaskSession(testPage, taskId, taskSessionId);
+      await waitForSessionAgentctlReady(testPage, taskSessionId);
+      await waitForSessionDone(
+        apiClient,
+        taskId,
+        taskSessionId,
+        "The guided canvas task did not finish before publishing its package.",
+      );
       const published = await publishTaskCanvas({
         apiClient,
         taskId,
@@ -570,6 +580,13 @@ test.describe("Plugin-backed canvases on mobile", () => {
       const menuButton = testPage.getByTestId("app-nav-trigger");
       await expect(menuButton).toBeVisible();
       await menuButton.tap();
+
+      const canvasGroup = testPage
+        .getByTestId("app-nav-sheet")
+        .getByRole("button", { name: "Canvases", exact: true });
+      await expect(canvasGroup).toHaveAttribute("aria-expanded", "false");
+      await canvasGroup.tap();
+      await expect(canvasGroup).toHaveAttribute("aria-expanded", "true");
 
       const workspaceCanvas = testPage.getByTestId(`mobile-workspace-canvas-${activeCanvas.id}`);
       await expect(workspaceCanvas).toBeVisible({ timeout: 15_000 });

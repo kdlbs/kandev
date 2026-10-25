@@ -1,5 +1,7 @@
 "use client";
 
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
+
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@kandev/ui/input";
 import { IconMessageDots } from "@tabler/icons-react";
@@ -154,35 +156,6 @@ function useFileContextMenuDelete({
   };
 }
 
-function useFileMenuDeleteHandler({
-  handleDelete,
-  isBulk,
-  isFinePointer,
-  contextMenuRef,
-}: {
-  handleDelete: () => void;
-  isBulk: boolean;
-  isFinePointer: boolean;
-  contextMenuRef: React.RefObject<HTMLElement | null>;
-}) {
-  return useCallback(
-    (event: Event) => {
-      const item = event.currentTarget;
-      contextMenuRef.current =
-        item instanceof HTMLElement
-          ? (item.closest('[data-slot="context-menu-content"]') as HTMLElement | null)
-          : null;
-      if (isBulk || !isFinePointer) {
-        handleDelete();
-      } else {
-        // Let the 100 ms context-menu exit animation finish before anchoring the popover.
-        setTimeout(handleDelete, 150);
-      }
-    },
-    [handleDelete, isBulk, isFinePointer, contextMenuRef],
-  );
-}
-
 type FileContextMenuSurfaceProps = {
   children: React.ReactNode;
   node: FileTreeNode;
@@ -230,7 +203,6 @@ function FileContextMenuSurface({
   onConfirmDelete,
   onDelete,
 }: FileContextMenuSurfaceProps) {
-  const { isMobile } = useResponsiveBreakpoint();
   const renamePendingRef = useRef(false);
   const deletePendingRef = useRef(false);
   const touchTriggerRef = useRef<HTMLButtonElement>(null);
@@ -244,6 +216,7 @@ function FileContextMenuSurface({
       if (deletePendingRef.current) {
         event.preventDefault();
         deletePendingRef.current = false;
+        // Transfer focus to the confirmation after the context menu closes.
         setDeleteConfirmationOpen(true);
         return;
       }
@@ -278,8 +251,13 @@ function FileContextMenuSurface({
             onUploadFilesHere={onUploadFilesHere}
             onStartRename={handleStartRename}
             onDelete={(event) => {
-              if (isMobile && !isBulk) deletePendingRef.current = true;
-              else onDelete(event);
+              const item = event.currentTarget;
+              focusBoundaryRef.current =
+                item instanceof HTMLElement
+                  ? (item.closest('[data-slot="context-menu-content"]') as HTMLElement | null)
+                  : null;
+              if (isBulk) onDelete(event);
+              else deletePendingRef.current = true;
             }}
           />
         </ContextMenuContent>
@@ -338,6 +316,7 @@ function FileDeleteConfirmation({
     <MobileActionConfirmation
       {...actions}
       targetKey={path}
+      useMobileSurfaceForCoarsePointer
       subject={path.includes("/") ? path : undefined}
       focusReturnRef={focusReturnRef}
       fallback={
@@ -409,13 +388,6 @@ export function FileContextMenu({
       onDeleteFile,
       selectedPaths,
     });
-  const handleMenuDelete = useFileMenuDeleteHandler({
-    handleDelete,
-    isBulk,
-    isFinePointer,
-    contextMenuRef,
-  });
-
   const deleteAction = createFileDeleteAction({
     node,
     onDeleteFile,
@@ -451,7 +423,7 @@ export function FileContextMenu({
       focusBoundaryRef={contextMenuRef}
       deleteAction={deleteAction}
       onConfirmDelete={handleConfirmDelete}
-      onDelete={handleMenuDelete}
+      onDelete={handleDelete}
     >
       {providedAnchorRef ? children : attachAnchorRef(children, anchorRef)}
     </FileContextMenuSurface>
@@ -559,37 +531,32 @@ export function useFileRename(
 /** Inline rename input or static file name */
 export function TreeNodeName({
   node,
+  displayName,
   isActive,
   gitStatus,
   rename,
 }: {
   node: FileTreeNode;
+  displayName?: string;
   isActive: boolean;
   gitStatus: GitFileStatus;
   rename: ReturnType<typeof useFileRename>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const blurEnabledRef = useRef(false);
 
   useEffect(() => {
     if (rename.isRenaming) {
-      blurEnabledRef.current = false;
       inputRef.current?.focus();
       inputRef.current?.select();
-      const blurTimer = setTimeout(() => {
-        blurEnabledRef.current = true;
-      }, 400);
-      return () => {
-        clearTimeout(blurTimer);
-      };
     }
   }, [rename.isRenaming]);
 
-  const handleBlur = useCallback(() => {
-    if (blurEnabledRef.current) {
-      rename.handleConfirmRename();
-    }
-  }, [rename]);
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: rename.isRenaming,
+    identity: node.path,
+    inputRef,
+    onLeave: rename.handleConfirmRename,
+  });
 
   if (rename.isRenaming) {
     return (
@@ -598,8 +565,11 @@ export function TreeNodeName({
         controlSize="none"
         value={rename.renameValue}
         onChange={(e) => rename.setRenameValue(e.target.value)}
-        onKeyDown={rename.handleRenameKeyDown}
-        onBlur={handleBlur}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === "Escape") cancelPendingBlur();
+          rename.handleRenameKeyDown(event);
+        }}
+        onBlur={onBlur}
         onClick={(e) => e.stopPropagation()}
         className="h-5 text-xs px-1 py-0 flex-1 min-w-0"
       />
@@ -613,7 +583,7 @@ export function TreeNodeName({
         node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
       )}
     >
-      {node.name}
+      {displayName ?? node.name}
     </span>
   );
 }

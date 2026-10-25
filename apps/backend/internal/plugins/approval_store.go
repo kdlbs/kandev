@@ -85,6 +85,8 @@ var (
 	ErrApprovalRevisionConflict       = errors.New("plugins: approval revision conflict")
 	ErrApprovalIdempotencyConflict    = errors.New("plugins: approval idempotency conflict")
 	ErrApprovalInstallationTombstoned = errors.New("plugins: installation approval tombstoned")
+	ErrApprovalLedgerUnavailable      = errors.New("plugins: approval ledger unavailable")
+	ErrApprovalNotFound               = errors.New("plugins: approval not found")
 )
 
 type approvalLedger struct {
@@ -280,7 +282,7 @@ func (l *approvalLedger) revokeIfRevision(installationID, workspaceID string, ex
 	key := approvalKey(installationID, workspaceID)
 	current, ok := file.Approvals[key]
 	if !ok {
-		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
+		return CapabilityApproval{}, ErrApprovalNotFound
 	}
 	effectiveExpectedRevision := expectedRevision
 	if allowCurrent {
@@ -450,6 +452,25 @@ func (l *approvalLedger) listByInstallation(installationID string) ([]Capability
 		}
 		return out[i].WorkspaceID < out[j].WorkspaceID
 	})
+	return out, nil
+}
+
+func (l *approvalLedger) eventsByWorkspace(installationID, workspaceID string) ([]CapabilityApprovalEvent, error) {
+	if err := validateApprovalIdentifiers(installationID, workspaceID); err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, err := l.load()
+	if err != nil {
+		return nil, err
+	}
+	var out []CapabilityApprovalEvent
+	for _, event := range file.Events {
+		if event.InstallationID == installationID && event.WorkspaceID == workspaceID {
+			out = append(out, event)
+		}
+	}
 	return out, nil
 }
 

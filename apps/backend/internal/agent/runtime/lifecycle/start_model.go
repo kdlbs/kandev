@@ -2,13 +2,42 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
+
+func modelSelectionBootstrapFailure(
+	policy StartModelPolicy,
+	state *CachedModelState,
+	effectiveModel, reason, attemptedModel string,
+	cause error,
+) *BootstrapFailure {
+	code := models.AgentErrorCauseCodeModelSelectionFailed
+	if reason == ModelSelectionReasonRequestedNotAdvertised {
+		code = models.AgentErrorCauseCodeModelUnavailable
+	}
+	if effectiveModel == "" && state != nil {
+		effectiveModel = state.CurrentModelID
+	}
+	promptNotSent := true
+	return &BootstrapFailure{
+		Code:           code,
+		Reason:         reason,
+		Detail:         bootstrapFailureDetail(code),
+		RequestedModel: policy.Model,
+		EffectiveModel: effectiveModel,
+		AttemptedModel: attemptedModel,
+		PromptNotSent:  &promptNotSent,
+		Cause:          cause,
+	}
+}
 
 // StartModelPolicy carries the profile's model-selection settings for the
 // executor-authoritative policy applied at session start and when a fresh ACP
@@ -130,6 +159,14 @@ func providerDefaultDecision(state *CachedModelState, policy StartModelPolicy, r
 	return decision
 }
 
+// isStartModelTransportError recognizes caller cancellation and typed loss of
+// the backend's agent stream. Opaque ACP replies cannot attest transport loss:
+// their messages can describe a provider-side model application failure.
+func isStartModelTransportError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, agentctl.ErrAgentStreamNotConnected)
+}
+
 // applyStartModelPolicy applies the profile model only when the executor's
 // ACP catalog advertises it. An exact profile fails closed when the requested
 // model cannot be attested before inference. Compatible profiles preserve the
@@ -144,7 +181,10 @@ func applyStartModelPolicy(
 ) (ModelSelectionDecision, error) {
 	if strings.TrimSpace(policy.Model) == "" {
 		if policy.RequireExactModel {
-			return ModelSelectionDecision{}, fmt.Errorf("exact model is required when RequireExactModel is enabled")
+			cause := fmt.Errorf("exact model is required when RequireExactModel is enabled")
+			return ModelSelectionDecision{}, modelSelectionBootstrapFailure(
+				policy, state, "", models.AgentErrorCauseReasonSelectionMissing, "", cause,
+			)
 		}
 		return ModelSelectionDecision{Outcome: ModelSelectionOutcomeNone}, nil
 	}
@@ -204,7 +244,13 @@ func applyStartModelPolicy(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		return decision, fmt.Errorf("failed to set start model %q: %w", policy.Model, err)
+		if isStartModelTransportError(err) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, policy.Model,
+			fmt.Errorf("failed to set start model %q: %w", policy.Model, err),
+		)
 	}
 
 	decision.EffectiveModel = policy.Model
@@ -224,12 +270,16 @@ func unavailableStartModel(
 	if !policy.RequireExactModel {
 		return decision, nil
 	}
+	causeText := fmt.Sprintf("requested model %q is unavailable (reason: %s)", policy.Model, reason)
 	if decision.EffectiveModel == "" {
-		return decision, fmt.Errorf("requested model %q is unavailable (reason: %s)", policy.Model, reason)
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", reason, "", fmt.Errorf("%s", causeText),
+		)
 	}
-	return decision, fmt.Errorf(
-		"requested model %q is unavailable (reason: %s, effective model: %q)",
-		policy.Model, reason, decision.EffectiveModel,
+	return decision, modelSelectionBootstrapFailure(
+		policy, state, decision.EffectiveModel, reason, "",
+		fmt.Errorf("requested model %q is unavailable (reason: %s, effective model: %q)",
+			policy.Model, reason, decision.EffectiveModel),
 	)
 }
 
@@ -250,7 +300,13 @@ func applyUniqueAdvertisedVariation(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		return decision, fmt.Errorf("failed to set unique model variation %q: %w", variation, err)
+		if isStartModelTransportError(err) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, variation,
+			fmt.Errorf("failed to set unique model variation %q: %w", variation, err),
+		)
 	}
 	decision.EffectiveModel = variation
 	decision.Outcome = ModelSelectionOutcomeUniqueVariation
@@ -280,7 +336,13 @@ func applyAdvertisedFallback(
 			}
 			return providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported), nil
 		}
-		return decision, fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err)
+		if isStartModelTransportError(err) {
+			return decision, err
+		}
+		return decision, modelSelectionBootstrapFailure(
+			policy, state, "", models.AgentErrorCauseReasonApplicationFailed, policy.FallbackModel,
+			fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err),
+		)
 	}
 	decision.EffectiveModel = policy.FallbackModel
 	decision.Outcome = ModelSelectionOutcomeExplicitFallback

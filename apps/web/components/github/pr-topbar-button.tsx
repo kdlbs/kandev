@@ -6,6 +6,15 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@kandev/ui/context-menu";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -15,6 +24,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useTaskPRUnlink } from "@/hooks/domains/github/use-task-pr-unlink";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
@@ -95,13 +105,31 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
   // multi-repo tasks can surface every PR (one button for single-repo, a
   // dropdown summary for 2+ so the topbar doesn't blow up horizontally).
   const { prs, refresh, unlink } = useTaskPR(activeTaskId);
+  const unlinkMenu = useTaskPRUnlink(activeTaskId);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   if (prs.length === 0) return null;
   if (prs.length === 1)
-    return <PRSingleButton pr={prs[0]} refreshTaskPR={refresh} triggerRef={triggerRef} />;
+    return (
+      <PRSingleButton
+        pr={prs[0]}
+        refreshTaskPR={refresh}
+        onUnlinkPR={unlinkMenu.unlink}
+        pendingIds={unlinkMenu.pendingIds}
+        canUnlink={unlinkMenu.canUnlink}
+        triggerRef={triggerRef}
+      />
+    );
   return (
-    <PRMultiButton prs={prs} refreshTaskPR={refresh} onRemovePR={unlink} triggerRef={triggerRef} />
+    <PRMultiButton
+      prs={prs}
+      refreshTaskPR={refresh}
+      onRemovePR={unlink}
+      onUnlinkPR={unlinkMenu.unlink}
+      pendingIds={unlinkMenu.pendingIds}
+      canUnlink={unlinkMenu.canUnlink}
+      triggerRef={triggerRef}
+    />
   );
 });
 
@@ -126,13 +154,73 @@ function usePopoverInteractions() {
   return { usesTouchDrawer, ...hover };
 }
 
+type PopoverInteractionHandlers = ReturnType<typeof usePopoverInteractions>;
+
+function buildPRSingleButtonTrigger({
+  pr,
+  statusText,
+  triggerRef,
+  contextMenuOpen,
+  onClick,
+  onTriggerEnter,
+  onTriggerLeave,
+}: {
+  pr: TaskPR;
+  statusText: string;
+  triggerRef?: TriggerRef;
+  contextMenuOpen: boolean;
+  onClick: () => void;
+  onTriggerEnter: PopoverInteractionHandlers["onTriggerEnter"];
+  onTriggerLeave: PopoverInteractionHandlers["onTriggerLeave"];
+}) {
+  return (
+    <ChangeRequestTopbarButton
+      ref={triggerRef}
+      data-testid="pr-topbar-button"
+      data-pr-number={pr.pr_number}
+      data-pr-state={pr.state}
+      data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
+      aria-label={statusText}
+      onMouseOver={contextMenuOpen ? undefined : onTriggerEnter}
+      onMouseEnter={contextMenuOpen ? undefined : onTriggerEnter}
+      onMouseMove={contextMenuOpen ? undefined : onTriggerEnter}
+      onPointerOver={contextMenuOpen ? undefined : onTriggerEnter}
+      onPointerEnter={contextMenuOpen ? undefined : onTriggerEnter}
+      onPointerMove={contextMenuOpen ? undefined : onTriggerEnter}
+      onMouseLeave={onTriggerLeave}
+      onPointerLeave={onTriggerLeave}
+      onFocus={contextMenuOpen ? undefined : onTriggerEnter}
+      onBlur={onTriggerLeave}
+      onClick={onClick}
+    >
+      <ChangeRequestTopbarContent
+        label={`#${pr.pr_number}`}
+        colorClassName={getPRStatusColor(pr)}
+        leadingIcon={
+          <PRStatusGlyph
+            size="topbar"
+            colorClassName={getPRStatusColor(pr)}
+            hasMergeConflicts={hasPRMergeConflict(pr)}
+          />
+        }
+      />
+    </ChangeRequestTopbarButton>
+  );
+}
+
 function PRSingleButton({
   pr,
   refreshTaskPR,
+  onUnlinkPR,
+  pendingIds,
+  canUnlink,
   triggerRef,
 }: {
   pr: TaskPR;
   refreshTaskPR: () => void | Promise<void>;
+  onUnlinkPR: (associationId: string) => Promise<boolean>;
+  pendingIds: ReadonlySet<string>;
+  canUnlink: boolean;
   triggerRef?: TriggerRef;
 }) {
   const { t } = useTranslation();
@@ -148,46 +236,23 @@ function PRSingleButton({
     onContentEnter,
     onContentLeave,
   } = usePopoverInteractions();
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
   // Background sync lives on PRStatusChip (always mounted in the chat
   // input area); the chip and this popover share prFeedbackCache so a
   // single subscription warms both.
 
-  const button = (
-    <ChangeRequestTopbarButton
-      ref={triggerRef}
-      data-testid="pr-topbar-button"
-      data-pr-number={pr.pr_number}
-      data-pr-state={pr.state}
-      data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
-      aria-label={statusText}
-      onMouseOver={onTriggerEnter}
-      onMouseEnter={onTriggerEnter}
-      onMouseMove={onTriggerEnter}
-      onPointerOver={onTriggerEnter}
-      onPointerEnter={onTriggerEnter}
-      onPointerMove={onTriggerEnter}
-      onMouseLeave={onTriggerLeave}
-      onPointerLeave={onTriggerLeave}
-      onFocus={onTriggerEnter}
-      onBlur={onTriggerLeave}
-      onClick={() => {
-        addPRPanel(prTaskKey(pr));
-        onOpenChange(false);
-      }}
-    >
-      <ChangeRequestTopbarContent
-        label={`#${pr.pr_number}`}
-        colorClassName={getPRStatusColor(pr)}
-        leadingIcon={
-          <PRStatusGlyph
-            size="topbar"
-            colorClassName={getPRStatusColor(pr)}
-            hasMergeConflicts={hasPRMergeConflict(pr)}
-          />
-        }
-      />
-    </ChangeRequestTopbarButton>
-  );
+  const button = buildPRSingleButtonTrigger({
+    pr,
+    statusText,
+    triggerRef,
+    contextMenuOpen,
+    onClick: () => {
+      addPRPanel(prTaskKey(pr));
+      onOpenChange(false);
+    },
+    onTriggerEnter,
+    onTriggerLeave,
+  });
 
   if (usesTouchDrawer) {
     return (
@@ -199,21 +264,152 @@ function PRSingleButton({
   }
 
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverAnchor asChild>{button}</PopoverAnchor>
-      <PopoverContent
-        data-testid="pr-topbar-popover"
-        align="end"
-        sideOffset={4}
-        className={`w-80 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
-        onMouseEnter={onContentEnter}
-        onMouseMove={onContentEnter}
-        onMouseLeave={onContentLeave}
-        onOpenAutoFocus={(e) => e.preventDefault()}
+    <ContextMenu
+      onOpenChange={(next) => {
+        setContextMenuOpen(next);
+        if (next) onOpenChange(false);
+      }}
+    >
+      <Popover open={open} onOpenChange={onOpenChange}>
+        <PopoverAnchor asChild>
+          <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+        </PopoverAnchor>
+        <PopoverContent
+          data-testid="pr-topbar-popover"
+          align="end"
+          sideOffset={4}
+          className={`w-80 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+          onMouseEnter={onContentEnter}
+          onMouseMove={onContentEnter}
+          onMouseLeave={onContentLeave}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
+        </PopoverContent>
+      </Popover>
+      <PRTopbarUnlinkContextContent
+        prs={[pr]}
+        onUnlinkPR={onUnlinkPR}
+        pendingIds={pendingIds}
+        canUnlink={canUnlink}
+      />
+    </ContextMenu>
+  );
+}
+
+function buildPRMultiButtonTrigger({
+  prs,
+  colorClassName,
+  label,
+  triggerRef,
+  menuOpen,
+  contextMenuOpen,
+  onTriggerEnter,
+  onTriggerLeave,
+}: {
+  prs: TaskPR[];
+  colorClassName: string;
+  label: string;
+  triggerRef?: TriggerRef;
+  menuOpen: boolean;
+  contextMenuOpen: boolean;
+  onTriggerEnter: PopoverInteractionHandlers["onTriggerEnter"];
+  onTriggerLeave: PopoverInteractionHandlers["onTriggerLeave"];
+}) {
+  const hoverSuppressed = menuOpen || contextMenuOpen;
+  return (
+    <DropdownMenuTrigger asChild>
+      <ChangeRequestTopbarButton
+        ref={triggerRef}
+        data-testid="pr-topbar-button"
+        data-pr-count={prs.length}
+        aria-label={label}
+        onMouseOver={hoverSuppressed ? undefined : onTriggerEnter}
+        onMouseEnter={hoverSuppressed ? undefined : onTriggerEnter}
+        onMouseMove={hoverSuppressed ? undefined : onTriggerEnter}
+        onPointerOver={hoverSuppressed ? undefined : onTriggerEnter}
+        onPointerEnter={hoverSuppressed ? undefined : onTriggerEnter}
+        onPointerMove={hoverSuppressed ? undefined : onTriggerEnter}
+        onMouseLeave={onTriggerLeave}
+        onPointerLeave={onTriggerLeave}
+        onFocus={hoverSuppressed ? undefined : onTriggerEnter}
+        onBlur={onTriggerLeave}
       >
-        <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
-      </PopoverContent>
-    </Popover>
+        <PRMultiButtonContent prs={prs} colorClassName={colorClassName} />
+      </ChangeRequestTopbarButton>
+    </DropdownMenuTrigger>
+  );
+}
+
+function buildPRMultiTriggerSurface(trigger: React.ReactElement, usesTouchDrawer: boolean) {
+  if (usesTouchDrawer) return trigger;
+  return (
+    <PopoverAnchor asChild>
+      <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
+    </PopoverAnchor>
+  );
+}
+
+function PRMultiDesktopSurface({
+  dropdown,
+  prs,
+  refreshTaskPR,
+  onRemovePR,
+  onUnlinkPR,
+  pendingIds,
+  canUnlink,
+  triggerRef,
+  interactions,
+  setContextMenuOpen,
+  onOpenDetailPanel,
+}: {
+  dropdown: React.ReactElement;
+  prs: TaskPR[];
+  refreshTaskPR: () => void | Promise<void>;
+  onRemovePR: (associationId: string) => Promise<void>;
+  onUnlinkPR: (associationId: string) => Promise<boolean>;
+  pendingIds: ReadonlySet<string>;
+  canUnlink: boolean;
+  triggerRef?: TriggerRef;
+  interactions: PopoverInteractionHandlers;
+  setContextMenuOpen: (open: boolean) => void;
+  onOpenDetailPanel: (pr: TaskPR) => void;
+}) {
+  const onContextMenuOpenChange = (next: boolean) => {
+    setContextMenuOpen(next);
+    if (next) interactions.onOpenChange(false);
+  };
+  return (
+    <ContextMenu onOpenChange={onContextMenuOpenChange}>
+      <Popover open={interactions.open} onOpenChange={interactions.onOpenChange}>
+        {dropdown}
+        <PopoverContent
+          data-testid="pr-topbar-popover"
+          align="end"
+          sideOffset={4}
+          className={`w-96 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+          onMouseEnter={interactions.onContentEnter}
+          onMouseMove={interactions.onContentEnter}
+          onMouseLeave={interactions.onContentLeave}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <MultiPRCIPopover
+            prs={prs}
+            enabled={interactions.open}
+            refreshTaskPR={refreshTaskPR}
+            onRemovePR={(pr) => onRemovePR(pr.id)}
+            onCollapseFocus={() => focusAfterCollapse(triggerRef)}
+            onOpenDetailPanel={onOpenDetailPanel}
+          />
+        </PopoverContent>
+      </Popover>
+      <PRTopbarUnlinkContextContent
+        prs={prs}
+        onUnlinkPR={onUnlinkPR}
+        pendingIds={pendingIds}
+        canUnlink={canUnlink}
+      />
+    </ContextMenu>
   );
 }
 
@@ -221,66 +417,44 @@ function PRMultiButton({
   prs,
   refreshTaskPR,
   onRemovePR,
+  onUnlinkPR,
+  pendingIds,
+  canUnlink,
   triggerRef,
 }: {
   prs: TaskPR[];
   refreshTaskPR: () => void | Promise<void>;
   onRemovePR: (associationId: string) => Promise<void>;
+  onUnlinkPR: (associationId: string) => Promise<boolean>;
+  pendingIds: ReadonlySet<string>;
+  canUnlink: boolean;
   triggerRef?: TriggerRef;
 }) {
   const { t } = useTranslation();
-  // Click opens the dropdown; desktop hover opens aggregate CI details.
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const {
-    usesTouchDrawer,
-    open,
-    onOpenChange,
-    onTriggerEnter,
-    onTriggerLeave,
-    onContentEnter,
-    onContentLeave,
-  } = usePopoverInteractions();
+  const interactions = usePopoverInteractions();
   const [menuOpen, setMenuOpen] = useState(false);
-  const aggColor = aggregatePRStatusColor(prs);
-
-  // The trigger is the dropdown target and hover anchor. On desktop the asChild
-  // layers (Tooltip → Popover → Dropdown) collapse onto the single Button and
-  // the popover positions against it. While the dropdown is open the hover
-  // popover is closed and hover re-opens are suppressed, so the two overlays
-  // never stack.
-  const triggerButton = (
-    <DropdownMenuTrigger asChild>
-      <ChangeRequestTopbarButton
-        ref={triggerRef}
-        data-testid="pr-topbar-button"
-        data-pr-count={prs.length}
-        aria-label={multiPRAccessibleStatus(prs, t)}
-        onMouseOver={menuOpen ? undefined : onTriggerEnter}
-        onMouseEnter={menuOpen ? undefined : onTriggerEnter}
-        onMouseMove={menuOpen ? undefined : onTriggerEnter}
-        onPointerOver={menuOpen ? undefined : onTriggerEnter}
-        onPointerEnter={menuOpen ? undefined : onTriggerEnter}
-        onPointerMove={menuOpen ? undefined : onTriggerEnter}
-        onMouseLeave={onTriggerLeave}
-        onPointerLeave={onTriggerLeave}
-        onFocus={menuOpen ? undefined : onTriggerEnter}
-        onBlur={onTriggerLeave}
-      >
-        <PRMultiButtonContent prs={prs} colorClassName={aggColor} />
-      </ChangeRequestTopbarButton>
-    </DropdownMenuTrigger>
-  );
-
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const trigger = buildPRMultiButtonTrigger({
+    prs,
+    colorClassName: aggregatePRStatusColor(prs),
+    label: multiPRAccessibleStatus(prs, t),
+    triggerRef,
+    menuOpen,
+    contextMenuOpen,
+    onTriggerEnter: interactions.onTriggerEnter,
+    onTriggerLeave: interactions.onTriggerLeave,
+  });
   const dropdown = (
     <DropdownMenu
       onOpenChange={(next) => {
         setMenuOpen(next);
-        if (next) onOpenChange(false);
+        if (next) interactions.onOpenChange(false);
       }}
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          {usesTouchDrawer ? triggerButton : <PopoverAnchor asChild>{triggerButton}</PopoverAnchor>}
+          {buildPRMultiTriggerSurface(trigger, interactions.usesTouchDrawer)}
         </TooltipTrigger>
         <TooltipContent>
           {t("github:pullRequestsLinkedToTask", { count: prs.length })}
@@ -290,34 +464,63 @@ function PRMultiButton({
     </DropdownMenu>
   );
 
-  if (usesTouchDrawer) return dropdown;
-
+  if (interactions.usesTouchDrawer) return dropdown;
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      {dropdown}
-      <PopoverContent
-        data-testid="pr-topbar-popover"
-        align="end"
-        sideOffset={4}
-        className={`w-96 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
-        onMouseEnter={onContentEnter}
-        onMouseMove={onContentEnter}
-        onMouseLeave={onContentLeave}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <MultiPRCIPopover
-          prs={prs}
-          enabled={open}
-          refreshTaskPR={refreshTaskPR}
-          onRemovePR={(pr) => onRemovePR(pr.id)}
-          onCollapseFocus={() => focusAfterCollapse(triggerRef)}
-          onOpenDetailPanel={(pr) => {
-            addPRPanel(prTaskKey(pr));
-            onOpenChange(false);
-          }}
-        />
-      </PopoverContent>
-    </Popover>
+    <PRMultiDesktopSurface
+      dropdown={dropdown}
+      prs={prs}
+      refreshTaskPR={refreshTaskPR}
+      onRemovePR={onRemovePR}
+      onUnlinkPR={onUnlinkPR}
+      pendingIds={pendingIds}
+      canUnlink={canUnlink}
+      triggerRef={triggerRef}
+      interactions={interactions}
+      setContextMenuOpen={setContextMenuOpen}
+      onOpenDetailPanel={(pr) => {
+        addPRPanel(prTaskKey(pr));
+        interactions.onOpenChange(false);
+      }}
+    />
+  );
+}
+
+function PRTopbarUnlinkContextContent({
+  prs,
+  onUnlinkPR,
+  pendingIds,
+  canUnlink,
+}: {
+  prs: TaskPR[];
+  onUnlinkPR: (associationId: string) => Promise<boolean>;
+  pendingIds: ReadonlySet<string>;
+  canUnlink: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ContextMenuContent>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>{t("common:edit")}</ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-64">
+          {prs.map((pr) => {
+            const repo = pr.owner ? `${pr.owner}/${pr.repo}` : pr.repo;
+            const label = t("github:removeFromTask", { repo, prnumber: pr.pr_number });
+            return (
+              <ContextMenuItem
+                key={pr.id}
+                data-testid={`pr-topbar-unlink-${prIdentitySlug(pr)}`}
+                aria-label={label}
+                disabled={!canUnlink || pendingIds.has(pr.id)}
+                className="cursor-pointer"
+                onSelect={() => void onUnlinkPR(pr.id)}
+              >
+                {label}
+              </ContextMenuItem>
+            );
+          })}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+    </ContextMenuContent>
   );
 }
 

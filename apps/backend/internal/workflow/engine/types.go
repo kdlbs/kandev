@@ -28,6 +28,11 @@ const (
 	TriggerOnHeartbeat         Trigger = "on_heartbeat"
 	TriggerOnBudgetAlert       Trigger = "on_budget_alert"
 	TriggerOnAgentError        Trigger = "on_agent_error"
+
+	// PR lifecycle triggers, raised by the orchestrator when the PR poller
+	// reports a state change for a pull request linked to the task.
+	TriggerOnPRMerged Trigger = "on_pr_merged"
+	TriggerOnPRClosed Trigger = "on_pr_closed"
 )
 
 // ActionKind identifies a typed workflow action.
@@ -190,11 +195,16 @@ type QueueRunAction struct {
 type ClearDecisionsAction struct{}
 
 // QueueRunForEachParticipantAction fans out QueueRun against every step
-// participant matching the configured role. Declared but not yet wired.
+// participant matching the configured role.
+//
+// SkipDecided, when true, drops every seat holding a non-superseded decision
+// at the step from the fan-out (REQ-OFFICE-GATE-COMMENT-001). It defaults to
+// false, preserving the step-entry fan-out's "wake everyone" behaviour.
 type QueueRunForEachParticipantAction struct {
-	Role    string
-	Reason  string
-	Payload map[string]any
+	Role        string
+	Reason      string
+	Payload     map[string]any
+	SkipDecided bool
 }
 
 // EnsureParticipantSeatAction declares the role that must hold a
@@ -307,6 +317,8 @@ func CompileStep(step *wfmodels.WorkflowStep) StepSpec {
 		TriggerOnHeartbeat:         compileGenericActions(step.Events.OnHeartbeat),
 		TriggerOnBudgetAlert:       compileGenericActions(step.Events.OnBudgetAlert),
 		TriggerOnAgentError:        compileGenericActions(step.Events.OnAgentError),
+		TriggerOnPRMerged:          compileGenericActions(step.Events.OnPRMerged),
+		TriggerOnPRClosed:          compileGenericActions(step.Events.OnPRClosed),
 	}
 	return StepSpec{
 		ID:         step.ID,
@@ -513,7 +525,9 @@ func readQueueRunConfig(config map[string]any) *QueueRunAction {
 }
 
 // readQueueRunForEachParticipantConfig reads the role/reason/payload for a
-// queue_run_for_each_participant action.
+// queue_run_for_each_participant action. skip_decided is read only as a
+// boolean; a missing key, false, or any non-boolean value all leave it off
+// (AC-OFFICE-GATE-COMMENT-005.3).
 func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEachParticipantAction {
 	if config == nil {
 		return &QueueRunForEachParticipantAction{}
@@ -521,10 +535,12 @@ func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEac
 	role, _ := config["role"].(string)
 	reason, _ := config["reason"].(string)
 	payload, _ := config["payload"].(map[string]any)
+	skipDecided, _ := config["skip_decided"].(bool)
 	return &QueueRunForEachParticipantAction{
-		Role:    role,
-		Reason:  reason,
-		Payload: payload,
+		Role:        role,
+		Reason:      reason,
+		Payload:     payload,
+		SkipDecided: skipDecided,
 	}
 }
 

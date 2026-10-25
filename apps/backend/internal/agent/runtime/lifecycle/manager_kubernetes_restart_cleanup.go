@@ -51,7 +51,19 @@ func (m *Manager) stopPersistedKubernetesExecution(
 	if row == nil || row.Runtime != agentruntime.RuntimeKubernetes {
 		return false, nil
 	}
+	return m.stopPersistedKubernetesRecord(ctx, row, reason, force)
+}
 
+func (m *Manager) stopPersistedKubernetesRecord(
+	ctx context.Context,
+	row *models.ExecutorRunning,
+	reason string,
+	force bool,
+) (bool, error) {
+	store, ok := m.runningWriter.(persistedKubernetesCleanupStore)
+	if !ok {
+		return true, errors.New("persisted Kubernetes executor inventory is unavailable")
+	}
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return true, err
@@ -134,7 +146,7 @@ func (m *Manager) stopPersistedKubernetesBackend(
 	if err != nil {
 		return fmt.Errorf("get Kubernetes runtime: %w", err)
 	}
-	return backend.StopInstance(ctx, instance, force)
+	return m.stopWorkspaceRuntime(ctx, backend, instance, force)
 }
 
 func uniquePersistedKubernetesExecution(

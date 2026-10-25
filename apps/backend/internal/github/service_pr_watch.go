@@ -257,8 +257,8 @@ func (s *Service) checkPRWatchWithClient(
 ) (*PRStatus, bool, error) {
 	ctx = withWorkflowAttentionCollector(ctx, func(
 		collectorCtx context.Context, collectorClient Client, owner, repo string, pr *PR,
-	) (*WorkflowAttention, error) {
-		return s.collectWorkflowAttention(collectorCtx, collectorClient, cacheScope, owner, repo, pr)
+	) (*workflowObservation, error) {
+		return s.collectWorkflowObservation(collectorCtx, collectorClient, cacheScope, owner, repo, pr)
 	})
 	status, err := client.GetPRStatus(ctx, watch.Owner, watch.Repo, watch.PRNumber)
 	if err != nil {
@@ -1650,6 +1650,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		return err
 	}
 	next := s.prepareTaskPRSyncState(ctx, tp, status)
+	nextLastSyncedAt := taskPRStatusSyncTimestamp(tp, status, next.headSHA, next.baseBranch)
 	baseBranchChanged := tp.BaseBranch != next.baseBranch && strings.TrimSpace(next.baseBranch) != ""
 
 	changedFields := taskPRChangedFields(tp, status, next)
@@ -1690,8 +1691,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.WorkflowAttention = next.workflowAttention
 	tp.WorkflowAttentionJSON = marshalWorkflowAttention(next.workflowAttention)
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
-	now := time.Now().UTC()
-	tp.LastSyncedAt = &now
+	tp.LastSyncedAt = nextLastSyncedAt
 	if len(changedFields) > 0 && s.logger != nil {
 		s.logger.Debug("task PR semantic state changed",
 			zap.String("task_id", taskID),

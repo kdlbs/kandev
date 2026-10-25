@@ -48,6 +48,7 @@ func TestWorkflowAsyncStartFailure_PreservesPlanOnlyInputThroughRecovery(t *test
 		t.Fatal("timed out waiting for startup failure callback")
 	}
 	waitForSessionState(t, fixture.repo, fixture.sessionID, models.TaskSessionStateFailed)
+	seedWorkflowRecoveryEnvironment(t, fixture.repo, fixture.taskID, fixture.sessionID)
 
 	status := fixture.svc.messageQueue.GetStatus(ctx, fixture.sessionID)
 	if status.Count != 1 {
@@ -70,6 +71,8 @@ func TestWorkflowAsyncStartFailure_PreservesPlanOnlyInputThroughRecovery(t *test
 	}()
 	select {
 	case <-fixture.secondStartEntered:
+	case recoverErr := <-recoveryDone:
+		t.Fatalf("explicit recovery failed before agent startup: %v", recoverErr)
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for explicit recovery startup")
 	}
@@ -160,6 +163,7 @@ func TestWorkflowAsyncStartFailure_PreservesConfigOnlyInputThroughRecovery(t *te
 		t.Fatal("timed out waiting for startup failure callback")
 	}
 	waitForSessionState(t, fixture.repo, fixture.sessionID, models.TaskSessionStateFailed)
+	seedWorkflowRecoveryEnvironment(t, fixture.repo, fixture.taskID, fixture.sessionID)
 
 	status := fixture.svc.messageQueue.GetStatus(ctx, fixture.sessionID)
 	if status.Count != 1 {
@@ -191,6 +195,8 @@ func TestWorkflowAsyncStartFailure_PreservesConfigOnlyInputThroughRecovery(t *te
 	}()
 	select {
 	case <-fixture.secondStartEntered:
+	case recoverErr := <-recoveryDone:
+		t.Fatalf("explicit recovery failed before agent startup: %v", recoverErr)
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for explicit recovery startup")
 	}

@@ -21,7 +21,8 @@ test("uses nested task commands and the move drawer on a phone", async ({
   );
   await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
   await testPage.keyboard.press("Control+k");
-  const palette = testPage.getByRole("dialog").filter({ has: testPage.getByRole("combobox") });
+  const palette = testPage.getByRole("dialog", { name: "Command Palette", exact: true });
+  await expect(palette).toBeVisible();
   const search = palette.getByRole("combobox");
   await search.fill("Move to");
   const move = palette
@@ -54,14 +55,27 @@ test("uses nested task commands and the move drawer on a phone", async ({
   await expect
     .poll(async () => (await apiClient.getTask(fixture.taskId)).workflow_step_id)
     .toBe(fixture.targetStepId);
+  await expect(drawer).toBeHidden();
   await testPage.keyboard.press("Control+k");
-  await testPage.getByRole("combobox").fill("Archive task");
-  await testPage
-    .getByRole("option")
-    .filter({ has: testPage.getByText("Archive task", { exact: true }) })
-    .tap();
+  await expect(palette).toBeVisible();
+  const archiveSearch = palette.getByRole("combobox");
+  await archiveSearch.fill("Archive task");
+  const archiveCommand = palette.getByRole("option", { name: "Archive task", exact: true });
+  await expect(archiveCommand).toBeVisible();
+  await archiveCommand.scrollIntoViewIfNeeded();
+  const archiveReceivesCenterTap = await archiveCommand.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const target = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    return target === element || (target instanceof Node && element.contains(target));
+  });
+  expect(archiveReceivesCenterTap).toBe(true);
+  await archiveCommand.tap();
   const confirm = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
   await expect(confirm).toBeVisible();
+  await expect(palette).toBeHidden({ timeout: 10_000 });
   await expect(testPage.getByRole("combobox")).toHaveCount(0);
   const cancel = confirm.getByRole("button", { name: "Cancel", exact: true });
   expect((await cancel.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -76,16 +90,20 @@ test("opens the shared change workflow form from the phone command palette", asy
   seedData,
 }) => {
   await testPage.setViewportSize({ width: 360, height: 780 });
-  const fixture = await seedMoveOverrideFixture(
-    testPage,
-    apiClient,
-    seedData,
-    "Phone palette change workflow",
-  );
-  const destination = await apiClient.createWorkflow(seedData.workspaceId, "Phone destination");
-  const destinationStep = await apiClient.createWorkflowStep(destination.id, "Incoming", 0);
-  await testPage.reload();
+  const [task, destination] = await Promise.all([
+    apiClient.createTask(seedData.workspaceId, "Phone palette change workflow", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    }),
+    (async () => {
+      const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Phone destination");
+      const step = await apiClient.createWorkflowStep(workflow.id, "Incoming", 0);
+      return { workflow, step };
+    })(),
+  ]);
+  await testPage.goto(`/t/${task.id}`);
 
+  await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
   await testPage.keyboard.press("Control+k");
   const palette = testPage.getByRole("dialog").filter({ has: testPage.getByRole("combobox") });
   const search = palette.getByRole("combobox");
@@ -99,13 +117,13 @@ test("opens the shared change workflow form from the phone command palette", asy
 
   const form = new ChangeWorkflowPage(testPage, true);
   await expect(form.phoneDrawer).toBeVisible();
-  await form.chooseWorkflow(destination.id);
-  await form.chooseStep(destinationStep.id);
+  await form.chooseWorkflow(destination.workflow.id);
+  await form.chooseStep(destination.step.id);
   const submit = form.form.getByTestId("change-workflow-submit");
   await submit.scrollIntoViewIfNeeded();
   expect((await submit.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await assertNoDocumentHorizontalOverflow(testPage, "phone command palette change workflow");
   await form.form.getByTestId("change-workflow-cancel").tap();
 
-  expect((await apiClient.getTask(fixture.taskId)).workflow_id).toBe(fixture.workflowId);
+  expect((await apiClient.getTask(task.id)).workflow_id).toBe(seedData.workflowId);
 });

@@ -37,6 +37,7 @@ func (h *WorkspaceHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workspaces", h.httpListWorkspaces)
 	api.POST("/workspaces", h.httpCreateWorkspace)
+	api.POST("/workspaces/:id/clone", h.httpCloneWorkspace)
 	api.GET("/workspaces/:id", h.httpGetWorkspace)
 	api.PATCH("/workspaces/:id", h.httpUpdateWorkspace)
 	api.DELETE("/workspaces/:id", h.httpDeleteWorkspace)
@@ -128,6 +129,8 @@ type httpUpdateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    *bool   `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
 	// UnitID moves the workspace to another unit, changing who reaches it.
 	UnitID *string `json:"unit_id,omitempty"`
 }
@@ -145,6 +148,8 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		DefaultEnvironmentID:        body.DefaultEnvironmentID,
 		DefaultAgentProfileID:       body.DefaultAgentProfileID,
 		DefaultConfigAgentProfileID: body.DefaultConfigAgentProfileID,
+		ACPIdleSuspensionEnabled:    body.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:       body.ACPIdleTimeoutMinutes,
 		UnitID:                      body.UnitID,
 	})
 	if err != nil {
@@ -264,6 +269,8 @@ type wsUpdateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    *bool   `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -282,9 +289,14 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 		DefaultEnvironmentID:        req.DefaultEnvironmentID,
 		DefaultAgentProfileID:       req.DefaultAgentProfileID,
 		DefaultConfigAgentProfileID: req.DefaultConfigAgentProfileID,
+		ACPIdleSuspensionEnabled:    req.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:       req.ACPIdleTimeoutMinutes,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workspace", zap.Error(err))
+		if errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workspace", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkspace(workspace))

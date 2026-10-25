@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"time"
 
 	"github.com/google/uuid"
@@ -129,7 +130,7 @@ func (s *Store) initSchema() error {
 	if err := s.addOAuthColumns(); err != nil {
 		return err
 	}
-	return nil
+	return s.migrateExecutorCreators()
 }
 
 func (s *Store) addConfigHealthColumns() error {
@@ -574,7 +575,7 @@ func (s *Store) resolveWorkspaceID(workspaceID string) (string, error) {
 // issueWatchInsertColumns / issueWatchSelectColumns split insert vs read so
 // the SELECT path can wrap nullable last_error in COALESCE (older databases
 // pre-self-heal migration may return NULL).
-const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id,
+const issueWatchInsertColumns = `created_by_user_id, id, workspace_id, workflow_id, workflow_step_id,
 	repository_id, base_branch, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
@@ -591,7 +592,7 @@ func nullableInt(v *int) interface{} {
 	return *v
 }
 
-const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id,
+const issueWatchSelectColumns = `created_by_user_id, id, workspace_id, workflow_id, workflow_step_id,
 	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
@@ -601,6 +602,7 @@ const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
 func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
+	w.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if w.ID == "" {
 		w.ID = uuid.New().String()
 	}
@@ -612,7 +614,7 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO jira_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), w.CreatedByUserID,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,

@@ -1,0 +1,360 @@
+"use client";
+
+import { useEffect, useId, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Switch } from "@kandev/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import {
+  ModelConfigSelector,
+  isModelConfigOption,
+  type ModelSelectorOption,
+} from "@/components/model-config-selector";
+import { modelConfigOptions } from "@/components/settings/profile-model-config";
+import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
+import {
+  useProfileModelCapabilities,
+  type ProfileDiscoveryStatus,
+} from "@/hooks/domains/settings/use-profile-model-capabilities";
+import type { AgentSetting, OnboardingAgentDraft } from "@/components/onboarding/agent-settings";
+import type { AvailableAgent, CapabilityStatus, ModelEntry } from "@/lib/types/http";
+import { cn } from "@/lib/utils";
+
+export type AgentSetupFieldsProps = {
+  agent: AvailableAgent;
+  setting: AgentSetting;
+  onChange: (patch: Partial<OnboardingAgentDraft>) => void;
+  onModelResolutionChange?: (profileId: string, pending: boolean) => void;
+  onStatusChange?: (status: CapabilityStatus | undefined, error: string | null) => void;
+};
+
+function buildModelOptions(
+  models: ModelEntry[],
+  currentModel: string,
+  discoveryState: ProfileDiscoveryStatus,
+  unavailableLabel: string,
+): { modelOptions: ModelSelectorOption[]; modelIsGone: boolean } {
+  const options: ModelSelectorOption[] = models.map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description || (model.id !== model.name ? model.id : undefined),
+    usageMultiplier:
+      typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
+  }));
+
+  const modelIsGone = Boolean(
+    discoveryState === "ready" &&
+    models.length > 0 &&
+    currentModel &&
+    !options.some((m) => m.id === currentModel),
+  );
+
+  if (modelIsGone) {
+    options.unshift({
+      id: currentModel,
+      name: currentModel,
+      disabled: true,
+      disabledReason: unavailableLabel,
+    });
+  }
+
+  return { modelOptions: options, modelIsGone };
+}
+
+function ModelStatusFeedback({
+  discoveryState,
+  error,
+  hasModels,
+  status,
+  profileSettingsHref,
+}: {
+  discoveryState: ProfileDiscoveryStatus;
+  error: string | null;
+  hasModels: boolean;
+  status: CapabilityStatus | undefined;
+  profileSettingsHref: string;
+}) {
+  const { t } = useTranslation();
+
+  if (discoveryState === "loading") {
+    return (
+      <p className="text-xs text-muted-foreground flex items-center gap-1" role="status">
+        <IconLoader2 className="h-3 w-3 animate-spin shrink-0" />
+        <span>{t("common:loading")}</span>
+      </p>
+    );
+  }
+
+  if (discoveryState === "failed" || status === "auth_required") {
+    return (
+      <div className="space-y-1">
+        <p className="text-xs text-destructive" role="alert">
+          {error ||
+            t(
+              status === "auth_required"
+                ? "agents:capabilityAuthRequired"
+                : "agents:failedToFetchCapabilities",
+            )}
+        </p>
+        {status === "auth_required" && (
+          <Button asChild variant="link" size="sm" className="px-0">
+            <a href={profileSettingsHref}>{t("common:settings")}</a>
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (discoveryState === "ready" && !hasModels) {
+    return <p className="text-xs text-muted-foreground">{t("agents:noModelsFound")}</p>;
+  }
+
+  return null;
+}
+
+function PassthroughField({
+  agent,
+  checked,
+  onChange,
+}: {
+  agent: AvailableAgent;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const switchId = useId();
+  const labelId = `${switchId}-label`;
+  const descriptionId = `${switchId}-description`;
+  const config = agent.passthrough_config;
+  if (!config?.supported) return null;
+
+  const label =
+    agent.name === "minimax-acp"
+      ? t("agents:minimaxPassthroughLabel")
+      : config.label || t("agents:minimaxPassthroughLabel");
+  const description =
+    agent.name === "minimax-acp" ? t("agents:minimaxPassthroughDescription") : config.description;
+
+  return (
+    <SettingsFieldLabel
+      htmlFor={switchId}
+      className="flex items-center justify-between gap-2 pt-1 cursor-pointer [@media(pointer:coarse)]:min-h-11"
+      data-testid="onboarding-agent-passthrough-field"
+    >
+      <span className="space-y-0.5">
+        <span id={labelId} className="block text-xs">
+          {label}
+        </span>
+        {description && (
+          <span id={descriptionId} className="block text-xs text-muted-foreground font-normal">
+            {description}
+          </span>
+        )}
+      </span>
+      <Switch
+        id={switchId}
+        aria-labelledby={labelId}
+        aria-describedby={description ? descriptionId : undefined}
+        size="sm"
+        checked={checked}
+        onCheckedChange={(val) => onChange(val === true)}
+        data-testid="onboarding-agent-passthrough-switch"
+      />
+    </SettingsFieldLabel>
+  );
+}
+
+function useProfileStatusSync(
+  discoveryStatus: CapabilityStatus | undefined,
+  discoveryState: ProfileDiscoveryStatus,
+  error: string | null,
+  onStatusChange?: AgentSetupFieldsProps["onStatusChange"],
+) {
+  useEffect(() => {
+    if (discoveryStatus) {
+      onStatusChange?.(discoveryStatus, error);
+    } else if (discoveryState === "loading") {
+      onStatusChange?.("probing", error);
+    } else if (discoveryState === "failed") {
+      onStatusChange?.("failed", error);
+    } else if (discoveryState === "ready") {
+      onStatusChange?.("ok", error);
+    }
+  }, [discoveryStatus, discoveryState, error, onStatusChange]);
+}
+
+function RefreshModelsButton({
+  isBusy,
+  onRefresh,
+}: {
+  isBusy: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={isBusy ? 0 : -1} className="inline-flex">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={onRefresh}
+            disabled={isBusy}
+            aria-label={t("agents:refreshCapabilities")}
+            data-testid="onboarding-agent-refresh-models"
+            className="cursor-pointer shrink-0"
+          >
+            <IconRefresh className={cn("h-4 w-4", isBusy && "animate-spin")} />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{t("agents:refreshCapabilitiesTooltip")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function useAgentSetupCapabilities(
+  agent: AvailableAgent,
+  setting: AgentSetting,
+  onChange: AgentSetupFieldsProps["onChange"],
+  onModelResolutionChange: AgentSetupFieldsProps["onModelResolutionChange"],
+) {
+  const profile = useMemo(
+    () => ({
+      ...setting.savedLaunchSettings,
+      model: setting.draft.model,
+      mode: setting.savedMode ?? "",
+      config_options: setting.draft.config_options,
+    }),
+    [
+      setting.savedLaunchSettings,
+      setting.draft.model,
+      setting.savedMode,
+      setting.draft.config_options,
+    ],
+  );
+  const discovery = useProfileModelCapabilities(agent.name, profile, agent.model_config, onChange, {
+    profileId: setting.profileId,
+    savedLaunchSettings: setting.savedLaunchSettings,
+  });
+  const configOptions = modelConfigOptions({
+    ...agent.model_config,
+    config_options: discovery.configOptions,
+  }).map((option) => ({
+    ...option,
+    currentValue: isModelConfigOption(option)
+      ? setting.draft.model || option.currentValue
+      : setting.draft.config_options?.[option.id] || option.currentValue,
+  }));
+
+  const pending = discovery.configIsLoading || discovery.isConfigResolutionPending;
+  useEffect(() => {
+    onModelResolutionChange?.(setting.profileId, pending);
+    return () => onModelResolutionChange?.(setting.profileId, false);
+  }, [onModelResolutionChange, setting.profileId, pending]);
+  return { discovery, configOptions };
+}
+
+export function AgentSetupFields({
+  agent,
+  setting,
+  onChange,
+  onStatusChange,
+  onModelResolutionChange,
+}: AgentSetupFieldsProps) {
+  const { t } = useTranslation();
+
+  const { discovery, configOptions } = useAgentSetupCapabilities(
+    agent,
+    setting,
+    onChange,
+    onModelResolutionChange,
+  );
+  const capabilities = discovery.capabilities;
+
+  const discoveryStatus = agent.model_config.supports_dynamic_models
+    ? capabilities.status
+    : agent.model_config.status;
+  const discoveryError =
+    discovery.discoveryState === "failed"
+      ? capabilities.error ||
+        t(
+          discoveryStatus === "auth_required"
+            ? "agents:capabilityAuthRequired"
+            : "agents:failedToFetchCapabilities",
+        )
+      : null;
+  useProfileStatusSync(discoveryStatus, discovery.discoveryState, discoveryError, onStatusChange);
+
+  const models = agent.model_config.supports_dynamic_models
+    ? capabilities.models
+    : (agent.model_config.available_models ?? []);
+
+  const currentModel =
+    setting.draft.model || capabilities.currentModelId || agent.model_config.default_model || "";
+
+  const unavailableLabel = t("settings:startModelUnavailable");
+  const { modelOptions, modelIsGone } = useMemo(
+    () => buildModelOptions(models, currentModel, discovery.discoveryState, unavailableLabel),
+    [models, currentModel, discovery.discoveryState, unavailableLabel],
+  );
+
+  const isBusy = discovery.discoveryState === "loading";
+  const disableUnverifiedModels = isBusy || discovery.discoveryState === "failed";
+
+  return (
+    <div className="space-y-3 pt-1" data-testid="onboarding-agent-setup-fields">
+      <div className="space-y-1.5" data-testid="onboarding-agent-model-field">
+        <SettingsFieldLabel className="text-xs">{t("agents:startModel")}</SettingsFieldLabel>
+        <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <ModelConfigSelector
+              modelOptions={modelOptions}
+              currentModel={currentModel}
+              configOptions={configOptions}
+              configOptionsLoading={
+                discovery.configIsLoading || discovery.isConfigResolutionPending
+              }
+              onConfigChange={(id, value) =>
+                onChange({
+                  config_options: { ...(setting.draft.config_options ?? {}), [id]: value },
+                })
+              }
+              onModelChange={(model) => onChange({ model })}
+              placeholder={t("settings:selectAModel")}
+              ariaLabel={t("settings:startModelAria")}
+              popoverAlign="start"
+              disabled={disableUnverifiedModels}
+              triggerClassName={modelIsGone ? "text-destructive" : undefined}
+            />
+          </div>
+          {agent.model_config.supports_dynamic_models && (
+            <RefreshModelsButton isBusy={isBusy} onRefresh={discovery.refresh} />
+          )}
+        </div>
+        <ModelConfigResolutionStatus
+          status={discovery.configStatus}
+          error={discovery.configError}
+          isLoading={discovery.configIsLoading}
+          onRetry={discovery.refreshModelConfig}
+        />
+        <ModelStatusFeedback
+          discoveryState={discovery.discoveryState}
+          error={discoveryError}
+          status={discoveryStatus}
+          profileSettingsHref={`/settings/agents/${agent.name}/profiles/${setting.profileId}`}
+          hasModels={models.length > 0}
+        />
+      </div>
+
+      <PassthroughField
+        agent={agent}
+        checked={setting.draft.cli_passthrough}
+        onChange={(cli_passthrough) => onChange({ cli_passthrough })}
+      />
+    </div>
+  );
+}

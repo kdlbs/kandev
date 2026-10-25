@@ -17,6 +17,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REMOTE_HELPER_ASSET_VALIDATOR="$ROOT_DIR/scripts/release/remote-helper-assets.mjs"
 # shellcheck source=scripts/release/npm-packages.sh
 source "$ROOT_DIR/scripts/release/npm-packages.sh"
 
@@ -56,6 +57,19 @@ for platform in "${RUNTIME_PLATFORMS[@]}"; do
     exit 1
   fi
 
+  if [[ -f "$bundle_root/remote-helpers.json" ]]; then
+    node "$REMOTE_HELPER_ASSET_VALIDATOR" verify-bundle \
+      --bundle-dir "$bundle_root" \
+      --variant standard
+    cp "$bundle_root/remote-helpers.json" "$pkg_out/remote-helpers.json"
+    package_files='["bin", "remote-helpers.json"]'
+  else
+    node "$REMOTE_HELPER_ASSET_VALIDATOR" verify-bundle \
+      --bundle-dir "$bundle_root" \
+      --variant full
+    package_files='["bin"]'
+  fi
+
   cp -R "$bundle_root/bin" "$pkg_out/bin"
   rm -rf "$local_tmp"
 
@@ -87,9 +101,7 @@ for platform in "${RUNTIME_PLATFORMS[@]}"; do
   "homepage": "https://github.com/kdlbs/kandev",
   "os": $os_field,
   "cpu": $cpu_field,
-  "files": [
-    "bin"
-  ]
+  "files": $package_files
 }
 EOF
 

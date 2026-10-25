@@ -24,8 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -79,9 +81,12 @@ type Config struct {
 	// Empty means authentication is disabled (e.g. dev/test without nonce).
 	AuthToken string
 
-	// ListenHostOverride forces HTTP listeners to a specific host. It is used by
-	// SSH launches, whose controller and instance traffic stays inside explicit
-	// loopback SSH forwards even though bootstrap authentication is enabled.
+	// ListenHostOverride forces HTTP listeners to a specific host
+	// (AGENTCTL_LISTEN_HOST) even though bootstrap authentication is enabled.
+	// Launches that know the only address the backend dials set it: the local
+	// standalone launcher passes agent.standaloneHost, and SSH and Kubernetes
+	// launches pass 127.0.0.1 because the backend reaches them only through a
+	// forward.
 	ListenHostOverride string
 
 	// BootstrapNonce is a one-time-use nonce for the handshake protocol.
@@ -223,6 +228,12 @@ type McpServerConfig struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
 	Headers map[string]string `json:"headers,omitempty"`
+	// DefinitionID and DefinitionRevision identify the selected workspace-owned
+	// definition. Origins are sanitized scope metadata used for attachment
+	// evidence and never contain secrets or transport values.
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // InstanceConfig holds configuration for a single agent instance.
@@ -239,6 +250,10 @@ type InstanceConfig struct {
 	// Port is the HTTP server port for this instance
 	Port int
 
+	// MCPHost is the address injected MCP clients use to reach this instance.
+	// It is derived from the listener bind host and is never sent over the API.
+	MCPHost string `json:"-"`
+
 	// Protocol for agent communication
 	Protocol agent.Protocol
 
@@ -246,7 +261,9 @@ type InstanceConfig struct {
 	AgentCommand string
 
 	// AgentArgs is the parsed command (derived from AgentCommand)
-	AgentArgs []string
+	AgentArgs             []string
+	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
 
 	// WorkDir is the working directory for the agent process
 	WorkDir string
@@ -259,11 +276,6 @@ type InstanceConfig struct {
 
 	// AutoApprovePermissions auto-approves permission requests
 	AutoApprovePermissions bool
-
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
 
 	// ShellEnabled enables auto-shell feature
 	ShellEnabled bool
@@ -380,6 +392,21 @@ type InstanceConfig struct {
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
+
+	// DurableJournalPath is an optional owner-scoped bbolt path on retained
+	// executor storage. Empty means the instance uses legacy delivery.
+	DurableJournalPath string
+
+	// DeliveryStreamID is the generation-scoped durable event stream identity.
+	// It remains stable when agentctl is replaced within the same generation.
+	DeliveryStreamID string
+
+	// DeliveryIncarnationID identifies the owning Kandev session incarnation.
+	DeliveryIncarnationID string
+
+	// DeliveryHarnessGeneration identifies the native conversation generation
+	// that owns this agentctl instance.
+	DeliveryHarnessGeneration uint64
 
 	// CreateReadyMillis is written once by instance.Manager.CreateInstance
 	// with the elapsed milliseconds from CreateInstance's entry (including
@@ -557,6 +584,11 @@ func (c *Config) ListenHost() string {
 	return ""
 }
 
+// MCPReachableHost returns an agent-facing host for the current listener.
+func (c *Config) MCPReachableHost() string {
+	return MCPReachableHost(c.ListenHost())
+}
+
 // ConsumeNonce atomically validates and burns the bootstrap nonce.
 // Returns the auth token if the nonce matches, empty string otherwise.
 // The nonce is invalidated after a single successful call (one-shot).
@@ -622,6 +654,7 @@ func generateSelfToken() string {
 func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
 	cfg := &InstanceConfig{
 		Port:                      port,
+		MCPHost:                   c.MCPReachableHost(),
 		Protocol:                  c.Defaults.Protocol,
 		AgentCommand:              c.Defaults.AgentCommand,
 		WorkDir:                   c.Defaults.WorkDir,
@@ -647,7 +680,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	// The MCP server uses the agent stream WebSocket connection (bidirectional)
 	// to forward tool calls to the backend.
 	if port > 0 {
-		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
+		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost)
 		cfg.InjectedKandevMCP = true
 	}
 
@@ -711,7 +744,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 		cfg.McpProviders = mcpproviders.Normalize(overrides.McpProviders)
 	}
 	if overrides.McpProfile != nil {
-		profileContext := *overrides.McpProfile
+		profileContext := mcpprofile.Normalize(*overrides.McpProfile)
 		cfg.McpProfile = &profileContext
 	}
 	if overrides.NamespacesMCPToolsByServer {
@@ -741,6 +774,18 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
+	if overrides.DurableJournalPath != "" {
+		cfg.DurableJournalPath = overrides.DurableJournalPath
+	}
+	if overrides.DeliveryStreamID != "" {
+		cfg.DeliveryStreamID = overrides.DeliveryStreamID
+	}
+	if overrides.DeliveryIncarnationID != "" {
+		cfg.DeliveryIncarnationID = overrides.DeliveryIncarnationID
+	}
+	if overrides.DeliveryHarnessGeneration > 0 {
+		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -755,9 +800,6 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AutoApprovePermissions != nil {
 		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
 	}
-	if overrides.ApprovalPolicy != "" {
-		cfg.ApprovalPolicy = overrides.ApprovalPolicy
-	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -769,7 +811,6 @@ type InstanceOverrides struct {
 	AutoStart                  *bool
 	Env                        []string
 	AutoApprovePermissions     *bool
-	ApprovalPolicy             string
 	AgentType                  string
 	McpServers                 []McpServerConfig
 	SessionID                  string
@@ -789,6 +830,10 @@ type InstanceOverrides struct {
 	RemoteContributions        map[string]models.RemoteContribution
 	ContributionDestinations   map[string]models.ContributionDestination
 	WorkspaceSourceRoots       []string
+	DurableJournalPath         string
+	DeliveryStreamID           string
+	DeliveryIncarnationID      string
+	DeliveryHarnessGeneration  uint64
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
@@ -867,6 +912,10 @@ func CollectAgentEnvWithoutAdditional() []string {
 // CollectAgentEnvWithError collects environment variables for an agent instance.
 // It rejects malformed indexed Git configuration rather than changing Git's effective config.
 func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
+	return collectAgentEnvWithError(additional, false)
+}
+
+func collectAgentEnvWithError(additional map[string]string, instance bool) ([]string, error) {
 	envMap := make(map[string]string)
 
 	// Start with current environment, excluding AGENTCTL_* and npm_config_* vars.
@@ -881,6 +930,14 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		}
 	}
 
+	if instance {
+		var err error
+		envMap, err = withoutInheritedManagedGitAuthorization(envMap)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Merge additional env vars. Git's indexed configuration environment is a
 	// single ordered protocol, so it must not be overlaid key by key.
 	var err error
@@ -889,8 +946,11 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
-		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == windowsOS)
-		configureGitHubCLIStartupEnv(envMap)
+		ActivateManagedGitTools(
+			envMap,
+			envMap[githubauth.CredentialCLIShimDirEnv],
+			envMap[githubauth.CredentialCLIBashEnvEnv],
+		)
 	}
 
 	// Convert back to slice
@@ -899,6 +959,39 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		result = append(result, k+"="+v)
 	}
 	return result, nil
+}
+
+// ActivateManagedGitTools adds the installed GitHub CLI shims to an agent's
+// executable path and wraps its Bash startup hook while preserving the parent.
+func ActivateManagedGitTools(env map[string]string, shimDir, startupEnv string) {
+	if shimDir != "" {
+		env[githubauth.CredentialCLIShimDirEnv] = shimDir
+		prependPathEntry(env, shimDir, runtime.GOOS == windowsOS)
+	}
+	if startupEnv == "" {
+		return
+	}
+	env[githubauth.CredentialCLIBashEnvEnv] = startupEnv
+	configureGitHubCLIStartupEnv(env)
+}
+
+// DeactivateManagedGitTools removes only PATH and Bash entries owned by the
+// installed managed tools. An unrelated replacement hook remains untouched.
+func DeactivateManagedGitTools(env map[string]string, shimDir, startupEnv string) {
+	if shimDir != "" && env[githubauth.CredentialCLIShimDirEnv] == shimDir {
+		removePathEntry(env, shimDir, runtime.GOOS == windowsOS)
+	}
+	if runtime.GOOS == windowsOS || startupEnv == "" || env[githubauth.CredentialCLIBashEnvEnv] != startupEnv {
+		return
+	}
+	if !samePathEntry(env["BASH_ENV"], startupEnv, false) {
+		return
+	}
+	if parentEnv := env[githubauth.CredentialParentBashEnv]; parentEnv != "" {
+		env["BASH_ENV"] = parentEnv
+	} else {
+		delete(env, "BASH_ENV")
+	}
 }
 
 func configureGitHubCLIStartupEnv(env map[string]string) {
@@ -988,11 +1081,34 @@ func prependPathEntry(env map[string]string, entry string, caseInsensitive bool)
 	filtered := make([]string, 0, len(parts)+1)
 	filtered = append(filtered, entry)
 	for _, part := range parts {
-		if filepath.Clean(part) != cleanEntry {
+		if !samePathEntry(part, cleanEntry, caseInsensitive) {
 			filtered = append(filtered, part)
 		}
 	}
 	env[key] = strings.Join(filtered, string(os.PathListSeparator))
+}
+
+func removePathEntry(env map[string]string, entry string, caseInsensitive bool) {
+	key := searchPathKey(env, caseInsensitive)
+	if _, exists := env[key]; !exists {
+		return
+	}
+	parts := filepath.SplitList(env[key])
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if !samePathEntry(part, entry, caseInsensitive) {
+			filtered = append(filtered, part)
+		}
+	}
+	env[key] = strings.Join(filtered, string(os.PathListSeparator))
+}
+
+func samePathEntry(left, right string, caseInsensitive bool) bool {
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if caseInsensitive {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 // searchPathKey returns the key env already carries the executable search path
@@ -1114,16 +1230,19 @@ const kandevMcpServerName = "kandev"
 // the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
 // SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
-	portStr := strconv.Itoa(port)
+	return injectKandevMcpServerAtHost(servers, port, "localhost")
+}
+
+func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string) []McpServerConfig {
 	kandevMcpSse := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "sse",
-		URL:  "http://localhost:" + portStr + "/sse",
+		URL:  MCPServerURL(host, port, "/sse"),
 	}
 	kandevMcpHttp := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "http",
-		URL:  "http://localhost:" + portStr + "/mcp",
+		URL:  MCPServerURL(host, port, "/mcp"),
 	}
 
 	// Filter out any existing kandev server and prepend the local ones

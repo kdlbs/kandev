@@ -52,7 +52,7 @@ type Service struct {
 }
 
 type sessionAdmission struct {
-	mu   sync.Mutex
+	gate *sessionAdmissionGate
 	refs int
 }
 
@@ -154,6 +154,19 @@ func NewServiceMemory(log *logger.Logger) *Service {
 // identity for trusted internal callers migrating legacy session snapshots.
 func (s *Service) ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (QueueSessionIdentity, error) {
 	return s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
+}
+
+// ManagedInputStorage returns the repository's managed-input receipt store
+// when supported. It returns nil for repositories that do not implement it.
+func (s *Service) ManagedInputStorage() ManagedInputStorage {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	storage, ok := s.repo.(ManagedInputStorage)
+	if !ok {
+		return nil
+	}
+	return storage
 }
 
 // SupportsAtomicDeferredMoveTransition reports whether task and queue rows share
@@ -315,7 +328,8 @@ func (s *Service) SetSessionAutoMerge(
 // WithSessionAdmission runs fn under the per-session queue admission lock.
 // All queue insertion and mutation paths use the same lock. The callback must
 // complete synchronously; queue methods called with its context reuse the held
-// lock.
+// lock. Acquisition has its own bounded context; admitted work retains the
+// caller's context and error semantics.
 func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
 	if fn == nil {
 		return errors.New("session admission callback is nil")
@@ -325,38 +339,54 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 		if token.sessionID == sessionID {
 			return fn(ctx)
 		}
-		return s.withSessionAdmissionLock(ctx, sessionID, token.afterLifecycleUnlock, fn)
+		waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
+		defer cancel()
+		return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, token.afterLifecycleUnlock, ownBudget, fn)
 	}
 
 	var afterLifecycleUnlock []func()
-	s.lifecycleMu.RLock()
+	waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
+	defer cancel()
+	if err := rlockWithContext(waitCtx, &s.lifecycleMu); err != nil {
+		return admissionWaitError(err, ownBudget)
+	}
 	defer func() {
 		s.lifecycleMu.RUnlock()
 		for _, callback := range afterLifecycleUnlock {
 			callback()
 		}
 	}()
-	return s.withSessionAdmissionLock(ctx, sessionID, &afterLifecycleUnlock, fn)
+	return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, &afterLifecycleUnlock, ownBudget, fn)
 }
 
 func (s *Service) withSessionAdmissionLock(
-	ctx context.Context,
+	waitCtx context.Context,
+	callbackCtx context.Context,
 	sessionID string,
 	afterLifecycleUnlock *[]func(),
+	ownBudget bool,
 	fn func(context.Context) error,
 ) error {
 	s.admissionMu.Lock()
 	entry := s.admissions[sessionID]
 	if entry == nil {
-		entry = &sessionAdmission{}
+		entry = &sessionAdmission{gate: newSessionAdmissionGate()}
 		s.admissions[sessionID] = entry
 	}
 	entry.refs++
 	s.admissionMu.Unlock()
 
-	entry.mu.Lock()
+	if err := entry.gate.lock(waitCtx); err != nil {
+		s.admissionMu.Lock()
+		entry.refs--
+		if entry.refs == 0 && s.admissions[sessionID] == entry {
+			delete(s.admissions, sessionID)
+		}
+		s.admissionMu.Unlock()
+		return admissionWaitError(err, ownBudget)
+	}
 	defer func() {
-		entry.mu.Unlock()
+		entry.gate.unlock()
 		s.admissionMu.Lock()
 		entry.refs--
 		if entry.refs == 0 && s.admissions[sessionID] == entry {
@@ -365,7 +395,7 @@ func (s *Service) withSessionAdmissionLock(
 		s.admissionMu.Unlock()
 	}()
 
-	admittedCtx := context.WithValue(ctx, sessionAdmissionContextKey{}, sessionAdmissionToken{
+	admittedCtx := context.WithValue(callbackCtx, sessionAdmissionContextKey{}, sessionAdmissionToken{
 		service: s, sessionID: sessionID, afterLifecycleUnlock: afterLifecycleUnlock,
 	})
 	return fn(admittedCtx)
@@ -1120,6 +1150,41 @@ func (s *Service) QueueMessageWithMetadataForSessionWithClientQueueID(
 	metadata map[string]interface{},
 	claim *QueueAttachmentClaim,
 ) (*QueuedMessage, bool, error) {
+	return s.queueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, nil, clientQueueID, content, model, userID, planMode, attachments, metadata, claim,
+	)
+}
+
+// QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry admits
+// one identified message only while the observed task and session versions
+// still own the current workflow entry.
+func (s *Service) QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entry WorkflowEntryIdentity,
+	clientQueueID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+) (*QueuedMessage, bool, error) {
+	if err := s.validateSessionIdentity(ctx, identity); err != nil {
+		return nil, false, err
+	}
+	return s.queueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, &entry, clientQueueID, content, model, userID, planMode, attachments, metadata, nil,
+	)
+}
+
+func (s *Service) queueMessageWithMetadataForSessionWithClientQueueID(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	workflowEntry *WorkflowEntryIdentity,
+	clientQueueID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	claim *QueueAttachmentClaim,
+) (*QueuedMessage, bool, error) {
 	if clientQueueID == "" || len(clientQueueID) > MaxQueueAdmissionIDLength {
 		return nil, false, errors.New("client queue id is invalid")
 	}
@@ -1140,7 +1205,7 @@ func (s *Service) QueueMessageWithMetadataForSessionWithClientQueueID(
 			policy := s.resolveAdmissionAutoMergePolicy(admittedCtx, &identity, identity.SessionID)
 			var err error
 			admitted, replay, err = writer.AdmitQueueMessage(
-				admittedCtx, identity, clientQueueID, candidate, claim, s.MaxPerSession(), policy,
+				admittedCtx, identity, clientQueueID, candidate, claim, s.MaxPerSession(), policy, workflowEntry,
 			)
 			if errors.Is(err, ErrAutoMergePolicyChanged) {
 				continue
@@ -1303,16 +1368,6 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 		zap.String("session_id", sessionID),
 		zap.Error(err))
 	return nil
-}
-
-func (s *Service) autoMergeCandidate(
-	ctx context.Context,
-	identity *QueueSessionIdentity,
-	candidate *QueuedMessage,
-	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
-) (*QueuedMessage, bool, error) {
-	return s.autoMergeCandidateAtWorkflowEntry(ctx, identity, nil, candidate, claim, policy)
 }
 
 func (s *Service) autoMergeCandidateAtWorkflowEntry(
@@ -1487,17 +1542,6 @@ func (s *Service) finalizeAutoMerge(
 		return merged
 	}
 	return source
-}
-
-func (s *Service) insertQueueMessage(
-	ctx context.Context,
-	identity *QueueSessionIdentity,
-	msg *QueuedMessage,
-	claim *QueueAttachmentClaim,
-	maxPerSession int,
-	policy *AutoMergePolicy,
-) error {
-	return s.insertQueueMessageAtWorkflowEntry(ctx, identity, nil, msg, claim, maxPerSession, policy)
 }
 
 func (s *Service) insertQueueMessageAtWorkflowEntry(
@@ -2078,7 +2122,7 @@ func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bo
 }
 
 // ReserveQueued atomically takes an ordinary head entry or reserves a durable
-// lifecycle head entry. The admission lock keeps drains from observing an
+// delivery head entry. The admission lock keeps drains from observing an
 // insert before its automatic-merge finalization completes. A reserved
 // lifecycle row survives until acknowledged. Auto-run OFF leaves the head in
 // place and reports no reserved entry.
@@ -2790,6 +2834,10 @@ type pendingSendNowClaimRepository interface {
 	DeletePendingSendNowClaim(context.Context, *SendNowClaim) error
 }
 
+type pendingSendNowClaimDeliveryRepository interface {
+	SetPendingSendNowClaimDelivery(context.Context, *SendNowClaim, string, string, string) error
+}
+
 // PendingSendNowClaimPersistenceAvailable reports whether ordinary claimed
 // prompts can be recovered after the owning process exits.
 func (s *Service) PendingSendNowClaimPersistenceAvailable() bool {
@@ -2839,10 +2887,40 @@ func (s *Service) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowC
 	})
 }
 
+// SetPendingSendNowClaimDelivery records the negotiated protocol and immutable
+// submission hash before the replacement prompt reaches the harness.
+func (s *Service) SetPendingSendNowClaimDelivery(
+	ctx context.Context,
+	claim *SendNowClaim,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingSendNowClaimDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending Send Now claim delivery persistence unavailable")
+	}
+	if claim == nil {
+		return ErrSendNowClaimChanged
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return err
+	}
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingSendNowClaimDelivery(admittedCtx, claim, protocol, submissionID, payloadHash)
+	})
+}
+
 type pendingQueueDispatchRepository interface {
 	ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error)
 	MarkPendingQueueDispatchAccepted(context.Context, *QueuedMessage) error
 	DeletePendingQueueDispatch(context.Context, *QueuedMessage) error
+}
+
+type pendingQueueDispatchDeliveryRepository interface {
+	SetPendingQueueDispatchDelivery(context.Context, *QueuedMessage, string, string, string) error
 }
 
 // PendingQueueDispatchPersistenceAvailable reports whether ordinary dequeues
@@ -2873,11 +2951,53 @@ func (s *Service) MarkPendingQueueDispatchAccepted(
 	})
 }
 
+// SetPendingQueueDispatchDelivery records the negotiated protocol and
+// immutable submission hash before the ordinary prompt reaches the harness.
+func (s *Service) SetPendingQueueDispatchDelivery(
+	ctx context.Context,
+	msg *QueuedMessage,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingQueueDispatchDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending queue dispatch delivery persistence unavailable")
+	}
+	if msg == nil {
+		return ErrQueueDispatchClaimChanged
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingQueueDispatchDelivery(admittedCtx, msg, protocol, submissionID, payloadHash)
+	})
+}
+
 // DeletePendingQueueDispatch acknowledges the exact recovered or accepted
 // ordinary dispatch attempt carried by msg.
 func (s *Service) DeletePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
 	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
 		return s.deletePendingQueueDispatch(admittedCtx, msg)
+	})
+}
+
+// AcknowledgeDurablePendingQueueDispatch removes the exact pending claim only
+// after its matching retained submission has authoritative terminal evidence.
+// Ordinary dispatch recovery deliberately keeps this claim until then.
+func (s *Service) AcknowledgeDurablePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	protocol, submissionID, _ := msg.DeliverySubmission()
+	if protocol != DeliveryProtocolV1 || submissionID == "" {
+		return errors.New("durable queue claim identity is incomplete")
+	}
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok {
+		return errors.New("pending queue dispatch persistence unavailable")
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.DeletePendingQueueDispatch(admittedCtx, msg)
 	})
 }
 
@@ -3267,6 +3387,20 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	return status
 }
 
+// HasPendingForSession reports whether a session still owns queued actionable
+// work. Callers that need an atomic admission boundary must hold the session
+// admission lock while checking it.
+func (s *Service) HasPendingForSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.repo == nil || sessionID == "" {
+		return false, nil
+	}
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
 // Snapshot returns an ordered status bound to one immutable session identity.
 func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (*QueueStatus, error) {
 	snapshot, err := s.repo.Snapshot(ctx, identity)
@@ -3327,12 +3461,18 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 func (s *Service) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
 	counts, err := s.repo.CountPendingByTaskIDs(ctx, taskIDs)
 	if err != nil {
-		s.logger.Error("count pending by task ids failed",
-			zap.Int("task_count", len(taskIDs)),
-			zap.Error(err))
+		if !isCanceledRequestError(ctx, err) {
+			s.logger.Error("count pending by task ids failed",
+				zap.Int("task_count", len(taskIDs)),
+				zap.Error(err))
+		}
 		return nil, err
 	}
 	return counts, nil
+}
+
+func isCanceledRequestError(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
 }
 
 // CountPendingByTask returns the pending prompt count for one task.

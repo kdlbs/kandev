@@ -118,11 +118,18 @@ test.describe("Quick Chat", () => {
     await expect(overlay).not.toBeVisible();
   });
 
-  test("returns focus without a visible indicator", async ({ testPage }) => {
+  test("returns focus without a visible indicator", async ({ testPage, apiClient }) => {
+    await apiClient.saveUserSettings({
+      sidebar_fast_actions_enabled: true,
+      sidebar_new_task_style: "compact",
+    });
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
-    const dialog = await openQuickChatSetup(testPage, false);
     const launcher = testPage.getByTestId("sidebar-quick-chat-shortcut");
+    const restingBorder = await launcher.evaluate(
+      (element) => getComputedStyle(element).borderColor,
+    );
+    const dialog = await openQuickChatSetup(testPage, false);
 
     await testPage.keyboard.press("Escape");
 
@@ -140,12 +147,14 @@ test.describe("Quick Chat", () => {
     });
     expect(silentStyles.outlineStyle).toBe("none");
     expect(silentStyles.boxShadow).toBe("none");
-    expect(silentStyles.borderColor).toBe("rgba(0, 0, 0, 0)");
+    await expect(launcher).toHaveCSS("border-color", restingBorder);
 
+    const terminalLauncher = testPage.getByTestId("sidebar-quick-terminal-shortcut");
     await testPage.getByTestId("create-task-button").focus();
     await expect(launcher).not.toHaveAttribute("data-quick-chat-silent-focus");
 
     await testPage.keyboard.press("Tab");
+    await expect(terminalLauncher).toBeFocused();
     await testPage.keyboard.press("Tab");
     await expect(launcher).toBeFocused();
 
@@ -207,7 +216,10 @@ test.describe("Quick Chat", () => {
       });
 
       const dialog = await openQuickChatSetup(testPage);
-      await dialog.getByTestId("quick-chat-start").click();
+      await dialog
+        .getByTestId("task-description-input")
+        .fill("Check the terminal after Quick Chat starts.");
+      await dialog.getByTestId("quick-chat-send").click();
 
       const terminal = dialog.getByTestId("passthrough-terminal");
       await expect(terminal).toBeVisible({ timeout: 15_000 });
@@ -249,7 +261,10 @@ test.describe("Quick Chat", () => {
     const clarification = dialog.getByTestId("clarification-overlay");
     await expect(clarification).toBeVisible({ timeout: 30_000 });
 
-    await dialog.getByTestId("quick-chat-messages").click({ position: { x: 8, y: 8 } });
+    await dialog
+      .getByTestId("quick-chat-messages")
+      .getByText("/e2e:clarification-multi", { exact: true })
+      .click();
     await expect(dialog.getByTestId("quick-chat-content")).toBeFocused();
 
     await testPage.keyboard.press("1");
@@ -479,7 +494,7 @@ test.describe("Quick Chat", () => {
     await expect(editor).toHaveText("fallback draft");
   });
 
-  test("offers configuration chat in setup and hides it once one exists", async ({
+  test("offers configuration mode on the opening composer and hides it once one exists", async ({
     testPage,
     apiClient,
     seedData,
@@ -490,17 +505,12 @@ test.describe("Quick Chat", () => {
     const dialog = await openQuickChatSetup(testPage);
     const setup = dialog.getByTestId("quick-chat-setup");
 
-    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
-    await setup.getByRole("switch", { name: "Configuration chat" }).click();
-
-    const configSetup = dialog.getByTestId("config-chat-setup");
-    await expect(configSetup).toBeVisible();
-    await expect(configSetup.getByRole("switch", { name: "Configuration chat" })).toBeChecked();
-    await configSetup
-      .getByPlaceholder("Ask anything about your configuration...")
-      .fill("/e2e:simple-message");
-    await configSetup.getByRole("button", { name: "Start configuration chat" }).click();
-    await expect(configSetup).not.toBeVisible({ timeout: 15_000 });
+    const modeSwitch = setup.getByRole("switch", { name: "Configuration chat" });
+    await modeSwitch.click();
+    await expect(modeSwitch).toBeChecked();
+    await setup.getByTestId("task-description-input").fill("/e2e:simple-message");
+    await setup.getByTestId("quick-chat-send").click();
+    await expect(setup).not.toBeVisible({ timeout: 15_000 });
 
     await testPage.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
@@ -592,7 +602,7 @@ test.describe("Quick Chat", () => {
       };
     });
     expect(setupSurfaces.setup).toBe(setupSurfaces.dialog);
-    expect(setupSurfaces.footer).toBe(setupSurfaces.setup);
+    expect(setupSurfaces.footer).toBeNull();
 
     await startQuickChatFromSetup(dialog, testPage);
     const surfaces = await dialog.evaluate((element) => {
@@ -624,6 +634,7 @@ test.describe("Quick Chat", () => {
 
   test("explains quick chat and starts with repository context", async ({
     testPage,
+    apiClient,
     seedData,
     backend,
   }) => {
@@ -639,24 +650,19 @@ test.describe("Quick Chat", () => {
       await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
         "Chat with an agent about an idea, question, or codebase.",
       );
-      await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
-        "Quick chats stay outside your task board.",
-      );
-      await expect(
-        dialog.getByText("Add repository context to focus on specific code and branches."),
-      ).toBeVisible();
+      await expect(dialog.getByTestId("add-repository")).toBeVisible();
       await selectAgentIfNeeded(dialog, testPage);
 
       await dialog.getByTestId("add-repository").click();
-      await dialog.getByTestId("repo-chip-trigger").click();
-      await testPage.getByRole("option").first().click();
+      await testPage.locator(`[role="option"][data-value="${seedData.repositoryId}"]`).click();
       await dialog.getByTestId("branch-chip-trigger").click();
       await testPage.locator(`[role="option"][data-value="${contextBranch}"]`).click();
 
       const startRequest = testPage.waitForRequest(
         (request) => request.url().includes("/quick-chat") && request.method() === "POST",
       );
-      await dialog.getByTestId("quick-chat-start").click();
+      await dialog.getByTestId("task-description-input").fill("Review the selected branch.");
+      await dialog.getByTestId("quick-chat-send").click();
       const payload = (await startRequest).postDataJSON() as {
         repositories?: Array<{ repository_id: string; base_branch: string }>;
       };
@@ -671,15 +677,57 @@ test.describe("Quick Chat", () => {
         }).trim(),
       ).toBe("main");
     } finally {
-      execFileSync("git", ["push", "origin", "--delete", contextBranch], { cwd: sourceRepo });
-      execFileSync("git", ["branch", "-D", contextBranch], { cwd: sourceRepo });
+      try {
+        // Worktree cleanup needs its base branch to remain resolvable.
+        await expect(
+          apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]),
+        ).resolves.toBeUndefined();
+      } finally {
+        execFileSync("git", ["push", "origin", "--delete", contextBranch], { cwd: sourceRepo });
+        execFileSync("git", ["branch", "-D", contextBranch], { cwd: sourceRepo });
+      }
     }
   });
 
   test("opens quick chat, selects agent, sends message and receives response", async ({
     testPage,
   }) => {
+    const availableCommands = attachAvailableCommandsCapture(testPage);
     const dialog = await openQuickChatWithAgent(testPage);
+
+    await test.step("slash commands populate after the opening prompt", async () => {
+      await expect
+        .poll(() => availableCommands.frames.some((frame) => frame.count > 0), { timeout: 15_000 })
+        .toBe(true);
+
+      const editor = dialog.locator(".tiptap.ProseMirror");
+      await editor.click();
+      await editor.pressSequentially("/");
+
+      // SlashCommandMenu renders into a portal at document root, so query at page level.
+      await expect(testPage.getByText("Commands").first()).toBeVisible({ timeout: 10_000 });
+      await expect(testPage.getByText("/slow")).toBeVisible({ timeout: 5_000 });
+      await expect(testPage.getByText("/error")).toBeVisible({ timeout: 5_000 });
+      await editor.fill("");
+      await expect(testPage.getByText("/slow")).not.toBeVisible();
+    });
+
+    await test.step("dynamic session options populate after the opening prompt", async () => {
+      const trigger = dialog.getByRole("button", { name: "Session model settings" });
+      await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+      await trigger.click();
+
+      const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+      await expect(effortTrigger).toBeVisible({
+        timeout: 10_000,
+      });
+      await effortTrigger.click();
+      await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
+        timeout: 10_000,
+      });
+      await trigger.click();
+      await expect(testPage.getByTestId("config-option-section-effort")).not.toBeVisible();
+    });
 
     await sendQuickChatMessage(dialog, testPage, "/e2e:simple-message");
 
@@ -787,55 +835,6 @@ test.describe("Quick Chat", () => {
     await expect(editor).toHaveText(generatedPrompt);
   });
 
-  test("slash command menu populates before first message (eager agent init)", async ({
-    testPage,
-  }) => {
-    // Picking an agent in quick chat should boot the agent process eagerly,
-    // so available_commands_update fires from session/new — the slash menu is
-    // populated before the user sends their first prompt. Mock-agent emits
-    // /slow, /error, /thinking, etc. on session/new (parity with real ACP
-    // agents like OpenCode and Claude).
-    const availableCommands = attachAvailableCommandsCapture(testPage);
-
-    const dialog = await openQuickChatWithAgent(testPage);
-
-    // Wait for the available_commands WS frame to land. Eager init kicks off
-    // session/new during the HTTP request, but the agent emits commands
-    // asynchronously after the response flushes — so the frame can arrive
-    // moments after openQuickChatWithAgent resolves.
-    await expect
-      .poll(() => availableCommands.frames.some((frame) => frame.count > 0), { timeout: 15_000 })
-      .toBe(true);
-
-    const editor = dialog.locator(".tiptap.ProseMirror");
-    await editor.click();
-    await editor.pressSequentially("/");
-
-    // SlashCommandMenu renders into a portal at document root, so query at page level.
-    await expect(testPage.getByText("Commands").first()).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText("/slow")).toBeVisible({ timeout: 5_000 });
-    await expect(testPage.getByText("/error")).toBeVisible({ timeout: 5_000 });
-  });
-
-  test("model selector shows dynamic session options before first message", async ({
-    testPage,
-  }) => {
-    const dialog = await openQuickChatWithAgent(testPage);
-
-    const trigger = dialog.getByRole("button", { name: "Session model settings" });
-    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
-    await trigger.click();
-
-    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
-    await expect(effortTrigger).toBeVisible({
-      timeout: 10_000,
-    });
-    await effortTrigger.click();
-    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
-      timeout: 10_000,
-    });
-  });
-
   // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2
   test("resumes a restored session after backend restart", async ({
     testPage,
@@ -873,9 +872,8 @@ test.describe("Quick Chat", () => {
     // the ACP catalog. Wait for the durable session metadata before reloading
     // the shell, so the reload hydrates the same state that the backend owns.
     const readPersistedModelCatalog = async () => {
-      const { sessions } = await apiClient.listTaskSessions(started.task_id);
-      const rawState = sessions.find((session) => session.id === started.session_id)?.metadata
-        ?.acp_model_state;
+      const { session } = await apiClient.getTaskSession(started.session_id);
+      const rawState = session.metadata?.acp_model_state;
       if (!rawState || typeof rawState !== "object") {
         return { currentModelId: "", configOptionIds: [] as string[] };
       }

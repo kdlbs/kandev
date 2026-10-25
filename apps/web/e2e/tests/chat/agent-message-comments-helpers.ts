@@ -91,9 +91,6 @@ export async function openSeededAgentReply(
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  // The seeded reply only needs the first agent message to be durable. A
-  // running status can outlive that message on mobile, where waiting for the
-  // idle composer would make comment-only coverage depend on terminal timing.
   await expect
     .poll(
       async () => {
@@ -119,6 +116,47 @@ export async function openSeededAgentReply(
   return { task, session, body };
 }
 
+export async function openSeededWaitingAgentReply(
+  page: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+) {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      start_agent: false,
+    },
+  );
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "WAITING_FOR_INPUT",
+    agentProfileId: seedData.agentProfileId,
+    repositoryId: seedData.repositoryId,
+  });
+  const now = new Date().toISOString();
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: AGENT_REPLY,
+    newTurn: true,
+    turnStartedAt: now,
+    turnCompletedAt: now,
+  });
+
+  await page.goto(`/t/${task.id}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  const body = session.activeChat().locator(`[data-agent-message-body][data-message-id]`).filter({
+    hasText: AGENT_REPLY,
+  });
+  await expect(body).toBeVisible({ timeout: 15_000 });
+  return { task: { ...task, session_id: sessionId }, body };
+}
+
 export async function selectAgentReplyText(
   body: ReturnType<SessionPage["activeChat"]>,
   selectedText: string,
@@ -136,6 +174,7 @@ export async function selectAgentReplyText(
         const selection = window.getSelection();
         selection?.removeAllRanges();
         selection?.addRange(range);
+        element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
         element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
         return;
       }

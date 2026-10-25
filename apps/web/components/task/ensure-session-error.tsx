@@ -219,10 +219,15 @@ export function EnsureSessionErrorBanner({
 export function SessionRecoveryNotice({
   message,
   recoveryFailure,
+  onResume,
+  resumeDisabled,
 }: {
   message: string;
   recoveryFailure?: Extract<SessionRecoveryFailure, { outcome: "workspace_read_only" }> | null;
+  onResume?: () => void;
+  resumeDisabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="px-3 pt-2" data-testid="session-recovery-notice">
       <Alert>
@@ -230,6 +235,19 @@ export function SessionRecoveryNotice({
         <AlertDescription className="col-start-2 w-full min-w-0">
           <span>{message}</span>
           {recoveryFailure ? <RecoveryFailureDetails failure={recoveryFailure} /> : null}
+          {onResume ? (
+            <RecoveryActions
+              actions={[
+                {
+                  kind: "resume",
+                  label: t("task:resumeSession"),
+                  onClick: onResume,
+                  testId: "session-recovery-notice-resume",
+                },
+              ]}
+              busy={resumeDisabled}
+            />
+          ) : null}
         </AlertDescription>
       </Alert>
     </div>
@@ -238,6 +256,7 @@ export function SessionRecoveryNotice({
 
 /** Shared inline rendering for automatic resume failures and read-only notices. */
 export function SessionRecoveryFeedback({
+  ownedByChat = false,
   error,
   notice,
   onRetry,
@@ -248,6 +267,7 @@ export function SessionRecoveryFeedback({
   recoveryFailure,
   testId = "session-recovery-error",
 }: {
+  ownedByChat?: boolean;
   error: string | null;
   notice: string | null;
   onRetry: () => void;
@@ -261,6 +281,7 @@ export function SessionRecoveryFeedback({
   const readOnlyRecovery =
     recoveryFailure?.outcome === "workspace_read_only" ? recoveryFailure : null;
   const statusFailure = recoveryFailure?.outcome === "status_unavailable" ? recoveryFailure : null;
+  if (ownedByChat && !statusFailure) return null;
   return (
     <div id={sessionRecoveryOwnerId(recoveryFailure)} tabIndex={-1}>
       {statusFailure ? (
@@ -281,7 +302,12 @@ export function SessionRecoveryFeedback({
         testId={testId}
       />
       {notice ? (
-        <SessionRecoveryNotice message={notice} recoveryFailure={readOnlyRecovery} />
+        <SessionRecoveryNotice
+          message={notice}
+          recoveryFailure={readOnlyRecovery}
+          onResume={readOnlyRecovery ? onRetry : undefined}
+          resumeDisabled={retryDisabled}
+        />
       ) : null}
     </div>
   );

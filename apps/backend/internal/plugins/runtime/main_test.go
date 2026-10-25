@@ -59,7 +59,7 @@ func buildFixturePlugin() (string, error) {
 		return "", fmt.Errorf("getwd: %w", err)
 	}
 
-	cmd := exec.Command("go", "build", "-o", binPath, "./testdata/fixtureplugin")
+	cmd := exec.Command("go", "build", "-trimpath", "-o", binPath, "./testdata/fixtureplugin")
 	cmd.Dir = pkgDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("go build fixtureplugin: %w: %s", err, out)

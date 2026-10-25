@@ -29,7 +29,7 @@ type TaskIssueStore interface {
 	GetTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*taskmodels.TaskRepository, error)
 	GetRepository(ctx context.Context, repositoryID string) (*taskmodels.Repository, error)
-	UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*taskmodels.Task, error)
+	UpdateTaskGitHubIssue(ctx context.Context, taskID string, link *taskmodels.TaskGitHubIssueLink) (*taskmodels.Task, error)
 }
 
 type LinkTaskIssueRequest struct {
@@ -133,13 +133,10 @@ func (s *Service) linkTaskIssueResolved(
 	if err := s.validateIssueTaskRepository(ctx, store, taskID, issue.RepoOwner, issue.RepoName); err != nil {
 		return nil, err
 	}
-	metadata := copyMetadata(task.Metadata)
-	metadata[taskMetaIssueURL] = issue.HTMLURL
-	metadata[taskMetaIssueNumber] = issue.Number
-	metadata[taskMetaIssueOwner] = issue.RepoOwner
-	metadata[taskMetaIssueRepo] = issue.RepoName
-	metadata[taskMetaIssueLinked] = true
-	if _, err := store.UpdateTaskMetadata(context.WithoutCancel(ctx), taskID, metadata); err != nil {
+	link := &taskmodels.TaskGitHubIssueLink{
+		URL: issue.HTMLURL, Number: issue.Number, Owner: issue.RepoOwner, Repo: issue.RepoName,
+	}
+	if _, err := store.UpdateTaskGitHubIssue(context.WithoutCancel(ctx), taskID, link); err != nil {
 		return nil, err
 	}
 	return taskIssueResponse(taskID, task.Title, issue), nil
@@ -169,17 +166,11 @@ func (s *Service) UnlinkTaskIssue(ctx context.Context, taskID string) error {
 	if store == nil {
 		return errStoreUnavailable
 	}
-	task, err := store.GetTask(ctx, taskID)
+	_, err := store.GetTask(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	metadata := copyMetadata(task.Metadata)
-	delete(metadata, taskMetaIssueURL)
-	delete(metadata, taskMetaIssueNumber)
-	delete(metadata, taskMetaIssueOwner)
-	delete(metadata, taskMetaIssueRepo)
-	delete(metadata, taskMetaIssueLinked)
-	_, err = store.UpdateTaskMetadata(context.WithoutCancel(ctx), taskID, metadata)
+	_, err = store.UpdateTaskGitHubIssue(context.WithoutCancel(ctx), taskID, nil)
 	return err
 }
 
@@ -246,14 +237,6 @@ func (s *Service) validateIssueTaskRepository(ctx context.Context, store TaskIss
 		}
 	}
 	return ErrIssueRepositoryMismatch
-}
-
-func copyMetadata(metadata map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(metadata)+5)
-	for key, value := range metadata {
-		out[key] = value
-	}
-	return out
 }
 
 func taskIssueLinkFromMetadata(row taskIssueMetadataRow) (TaskIssueLinkResponse, bool) {

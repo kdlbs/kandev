@@ -107,7 +107,14 @@ Desktop forces the backend to `127.0.0.1`, supplies a random 256-bit health toke
 
 The preferred desktop port is `38430`. If only that port is unavailable, Kandev asks the OS for a free loopback port. `KANDEV_DESKTOP_PORT` can request a different port, but a non-UTF-8 value, a non-integer, `0`, or a value above `65535` is a fatal startup configuration error. If the requested port is occupied, the desktop still falls back to an OS-assigned loopback port.
 
-Startup waits up to 60 seconds for the owned backend. A missing packaged binary, invalid port, configuration/database error, or early backend exit appears on the startup screen with the most recent captured backend output. Reinstall the complete artifact if runtime validation reports a missing `kandev`, `agentctl`, or remote helper.
+Startup waits up to 60 seconds for the owned backend. A missing packaged binary, invalid port, configuration/database error, or early backend exit appears on the startup screen with the most recent captured backend output. Reinstall the app if runtime validation reports a missing `kandev`, `agentctl`, or helper manifest.
+
+Stable Desktop resources contain the host binaries and a remote-helper manifest. Local startup and
+local tasks do not need a helper download. The first remote task for a platform downloads the
+matching helper if no verified copy is cached. Kandev checks its digest before use. Allow outbound
+HTTPS to `github.com` and `release-assets.githubusercontent.com`; GitHub redirects release-asset
+downloads to the second host. Desktop has no full offline installer or updater. A cached helper or
+an existing helper-path override supports remote work without this download.
 
 ## Data, processes, and cleanup
 
@@ -127,7 +134,18 @@ KANDEV_HOME_DIR="$HOME/.kandev-desktop-dev" make desktop-dev
 
 This home persists between launches. It is separate from both your normal Kandev home and each disposable temporary test window.
 
-The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
+The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Developer Tools, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
+
+### Inspect the desktop app
+
+Release builds include **Developer Tools**. The inspector stays closed until you open it.
+
+- On macOS, choose **View → Developer Tools** or press **Cmd+Option+I**.
+- On Windows or Linux, choose **View → Developer Tools** or press **Ctrl+Shift+I**.
+
+The inspector opens for the current Kandev page, including startup and error pages. Opening or reopening it does not reload the page or restart the backend. If it is already open, this action keeps it open.
+
+On macOS 13.3 or later, Safari can inspect the same WebView. Enable Safari's **Develop** menu in Safari settings. Open **Develop** and select this computer. Then select **Kandev**.
 
 Uninstalling the desktop application does not delete the Kandev home. Keep it to preserve workspaces and settings, or back it up and remove it separately only after all Kandev processes and executors are stopped. See [Operations](operations.md).
 
@@ -139,6 +157,11 @@ Repository**, then choose a folder. The selected folders are saved for the
 desktop installation and are available to its workspaces. A normal browser
 connected to the same backend uses the HTTP folder picker. The browser does
 not receive the desktop app's native picker authority.
+
+The in-app folder browser hides directories whose name starts with a dot. Use
+its **Hidden folders** switch to list them. The desktop app's own folder
+panel is the operating system's panel, where hidden files are shown with the
+platform's own control instead.
 
 After an upgrade, an existing installation can show **Continue Home
 Discovery**. This action saves the desktop backend's Home folder directly; it
@@ -207,7 +230,7 @@ Kandev has no registered public URL scheme, file association, or command-line de
 
 External `http`, `https`, and `mailto` destinations open in the system browser or mail client. The desktop bridge blocks links with embedded credentials and unsupported schemes. It keeps `localhost` names, loopback IPs, and unspecified IPs in the WebView. It does not block all private-LAN hosts. Kandev routes, previews, and downloads stay in the WebView. Downloads that you start inside the desktop app open the system Save dialog. Kandev reports whether the transfer succeeds. The WebView transfers the file data.
 
-Native notifications are limited to selected agent-turn-finished and
+Automatic agent notifications are limited to selected agent-turn-finished and
 agent-needs-an-answer events, plus session failures. Semantic session events
 respect each provider's event selections. Session failures remain an independent
 safety alert whenever the Local provider is enabled. Delivery also respects the
@@ -215,6 +238,15 @@ application's notification preference and OS permission. Requests carry
 task/session and semantic event identifiers for validation and event
 de-duplication, but the desktop registers no notification activation/deep-link
 handler. Clicking a notification is therefore not a supported navigation path.
+
+To test delivery, open **Settings > Preferences > Notifications** and select
+**Send test notification**. Desktop tests use native notifications even when
+browser notifications are unavailable or blocked; the message confirms
+notification delivery on this device. An undecided OS permission can be
+requested from that click. If permission is denied, enable Kandev in the OS
+notification settings and refresh the permission status. With permission
+granted, each click makes a new test attempt. Browser-only clients retain
+browser notification tests through the same control.
 
 ## Troubleshooting
 
@@ -233,6 +265,13 @@ Reinstalling repairs packaged program files but intentionally leaves user data u
 ### Agent works in a terminal but not Desktop
 
 Use the full command path in the agent profile and verify GUI-visible credentials. Shell aliases and functions are not executables and cannot be discovered by `PATH`.
+
+### A remote task cannot get its helper
+
+Read the preparation error. If it names a download or network problem, allow outbound HTTPS to
+`github.com` and `release-assets.githubusercontent.com`, then retry. A Stable Desktop installer has
+no full offline variant. Use a cached helper or an existing helper-path override when the app cannot
+reach those hosts.
 
 ### Update check reports no usable feed
 

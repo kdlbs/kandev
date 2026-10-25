@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -23,6 +22,11 @@ func TestRegisteredIdentifiersMatchAC005_3(t *testing.T) {
 		StepMessageTimestampsBackfill: true,
 		StepSubagentContextBackfill:   true,
 		StepSessionsRecovery:          true,
+		StepQueueReconciliation:       true,
+		StepTurnReconciliation:        true,
+		StepRouteReconciliation:       true,
+		StepRuntimeInventory:          true,
+		StepTaskReconciliation:        true,
 	}
 
 	got := map[StepID]bool{}
@@ -72,12 +76,12 @@ func TestEveryLabelKeyResolvesInEveryLocale(t *testing.T) {
 
 func readWebStartupCatalog(t *testing.T) map[string]string {
 	t.Helper()
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate startup package")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
 	// internal/startup -> internal -> backend -> apps -> repo root
-	repoRoot := filepath.Join(filepath.Dir(sourceFile), "..", "..", "..", "..")
+	repoRoot := filepath.Join(packageDir, "..", "..", "..", "..")
 	path := filepath.Join(repoRoot, "apps", "web", "src", "locales", "en", "startup.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -120,7 +124,12 @@ func TestRegisteredStepsDeclarePhaseMatchesCallSite(t *testing.T) {
 		// SetPhase(RecoveringSessions) transition (not the later
 		// bindListeners closure in startGatewayAndServe, which runs after
 		// recovery has already completed).
-		StepSessionsRecovery: RecoveringSessions,
+		StepSessionsRecovery:    RecoveringSessions,
+		StepQueueReconciliation: RecoveringSessions,
+		StepTurnReconciliation:  RecoveringSessions,
+		StepRouteReconciliation: RecoveringSessions,
+		StepRuntimeInventory:    RecoveringSessions,
+		StepTaskReconciliation:  RecoveringSessions,
 	}
 
 	for _, spec := range Registry() {

@@ -104,6 +104,7 @@ type ContainerInfo struct {
 	ExitCode   int
 	Health     string
 	Labels     map[string]string
+	Mounts     []string
 }
 
 // Client wraps the Docker client.
@@ -570,6 +571,9 @@ func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*Con
 		info.Image = inspect.Config.Image
 		info.Labels = inspect.Config.Labels
 	}
+	for _, containerMount := range inspect.Mounts {
+		info.Mounts = append(info.Mounts, containerMount.Source)
+	}
 	applyContainerState(info, inspect.State)
 
 	return info, nil
@@ -853,6 +857,9 @@ func (c *Client) ListContainers(ctx context.Context, labels map[string]string) (
 			State:  string(ctr.State),
 			Status: ctr.Status,
 			Labels: ctr.Labels,
+		}
+		for _, containerMount := range ctr.Mounts {
+			info.Mounts = append(info.Mounts, containerMount.Source)
 		}
 		infos = append(infos, info)
 	}

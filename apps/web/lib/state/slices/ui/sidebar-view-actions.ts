@@ -3,13 +3,7 @@ import type { WorkspaceSliceState } from "../workspace/types";
 import { requestUserSettingsUpdateWithRetry } from "@/lib/user-settings-sync";
 import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
 import type { UISlice, UISliceState } from "./types";
-import type {
-  FilterClause,
-  GroupKey,
-  SidebarView,
-  SidebarViewDraft,
-  SortSpec,
-} from "./sidebar-view-types";
+import type { FilterClause, GroupKey, SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import { toApiSidebarDraft, toApiSidebarView } from "./sidebar-view-wire";
 import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
@@ -246,6 +240,63 @@ function mutateViews(
   syncSidebarWrite(set, snapshot, afterSnapshot, toSidebarSettingsPayload(after), "views");
 }
 
+type SidebarDraftPatch = Partial<{
+  filters: FilterClause[];
+  sort: SidebarView["sort"];
+  group: GroupKey;
+  groupIndent: boolean;
+  taskRow: SidebarView["taskRow"];
+}>;
+
+function updateSidebarDraft(
+  set: ImmerSet,
+  get: () => SidebarActionState,
+  patch: SidebarDraftPatch,
+): void {
+  const before = snapshotSidebar(get().sidebarViews);
+  let committed = false;
+  set((draft) => {
+    const active = draft.sidebarViews.views.find((v) => v.id === draft.sidebarViews.activeViewId);
+    if (!active) return;
+    committed = true;
+    const current: SidebarViewDraft = draft.sidebarViews.draft ?? {
+      baseViewId: active.id,
+      filters: active.filters,
+      sort: active.sort,
+      ...(active.sortWarningCount !== undefined
+        ? { sortWarningCount: active.sortWarningCount }
+        : {}),
+      group: active.group,
+      groupIndent: active.groupIndent,
+      taskRow: cloneSidebarTaskRowPresentation(active.taskRow),
+    };
+    const next: SidebarViewDraft = {
+      baseViewId: active.id,
+      filters: patch.filters ?? current.filters,
+      sort: patch.sort ?? current.sort,
+      ...(current.sortWarningCount !== undefined
+        ? { sortWarningCount: current.sortWarningCount }
+        : {}),
+      group: patch.group ?? current.group,
+      groupIndent: patch.groupIndent ?? current.groupIndent,
+      taskRow: cloneSidebarTaskRowPresentation(patch.taskRow ?? current.taskRow),
+    };
+    draft.sidebarViews.draft = next;
+  });
+  if (!committed) return;
+  const after = snapshotSidebar(get().sidebarViews);
+  syncSidebarWrite(
+    set,
+    before,
+    after,
+    {
+      active_view_id: after.activeViewId,
+      draft: after.draft ? toApiSidebarDraft(after.draft) : null,
+    },
+    "local",
+  );
+}
+
 function buildSidebarLocalActions(set: ImmerSet, get: () => SidebarActionState) {
   return {
     setSidebarActiveView: (viewId: string) => {
@@ -270,51 +321,7 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => SidebarActionState) 
         "local",
       );
     },
-    updateSidebarDraft: (
-      patch: Partial<{
-        filters: FilterClause[];
-        sort: SortSpec;
-        group: GroupKey;
-        taskRow: SidebarView["taskRow"];
-      }>,
-    ) => {
-      const before = snapshotSidebar(get().sidebarViews);
-      let committed = false;
-      set((draft) => {
-        const active = draft.sidebarViews.views.find(
-          (v) => v.id === draft.sidebarViews.activeViewId,
-        );
-        if (!active) return;
-        committed = true;
-        const current: SidebarViewDraft = draft.sidebarViews.draft ?? {
-          baseViewId: active.id,
-          filters: active.filters,
-          sort: active.sort,
-          group: active.group,
-          taskRow: cloneSidebarTaskRowPresentation(active.taskRow),
-        };
-        const next: SidebarViewDraft = {
-          baseViewId: active.id,
-          filters: patch.filters ?? current.filters,
-          sort: patch.sort ?? current.sort,
-          group: patch.group ?? current.group,
-          taskRow: cloneSidebarTaskRowPresentation(patch.taskRow ?? current.taskRow),
-        };
-        draft.sidebarViews.draft = next;
-      });
-      if (!committed) return;
-      const after = snapshotSidebar(get().sidebarViews);
-      syncSidebarWrite(
-        set,
-        before,
-        after,
-        {
-          active_view_id: after.activeViewId,
-          draft: after.draft ? toApiSidebarDraft(after.draft) : null,
-        },
-        "local",
-      );
-    },
+    updateSidebarDraft: (patch: SidebarDraftPatch) => updateSidebarDraft(set, get, patch),
     discardSidebarDraft: () => {
       if (!get().sidebarViews.draft) return;
       const before = snapshotSidebar(get().sidebarViews);
@@ -371,7 +378,11 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
           name: name.trim() || t("sidebar:untitledView"),
           filters: s.draft.filters,
           sort: s.draft.sort,
+          ...(s.draft.sortWarningCount !== undefined
+            ? { sortWarningCount: s.draft.sortWarningCount }
+            : {}),
           group: s.draft.group,
+          groupIndent: s.draft.groupIndent,
           collapsedGroups: [],
           taskRow: cloneSidebarTaskRowPresentation(s.draft.taskRow),
         });
@@ -385,7 +396,9 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
         if (!view) return false;
         view.filters = s.draft.filters;
         view.sort = s.draft.sort;
+        view.sortWarningCount = s.draft.sortWarningCount;
         view.group = s.draft.group;
+        view.groupIndent = s.draft.groupIndent;
         view.taskRow = cloneSidebarTaskRowPresentation(s.draft.taskRow);
         s.draft = null;
       }),
@@ -398,7 +411,11 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
           name: name.trim() || `${source.name} copy`,
           filters: source.filters.map((f) => ({ ...f, id: makeId("clause") })),
           sort: source.sort,
+          ...(source.sortWarningCount !== undefined
+            ? { sortWarningCount: source.sortWarningCount }
+            : {}),
           group: source.group,
+          groupIndent: source.groupIndent,
           collapsedGroups: [],
           taskRow: source.taskRow ? cloneSidebarTaskRowPresentation(source.taskRow) : undefined,
         });
@@ -490,7 +507,9 @@ function cloneView(v: SidebarView): SidebarView {
       ...f,
       value: Array.isArray(f.value) ? [...f.value] : f.value,
     })),
-    sort: { ...v.sort },
+    sort: { ...v.sort, thenBy: v.sort.thenBy?.map((rule) => ({ ...rule })) },
+    ...(v.sortWarningCount !== undefined ? { sortWarningCount: v.sortWarningCount } : {}),
+    groupIndent: typeof v.groupIndent === "boolean" ? v.groupIndent : true,
     group: v.group,
     collapsedGroups: [...v.collapsedGroups],
     taskRow: v.taskRow ? cloneSidebarTaskRowPresentation(v.taskRow) : undefined,
@@ -505,8 +524,10 @@ function cloneDraft(draft: SidebarViewDraft | null): SidebarViewDraft | null {
       ...filter,
       value: Array.isArray(filter.value) ? [...filter.value] : filter.value,
     })),
-    sort: { ...draft.sort },
+    sort: { ...draft.sort, thenBy: draft.sort.thenBy?.map((rule) => ({ ...rule })) },
+    ...(draft.sortWarningCount !== undefined ? { sortWarningCount: draft.sortWarningCount } : {}),
     group: draft.group,
+    groupIndent: typeof draft.groupIndent === "boolean" ? draft.groupIndent : true,
     taskRow: draft.taskRow ? cloneSidebarTaskRowPresentation(draft.taskRow) : undefined,
   };
 }

@@ -60,6 +60,87 @@ func (r *Repository) SetTaskMetadataKeyIfDifferentStamp(
 	return r.setMetadataKeyIfStamp(ctx, "tasks", "task", taskID, key, newStamp, value, metadataCASDifferent)
 }
 
+// RecordSessionRecoveryResolution atomically appends one bounded, exact-stamp
+// successful recovery record while serializing metadata updates for the row.
+func (r *Repository) RecordSessionRecoveryResolution(
+	ctx context.Context,
+	sessionID string,
+	resolution models.SessionRecoveryResolution,
+) (bool, error) {
+	items := models.NormalizeSessionRecoveryResolutions([]models.SessionRecoveryResolution{resolution})
+	if len(items) != 1 {
+		return false, nil
+	}
+	resolution = items[0]
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	raw, err := r.lockSessionRecoveryResolutionMetadata(ctx, tx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return false, fmt.Errorf("failed to parse session metadata: %w", err)
+	}
+	var existing []models.SessionRecoveryResolution
+	if encoded := metadata[models.SessionMetaKeyRecoveryResolutions]; len(encoded) > 0 {
+		if err := json.Unmarshal(encoded, &existing); err != nil {
+			existing = nil
+		}
+	}
+	for _, item := range models.NormalizeSessionRecoveryResolutions(existing) {
+		if item.ErrorStamp == resolution.ErrorStamp {
+			if err := tx.Commit(); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	merged := models.NormalizeSessionRecoveryResolutions(append(existing, resolution))
+	payload, err := json.Marshal(merged)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize recovery resolutions: %w", err)
+	}
+	result, err := tx.ExecContext(
+		ctx,
+		r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())),
+		metadataKeyUpdateArgs(
+			r.db.DriverName(),
+			models.SessionMetaKeyRecoveryResolutions,
+			string(payload),
+			r.nowUTC(),
+			sessionID,
+		)...,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) lockSessionRecoveryResolutionMetadata(ctx context.Context, tx *sqlx.Tx, sessionID string) (string, error) {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockKey := "session-recovery-resolution:" + sessionID
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return "", fmt.Errorf("lock session recovery resolution: %w", err)
+		}
+	}
+	return r.lockMetadataRow(ctx, tx, "task_sessions", "agent session", sessionID)
+}
+
 func (r *Repository) setMetadataKeyIfStamp(
 	ctx context.Context,
 	table, entityName, entityID, key, expectedStamp string,

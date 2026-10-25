@@ -161,6 +161,7 @@ test.describe("Repository secrets", () => {
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
+          executor_profile_id: seedData.worktreeExecutorProfileId,
         },
       );
       await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for local secret session");

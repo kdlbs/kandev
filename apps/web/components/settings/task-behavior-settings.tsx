@@ -2,6 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
+import { MessageTimeDisplaySettings } from "@/components/settings/message-time-display-settings";
+import { AgentTabCloseBehaviorSettings } from "./agent-tab-close-behavior-settings";
 import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
@@ -12,6 +14,7 @@ import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
 import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
+import { TurnChangedFilesSettings } from "@/components/settings/turn-changed-files-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
 import {
   MessageQueueSettingsContent,
@@ -88,7 +91,7 @@ export function TaskBehaviorSettings() {
     ),
   }));
   return (
-    <div className="space-y-6" data-testid="task-behavior-settings">
+    <div className="w-full max-w-5xl space-y-6" data-testid="task-behavior-settings">
       <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
         <SettingsPageHeader
           title={t("settings:taskBehavior")}
@@ -119,9 +122,12 @@ export function TaskBehaviorSettings() {
             titleTestId="task-behavior-conversation-title"
             data-testid="task-behavior-group"
           >
+            <AgentTabCloseBehaviorSettings />
             <UnreadDividerSettings presentation="row" />
+            <TurnChangedFilesSettings />
             <AnchoredPromptBarSettings presentation="row" />
             <TodoListPanelSettings presentation="row" />
+            <MessageTimeDisplaySettings />
           </SettingsGroup>
         </SettingsTabsPanel>
         <SettingsTabsPanel value="runtime" className="pt-4">

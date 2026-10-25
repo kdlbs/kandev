@@ -10,8 +10,10 @@ import { registerSessionModelsHandlers } from "@/lib/ws/handlers/session-models"
 import { registerSessionMCPStatusHandlers } from "@/lib/ws/handlers/session-mcp-status";
 import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
 import { registerSessionPendingActionHandlers } from "@/lib/ws/handlers/session-pending-action";
+import { registerSessionWorkspaceRecoveryHandlers } from "@/lib/ws/handlers/session-workspace-recovery";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
+import { registerBackgroundWorkHandlers } from "@/lib/ws/handlers/background-work";
 import { registerWorkflowsHandlers } from "@/lib/ws/handlers/workflows";
 
 import { createMessagesHandlerRegistration } from "@/lib/ws/handlers/messages";
@@ -32,7 +34,9 @@ import { registerWalkthroughsHandlers } from "@/lib/ws/handlers/walkthroughs";
 import { registerReviewHandlers } from "@/lib/ws/handlers/review";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
+import { registerTurnChangesHandlers } from "@/lib/ws/handlers/turn-changes";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
+import { registerPromptsHandlers } from "@/lib/ws/handlers/prompts";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { registerSessionHostnamesHandlers } from "@/lib/ws/handlers/session-hostnames";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
@@ -73,9 +77,12 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionMCPStatusHandlers(store),
     ...registerSessionInfoHandlers(store),
     ...registerSessionPendingActionHandlers(store),
+    ...registerSessionWorkspaceRecoveryHandlers(store),
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
+    ...registerBackgroundWorkHandlers(store),
     ...registerUsersHandlers(store),
+    ...registerPromptsHandlers(store),
     ...registerSessionHostnamesHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),
@@ -85,6 +92,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerGitStatusHandlers(store),
     ...registerSystemEventsHandlers(store),
     ...registerTurnsHandlers(store, messages.scheduler),
+    ...registerTurnChangesHandlers(store),
     ...registerGitHubHandlers(store),
     ...registerGitLabHandlers(store),
     ...registerOfficeHandlers(store),

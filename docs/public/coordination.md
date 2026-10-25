@@ -117,13 +117,17 @@ Detaching changes task hierarchy only. An inherited workspace remains shared wit
 
 Call `create_task_kandev` with `parent_id: "self"`. Omit `workspace_mode` to inherit the parent's materialized workspace/worktree, or set it to `new_workspace` for a separate workspace/worktree. The only explicit values are `inherit_parent` and `new_workspace`; `inherit_parent` requires `parent_id`. Send an exact value or omit the field: empty, whitespace-only, and padded strings fail MCP schema validation.
 
-- `start_agent` defaults to `true`. Supply a detailed `prompt` when it is true; if omitted, Kandev still starts the agent without task-specific instructions. Set it to `false` for a placeholder task.
+When the calling task is already a regular Kanban child, `parent_id: "self"` resolves one hop to the direct parent and creates a sibling under that common parent. The tool result identifies the requested and resolved parent and explains the depth-limit resolution. The common parent owns completion, parent questions, interrupt, and stop controls; the creating child keeps ordinary task messaging. An explicit child task ID keeps the strict one-level depth error, and this behavior does not change Office's deeper task trees.
+
+For redirected calls, `parent_resolution` contains `requested_parent_id`, `resolved_parent_id`, `reason: "kanban_depth_limit"`, and an explanatory `message`. If `external_id` returns existing work, the result explains that no task was created or reparented. Read the returned task's `parent_id` for its actual parent, which can differ from the parent resolved for this request.
+
+- `start_agent` defaults to `true`. A subtask or redirected sibling needs a detailed `prompt` when it is true. Set it to `false` for a placeholder task.
 - `autopilot` defaults to `false`. Set it to `true` to start an autonomous task. This choice is immutable and is not inherited by subtasks. An autopilot child receives `ask_parent_question_kandev` instead of `ask_user_question_kandev`; an autopilot root receives neither question tool. See [Agent Communication](agent-communication.md#autopilot-parent-questions) for the answer protocol.
 - The tool inherits the parent workspace, workflow, profile, executor, repositories, and base branches unless overridden.
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.
 - Every created task must resolve an agent profile, even with `start_agent: false`.
-- Profile precedence when the task lands on a workflow step is the destination step's launch profile first (the step's pinned profile, or the workflow default when the step is unpinned), because that is what the orchestrator launches; it overrides an explicit `agent_profile_id`, and the created task records it. With no explicit `workflow_step_id`, the destination is the first **Auto-start agent** step for `start_agent: true` and the workflow's start step otherwise, so a workflow with steps still applies that step's launch profile. Off a workflow step (no workflow, or a workflow with no steps), the order is explicit profile, then parent/current/source task metadata or primary-session profile, then the workspace default.
+- Profile precedence when the task lands on a workflow step is the destination step's launch profile first (the step's pinned profile, or the workflow default when the step is unpinned), because that is what the orchestrator launches; it overrides an explicit `agent_profile_id`, and the created task records it. With no explicit `workflow_step_id`, the destination is the first **Auto-start agent** step for `start_agent: true` and the workflow's start step otherwise, so a workflow with steps still applies that step's launch profile. Off a workflow step, an explicit profile wins. Otherwise, the saved `current_task` preference uses the verified creating session's profile and effective runtime settings before parent/current/source defaults; `workspace_default` uses workflow and workspace defaults. Sibling placement preserves this precedence, so the common parent's execution settings do not replace the creating session's profile or runtime settings where those take precedence.
 - If no executor or executor profile is explicit or inherited, task MCP uses the built-in **git-worktree** executor. It does not consult the workspace's **Default Executor** for this fallback.
 - The one-level Kanban depth rule still applies.
 - An ephemeral Quick Chat task cannot be a parent; omit `parent_id` and create a top-level task instead.
@@ -146,6 +150,8 @@ The default delivery mode is queued. Each session accepts 10 queued messages by 
 **Automatically merge consecutive messages** is enabled by default on the same settings card. Each session follows later changes to this install-wide value until its **Auto-merge** queue pill is changed. That first session change creates an explicit override that remains independent for the lifetime of that session, including across an empty queue and backend restart. For each new admission, Kandev resolves the effective session or global setting once. A compatible message may fold into the immediately preceding pending entry when both have the same strict source and compatible task, model, mode, metadata, attachments, and references. Otherwise it remains a separate FIFO entry. The earlier entry survives, so a successful admission may return an older queue-entry ID. The setting affects only later admissions and never sweeps rows already waiting. It is independent from **Enable queued message merging**, which controls the manual **Merge with above** action.
 
 In the task workbench, expand the queue chip to manage pending messages. The compact header places the **Auto-run** and **Auto-merge** pills beside the queue count; these control queued-message delivery and folding, not pull-request Auto-merge. Every visible pending row has **Remove**, whether it came from a user, another agent, workflow automation, or a server action. **Clear all** removes all visible pending rows in that session and releases their capacity. After removal, merge, or drain, displayed positions compact to `#1` through `#N` while FIFO order stays unchanged. Provenance still matters for editing and merging: only user-origin content can be edited. A row already reserved for delivery is hidden from the panel and cannot be cancelled there.
+
+If another operation holds the session queue, queue changes wait up to 30 seconds to acquire it, respecting an earlier request deadline. This includes **Remove**, **Clear all**, **Merge with above**, reordering, editing, **Auto-run**, and **Auto-merge**. When the internal wait expires, the controls show retryable unavailable feedback and preserve pending messages. Retry after the competing operation finishes; this limit does not cancel work that already acquired the queue. Desktop and phone use the same retry behavior.
 
 Use the queue controls according to the outcome you want:
 
@@ -234,15 +240,22 @@ unavailable instead of using a same-named local or `origin` branch.
 <details>
 <summary>Adding sources details</summary>
 
-For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears when the executor supports it. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
+For an idle, non-archived task with a prepared workspace, use **Files → + → Add repositories or folders**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears for Worktree and Local/Local PC tasks. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
 
-Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Folder sources are live host grants and work only on **Worktree** and **Local/Local PC**; they are unavailable to Docker and remote runtimes. Remote Docker remains unimplemented. Local Git sources need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use host repositories directly.
+Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. They use the current workspace root. Local/Local PC links host repositories and folders into that root without switching the current checkout; Docker, Kubernetes, SSH, and Sprites clone repositories inside the executor workspace and require a cloneable origin for local Git rows. Folder sources are live host links and work only on **Worktree** and **Local/Local PC**. They are unavailable to remote executors, where **Upload folder** remains a separate copy flow when supported. Remote Docker remains unimplemented.
 
 Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
 
-Read the consequence summary in the dialog or drawer before submitting. It describes whether the
-current executor will restart the agent or update the live remote workspace. **Cancel** or closing
-the surface sends no attachment request and leaves the workspace unchanged.
+Choose sources first, then review their locations. Additions within the current workspace show a brief
+continuity note. A prominent restart warning appears only when workspace-root expansion is selected.
+**Cancel** or closing the surface sends no attachment request and leaves the workspace unchanged.
+
+On a single-repository Worktree task, a repository-only batch also shows a placement choice. Choose
+`kandev/` to group new repositories below the current root, or choose the current root to place each
+one beside the existing repository files. The preview shows the exact relative paths. These nested
+choices keep the agent CWD and workspace processes unchanged, and Kandev protects the outer Git
+worktree from staging the nested checkouts. Parent-rooted tasks add repository siblings directly.
+Workspace-root expansion stays disabled until explicit idle session recovery is available.
 
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 
@@ -310,6 +323,8 @@ Regular Kanban does not currently expose a dependency editor or blocker filter. 
 
 When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
 
+The [Office task guide](office-tasks.md) covers its projects, assignments, deeper task trees, dependencies, and review/approval flow. Start with [Office setup](office-getting-started.md) to enable that experimental surface.
+
 </details>
 
 ## Troubleshooting
@@ -317,7 +332,7 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **New Agent has no usable profile:** configure credentials under **Settings → Agents** and a compatible executor under **Settings → Executors**.
 - **Summarize session is missing:** configure a utility agent; otherwise use **Blank** or **Copy initial prompt**.
 - **Parallel agents overwrite work:** stop one writer, assign disjoint files, or create an isolated subtask workspace.
-- **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit.
+- **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit. From a Kanban child, use `parent_id: "self"` for the supported sibling placement; an explicit child ID still returns the depth error.
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.

@@ -77,6 +77,13 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(ws.isFromOffice).toBe(true);
   });
 
+  it("carries the card identifier through both task shapes, defaulting to undefined", () => {
+    const withIdentifier = toKanbanTask(httpDTO({ identifier: "KAN-42" }));
+    expect(withIdentifier.identifier).toBe("KAN-42");
+    expect(toKanbanTask(wsPayload({ identifier: "KAN-42" })).identifier).toBe("KAN-42");
+    expect(toKanbanTask(httpDTO()).identifier).toBeUndefined();
+  });
+
   it("carries workspace identity and archived state through both task shapes", () => {
     const archivedAt = "2026-08-04T10:00:00Z";
     const http = toKanbanTask(httpDTO({ archived_at: archivedAt } as Partial<TaskLike>));
@@ -424,4 +431,22 @@ describe("preserveOmittedExecutorFields", () => {
     expect(incoming.primaryExecutorName).toBe("Remote box");
     expect(incoming.isRemoteExecutor).toBe(true);
   });
+});
+
+// @covers AC-UI-PROVIDER-WATCHER-TYPES-001.5
+it.each([
+  ["issue_watch_id", true, false],
+  ["review_watch_id", false, true],
+  ["gitlab_issue_watch_id", true, false],
+  ["gitlab_review_watch_id", false, true],
+  ["jira_issue_watch_id", true, false],
+  ["linear_issue_watch_id", true, false],
+  ["sentry_issue_watch_id", true, false],
+  ["azure_devops_work_item_watch_id", true, false],
+  ["azure_devops_pr_watch_id", false, true],
+] as const)("maps watcher %s identically from HTTP and WS", (key, issue, review) => {
+  for (const makeTask of [httpDTO, wsPayload]) {
+    const mapped = toKanbanTask(makeTask({ metadata: { [key]: "watch" } }));
+    expect([mapped.isIssueWatch, mapped.isPRReview]).toEqual([issue, review]);
+  }
 });

@@ -1,8 +1,9 @@
 // Cross-platform E2E `git` shim.
 //
 // The E2E backend invokes `git` via PATH lookup. Tests prepend a per-worker bin
-// directory (see backend.ts) whose `git` launcher runs this script instead of
-// the real binary. Written in Node so it behaves identically on macOS, Linux,
+// directory (see backend.ts) whose `git` launcher runs this script when controls
+// are active (and for all commands on Windows). Written in Node so the controls
+// behave identically on macOS, Linux,
 // and Windows and never depends on the developer's login shell (bash/zsh/fish)
 // or on a POSIX `sh` being present. It replaces an earlier `/bin/sh` shim whose
 // `case` block inside a `$(...)` substitution tripped bash 5.x's parser and
@@ -13,7 +14,8 @@
 //   - If KANDEV_E2E_GIT_DELAY_FILE holds a positive ms value and the subcommand
 //     is `fetch`/`pull`, sleep that long before running real git (simulates slow
 //     network git so prepare-panel streaming stays observable). A JSON object
-//     with `startedFile` and `releaseFile` provides a deterministic test gate.
+//     with `startedFile` and `releaseFile` gates `clone`, `fetch`, `pull`, or
+//     `worktree add` so fresh and reused worktrees can use the same test gate.
 //   - If the subcommand is `push` and KANDEV_E2E_GITLAB_PUSH_FILE matches the
 //     repo's origin remote, record the push args and exit 0 without pushing.
 //   - Otherwise exec the real git binary with the original args, restoring the
@@ -22,7 +24,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
-/** Returns the first non-option token after Git's leading global options. */
+/** Returns the Git subcommand and its arguments after leading global options. */
 function findSubcommand(args) {
   let i = 0;
   while (i < args.length) {
@@ -35,9 +37,9 @@ function findSubcommand(args) {
       i += 1;
       continue;
     }
-    return arg;
+    return { subcommand: arg, commandArgs: args.slice(i + 1) };
   }
-  return "";
+  return { subcommand: "", commandArgs: [] };
 }
 
 /** Blocking sleep in milliseconds, used to simulate slow network git. */
@@ -70,18 +72,34 @@ function runRealGit(args, extraEnv) {
   return 1; // terminated by signal
 }
 
-/** Sleeps before fetch/pull when a positive delay file is present. */
-function maybeDelay(subcommand) {
-  if (subcommand !== "fetch" && subcommand !== "pull") return;
+function gateMatchesCommand(gate, subcommand, commandArgs) {
+  const targetCommand = typeof gate.subcommand === "string" ? gate.subcommand : null;
+  if (
+    targetCommand ? targetCommand !== subcommand : subcommand !== "fetch" && subcommand !== "pull"
+  ) {
+    return false;
+  }
+  if (
+    Array.isArray(gate.requiredArgs) &&
+    !gate.requiredArgs.every((required) => commandArgs.includes(required))
+  ) {
+    return false;
+  }
+  return typeof gate.startedFile === "string" && typeof gate.releaseFile === "string";
+}
+
+/** Applies numeric fetch/pull delays or an explicit command gate. */
+function maybeDelay(subcommand, commandArgs) {
+  const isFetchOrPull = subcommand === "fetch" || subcommand === "pull";
   const raw = readFileSafe(process.env.KANDEV_E2E_GIT_DELAY_FILE);
-  if (/^[0-9]+$/.test(raw)) {
+  if (isFetchOrPull && /^[0-9]+$/.test(raw)) {
     const delayMs = Number(raw);
     if (delayMs > 0) sleepMs(delayMs);
     return;
   }
   try {
     const gate = JSON.parse(raw);
-    if (typeof gate.startedFile !== "string" || typeof gate.releaseFile !== "string") return;
+    if (!gateMatchesCommand(gate, subcommand, commandArgs)) return;
     fs.writeFileSync(gate.startedFile, "started");
     while (!fs.existsSync(gate.releaseFile)) sleepMs(50);
   } catch {
@@ -118,8 +136,8 @@ function maybeInterceptPush(subcommand, args) {
 
 function main() {
   const args = process.argv.slice(2);
-  const subcommand = findSubcommand(args);
-  maybeDelay(subcommand);
+  const { subcommand, commandArgs } = findSubcommand(args);
+  maybeDelay(subcommand, commandArgs);
   if (maybeInterceptPush(subcommand, args)) {
     process.exit(0);
   }

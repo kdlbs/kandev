@@ -384,14 +384,26 @@ type PRComment struct {
 
 // CheckRun represents a CI check result.
 type CheckRun struct {
-	Name        string     `json:"name"`
-	Source      string     `json:"source"`     // check_run, status_context
-	Status      string     `json:"status"`     // queued, in_progress, completed
-	Conclusion  string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
-	HTMLURL     string     `json:"html_url"`
-	Output      string     `json:"output"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ID            int64      `json:"id,omitempty"`
+	AppID         int64      `json:"app_id,omitempty"`
+	AppSlug       string     `json:"app_slug,omitempty"`
+	CheckSuiteID  int64      `json:"check_suite_id,omitempty"`
+	WorkflowID    int64      `json:"workflow_id,omitempty"`
+	WorkflowName  string     `json:"workflow_name,omitempty"`
+	WorkflowRunID int64      `json:"workflow_run_id,omitempty"`
+	WorkflowEvent string     `json:"workflow_event,omitempty"`
+	HeadRepoID    int64      `json:"head_repo_id,omitempty"`
+	HeadRepoOwner string     `json:"head_repo_owner,omitempty"`
+	HeadRepoName  string     `json:"head_repo_name,omitempty"`
+	HeadBranch    string     `json:"head_branch,omitempty"`
+	Name          string     `json:"name"`
+	Source        string     `json:"source"`     // check_run, status_context
+	Status        string     `json:"status"`     // queued, in_progress, completed
+	Conclusion    string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
+	HTMLURL       string     `json:"html_url"`
+	Output        string     `json:"output"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
 // WorkflowAttentionState describes an Actions workflow observation that is
@@ -432,6 +444,7 @@ type WorkflowAttention struct {
 // to match a run to one pull-request head and classify action_required.
 type WorkflowRun struct {
 	ID            int64                    `json:"id"`
+	CheckSuiteID  int64                    `json:"check_suite_id,omitempty"`
 	RunAttempt    int                      `json:"run_attempt"`
 	WorkflowID    int64                    `json:"workflow_id"`
 	Name          string                   `json:"name"`
@@ -477,6 +490,7 @@ type PRFeedback struct {
 	Reviews           []PRReview         `json:"reviews"`
 	Comments          []PRComment        `json:"comments"`
 	Checks            []CheckRun         `json:"checks"`
+	ChecksState       *string            `json:"checks_state,omitempty"`
 	HasIssues         bool               `json:"has_issues"`
 	WorkflowAttention *WorkflowAttention `json:"workflow_attention,omitempty"`
 }
@@ -546,6 +560,9 @@ type PRStatus struct {
 	// mergeQueueRecoveryPopulated distinguishes a GraphQL observation of the
 	// latest removal event (including no event) from REST and gh CLI reads.
 	mergeQueueRecoveryPopulated bool
+	// feedbackOnly preserves status-sync freshness because feedback does not
+	// observe every aggregate used by automation, including review threads.
+	feedbackOnly bool
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
@@ -1042,6 +1059,7 @@ func NormalizeCleanupPolicy(s string) string {
 // ReviewWatch configures periodic polling for PRs needing the user's review.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type ReviewWatch struct {
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1109,19 +1127,20 @@ type GitHubRepo struct {
 // derived parent and permission fields deliberately do not carry raw API
 // response shapes into task metadata.
 type GitHubRepository struct {
-	ID             int64
-	NodeID         string
-	FullName       string
-	Owner          string
-	Name           string
-	CloneURL       string
-	HTMLURL        string
-	DefaultBranch  string
-	Fork           bool
-	ParentID       int64
-	ParentFullName string
-	PushAccess     bool
-	AdminAccess    bool
+	ID              int64
+	NodeID          string
+	FullName        string
+	Owner           string
+	Name            string
+	CloneURL        string
+	HTMLURL         string
+	DefaultBranch   string
+	Fork            bool
+	ParentID        int64
+	ParentFullName  string
+	PushAccess      bool
+	PushAccessKnown bool
+	AdminAccess     bool
 }
 
 // RepoBranch represents a branch in a GitHub repository.
@@ -1227,6 +1246,7 @@ type PRFeedbackEvent struct {
 
 // NewReviewPREvent is published when a new PR needing review is found.
 type NewReviewPREvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	ReviewWatchID     string `json:"review_watch_id"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkflowID        string `json:"workflow_id"`
@@ -1332,6 +1352,7 @@ type Issue struct {
 // IssueWatch configures periodic polling for GitHub issues matching a query.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type IssueWatch struct {
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1370,6 +1391,7 @@ type IssueWatchTask struct {
 
 // NewIssueEvent is published when a new issue matching a watch is found.
 type NewIssueEvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	IssueWatchID      string `json:"issue_watch_id"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkflowID        string `json:"workflow_id"`

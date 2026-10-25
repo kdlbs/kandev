@@ -280,11 +280,26 @@ export function getOnTurnStartTransitionType(step: WorkflowStep): string {
   return action?.type ?? "none";
 }
 
-export function getChildrenCompletedTransitionType(step: WorkflowStep): string {
-  const action = step.events?.on_children_completed?.find((a) =>
+/** Generic step events whose editor offers a single transition action. */
+export type TransitionEventKey = "on_children_completed" | "on_pr_merged" | "on_pr_closed";
+
+export function getEventTransitionType(step: WorkflowStep, eventKey: TransitionEventKey): string {
+  const action = step.events?.[eventKey]?.find((a) =>
     ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
   );
   return action?.type ?? "none";
+}
+
+export function getEventTransitionTargetStepId(
+  step: WorkflowStep,
+  eventKey: TransitionEventKey,
+): string {
+  const stepId = step.events?.[eventKey]?.find((a) => a.type === "move_to_step")?.config?.step_id;
+  return typeof stepId === "string" ? stepId : "";
+}
+
+export function getChildrenCompletedTransitionType(step: WorkflowStep): string {
+  return getEventTransitionType(step, "on_children_completed");
 }
 
 export function hasDisablePlanMode(step: WorkflowStep): boolean {

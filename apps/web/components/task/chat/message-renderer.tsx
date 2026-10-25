@@ -37,6 +37,7 @@ import {
 } from "@/components/task/chat/messages/kandev-tool-message";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -406,7 +407,12 @@ const adapters: MessageAdapter[] = [
   {
     matches: (comment) => {
       const meta = comment.metadata as Record<string, unknown> | undefined;
-      return Array.isArray(meta?.actions) && (meta.actions as unknown[]).length > 0;
+      const hasActions = Array.isArray(meta?.actions) && meta.actions.length > 0;
+      const isRetainedTurnFailure =
+        meta?.variant === "error" &&
+        meta.failure_scope === "turn" &&
+        meta.runtime_retained === true;
+      return hasActions || isRetainedTurnFailure;
     },
     render: (comment) => <ActionMessage comment={comment} />,
   },
@@ -517,6 +523,8 @@ export const MessageRenderer = memo(function MessageRenderer({
   isTurnActive = false,
   isContainingTurnActive = false,
 }: MessageRendererProps) {
+  if (isDismissedGitPushErrorMessage(comment)) return null;
+
   const ctx = {
     isTaskDescription,
     taskId,

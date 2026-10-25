@@ -9,6 +9,7 @@ import (
 
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
 
@@ -33,18 +34,40 @@ func shipRemoteCopyfilesForLaunch(
 	}
 	var jobs []repoCopy
 	if specs := req.Repositories; len(specs) > 0 {
-		for _, spec := range specs {
+		for index, spec := range specs {
+			repoSubpath := spec.RepoName
+			if usesRemoteWorkspaceMaterialization(req) {
+				var err error
+				repoSubpath, err = launchRepositoryProjectionKey(req, spec, index)
+				if err != nil {
+					log.Warn("remote-copyfiles: resolve workspace repository path failed",
+						zap.String("repository", spec.RepoName), zap.Error(err))
+					continue
+				}
+			}
 			jobs = append(jobs, repoCopy{
 				sourceRepoPath: spec.RepositoryPath,
 				copyFilesSpec:  spec.CopyFiles,
-				repoSubpath:    spec.RepoName,
+				repoSubpath:    repoSubpath,
 			})
 		}
 	} else if req.RepositoryPath != "" {
+		repoSubpath := "" // most single-repo remote runtimes keep the checkout at the workspace root
+		if usesRemoteWorkspaceMaterialization(req) && req.ExecutorType == string(models.ExecutorTypePluginRemote) {
+			specs := req.RepoSpecs()
+			if len(specs) > 0 {
+				var err error
+				repoSubpath, err = launchRepositoryProjectionKey(req, specs[0], 0)
+				if err != nil {
+					log.Warn("remote-copyfiles: resolve workspace repository path failed", zap.Error(err))
+					return
+				}
+			}
+		}
 		jobs = append(jobs, repoCopy{
 			sourceRepoPath: req.RepositoryPath,
 			copyFilesSpec:  req.CopyFiles,
-			repoSubpath:    "", // single-repo: write at workspace root
+			repoSubpath:    repoSubpath,
 		})
 	}
 	for _, j := range jobs {
@@ -90,9 +113,8 @@ type remoteCopyfilesRequest struct {
 // failure logs + emits a warning on the step but never aborts the
 // launch (parallels worktree.Manager.copyConfiguredFiles).
 //
-// Used by remote executors (Docker, Sprites) whose containers clone
-// their own workspace and therefore can't receive copy_files seeding
-// via the host-side worktree path.
+// Used by remote executors that clone their workspace through agentctl and
+// therefore cannot receive copy_files seeding through the host-side worktree.
 func runRemoteCopyfiles(ctx context.Context, log *logger.Logger, req remoteCopyfilesRequest) {
 	if req.Client == nil || strings.TrimSpace(req.CopyFilesSpec) == "" || req.SourceRepoPath == "" {
 		return

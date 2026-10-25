@@ -1,13 +1,10 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { SystemSlice, SystemSliceState } from "./types";
 
 export const defaultSystemState: SystemSliceState = {
   system: {
-    info: null,
-    diskUsage: null,
-    database: null,
     retention: null,
-    backups: { items: [], loaded: false },
     updates: null,
     jobs: {},
     metrics: null,
@@ -16,42 +13,20 @@ export const defaultSystemState: SystemSliceState = {
       overview: null,
       analysisRevision: 0,
       disk: null,
+      diskIdentity: null,
       runs: [],
       quarantine: [],
     },
   },
 };
 
-type ImmerSet = Parameters<
-  StateCreator<SystemSlice, [["zustand/immer", never]], [], SystemSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<SystemSlice>>[0];
 
-export const createSystemSlice: StateCreator<
-  SystemSlice,
-  [["zustand/immer", never]],
-  [],
-  SystemSlice
-> = (set: ImmerSet, _get, _api) => ({
+export const createSystemSlice: SliceCreator<SystemSlice> = (set: ImmerSet) => ({
   ...defaultSystemState,
-  setSystemInfo: (info) =>
-    set((draft) => {
-      draft.system.info = info;
-    }),
-  setSystemDiskUsage: (usage) =>
-    set((draft) => {
-      draft.system.diskUsage = usage;
-    }),
-  setSystemDatabase: (stats) =>
-    set((draft) => {
-      draft.system.database = stats;
-    }),
   setSystemRetention: (status) =>
     set((draft) => {
       draft.system.retention = status;
-    }),
-  setSystemBackups: (items) =>
-    set((draft) => {
-      draft.system.backups = { items, loaded: true };
     }),
   setSystemUpdates: (updates) =>
     set((draft) => {
@@ -81,9 +56,10 @@ export const createSystemSlice: StateCreator<
     set((draft) => {
       draft.system.storage.analysisRevision += 1;
     }),
-  setSystemStorageDisk: (disk) =>
+  setSystemStorageDisk: (disk, identity) =>
     set((draft) => {
       draft.system.storage.disk = disk;
+      draft.system.storage.diskIdentity = identity;
     }),
   setSystemStorageRuns: (runs) =>
     set((draft) => {

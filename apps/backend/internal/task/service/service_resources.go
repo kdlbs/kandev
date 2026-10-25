@@ -107,6 +107,27 @@ type workspaceDeleteTaskCleanup struct {
 type workspaceAttachmentLister interface {
 	ListMessageAttachmentsByWorkspace(ctx context.Context, workspaceID string) ([]*models.TaskMessageAttachment, error)
 }
+
+type exactWorkflowCreator interface {
+	CreateWorkflowIfWorkspaceUnchanged(context.Context, *models.Workflow, time.Time) error
+}
+
+type exactWorkflowVersionUpdater interface {
+	UpdateWorkflowIfUnchanged(context.Context, *models.Workflow, time.Time) error
+}
+
+type exactWorkflowReorderer interface {
+	ReorderWorkflowsIfUnchanged(context.Context, string, []string, time.Time, map[string]time.Time) error
+}
+
+type exactRepositoryCreator interface {
+	CreateRepositoryIfWorkspaceUnchanged(context.Context, *models.Repository, time.Time) error
+}
+
+type exactRepositoryUpdater interface {
+	UpdateRepositoryIfUnchanged(context.Context, *models.Repository, time.Time) error
+	UpdateRepositoryWithSecretBindingsIfUnchanged(context.Context, *models.Repository, []models.RepositorySecretBinding, time.Time) error
+}
 type repositorySessionPruner interface {
 	DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context, id string) (bool, error)
 }
@@ -133,7 +154,9 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		// The tenant comes from the creating identity and from nowhere else.
 		// There is no org field on the request on purpose: a caller must not
 		// be able to place a workspace in another tenant.
-		OrgID: callerOrgID(ctx),
+		OrgID:                    callerOrgID(ctx),
+		ACPIdleSuspensionEnabled: false,
+		ACPIdleTimeoutMinutes:    120,
 	}
 	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
 	if placementErr != nil {
@@ -192,6 +215,9 @@ func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspac
 
 // UpdateWorkspace updates an existing workspace
 func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWorkspaceRequest) (*models.Workspace, error) {
+	if req.ACPIdleTimeoutMinutes != nil && *req.ACPIdleTimeoutMinutes <= 0 {
+		return nil, fmt.Errorf("%w: must be greater than zero", ErrWorkspaceIdleTimeoutInvalid)
+	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, err
@@ -199,33 +225,22 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
 		return nil, err
 	}
+	if req.ExpectedUpdatedAt != nil && !workspace.UpdatedAt.Equal(*req.ExpectedUpdatedAt) {
+		return nil, repoerrors.ErrTaskVersionConflict
+	}
 
+	update := workspaceFieldUpdate(req)
 	if req.UnitID != nil {
+		previousUnitID := workspace.UnitID
 		if err := s.moveWorkspaceToUnit(ctx, workspace, *req.UnitID); err != nil {
 			return nil, err
 		}
+		if workspace.UnitID != previousUnitID {
+			update.UnitID = &workspace.UnitID
+		}
 	}
-	if req.Name != nil {
-		workspace.Name = *req.Name
-	}
-	if req.Description != nil {
-		workspace.Description = *req.Description
-	}
-	if req.DefaultExecutorID != nil {
-		workspace.DefaultExecutorID = normalizeOptionalID(req.DefaultExecutorID)
-	}
-	if req.DefaultEnvironmentID != nil {
-		workspace.DefaultEnvironmentID = normalizeOptionalID(req.DefaultEnvironmentID)
-	}
-	if req.DefaultAgentProfileID != nil {
-		workspace.DefaultAgentProfileID = normalizeOptionalID(req.DefaultAgentProfileID)
-	}
-	if req.DefaultConfigAgentProfileID != nil {
-		workspace.DefaultConfigAgentProfileID = normalizeOptionalID(req.DefaultConfigAgentProfileID)
-	}
-	workspace.UpdatedAt = time.Now().UTC()
-
-	if err := s.workspaces.UpdateWorkspace(ctx, workspace); err != nil {
+	workspace, err = s.workspaces.UpdateWorkspaceFields(ctx, id, update, req.ExpectedUpdatedAt)
+	if err != nil {
 		s.logger.Error("failed to update workspace", zap.String("workspace_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -341,14 +356,6 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		return err
 	}
-	// Record canvas artifact cleanup before the workspace cascade removes its
-	// task and workspace rows. This keeps the release ownership boundary
-	// durable across a process stop between the two operations.
-	if s.canvasCleanup != nil {
-		if err := s.canvasCleanup.CleanupWorkspaceCanvases(ctx, workspace.ID); err != nil {
-			return fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err)
-		}
-	}
 	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks)+1)
 	if workspaceAttachmentCleanup != nil {
 		cleanups = append(cleanups, workspaceDeleteTaskCleanup{cleanupJob: workspaceAttachmentCleanup})
@@ -360,6 +367,14 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	}
 	cleanups = append(cleanups, taskCleanups...)
 
+	// Record canvas artifact cleanup before the workspace cascade removes its
+	// task and workspace rows. This keeps the release ownership boundary
+	// durable across a process stop between the two operations.
+	if s.canvasCleanup != nil {
+		if err := s.canvasCleanup.CleanupWorkspaceCanvases(ctx, workspace.ID); err != nil {
+			return errors.Join(fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err), s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups))
+		}
+	}
 	var deletedWorkspaceAttachments []*models.TaskMessageAttachment
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow
@@ -413,7 +428,7 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	var lateCleanupErr error
 	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
-	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
+	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows, cleanups)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
@@ -561,12 +576,28 @@ func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, clea
 	return nil
 }
 
-func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
+func (s *Service) publishWorkspaceDeleteChildEvents(
+	ctx context.Context,
+	tasks []*models.Task,
+	workflows []*models.Workflow,
+	cleanups []workspaceDeleteTaskCleanup,
+) {
+	sessionIDsByTask := make(map[string][]string, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.task == nil || cleanup.task.ID == "" {
+			continue
+		}
+		sessionIDsByTask[cleanup.task.ID] = taskSessionIDs(cleanup.sessions)
+	}
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue
 		}
-		s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+		extra := map[string]interface{}{}
+		if sessionIDs := sessionIDsByTask[task.ID]; len(sessionIDs) > 0 {
+			extra["mcp_session_ids"] = sessionIDs
+		}
+		s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
 	}
 	for _, workflow := range workflows {
 		if workflow == nil || workflow.ID == "" {
@@ -714,7 +745,7 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		return nil, err
 	}
 	workflow := &models.Workflow{
-		ID:                 uuid.New().String(),
+		ID:                 req.ID,
 		WorkspaceID:        req.WorkspaceID,
 		Name:               req.Name,
 		Description:        req.Description,
@@ -722,10 +753,23 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		WorkflowTemplateID: req.WorkflowTemplateID,
 		Hidden:             req.Hidden,
 	}
+	if workflow.ID == "" {
+		workflow.ID = uuid.New().String()
+	}
 
-	if err := s.workflows.CreateWorkflow(ctx, workflow); err != nil {
-		s.logger.Error("failed to create workflow", zap.Error(err))
-		return nil, err
+	var createErr error
+	if req.ExpectedWorkspaceUpdatedAt != nil {
+		creator, ok := s.workflows.(exactWorkflowCreator)
+		if !ok {
+			return nil, errors.New("workflow creation version fencing is unavailable")
+		}
+		createErr = creator.CreateWorkflowIfWorkspaceUnchanged(ctx, workflow, *req.ExpectedWorkspaceUpdatedAt)
+	} else {
+		createErr = s.workflows.CreateWorkflow(ctx, workflow)
+	}
+	if createErr != nil {
+		s.logger.Error("failed to create workflow", zap.Error(createErr))
+		return nil, createErr
 	}
 
 	// Create workflow steps from template if specified
@@ -761,6 +805,12 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	if err != nil {
 		return nil, err
 	}
+	if err := s.AuthorizeWorkflowExecutorMutation(ctx, id); err != nil {
+		return nil, err
+	}
+	if req.ExpectedUpdatedAt != nil && !workflow.UpdatedAt.Equal(*req.ExpectedUpdatedAt) {
+		return nil, repoerrors.ErrTaskVersionConflict
+	}
 
 	if req.Name != nil {
 		workflow.Name = *req.Name
@@ -776,14 +826,34 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	}
 	workflow.UpdatedAt = time.Now().UTC()
 
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
-		s.logger.Error("failed to update workflow", zap.String("workflow_id", id), zap.Error(err))
-		return nil, err
+	var updateErr error
+	if req.ExpectedUpdatedAt != nil {
+		updater, ok := s.workflows.(exactWorkflowVersionUpdater)
+		if !ok {
+			return nil, errors.New("workflow version fencing is unavailable")
+		}
+		updateErr = updater.UpdateWorkflowIfUnchanged(ctx, workflow, *req.ExpectedUpdatedAt)
+	} else {
+		workflow, updateErr = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{
+			Name: req.Name, Description: req.Description, Prompt: req.Prompt, AgentProfileID: normalizedWorkflowProfile(req.AgentProfileID),
+		})
+	}
+	if updateErr != nil {
+		s.logger.Error("failed to update workflow", zap.String("workflow_id", id), zap.Error(updateErr))
+		return nil, updateErr
 	}
 
 	s.publishWorkflowEvent(ctx, events.WorkflowUpdated, workflow)
 	s.logger.Info("workflow updated", zap.String("workflow_id", workflow.ID))
 	return workflow, nil
+}
+
+func normalizedWorkflowProfile(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	return &trimmed
 }
 
 // SetWorkflowHidden flips the hidden flag on a workflow. Used by system
@@ -797,9 +867,8 @@ func (s *Service) SetWorkflowHidden(ctx context.Context, id string, hidden bool)
 	if workflow.Hidden == hidden {
 		return nil
 	}
-	workflow.Hidden = hidden
-	workflow.UpdatedAt = time.Now().UTC()
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+	workflow, err = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{Hidden: &hidden})
+	if err != nil {
 		s.logger.Error("failed to update workflow hidden flag", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
@@ -818,10 +887,8 @@ func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath 
 	if workflow.Source == source && workflow.SourcePath == sourcePath {
 		return nil
 	}
-	workflow.Source = source
-	workflow.SourcePath = sourcePath
-	workflow.UpdatedAt = time.Now().UTC()
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+	workflow, err = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{Source: &source, SourcePath: &sourcePath})
+	if err != nil {
 		s.logger.Error("failed to update workflow source", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
@@ -979,6 +1046,26 @@ func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, work
 	return nil
 }
 
+// ReorderWorkflowsIfUnchanged reorders a complete workspace workflow list only
+// while the workspace and every workflow still match the observed versions.
+func (s *Service) ReorderWorkflowsIfUnchanged(
+	ctx context.Context, workspaceID string, workflowIDs []string, expectedWorkspace time.Time, expectedByID map[string]time.Time,
+) error {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return err
+	}
+	reorderer, ok := s.workflows.(exactWorkflowReorderer)
+	if !ok {
+		return errors.New("workflow reorder version fencing is unavailable")
+	}
+	if err := reorderer.ReorderWorkflowsIfUnchanged(ctx, workspaceID, workflowIDs, expectedWorkspace, expectedByID); err != nil {
+		s.logger.Error("failed to reorder workflows", zap.String("workspace_id", workspaceID), zap.Error(err))
+		return err
+	}
+	s.logger.Info("reordered workflows", zap.String("workspace_id", workspaceID), zap.Int("count", len(workflowIDs)))
+	return nil
+}
+
 // Repository operations
 
 func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {
@@ -996,6 +1083,7 @@ func (s *Service) createRepositoryWithCanonicalPath(
 	return s.createRepository(ctx, req, req.LocalPath, false)
 }
 
+//nolint:nestif // Repository creation resolves provider details before updating workspace projections.
 func (s *Service) createRepository(
 	ctx context.Context,
 	req *CreateRepositoryRequest,
@@ -1039,7 +1127,7 @@ func (s *Service) createRepository(
 		return nil, err
 	}
 	repository := &models.Repository{
-		ID:                     uuid.New().String(),
+		ID:                     req.ID,
 		WorkspaceID:            req.WorkspaceID,
 		Name:                   req.Name,
 		SourceType:             sourceType,
@@ -1061,6 +1149,9 @@ func (s *Service) createRepository(
 		CopyFiles:              req.CopyFiles,
 		SecretBindings:         bindings,
 	}
+	if repository.ID == "" {
+		repository.ID = uuid.New().String()
+	}
 
 	if resolveProvider {
 		resolveRepositoryProviderIdentity(repository)
@@ -1070,7 +1161,16 @@ func (s *Service) createRepository(
 		return nil, err
 	}
 
-	if mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator); ok {
+	if req.ExpectedWorkspaceUpdatedAt != nil {
+		creator, ok := s.repoEntities.(exactRepositoryCreator)
+		if !ok {
+			return nil, errors.New("repository registration version fencing is unavailable")
+		}
+		if err := creator.CreateRepositoryIfWorkspaceUnchanged(ctx, repository, *req.ExpectedWorkspaceUpdatedAt); err != nil {
+			s.logger.Error("failed to create repository", zap.Error(err))
+			return nil, err
+		}
+	} else if mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator); ok {
 		if err := mutator.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
 			s.logger.Error("failed to create repository", zap.Error(err))
 			return nil, err
@@ -1189,10 +1289,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 	req.ProviderName = strings.TrimSpace(req.ProviderName)
 	req.RemoteURL = strings.TrimSpace(req.RemoteURL)
 	req.ProviderHost = normalizeProviderHost(req.Provider, req.ProviderHost)
-	existing, err := s.repoEntities.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
-		WorkspaceID: req.WorkspaceID, Provider: req.Provider, Scope: req.ProviderScope,
-		RepositoryID: req.ProviderRepoID, Host: req.ProviderHost, Owner: req.ProviderOwner, Name: req.ProviderName,
-	})
+	existing, err := s.findRepositoryForRemoteSelection(ctx, req)
 	if err != nil {
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
@@ -1324,6 +1421,9 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			return nil, repoerrors.ErrRepositoryNotFound
 		}
 	}
+	if req.ExpectedUpdatedAt != nil && (repository == nil || !repository.UpdatedAt.Equal(*req.ExpectedUpdatedAt)) {
+		return nil, repoerrors.ErrTaskVersionConflict
+	}
 	updates := *req
 	if req.LocalPath != nil {
 		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
@@ -1350,11 +1450,30 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		if !ok {
 			return nil, fmt.Errorf("%w: repository secret bindings are unavailable", ErrInvalidRepositorySettings)
 		}
-		if err := mutator.UpdateRepositoryWithSecretBindings(ctx, repository, replacement); err != nil {
+		var updateErr error
+		if req.ExpectedUpdatedAt != nil {
+			exact, exactOK := s.repoEntities.(exactRepositoryUpdater)
+			if !exactOK {
+				return nil, errors.New("repository update version fencing is unavailable")
+			}
+			updateErr = exact.UpdateRepositoryWithSecretBindingsIfUnchanged(ctx, repository, replacement, *req.ExpectedUpdatedAt)
+		} else {
+			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree})
+		}
+		if updateErr != nil {
+			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(updateErr))
+			return nil, updateErr
+		}
+	} else if req.ExpectedUpdatedAt != nil {
+		updater, ok := s.repoEntities.(exactRepositoryUpdater)
+		if !ok {
+			return nil, errors.New("repository update version fencing is unavailable")
+		}
+		if err := updater.UpdateRepositoryIfUnchanged(ctx, repository, *req.ExpectedUpdatedAt); err != nil {
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 			return nil, err
 		}
-	} else if err := s.repoEntities.UpdateRepository(ctx, repository); err != nil {
+	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree}); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -1815,20 +1934,30 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 }
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
-	if err := requireExecutorTypeAdmin(ctx, req.Type); err != nil {
+	if err := s.validateExecutorCreateOwner(ctx, req.OwnerUserID); err != nil {
+		return nil, err
+	}
+	if req.IsSystem && req.OwnerUserID != "" {
+		return nil, models.ErrExecutorOwnershipInvalid
+	}
+	if req.Type == models.ExecutorTypePluginRemote {
+		return nil, fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
+	}
+	if err := s.requireExecutorTypeAdmin(ctx, req.Type); err != nil {
 		return nil, err
 	}
 	if err := validateExecutorForType(req.Type, req.Config); err != nil {
 		return nil, err
 	}
 	executor := &models.Executor{
-		ID:        uuid.New().String(),
-		Name:      req.Name,
-		Type:      req.Type,
-		Status:    req.Status,
-		IsSystem:  req.IsSystem,
-		Resumable: req.Resumable,
-		Config:    req.Config,
+		OwnerUserID: req.OwnerUserID,
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Type:        req.Type,
+		Status:      req.Status,
+		IsSystem:    req.IsSystem,
+		Resumable:   req.Resumable,
+		Config:      req.Config,
 	}
 
 	if err := s.executors.CreateExecutor(ctx, executor); err != nil {
@@ -1849,7 +1978,19 @@ func (s *Service) notifyExecutorSaved(ctx context.Context, before, after *models
 }
 
 func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
-	return s.executors.GetExecutor(ctx, id)
+	providers, err := s.syncPluginExecutorEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	executor, err := s.executors.GetExecutor(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeExecutorOwners(ctx, executor.OwnerUserID); err != nil {
+		return nil, models.ErrExecutorNotFound
+	}
+	s.attachExecutorProvider(executor, providers)
+	return executor, nil
 }
 
 func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExecutorRequest) (*models.Executor, error) {
@@ -1857,15 +1998,23 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err != nil {
 		return nil, err
 	}
+	if err := s.authorizeExecutorOwners(ctx, executor.OwnerUserID); err != nil {
+		return nil, models.ErrExecutorNotFound
+	}
+	if executor.Type == models.ExecutorTypePluginRemote || (req.Type != nil && *req.Type == models.ExecutorTypePluginRemote) {
+		return nil, fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
+	}
 	targetType := executor.Type
 	if req.Type != nil {
 		targetType = *req.Type
 	}
-	if err := requireExecutorTypeAdmin(ctx, executor.Type, targetType); err != nil {
-		return nil, err
-	}
-	if err := validateExecutorUpdateRequest(executor, req); err != nil {
-		return nil, err
+	if !executorOwnershipOnly(req) {
+		if err := s.requireExecutorTypeAdmin(ctx, executor.Type, targetType); err != nil {
+			return nil, err
+		}
+		if err := validateExecutorUpdateRequest(executor, req); err != nil {
+			return nil, err
+		}
 	}
 	if req.Type != nil && *req.Type != executor.Type &&
 		(executor.Type == models.ExecutorTypeKubernetes || *req.Type == models.ExecutorTypeKubernetes) {
@@ -1882,6 +2031,14 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err := s.guardRetainedRemoteDockerConnection(ctx, executor, req); err != nil {
 		return nil, err
 	}
+	intent, err := s.executorOwnershipIntent(ctx, executor.OwnerUserID, req.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	if executor.IsSystem && req.OwnerUserID.Set && req.OwnerUserID.Value != "" {
+		return nil, models.ErrExecutorOwnershipInvalid
+	}
+	executor.OwnershipIntent = intent
 	before := *executor
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
@@ -1946,11 +2103,14 @@ func applyExecutorUpdates(executor *models.Executor, req *UpdateExecutorRequest)
 }
 
 func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
-	executor, err := s.executors.GetExecutor(ctx, id)
+	executor, err := s.GetExecutor(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return fmt.Errorf("%w: plugin remote executors are provider-owned", ErrInvalidExecutorConfig)
+	}
+	if err := s.requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 		return err
 	}
 	if executor.IsSystem {
@@ -1980,7 +2140,7 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 			return ErrActiveTaskSessions
 		}
 	}
-	if err := s.executors.DeleteExecutor(ctx, id); err != nil {
+	if err := s.executors.DeleteExecutorIfOwnershipUnmodified(ctx, id, executor.OwnerUserID); err != nil {
 		return err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
@@ -2073,7 +2233,23 @@ func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID st
 }
 
 func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
-	return s.executors.ListExecutors(ctx)
+	providers, err := s.syncPluginExecutorEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	executors, err := s.executors.ListExecutors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]*models.Executor, 0, len(executors))
+	for _, executor := range executors {
+		if s.authorizeExecutorOwners(ctx, executor.OwnerUserID) != nil {
+			continue
+		}
+		s.attachExecutorProvider(executor, providers)
+		visible = append(visible, executor)
+	}
+	return visible, nil
 }
 
 // Executor Profile operations
@@ -2085,13 +2261,22 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if req.ExecutorID == "" {
 		return nil, fmt.Errorf("executor_id is required")
 	}
+	if err := s.validateExecutorCreateOwner(ctx, req.OwnerUserID); err != nil {
+		return nil, err
+	}
 	// Verify executor exists
-	executor, err := s.executors.GetExecutor(ctx, req.ExecutorID)
+	executor, err := s.GetExecutor(ctx, req.ExecutorID)
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
-	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+	if executor.OwnerUserID != "" && req.OwnerUserID != "" && executor.OwnerUserID != req.OwnerUserID {
+		return nil, models.ErrExecutorOwnershipInvalid
+	}
+	if err := s.requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 		return nil, err
+	}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return s.createPluginExecutorProfile(ctx, executor, req)
 	}
 	if executor.Type == models.ExecutorTypeKubernetes {
 		if err := validateKubernetesProfileConfig(req.Config); err != nil {
@@ -2105,6 +2290,7 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 		return nil, fmt.Errorf("sprites profiles require %s env var", spritesTokenEnvKey)
 	}
 	profile := &models.ExecutorProfile{
+		OwnerUserID:   req.OwnerUserID,
 		ExecutorID:    req.ExecutorID,
 		Name:          req.Name,
 		McpPolicy:     req.McpPolicy,
@@ -2121,20 +2307,41 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 }
 
 func (s *Service) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
-	return s.executors.GetExecutorProfile(ctx, id)
-}
-
-func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *UpdateExecutorProfileRequest) (*models.ExecutorProfile, error) {
 	profile, err := s.executors.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	if err := s.authorizeExecutorProfile(ctx, profile); err != nil {
+		return nil, repoerrors.ErrExecutorProfileNotFound
+	}
+	return profile, nil
+}
+
+func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *UpdateExecutorProfileRequest) (*models.ExecutorProfile, error) {
+	profile, err := s.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+	executor, err := s.GetExecutor(ctx, profile.ExecutorID)
+	if err != nil {
 		return nil, err
+	}
+	if !executorProfileOwnershipOnly(req) {
+		if err := s.requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+			return nil, err
+		}
+	}
+	intent, err := s.executorOwnershipIntent(ctx, profile.OwnerUserID, req.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	intent.ExpectedParentOwnerUserID = &executor.OwnerUserID
+	profile.OwnershipIntent = intent
+	if executorProfileOwnershipOnly(req) {
+		return s.saveExecutorProfileOwnership(ctx, profile, req)
+	}
+	if executor.Type == models.ExecutorTypePluginRemote {
+		return s.updatePluginExecutorProfile(ctx, profile, executor, req)
 	}
 	if executor.Type == models.ExecutorTypeKubernetes {
 		config := profile.Config
@@ -2173,7 +2380,10 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if req.ExpectedUpdatedAt != nil {
 		updateErr = s.executors.UpdateExecutorProfileIfUnmodified(ctx, profile, *req.ExpectedUpdatedAt)
 	} else {
-		updateErr = s.executors.UpdateExecutorProfile(ctx, profile)
+		updateErr = s.executors.UpdateExecutorProfileWithScriptIntent(ctx, profile, models.ExecutorProfileScriptIntent{
+			PrepareScript: req.PrepareScript,
+			CleanupScript: req.CleanupScript,
+		})
 	}
 	if updateErr != nil {
 		return nil, updateErr
@@ -2252,28 +2462,66 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	executor, err := s.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
 		return err
 	}
+	if executor == nil {
+		if err := s.authorizeExecutorOwners(ctx, profile.OwnerUserID); err != nil {
+			return err
+		}
+		if profile.OwnerUserID == "" && !s.executorConfigurationManager(ctx) {
+			return repoerrors.ErrExecutorProfileNotFound
+		}
+	}
 	if executor != nil {
-		if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		if err := s.authorizeExecutorOwners(ctx, executor.OwnerUserID, profile.OwnerUserID); err != nil {
+			return err
+		}
+		if err := s.requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 			return err
 		}
 	}
-	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
+	profileInUse, _, err := s.retainedPluginExecutorReferences(ctx, id, nil)
+	if err != nil {
 		return err
 	}
+	if profileInUse {
+		return ErrExecutorProfileInUse
+	}
+	secretIDs, err := s.executorProfileSecretIDs(ctx, profile)
+	if err != nil {
+		return err
+	}
+	var parentOwner *string
+	if executor != nil {
+		parentOwner = &executor.OwnerUserID
+	}
+	if err := s.executors.DeleteExecutorProfileIfOwnershipUnmodified(ctx, profile, parentOwner); err != nil {
+		return err
+	}
+	cleanupProfileSecrets(ctx, s.secretStore, secretIDs)
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileDeleted, profile)
 	return nil
 }
 
 func (s *Service) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
-	return s.executors.ListExecutorProfiles(ctx, executorID)
+	if _, err := s.GetExecutor(ctx, executorID); err != nil {
+		return nil, err
+	}
+	profiles, err := s.executors.ListExecutorProfiles(ctx, executorID)
+	if err != nil {
+		return nil, err
+	}
+	return s.visibleExecutorProfiles(ctx, profiles), nil
 }
 
 func (s *Service) ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error) {
-	return s.executors.ListAllExecutorProfiles(ctx)
+	profiles, err := s.executors.ListAllExecutorProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.visibleExecutorProfiles(ctx, profiles), nil
 }
 
 // Environment operations

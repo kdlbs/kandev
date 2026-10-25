@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import {
   AlertDialog,
@@ -57,11 +57,13 @@ export function BulkSessionRemoveDialog({
           )}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending} className="cursor-pointer">
+            {t("common:cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             disabled={pending}
             onClick={onConfirm}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             {pending ? t("task:removingSessions", { count }) : action}
           </AlertDialogAction>
@@ -79,6 +81,8 @@ export type SessionTabMenuActions = {
   handleSetPrimary: () => void;
   handleStop: () => void;
   handleResume: () => void;
+  handleRestart: () => void;
+  isRestarting?: boolean;
   handleCloseOthers?: () => void;
   handleRemoveOthers?: () => void;
   handleRemoveAll?: () => void;
@@ -171,6 +175,64 @@ export function DeleteSessionPopover({
   );
 }
 
+/** Keeps restart visible while pending and disables competing actions for the same target. */
+function SessionLifecycleMenuItems({
+  sessionState,
+  actions,
+  onDelete,
+}: {
+  sessionState: TaskSessionState | null;
+  actions: SessionTabMenuActions;
+  onDelete: (event: Event) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {sessionState && isStoppable(sessionState) && (
+        <ContextMenuItem
+          className="cursor-pointer"
+          onSelect={actions.handleStop}
+          disabled={actions.isRestarting}
+        >
+          {t("task:stop")}
+        </ContextMenuItem>
+      )}
+      {(actions.isRestarting || (sessionState && isStoppable(sessionState))) && (
+        <ContextMenuItem
+          className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          onSelect={actions.handleRestart}
+          disabled={actions.isRestarting}
+        >
+          {t("task:restartSession")}
+        </ContextMenuItem>
+      )}
+      {sessionState && isResumable(sessionState) && (
+        <ContextMenuItem
+          className="cursor-pointer"
+          onSelect={actions.handleResume}
+          disabled={actions.isRestarting}
+        >
+          {t("task:resume")}
+        </ContextMenuItem>
+      )}
+      {sessionState && isDeletable(sessionState) && (
+        <ContextMenuItem
+          className="cursor-pointer text-destructive"
+          disabled={actions.isRestarting}
+          onSelect={(event) => {
+            // Keep the context menu mounted so the confirmation popover can stay anchored here.
+            event.preventDefault();
+            onDelete(event);
+          }}
+        >
+          {t("task:delete")}
+        </ContextMenuItem>
+      )}
+    </>
+  );
+}
+
+/** Composes session actions while deferring rename focus until the context menu closes. */
 export function SessionContextMenuItems({
   sessionState,
   isPrimary,
@@ -196,9 +258,22 @@ export function SessionContextMenuItems({
   onStartRename: () => void;
 }) {
   const { t } = useTranslation();
+  const renameAfterCloseRef = useRef(false);
   return (
-    <ContextMenuContent>
-      <ContextMenuItem className="cursor-pointer" onSelect={onStartRename}>
+    <ContextMenuContent
+      onCloseAutoFocus={(event) => {
+        if (!renameAfterCloseRef.current) return;
+        renameAfterCloseRef.current = false;
+        event.preventDefault();
+        queueMicrotask(onStartRename);
+      }}
+    >
+      <ContextMenuItem
+        className="cursor-pointer"
+        onSelect={() => {
+          renameAfterCloseRef.current = true;
+        }}
+      >
         {t("task:rename2")}
       </ContextMenuItem>
       <ContextMenuItem
@@ -209,28 +284,11 @@ export function SessionContextMenuItems({
         {t("task:setAsPrimary")}
       </ContextMenuItem>
       <ContextMenuSeparator />
-      {sessionState && isStoppable(sessionState) && (
-        <ContextMenuItem className="cursor-pointer" onSelect={actions.handleStop}>
-          {t("task:stop")}
-        </ContextMenuItem>
-      )}
-      {sessionState && isResumable(sessionState) && (
-        <ContextMenuItem className="cursor-pointer" onSelect={actions.handleResume}>
-          {t("task:resume")}
-        </ContextMenuItem>
-      )}
-      {sessionState && isDeletable(sessionState) && (
-        <ContextMenuItem
-          className="cursor-pointer text-destructive"
-          onSelect={(event) => {
-            // Keep the context menu mounted so the confirmation popover can stay anchored here.
-            event.preventDefault();
-            onDelete(event);
-          }}
-        >
-          {t("task:delete")}
-        </ContextMenuItem>
-      )}
+      <SessionLifecycleMenuItems
+        sessionState={sessionState}
+        actions={actions}
+        onDelete={onDelete}
+      />
       {canShare && (
         <>
           <ContextMenuSeparator />

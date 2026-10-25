@@ -17,6 +17,7 @@ const responsiveMock = vi.hoisted(() => ({
 const wsMock = vi.hoisted(() => ({
   client: null as { request: ReturnType<typeof vi.fn> } | null,
 }));
+const deleteTaskPRMock = vi.hoisted(() => vi.fn());
 const CHIP_TESTID = "pr-status-chip";
 const TOPBAR_BUTTON_TESTID = "pr-topbar-button";
 const CHECKS_FAILED = "Checks failed";
@@ -54,6 +55,7 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
       pr_states: [],
     }),
     listWorkspaceTaskPRs: vi.fn().mockResolvedValue({ task_prs: {} }),
+    deleteTaskPR: deleteTaskPRMock,
   };
 });
 
@@ -304,5 +306,60 @@ describe("multi-PR accessible status", () => {
     expect(ariaLabel(failedRow)).toContain(CONFLICTS);
     expect(ariaLabel(passingRow)).toContain(CHECKS_PASSED);
     expect(ariaLabel(passingRow)).not.toContain(CONFLICTS);
+  });
+});
+
+describe("PR topbar unlink context menu", () => {
+  beforeEach(() => {
+    deleteTaskPRMock.mockReset();
+    deleteTaskPRMock.mockResolvedValue(undefined);
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.1, .3, .4, .7
+  it("unlinks the selected association when duplicate PR numbers belong to different repositories", async () => {
+    const webPR = makePR({
+      id: "web-association",
+      repo: "web",
+      repository_id: "web-repository",
+    });
+    const apiPR = makePR({
+      id: "api-association",
+      repo: "api",
+      repository_id: "api-repository",
+    });
+    setupRefresh([webPR, apiPR]);
+    renderWithStore(taskState([webPR, apiPR], true), <PRTopbarButton />);
+
+    const trigger = screen.getByTestId(TOPBAR_BUTTON_TESTID);
+    fireEvent.contextMenu(trigger);
+
+    const edit = await screen.findByRole("menuitem", { name: "Edit" });
+    fireEvent.pointerMove(edit, { pointerType: "mouse" });
+    const selected = await screen.findByRole("menuitem", {
+      name: "Remove acme/api #42 from task",
+    });
+    expect(screen.getByRole("menuitem", { name: "Remove acme/web #42 from task" })).toBeTruthy();
+    fireEvent.click(selected);
+
+    await waitFor(() => expect(deleteTaskPRMock).toHaveBeenCalledWith(apiPR.id, "ws-1"));
+    await waitFor(() => expect(screen.queryByTestId(TOPBAR_BUTTON_TESTID)).not.toBeNull());
+    expect(screen.queryByRole("menuitem", { name: "Remove acme/api #42 from task" })).toBeNull();
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.1, .4
+  it("removes the topbar control after unlinking its final PR", async () => {
+    const pr = makePR({ id: "only-association" });
+    setupRefresh([pr]);
+    renderWithStore(taskState([pr], true), <PRTopbarButton />);
+
+    fireEvent.contextMenu(screen.getByTestId(TOPBAR_BUTTON_TESTID));
+    const edit = await screen.findByRole("menuitem", { name: "Edit" });
+    fireEvent.pointerMove(edit, { pointerType: "mouse" });
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Remove acme/demo #42 from task" }),
+    );
+
+    await waitFor(() => expect(deleteTaskPRMock).toHaveBeenCalledWith(pr.id, "ws-1"));
+    await waitFor(() => expect(screen.queryByTestId(TOPBAR_BUTTON_TESTID)).toBeNull());
   });
 });

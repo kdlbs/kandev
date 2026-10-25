@@ -876,13 +876,14 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 	out := make([]map[string]interface{}, 0, len(folders))
 	for _, folder := range folders {
 		out = append(out, map[string]interface{}{
-			"id":           folder.ID,
-			"task_id":      folder.TaskID,
-			"local_path":   folder.LocalPath,
-			"display_name": folder.DisplayName,
-			"position":     folder.Position,
-			"created_at":   folder.CreatedAt.Format(time.RFC3339),
-			"updated_at":   folder.UpdatedAt.Format(time.RFC3339),
+			"id":                      folder.ID,
+			"task_id":                 folder.TaskID,
+			"local_path":              folder.LocalPath,
+			"display_name":            folder.DisplayName,
+			"workspace_relative_path": folder.WorkspaceRelativePath,
+			"position":                folder.Position,
+			"created_at":              folder.CreatedAt.Format(time.RFC3339),
+			"updated_at":              folder.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 	return out
@@ -953,6 +954,8 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
+		"acp_idle_suspension_enabled":     workspace.ACPIdleSuspensionEnabled,
+		"acp_idle_timeout_minutes":        workspace.ACPIdleTimeoutMinutes,
 		// Placement is reach: moving a workspace between units is what grants
 		// and withdraws access now, so an access-changed event that omitted it
 		// would tell clients something changed without telling them what.
@@ -1001,15 +1004,16 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 	}
 
 	data := map[string]interface{}{
-		"id":         executor.ID,
-		"name":       executor.Name,
-		"type":       executor.Type,
-		"status":     executor.Status,
-		"is_system":  executor.IsSystem,
-		"resumable":  executor.Resumable,
-		"config":     executor.Config,
-		"created_at": executor.CreatedAt.Format(time.RFC3339),
-		"updated_at": executor.UpdatedAt.Format(time.RFC3339),
+		"owner_user_id": executor.OwnerUserID,
+		"id":            executor.ID,
+		"name":          executor.Name,
+		"type":          executor.Type,
+		"status":        executor.Status,
+		"is_system":     executor.IsSystem,
+		"resumable":     executor.Resumable,
+		"config":        executor.Config,
+		"created_at":    executor.CreatedAt.Format(time.RFC3339),
+		"updated_at":    executor.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.publishEventToBus(ctx, eventType, "executor", executor.ID, data)
@@ -1019,12 +1023,20 @@ func (s *Service) publishExecutorProfileEvent(ctx context.Context, eventType str
 	if s.eventBus == nil || profile == nil {
 		return
 	}
+	config, secretFields := models.RedactExecutorProfileConfig(profile.Config)
+	var provider *models.ExecutorProvider
+	if executor, err := s.GetExecutor(ctx, profile.ExecutorID); err == nil {
+		provider = executor.Provider
+	}
 	data := map[string]interface{}{
+		"owner_user_id":  profile.OwnerUserID,
 		"id":             profile.ID,
 		"executor_id":    profile.ExecutorID,
 		"name":           profile.Name,
 		"mcp_policy":     profile.McpPolicy,
-		"config":         profile.Config,
+		"config":         config,
+		"secret_fields":  secretFields,
+		"provider":       provider,
 		"prepare_script": profile.PrepareScript,
 		"cleanup_script": profile.CleanupScript,
 		"created_at":     profile.CreatedAt.Format(time.RFC3339),
@@ -1202,8 +1214,22 @@ func (s *Service) pendingActionProjectionChanged(
 	if s.lastPendingActionProjections == nil {
 		s.lastPendingActionProjections = make(map[string]pendingActionProjectionState)
 	}
+	if observed, exists := s.pendingActionProjectionObserved[sessionID]; exists &&
+		!pendingActionRevisionAfter(revision, observed.revision) && revision != observed.revision {
+		return false
+	}
 	previous, exists := s.lastPendingActionProjections[sessionID]
-	if exists && !pendingActionRevisionAfter(revision, previous.revision) {
+	if exists && revision != previous.revision && !pendingActionRevisionAfter(revision, previous.revision) {
+		return false
+	}
+	if exists && previous.action == action {
+		if pendingActionRevisionAfter(revision, previous.revision) {
+			previous.revision = revision
+			s.lastPendingActionProjections[sessionID] = previous
+		}
+		return false
+	}
+	if exists && revision == previous.revision {
 		return false
 	}
 	s.lastPendingActionProjections[sessionID] = pendingActionProjectionState{

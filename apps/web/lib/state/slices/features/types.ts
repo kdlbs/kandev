@@ -9,6 +9,7 @@ export const defaultFeatureFlags = {
   // overwrites this with the backend's effective values after startup.
   lspBrowserContinuity: false,
   office: false,
+  integratedControl: false,
   auth: false,
   canvases: false,
   multiTenancy: false,
@@ -17,6 +18,12 @@ export const defaultFeatureFlags = {
   claudeMidTurnSteering: false,
   needsYouInbox: false,
   agentSurvival: false,
+  coordinator: false,
+  coordinatorPhase2: false,
+  coordinatorPhase3: false,
+  coordinatorPhase31: false,
+  codexAppServer: false,
+  agentBackgroundWork: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

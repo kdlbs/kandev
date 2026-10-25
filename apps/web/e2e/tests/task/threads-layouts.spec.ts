@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import { injectLatency } from "../../helpers/causal-waits";
+import { waitForTaskSessionsSettled } from "../../helpers/session-store";
 import {
   captureThreadSettings,
   capturePresentation,
@@ -21,22 +23,35 @@ test("bounds both grid rows to visible streams and opens a lower-row deep link",
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
   test.setTimeout(300_000);
+  await backend.restart();
+  await testPage.reload();
   const tasks = [];
   for (const title of ["A", "B", "C", "D", "E", "F", "G", "H"]) {
-    tasks.push(
-      await startPresentationThread(testPage, apiClient, seedData, `${title} windowed grid`),
-    );
+    tasks.push(await startPresentationThread(apiClient, seedData, `${title} windowed grid`));
   }
   await seedThreadPresentation(apiClient, { layout: "grid", maxChats: 8 });
   await testPage.setViewportSize({ width: 1100, height: 1100 });
   const capture = attachGatewayTrafficCapture(testPage);
+  let delayedSessionRead = false;
+  await testPage.route(`**/api/v1/tasks/${tasks[7].id}/sessions`, async (route) => {
+    if (delayedSessionRead || route.request().method() !== "GET") return route.continue();
+    delayedSessionRead = true;
+    await injectLatency(
+      8_000,
+      "deep-linked thread session hydration remains in flight after focus",
+    );
+    await route.continue();
+  });
   await testPage.goto(`/threads?taskId=${tasks[7].id}`);
   const board = testPage.getByTestId("threads-board");
   const target = testPage.getByTestId(`thread-column-${tasks[7].id}`);
   await expect(target).toHaveAttribute("data-focused", "true");
+  await waitForTaskSessionsSettled(testPage, tasks[7].id);
   await expect(target.getByTestId("session-chat")).toBeVisible();
+  expect(delayedSessionRead).toBe(true);
   const expectedSessions = async () =>
     board
       .locator('[data-testid="session-chat"]')
@@ -62,6 +77,7 @@ test("bounds both grid rows to visible streams and opens a lower-row deep link",
     element.scrollLeft = 0;
   });
   await expect(target.getByTestId("session-chat")).toHaveCount(0);
+  await waitForTaskSessionsSettled(testPage, tasks[0].id);
   await expect(
     testPage.getByTestId(`thread-column-${tasks[0].id}`).getByTestId("session-chat"),
   ).toBeVisible();
@@ -71,6 +87,7 @@ test("bounds both grid rows to visible streams and opens a lower-row deep link",
   await board.evaluate((element) => {
     element.scrollLeft = element.scrollWidth;
   });
+  await waitForTaskSessionsSettled(testPage, tasks[7].id);
   await expect(target.getByTestId("session-chat")).toBeVisible();
   await target.getByRole("button", { name: "Open task", exact: true }).click();
   await expect(testPage).toHaveURL(new RegExp(`/t/${tasks[7].id}`));
@@ -88,7 +105,7 @@ test("lays out stable task tiles in two rows and falls back in a short window", 
   test.setTimeout(240_000);
   await testPage.setViewportSize({ width: 1440, height: 1100 });
   for (const title of ["A layout chat", "B layout chat", "C layout chat"]) {
-    await startPresentationThread(testPage, apiClient, seedData, title);
+    await startPresentationThread(apiClient, seedData, title);
   }
   await seedThreadPresentation(apiClient, { layout: "grid" });
   expect((await captureThreadSettings(apiClient)).thread_views[0].layout).toBe("grid");

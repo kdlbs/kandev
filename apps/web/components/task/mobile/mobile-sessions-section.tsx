@@ -24,10 +24,7 @@ import { HandoffDropdownMenuSub } from "../handoff-profile-menu-items";
 import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
-import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
-import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { repositorySlug } from "@/lib/repository-slug";
-import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
@@ -36,6 +33,8 @@ import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirm
 import { useTaskBulkRemovalController } from "../use-task-bulk-removal-controller";
 import { MobileBulkSessionRemovalConfirmation } from "./mobile-bulk-session-removal-confirmation";
 import { MobileBulkSessionMenuItems } from "./mobile-bulk-session-menu-items";
+import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";
+import { MobileSessionStateBadge } from "./mobile-session-state-badge";
 
 type SessionRow = {
   id: string;
@@ -82,70 +81,22 @@ function buildSessionRows(
   });
 }
 
-// The mobile sessions section reads the per-session substate through the same
-// shared vocabulary as the desktop session switcher and the reopen menu
-// `getSessionStateIcon` carries background-running
-// as a spinner distinct — by SHAPE and MOTION, not hue alone — from generating
-// (a static dot) and from done (a check), so the three read apart even in a
-// grayscale scan. The label reinforces the distinction in words: while spawned
-// background work runs, the row reads "Working in background" rather than the
-// bare "Running", so background is never confused with generating.
-// A catalog key, not copy: `t()` at module scope would freeze at the boot locale.
-const BACKGROUND_RUNNING_LABEL_KEY = "task:workingInBackground";
-
-function sessionStateLabel(
-  state: TaskSessionState,
-  foregroundActivity: ForegroundActivity | null,
-  pending: PendingInput,
-  parkedOnBackgroundWork: boolean,
-): string {
-  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
-  if (canRequestInput && pending.permission) return t("task:permissionRequested");
-  if (canRequestInput && pending.clarification) {
-    return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
-  }
-  if (canRequestInput && foregroundActivity === "background") {
-    return t(BACKGROUND_RUNNING_LABEL_KEY);
-  }
-  if (canRequestInput && parkedOnBackgroundWork) {
-    return t(BACKGROUND_RUNNING_LABEL_KEY);
-  }
-  return formatTaskSessionStateLabel(state);
-}
-
-function StateBadge({
-  sessionId,
-  state,
-  foregroundActivity,
-  parkedOnBackgroundWork,
-  testId,
-}: {
-  sessionId: string;
+type SessionActionsMenuProps = {
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  taskId: string;
   state: TaskSessionState | null;
-  foregroundActivity: ForegroundActivity | null;
-  parkedOnBackgroundWork: boolean;
-  testId?: string;
-}) {
-  const pending = useSessionPendingInput(sessionId);
-  if (!state) return null;
-  const label = sessionStateLabel(state, foregroundActivity, pending, parkedOnBackgroundWork);
-  return (
-    <span
-      data-testid={testId}
-      title={label}
-      className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground shrink-0"
-    >
-      {getSessionStateIcon(state, "h-3 w-3 shrink-0", {
-        foregroundActivity,
-        hasPendingClarification: pending.clarification,
-        hasPendingPermission: pending.permission,
-        parkedOnBackgroundWork,
-      })}
-      {label}
-    </span>
-  );
-}
+  isPrimary: boolean;
+  onSetPrimary: () => void;
+  onStop: () => void;
+  onResume: () => void;
+  onRestart: () => void;
+  isRestarting: boolean;
+  onAskDelete: () => void;
+  onRemoveScope: (scope: "others" | "all") => void;
+  onHandoffProfile: (profileId: string) => void;
+};
 
+/** Exposes touch-accessible session actions and blocks conflicting lifecycle requests during restart. */
 function SessionActionsMenu({
   triggerRef,
   taskId,
@@ -154,37 +105,29 @@ function SessionActionsMenu({
   onSetPrimary,
   onStop,
   onResume,
+  onRestart,
+  isRestarting,
   onAskDelete,
   onRemoveScope,
   onHandoffProfile,
-}: {
-  triggerRef: RefObject<HTMLButtonElement | null>;
-  taskId: string;
-  state: TaskSessionState | null;
-  isPrimary: boolean;
-  onSetPrimary: () => void;
-  onStop: () => void;
-  onResume: () => void;
-  onAskDelete: () => void;
-  onRemoveScope: (scope: "others" | "all") => void;
-  onHandoffProfile: (profileId: string) => void;
-}) {
+}: SessionActionsMenuProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
+  const { open, setOpen, triggerProps } = useSessionMenuOpeningGesture();
   const hasLifecycleAction =
     !!state &&
     (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           ref={triggerRef}
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer h-11 w-11 md:h-7 md:w-7"
-          onClick={(e) => e.stopPropagation()}
+          className="cursor-pointer h-11 w-11 md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          {...triggerProps}
           aria-label={t("task:sessionActions")}
         >
           <IconDotsVertical className="h-4 w-4" />
@@ -209,18 +152,28 @@ function SessionActionsMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {state && isSessionStoppable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onStop}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onStop} disabled={isRestarting}>
             {t("task:stop")}
           </DropdownMenuItem>
         )}
+        {(isRestarting || (state && isSessionStoppable(state))) && (
+          <DropdownMenuItem
+            className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            onSelect={onRestart}
+            disabled={isRestarting}
+          >
+            {t("task:restartSession")}
+          </DropdownMenuItem>
+        )}
         {state && isSessionResumable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onResume}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onResume} disabled={isRestarting}>
             {t("task:resume")}
           </DropdownMenuItem>
         )}
         {state && isSessionDeletable(state) && (
           <DropdownMenuItem
             className="cursor-pointer text-destructive focus:text-destructive"
+            disabled={isRestarting}
             onSelect={() => {
               if (isMobile) pendingDelete.current = true;
               else onAskDelete();
@@ -253,6 +206,7 @@ function SessionIdentity({ row }: { row: SessionRow }) {
   );
 }
 
+/** Connects one session's menu and delete confirmation to its shared lifecycle actions. */
 function SessionRowTrailingActions({
   row,
   taskId,
@@ -298,6 +252,8 @@ function SessionRowTrailingActions({
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
+          onRestart={() => void actions.restart()}
+          isRestarting={actions.isRestarting}
           onAskDelete={onAskDelete}
           onRemoveScope={onRemoveScope}
           onHandoffProfile={onHandoffProfile}
@@ -368,7 +324,7 @@ function SessionRowItem({
         )}
         {row.agentName && <AgentLogo agentName={row.agentName} size={16} className="shrink-0" />}
         <SessionIdentity row={row} />
-        <StateBadge
+        <MobileSessionStateBadge
           sessionId={row.id}
           state={row.state}
           foregroundActivity={row.foregroundActivity}

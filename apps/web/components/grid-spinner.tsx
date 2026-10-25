@@ -1,7 +1,11 @@
 "use client";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { firstAnimationListValue, parseCssTime } from "@kandev/ui/animation-utils";
+import {
+  firstAnimationListValue,
+  parseCssTime,
+  releaseAnimation,
+} from "@kandev/ui/animation-utils";
 import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-visibility";
 
 type GridSpinnerProps = {
@@ -30,21 +34,25 @@ export function GridSpinner({ className, ariaLabel }: GridSpinnerProps) {
     if (!grid) return;
     const visibility = createPersistentMotionVisibility(grid);
     const registrations = cubes.map((cube) => visibility.register(cube));
-    const animations = startGridAnimations(cubes);
-    if (!animations) {
-      return () => {
-        for (const registration of registrations) registration.unregister();
-        visibility.dispose();
-      };
-    }
-
-    for (let index = 0; index < cubes.length; index += 1) {
-      registrations[index]?.setAnimation(animations[index] ?? null);
-      cubes[index].style.animation = "none";
-    }
+    let animations: Animation[] | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // CSS already supplies the initial motion. Promote after the first frame
+    // so reading animation styles cannot block the task's initial paint.
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => {
+        animations = startGridAnimations(cubes);
+        if (!animations) return;
+        for (let index = 0; index < cubes.length; index += 1) {
+          registrations[index]?.setAnimation(animations[index] ?? null);
+          cubes[index].style.animation = "none";
+        }
+      }, 0);
+    });
 
     return () => {
-      for (const animation of animations) animation.cancel();
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      for (const animation of animations ?? []) releaseAnimation(animation);
       for (const registration of registrations) registration.unregister();
       visibility.dispose();
       for (const cube of cubes) cube.style.removeProperty("animation");
@@ -85,7 +93,7 @@ function startGridAnimations(cubes: HTMLElement[]): Animation[] | null {
     }
     return animations;
   } catch {
-    for (const animation of animations) animation.cancel();
+    for (const animation of animations) releaseAnimation(animation);
     return null;
   }
 }

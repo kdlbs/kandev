@@ -1,6 +1,58 @@
 import { expect, test } from "../../fixtures/test-base";
 
 const PATH = "/settings/preferences/task-behavior";
+
+test("bounds task behavior content", async ({ testPage }) => {
+  await testPage.setViewportSize({ width: 1920, height: 1080 });
+  await testPage.goto(PATH);
+  const content = testPage.getByTestId("task-behavior-settings");
+  for (const tab of ["Tasks", "Conversation", "Runtime"]) {
+    await testPage.getByRole("tab", { name: tab, exact: true }).click();
+    const box = await content.boundingBox();
+    expect(box!.width).toBeLessThanOrEqual(1025);
+  }
+});
+
+for (const width of [1920, 767, 768]) {
+  test(`places profile choices below their label at ${width}px`, async ({ testPage }) => {
+    await testPage.setViewportSize({ width, height: 1080 });
+    await testPage.goto(PATH);
+    const description = await testPage.locator("#mcp-task-profile-description").boundingBox();
+    const choices = testPage.locator('label[for^="mcp-task-profile-"]');
+    await expect(choices).toHaveCount(2);
+    const first = (await choices.nth(0).boundingBox())!;
+    const second = (await choices.nth(1).boundingBox())!;
+    expect(first.y).toBeGreaterThanOrEqual(description!.y + description!.height);
+    expect(Math.abs(first.x - description!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(first.width - second.width)).toBeLessThanOrEqual(1);
+    if (width >= 768) {
+      expect(Math.abs(first.y - second.y)).toBeLessThanOrEqual(1);
+      expect(second.x - first.x - first.width).toBeCloseTo(8, 0);
+    } else {
+      expect(second.y).toBeGreaterThanOrEqual(first.y + first.height);
+      expect(first.height).toBeGreaterThanOrEqual(44);
+    }
+    const current = testPage.getByRole("radio", { name: "Creating session profile", exact: true });
+    await current.focus();
+    const workspaceDefault = testPage.getByRole("radio", {
+      name: "Workspace default profile",
+      exact: true,
+    });
+    await testPage.keyboard.down("ArrowRight");
+    try {
+      await expect(workspaceDefault).toBeFocused();
+      await expect(workspaceDefault).toBeChecked();
+    } finally {
+      await testPage.keyboard.up("ArrowRight");
+    }
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Reset", exact: true })
+      .click();
+    await expect(current).toBeChecked();
+  });
+}
+
 test("concise descriptions retain hover and keyboard technical help", async ({ testPage }) => {
   await testPage.goto(`${PATH}?tab=unknown`);
   await expect(testPage.getByRole("tab", { name: "Tasks", exact: true })).toHaveAttribute(

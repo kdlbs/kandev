@@ -14,7 +14,7 @@ import {
   CommandList,
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { latestRuntimeVersions, resolveRuntimeActiveVersion } from "@/lib/agent-runtime-update";
+import { resolveRuntimeActiveVersion } from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateVersion } from "@/lib/api";
 import { settingsActionClassName } from "./settings-control";
 
@@ -192,9 +192,9 @@ export function RuntimeVersionPicker({
 }) {
   const { t } = useTranslation();
   const [browseOpen, setBrowseOpen] = useState(false);
-  const versions = latestRuntimeVersions(
-    preview.available_versions ?? [{ version: preview.target_version, latest: false }],
-  );
+  const versions = preview.available_versions ?? [
+    { version: preview.target_version, latest: false },
+  ];
   const latestVersion =
     versions.find((version) => version.latest)?.version ?? preview.target_version;
   const activeVersion = resolveRuntimeActiveVersion(preview, job);

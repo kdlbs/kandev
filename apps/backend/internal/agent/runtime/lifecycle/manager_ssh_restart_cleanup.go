@@ -46,7 +46,15 @@ func (m *Manager) stopPersistedSSHExecution(
 	if row == nil || row.Runtime != agentruntime.RuntimeSSH {
 		return false, nil
 	}
+	return m.stopPersistedSSHRecord(ctx, row, reason, force)
+}
 
+func (m *Manager) stopPersistedSSHRecord(
+	ctx context.Context,
+	row *models.ExecutorRunning,
+	reason string,
+	force bool,
+) (bool, error) {
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return true, err
@@ -91,7 +99,7 @@ func (m *Manager) stopPersistedSSHBackend(
 	if err != nil {
 		return fmt.Errorf("get SSH runtime: %w", err)
 	}
-	return backend.StopInstance(ctx, instance, force)
+	return m.stopWorkspaceRuntime(ctx, backend, instance, force)
 }
 
 func uniquePersistedSSHExecution(

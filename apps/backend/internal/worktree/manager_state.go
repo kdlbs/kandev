@@ -25,6 +25,8 @@ func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, work
 		RepositoryID:      req.RepositoryID,
 		BranchSlug:        requestBranchIdentitySlug(req),
 		RepositoryPath:    req.RepositoryPath,
+		SourceClonePath:   req.RepositoryPath,
+		SourceCommonDir:   filepath.Join(req.RepositoryPath, ".git"),
 		Path:              worktreePath,
 		Branch:            branchName,
 		BaseBranch:        req.BaseBranch,
@@ -247,7 +249,15 @@ func (m *Manager) GetByID(ctx context.Context, worktreeID string) (*Worktree, er
 // GetAllByTaskID returns all worktrees for a task.
 func (m *Manager) GetAllByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
 	if m.store == nil {
-		return nil, nil
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		worktrees := make([]*Worktree, 0)
+		for _, wt := range m.worktrees {
+			if wt != nil && wt.TaskID == taskID && wt.Status == StatusActive {
+				worktrees = append(worktrees, wt)
+			}
+		}
+		return worktrees, nil
 	}
 	return m.store.GetWorktreesByTaskID(ctx, taskID)
 }

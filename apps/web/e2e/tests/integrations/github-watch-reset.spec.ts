@@ -57,12 +57,23 @@ test.describe("GitHub review watch reset", () => {
     // Preview reports the count the dialog will surface. workspace_id is
     // required — the reset endpoints reject cross-workspace IDs with 404.
     const wsQuery = `workspace_id=${seedData.workspaceId}`;
-    const preview = await apiClient.rawRequest(
-      "GET",
-      `/api/v1/github/watches/review/${watch.id}/reset/preview?${wsQuery}`,
-    );
-    expect(preview.status).toBe(200);
-    expect(await preview.json()).toMatchObject({ taskCount: 1 });
+    let previewStatus = 0;
+    await expect
+      .poll(
+        async () => {
+          const preview = await apiClient.rawRequest(
+            "GET",
+            `/api/v1/github/watches/review/${watch.id}/reset/preview?${wsQuery}`,
+          );
+          previewStatus = preview.status;
+          if (!preview.ok) return undefined;
+          const result = (await preview.json()) as { taskCount: number };
+          return result.taskCount;
+        },
+        { timeout: 15_000, message: "the review watch should associate its created task" },
+      )
+      .toBe(1);
+    expect(previewStatus).toBe(200);
 
     // Reset cascades the delete and returns the count it actually removed.
     const reset = await apiClient.rawRequest(

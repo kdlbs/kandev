@@ -385,6 +385,10 @@ type archiveTaskResourceCleanupCanceller interface {
 	CancelArchiveTaskResourceCleanup(ctx context.Context, taskID string) error
 }
 
+type archiveTaskResourceCleanupOperationsCanceller interface {
+	CancelArchiveTaskResourceCleanupWithOperations(ctx context.Context, taskID string) ([]string, error)
+}
+
 type taskResourceCleanupCoordinator interface {
 	PrepareTaskResourceCleanup(ctx context.Context, taskID string, trigger models.TaskResourceCleanupTrigger, operationID string, deleteEnvironmentRow bool) error
 	StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
@@ -865,4 +869,8 @@ func (s *HandoffService) toRelatedByIDs(ctx context.Context, ids []string) []*Re
 		out = append(out, &rt)
 	}
 	return out
+}
+
+type taskResourceRetentionCoordinator interface {
+	PrepareTaskResourceCleanupWithDeleteOptions(context.Context, string, models.TaskResourceCleanupTrigger, string, bool, DeleteTaskOptions) error
 }

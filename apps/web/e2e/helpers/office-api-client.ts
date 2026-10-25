@@ -4,9 +4,13 @@
  * config sync, routines, costs, approvals, and workspace settings.
  */
 export class OfficeApiClient {
-  constructor(private baseUrl: string) {}
+  constructor(
+    private baseUrl: string,
+    private ensureBackendReady?: () => Promise<void>,
+  ) {}
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}/api/v1/office${path}`, {
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -22,6 +26,7 @@ export class OfficeApiClient {
   /** Like {@link request}, but returns the raw Response instead of throwing on non-2xx —
    * for endpoints a test exercises across success and rejection status codes (409, 503). */
   async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office${path}`, {
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -75,6 +80,7 @@ export class OfficeApiClient {
       name: string;
       role: string;
       agent_profile_id?: string;
+      executor_preference?: string;
     },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ agent: Record<string, unknown> }>(
@@ -144,6 +150,7 @@ export class OfficeApiClient {
     if (opts?.blocked_by?.length) body.blocked_by = opts.blocked_by;
     if (opts?.workflow_id) body.workflow_id = opts.workflow_id;
     // Use the core /api/v1/tasks route (not the /office/ prefix)
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}/api/v1/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -199,14 +206,18 @@ export class OfficeApiClient {
   /**
    * Create a project in the workspace. Onboarding does not seed a default
    * project (see e2e/tests/office/project-repository-picker.spec.ts), so
-   * tests that need a real project_id to reassign a task to must create
-   * one first.
+   * tests that need a project must create one first. Optional repository
+   * paths seed the project's source list for task-creation coverage.
    */
-  async createProject(wsId: string, name: string): Promise<Record<string, unknown>> {
+  async createProject(
+    wsId: string,
+    name: string,
+    repositories?: string[],
+  ): Promise<Record<string, unknown>> {
     const res = await this.request<{ project?: Record<string, unknown> }>(
       "POST",
       `/workspaces/${wsId}/projects`,
-      { name },
+      { name, ...(repositories === undefined ? {} : { repositories }) },
     );
     return res.project ?? (res as unknown as Record<string, unknown>);
   }
@@ -513,6 +524,7 @@ export class OfficeApiClient {
   // getConfigSyncConfig returns null on a 204 (no config yet for this
   // workspace) rather than calling res.json() on an empty body.
   async getConfigSyncConfig(wsId: string): Promise<Record<string, unknown> | null> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}/api/v1/office/workspaces/${wsId}/config-sync/config`);
     if (res.status === 204) return null;
     if (!res.ok) {

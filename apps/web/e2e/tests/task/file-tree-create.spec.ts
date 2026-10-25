@@ -1,10 +1,14 @@
+import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { type Page } from "@playwright/test";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+
+test.use({ channel: "chromium" });
 
 // File creation lives in file-browser-toolbar.tsx ("New file" button) +
 // inline-file-input.tsx (InlineFileInput) + file-browser.tsx
@@ -20,9 +24,19 @@ import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-
 async function setupTask(
   testPage: Page,
   apiClient: ApiClient,
-  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
-  options: { profileName: string; taskTitle: string; requiredPath?: string },
+  seedData: {
+    workspaceId: string;
+    workflowId: string;
+    startStepId: string;
+    repositoryId: string;
+    repositoryPath: string;
+  },
+  options: { profileName: string; taskTitle: string },
 ) {
+  const seededBranch = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
+    cwd: seedData.repositoryPath,
+    encoding: "utf8",
+  }).trim();
   const profile = await createStandardProfile(apiClient, options.profileName);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -32,12 +46,11 @@ async function setupTask(
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
+      repositories: [{ repository_id: seedData.repositoryId, base_branch: seededBranch }],
     },
   );
 
   if (options.requiredPath) {
-    let workspacePath = "";
     await expect
       .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
         timeout: 30_000,
@@ -65,11 +78,9 @@ async function setupTask(
             (candidate, index, paths): candidate is string =>
               Boolean(candidate) && paths.indexOf(candidate) === index,
           );
-          workspacePath =
-            candidatePaths.find((candidate) =>
-              fs.existsSync(path.join(candidate, options.requiredPath!)),
-            ) ?? "";
-          return workspacePath !== "";
+          return candidatePaths.some((candidate) =>
+            fs.existsSync(path.join(candidate, options.requiredPath!)),
+          );
         },
         {
           timeout: 90_000,
@@ -86,6 +97,14 @@ async function setupTask(
   await session.waitForLoad();
   await session.clickTab("Files");
   return session;
+}
+
+function gitForTaskWorkspace(repoDir: string, tmpDir: string): GitHelper {
+  const git = new GitHelper(repoDir, makeGitEnv(tmpDir));
+  // Task workspaces check out main. A preceding Git E2E can leave this shared
+  // worker repository on another branch, which would hide these seed files.
+  git.exec("git checkout -f main");
+  return git;
 }
 
 async function startCreateAtRoot(testPage: Page) {
@@ -117,7 +136,9 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
+    // Task startup must retain the non-default branch containing the seed.
+    git.exec(`git checkout -b file-create-fixture-${Date.now()}`);
     // Seed at least one file so the tree loads. Without any files the tree
     // shows "No files found" instead of the toolbar.
     git.createFile("seed.ts", "seed");
@@ -134,6 +155,11 @@ test.describe("File tree create file", () => {
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("brand-new.ts");
+    // @covers AC-UI-EDIT-FOCUS-001.1
+    await visitOtherBrowserTab(testPage, async () => {
+      await expect(input).toHaveValue("brand-new.ts");
+      expect(fs.existsSync(path.join(repoDir, "brand-new.ts"))).toBe(false);
+    });
     await input.press("Enter");
 
     await expect(session.fileTreeNode("brand-new.ts")).toBeVisible({ timeout: 10_000 });
@@ -151,7 +177,7 @@ test.describe("File tree create file", () => {
     // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.1
     // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.2
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("select-all-alpha.ts", "alpha");
     git.createFile("select-all-beta.ts", "beta");
     git.stageAll();
@@ -190,7 +216,7 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("scope/existing.ts", "x");
     git.stageAll();
     git.commit("seed scope");
@@ -223,7 +249,7 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("seed.ts", "seed");
     git.stageAll();
     git.commit("seed");
@@ -253,7 +279,7 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("seed.ts", "seed");
     git.stageAll();
     git.commit("seed");

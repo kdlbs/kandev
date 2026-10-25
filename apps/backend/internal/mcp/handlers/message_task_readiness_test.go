@@ -63,6 +63,7 @@ func TestMessageTaskReadiness_PreparedBusySession(t *testing.T) {
 		session,
 		"prepared branch",
 		map[string]interface{}{"sender_task_id": "sender"},
+		false,
 	)
 
 	require.NoError(t, err)
@@ -264,6 +265,22 @@ func (m *mcpReadinessAgentManager) PromptAgentWithDispatchCallback(
 		return nil, ctx.Err()
 	}
 	return &executor.PromptResult{}, nil
+}
+
+func (m *mcpReadinessAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 }
 
 type mcpReadinessQueueRepository struct {

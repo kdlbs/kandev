@@ -5,6 +5,7 @@ requirements:
   - REQ-TWS-001
   - REQ-TWS-002
   - REQ-TWS-005
+  - REQ-TWS-006
 system_design:
   - ../../specs/typed-workflow-state/system-design/typed-workflow-state.md
 ---
@@ -39,6 +40,12 @@ and
   than failing prompt building.
 - `apps/backend/internal/orchestrator/service.go`: wiring for the new
   repository method.
+- `apps/backend/internal/orchestrator/task_title_prompt.go`: `{task_title}`
+  substitution (REQ-TWS-006, see
+  [../../specs/typed-workflow-state/requirements/task-title.md](../../specs/typed-workflow-state/requirements/task-title.md)).
+  The task is looked up only when the token is present; a lookup error leaves
+  the token literal. The title is spliced in after every other placeholder, so
+  its text is never expanded.
 
 ## Tests
 
@@ -51,10 +58,14 @@ and
   production call sites, the count-query-error degrade path with a field-value
   warn-log assertion, the `{unknown_token}` case, and the
   `basePrompt`-embedded-literal case.
+- `apps/backend/internal/orchestrator/task_title_prompt_test.go`: `{task_title}`
+  at both call sites, the no-lookup fast path, the lookup-error degrade path,
+  and title text that contains other placeholders.
 
 ## Implementation Wave
 
 - [x] [task-01-step-entry-number](task-01-step-entry-number.md) — complete.
+- [x] [task-02-task-title](task-02-task-title.md) — complete.
 
 ## Verification
 

@@ -38,7 +38,7 @@ function toolActivity(id: string): Message {
   );
 }
 
-function richOutputCall(): Message {
+function richOutputCall(version: number): Message {
   const toolName = "kandev: show_rich_output_kandev";
   return message(
     "rich",
@@ -55,11 +55,28 @@ function richOutputCall(): Message {
             raw_input: {
               providerIdentifier: "kandev",
               toolName: "show_rich_output_kandev",
-              args: {
-                version: 1,
-                title: "Build health",
-                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
-              },
+              args:
+                version === 1
+                  ? {
+                      version: 1,
+                      title: "Build health",
+                      blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
+                    }
+                  : {
+                      version: 2,
+                      catalog_version: 1,
+                      title: "Build health",
+                      spec: {
+                        root: "counts",
+                        elements: {
+                          counts: {
+                            type: "Metrics",
+                            props: { items: [{ label: "Passed", value: "38" }] },
+                            children: [],
+                          },
+                        },
+                      },
+                    },
             },
           },
           output: { success: true },
@@ -71,12 +88,12 @@ function richOutputCall(): Message {
 }
 
 describe("buildGroupedRenderItems rich-output hoisting", () => {
-  it("keeps a rich presentation standalone and groups ordinary activity", () => {
+  it.each([1, 2])("keeps version %i standalone and groups ordinary activity", (version) => {
     const items = buildGroupedRenderItems(
       [
         toolActivity("t1"),
         toolActivity("t2"),
-        richOutputCall(),
+        richOutputCall(version),
         toolActivity("t3"),
         toolActivity("t4"),
       ],

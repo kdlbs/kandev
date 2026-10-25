@@ -8,11 +8,19 @@ test.describe("Mobile sidebar workflow completion icons", () => {
     seedData,
     prCapture,
   }) => {
-    const finalSeedStep = seedData.steps.at(-1);
-    if (!finalSeedStep) throw new Error("seed workflow has no steps");
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Sidebar completion icon workflow",
+      "simple",
+    );
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const sortedSteps = steps.sort((a, b) => a.position - b.position);
+    const startStep = sortedSteps.find((step) => step.is_start_step) ?? sortedSteps[0];
+    const finalSeedStep = sortedSteps.at(-1);
+    if (!startStep || !finalSeedStep) throw new Error("completion icon workflow has no steps");
 
     const finalStep = await apiClient.createWorkflowStep(
-      seedData.workflowId,
+      workflow.id,
       "Mobile completion icon final step",
       finalSeedStep.position + 1,
     );
@@ -20,8 +28,8 @@ test.describe("Mobile sidebar workflow completion icons", () => {
       seedData.workspaceId,
       "Mobile sidebar turn finished",
       {
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
+        workflow_id: workflow.id,
+        workflow_step_id: startStep.id,
         state: "REVIEW",
       },
     );
@@ -29,7 +37,7 @@ test.describe("Mobile sidebar workflow completion icons", () => {
       seedData.workspaceId,
       "Mobile sidebar workflow complete",
       {
-        workflow_id: seedData.workflowId,
+        workflow_id: workflow.id,
         workflow_step_id: finalStep.id,
         state: "REVIEW",
       },

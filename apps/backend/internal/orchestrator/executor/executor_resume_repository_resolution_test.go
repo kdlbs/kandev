@@ -570,3 +570,27 @@ func TestApplyResumeRepoConfig_LocalDockerRejectsMissingRepositoryPathOnResume(t
 		t.Fatalf("applyResumeRepoConfig error = %v, want ErrNoCloneURL", err)
 	}
 }
+
+func TestApplyResumeRepoConfig_LocalFirstAttachmentPreservesPlacementForInventory(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", Name: "tools", LocalPath: t.TempDir()}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main", WorkspaceRelativePath: "kandev/tools"}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	env := &models.TaskEnvironment{ID: "env-1", ExecutorType: "local", WorkspacePath: t.TempDir(), WorkspaceLayout: "kandev_directory"}
+	repo.taskEnvironmentRepos[env.ID] = []*models.TaskEnvironmentRepo{{RepositoryID: "repo-1", BranchSlug: "main", WorkspaceRelativePath: "kandev/tools"}}
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "session-1", ExecutorType: "local", WorkspaceReuseRequired: true}
+	_, err := executor.applyResumeRepoConfig(context.Background(), &v1.Task{ID: "task-1"}, &models.TaskSession{ID: "session-1", TaskID: "task-1"}, req, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.validateReuseEnvironmentInventory(context.Background(), req, env); err != nil {
+		t.Fatalf("resume lost first attachment placement: %v", err)
+	}
+	if req.WorkspaceRelativePath != "kandev/tools" || req.TaskRepositoryID != "tr-1" {
+		t.Fatalf("attachment identity was not preserved: %+v", req)
+	}
+	if req.BaseBranch != "" {
+		t.Fatalf("Local resume must not switch checkout: %q", req.BaseBranch)
+	}
+}

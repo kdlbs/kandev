@@ -162,7 +162,19 @@ launch request
 ```
 
 Manual origins bypass refusal and write a manual-override audit entry. Automatic
-origins never become manual during replay. The sweep clears a record only after
+origins never become manual during replay. Task focus that resumes an
+idle-suspended session is passive inspection, like opening a conversation, so it
+uses the automatic origin. Its deferred record keeps the completed-session
+permission and the idle-suspension check, so a parked completed session stays a
+valid destination and the replay re-checks that the idle policy still parks it.
+Only a held claim from the same service for the exact task/session resume may
+bypass its own queued-launch guard. The bypass renews the unchanged durable
+claim, including its owner and unexpired lease, and validates the route;
+foreign, released, superseded and expired claims remain blocked. Renewal errors
+remain retryable and preserve the queued record. A replay that no longer has
+idle-suspension provenance is dropped. Final provider admission
+still revalidates claim and route ownership.
+The sweep clears a record only after
 successful dispatch. A repeated refusal leaves the original timestamp and
 payload in place.
 
@@ -203,9 +215,89 @@ failed. A deferred detached relaunch leaves the automation run and its durable
 record for the sweep. Queue dispatch treats a seam-3 refusal as retryable so the
 original message remains in the queue.
 
+A replay returns its outcome together with the error and a short detail, so the
+warning for a preserved non-ceiling failure names the cause. Validation of the
+built agent or continue command (`validate agent command:` or
+`validate continue command:`) is a permanent failure. A later pass rebuilds the
+same command from the same profile, and each attempt leaves a failed session.
+The sweep drops that record with `ceiling_dropped_launch_invalid`. The lifecycle command producer emits a typed `BuiltCommandValidationError`,
+and consumers recognize it through `errors.As`, including resume, sanitizer,
+and cleanup wrappers. Display text alone never proves this failure. All seven
+replay kinds preserve the error until settlement; ensure and dynamic-relaunch
+paths classify it after their accepted/deferred/superseded guards. Other
+failures keep their retry.
+
+Entry validation distinguishes uncertainty from a dead end. `unavailable` keeps
+the record; it is reserved for failed step, transition, or task reads, which
+validation reports as errors. The start auto-start eligibility read also
+preserves uncertainty when the record already carries a binding. A genuine
+`ErrWorkflowStepNotFound` or a readable step without auto-start remains a
+terminal destination. `permanently unavailable` covers shapes that no
+later pass can repair: a legacy sessionless `start`, an underivable or
+incomplete binding, an unrouted entry whose step now routes sessions, and a task
+with no durable entry identity. The sweep, the claimed replay, and the claimed
+binding check treat it like `superseded` and drop the record.
+
 Office automatic starts do not use workflow-step auto-start eligibility when the
 sweep evaluates a `start` record. This keeps Office scheduling ownership in the
 Office path.
+
+A legacy automation run's start refused at seam 1 is queued, not failed. The `start`
+payload records the run ID and thread disposition under `automation_run`. The
+automation dispatcher receives `ErrRunDeferred`, so it leaves the run
+`triggered` and bound to its task, and the run keeps its concurrency slot while
+the ceiling stays full. The orchestrator skips failure cleanup, so the task and
+its record remain. The sweep replays that start through the same dispatcher. It
+binds the new session and turn to the run, or fails the run when the launch
+fails for a non-ceiling reason. When the launch succeeds but the binding fails,
+the run is failed and cleanup attempts to stop the launched session, since no
+completion would settle the run; the task is kept. Failed or unknown stopping
+does not authorize a replacement start. Workflow-step auto-start eligibility
+does not apply because the trigger is the start signal.
+
+A newly created automation task carries `automation_start_owned` before
+`CreateTask` publishes feeder moves. Its value is the admitted run ID, or a
+fresh internal token for an unbound internal start. Workflow auto-start yields
+to that owner. Continuations reuse their task and never acquire or overwrite
+initial-start ownership. Wire create requests and ordinary metadata updates
+cannot set or remove the marker.
+
+Release compares the captured owner through the existing metadata CAS boundary
+and publishes `task.updated` on removal, using a bounded detached context.
+A queued dispatch keeps its marker until exact replay admission or a definitive
+queue drop. A failed unbound legacy run can release on a drop only when its
+task has no session rows. Session creation can precede run binding; existing
+rows or an uncertain session read retain ownership, regardless of session
+state. Legacy bound session/turn evidence can release the initial fence;
+a durable retry keeps it until its matching run is terminal and its immutable
+run/generation/task/session/turn/submission launch is confirmed stopped. Generic
+retry and recovery fences continue to apply independently.
+
+Startup and later workflow entry consult the existing run and launch ledgers.
+Restart, expired leases, unknown acceptance, failed Stop, missing ownership
+and read uncertainty do not certify termination or permit generic replay.
+Unresolved legacy boolean markers also remain fenced. Explicit task/session
+recovery remains subject to the existing retry owner controls.
+
+For legacy runs, the sweep drops a start whose run was deleted or is no longer
+`triggered`, such
+as a stopped, bound, failed, or startup-reconciled run, without launching. A run
+that closes between that check and the replay's dispatch is reported by the
+replay, and the start is dropped the same way. Dropping any other queued
+automation start first fails its run, because no completion event will settle
+it; the record is cleared only after the run is no longer waiting, so a failed
+run update leaves the record for the next sweep. Startup reconciliation can
+fail an unbound legacy run, after which the sweep drops its waiting start. When
+its task is hard-deleted while the start is queued, the task-deleted event fails
+the unbound legacy run. Its concurrency slot is released, and the missing task
+prevents a later replay.
+
+Retry-enabled starts use the durable launch ledger and exact prepared-payload
+admission. Queued, accepted or uncertain launch ownership can survive restart
+and remain live across instances. Startup, lease recovery and task deletion
+must retain unresolved ownership and use the existing retry cancellation and
+termination boundaries; none of them alone proves a launch stopped or permits
+a replacement start.
 
 ## Persistence
 

@@ -32,9 +32,11 @@ func (h *MessageHandlers) prepareInitialTaskBriefCandidate(
 	req wsAddMessageRequest,
 	sessionResp *dto.GetTaskSessionResponse,
 	task *models.Task,
-	configMode, startCreatedSession, titleOwner, hasMessageContent bool,
+	configMode, startCreatedSession, titleOwner, hasMessageContent, initialBriefEligible bool,
 ) *admission.InitialTaskBriefCandidate {
-	if !eligibleForInitialTaskBrief(task, sessionResp, configMode, startCreatedSession, hasMessageContent) {
+	if !initialBriefEligible || !eligibleForInitialTaskBrief(
+		task, sessionResp, configMode, startCreatedSession, hasMessageContent,
+	) {
 		return nil
 	}
 	// Compose the raw brief and instruction before the server-owned preparer sees

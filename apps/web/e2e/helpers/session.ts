@@ -1,7 +1,9 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import type { SessionPage } from "../pages/session-page";
+import type { AppState } from "../../lib/state/store";
+import type { StoreApi } from "zustand";
 import { pollUntil } from "./poll-until";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -75,6 +77,29 @@ export async function waitForWorkspacePath(
   );
 }
 
+export async function waitForWorkspaceFile(
+  apiClient: ApiClient,
+  sessionId: string,
+  filePath: string,
+  timeout = 30_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        try {
+          const response = await apiClient.wsRequest<{
+            root?: { children?: Array<{ path?: string }> } | null;
+          }>("workspace.tree.get", { session_id: sessionId, path: "", depth: 1 });
+          return response.root?.children?.some((child) => child.path === filePath) ?? false;
+        } catch {
+          return false;
+        }
+      },
+      { timeout, message: `Waiting for ${filePath} in the task workspace` },
+    )
+    .toBe(true);
+}
+
 export async function waitForAgentMessage(
   apiClient: ApiClient,
   sessionId: string,
@@ -92,6 +117,24 @@ export async function waitForAgentMessage(
     timeout,
     `Waiting for agent message containing ${JSON.stringify(content)}`,
   );
+}
+
+/** Cancellation is persisted before runtime teardown makes the workspace restorable. */
+export async function waitForRestorableSessionWorkspace(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      () => apiClient.wsRequest("task.session.status", { task_id: taskId, session_id: sessionId }),
+      { timeout: 30_000, message: "Waiting for stopped runtime teardown before workspace restore" },
+    )
+    .toMatchObject({
+      is_agent_running: false,
+      needs_workspace_restore: true,
+      auto_resume_allowed: true,
+    });
 }
 
 export async function waitForSessionState(
@@ -190,8 +233,35 @@ export async function seedIdleSession(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  await waitForAgentMessage(apiClient, task.session_id, "simple mock response", 30_000);
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the initial fixture turn to finish",
+    30_000,
+  );
   const session = await openTaskSession(testPage, task.id);
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.composerReady();
   return session;
+}
+
+export async function waitForSessionGitHydration(page: Page, sessionId: string) {
+  // Initial commit discovery can activate Changes. Select Files after both Git reads settle.
+  await expect
+    .poll(() =>
+      page.evaluate((sessionId) => {
+        const state = (
+          window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
+        ).__KANDEV_E2E_STORE__.getState();
+        const env = state.environmentIdBySessionId[sessionId] ?? sessionId;
+        return (
+          state.gitStatus.byEnvironmentRepo[env] !== undefined &&
+          state.sessionCommits.byEnvironmentId[env] !== undefined &&
+          state.sessionCommits.loading[env] !== true
+        );
+      }, sessionId),
+    )
+    .toBe(true);
 }

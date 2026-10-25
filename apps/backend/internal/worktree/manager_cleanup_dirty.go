@@ -2,11 +2,14 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+var ErrArchivedWorktreeIdentityChanged = errors.New("archived worktree identity changed")
 
 // DirtyWorktree describes local changes that would be lost by task deletion.
 // Paths are derived from the persisted worktree record and Git status; callers
@@ -23,6 +26,9 @@ type DirtyWorktree struct {
 // active regardless of this option.
 type WorktreeCleanupOptions struct {
 	DiscardWorktreeChanges bool
+	ExpectedTaskID         string
+	ExpectedWorktreePath   string
+	ExpectedRepositoryPath string
 }
 
 // InspectDirtyWorktrees audits the recorded paths and reports local Git
@@ -37,7 +43,7 @@ func (m *Manager) InspectDirtyWorktrees(
 		if wt == nil || strings.TrimSpace(wt.ID) == "" {
 			continue
 		}
-		m.enrichCleanupWorktreeFromCache(ctx, wt)
+		wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 		if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
 			return nil, fmt.Errorf("worktree %s is missing repository or worktree path metadata", wt.ID)
 		}
@@ -48,18 +54,18 @@ func (m *Manager) InspectDirtyWorktrees(
 		seen[key] = struct{}{}
 
 		if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
-			return nil, fmt.Errorf("validate worktree cleanup path %s: %w", wt.ID, err)
+			return nil, fmt.Errorf("validate worktree cleanup path %s: %w", wt.ID, classifyCleanupInspectionError(CleanupInspectionStageOwnership, err))
 		}
 		pathPresent, err := cleanupPathPresent(wt.Path)
 		if err != nil {
-			return nil, fmt.Errorf("inspect worktree cleanup path %s: %w", wt.ID, err)
+			return nil, fmt.Errorf("inspect worktree cleanup path %s: %w", wt.ID, classifyCleanupInspectionError(CleanupInspectionStageOwnership, err))
 		}
 		if !pathPresent {
 			continue
 		}
 		pathHandle, err := m.openCleanupPathHandle(wt.Path, true)
 		if err != nil {
-			return nil, fmt.Errorf("pin worktree cleanup path %s: %w", wt.ID, err)
+			return nil, fmt.Errorf("pin worktree cleanup path %s: %w", wt.ID, classifyCleanupInspectionError(CleanupInspectionStageOwnership, err))
 		}
 		status, statusErr := m.runBoundedGitInspect(
 			ctx, wt.Path, "status", "--porcelain=v1", "--untracked-files=normal", "-z",
@@ -70,7 +76,7 @@ func (m *Manager) InspectDirtyWorktrees(
 		if statusErr != nil {
 			stillPresent, presenceErr := cleanupPathPresent(wt.Path)
 			if presenceErr != nil {
-				return nil, fmt.Errorf("recheck worktree cleanup path %s after Git inspection failed: %w", wt.ID, presenceErr)
+				return nil, fmt.Errorf("recheck worktree cleanup path %s after Git inspection failed: %w", wt.ID, classifyCleanupInspectionError(CleanupInspectionStageOwnership, presenceErr))
 			}
 			if !stillPresent {
 				// A concurrent cleanup can remove the checkout after the initial
@@ -78,7 +84,8 @@ func (m *Manager) InspectDirtyWorktrees(
 				// changes left to protect, so let task cleanup proceed.
 				continue
 			}
-			return nil, fmt.Errorf("inspect worktree changes for %s: %w", wt.ID, statusErr)
+			return nil, fmt.Errorf("inspect worktree changes for %s: %w", wt.ID,
+				classifyWorktreeCleanupInspectionError(CleanupInspectionStageStatus, statusErr, wt))
 		}
 		files := parseDirtyWorktreeFiles(status)
 		if len(files) == 0 {

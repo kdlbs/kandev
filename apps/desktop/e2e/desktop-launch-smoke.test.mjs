@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,13 +12,23 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
+  parseProcessStatuses,
+  stopProcess,
+  waitForHttp,
+  writeJsonAtomically,
+  createAtomicRecordWriter,
+  readInstances,
   waitForFile,
+  writeInstanceRecord,
+  writeFakeRuntime,
+  writeReleaseShapedRuntime,
 } from "./desktop-launch-smoke.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "../..");
 const backendRsPath = resolve(__dirname, "../src-tauri/src/backend.rs");
+const smokeScriptPath = resolve(__dirname, "desktop-launch-smoke.mjs");
 const mainRsPath = resolve(__dirname, "../src-tauri/src/main.rs");
 const shellRsPath = resolve(__dirname, "../src-tauri/src/shell.rs");
 const startupHtmlPath = resolve(__dirname, "../index.html");
@@ -49,6 +60,36 @@ const STARTUP_COPY_KEYS = [
   "startupFailureTitle",
 ];
 
+test("process-status parsing preserves PID ownership and zombie state", () => {
+  assert.deepEqual(parseProcessStatuses(" 123 45 Sl+\n 124 45 Z\n"), [
+    { pid: 123, parentPid: 45, state: "Sl+" },
+    { pid: 124, parentPid: 45, state: "Z" },
+  ]);
+  assert.deepEqual(parseProcessStatuses("\n"), []);
+  assert.throws(() => parseProcessStatuses("not a process row"), /invalid process status row/);
+});
+
+test("empty status-1 ps failures mean there are no child processes", () => {
+  const noChildren = Object.assign(new Error("ps found no child processes"), {
+    status: 1,
+    stdout: " \n",
+  });
+  let statuses;
+  assert.doesNotThrow(() => {
+    statuses = parseProcessStatuses(noChildren);
+  });
+  assert.deepEqual(statuses, []);
+
+  const partialOutputFailure = Object.assign(new Error("ps failed after partial output"), {
+    status: 1,
+    stdout: "not a process row",
+  });
+  assert.throws(() => parseProcessStatuses(partialOutputFailure), partialOutputFailure);
+
+  const otherFailure = Object.assign(new Error("ps failed"), { status: 2, stdout: "" });
+  assert.throws(() => parseProcessStatuses(otherFailure), otherFailure);
+});
+
 async function withTempDir(run) {
   const dir = await mkdtemp(join(tmpdir(), "wait-for-file-"));
   try {
@@ -58,11 +99,63 @@ async function withTempDir(run) {
   }
 }
 
+test("atomic instance-record writes serialize concurrent updates without partial JSON", async () => {
+  await withTempDir(async (dir) => {
+    const filePath = join(dir, "instance.json");
+    const saveRecord = createAtomicRecordWriter(filePath);
+    const record = { revision: 0, payload: "x".repeat(32_000) };
+    await saveRecord(record);
+
+    const writes = [];
+    for (let revision = 1; revision <= 20; revision += 1) {
+      record.revision = revision;
+      writes.push(saveRecord(record));
+    }
+    await Promise.all(writes);
+
+    assert.deepEqual(JSON.parse(await readFile(filePath, "utf8")), {
+      revision: 20,
+      payload: "x".repeat(32_000),
+    });
+    assert.deepEqual(await readdir(dir), ["instance.json"]);
+  });
+});
+
 test("waitForFile resolves once the target file appears", async () => {
   await withTempDir(async (dir) => {
     const target = join(dir, "marker");
     const write = new Promise((r) => setTimeout(r, 50)).then(() => writeFile(target, "1"));
     await Promise.all([waitForFile(target, 2_000), write]);
+  });
+});
+
+test("instance records remain valid during concurrent updates", async () => {
+  await withTempDir(async (dir) => {
+    const target = join(dir, "instance.json");
+    await writeInstanceRecord(dir, { pid: 1, payload: "a".repeat(100_000) });
+    const writes = Array.from({ length: 30 }, (_, i) =>
+      writeInstanceRecord(dir, { pid: i + 2, payload: "b".repeat(100_000) }),
+    );
+    const reads = Array.from({ length: 100 }, async () => {
+      const record = JSON.parse(await readFile(target, "utf8"));
+      assert.equal(record.payload.length, 100_000);
+    });
+    await Promise.all([...writes, ...reads]);
+  });
+});
+
+test("readInstances skips a record while the fake runtime is writing it", async () => {
+  await withTempDir(async (dir) => {
+    const instancesDir = join(dir, "instances");
+    const instanceDir = join(instancesDir, "123");
+    const instancePath = join(instanceDir, "instance.json");
+    await mkdir(instanceDir, { recursive: true });
+    await writeFile(instancePath, '{"pid":123,"home":');
+
+    assert.deepEqual(await readInstances(instancesDir), []);
+
+    await writeFile(instancePath, JSON.stringify({ pid: 123, home: "/tmp/kandev" }));
+    assert.deepEqual(await readInstances(instancesDir), [{ pid: 123, home: "/tmp/kandev" }]);
   });
 });
 
@@ -111,6 +204,38 @@ test("waitForFile calls tick on every poll and surfaces a tick failure immediate
   });
 });
 
+test("atomic JSON writes never expose a partial instance record", async () => {
+  await withTempDir(async (dir) => {
+    const target = join(dir, "instance.json");
+    await writeFile(target, JSON.stringify({ revision: 0, payload: "x".repeat(100_000) }));
+
+    let writing = true;
+    let parseErrors = 0;
+    const writer = (async () => {
+      for (let revision = 1; revision <= 300; revision += 1) {
+        await writeJsonAtomically(
+          target,
+          JSON.stringify({ revision, payload: "x".repeat(100_000) }),
+        );
+      }
+      writing = false;
+    })();
+    const readers = Array.from({ length: 4 }, async () => {
+      while (writing) {
+        try {
+          JSON.parse(await readFile(target, "utf8"));
+        } catch (error) {
+          if (error instanceof SyntaxError) parseErrors += 1;
+        }
+      }
+    });
+
+    await Promise.all([writer, ...readers]);
+    assert.equal(parseErrors, 0);
+    assert.equal(JSON.parse(await readFile(target, "utf8")).revision, 300);
+  });
+});
+
 test("waitForHttp backs off after an unsuccessful HTTP response", async () => {
   const originalFetch = globalThis.fetch;
   const pauses = [];
@@ -126,6 +251,74 @@ test("waitForHttp backs off after an unsuccessful HTTP response", async () => {
 
   assert.equal(attempts, 2);
   assert.deepEqual(pauses, [100]);
+});
+
+test("desktop smoke runtime uses standard resources without bundled remote helpers", async () => {
+  await withTempDir(async (dir) => {
+    const runtimeDir = resolve(dir, "runtime");
+    const stateDir = resolve(dir, "state");
+    await mkdir(resolve(runtimeDir, "bin"), { recursive: true });
+    await mkdir(stateDir, { recursive: true });
+    await writeFakeRuntime(runtimeDir, stateDir, "happy");
+
+    assert.deepEqual(
+      (await readdir(resolve(runtimeDir, "bin"))).sort(),
+      process.platform === "win32" ? ["agentctl.cmd", "kandev.cmd"] : ["agentctl", "kandev"],
+    );
+    const manifest = JSON.parse(await readFile(resolve(runtimeDir, "remote-helpers.json"), "utf8"));
+    assert.equal(manifest.variant, "standard");
+    assert.equal(manifest.schema_version, 1);
+  });
+});
+
+test("release-shaped Desktop runtime seeds a verified helper outside the standard bundle", async () => {
+  await withTempDir(async (dir) => {
+    const sourceBinDir = resolve(dir, "source-bin");
+    const runtimeDir = resolve(dir, "runtime");
+    const homeDir = resolve(dir, "home");
+    await mkdir(sourceBinDir, { recursive: true });
+    for (const name of [
+      "kandev",
+      "agentctl",
+      "agentctl-linux-amd64",
+      "agentctl-linux-arm64",
+      "agentctl-darwin-amd64",
+      "agentctl-darwin-arm64",
+    ]) {
+      const path = resolve(sourceBinDir, name);
+      await writeFile(path, `#!/bin/sh\n# ${name}\n`);
+      await chmod(path, 0o755);
+    }
+
+    const runtime = await writeReleaseShapedRuntime({
+      sourceBinDir,
+      runtimeDir,
+      homeDir,
+      version: "1.2.3",
+      commit: "a".repeat(40),
+    });
+
+    assert.deepEqual((await readdir(resolve(runtimeDir, "bin"))).sort(), ["agentctl", "kandev"]);
+    assert.equal(runtime.manifest.variant, "standard");
+    assert.equal(runtime.manifest.version, "1.2.3");
+    assert.equal(runtime.manifest.commit, "a".repeat(40));
+    const helper = runtime.manifest.helpers.find(({ platform }) => platform === "linux/amd64");
+    assert.ok(helper);
+    const cachedHelper = await readFile(runtime.cachePath);
+    assert.equal(createHash("sha256").update(cachedHelper).digest("hex"), helper.sha256);
+    assert.equal(cachedHelper.length, helper.size_bytes);
+    assert.ok((await stat(runtime.cachePath)).mode & 0o111);
+  });
+});
+
+test("release-shaped Desktop smoke runs the real launcher with a preseeded helper cache", async () => {
+  const source = await readFile(smokeScriptPath, "utf8");
+  assert.match(source, /spawn\(launcherBinary, \["--headless", "--port", String\(launcherPort\)\]/);
+  assert.match(source, /KANDEV_BUNDLE_DIR: runtimeDir/);
+  assert.match(source, /KANDEV_AGENTCTL_LINUX_AMD64_BINARY: ""/);
+  assert.match(source, /KANDEV_DESKTOP_RUNTIME_DIR: runtimeDir/);
+  assert.match(source, /TestAgentctlResolverPackagedDesktopBundleUsesPreseededCache/);
+  assert.match(source, /await runReleaseShapedSmoke\(appBinary\)/);
 });
 
 test("health-requested timeout stays above the Rust backend's own HEALTH_TIMEOUT", async () => {
@@ -183,8 +376,15 @@ test("main window registers download handling before its configured WebView is c
   const mainWindow = JSON.parse(configSource).app.windows.find(({ label }) => label === "main");
 
   assert.ok(mainWindow, "the configured main window must exist");
-  assert.equal(mainWindow.create, false, "Tauri must leave creation to the configured callback builder");
-  assert.match(mainSource, /WebviewWindowBuilder::from_config[\s\S]*?\.on_download\([\s\S]*?\)\s*\.build\(\)/);
+  assert.equal(
+    mainWindow.create,
+    false,
+    "Tauri must leave creation to the configured callback builder",
+  );
+  assert.match(
+    mainSource,
+    /WebviewWindowBuilder::from_config[\s\S]*?\.on_download\([\s\S]*?\)\s*\.build\(\)/,
+  );
   assert.match(mainSource, /downloads::handle_download_event/);
 });
 
@@ -307,7 +507,7 @@ test(
 
     let browser;
     try {
-      await waitForHttp("http://127.0.0.1:4178", 15_000, () => {
+      await waitForPreviewHttp("http://127.0.0.1:4178", 15_000, () => {
         if (preview.exitCode !== null) throw new Error(serverOutput);
       });
       browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
@@ -338,12 +538,15 @@ test(
         ["zh-Hant", "zh-tw"],
       ]) {
         const localeContext = await browser.newContext();
-        await localeContext.addInitScript((languages) => {
-          Object.defineProperty(navigator, "languages", {
-            configurable: true,
-            value: languages,
-          });
-        }, [language]);
+        await localeContext.addInitScript(
+          (languages) => {
+            Object.defineProperty(navigator, "languages", {
+              configurable: true,
+              value: languages,
+            });
+          },
+          [language],
+        );
         const localePage = await localeContext.newPage();
         await localePage.goto("http://127.0.0.1:4178", { waitUntil: "networkidle" });
         assert.equal(await localePage.locator("html").getAttribute("lang"), expectedLocale);
@@ -374,7 +577,9 @@ test(
         () => typeof window.__KANDEV_DESKTOP_SET_STATUS === "function",
       );
       assert.equal(
-        await lightPage.locator("[data-startup-drag-region]").getAttribute("data-tauri-drag-region"),
+        await lightPage
+          .locator("[data-startup-drag-region]")
+          .getAttribute("data-tauri-drag-region"),
         "",
       );
 
@@ -488,7 +693,7 @@ test(
   },
 );
 
-async function waitForHttp(url, timeoutMs, tick, pause = delay) {
+async function waitForPreviewHttp(url, timeoutMs, tick, pause = delay) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     tick?.();
@@ -504,3 +709,105 @@ async function waitForHttp(url, timeoutMs, tick, pause = delay) {
   }
   throw new Error(`Timed out waiting for ${url}`);
 }
+
+for (const parentAlreadyExited of [false, true]) {
+  test(
+    `smoke shutdown waits for a backend writer (parent exited: ${parentAlreadyExited})`,
+    {
+      skip: process.platform === "win32",
+    },
+    async () => {
+      await withTempDir(async (dir) => {
+        const marker = join(dir, "terminated");
+        const worker = `
+        const fs = require("node:fs");
+        process.on("SIGTERM", () => setTimeout(() => {
+          fs.writeFileSync(process.argv[1], "settled");
+          process.exit(0);
+        }, 200));
+        process.send("ready");
+        setInterval(() => {}, 1000);
+      `;
+        const launcher = spawn(
+          process.execPath,
+          [
+            "-e",
+            `
+        const { spawn } = require("node:child_process");
+        const child = spawn(process.execPath, ["-e", process.argv[1], process.argv[2]], {
+          stdio: ["ignore", "ignore", "ignore", "ipc"],
+        });
+        process.on("SIGTERM", () => process.exit(0));
+        child.on("message", () => {
+          process.stdout.write("ready\\n");
+          if (process.argv[3] === "true") process.exit(0);
+        });
+      `,
+            worker,
+            marker,
+            String(parentAlreadyExited),
+          ],
+          {
+            detached: true,
+            stdio: ["ignore", "pipe", "inherit"],
+          },
+        );
+        const exited = new Promise((resolveExit) => launcher.once("exit", resolveExit));
+        try {
+          await new Promise((resolveReady, reject) => {
+            launcher.once("error", reject);
+            launcher.stdout.once("data", resolveReady);
+          });
+          if (parentAlreadyExited) await exited;
+          await stopProcess(launcher);
+          assert.equal(await readFile(marker, "utf8"), "settled");
+        } finally {
+          try {
+            process.kill(-launcher.pid, "SIGKILL");
+          } catch (error) {
+            if (error.code !== "ESRCH") throw error;
+          }
+          await exited;
+        }
+      });
+    },
+  );
+}
+
+test(
+  "smoke shutdown escalates an owned process that ignores SIGTERM",
+  {
+    skip: process.platform === "win32",
+  },
+  async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        `
+    process.on("SIGTERM", () => {});
+    process.stdout.write("ready\\n");
+    setInterval(() => {}, 1000);
+  `,
+      ],
+      { detached: true, stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
+    try {
+      await new Promise((resolveReady, reject) => {
+        child.once("error", reject);
+        child.stdout.once("data", resolveReady);
+      });
+      await stopProcess(child);
+      await exited;
+      assert.equal(child.signalCode, "SIGKILL");
+    } finally {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+      await exited;
+    }
+  },
+);

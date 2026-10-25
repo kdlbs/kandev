@@ -111,6 +111,7 @@ export const ContextChip = memo(function ContextChip({
             onRemove();
           }}
           aria-label={t("task:removeLabeled", { label })}
+          data-testid="context-chip-remove"
           className={`ml-0.5 ${
             isFinePointer
               ? "min-h-0 min-w-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"

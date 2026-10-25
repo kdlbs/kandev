@@ -40,6 +40,7 @@ func (s *Service) publishNewReviewMREvent(ctx context.Context, watch *ReviewWatc
 		return
 	}
 	ev := &NewReviewMREvent{
+		CreatedByUserID:   watch.CreatedByUserID,
 		ReviewWatchID:     watch.ID,
 		WatchGeneration:   watch.Generation,
 		WorkspaceID:       watch.WorkspaceID,
@@ -67,6 +68,7 @@ func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, i
 		return
 	}
 	ev := &NewIssueEvent{
+		CreatedByUserID:   watch.CreatedByUserID,
 		IssueWatchID:      watch.ID,
 		WatchGeneration:   watch.Generation,
 		WorkspaceID:       watch.WorkspaceID,

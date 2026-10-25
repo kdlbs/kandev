@@ -3,6 +3,7 @@ package shared
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 )
 
@@ -92,5 +93,8 @@ type McpServerConfig struct {
 	// Env holds environment variables for stdio transport
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
-	Headers map[string]string `json:"headers,omitempty"`
+	Headers            map[string]string       `json:"headers,omitempty"`
+	DefinitionID       string                  `json:"definition_id,omitempty"`
+	DefinitionRevision int64                   `json:"definition_revision,omitempty"`
+	Origins            []types.McpServerOrigin `json:"origins,omitempty"`
 }

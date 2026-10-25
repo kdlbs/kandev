@@ -201,9 +201,9 @@ export function useBulkSessionRemoval({
     setPending(true);
     let latest: { sessions: TaskSession[]; isLoading: boolean; hasError?: boolean };
     try {
-      latest = getLatestSnapshot ? await getLatestSnapshot() : { sessions, isLoading };
+      latest = getLatestSnapshot ? await getLatestSnapshot() : { sessions, isLoading, hasError };
     } catch {
-      latest = { sessions: [], isLoading: true };
+      latest = { sessions: [], isLoading: false, hasError: true };
     }
     const selectedSessionMissing = didSelectedSessionDisappear(snapshot, latest);
     const refreshed = refreshInvalidSnapshot(snapshot, latest);
@@ -226,6 +226,7 @@ export function useBulkSessionRemoval({
     return { ...result, stale: false } satisfies BulkSessionRemovalConfirmationResult;
   }, [
     getLatestSnapshot,
+    hasError,
     isLoading,
     onComplete,
     onInvalidSnapshot,

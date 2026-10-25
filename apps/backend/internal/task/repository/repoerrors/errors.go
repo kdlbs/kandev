@@ -2,6 +2,10 @@ package repoerrors
 
 import "errors"
 
+// ErrWorkspaceCloneConfiguration reports a source setting that cannot be
+// copied into an independent workspace.
+var ErrWorkspaceCloneConfiguration = errors.New("workspace configuration cannot be cloned")
+
 // ErrWorkspaceNameMismatch reports that a confirmed workspace delete did not
 // match the workspace row's current name.
 var ErrWorkspaceNameMismatch = errors.New("workspace name mismatch")
@@ -14,6 +18,55 @@ var ErrWorkflowNotFound = errors.New("workflow not found")
 
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
+
+// ErrTurnChangeSetNotFound reports that no historical turn-change summary
+// matched the task, session, and server-owned change-set identity.
+var ErrTurnChangeSetNotFound = errors.New("turn change set not found")
+
+// ErrTurnChangeSetIdentityConflict reports a duplicate immutable turn identity.
+var ErrTurnChangeSetIdentityConflict = errors.New("turn change set identity conflict")
+
+// ErrTurnChangeRelationship reports a change-set identity whose task, session,
+// turn, or environment ownership no longer matches.
+var ErrTurnChangeRelationship = errors.New("turn change ownership relationship changed")
+
+// ErrTurnChangeContentNotFound reports unavailable or expired retained content.
+var ErrTurnChangeContentNotFound = errors.New("turn change content not found")
+
+// ErrTaskVersionConflict reports an exact task update based on a stale
+// workspace or resource version.
+var ErrTaskVersionConflict = errors.New("task resource version changed")
+
+// ErrTaskManagementClaimConflict reports a claim-version mismatch or a write
+// made with an owner identity/generation that is no longer current.
+var ErrTaskManagementClaimConflict = errors.New("task management claim changed")
+
+// ErrTaskManagementClaimOwned reports that a different plugin instance owns
+// the active task management claim.
+var ErrTaskManagementClaimOwned = errors.New("task management claim already owned")
+
+// ErrTaskCompletionGateBlocked reports an attempted completion with at least
+// one missing, stale, or unverified task-owned criterion.
+var ErrTaskCompletionGateBlocked = errors.New("task completion requirements are not satisfied")
+
+// ErrTaskCompletionCriteriaConflict reports a stale criteria-set revision.
+var ErrTaskCompletionCriteriaConflict = errors.New("task completion criteria changed")
+
+// ErrTaskCompletionEvidenceChanged reports evidence that no longer identifies
+// the criterion's required subject revision.
+var ErrTaskCompletionEvidenceChanged = errors.New("task completion evidence changed")
+
+// ErrTaskCompletionHumanConfirmationRequired reports that removing or changing
+// an unmet criterion needs an explicit native human confirmation.
+var ErrTaskCompletionHumanConfirmationRequired = errors.New("human confirmation required to weaken unmet completion criteria")
+
+// ErrTaskOperationConflict reports reuse of an exact operation identity with
+// a different task or payload.
+var ErrTaskOperationConflict = errors.New("task operation identity conflict")
+
+// ErrSilentRestoreAttemptConflict reports reuse of a restore-attempt ID for a
+// different durable source identity.
+var ErrSilentRestoreAttemptConflict = errors.New("silent restore attempt identity conflict")
 
 // ErrNoPrimarySession reports that a task exists but has no primary session.
 // Callers can repair that state without hiding other repository failures.
@@ -89,6 +142,11 @@ var ErrExternalIDConflict = errors.New("external_id already claimed by another t
 // inventory was captured under the same barrier.
 var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 
+// ErrArchiveCleanupInProgress reports that an archive cleanup job appeared
+// after unarchive's preflight cancellation scan. The caller can retry once the
+// archived task's cleanup has settled.
+var ErrArchiveCleanupInProgress = errors.New("archive cleanup in progress")
+
 // ErrWorkflowResolutionConflict reports that a caller's expected current
 // workflow (passed to guard a write against a concurrent reassignment) no
 // longer matches the task's persisted workflow_id, checked atomically inside
@@ -97,6 +155,10 @@ var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 // did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+
+// ErrTaskTransferConflict is the stable, non-leaking result for a stale,
+// ambiguous, incompatible, or idempotency-mismatched transfer request.
+var ErrTaskTransferConflict = errors.New("task transfer conflict")
 
 // ErrWorkflowChangeConflict reports that an explicit change-workflow request
 // no longer matches the task source or task version it was opened against.
@@ -141,3 +203,9 @@ var ErrStepChanged = errors.New("step_changed")
 // duplicate id list, or an id that names a task outside the named step/band.
 // Unlike ErrStepChanged this implies nothing about the persisted order.
 var ErrInvalidReorder = errors.New("invalid_reorder")
+
+// ErrRepositoryBranchPolicyNameConflict reports a duplicate policy name in its repository.
+var ErrRepositoryBranchPolicyNameConflict = errors.New("repository branch policy name already used")
+
+// ErrTaskHierarchyConflict means a child arrived before final parent deletion.
+var ErrTaskHierarchyConflict = errors.New("task has children at final deletion; retry the task deletion")

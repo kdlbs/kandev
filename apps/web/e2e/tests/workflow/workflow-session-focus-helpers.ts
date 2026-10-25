@@ -30,7 +30,10 @@ export async function createWorkflowSessionFocusScenario(
   seedData: SeedData,
   target: "new" | "initial" | "profile",
 ): Promise<WorkflowSessionFocusScenario> {
-  const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+  const { profileA, profileB } = await createWorkflowAgentProfiles(
+    apiClient,
+    seedData.agentProfileId,
+  );
   const workflow = await apiClient.createWorkflow(
     seedData.workspaceId,
     `Workflow session focus ${target}`,
@@ -62,7 +65,12 @@ export async function createWorkflowSessionFocusScenario(
       repository_ids: [seedData.repositoryId],
     },
   );
-  const sourceSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);
+  const sourceSessionId = await waitForWorkflowProfileSession(
+    apiClient,
+    task.id,
+    profileA.id,
+    60_000,
+  );
 
   const secondary = await apiClient.launchSession({
     task_id: task.id,
@@ -77,9 +85,9 @@ export async function createWorkflowSessionFocusScenario(
         const { sessions } = await apiClient.listTaskSessions(task.id);
         return sessions.find((session) => session.id === secondary.session_id)?.state;
       },
-      { timeout: 30_000, message: "secondary focus session never became visible" },
+      { timeout: 30_000, message: "secondary focus session never became idle" },
     )
-    .not.toBe("CREATED");
+    .toBe("WAITING_FOR_INPUT");
   await apiClient.setPrimarySession(sourceSessionId);
 
   return {

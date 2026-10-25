@@ -14,6 +14,7 @@ import type {
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -23,7 +24,10 @@ import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-v
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
-import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type {
+  TasksListGroupPreference,
+  TasksListSortPreference,
+} from "@/lib/tasks/tasks-list-options";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 import type { TaskPriority } from "@/lib/types/http";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
@@ -35,6 +39,7 @@ import type {
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+import type { AgentUpdateJob } from "@/lib/api";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -92,6 +97,8 @@ export type AgentProfileOption = {
   /** Persisted profile revision (RFC3339 updated_at), used to prefer newer
    * WS-delivered options over a stale in-flight response. */
   updatedAt?: string;
+  /** Creation instant for the selector baseline, independent of Settings order. */
+  createdAt?: string;
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep their labels and the profile stays editable in settings.
@@ -292,6 +299,7 @@ export function toAgentProfileOption(
   >,
   profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
     updatedAt?: string;
+    createdAt?: string;
     kind?: AgentProfileKind;
     cliPassthrough?: boolean;
     model?: string;
@@ -315,15 +323,24 @@ export function toAgentProfileOption(
     require_exact_model: profile.requireExactModel ?? undefined,
     workspace_id: profile.workspaceId,
     updatedAt: profile.updatedAt,
+    createdAt: profile.createdAt,
     enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
   };
 }
 
+export type ProfileOrderSync = {
+  revision: number;
+  order: string[] | null;
+  inFlight: string[] | null;
+  queued: string[] | null;
+};
+
 export type AgentProfilesState = {
   items: AgentProfileOption[];
   version: number;
+  orderByAgent: Record<string, ProfileOrderSync>;
 };
 
 export type InstallJobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -346,27 +363,6 @@ export type InstallJob = {
  */
 export type InstallJobsState = {
   byAgent: Record<string, InstallJob>;
-};
-
-export type AgentUpdateJobStatus =
-  | "queued"
-  | "resolving"
-  | "updating"
-  | "refreshing"
-  | "succeeded"
-  | "failed";
-
-export type AgentUpdateJob = {
-  job_id: string;
-  agent_name: string;
-  status: AgentUpdateJobStatus;
-  current_version?: string;
-  target_version?: string;
-  output?: string;
-  error?: string;
-  refresh_error?: string;
-  started_at: string;
-  finished_at?: string;
 };
 
 export type AgentUpdateJobsState = {
@@ -431,8 +427,8 @@ export type UserSettingsState = {
   startupPage: StartupPage;
   workflowId: string | null;
   repositoryIds: string[];
-  tasksListSort: TasksListSort;
-  tasksListGroup: TasksListGroup;
+  tasksListSort: TasksListSortPreference;
+  tasksListGroup: TasksListGroupPreference;
   tasksListShowDetails: boolean;
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
@@ -445,6 +441,7 @@ export type UserSettingsState = {
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
   autoFocusNewTasks: boolean;
+  agentTabCloseBehavior: "delete_session" | "hide_panel";
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
@@ -452,6 +449,7 @@ export type UserSettingsState = {
   showTranscriptAutoScrollControl: boolean;
   showTodoListPanel: boolean;
   showTodoListPanelOnlyWhenNotEmpty: boolean;
+  showTurnChangedFiles: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];
@@ -485,8 +483,11 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   lastSeenDisplay: LastSeenDisplay;
+  messageTimeDisplay: MessageTimeDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  sidebarFastActionsEnabled: boolean;
+  sidebarNewTaskStyle: "simple" | "compact";
   sidebarHoverEnabled: boolean;
   sidebarHoverDelayMs: number;
   resolveSessionHostnames: boolean;
@@ -514,6 +515,11 @@ export type TaskCreateLastUsedState = {
 };
 
 export type SettingsSliceState = {
+  agentRuntimeUpdates: {
+    byAgent: Record<string, import("@/lib/api/domains/agent-update-api").AgentUpdateStatus>;
+    checkedAt: number;
+    loading: boolean;
+  };
   executors: ExecutorsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
@@ -534,6 +540,11 @@ export type SettingsSliceState = {
 };
 
 export type SettingsSliceActions = {
+  setAgentRuntimeUpdateStatuses: (
+    statuses: import("@/lib/api/domains/agent-update-api").AgentUpdateStatus[],
+    checkedAt: number,
+  ) => void;
+  setAgentRuntimeUpdateLoading: (loading: boolean) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
@@ -543,6 +554,17 @@ export type SettingsSliceActions = {
     tools?: AvailableAgentsState["tools"],
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
+  applyAgentListSnapshot: (
+    agents: SettingsAgentsState["items"],
+    expectedProfileVersion: number,
+  ) => boolean;
+  acceptAgentProfileOrder: (agentId: string, profileIds: string[], revision: number) => boolean;
+  setAgentProfileOrder: (agentId: string, profileIds: string[]) => void;
+  setAgentProfileOrderIntent: (
+    agentId: string,
+    inFlight: string[] | null,
+    queued: string[] | null,
+  ) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
   setInstallJobs: (jobs: InstallJob[]) => void;
   upsertInstallJob: (job: InstallJob) => void;

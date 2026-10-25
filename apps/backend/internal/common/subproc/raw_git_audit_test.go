@@ -6,8 +6,8 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,13 +20,13 @@ import (
 // This catches raw command construction, executable lookup, and direct exec
 // additions that a search for the legacy subproc.Git accessor would miss.
 func TestProductionGitCommandsUseTheAdmissionSeam(t *testing.T) {
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	backendRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../../.."))
+	backendRoot := filepath.Clean(filepath.Join(packageDir, "../../.."))
 	var violations []string
-	err := filepath.WalkDir(backendRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(backendRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

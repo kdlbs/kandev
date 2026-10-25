@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/githubauth"
-	"github.com/kandev/kandev/pkg/agent"
 )
 
 func envValue(env []string, key string) string {
@@ -325,7 +324,7 @@ func TestManagerConfigureReplacesOwnedHostHelperAndPreservesIndexedEnvironment(t
 
 	configure := func(env map[string]string) {
 		t.Helper()
-		if err := mgr.Configure("echo", nil, false, env, "", "", nil, false); err != nil {
+		if err := mgr.Configure("echo", nil, false, env, "", nil, false); err != nil {
 			t.Fatalf("Configure() error = %v", err)
 		}
 	}
@@ -382,7 +381,7 @@ func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.
 		"GIT_CONFIG_KEY_2":   "credential.https://github.com.helper",
 		"GIT_CONFIG_VALUE_2": newHelper,
 	}
-	if err := mgr.ConfigureWithEnvironment("echo", nil, false, complete, "", "", nil, false); err != nil {
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, complete, "", nil, false); err != nil {
 		t.Fatalf("ConfigureWithEnvironment() error = %v", err)
 	}
 	env := environmentMap(mgr.cfg.AgentEnv)
@@ -392,7 +391,7 @@ func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.
 		t.Fatalf("complete configured environment = %#v, want one complete replacement block", env)
 	}
 
-	if err := mgr.ConfigureWithEnvironment("echo", nil, false, nil, "", "", nil, false); err != nil {
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, nil, "", nil, false); err != nil {
 		t.Fatalf("ConfigureWithEnvironment() removal error = %v", err)
 	}
 	env = environmentMap(mgr.cfg.AgentEnv)
@@ -408,10 +407,9 @@ func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.
 
 func TestManagerConfigureLeavesConfigurationUnchangedWhenEnvironmentIsInvalid(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
-		WorkDir:        t.TempDir(),
-		AgentCommand:   "old-command",
-		AgentArgs:      []string{"old-command", "--old"},
-		ApprovalPolicy: "old-policy",
+		WorkDir:      t.TempDir(),
+		AgentCommand: "old-command",
+		AgentArgs:    []string{"old-command", "--old"},
 		AgentEnv: []string{
 			"KEEP_ME=yes",
 			"GIT_CONFIG_COUNT=1",
@@ -424,14 +422,13 @@ func TestManagerConfigureLeavesConfigurationUnchangedWhenEnvironmentIsInvalid(t 
 	err := mgr.ConfigureWithEnvironment(
 		"new-command", []string{"new-command"}, true,
 		map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "missing-value"},
-		"new-policy", "", nil, false,
+		"", nil, false,
 	)
 	if err == nil {
 		t.Fatal("ConfigureWithEnvironment() succeeded with malformed indexed Git block")
 	}
-	if mgr.cfg.AgentCommand != "old-command" || strings.Join(mgr.cfg.AgentArgs, " ") != "old-command --old" ||
-		mgr.cfg.ApprovalPolicy != "old-policy" {
-		t.Fatalf("configuration mutated after failed composition: command=%q args=%#v policy=%q", mgr.cfg.AgentCommand, mgr.cfg.AgentArgs, mgr.cfg.ApprovalPolicy)
+	if mgr.cfg.AgentCommand != "old-command" || strings.Join(mgr.cfg.AgentArgs, " ") != "old-command --old" {
+		t.Fatalf("configuration mutated after failed composition: command=%q args=%#v", mgr.cfg.AgentCommand, mgr.cfg.AgentArgs)
 	}
 	env := environmentMap(mgr.cfg.AgentEnv)
 	if env["KEEP_ME"] != "yes" || env["GIT_CONFIG_COUNT"] != "1" || env["GIT_CONFIG_VALUE_0"] != "/user/hooks" {
@@ -451,7 +448,7 @@ func TestManagerConfigureRemovesObsoleteManagedCredentialEnvironment(t *testing.
 	}, newTestLogger(t))
 	t.Cleanup(mgr.stopWorkspaceTrackers)
 
-	if err := mgr.Configure("echo", nil, false, nil, "", "", nil, false); err != nil {
+	if err := mgr.Configure("echo", nil, false, nil, "", nil, false); err != nil {
 		t.Fatalf("Configure() error = %v", err)
 	}
 	env := environmentMap(mgr.cfg.AgentEnv)
@@ -500,22 +497,25 @@ func TestManager_PipedProcessInheritsAgentEnvironment(t *testing.T) {
 
 func TestManager_StartAutoShellDoesNotDeadlockOnEnvironmentSnapshot(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
-		AgentArgs:    []string{"echo"},
+		AgentEnv:     []string{"GIT_CONFIG_COUNT=invalid"},
 		ShellEnabled: true,
-		Protocol:     agent.ProtocolACP,
 	}, newTestLogger(t))
-	mgr.adapter = newOneShotStubAdapter()
-	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
+	t.Cleanup(mgr.lifetimeCancel)
+	if _, err := mgr.buildShellConfigWithAgentEnv(mgr.cfg.AgentEnv); err == nil {
+		t.Fatal("fixture must reject the environment before spawning a shell")
+	}
 
-	done := make(chan error, 1)
-	go func() { done <- mgr.Start(context.Background()) }()
+	done := make(chan struct{})
+	go func() {
+		mgr.startMu.Lock()
+		defer mgr.startMu.Unlock()
+		mgr.startAgentShell()
+		close(done)
+	}()
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Start() error = %v", err)
-		}
+	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Start() deadlocked while creating the auto shell")
+		t.Fatal("auto shell environment snapshot attempted to acquire the start lock")
 	}
 }
 

@@ -204,7 +204,7 @@ describe("bulk confirmation revalidation", () => {
     expect(onInvalidSnapshot).toHaveBeenCalledWith(null);
   });
 
-  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 reports a failed refresh as loading, not a missing selection", async () => {
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 reports a failed refresh as an error", async () => {
     const onInvalidSnapshot = vi.fn();
     const remove = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
     const hook = renderHook(() =>
@@ -223,6 +223,24 @@ describe("bulk confirmation revalidation", () => {
     await act(async () => hook.result.current.confirm());
 
     expect(remove).not.toHaveBeenCalled();
-    expect(onInvalidSnapshot).toHaveBeenCalledWith("loading");
+    expect(onInvalidSnapshot).toHaveBeenCalledWith("error");
+  });
+
+  it("preserves the current error state when no refresh callback is supplied", async () => {
+    const onInvalidSnapshot = vi.fn();
+    const remove = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
+    const sessions = [taskSession("selected", "COMPLETED"), taskSession("other", "COMPLETED")];
+    const hook = renderHook(
+      ({ hasError }) =>
+        useBulkSessionRemoval({ sessions, isLoading: false, hasError, remove, onInvalidSnapshot }),
+      { initialProps: { hasError: false } },
+    );
+
+    act(() => hook.result.current.request("others", "selected"));
+    hook.rerender({ hasError: true });
+    await act(async () => hook.result.current.confirm());
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(onInvalidSnapshot).toHaveBeenCalledWith("error");
   });
 });

@@ -237,7 +237,7 @@ func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case isStepValidationError(msg):
+	case errors.Is(err, models.ErrInvalidWorkflowStepOrder) || isStepValidationError(msg):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case strings.Contains(msg, "not found"):
 		c.JSON(http.StatusNotFound, gin.H{"error": "Step not found"})

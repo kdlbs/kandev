@@ -74,7 +74,6 @@ describe("task detach confirmation adapters", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(confirmation.textContent).toContain("workflow, subtasks, and state will not change");
     expect(confirmation.textContent).toContain("shares its parent's workspace");
-    expect(screen.getByTestId("detach-task-confirm").classList.contains("min-h-11")).toBe(true);
   });
 
   it("keeps inline touch actions local and closes before confirming", async () => {

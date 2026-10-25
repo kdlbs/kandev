@@ -262,10 +262,15 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		}
 	}
 
+	flagDestination := dto.FlagDestinationACPBridge
+	if req.CLIPassthrough {
+		flagDestination = dto.FlagDestinationAgentCLI
+	}
 	return &dto.CommandPreviewResponse{
-		Supported:     true,
-		Command:       cmd.Args(),
-		CommandString: buildCommandString(cmd.Args()),
+		Supported:       true,
+		Command:         cmd.Args(),
+		CommandString:   buildCommandString(cmd.Args()),
+		FlagDestination: flagDestination,
 	}, nil
 }
 
@@ -297,10 +302,10 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 		return nil, ErrAgentNotFound
 	}
 	if c.hostUtility == nil {
-		return &dto.DynamicModelsResponse{
+		return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
 			AgentName: agentName,
 			Status:    "not_configured",
-		}, nil
+		}, refresh), nil
 	}
 
 	var caps hostutility.AgentCapabilities
@@ -309,20 +314,20 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 		caps, err = c.hostUtility.Refresh(ctx, agentName)
 		if err != nil {
 			s := err.Error()
-			return &dto.DynamicModelsResponse{
+			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
 				AgentName: agentName,
 				Status:    string(hostutility.StatusFailed),
 				Error:     &s,
-			}, nil
+			}, refresh), nil
 		}
 	} else {
 		var ok bool
 		caps, ok = c.hostUtility.Get(agentName)
 		if !ok {
-			return &dto.DynamicModelsResponse{
+			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
 				AgentName: agentName,
 				Status:    "not_configured",
-			}, nil
+			}, refresh), nil
 		}
 	}
 
@@ -355,13 +360,28 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 			Meta:        m.Meta,
 		})
 	}
-	for _, c := range caps.Commands {
+	for _, command := range caps.Commands {
 		resp.Commands = append(resp.Commands, dto.CommandEntryDTO{
-			Name:        c.Name,
-			Description: c.Description,
+			Name:        command.Name,
+			Description: command.Description,
 		})
 	}
-	return resp, nil
+	return c.finishDynamicModels(ctx, agentName, resp, refresh), nil
+}
+
+// finishDynamicModels merges the vendor CLI catalogue into a models response.
+// A refresh re-reads the CLI; other catalogue lookups reuse cached models.
+func (c *Controller) finishDynamicModels(
+	ctx context.Context,
+	agentName string,
+	resp *dto.DynamicModelsResponse,
+	refresh bool,
+) *dto.DynamicModelsResponse {
+	if resp.Models == nil {
+		resp.Models = []dto.ModelEntryDTO{}
+	}
+	resp.Models, resp.Discovery = c.hostCLIModelProjection(ctx, agentName, resp.Models, refresh)
+	return resp
 }
 
 // ResolveAgentModelConfig returns the complete provider configuration-option
@@ -383,25 +403,34 @@ func (c *Controller) ResolveAgentModelConfig(
 		Status:        string(hostutility.StatusNotConfigured),
 		ConfigOptions: []dto.ConfigOptionDTO{},
 	}
+	var profileContext *hostutility.ProfileProbeContext
+	if req.ProfileID != "" || req.LaunchSettings != nil {
+		resolved, err := c.resolveProfileProbeContext(ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings)
+		if err != nil {
+			return nil, err
+		}
+		profileContext = &resolved
+	}
 	if c.hostUtility == nil {
 		return resp, nil
 	}
-
 	resolution, err := c.hostUtility.ResolveModelConfig(ctx, agentName, hostutility.ModelConfigResolutionRequest{
-		Model:         req.Model,
-		Mode:          req.Mode,
-		ConfigOptions: req.ConfigOptions,
-		Refresh:       req.Refresh,
+		Model:          req.Model,
+		Mode:           req.Mode,
+		ConfigOptions:  req.ConfigOptions,
+		Refresh:        req.Refresh,
+		ProfileContext: profileContext,
 	})
 	if err != nil {
 		return nil, err
 	}
 	resp.Status = string(resolution.Status)
+	resp.ContextRevision = resolution.ContextRevision
 	resp.ConfigOptions = configOptionDTOs(resolution.ConfigOptions)
 	if resolution.Error != "" {
 		message := "model option resolution failed"
 		if resolution.Status == hostutility.StatusAuthRequired {
-			message = "agent authentication is required"
+			message = agentAuthenticationRequiredMessage
 		}
 		resp.Error = &message
 	}

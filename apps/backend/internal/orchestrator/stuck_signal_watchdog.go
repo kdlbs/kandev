@@ -85,11 +85,11 @@ const (
 )
 
 // stuckSignalSessionLister is implemented by the durable repository via
-// ListActiveTaskSessions. A narrow optional interface — mirrors
+// ListStepSignalWatchdogSessions. A narrow optional interface — mirrors
 // idleExecutorCandidateLister in idle_session_reaper.go — so lightweight
 // test doubles that don't exercise this scan stay compatible.
 type stuckSignalSessionLister interface {
-	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
+	ListStepSignalWatchdogSessions(ctx context.Context) ([]*models.TaskSession, error)
 }
 
 // reclaimStuckSignalSessionsOnce is the per-tick scan, called from the
@@ -102,7 +102,7 @@ func (s *Service) reclaimStuckSignalSessionsOnce(ctx context.Context) {
 	if !ok {
 		return
 	}
-	sessions, err := lister.ListActiveTaskSessions(ctx)
+	sessions, err := lister.ListStepSignalWatchdogSessions(ctx)
 	if err != nil {
 		s.logger.Warn("stuck-signal watchdog: list active sessions failed; tick skipped", zap.Error(err))
 		return
@@ -310,7 +310,7 @@ func (s *Service) reclaimStuckSignalSessionOwned(
 	// (ErrNoExecutionForSession, ErrCancelEscalated) means the execution
 	// could not be confirmed settled; fail closed and skip this tick rather
 	// than force-closing the turn anyway.
-	if err := s.cancelAgentWhileUnlockedForPrompt(ctx, session.ID, identity, operation, guard.unlock, guard.relock); err != nil {
+	if err := s.cancelAgentWhileUnlockedForPrompt(ctx, session.ID, identity, operation, guard.unlock, guard.relockWithContext); err != nil {
 		s.logger.Warn("stuck-signal watchdog: failed to settle stuck execution before reclaim; skipping this tick",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
@@ -432,6 +432,9 @@ func (s *Service) stuckSignalCandidate(
 		}
 		return nil, models.PendingStepCompletionSignal{}, false
 	case stuckSignalReclaimable:
+		if _, matches := s.matchingStepCompletionSignal(ctx, task.ID, signal.StepID, session); !matches {
+			return nil, models.PendingStepCompletionSignal{}, false
+		}
 		return task, signal, true
 	default:
 		return nil, models.PendingStepCompletionSignal{}, false
@@ -571,7 +574,7 @@ func (s *Service) stuckSignalStillPending(ctx context.Context, sessionID, stepID
 	if latest.State != models.TaskSessionStateRunning && latest.State != models.TaskSessionStateStarting {
 		return nil, false
 	}
-	if latestSignal, stillPending := models.LoadPendingStepSignal(latest.Metadata); !stillPending || latestSignal.StepID != stepID {
+	if _, stillPending := s.matchingStepCompletionSignal(ctx, latest.TaskID, stepID, latest); !stillPending {
 		return nil, false
 	}
 	return latest, true
@@ -664,7 +667,8 @@ func (s *Service) cancelAgentWhileUnlockedForPrompt(
 	sessionID string,
 	identity cancellationIdentity,
 	operation *cancelOperation,
-	unlockGuard, relockGuard func(),
+	unlockGuard func(),
+	relockGuard func(context.Context) error,
 ) error {
 	if identity.executionID == "" {
 		return s.cancelAgentWhileUnlocked(ctx, sessionID, operation, unlockGuard, relockGuard)
@@ -684,7 +688,9 @@ func (s *Service) cancelAgentWhileUnlockedForPrompt(
 		identity.promptGeneration,
 		identity.activityEpoch,
 	)
-	relockGuard()
+	if err := relockGuard(ctx); err != nil {
+		return fmt.Errorf("reacquire cancellation guard: %w", err)
+	}
 	s.setCancellationProviderOutcome(sessionID, operation, cancelErr)
 	return s.normalizeCancelAgentError(cancelErr)
 }

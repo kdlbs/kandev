@@ -38,6 +38,7 @@ change Git commands that an agent runs after launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14` | [Safe refresh diagnostics](#safe-refresh-diagnostics) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.24` | [Required refresh verification cause](#required-refresh-verification-cause) |
 
 ## Components and responsibilities
 
@@ -275,6 +276,122 @@ Preserve the completed comparison-target and stacked-PR packages. Their old
 verification results remain historical. New compatibility results belong to
 this repair's work orders. Issue #3856 owns the separate reconciliation hint.
 
+## Repository checkout settings persistence
+
+AC .20 through .23 extend this owner because repository defaults determine
+ordinary task bases and refresh policy. The
+[workspace settings update design](workspace-settings-updates.md) owns the
+separate `workspaces` table and is only a nearby implementation example.
+
+### Request intent and storage boundary
+
+`Service.UpdateRepository` in `internal/task/service/service_resources.go`
+currently reads a repository, validates and merges optional fields, then calls
+the complete-model store updater. That updater always assigns
+`repositories.default_branch` and `repositories.pull_before_worktree`. The
+secret-binding companion uses that same updater inside its transaction.
+An omitted choice therefore carries an old snapshot into a later write.
+
+Introduce an internal `RepositoryCheckoutIntent` with `DefaultBranch *string`
+and `PullBeforeWorktree *bool` in the neutral `internal/task/models` package,
+aliased by `internal/task/repository`. The repository package already imports
+its SQLite provider, so the concrete store must not import it back. Add a required
+`UpdateRepositoryWithCheckoutIntent` method to `RepositoryEntityRepository`
+and the atomic companion
+`UpdateRepositoryWithSecretBindingsAndCheckoutIntent` to
+`RepositorySecretBindingMutator`. The names are proposed implementation
+symbols. Update in-tree adapters and test doubles at these internal boundaries;
+do not silently fall back to a complete-model write for an ordinary save.
+The optional secret-binding capability remains optional, with its existing
+unavailable-capability error.
+
+For ordinary settings saves, construct intent from the original request
+pointers after the existing validation and normalization. Retain the merged
+model for every other field. A nil checkout pointer leaves its column out of
+the SQL assignments; a non-nil pointer binds its validated value. Empty string
+and false are supplied values. Do not use truthiness or treat blank as absent.
+Empty ordinary requests retain the existing timestamp-refresh/event behavior.
+
+The write keeps the live-row predicate and obtains `default_branch`,
+`pull_before_worktree`, and `updated_at` from `UPDATE ... RETURNING`, using the
+same statement's row. Use a short transaction for the ordinary path and the
+existing transaction for the companion. Close/drain the returning row before
+commit. Retain values locally until commit succeeds, then project them onto
+the service model used for the response and event. A binding insertion or
+commit failure cannot expose a successful result. No pre-write refresh or
+post-commit reread supplies these values.
+
+Keep other assignment expressions and field behavior compatible. This is not
+an all-field patch: another omitted repository field or omitted binding set
+can still reflect existing snapshot behavior. Both checkout values describe
+this committed mutation, not whichever state a later request leaves globally.
+No schema migration, additional public field, revision token, event ordering
+protocol, or advisory-lock framework is introduced. PostgreSQL's statement
+row locking evaluates the assignments against the row after a conflicting
+writer settles; no read-modify-write calculation for these choices remains.
+SQLite uses its existing writer admission. Continue dialect rebinding,
+existing boolean encoding/scanning, and SQLguard rules.
+
+### Complete writes, exact writes, and recovery
+
+Keep `UpdateRepository`, `UpdateRepositoryWithSecretBindings`, and their exact
+timestamp variants as deliberate complete writes. `ExpectedUpdatedAt` saves
+retain the existing service precheck and SQL `updated_at` predicate. Their
+unchanged-version full model is valid; a changed timestamp rejects the entire
+request, including bindings, using the existing conflict outcome.
+
+Keep `UpdateRepositoryDefaultBranch` as the narrow recovery compare-and-set
+on observed branch plus live row. Its semantics do not become an ordinary
+settings patch. Repository creation, provider-resolution backfill through
+the legacy store method, and direct orchestrator complete writes keep their
+existing behavior. These paths are explicit scope boundaries, not claims that
+every repository writer was audited or made universally concurrency-safe.
+
+### Supported save routes and projections
+
+| Existing surface | Checkout choices and compatibility |
+| --- | --- |
+| Registered REST `PATCH /api/v1/repositories/:id` in `RepositoryHandlers` | Both optional pointers; JSON null means omitted. Read-only and scope checks remain. `dto.FromRepository` receives the committed model. |
+| Registered WebSocket `repository.update` | Optional branch only; its schema has no pull-policy field. Preserve the persisted pull choice and return it without adding support for editing it. |
+| Compact `update_settings_kandev` | The server's sensitive wrapper forwards `ActionMCPUpdateSettings` through `guardedMCPDispatcher`, registry validation and `backendapp.settingsOperations.updateDomainSettings` into this service. The repository catalog declares both choices writable and non-nullable. Reject null and empty changes as today; retain caller, target, workspace, permission and redaction checks. |
+| Exact plugin Host workspace administration | `pluginsWorkspaceAdminAdapter.updateRepository` retains expected-resource-version matching, replay admission and `ExpectedUpdatedAt`; no public SDK or protocol changes. |
+| Internal request-driven adapters | Local-path/default-branch updater and provider-ID saves through the service receive the same two-choice protection. Other field semantics remain. |
+
+Only `Service.publishRepositoryEvent` publishes `repository.updated` for
+these service mutations, after successful persistence. Keep its fields,
+RFC3339 timestamps and best-effort publication failure behavior. Do not
+invent events for compact wrappers or exact replay no-ops. Compact results
+continue to sanitize the service result using existing catalog rules.
+
+### Downstream consumers and failure limits
+
+`internal/orchestrator/executor/executor_resume.go` derives the ordinary
+default base and pull flag from the persisted repository. `executor_execute.go`
+projects them into single- and multi-repository launch requests.
+`worktree.Manager.resolveBaseRefWithFallback` in `manager_lifecycle.go`
+applies that pull flag; `worktree.RepositoryAdapter` supplies the repository
+default branch without owning the refresh flag. These consumers keep their
+current selection, fallback, transport, reuse and materialization behavior.
+
+Tests must prove stale-snapshot preservation and physical PostgreSQL lock
+waits for both values, atomic binding rollback, deletion/cancellation and
+exact/legacy controls. Registered routes must verify saved results and actual
+service events, not just decoding or fabricated publishers. The work order
+owns the causal test matrix and execution commands. A bounded real Git
+consumer integration may use existing executor preparation wiring; it must
+not expand runner behavior or substitute manually assembled launch fields
+for producer evidence. The supplied reproduction does not establish that
+consumer proof.
+
+This is backend data-only: no layout, copy, interaction, store, or breakpoint
+change. Mobile uses the same supported persistence paths, so a new browser
+composition or mobile E2E is unnecessary. Public Git lifecycle guidance must
+distinguish registration defaults from omitted fields on existing saves.
+No new ADR is needed: this local correction follows existing supplied-intent,
+statement-result, atomic companion and exact-version boundaries.
+
+Delivery: [Preserve repository checkout defaults](../../../plans/preserve-repository-checkout-defaults/plan.md).
+
 ## Refresh policy
 
 If `PullBeforeWorktree` is false, Kandev uses the selected local base without a
@@ -423,6 +540,41 @@ Preserve context errors and current progress/error payloads. Correct the
 No new logging configuration, subprocess, retry, or persistence is required.
 
 Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
+
+#### Invalid local ref diagnostics
+
+Under AC .14, classify fatal `bad object refs/...` and `bad ref refs/...` lines
+as `invalid_local_ref`. Emit only: "Git reported an invalid local reference.
+Inspect repository references before retrying." Ignore incidental URL or branch
+text. Cancellation and timeout win. Missing blobs, arbitrary object IDs, and
+`did not send all necessary objects` alone remain unknown.
+
+Preserve refresh policy and error identities. Add no repair or Git command.
+Test required and best-effort refresh with an unrelated empty fixture ref,
+negative matches, secret exclusion, and context precedence.
+Delivery: [Invalid Git ref diagnostics](../../../plans/git-invalid-ref-diagnostics/plan.md).
+
+### Required refresh verification cause
+
+AC .24 extends the same diagnostics contract to the required checkout-branch
+refresh. `fetchBranchToLocalWithPolicy` retries a fetch that Git refused
+because the branch is already checked out, fetching the branch as a
+remote-tracking ref instead. When that retry still cannot verify the refreshed
+ref and the refresh is required, the manager returns a generic command-failure
+error. The `FetchBranchResult` already carries the user-facing `Warning` and the
+diagnostic `WarningDetail`, and the best-effort path returns them to the caller.
+
+The required path shall reuse those values instead of discarding them. Resolve
+the detail as `WarningDetail`, falling back to `Warning` when the detail is
+empty. Emit one structured warning that records the branch and the resolved
+detail, and carry the resolved detail in the returned error before
+`ErrGitCommandFailed`. The warning records no raw command output. The existing
+suppression of a result whose warning is empty, the non-required result, and
+every fallback decision remain unchanged. On this path the detail is the fixed
+probe string from `resolveRetryStartPoint`; it is not a raw credential or remote
+URL.
+
+Delivery: [Fail-closed worktree refresh](../../../plans/worktree-refresh-fail-closed/plan.md).
 
 ## Related decisions
 

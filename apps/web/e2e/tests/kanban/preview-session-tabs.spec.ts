@@ -30,6 +30,13 @@ test.describe("Preview session tabs", () => {
   }) => {
     test.setTimeout(180_000);
 
+    // This fixture owns primary selection. Workflow automation must not replace
+    // that selection after a session finishes.
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Preview tabs");
+    const step = await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+      is_start_step: true,
+    });
+
     // 1. Create a task — first session becomes primary.
     // Task descriptions use the scenario registry (`/e2e:<name>`), so we pick a
     // scenario with a unique, agent-only response string to avoid prompt/response
@@ -40,8 +47,8 @@ test.describe("Preview session tabs", () => {
       seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
+        workflow_id: workflow.id,
+        workflow_step_id: step.id,
         repository_ids: [seedData.repositoryId],
       },
     );
@@ -69,7 +76,7 @@ test.describe("Preview session tabs", () => {
         task_id: task.id,
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
-        workflow_step_id: seedData.startStepId,
+        workflow_step_id: step.id,
         prompt: 'e2e:message("secondary-session-response")',
       },
       60_000,
@@ -84,12 +91,20 @@ test.describe("Preview session tabs", () => {
       60_000,
     );
 
+    await apiClient.setPrimarySession(initialSessionId);
+    await expect
+      .poll(() => apiClient.getTask(task.id).then((current) => current.primary_session_id), {
+        timeout: 30_000,
+        message: "the original session should become primary before opening the preview",
+      })
+      .toBe(initialSessionId);
+
     const { sessions: afterSecond } = await apiClient.listTaskSessions(task.id);
-    const taskAfterSecond = await apiClient.getTask(task.id);
-    const primaryId = taskAfterSecond.primary_session_id;
-    if (!primaryId) throw new Error("Primary session not set after creating sessions");
-    const secondaryId = afterSecond.find((s) => s.id !== primaryId)?.id;
-    if (!secondaryId) throw new Error("Secondary session not created");
+    expect(afterSecond.map((session) => session.id)).toEqual(
+      expect.arrayContaining([initialSessionId, launched.session_id]),
+    );
+    const primaryId = initialSessionId;
+    const secondaryId = launched.session_id;
     const responseBySessionId: Record<string, string> = {
       [initialSessionId]: "simple mock response",
       [launched.session_id]: "secondary-session-response",
@@ -100,21 +115,38 @@ test.describe("Preview session tabs", () => {
       throw new Error("Session response markers do not match the task sessions");
     }
 
-    // The direct launch path may promote the new session. Use the task's
-    // persisted primary ID as the expected default instead of changing it via
-    // an out-of-band API call that cannot update the page's active-session state.
+    // Mark the older session primary before the full page load so the fixture
+    // checks the persisted default independently of launch-time promotion.
+    expect(primaryId).toBe(initialSessionId);
 
     const kanban = new KanbanPage(testPage);
 
     // 5. Enable preview-on-click and open the kanban board.
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
-    await kanban.goto();
+    await kanban.goto(workflow.id);
 
     const previewCard = kanban.taskCardByTitle("Preview Tabs Task");
     await expect(previewCard).toBeVisible({ timeout: 10_000 });
     await expect(previewCard.getByRole("button", { name: "Open full page" })).toBeVisible({
       timeout: 10_000,
     });
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate((taskId) => {
+            type KandevStore = {
+              getState: () => {
+                kanban: { tasks: { id: string; primarySessionId?: string | null }[] };
+              };
+            };
+            const store = (window as unknown as { __KANDEV_E2E_STORE__?: KandevStore })
+              .__KANDEV_E2E_STORE__;
+            return store?.getState().kanban.tasks.find((task) => task.id === taskId)
+              ?.primarySessionId;
+          }, task.id),
+        { timeout: 15_000, message: "Waiting for the board task's primary session projection" },
+      )
+      .toBe(primaryId);
     await previewCard.click();
 
     // 6. Preview panel + both tabs are visible.

@@ -104,6 +104,7 @@ func (s *Service) handleWorkspaceDeleted(ctx context.Context, event *bus.Event) 
 	if workspaceID == "" {
 		return nil
 	}
+	s.clearWatchFilterProgress(workspaceID)
 	s.mu.Lock()
 	broker := s.credentialBroker
 	s.mu.Unlock()

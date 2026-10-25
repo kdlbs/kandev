@@ -38,5 +38,10 @@ the authorized task audit route.
 
 ## Verification Results
 
+The checks below record the original implementation. Ignored-directory content
+capture is amended by the completed
+[bounded cleanup package](../archive-manifest-bounded-cleanup/plan.md).
+That package owns the revised directory test, cancellation, and background recovery.
+
 Local implementation checks passed; PR #3905 receives a fresh CI and review
 snapshot after the fixup commit is pushed.

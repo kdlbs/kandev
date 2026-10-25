@@ -53,6 +53,19 @@ func TestAgentEventPayloadCarriesRunID(t *testing.T) {
 	}
 }
 
+func TestAgentEventPayloadCarriesCausingRunIDForTaskOwnedExecution(t *testing.T) {
+	payload := newAgentEventPayload(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		CausingRunID: "office-run-1",
+	})
+	if payload.CausingRunID != "office-run-1" {
+		t.Fatalf("causing run ID = %q, want office-run-1", payload.CausingRunID)
+	}
+	if payload.OwnerKind != ExecutionOwnerTask {
+		t.Fatalf("owner kind = %q, want task", payload.OwnerKind)
+	}
+}
+
 func TestAgentEventPayloadCarriesPromptTurnID(t *testing.T) {
 	execution := &AgentExecution{ID: "exec-1", promptTurnID: "turn-1"}
 	payload := newAgentEventPayload(execution)
@@ -67,5 +80,32 @@ func TestAgentEventPayloadCarriesPromptTurnID(t *testing.T) {
 	}
 	if fields["turn_id"] != "turn-1" {
 		t.Fatalf("turn_id = %q, want turn-1", fields["turn_id"])
+	}
+}
+
+func TestAgentEventPayloadCarriesHostSettingsPolicy(t *testing.T) {
+	providerRestored := newAgentEventPayload(&AgentExecution{
+		ID:                              "exec-provider-restored",
+		SessionSettingsProjectionPolicy: SessionSettingsPolicyProviderRestored,
+	})
+	if providerRestored.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("provider-restored policy = %q, want provider_restored", providerRestored.SessionSettingsPolicy)
+	}
+
+	ordinary := newAgentEventPayload(&AgentExecution{ID: "exec-ordinary"})
+	if ordinary.SessionSettingsPolicy != "" {
+		t.Fatalf("ordinary policy = %q, want no recovery provenance", ordinary.SessionSettingsPolicy)
+	}
+
+	encoded, err := json.Marshal(providerRestored)
+	if err != nil {
+		t.Fatalf("marshal provider-restored lifecycle event: %v", err)
+	}
+	var watcherPayload map[string]interface{}
+	if err := json.Unmarshal(encoded, &watcherPayload); err != nil {
+		t.Fatalf("unmarshal provider-restored lifecycle event: %v", err)
+	}
+	if watcherPayload["session_settings_policy"] != string(streams.SessionSettingsPolicyProviderRestored) {
+		t.Fatalf("wire policy = %#v, want provider_restored", watcherPayload["session_settings_policy"])
 	}
 }

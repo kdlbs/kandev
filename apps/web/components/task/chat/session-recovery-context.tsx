@@ -8,9 +8,11 @@ import {
 } from "@/lib/active-session-recovery";
 import { useTaskLaunchErrorContext } from "../task-launch-error-context";
 import { usePendingSessionRecovery } from "@/hooks/domains/session/session-recovery-pending";
+import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
 
 type RecoveryContext = {
   sessionId: string;
+  onDeliveryReconciled?: () => void;
   model: ActiveSessionRecovery | null;
   pending: import("@/hooks/domains/session/use-session-recovery-actions").SessionRecoveryBusyAction;
 };
@@ -22,6 +24,7 @@ export function SessionRecoveryProvider({
   taskId,
   enabled,
   messagesLoading = false,
+  onDeliveryReconciled,
   children,
 }: {
   session: TaskSession | null | undefined;
@@ -29,6 +32,7 @@ export function SessionRecoveryProvider({
   taskId: string | null;
   enabled: boolean;
   messagesLoading?: boolean;
+  onDeliveryReconciled?: () => void;
   children: ReactNode;
 }) {
   const pending = usePendingSessionRecovery(`${taskId ?? ""}\u0000${session?.id ?? ""}`);
@@ -36,27 +40,83 @@ export function SessionRecoveryProvider({
   if (pending) lastPending.current = pending;
   const previous = useRef<ActiveSessionRecovery | null>(null);
   const selected = useCurrentRecovery(session, messages, enabled);
+  const launchErrorContext = useTaskLaunchErrorContext();
+  const automaticRecovery = matchingAutomaticRecovery(
+    launchErrorContext?.automaticRecovery,
+    taskId,
+    session?.id,
+  );
   const retainPending = retainRecovery(enabled, session, previous.current);
-  const model = selected ?? (retainPending ? previous.current : null);
+  const requestLocalModel = requestLocalRecoveryModel(session?.id, automaticRecovery);
+  const model = chooseRecoveryModel(selected, retainPending, previous.current, requestLocalModel);
   previous.current = model;
   const presentedModel = model ? { ...model, loading: messagesLoading } : null;
   return (
     <Context.Provider
-      value={
-        enabled && session
-          ? {
-              sessionId: session.id,
-              model: presentedModel,
-              pending:
-                pending ??
-                (session.state === "STARTING" && model ? (lastPending.current ?? "resume") : null),
-            }
-          : null
-      }
+      value={recoveryContextValue({
+        enabled,
+        session,
+        model: presentedModel,
+        pending,
+        lastPending: lastPending.current,
+        onDeliveryReconciled,
+      })}
     >
       {children}
     </Context.Provider>
   );
+}
+
+function chooseRecoveryModel(
+  selected: ActiveSessionRecovery | null,
+  retainPending: boolean,
+  previous: ActiveSessionRecovery | null,
+  requestLocal: ActiveSessionRecovery | null,
+) {
+  return selected ?? (retainPending ? previous : null) ?? requestLocal;
+}
+
+function recoveryContextValue({
+  enabled,
+  session,
+  model,
+  pending,
+  lastPending,
+  onDeliveryReconciled,
+}: {
+  enabled: boolean;
+  session: TaskSession | null | undefined;
+  model: ActiveSessionRecovery | null;
+  pending: RecoveryContext["pending"];
+  lastPending: RecoveryContext["pending"];
+  onDeliveryReconciled?: () => void;
+}): RecoveryContext | null {
+  if (!enabled || !session) return null;
+  const startingPending = session.state === "STARTING" && model ? (lastPending ?? "resume") : null;
+  return {
+    sessionId: session.id,
+    onDeliveryReconciled,
+    model,
+    pending: pending ?? startingPending,
+  };
+}
+
+function requestLocalRecoveryModel(
+  sessionId: string | undefined,
+  recovery: ReturnType<typeof matchingAutomaticRecovery>,
+): ActiveSessionRecovery | null {
+  if (!sessionId) return null;
+  if (recovery?.noticeKind === "inspection_busy") {
+    return {
+      sessionId,
+      kind: "recovery_inspection_busy",
+      summary: recovery.notice ?? undefined,
+      requestLocal: true,
+    };
+  }
+  if (recovery?.error)
+    return { sessionId, kind: "generic", summary: recovery.error, requestLocal: true };
+  return null;
 }
 
 export function useSessionComposerRecovery(sessionId?: string | null) {

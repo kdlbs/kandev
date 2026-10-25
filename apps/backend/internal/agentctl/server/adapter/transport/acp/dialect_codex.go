@@ -29,11 +29,12 @@ const (
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
 	return acpDialect{
-		subagentFrame:        parseCodexSubagentFrame,
-		normalizePromptUsage: normalizeCodexPromptUsage,
-		mcpToolCall:          parseCodexMCPToolCall,
-		mcpToolResult:        normalizeCodexMCPToolResult,
-		responseAttemptReset: codexResponseAttemptResetMeta,
+		capacityContinuationSupport: streams.CapacityContinuationCodexLiveSessionV1,
+		subagentFrame:               parseCodexSubagentFrame,
+		normalizePromptUsage:        normalizeCodexPromptUsage,
+		mcpToolCall:                 parseCodexMCPToolCall,
+		mcpToolResult:               normalizeCodexMCPToolResult,
+		responseAttemptReset:        codexResponseAttemptResetMeta,
 	}
 }
 

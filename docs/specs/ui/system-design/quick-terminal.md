@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-08-28
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -20,7 +20,7 @@ records and Quick Terminal descriptors remain owned by their existing backend se
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing) |
+| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing), [Phone terminal shortcut controls](#phone-terminal-shortcut-controls) |
 | `REQ-UI-QUICK-TERMINAL-002` | [Tab order and editing](#tab-order-and-editing) |
 
 Remembered conversation selection is defined in the
@@ -348,30 +348,33 @@ legacy singleton login surface retains its existing behavior and authorization c
 | Connecting | Host-shell start succeeds | Store the returned session ID, attach its stream, and mark the tab running. |
 | Running | Chat/terminal tab switch or dialog dismissal | Detach the rendered terminal; keep the backend PTY and tab descriptor alive. |
 | Detached | Tab selected or terminal launcher used | Reattach to the same session and replay available buffered output. |
-| Running or detached | Quiet or long-running work | The session has no idle or hard timeout; it stays running across tab switches, dialog dismissal, and page reloads until closed, exited, or the backend stops. |
+| Running or detached | Quiet or long-running work | No timeout; it persists through tab switches, dismissal, and reload until closed, exited, or shutdown. |
 | Running or detached | PTY exits | Mark the tab exited when observed; retain it for inspection. |
-| Connecting, running, exited, or error | Terminal tab close | Stop the session when one exists, remove the tab, select the nearest remaining same-workspace tab, or close the dialog when none remains. |
+| Connecting, running, exited, or error | Terminal tab close | Stop any session, remove the tab, select the nearest same-workspace tab, or close the dialog. |
+
+The current client's connecting state remains authoritative until a session ID is attached. A
+resync started earlier cannot mark that local start unavailable.
 
 ## Permissions
 
-Quick terminals retain the existing host-shell permissions and environment of the Kandev backend
-process. Workspace association controls descriptor ownership and frontend visibility; it does not
-sandbox the shell or grant access to a task worktree. Existing API authentication, WebSocket origin
-checks, and Agents-page authorization behavior remain unchanged.
+Quick terminals use the backend process's existing host-shell permissions and environment. Workspace
+association scopes descriptor ownership and frontend visibility; it does not sandbox the shell or
+grant access to a task worktree. API authentication, WebSocket origin checks, and Agents-page
+authorization remain unchanged.
 
 ## Failure modes
 
-- A failed start or stream leaves the terminal tab visible with its existing error presentation and
-  a usable close action. It does not activate or stop sibling tabs.
+- Start or stream errors keep the terminal tab, its error presentation, and the close action. They do
+  not affect sibling tabs.
 - Closing a terminal tab while its start request is pending removes the tab and stops the session if
   that request later succeeds. Development StrictMode replay uses the stable client ID and cannot
   create or stop a sibling session.
 - A detached session may exit on its own (for example the user runs `exit` or the shell process
   crashes). It is not reaped by an idle or hard timeout. Reattaching to a session that no longer
   exists marks the tab exited or unavailable; it does not create a replacement implicitly.
-- A descriptor whose PTY disappeared during a backend restart or while no client was attached is
-  retained with an exited/unavailable status and a cleared session association. The user must
-  choose **New Terminal** to create a replacement.
+- Missing PTYs retain an unavailable descriptor with no session. **New Terminal** creates a replacement.
+  Reconnect reads preserve an in-flight local start until its request settles. Bound sessions and
+  restored descriptors remain authoritative.
 - A successful stop or an already-missing session removes the tab. Any other stop failure is
   surfaced and keeps the tab available so the user can retry.
 - A descriptor create/update failure is visible on the affected tab and never causes a shell to be
@@ -486,3 +489,20 @@ checks, and Agents-page authorization behavior remain unchanged.
 [Quick Terminal durable session lifecycle and menu alignment](../../../plans/quick-terminal-durable-lifecycle/plan.md)
 
 [Quick Chat tab order and editing](../../../plans/quick-chat-tab-order/plan.md)
+
+## Phone terminal shortcut controls
+
+`QuickTerminalTabView` enables inline `MobileTerminalKeybar` controls through
+`PtyTerminalView` on phones. Local send/focus callbacks target the host PTY's
+socket and xterm, bypassing the task terminal sender registry. Physical and
+shortcut input share Ctrl/Shift transforms. Control activation, owner changes,
+and dismissal reset modifiers. Latched modifiers are consumed only
+after an open socket accepts input. Authentication PTYs retain raw input.
+
+The task terminal keybar is the mobile exemplar: output scrolls vertically,
+while the 44px shortcut row scrolls horizontally.
+Visual viewport occlusion reduces terminal panel space above the keyboard;
+dialog safe-area padding stays authoritative. Desktop omits the row.
+
+[Shortcut parity repair](../../../plans/quick-terminal-mobile-controls/plan.md)
+implements AC-UI-QUICK-TERMINAL-001.13 and preserves sibling isolation (001.8).

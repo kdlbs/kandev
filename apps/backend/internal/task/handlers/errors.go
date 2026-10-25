@@ -8,9 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -43,6 +45,14 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(status, taskErrorBody(err))
 		return
 	}
+	if errors.Is(err, taskrepository.ErrTaskHierarchyConflict) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
+	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
+		return
+	}
 	if isNotFound(err) {
 		c.JSON(http.StatusNotFound, gin.H{"error": fallback})
 		return
@@ -72,8 +82,16 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
-	log.Error("request failed", zap.Error(err))
+	log.Error("request failed", append(cleanupInspectionFields(err), zap.Error(err))...)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+}
+
+func cleanupInspectionFields(err error) []zap.Field {
+	var inspection *worktree.CleanupInspectionError
+	if !errors.As(err, &inspection) {
+		return nil
+	}
+	return []zap.Field{zap.String("stage", inspection.Stage), zap.String("reason", inspection.Reason)}
 }
 
 func taskErrorBody(err error) gin.H {
@@ -140,6 +158,12 @@ func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 	switch {
 	case isClientDisconnect(err):
 		abortClientDisconnect(c)
+	case errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked):
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
+	case errors.Is(err, taskrepository.ErrTaskCompletionCriteriaConflict):
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_criteria_conflict"})
+	case errors.Is(err, taskrepository.ErrTaskCompletionHumanConfirmationRequired):
+		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_human_confirmation_required"})
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "task or workflow not found"})
 	case isMoveConflict(err):
@@ -175,6 +199,10 @@ func handleSelectedMoveError(c *gin.Context, log *logger.Logger, err error) {
 // firing, and it stays a logged 500.
 func isClientDisconnect(err error) bool {
 	return err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+func isRequestCancellation(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
 }
 
 func abortClientDisconnect(c *gin.Context) {
@@ -256,7 +284,8 @@ func isValidationError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) {
+	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) ||
+		errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) {
 		return true
 	}
 	if errors.Is(err, service.ErrInvalidWorkflowChange) {
@@ -265,7 +294,7 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrTaskTitleTooLong) {
 		return true
 	}
-	if errors.Is(err, service.ErrExternalIDInvalid) {
+	if errors.Is(err, service.ErrExternalIDInvalid) || errors.Is(err, service.ErrReservedMetadata) {
 		return true
 	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||

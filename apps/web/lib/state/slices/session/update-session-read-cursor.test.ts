@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import { createSessionRuntimeSlice } from "../session-runtime/session-runtime-slice";
+import { captureTaskSessionHydrationEpochs } from "./hydration-epochs";
 import type { SessionSlice } from "./types";
 import type { SessionRuntimeSlice } from "../session-runtime/types";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
@@ -97,6 +98,42 @@ describe("updateSessionReadCursor", () => {
 
     const listed = store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID]?.[0];
     expect(listed?.last_read_message_id).toBe("m2");
+  });
+
+  it("does not let a session-list response started before the read update regress its cursor", () => {
+    const store = makeStore();
+    const initialSnapshot = makeSession({ last_read_message_id: "m1" });
+    store.getState().setTaskSessionsForTask(TASK_ID, [initialSnapshot], {});
+    const staleRequestEpochs = captureTaskSessionHydrationEpochs(store.getState(), TASK_ID);
+
+    store.getState().updateSessionReadCursor(SESSION_ID, "m2");
+    store.getState().setTaskSessionsForTask(TASK_ID, [initialSnapshot], staleRequestEpochs);
+
+    expect(store.getState().taskSessions.items[SESSION_ID].last_read_message_id).toBe("m2");
+
+    const freshRequestEpochs = captureTaskSessionHydrationEpochs(store.getState(), TASK_ID);
+    store
+      .getState()
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ last_read_message_id: "m3" })],
+        freshRequestEpochs,
+      );
+    store.getState().setTaskSessionsForTask(TASK_ID, [initialSnapshot], staleRequestEpochs);
+
+    expect(store.getState().taskSessions.items[SESSION_ID].last_read_message_id).toBe("m3");
+  });
+
+  it("protects a direct session update from an older list snapshot", () => {
+    const store = makeStore();
+    const initialSnapshot = makeSession({ last_read_message_id: "m1" });
+    store.getState().setTaskSessionsForTask(TASK_ID, [initialSnapshot], {});
+    const staleRequestEpochs = captureTaskSessionHydrationEpochs(store.getState(), TASK_ID);
+
+    store.getState().setTaskSession(makeSession({ last_read_message_id: "m2" }));
+    store.getState().setTaskSessionsForTask(TASK_ID, [initialSnapshot], staleRequestEpochs);
+
+    expect(store.getState().taskSessions.items[SESSION_ID].last_read_message_id).toBe("m2");
   });
 });
 

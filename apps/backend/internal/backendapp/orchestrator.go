@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/authz"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,9 +13,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	automationpkg "github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/gitref"
@@ -40,6 +43,7 @@ import (
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -66,6 +70,7 @@ func provideOrchestrator(
 	eventBus bus.EventBus,
 	taskRepo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
+	authSvc *auth.Service,
 	userSvc *userservice.Service,
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
@@ -77,6 +82,7 @@ func provideOrchestrator(
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
 	sessionCapacityEnvironment sessioncapacity.Environment,
+	retryClock *e2eCapacityRetryClock,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -87,10 +93,14 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	if retryClock != nil {
+		serviceCfg.RetryClock = retryClock
+	}
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
+	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -149,6 +159,9 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetStartupRecoveryOwnerContextResolver(func(ctx context.Context, ownerID, orgID string) (context.Context, error) {
+		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
+	})
 	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
@@ -169,13 +182,14 @@ func provideOrchestrator(
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
 	// confirmed-dead local runtime as already stopped instead of retrying forever.
 	taskSvc.SetRowLivenessProber(agentManagerClient)
-	// The orphan-session sweep preserves stale STARTING/RUNNING sessions when no
-	// live in-memory execution backs them, so the conversation can recover on
-	// task focus after a backend restart.
+	// The orphan-session sweep preserves stale sessions unless neither a live
+	// local execution nor an exact pending remote owner backs them, so a remote
+	// conversation remains available for authenticated recovery after restart.
 	taskSvc.SetExecutionLivenessChecker(agentManagerClient)
+	taskSvc.SetPendingRemoteRecoveryChecker(agentManagerClient.HasPendingRemoteRecovery)
 	// The session reconciliation sweep's active-task pass (stall detection and
-	// orphaned-session healing) verifies "no live execution" against the agent
-	// runtime's in-memory execution store through this registry.
+	// orphaned-session healing) checks local execution liveness through this
+	// registry and separately checks exact pending remote ownership above.
 	taskSvc.SetSessionExecutionRegistry(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
@@ -184,6 +198,8 @@ func provideOrchestrator(
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 	orchestratorSvc.SetTaskLaunchRecoveryService(taskSvc)
+	orchestratorSvc.SetWorkspaceRecoveryErrorReporter(taskSvc)
+	orchestratorSvc.SetWorkspaceRecoveryStatusReader(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
@@ -192,6 +208,16 @@ func provideOrchestrator(
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
+	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
+	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
+	turnChangeCoordinator.SetLogger(log.Zap())
+	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
+		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+	}
+	agentruntime.InstallTurnChangeCaptureHandler(
+		lifecycleMgr,
+		&runtimeTurnChangeCaptureHandler{coordinator: turnChangeCoordinator, publisher: taskSvc},
+	)
 
 	// Route orchestrator task.updated events through the task service, which
 	// owns the canonical rich payload. Covers workflow transitions, workflow
@@ -211,6 +237,8 @@ func provideOrchestrator(
 	// Wired unconditionally: dependencies are a core Kanban relationship, not an
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
+	orchestratorSvc.SetBackgroundWorkObserver(taskSvc)
+	taskSvc.SetBackgroundWorkActionDispatcher(lifecycleMgr)
 
 	// Let the task service read the orchestrator's task-level
 	// parked_on_background_work OR-aggregate and its own monotonic revision so
@@ -254,9 +282,14 @@ func provideOrchestrator(
 	orchestratorSvc.SetSessionPromptChecker(func(ctx context.Context, sessionID string) error {
 		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt)
 	})
-	orchestratorSvc.SetTaskPromptChecker(func(ctx context.Context, taskID string) error {
-		return taskSvc.AuthorizeTaskScope(ctx, taskID, authz.ScopeSessionPrompt)
-	})
+	// session.launch is a separate transport from message.add and must enforce
+	// the same coordinator attended-only scope upgrade
+	// (copilot.md#attended-only): AuthorizeTaskPromptScope requires
+	// workspace.manage, not session.prompt, to start a turn on a coordinator
+	// conversation task.
+	orchestratorSvc.SetTaskPromptChecker(taskSvc.AuthorizeTaskPromptScope)
+	orchestratorSvc.SetExecutorAdmission(taskSvc.PrepareExecutorAdmission)
+	orchestratorSvc.SetAutonomousExecutorContext(taskSvc.PrepareAutonomousExecutor)
 	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the
@@ -326,6 +359,24 @@ func provideOrchestrator(
 	orchestratorSvc.SetTaskRepositoryBaseBranchUpdater(&repoLocalPathUpdater{svc: taskSvc})
 
 	return orchestratorSvc, msgCreator, nil
+}
+
+func startupRecoveryOwnerContext(
+	ctx context.Context,
+	authSvc *auth.Service,
+	ownerID, orgID string,
+) (context.Context, error) {
+	if authSvc == nil {
+		return nil, errors.New("startup recovery authentication service is unavailable")
+	}
+	if authSvc.Mode() == auth.ModeDisabled {
+		return ctx, nil
+	}
+	identity, ok := authSvc.IdentityForUser(ctx, ownerID)
+	if !ok || identity.UserID != ownerID || identity.OrgID != orgID {
+		return nil, errors.New("workspace owner identity is unavailable or changed organizations")
+	}
+	return authn.WithIdentity(taskmodels.WithExecutorActor(ctx, ""), identity), nil
 }
 
 type githubCredentialPolicyService interface {
@@ -512,6 +563,19 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 		WorkspaceMethod: policy.WorkspaceMethod,
 		WorkspaceActor:  policy.WorkspaceActor,
 	}, nil
+}
+
+// pluginRuntimeAPIURL is the Kandev API URL plugin executor environments call
+// back to. It exists only when an externally reachable base URL is configured.
+func pluginRuntimeAPIURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/")
+	if publicBaseURL == "" {
+		return ""
+	}
+	return publicBaseURL + "/api/v1"
 }
 
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {
@@ -753,11 +817,19 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		Repositories:   repos,
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
+
+		AutomationStartOwned: req.AutomationStartOwned,
+		AutomationStartOwner: req.AutomationStartOwner,
+		ExternalID:           req.ExternalID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result.Task, nil
+}
+
+func (a *reviewTaskCreatorAdapter) GetReviewTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, error) {
+	return a.svc.GetTaskByExternalID(ctx, workspaceID, externalID)
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.
@@ -1234,6 +1306,14 @@ func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, re
 		LocalPath: &localPath,
 	})
 	return err
+}
+
+// UpdateVerifiedRepositoryLocalPath retains the repository snapshot validated by attachment.
+func (u *repoLocalPathUpdater) UpdateVerifiedRepositoryLocalPath(ctx context.Context, repository *taskmodels.Repository, localPath string) error {
+	if repository == nil || repository.ID == "" || localPath == "" {
+		return fmt.Errorf("verified repository identity and path are required")
+	}
+	return u.svc.UpdateVerifiedManagedRepositoryPath(ctx, repository, localPath)
 }
 
 func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error {

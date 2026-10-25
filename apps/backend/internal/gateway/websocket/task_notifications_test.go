@@ -159,6 +159,33 @@ func TestTaskEventBroadcaster_OrdersLifecycleStateNotifications(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_TransferReconcilesSourceAndDestination(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	hub := NewHub(nil, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	payload := map[string]interface{}{
+		"task_id": "task-transfer", "workspace_id": "ws-destination",
+		"workflow_id": "wf-destination", "source_workspace_id": "ws-source",
+		"source_workflow_id": "wf-source", "old_workflow_id": "wf-source",
+	}
+	_ = eventBus.Publish(ctx, events.TaskUpdated,
+		bus.NewEvent(events.TaskUpdated, "test", payload))
+
+	destination := <-hub.broadcast
+	if destination.Action != ws.ActionTaskUpdated {
+		t.Fatalf("destination transfer action = %q, want task.updated", destination.Action)
+	}
+	select {
+	case source := <-hub.broadcast:
+		t.Fatalf("global destination reader received source tombstone: %s", source.Action)
+	default:
+	}
+}
+
 func TestTaskEventBroadcaster_OrdersTranscriptMutationsAcrossTransportSubjects(t *testing.T) {
 	log := testLogger()
 	eventBus := &queuedTransportEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
@@ -226,7 +253,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 77
+	const wantSubscriptions = 79
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -434,6 +461,29 @@ func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	if clientReceived(second) {
 		t.Fatal("cancellation notification crossed the session boundary")
 	}
+}
+
+func TestTaskEventBroadcaster_TurnChangeSummaryIsSessionScoped(t *testing.T) {
+	hub := newTestHub(t)
+	first := newTestClient("turn-changes-first")
+	second := newTestClient("turn-changes-second")
+	registerTestClient(hub, first)
+	registerTestClient(hub, second)
+	hub.SubscribeToSession(first, "session-1")
+	hub.SubscribeToSession(second, "session-2")
+	payload := map[string]any{
+		"session_id": "session-1",
+		"change_set": map[string]any{"id": "set-1", "revision": 2, "file_count": 1},
+	}
+	message, err := ws.NewNotification(ws.ActionSessionTurnChangesUpdated, payload)
+	require.NoError(t, err)
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	require.NoError(t, broadcaster.routeBroadcast(ws.ActionSessionTurnChangesUpdated, message.Payload, "session-1", "", message))
+	frame := <-first.send
+	var received ws.Message
+	require.NoError(t, json.Unmarshal(frame, &received))
+	require.Equal(t, ws.ActionSessionTurnChangesUpdated, received.Action)
+	require.False(t, clientReceived(second), "summary crossed the session boundary")
 }
 
 func TestTaskEventBroadcaster_PlanCommentsAreTaskScoped(t *testing.T) {
@@ -739,5 +789,25 @@ func TestTaskEventBroadcaster_ScopesSessionPendingActionToOwningWorkspace(t *tes
 	}
 	if clientReceived(foreign) {
 		t.Fatal("session pending-action event crossed the workspace boundary")
+	}
+}
+
+func TestTaskEventBroadcaster_PromptChangesInvalidateWithoutContent(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(eventBus.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hub := NewHub(nil, log)
+	RegisterTaskNotifications(ctx, eventBus, hub, log)
+	require.NoError(t, eventBus.Publish(ctx, events.PromptsChanged, bus.NewEvent(events.PromptsChanged, "test", map[string]any{})))
+	select {
+	case message := <-hub.broadcast:
+		require.Equal(t, ws.ActionPromptsChanged, message.Action)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(message.Payload, &payload))
+		require.Empty(t, payload)
+	default:
+		t.Fatal("prompt change was not broadcast")
 	}
 }

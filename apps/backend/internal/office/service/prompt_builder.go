@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -116,7 +118,11 @@ func BuildPrompt(pc *PromptContext) string {
 	case RunReasonTaskChangesRequested:
 		prompt = buildReworkPrompt(pc)
 	case RunReasonTaskComment:
-		prompt = buildTaskCommentPrompt(pc)
+		if isReviewOrApprovalStage(pc.StageType) {
+			prompt = buildGateCommentPrompt(pc)
+		} else {
+			prompt = buildTaskCommentPrompt(pc)
+		}
 	case RunReasonTaskBlockersResolved:
 		prompt = buildBlockersResolvedPrompt(pc)
 	case legacyRunReasonBlockersResolved:
@@ -408,6 +414,37 @@ func buildTaskCommentPrompt(pc *PromptContext) string {
 	return b.String()
 }
 
+// buildGateCommentPrompt frames a task_comment run at a review or approval
+// gate as a verdict request rather than the generic "address this comment"
+// prompt: it quotes the triggering comment (or notes it is gone) and asks
+// the seat to re-examine the work and record a verdict, ending with the
+// decision contract when the seat holds a decision action.
+func buildGateCommentPrompt(pc *PromptContext) string {
+	verb := "reviewing"
+	if pc.StageType == stageTypeApproval {
+		verb = "approving"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are %s task %s: %s.\n", verb, taskRef(pc), pc.TaskTitle)
+	if pc.CommentAuthor != "" {
+		authorDesc := pc.CommentAuthor
+		if pc.CommentAuthorType != "" {
+			authorDesc += " (" + pc.CommentAuthorType + ")"
+		}
+		fmt.Fprintf(&b, "From: %s\n", authorDesc)
+	}
+	if pc.CommentBody != "" {
+		fmt.Fprintf(&b, "Comment: %s\n", pc.CommentBody)
+	} else {
+		b.WriteString("The triggering comment is no longer available.\n")
+	}
+	b.WriteString("Re-examine the work in light of this comment and record your verdict.")
+	if hasDecisionAction(pc.AllowedActions) {
+		writeDecisionContract(&b)
+	}
+	return b.String()
+}
+
 func buildBlockersResolvedPrompt(pc *PromptContext) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "All blockers for your task %s: %s have been resolved.\n", taskRef(pc), pc.TaskTitle)
@@ -680,7 +717,7 @@ type BuildAgentPromptResult struct {
 // summary that was prepended (empty when no summary applied). The
 // caller persists both onto the run row.
 func (s *Service) BuildAgentPrompt(
-	_ *models.Run,
+	_ *runsmodels.Run,
 	_ *models.AgentInstance,
 	_, agentsMD string,
 	isResume bool,

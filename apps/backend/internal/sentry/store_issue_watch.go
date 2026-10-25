@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 // the way SQLite holds it. The store marshals/unmarshals at this boundary so
 // service callers see a typed SearchFilter and never have to think about JSON.
 type issueWatchRow struct {
+	CreatedByUserID     string         `db:"created_by_user_id"`
 	ID                  string         `db:"id"`
 	WorkspaceID         string         `db:"workspace_id"`
 	SentryInstanceID    sql.NullString `db:"sentry_instance_id"`
@@ -49,6 +51,7 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		maxInflight = &v
 	}
 	return &IssueWatch{
+		CreatedByUserID:     r.CreatedByUserID,
 		ID:                  r.ID,
 		WorkspaceID:         r.WorkspaceID,
 		SentryInstanceID:    r.SentryInstanceID.String,
@@ -103,14 +106,14 @@ func encodeFilter(f SearchFilter) (string, error) {
 // SELECTs use issueWatchSelectColumns which wraps the nullable last_error in
 // COALESCE so older databases (pre-self-heal migration) read back as empty
 // strings rather than NULL.
-const issueWatchInsertColumns = `id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id,
+const issueWatchInsertColumns = `created_by_user_id, id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id,
 	repository_id, base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
 	last_error, last_error_at,
 	created_at, updated_at`
 
-const issueWatchSelectColumns = `id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id,
+const issueWatchSelectColumns = `created_by_user_id, id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id,
 	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
@@ -120,6 +123,7 @@ const issueWatchSelectColumns = `id, workspace_id, sentry_instance_id, workflow_
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
 func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
+	w.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if w.ID == "" {
 		w.ID = uuid.New().String()
 	}
@@ -135,7 +139,7 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO sentry_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), w.CreatedByUserID,
 		w.ID, w.WorkspaceID, nullableString(w.SentryInstanceID), w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,

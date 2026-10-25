@@ -2,6 +2,7 @@
 """Prepare bounded, immutable PR walkthrough context from Git objects."""
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -21,7 +22,7 @@ class ContextError(Exception):
     """Raised when the trusted context cannot be prepared."""
 
 
-def git(repo: str, *args: str, text: bool = False) -> subprocess.CompletedProcess:
+def git(repo: str, *args: str, text: bool = False, stdin_bytes: bytes | None = None) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
     return subprocess.run(
         ["git", *args],
@@ -29,6 +30,7 @@ def git(repo: str, *args: str, text: bool = False) -> subprocess.CompletedProces
         env=env,
         capture_output=True,
         text=text,
+        input=stdin_bytes,
         check=False,
     )
 
@@ -92,51 +94,122 @@ def is_safe_path(path: str) -> bool:
     )
 
 
-def head_tree_entry(repo: str, head_sha: str, path_bytes: bytes) -> tuple[str, str, str] | None:
-    result = git(
-        repo,
-        "--literal-pathspecs",
-        "ls-tree",
-        "-z",
-        "-r",
-        "--full-tree",
-        head_sha,
-        "--",
-        path_bytes.decode("utf-8", errors="surrogateescape"),
-    )
-    if result.returncode != 0:
-        raise ContextError("could not inspect the PR head tree")
-    records = [record for record in result.stdout.split(b"\0") if record]
-    if len(records) != 1:
-        return None
-    metadata, separator, matched_path = records[0].partition(b"\t")
-    fields = metadata.split()
-    if not separator or len(fields) != 3 or matched_path != path_bytes:
-        return None
-    mode, object_type, object_id = (field.decode("ascii") for field in fields)
-    return mode, object_type, object_id
+def path_batches(paths: list[bytes]):
+    batch: list[str] = []
+    byte_count = 0
+    for path in paths:
+        if batch and (len(batch) >= 128 or byte_count + len(path) > 16 * 1024):
+            yield batch
+            batch, byte_count = [], 0
+        batch.append(display_path(path))
+        byte_count += len(path) + 1
+    if batch:
+        yield batch
 
 
-def blob_size(repo: str, object_id: str) -> int:
-    result = git(repo, "cat-file", "-s", object_id, text=True)
-    if result.returncode != 0:
-        raise ContextError("could not inspect a PR head file object")
-    try:
-        return int(result.stdout.strip())
-    except ValueError as exc:
-        raise ContextError("git returned an invalid file size") from exc
+def head_tree_entries(repo: str, head_sha: str, paths: list[bytes]) -> dict[bytes, tuple[str, str, str]]:
+    entries: dict[bytes, tuple[str, str, str]] = {}
+    wanted = set(paths)
+    for batch in path_batches(paths):
+        result = git(repo, "--literal-pathspecs", "ls-tree", "-z", "-r", "--full-tree", head_sha, "--", *batch)
+        if result.returncode != 0:
+            raise ContextError("could not inspect the PR head tree")
+        for record in result.stdout.split(b"\0"):
+            if not record:
+                continue
+            metadata, separator, path = record.partition(b"\t")
+            fields = metadata.split()
+            if not separator or len(fields) != 3:
+                raise ContextError("git returned an invalid tree entry")
+            if path in wanted:
+                entries[path] = tuple(field.decode("ascii") for field in fields)
+    return entries
 
 
-def blob_bytes(repo: str, object_id: str) -> bytes:
-    result = git(repo, "cat-file", "blob", object_id)
-    if result.returncode != 0:
-        raise ContextError("could not read a PR head file object")
-    return result.stdout
+def prefetch_missing_blobs(repo: str, head_sha: str, entries: dict[bytes, tuple[str, str, str]]) -> None:
+    wanted = {oid for mode, kind, oid in entries.values() if mode in REGULAR_MODES and kind == "blob"}
+    if not all(SHA_RE.fullmatch(oid) for oid in wanted):
+        raise ContextError("git returned an invalid file object ID")
+    objects = git(repo, "rev-list", "--objects", "--missing=print", "--no-object-names", head_sha + "^{tree}", text=True)
+    if objects.returncode != 0:
+        raise ContextError("could not inspect missing PR head file objects")
+    missing = sorted(wanted.intersection(line[1:] for line in objects.stdout.splitlines() if line.startswith("?")))
+    if not missing:
+        return
+    config = git(repo, "config", "--type=bool", "--get-regexp", r"^remote\..*\.promisor$", text=True)
+    if config.returncode not in {0, 1}:
+        raise ContextError("could not inspect configured promisor remotes")
+    remotes = []
+    for line in config.stdout.splitlines():
+        key, value = line.rsplit(None, 1)
+        if value == "true":
+            remotes.append(key[len("remote."):-len(".promisor")])
+    if not remotes:
+        legacy = git(repo, "config", "--get", "extensions.partialClone", text=True)
+        if legacy.returncode == 0 and legacy.stdout.strip():
+            remotes.append(legacy.stdout.strip())
+    for remote in remotes:
+        result = git(
+            repo, "-c", "fetch.negotiationAlgorithm=noop", "fetch", remote,
+            "--no-tags", "--no-write-fetch-head", "--recurse-submodules=no",
+            "--filter=blob:none", "--stdin",
+            stdin_bytes=("\n".join(missing) + "\n").encode("ascii"),
+        )
+        if result.returncode == 0:
+            return
+    raise ContextError("could not prefetch required PR head file objects")
+
+
+class BlobReader:
+    def __init__(self, sizes, contents):
+        self.sizes = sizes
+        self.contents = contents
+
+    def header(self, process, object_id: str) -> int:
+        if not SHA_RE.fullmatch(object_id):
+            raise ContextError("git returned an invalid file object ID")
+        process.stdin.write(object_id.encode("ascii") + b"\n")
+        process.stdin.flush()
+        fields = process.stdout.readline().split()
+        if len(fields) != 3 or fields[:2] != [object_id.encode("ascii"), b"blob"]:
+            raise ContextError("could not inspect a PR head file object")
+        try:
+            size = int(fields[2])
+        except ValueError as exc:
+            raise ContextError("git returned an invalid file size") from exc
+        if size < 0:
+            raise ContextError("git returned an invalid file size")
+        return size
+
+    def size(self, object_id: str) -> int:
+        return self.header(self.sizes, object_id)
+
+    def read(self, object_id: str, expected_size: int) -> bytes:
+        if self.header(self.contents, object_id) != expected_size:
+            raise ContextError("git returned an inconsistent file size")
+        content = self.contents.stdout.read(expected_size)
+        if len(content) != expected_size or self.contents.stdout.read(1) != b"\n":
+            raise ContextError("could not read a complete PR head file object")
+        return content
+
+
+@contextmanager
+def blob_reader(repo: str):
+    options = {
+        "cwd": repo,
+        "env": {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"},
+        "stdin": subprocess.PIPE,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.DEVNULL,
+    }
+    with subprocess.Popen(["git", "cat-file", "--batch-check"], **options) as sizes, \
+            subprocess.Popen(["git", "cat-file", "--batch"], **options) as contents:
+        yield BlobReader(sizes, contents)
 
 
 def entry_for_path(
-    repo: str,
-    head_sha: str,
+    tree_entries: dict[bytes, tuple[str, str, str]],
+    blobs: BlobReader,
     status: str,
     path_bytes: bytes,
     root: Path,
@@ -155,7 +228,7 @@ def entry_for_path(
         entry["reason"] = "unsafe_path"
         return entry, materialized_bytes
 
-    tree_entry = head_tree_entry(repo, head_sha, path_bytes)
+    tree_entry = tree_entries.get(path_bytes)
     if tree_entry is None:
         entry["reason"] = "missing"
         return entry, materialized_bytes
@@ -166,7 +239,7 @@ def entry_for_path(
         entry["object_type"] = object_type
         return entry, materialized_bytes
 
-    size = blob_size(repo, object_id)
+    size = blobs.size(object_id)
     entry["bytes"] = size
     if size > MAX_FILE_BYTES:
         entry["reason"] = "oversized"
@@ -175,7 +248,7 @@ def entry_for_path(
         entry["reason"] = "budget_excluded"
         return entry, materialized_bytes
 
-    content = blob_bytes(repo, object_id)
+    content = blobs.read(object_id, size)
     try:
         content.decode("utf-8")
     except UnicodeDecodeError:
@@ -195,6 +268,10 @@ def prepare(repo: str, base_sha: str, head_sha: str, output_dir: Path) -> Path:
     require_sha(repo, head_sha, "head")
     merge_base = resolve_merge_base(repo, base_sha, head_sha)
     files = changed_files(repo, merge_base, head_sha)
+    tree_entries = head_tree_entries(repo, head_sha, [
+        path for status, path in files if status != "D" and is_safe_path(display_path(path))
+    ])
+    prefetch_missing_blobs(repo, head_sha, tree_entries)
 
     head_root = output_dir / "head" / "files"
     if head_root.exists() or head_root.is_symlink():
@@ -205,11 +282,12 @@ def prepare(repo: str, base_sha: str, head_sha: str, output_dir: Path) -> Path:
 
     manifest_files: list[dict[str, object]] = []
     total_bytes = 0
-    for status, path_bytes in files:
-        entry, total_bytes = entry_for_path(
-            repo, head_sha, status, path_bytes, head_root, total_bytes
-        )
-        manifest_files.append(entry)
+    with blob_reader(repo) as blobs:
+        for status, path_bytes in files:
+            entry, total_bytes = entry_for_path(
+                tree_entries, blobs, status, path_bytes, head_root, total_bytes
+            )
+            manifest_files.append(entry)
 
     manifest: dict[str, object] = {
         "version": 1,

@@ -5,6 +5,28 @@ import { renderSessionOrLoadState } from "./file-browser-load-state";
 afterEach(cleanup);
 
 describe("renderSessionOrLoadState", () => {
+  it.each(["loading", "waiting", "manual"])(
+    "does not replace a usable tree during %s",
+    (loadState) => {
+      expect(
+        renderSessionOrLoadState({
+          isSessionFailed: false,
+          sessionError: null,
+          loadState,
+          isLoadingTree: false,
+          tree: {
+            name: "",
+            path: "",
+            is_dir: true,
+            children: [{ name: "ready.ts", path: "ready.ts", is_dir: false }],
+          },
+          loadError: "temporarily unavailable",
+          onRetry: () => {},
+        }),
+      ).toBeNull();
+    },
+  );
+
   it("uses the compact workspace failure state for failed sessions", () => {
     const result = renderSessionOrLoadState({
       isSessionFailed: true,

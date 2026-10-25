@@ -14,6 +14,14 @@ owners:
 
 This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATES-001` during migration.
 
+## OpenCode adoption amendment
+
+[OpenCode v2 adoption](opencode-v2-adoption.md) defines the proposed exception for trusted package families,
+managed source priority, isolated migration probes, and OpenCode interactive CLI selection.
+Its rules take precedence over the single-package and native-preference descriptions below once implemented.
+Other providers retain their existing behavior. Delivery is tracked in the
+[OpenCode package](../../../plans/opencode-v2-adoption/plan.md).
+
 ## Requirement mapping
 
 | Requirement | Design section |
@@ -100,10 +108,9 @@ This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATE
 
 ## Out of scope
 
-- Automatic runtime installation, selection changes outside default-generation
-  activation, and automatic rollback after launch failure.
-- Global npm cache cleanup, registry replacement, dependency substitution, or
-  automatic selection of another package version.
+- Automatic rollback after launch failure. Opt-in runtime installation and
+  selection are defined by [runtime update notifications](runtime-update-notifications.md).
+- Global npm cache cleanup, registry replacement, or dependency substitution.
 - Prerelease, tag, arbitrary package-spec, registry, or shell-command input.
 - Kandev-owned npm artifact retention or a package lockfile.
 - Removing npm or network access from the launch path, or locking transitive

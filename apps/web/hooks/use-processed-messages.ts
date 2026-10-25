@@ -120,6 +120,8 @@ export type TurnGroup = {
   id: string;
   turnId: string | null;
   messages: Message[];
+  /** Set on the coordinator copilot's collapsed tool-call chip; renders in place of the group. */
+  activityChip?: { count: number; failed: number; durationSeconds: number | null };
 };
 
 export type PrepareProgressItem = {

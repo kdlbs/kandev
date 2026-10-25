@@ -40,7 +40,30 @@ describe("setTaskSessionsForTask prepare backfill", () => {
     const session = makeSession("s1", {
       prepare_result: {
         status: "completed",
-        steps: [{ name: "clone", status: "ok", started_at: TS }],
+        steps: [
+          {
+            name: "clone",
+            kind: "remote_helper_download",
+            remote_platform: "linux/amd64",
+            failure_code: "timeout",
+            status: "ok",
+            started_at: TS,
+          },
+          {
+            name: "raw approval name",
+            kind: "agent_mcp_approval",
+            mcp_server_id: "server-a",
+            status: "failed",
+            error: "raw error",
+            output: "raw output",
+            mcp_diagnostic: {
+              operation: "enable",
+              stage: "start",
+              kind: "start_failed",
+              message: "exec: executable unavailable",
+            },
+          },
+        ],
       },
     });
 
@@ -49,7 +72,28 @@ describe("setTaskSessionsForTask prepare backfill", () => {
     const prepare = store.getState().prepareProgress.bySessionId["s1"];
     expect(prepare).toBeDefined();
     expect(prepare.status).toBe("completed");
-    expect(prepare.steps).toEqual([{ name: "clone", status: "ok", startedAt: TS }]);
+    expect(prepare.steps).toEqual([
+      {
+        name: "clone",
+        kind: "remote_helper_download",
+        remotePlatform: "linux/amd64",
+        failureCode: "timeout",
+        status: "ok",
+        startedAt: TS,
+      },
+      {
+        name: "",
+        kind: "agent_mcp_approval",
+        mcpServerId: "server-a",
+        status: "failed",
+        mcpDiagnostic: {
+          operation: "enable",
+          stage: "start",
+          kind: "start_failed",
+          message: "exec: executable unavailable",
+        },
+      },
+    ]);
   });
 
   it("does not create an entry for sessions without prepare_result", () => {

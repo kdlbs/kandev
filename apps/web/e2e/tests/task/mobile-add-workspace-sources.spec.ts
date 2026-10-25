@@ -1,12 +1,14 @@
-import { waitForFiniteAnimations } from "../../helpers/animations";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 
 async function chooseDirectory(
   page: Page,
@@ -87,13 +89,23 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     })
     .toBeTruthy();
 
+  if (!task.session_id) throw new Error("task creation did not return a session id");
+  await waitForAgentMessage(apiClient, task.session_id, "This is a simple mock response", 30_000);
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the source attachment workspace and initial turn to settle",
+    30_000,
+  );
+
   await mockFolderAvailability(testPage, true);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-  const entryPoint = testPage.getByTestId("files-workspace-actions");
+  const entryPoint = testPage.getByTestId("files-create-menu");
   await expect(entryPoint).toBeVisible();
   await expect(entryPoint).toBeEnabled();
   const entryBox = await entryPoint.boundingBox();
@@ -103,9 +115,8 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   expect(entryBox!.width).toBeLessThanOrEqual(48);
   await entryPoint.tap();
   const addSources = testPage.getByRole("menuitem", {
-    name: "Add Repositories to workspace",
+    name: "Add repositories or folders",
   });
-  const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
   const actionMenu = addSources.locator("xpath=ancestor::*[@role='menu'][1]");
   await actionMenu.evaluate((element) =>
     Promise.all(
@@ -114,21 +125,41 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
         .map((animation) => animation.finished.catch(() => undefined)),
     ),
   );
-  const [menuBox, addSourcesBox, openFolderBox] = await Promise.all([
+  const [menuBox, addSourcesBox] = await Promise.all([
     actionMenu.boundingBox(),
     addSources.boundingBox(),
-    openFolder.boundingBox(),
   ]);
   const menuViewport = testPage.viewportSize();
-  if (!menuBox || !addSourcesBox || !openFolderBox || !menuViewport) {
-    throw new Error("mobile workspace actions menu has no layout box");
+  if (!menuBox || !addSourcesBox || !menuViewport) {
+    throw new Error("mobile Files create menu has no layout box");
   }
   expect(menuBox.x).toBeGreaterThanOrEqual(8);
   expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(menuViewport.width - 8);
   expect(menuViewport.height - (menuBox.y + menuBox.height)).toBeGreaterThanOrEqual(7);
   expect(addSourcesBox.height).toBeGreaterThanOrEqual(44);
+  await testPage.keyboard.press("Escape");
+  await expect(addSources).not.toBeVisible();
+  const workspaceActions = testPage.getByTestId("files-workspace-actions");
+  await workspaceActions.tap();
+  const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
+  const workspaceActionsMenu = openFolder.locator("xpath=ancestor::*[@role='menu'][1]");
+  await workspaceActionsMenu.evaluate((element) =>
+    Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
+  const [overflowBox, openFolderBox] = await Promise.all([
+    workspaceActionsMenu.boundingBox(),
+    openFolder.boundingBox(),
+  ]);
+  if (!overflowBox || !openFolderBox) {
+    throw new Error("mobile workspace actions menu has no layout box");
+  }
+  expect(overflowBox.x).toBeGreaterThanOrEqual(8);
+  expect(overflowBox.x + overflowBox.width).toBeLessThanOrEqual(menuViewport.width - 8);
   expect(openFolderBox.height).toBeGreaterThanOrEqual(44);
-  if (!task.session_id) throw new Error("task creation did not return a session id");
   await testPage.route("**/api/v1/task-sessions/*/open-folder", (route) =>
     route.fulfill({ json: { success: true } }),
   );
@@ -142,27 +173,13 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   ]);
   await expect(openFolder).not.toBeVisible();
   await entryPoint.tap();
-  await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).tap();
+  await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).tap();
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
   await waitForFiniteAnimations(drawer);
-  const consequences = drawer.getByTestId("workspace-change-consequences");
-  await expect(consequences).toBeVisible();
-  await expect(consequences).toContainText("This restarts the task workspace");
-  await expect(consequences).toContainText("Cancel leaves the workspace unchanged");
-  await expect(consequences).toContainText(
-    "terminals, dev servers, and other workspace processes stop",
-  );
-  const fullImpactDetails = consequences.getByText("Full impact details");
-  const fullImpactDetailsBox = await fullImpactDetails.boundingBox();
-  expect(fullImpactDetailsBox?.height).toBeGreaterThanOrEqual(44);
-  await fullImpactDetails.tap();
-  await expect(
-    consequences.getByText(/The task root becomes the agent's working directory/),
-  ).toBeVisible();
-  await fullImpactDetails.tap();
-  await waitForFiniteAnimations(drawer);
+  await expect(drawer.getByTestId("workspace-change-consequences")).toHaveCount(0);
+  await expect(drawer.getByTestId("workspace-source-continuity")).toBeVisible();
   const [drawerBox, viewport] = await Promise.all([
     drawer.boundingBox(),
     testPage.evaluate(() => ({ width: innerWidth, height: innerHeight })),
@@ -252,6 +269,13 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     folderPath,
   );
   await expect(rows).toHaveCount(2);
+  await expect(testPage.getByTestId("folder-picker-popover")).toHaveCount(0);
+  await drawer.getByText(/Folders are live links/).scrollIntoViewIfNeeded();
+  await expect(drawer.getByText(/Folders are live links/)).toBeInViewport();
+  const removeBox = await rows.first().getByRole("button", { name: "Remove source" }).boundingBox();
+  expect(removeBox).not.toBeNull();
+  expect(removeBox!.height).toBeGreaterThanOrEqual(44);
+  expect(removeBox!.width).toBeGreaterThanOrEqual(44);
   await prCapture.screenshot("workspace-actions-mixed-sources", {
     caption: "Pixel 5 Add to workspace drawer with a local repository and folder configured",
   });
@@ -260,25 +284,36 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const [footerBox, submitBox] = await Promise.all([footer.boundingBox(), submit.boundingBox()]);
   expect(footerBox).not.toBeNull();
   expect(submitBox).not.toBeNull();
+  expect(submitBox!.height).toBeGreaterThanOrEqual(44);
   expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
+  await drawer.getByRole("radio", { name: /Inside the current/ }).tap();
+  await expect(submit).toBeEnabled();
+  const attachmentResponse = waitForHttp(
+    testPage,
+    "POST",
+    /^\/api\/v1\/tasks\/[^/]+\/workspace-sources$/,
+    { timeout: 60_000 },
+  );
   await submit.tap();
+  expect((await attachmentResponse).ok()).toBe(true);
   await expect(drawer).not.toBeVisible();
   await expect(entryPoint).toBeEnabled();
   await expect(entryPoint).toBeFocused();
 
   const files = testPage;
-  await expect(
-    files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-repository-main" }),
-  ).toBeVisible({ timeout: 30_000 });
+  const repositoryNode = files.locator(
+    '[data-testid="file-tree-node"][data-path="mobile-local-repository-main"]',
+  );
+  await expect(repositoryNode).toBeVisible({ timeout: 30_000 });
+  await expect(repositoryNode).toContainText("mobile-local-repository");
   await expect(
     files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-folder" }),
   ).toBeVisible();
   await testPage.reload();
   await session.waitForLoad();
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-  await expect(
-    files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-repository-main" }),
-  ).toBeVisible({ timeout: 30_000 });
+  await expect(repositoryNode).toBeVisible({ timeout: 30_000 });
+  await expect(repositoryNode).toContainText("mobile-local-repository");
   await expect(
     files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-folder" }),
   ).toBeVisible();

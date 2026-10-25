@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/models"
@@ -99,6 +100,30 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 	if err != nil {
 		return ContainerConfig{}, err
 	}
+	var journalHostPath, journalContainerPath string
+	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
+		location, locationErr := resolveDurableJournal(req)
+		if locationErr != nil {
+			return ContainerConfig{}, fmt.Errorf("resolve retained delivery journal: %w", locationErr)
+		}
+		journalContainerPath, err = durableJournalContainerPath(req)
+		if err != nil {
+			return ContainerConfig{}, err
+		}
+		switch executorType {
+		case string(models.ExecutorTypeLocalDocker):
+			capability := journal.CheckStorage(req.DurableJournalHostRoot, req.DurableJournalOwnerID)
+			if !capability.Durable {
+				return ContainerConfig{}, fmt.Errorf("retained delivery journal unavailable: %s", capability.Reason)
+			}
+			journalHostPath = location.Path
+		case string(models.ExecutorTypeRemoteDocker):
+			// A remote Docker daemon cannot mount a path on the backend host.
+			// Its retained container owns this path until that container is removed.
+		default:
+			return ContainerConfig{}, fmt.Errorf("unsupported Docker executor type for durable journal: %s", executorType)
+		}
+	}
 	return ContainerConfig{
 		AgentConfig:                    req.AgentConfig,
 		WorkspacePath:                  "", // Empty = no workspace mount; the clone happens inside the container.
@@ -127,6 +152,11 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		Metadata:                       req.Metadata,
 		OnProgress:                     req.OnProgress,
 		Network:                        containerNet,
+		DurableJournalHostPath:         journalHostPath,
+		DurableJournalContainerPath:    journalContainerPath,
+		DeliveryStreamID:               req.DeliveryStreamID,
+		DeliveryIncarnationID:          req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:      req.DeliveryHarnessGeneration,
 	}, nil
 }
 

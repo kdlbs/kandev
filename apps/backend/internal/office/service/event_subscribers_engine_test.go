@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -153,6 +155,76 @@ func TestEngineDispatcher_SkipsAlreadyDispatchedCommentEvent(t *testing.T) {
 	}
 }
 
+func TestCommentRetryDispatchPreservesCapturedWorkflowEntry(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	svc.SetWorkflowEngineDispatcher(nil)
+	insertTestTask(t, svc, "task-comment-retry-entry", "ws-1")
+	comment := &models.TaskComment{
+		ID:         "comment-retry-entry",
+		TaskID:     "task-comment-retry-entry",
+		AuthorType: "user",
+		AuthorID:   "user-1",
+		Body:       "please decide",
+	}
+	if err := svc.CreateComment(context.Background(), comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	disp := &fakeDispatcher{}
+	svc.SetWorkflowEngineDispatcher(disp)
+	ctx := context.Background()
+	event := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                     comment.TaskID,
+		"comment_id":                  comment.ID,
+		"author_type":                 "user",
+		"author_id":                   "user-1",
+		"workflow_step_id":            "step-review",
+		"workflow_step_transition_id": "42",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {
+		t.Fatalf("publish comment retry: %v", err)
+	}
+	calls := disp.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", len(calls))
+	}
+	payload, ok := calls[0].payload.(engine.OnCommentPayload)
+	if !ok {
+		t.Fatalf("payload type = %T, want engine.OnCommentPayload", calls[0].payload)
+	}
+	if payload.RetryWorkflowStepID != "step-review" || payload.RetryWorkflowStepTransitionID != 42 {
+		t.Fatalf("retry entry = (%q, %d), want (step-review, 42)", payload.RetryWorkflowStepID, payload.RetryWorkflowStepTransitionID)
+	}
+
+	partial := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                     comment.TaskID,
+		"comment_id":                  comment.ID,
+		"author_type":                 "user",
+		"author_id":                   "user-1",
+		"workflow_step_id":            "step-review",
+		"workflow_step_transition_id": "",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, partial); err != nil {
+		t.Fatalf("publish partial comment retry: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 1 {
+		t.Fatalf("dispatcher calls after partial retry identity = %d, want 1", len(calls))
+	}
+	suppressed := bus.NewEvent(events.OfficeCommentCreated, "dashboard", map[string]string{
+		"task_id":                 comment.TaskID,
+		"comment_id":              comment.ID,
+		"author_type":             "user",
+		"author_id":               "user-1",
+		"engine_retry_suppressed": "true",
+	})
+	if err := eb.Publish(ctx, events.OfficeCommentCreated, suppressed); err != nil {
+		t.Fatalf("publish retry-suppressed comment: %v", err)
+	}
+	if calls := disp.Calls(); len(calls) != 1 {
+		t.Fatalf("dispatcher calls after retry suppression = %d, want 1", len(calls))
+	}
+}
+
 func TestEngineDispatcher_SkipsDoneStepSelfComment(t *testing.T) {
 	svc, _ := newTestServiceWithBus(t)
 
@@ -270,19 +342,19 @@ func TestEngineDispatcher_NoSession_DropsTrigger(t *testing.T) {
 type fallbackHandledRoutingDispatcher struct{}
 
 func (fallbackHandledRoutingDispatcher) DispatchWithRouting(
-	context.Context, *models.Run, *models.AgentInstance, service.LaunchContext,
+	context.Context, *runsmodels.Run, *models.AgentInstance, service.LaunchContext,
 ) (bool, bool, error) {
 	return false, false, nil
 }
 
 func (fallbackHandledRoutingDispatcher) HandlePostStartFailure(
-	context.Context, *models.Run, *models.AgentInstance, string, *streams.ProviderError,
+	context.Context, *runsmodels.Run, *models.AgentInstance, string, *streams.ProviderError,
 ) (bool, error) {
 	return true, nil
 }
 
 func (fallbackHandledRoutingDispatcher) MarkRunSuccessHealth(
-	context.Context, *models.Run, *models.AgentInstance,
+	context.Context, *runsmodels.Run, *models.AgentInstance,
 ) {
 }
 
@@ -294,13 +366,13 @@ type blockingPostStartFallbackDispatcher struct {
 }
 
 func (d *blockingPostStartFallbackDispatcher) DispatchWithRouting(
-	context.Context, *models.Run, *models.AgentInstance, service.LaunchContext,
+	context.Context, *runsmodels.Run, *models.AgentInstance, service.LaunchContext,
 ) (bool, bool, error) {
 	return false, false, nil
 }
 
 func (d *blockingPostStartFallbackDispatcher) HandlePostStartFailure(
-	_ context.Context, run *models.Run, _ *models.AgentInstance, _ string, _ *streams.ProviderError,
+	_ context.Context, run *runsmodels.Run, _ *models.AgentInstance, _ string, _ *streams.ProviderError,
 ) (bool, error) {
 	d.svc.ExecSQL(d.t, `UPDATE runs SET status = 'queued', session_id = '',
 		claimed_at = NULL, finished_at = NULL WHERE id = ?`, run.ID)
@@ -310,7 +382,7 @@ func (d *blockingPostStartFallbackDispatcher) HandlePostStartFailure(
 }
 
 func (d *blockingPostStartFallbackDispatcher) MarkRunSuccessHealth(
-	context.Context, *models.Run, *models.AgentInstance,
+	context.Context, *runsmodels.Run, *models.AgentInstance,
 ) {
 }
 
@@ -319,7 +391,7 @@ func (d *blockingPostStartFallbackDispatcher) MarkRunSuccessHealth(
 // task+agent fallback (GetClaimedRunByTaskAndAgent).
 func queueTaskAssignedRunForAgentFailedTests(
 	t *testing.T, svc *service.Service, agentID, taskID string,
-) *models.Run {
+) *runsmodels.Run {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := svc.QueueRun(

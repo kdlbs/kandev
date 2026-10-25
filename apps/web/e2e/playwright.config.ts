@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const CI = !!process.env.CI;
+const upgradeRun = ["upgrade-desktop", "upgrade-mobile"].includes(
+  process.env.KANDEV_UPGRADE_PROJECT ?? "",
+);
 
 export default defineConfig({
   testDir: "./tests",
@@ -24,7 +27,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: CI,
   failOnFlakyTests: !CI || process.env.E2E_FAIL_ON_FLAKY === "1",
-  retries: CI ? 2 : 0,
+  retries: CI ? 3 : 0,
   workers: 1,
   timeout: 60_000,
   // CI uses blob reporter for cross-shard merge-reports; local uses list.
@@ -38,6 +41,24 @@ export default defineConfig({
   },
 
   projects: [
+    ...(upgradeRun
+      ? [
+          {
+            name: "upgrade-desktop",
+            testMatch: /upgrade\/release-upgrade\.spec\.ts/,
+            retries: 0,
+            timeout: 600_000,
+            use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" as const },
+          },
+          {
+            name: "upgrade-mobile",
+            testMatch: /upgrade\/mobile-release-upgrade\.spec\.ts/,
+            retries: 0,
+            timeout: 600_000,
+            use: { ...devices["Pixel 5"], trace: "retain-on-failure" as const },
+          },
+        ]
+      : []),
     {
       // The office-routing-* specs call `backend.restart()` with
       // KANDEV_MOCK_PROVIDERS, which permanently mutates the backend's
@@ -66,6 +87,7 @@ export default defineConfig({
     {
       name: "chromium",
       testIgnore: [
+        /upgrade\/.*\.spec\.ts/,
         /mobile-.*\.spec\.ts/,
         // Container-backed tests (Docker, SSH, and Kubernetes executors) live in the
         // `containers` project and skip when Docker is not available locally.
@@ -74,6 +96,7 @@ export default defineConfig({
         /ssh\/.*\.spec\.ts/,
         /kubernetes\/.*\.spec\.ts/,
         /kubernetes-compat\/.*\.spec\.ts/,
+        /git\/turn-changed-files-executors\.spec\.ts/,
         /office-routing-.*\.spec\.ts/,
         // Auth specs run in the dedicated `auth` project (see above).
         /auth\/.*\.spec\.ts/,
@@ -83,6 +106,7 @@ export default defineConfig({
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
+      testIgnore: [/ssh\/.*\.spec\.ts/, /upgrade\/.*\.spec\.ts/],
       use: { ...devices["Pixel 5"] },
     },
     {
@@ -103,6 +127,7 @@ export default defineConfig({
         /remote-docker\/.*\.spec\.ts/,
         /ssh\/.*\.spec\.ts/,
         /kubernetes\/.*\.spec\.ts/,
+        /git\/turn-changed-files-executors\.spec\.ts/,
       ],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
@@ -127,5 +152,5 @@ export default defineConfig({
   // No webServer — each Playwright worker spawns its own frontend
   // via the backend fixture (see fixtures/backend.ts)
 
-  globalSetup: "./global-setup.ts",
+  globalSetup: upgradeRun ? "./upgrade-global-setup.ts" : "./global-setup.ts",
 });

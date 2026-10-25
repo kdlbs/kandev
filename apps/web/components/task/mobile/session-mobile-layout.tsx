@@ -24,6 +24,7 @@ import { fetchAndOpenFile } from "../file-browser-hooks";
 import { MobileReviewPanel } from "./mobile-review-panel";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import { useAppStore } from "@/components/state-provider";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type {
@@ -34,7 +35,6 @@ import type {
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { reviewItemId, useReviewItemSelection } from "../review-selection";
 import { PluginTaskPanel } from "../plugin-task-panel";
-import { PromptHistoryPanelContent } from "../prompt-history-panel-content";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 import { useTranslation } from "react-i18next";
@@ -81,8 +81,19 @@ export function resolveMobileReviewSource(
 const TOP_NAV_HEIGHT = "3.5rem";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
 
-export function mobilePanelTopNavHeight(hasSharedTaskError: boolean): string {
-  return hasSharedTaskError ? "0px" : TOP_NAV_HEIGHT;
+export function mobilePanelTopNavHeight(
+  hasSharedTaskError: boolean,
+  hasPageLevelFeedback = false,
+): string {
+  return hasSharedTaskError || hasPageLevelFeedback ? "0px" : TOP_NAV_HEIGHT;
+}
+
+export function mobilePanelTopPadding(
+  hasSharedTaskError: boolean,
+  hasPageLevelFeedback = false,
+): string {
+  if (hasPageLevelFeedback) return "0px";
+  return `calc(${mobilePanelTopNavHeight(hasSharedTaskError)} + env(safe-area-inset-top, 0px))`;
 }
 
 type SessionMobileLayoutProps = {
@@ -107,6 +118,7 @@ type SessionMobileLayoutProps = {
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
   hasSharedTaskError?: boolean;
+  hasPageLevelFeedback?: boolean;
 };
 
 function MobileChatPanelContent({
@@ -114,6 +126,7 @@ function MobileChatPanelContent({
   isPassthroughMode,
   effectiveSessionId,
   onOpenFile,
+  onOpenHistoricalDiff,
   scrollTarget,
   onScrollTargetConsumed,
   isVisible,
@@ -122,6 +135,7 @@ function MobileChatPanelContent({
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
   onOpenFile: (path: string, repo?: string) => void;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
   scrollTarget: PendingMessageScrollTarget | null;
   onScrollTargetConsumed: (messageId: string) => void;
   isVisible: boolean;
@@ -156,8 +170,10 @@ function MobileChatPanelContent({
           taskId={effectiveSessionId ? activeTaskId : null}
           statusTaskId={activeTaskId}
           onOpenFile={onOpenFile}
+          onOpenHistoricalDiff={onOpenHistoricalDiff}
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
+          detailActive={isVisible}
           onPendingScrollConsumed={onScrollTargetConsumed}
           hideLaunchQueueStatus
           hideWipQueueStatus
@@ -175,6 +191,8 @@ type MobilePanelAreaProps = {
   selectedFile: OpenFileTab | null;
   selectedFilePreview: boolean;
   selectedDiff: { path: string; content?: string } | null;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
+  onCloseHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
   handleOpenFileFromChat: (path: string, repo?: string, preview?: boolean) => void;
   handleClearSelectedDiff: () => void;
   handleOpenFile: (file: OpenFileTab) => void;
@@ -182,7 +200,7 @@ type MobilePanelAreaProps = {
   onNavigateToPrompt: (messageId: string) => PluginOpenMessageResult;
   onScrollTargetConsumed?: (messageId: string) => void;
   mobileScrollTarget: PendingMessageScrollTarget | null;
-  topNavHeight: string;
+  topPadding: string;
   bottomNavHeight: string;
   reviews: readonly ReviewItemSummary[];
   selectedReview: ReviewItemSummary | null;
@@ -231,6 +249,8 @@ export function MobilePanelArea({
   selectedFile,
   selectedFilePreview,
   selectedDiff,
+  onOpenHistoricalDiff,
+  onCloseHistoricalDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
   handleOpenFile,
@@ -238,7 +258,7 @@ export function MobilePanelArea({
   onNavigateToPrompt,
   onScrollTargetConsumed = () => {},
   mobileScrollTarget,
-  topNavHeight,
+  topPadding,
   bottomNavHeight,
   reviews,
   selectedReview,
@@ -249,8 +269,11 @@ export function MobilePanelArea({
     <div
       className="flex flex-col"
       style={{
-        paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
-        paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
+        paddingTop: topPadding,
+        paddingBottom:
+          currentMobilePanel === "chat" && isPassthroughMode
+            ? `max(calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px)), ${bottomOffset}px)`
+            : `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
         height: "100%",
       }}
     >
@@ -261,15 +284,11 @@ export function MobilePanelArea({
             isPassthroughMode={isPassthroughMode}
             effectiveSessionId={effectiveSessionId}
             onOpenFile={handleOpenFileFromChat}
+            onOpenHistoricalDiff={onOpenHistoricalDiff}
             scrollTarget={mobileScrollTarget}
             onScrollTargetConsumed={onScrollTargetConsumed}
             isVisible
           />
-        </div>
-      )}
-      {currentMobilePanel === "prompt-history" && (
-        <div className="flex-1 min-h-0 flex flex-col p-2">
-          <PromptHistoryPanelContent onNavigateToPrompt={onNavigateToPrompt} />
         </div>
       )}
       {currentMobilePanel === "plan" && (
@@ -281,6 +300,7 @@ export function MobilePanelArea({
             selectedDiff={selectedDiff}
             onClearSelected={handleClearSelectedDiff}
             onOpenFile={handleOpenFileFromChat}
+            onCloseHistoricalDiff={onCloseHistoricalDiff}
           />
         </div>
       )}
@@ -575,7 +595,6 @@ type SessionMobileFooterProps = {
   sessionKind: "managed" | "passthrough" | null;
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
-  showPromptHistory: boolean;
   planBadge: boolean;
   changesBadge: number;
   hasReview: boolean;
@@ -592,7 +611,6 @@ function SessionMobileFooter({
   sessionKind,
   activePanel,
   onPanelChange,
-  showPromptHistory,
   planBadge,
   changesBadge,
   hasReview,
@@ -612,7 +630,6 @@ function SessionMobileFooter({
       <SessionMobileBottomNav
         activePanel={activePanel}
         onPanelChange={onPanelChange}
-        showPromptHistory={showPromptHistory}
         planBadge={planBadge}
         changesBadge={changesBadge}
         hasReview={hasReview}
@@ -652,6 +669,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     effectiveSessionId,
     isPassthroughMode,
     selectedDiff,
+    handleSelectHistoricalDiff,
     handleClearSelectedDiff,
     totalChangesCount,
     hasUnseenPlanUpdate,
@@ -662,6 +680,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     isTaskSwitcherOpen,
     handleMenuClick,
   } = useSessionLayoutState({ sessionId: props.sessionId });
+  const handleOpenHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      handleSelectHistoricalDiff(target);
+      handlePanelChange("changes");
+    },
+    [handlePanelChange, handleSelectHistoricalDiff],
+  );
   const {
     selectedFile,
     selectedFilePreview,
@@ -669,6 +694,25 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const handleCloseHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      handlePanelChangeAndClearSheet("chat");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const card = [...document.querySelectorAll<HTMLElement>("[data-change-set-id]")].find(
+            (element) => element.dataset.changeSetId === target.changeSetId,
+          );
+          const trigger = target.fileChangeId
+            ? card?.querySelector<HTMLElement>(
+                `[data-turn-file-change-id="${target.fileChangeId}"]`,
+              )
+            : card?.querySelector<HTMLElement>("[data-turn-change-open-diff]");
+          trigger?.focus();
+        });
+      });
+    },
+    [handlePanelChangeAndClearSheet],
+  );
   const workflowFocusRequest = useAppStore((state) => {
     const request = state.workflowSessionFocus.request;
     return request && request.taskId === activeTaskId && request.sessionId === effectiveSessionId
@@ -755,6 +799,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         selectedFile={selectedFile}
         selectedFilePreview={selectedFilePreview}
         selectedDiff={selectedDiff}
+        onOpenHistoricalDiff={handleOpenHistoricalDiff}
+        onCloseHistoricalDiff={handleCloseHistoricalDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleOpenFile={handleOpenFile}
@@ -762,7 +808,10 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}
         mobileScrollTarget={mobileScrollTarget}
-        topNavHeight={mobilePanelTopNavHeight(Boolean(props.hasSharedTaskError))}
+        topPadding={mobilePanelTopPadding(
+          Boolean(props.hasSharedTaskError),
+          Boolean(props.hasPageLevelFeedback),
+        )}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
         reviews={reviews}
         selectedReview={selectedReview}
@@ -777,7 +826,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         planBadge={hasUnseenPlanUpdate}
         changesBadge={totalChangesCount}
         hasReview={reviews.length > 0}
-        showPromptHistory={!isPassthroughMode && effectiveSessionId !== null}
         taskCanvases={props.taskCanvases}
         onOpenCanvas={props.onOpenCanvas}
       />

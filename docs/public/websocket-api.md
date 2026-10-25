@@ -226,7 +226,20 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
-`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Actual workflow-step changes requested through `move_task_kandev` from a RUNNING or STARTING session use the deferred MCP path and persist their complete options through turn completion, WIP promotion, and backend restart. A valid same-step MCP request without entry options returns `disposition: "applied"` with the stored task, so the caller does not need to retry.
+`task.move` accepts an optional one-shot `entry_options` object:
+
+- Normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`. Empty optional strings are omitted, and the values never mutate workflow defaults.
+- Reset is additive. Instructions are appended after the destination step's normal prompt.
+- `skip_step_prompt` suppresses the destination prompt and task-description fallback for this entry. With instructions, the agent starts a turn carrying only those instructions. Without instructions, no turn starts and the task lands idle.
+- A successful response includes the normalized options when supplied, plus a `move_id` correlating options retained for a deferred move.
+- HTTP and WebSocket moves keep the session-or-auto-start acceptance rule.
+
+The agent tool has additional rules:
+
+- `move_task_kandev` accepts the same options. Its legacy `prompt` aliases `entry_options.instructions`; conflicting non-empty values are rejected.
+- Manual targets reject agent prompts and options, even when the task has a session. See [agent move guidance](agent-communication.md#move-a-task-with-entry-options) for recipient semantics and the workaround.
+- A step change requested by a `RUNNING` or `STARTING` session uses the deferred MCP path. Complete options persist through turn completion, WIP promotion, and restart.
+- A same-step request without options returns `disposition: "applied"` with the stored task; no retry is needed.
 
 ```json
 {
@@ -269,6 +282,34 @@ If `intent` is omitted, the backend infers it from those fields. That inference 
 
 A successful response contains `success`, `task_id`, `state`, and usually `session_id`; it can also contain `agent_execution_id`, `worktree_path`, and `worktree_branch`. Session states use uppercase values such as `CREATED`, `STARTING`, `RUNNING`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`.
 
+### Repair preserved workspace inventory
+
+`session.recover` accepts the task-scoped `repair_workspace_inventory` action when a Worktree resume fails because the canonical environment inventory is missing or has a stale branch-slot identity. This is a preservation-only recovery action, not a general database editor. The server derives the workspace, repository, environment, row, path, and branch from the authorized task and session; clients provide only `task_id`, `session_id`, `action`, and a non-empty retry-stable `idempotency_key`. The key remains bound to the original session and derived checkout identity after repair; reusing it for another session conflicts. Active borrowers of the same environment block repair, and inherited resumes must pass the environment owner’s preservation attestation. Repositories with external Git clean/process filters require manual recovery.
+
+```json
+{
+  "id": "repair-inventory-1",
+  "type": "request",
+  "action": "session.recover",
+  "payload": {
+    "task_id": "task-uuid",
+    "session_id": "session-uuid",
+    "action": "repair_workspace_inventory",
+    "idempotency_key": "incident-2026-09-01-attempt-1"
+  }
+}
+```
+
+The action succeeds only when Kandev proves one unmatched canonical slot, one server-owned managed checkout, the exact registered Git worktree and branch, an unchanged HEAD plus dirty/untracked content, current database revisions, and no competing task session. It then inserts or corrects only that environment-repository row and appends an audit receipt in one transaction. The unchanged checkout is inspected again, and matching post-repair evidence must be durably recorded, before the resume proceeds through the normal fail-closed inventory validator.
+
+The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
+
+After a completed positive repair, ordinary Resume and additional-session launch allow a later branch switch or rename when the recorded current branch matches the same registered Git worktree. Later commits and file edits remain intact, and the original repair receipt remains unchanged. Existing receipts support this check without a migration.
+
+Use ordinary Resume after a branch change. An explicit repair retry with the original key still requires the original request identity. Incomplete or failed repair evidence still blocks admission, and workspace recovery does not clear an independent `unknown_prompt_outcome` block or replay its prompt.
+
+Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
+
 Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
 
 ### Search work-item references over HTTP
@@ -276,6 +317,61 @@ Every task-session response includes immutable `queue_incarnation_id`. Kandev ge
 The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspaceId/mentions/search?q=<plain-text>&limit=<per-source-limit>&exclude_task_id=<optional-task-id>`. `q` is required after trimming and accepts 1–200 Unicode characters. `limit` defaults to 5 and is clamped to 1–10. When supplied, `exclude_task_id` must belong to the requested workspace.
 
 A successful response returns the normalized query and an ordered `groups` array. Each group includes `source`, `provider`, `kind`, `display_name`, `kind_label`, `status`, and `results`. One source can report `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope` while the request remains HTTP 200 and other groups remain usable. Each result is a versioned `EntityReference` with the fields described below; raw provider errors and credentials are not returned.
+
+### Workflow snapshot coverage
+
+Workflow and workspace snapshot responses can include `task_coverage` alongside
+`tasks`: `workspace_id`, `workflow_id`, `membership: "active"`, `total`, `complete`,
+and `ordering_profile`. The total describes the collection before `task_limit`
+truncation. Boot snapshots use `taskCoverage` for the same metadata and mark
+omitted rows incomplete. Missing metadata never establishes completeness.
+
+The workflow list with `include_hidden=true` can also include
+`task_workflow_coverage`, containing `workspace_id`, `workflow_ids`, and `complete`.
+It identifies every scope containing eligible active tasks, including hidden
+workflows and the empty identifier for unassigned tasks. Empty scopes need no task
+fetch. The boot workflow state carries this as `taskWorkflowCoverage`.
+
+The web client evaluates complete resident views with the verified
+`sqlite_nocase_v1` ordering profile. `server_only` and unknown profiles retain
+server evaluation. Complete active coverage cannot satisfy archived views.
+WebSocket updates maintain shared task records; a reconnect gap invalidates
+coverage until an authoritative snapshot recovers it.
+
+### Query sidebar tasks over HTTP
+
+When a view is not covered by current workspace data, the web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
+
+```json
+{
+  "filters": [{ "dimension": "archived", "op": "is", "value": false }],
+  "sort": { "key": "lastActivityAt", "direction": "desc" },
+  "group": "none",
+  "collapsed_group_keys": [],
+  "collapsed_task_ids": [],
+  "page": 1,
+  "page_size": 100,
+  "locale": "en"
+}
+```
+
+`page` is one-based. `page_size` defaults to 100 and cannot exceed 100. The server filters and orders the complete view before selecting the page. It clamps a page that is beyond the current result and returns `query_key`, `page`, `page_size`, `total_tasks`, `total_visible_tasks`, `has_previous`, `has_next`, and ordered `entries`. Entries can be group headings, task rows, or continuation context for a task whose parent is on another page. Group headings and continuation entries are not included in `total_visible_tasks`.
+
+The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
+
+A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
+accepts up to 1,000 values, including an empty list. Each decoded string is
+limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.
+Repository values are repository names, while workflow values are workflow IDs.
+
+Invalid queries return HTTP 400 with the existing `error` string and an additive
+`error_code: "sidebar_query_invalid"`. The `details` object includes a stable
+`reason` and, where relevant, a zero-based `filter_index` and numeric `limit`.
+Reasons include `list_count`, `scalar_length`, `clause_count`, `invalid_clause`,
+`malformed_query`, `page_bounds`, `sorting`, `grouping`, `collapsed_count`, and
+`locale`. Clients should render their own localized recovery message and treat
+unknown reasons as invalid input. Authorization failures remain separate from
+query validation.
 
 ### Send a user turn
 
@@ -378,6 +474,54 @@ task.walkthrough.get
 
 There are no ordinary dispatcher registrations for direct workflow-step update, delete, or reorder requests. Those operations are available through the workflow HTTP/configuration surfaces and relevant MCP tools.
 
+### Session list projection
+
+`task.session.list` and `GET /api/v1/tasks/{id}/sessions` return compact membership and status rows. The caller must have access to the task. Rows retain session and repository identity, pending actions, runtime activity, cancellation revisions, and parked-work revisions.
+
+Metadata includes the latest agent error and, when available, the current model ID and display name. It excludes other model choices, configuration options, preparation records, and delivery-recovery state. Use `GET /api/v1/task-sessions/{id}` when full session details are needed. An explicit `last_agent_error: null` clears a retained error.
+
+### Partial workflow updates
+
+`workflow.update` and REST `PATCH /api/v1/workflows/:id` change only supplied
+`name`, `description`, `prompt`, and `agent_profile_id` fields. Omitted fields
+and JSON `null` retain stored values; explicit empty strings clear them. Concurrent
+updates to different fields retain both edits across backend services. Supplying
+all four fields, as the workflow editor does, replaces all four values.
+
+Responses and `workflow.updated` events describe the row observed by each write.
+Concurrent events may arrive in a different order from writes. Reconcile with
+`workflow.get` after a gap or an uncertain request outcome.
+
+### Partial task updates
+
+`task.update` and REST `PATCH /api/v1/tasks/:id` change only supplied fields. Concurrent
+ordinary updates to different fields retain both edits, including requests handled by
+separate backend services. Omitted fields and JSON `null` retain current values; explicit
+empty strings keep the field's existing clear behavior, and `repositories: []` clears
+repository associations.
+
+A supplied `metadata` object retains the existing replacement or pending-title merge
+behavior. It does not merge arbitrary keys from competing requests. Server-owned
+lifecycle and handoff records remain protected, and an explicit title resolves pending
+agent naming.
+
+The REST `PATCH /api/v1/tasks/:id/port-forwarding` preference uses the explicit
+metadata merge path. Concurrent admitted merges preserve different ordinary top-level
+keys and omitted task fields across backend services. Supplying the same key uses the
+last committed value. This does not extend ordinary metadata replacement or later
+full-snapshot writes into per-key merges, and nested/null behavior keeps the current
+pending-title database semantics.
+
+GitHub issue linking and unlinking preserve unrelated metadata and omitted task fields,
+including concurrent port-forwarding preference changes. A link replaces the complete
+issue identity together; unlink removes its five issue keys. Legacy issue-watch metadata
+remains separate. These operations retain the ordinary task update notification path.
+
+This guarantee covers ordinary partial updates and participating field-scoped writes.
+Internal full-snapshot and exact/versioned commands retain their own contracts. Responses
+and notifications may observe a later commit; they do not establish a total event order
+or an exact mutation receipt.
+
 ### Sessions, messages, agents, and orchestration
 
 ```text
@@ -433,6 +577,8 @@ permission.respond
 ```
 
 `agent.launch`, `agent.stdin`, and related calls are lower-level agent controls. Task clients should normally use `session.launch`, `message.add`, and `session.stop`. Constants such as `agent.prompt`, `message.get`, and `session.set_mode` currently have no dispatcher registration and are deliberately absent.
+
+`message.list` accepts `session_id`, `limit`, `before`, `after`, and `sort`. Set `include_turns: true` to receive `turns` and `turn_coverage` with the message page. The equivalent HTTP option is `GET /api/v1/task-sessions/{id}/messages?include_turns=true`. Turn context comes from the same reader snapshot as the messages and contains only turns referenced by those messages plus the current active turn. The response has at most one turn per distinct message turn ID and one additional active turn. `turn_coverage.message_ids` lists the returned messages covered by the read; `turn_coverage.active_turn_id` is the active turn observed by that snapshot, or `null` when none was active. Without `include_turns`, the response keeps its message-only shape.
 
 ### Repositories, executors, files, Git, and terminals
 
@@ -709,7 +855,25 @@ mcp.write_task_document
 
 These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims: raw `/ws` rejects every one of them before handler dispatch. Use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact. In particular, `mcp.stop_task` is the internal action behind task-mode `stop_task_kandev`; External MCP does not register that tool.
 
+The `mcp.get_task_plan` shim accepts optional `offset`, `limit`, and
+`expected_version` from the agent tool. Offset and limit count Unicode code
+points. Supplying either selects an exact bounded fragment; omitting both
+preserves the full read. Partial results include the snapshot version, whole
+plan lengths, returned lengths, `has_more`, and `next_offset`; a stale expected
+version returns a conflict without content. These fields do not change the
+browser's `task.plan.get` contract. Use
+[the MCP plan-read guide](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for defaults, bounds, and examples.
+
 ## Emitted notifications and recipients
+
+Executor and executor-profile configuration notifications are sent only to
+eligible recipients. Ownership changes also emit the payload-free
+`executor.catalogue.invalidated` notification so clients discard cached
+configuration and refetch their permitted catalogue, including when access was
+revoked. Failed eligibility resolution does not broadcast private executor
+configuration.
+
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 

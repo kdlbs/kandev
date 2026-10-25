@@ -23,13 +23,13 @@ import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import { useAppStore } from "@/components/state-provider";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { useAgentCreationStoreSync } from "@/hooks/domains/settings/use-agent-creation-store-sync";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
-import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
+import type { DraftProfile, DraftAgent, SaveAgentCallbacks } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
 import { isHandledApiError } from "@/lib/api/client";
 
@@ -65,6 +65,7 @@ const createDraftProfile = (
   ...buildDefaultPermissions(permissionSettings ?? {}),
   cliPassthrough: false,
   cursorMcpAuthEnabled: true,
+  cursorPluginsMcpEnabled: true,
   cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
@@ -165,32 +166,6 @@ function useAgentFormState(
   };
 }
 
-function useAgentStoreSync() {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
-
-  const syncAgentsToStore = (nextAgents: Agent[]) => {
-    setSettingsAgents(nextAgents);
-    setAgentProfiles(
-      nextAgents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-    );
-  };
-
-  const upsertAgent = (agent: Agent) => {
-    const exists = settingsAgents.some((item: Agent) => item.id === agent.id);
-    syncAgentsToStore(
-      exists
-        ? settingsAgents.map((item: Agent) => (item.id === agent.id ? agent : item))
-        : [...settingsAgents, agent],
-    );
-  };
-
-  return { upsertAgent };
-}
-
 type AgentSaveHandlersProps = {
   draftAgent: DraftAgent;
   savedAgent: Agent | null;
@@ -201,7 +176,8 @@ type AgentSaveHandlersProps = {
   resolveDisplayName: (name: string) => string;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   setSaveStatus: (status: "idle" | "loading" | "success" | "error") => void;
-  upsertAgent: (agent: Agent) => void;
+  upsertAgent: ReturnType<typeof useAgentCreationStoreSync>["upsertAgent"];
+  getAgentProfilesVersion: () => number;
   onToastError: (error: unknown) => void;
   replaceRoute: (path: string) => void;
 };
@@ -217,6 +193,7 @@ function useAgentSaveHandlers({
   setDraftAgent,
   setSaveStatus,
   upsertAgent,
+  getAgentProfilesVersion,
   onToastError,
   replaceRoute,
 }: AgentSaveHandlersProps) {
@@ -234,13 +211,20 @@ function useAgentSaveHandlers({
       onToastError(new Error(t("agents:fixInvalidMcpJson")));
       return;
     }
+    const profileVersionAtSaveStart = getAgentProfilesVersion();
     setSaveStatus("loading");
     const callbacks = {
       onToastError,
       currentAgentModelConfig,
       permissionSettings,
       resolveDisplayName,
-      upsertAgent,
+      upsertAgent: ((agent, creation, allowMissingAgent) =>
+        upsertAgent(
+          agent,
+          creation,
+          profileVersionAtSaveStart,
+          allowMissingAgent,
+        )) satisfies SaveAgentCallbacks["upsertAgent"],
       setDraftAgent,
       ensureProfiles,
       cloneAgent,
@@ -376,7 +360,7 @@ function AgentSetupForm({
   const router = useRouter();
   const availableAgents = useAvailableAgents().items;
   const { items: secrets } = useSecrets();
-  const { upsertAgent } = useAgentStoreSync();
+  const { getAgentProfilesVersion, upsertAgent } = useAgentCreationStoreSync();
 
   const {
     draftAgent,
@@ -414,6 +398,7 @@ function AgentSetupForm({
     setDraftAgent,
     setSaveStatus,
     upsertAgent,
+    getAgentProfilesVersion,
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });
@@ -462,6 +447,57 @@ function AgentSetupForm({
   );
 }
 
+function buildInitialAgent(
+  decodedKey: string,
+  savedAgent: Agent | null,
+  discoveryAgent: AgentDiscovery | undefined,
+  availableAgents: AvailableAgent[],
+  isCreateMode: boolean,
+): DraftAgent | null {
+  if (!decodedKey) return null;
+  const resolve = (name: string) => availableAgents.find((item) => item.name === name);
+  const displayName = (name: string) => resolve(name)?.display_name ?? "";
+  const defaultModel = (name: string) => resolve(name)?.model_config?.default_model ?? "";
+  const permissions = (name: string) => resolve(name)?.permission_settings;
+
+  if (savedAgent) {
+    const agentDraft = isCreateMode
+      ? {
+          ...savedAgent,
+          workspace_id: savedAgent.workspace_id ?? null,
+          mcp_config_path: savedAgent.mcp_config_path ?? "",
+          profiles: [],
+          isNew: false,
+        }
+      : cloneAgent(savedAgent);
+    return ensureProfiles(
+      agentDraft,
+      displayName(savedAgent.name),
+      defaultModel(savedAgent.name),
+      permissions(savedAgent.name),
+    );
+  }
+  if (!discoveryAgent) return null;
+
+  const draft: DraftAgent = {
+    id: `draft-${generateUUID()}`,
+    name: discoveryAgent.name,
+    workspace_id: null,
+    supports_mcp: discoveryAgent.supports_mcp,
+    mcp_config_path: discoveryAgent.mcp_config_path ?? "",
+    profiles: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    isNew: true,
+  };
+  return ensureProfiles(
+    draft,
+    displayName(draft.name),
+    defaultModel(draft.name),
+    permissions(draft.name),
+  );
+}
+
 export default function AgentSetupPage() {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -473,6 +509,7 @@ export default function AgentSetupPage() {
   const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
   const savedAgents = useAppStore((state) => state.settingsAgents.items);
   const availableAgents = useAvailableAgents().items;
+  const nativeCodexAvailable = useAppStore((state) => state.features?.codexAppServer ?? false);
 
   const discoveryAgent = useMemo(
     () => discoveryAgents.find((a: AgentDiscovery) => a.name === decodedKey),
@@ -483,51 +520,23 @@ export default function AgentSetupPage() {
     [decodedKey, savedAgents],
   );
 
-  const initialAgent = useMemo(() => {
-    if (!decodedKey) return null;
-    const resolve = (name: string) =>
-      availableAgents.find((item: AvailableAgent) => item.name === name);
-    const dn = (name: string) => resolve(name)?.display_name ?? "";
-    const dm = (name: string) => resolve(name)?.model_config?.default_model ?? "";
-    const ps = (name: string) => resolve(name)?.permission_settings;
-    if (savedAgent) {
-      if (isCreateMode) {
-        return ensureProfiles(
-          {
-            ...savedAgent,
-            workspace_id: savedAgent.workspace_id ?? null,
-            mcp_config_path: savedAgent.mcp_config_path ?? "",
-            profiles: [],
-            isNew: false,
-          },
-          dn(savedAgent.name),
-          dm(savedAgent.name),
-          ps(savedAgent.name),
-        );
-      }
-      return ensureProfiles(
-        cloneAgent(savedAgent),
-        dn(savedAgent.name),
-        dm(savedAgent.name),
-        ps(savedAgent.name),
-      );
-    }
-    if (discoveryAgent) {
-      const draft: DraftAgent = {
-        id: `draft-${generateUUID()}`,
-        name: discoveryAgent.name,
-        workspace_id: null,
-        supports_mcp: discoveryAgent.supports_mcp,
-        mcp_config_path: discoveryAgent.mcp_config_path ?? "",
-        profiles: [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        isNew: true,
-      };
-      return ensureProfiles(draft, dn(draft.name), dm(draft.name), ps(draft.name));
-    }
-    return null;
-  }, [decodedKey, discoveryAgent, savedAgent, availableAgents, isCreateMode]);
+  const initialAgent = useMemo(
+    () => buildInitialAgent(decodedKey, savedAgent, discoveryAgent, availableAgents, isCreateMode),
+    [decodedKey, discoveryAgent, savedAgent, availableAgents, isCreateMode],
+  );
+
+  if (decodedKey === "codex-app-server" && !nativeCodexAvailable) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <p className="text-sm text-muted-foreground">{t("agents:nativeCodexUnavailable")}</p>
+          <Button className="mt-4" asChild>
+            <Link href="/settings/agents">{t("agents:backToAgents")}</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (!initialAgent && discoveryAgents.length > 0) {
     return (

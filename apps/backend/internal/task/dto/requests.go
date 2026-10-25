@@ -25,12 +25,14 @@ type CreateWorkspaceRequest struct {
 }
 
 type UpdateWorkspaceRequest struct {
-	ID                    string
-	Name                  *string
-	Description           *string
-	DefaultExecutorID     *string
-	DefaultEnvironmentID  *string
-	DefaultAgentProfileID *string
+	ID                       string
+	Name                     *string
+	Description              *string
+	DefaultExecutorID        *string
+	DefaultEnvironmentID     *string
+	DefaultAgentProfileID    *string
+	ACPIdleSuspensionEnabled *bool
+	ACPIdleTimeoutMinutes    *int
 }
 
 type DeleteWorkspaceRequest struct {
@@ -289,6 +291,7 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput
 	Position       int
 	Metadata       map[string]interface{}
+	MCPServerIDs   []string
 
 	// Office extensions
 	AssigneeAgentProfileID string

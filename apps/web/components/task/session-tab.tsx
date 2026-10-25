@@ -16,13 +16,8 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import {
-  useSessionActions,
-  isSessionDeletable as isDeletable,
-} from "@/hooks/domains/session/use-session-actions";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
-import { usableConfigOptions } from "@/components/model-config-selector";
 import {
   BulkSessionRemoveDialog,
   SessionContextMenuItems,
@@ -35,12 +30,14 @@ import {
   shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
-import { resolveSessionTabTitle } from "./session-tab-title";
+import { selectSessionTabTitle } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
 import { useSessionTabDelete } from "./use-session-tab-delete";
-import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
+import { limitSessionName, useSessionRenameCommitter } from "./use-session-rename";
+import { shouldShowSessionTabCloseAction } from "./session-tab-visibility";
+import { useSessionTabActions } from "./session-tab-actions";
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -61,37 +58,7 @@ function useSessionTabState(sessionId: string | undefined) {
   });
   const tabTitle = useAppStore((state) => {
     if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    const sessionModels = state.sessionModels.bySessionId[sessionId];
-    const activeModelId = state.activeModel.bySessionId[sessionId] || null;
-    const agentLabel = (() => {
-      if (!session?.agent_profile_id) return null;
-      const profile = state.agentProfiles.items.find(
-        (p: { id: string }) => p.id === session.agent_profile_id,
-      );
-      if (!profile) return null;
-      const parts = profile.label.split(" \u2022 ");
-      return parts[1] || parts[0] || profile.label;
-    })();
-    const snapshotModel =
-      typeof session?.agent_profile_snapshot?.model === "string"
-        ? session.agent_profile_snapshot.model
-        : null;
-    return resolveSessionTabTitle({
-      customName: session?.name ?? null,
-      agentLabel,
-      activeModelId,
-      currentModelId: sessionModels?.currentModelId || null,
-      snapshotModel,
-      modelOptions:
-        sessionModels?.models.map((model) => ({
-          id: model.modelId,
-          name: model.name,
-          description: model.description,
-          usageMultiplier: model.usageMultiplier,
-        })) ?? [],
-      configOptions: usableConfigOptions(sessionModels?.configOptions),
-    });
+    return selectSessionTabTitle(state, sessionId);
   });
   const agentName = useAppStore((state) => {
     if (!sessionId) return null;
@@ -130,37 +97,6 @@ function useSessionTabState(sessionId: string | undefined) {
     agentName,
     sessionNumber,
     sessionCount,
-  };
-}
-
-function useSessionTabActions(
-  sessionId: string | undefined,
-  taskId: string | null,
-  api: IDockviewPanelHeaderProps["api"],
-  containerApi: IDockviewPanelHeaderProps["containerApi"],
-) {
-  const onDeleted = useCallback(() => {
-    const panel = containerApi.getPanel(api.id);
-    if (panel) containerApi.removePanel(panel);
-  }, [api.id, containerApi]);
-  const {
-    setPrimary: handleSetPrimary,
-    stop: handleStop,
-    resume: handleResume,
-    remove: handleDelete,
-    removeById,
-  } = useSessionActions({ sessionId, taskId, onDeleted });
-  const handleCloseOthers = useCallback(() => {
-    const toClose = api.group.panels.filter((p) => p.id !== api.id);
-    for (const panel of toClose) containerApi.removePanel(panel);
-  }, [api, containerApi]);
-  return {
-    handleSetPrimary,
-    handleStop,
-    handleResume,
-    handleDelete,
-    removeById,
-    handleCloseOthers,
   };
 }
 
@@ -214,6 +150,7 @@ function SessionTabTriggerContent({
   isActive,
   showDeleteOnClose,
   isDeleting,
+  closeBehavior,
   onCloseTab,
 }: {
   props: IDockviewPanelHeaderProps;
@@ -226,6 +163,7 @@ function SessionTabTriggerContent({
   isActive: boolean;
   showDeleteOnClose: boolean;
   isDeleting: boolean;
+  closeBehavior: "delete_session" | "hide_panel";
   onCloseTab: () => void;
 }) {
   return (
@@ -252,7 +190,12 @@ function SessionTabTriggerContent({
         ))}
       <DockviewDefaultTab {...props} hideClose />
       {showDeleteOnClose && (
-        <SessionTabCloseAction sessionId={sessionId} isDeleting={isDeleting} onClose={onCloseTab} />
+        <SessionTabCloseAction
+          sessionId={sessionId}
+          isDeleting={isDeleting}
+          closeBehavior={closeBehavior}
+          onClose={onCloseTab}
+        />
       )}
     </div>
   );
@@ -329,6 +272,7 @@ function SessionTabBody({
   isActive: boolean;
   showDeleteOnClose: boolean;
   isDeleting: boolean;
+  closeBehavior: "delete_session" | "hide_panel";
   onCloseTab: () => void;
 }) {
   if (isRenaming) {
@@ -339,7 +283,7 @@ function SessionTabBody({
         onCommit={onCommitRename}
         onCancel={onCancelRename}
         testId="session-tab-rename-input"
-        maxLength={MAX_SESSION_NAME_LENGTH}
+        limitValue={limitSessionName}
       />
     );
   }
@@ -430,6 +374,7 @@ type SessionTabContentProps = {
   onDoubleClick: ReturnType<typeof useTabMaximizeOnDoubleClick>;
   onCommitRename: (next: string) => void;
   onCloseTab: () => void;
+  closeBehavior: "delete_session" | "hide_panel";
   onDelete: (event: Event) => void;
   onRemoveScope: (scope: "others" | "all") => void;
   onPointerDownCapture: (event: ReactPointerEvent) => void;
@@ -437,6 +382,23 @@ type SessionTabContentProps = {
   menuDeleteAnchorRef: RefObject<HTMLElement | null>;
   menuDeleteFocusBoundaryRef: RefObject<HTMLElement | null>;
 };
+
+function SessionTabBulkRemovalDialog({
+  bulkRemoval,
+}: {
+  bulkRemoval: ReturnType<typeof useTaskBulkRemovalController>["bulkRemoval"];
+}) {
+  return (
+    <BulkSessionRemoveDialog
+      scope={bulkRemoval.snapshot?.scope ?? null}
+      count={bulkRemoval.snapshot?.targetIds.length ?? 0}
+      pending={bulkRemoval.pending}
+      removedCount={bulkRemoval.removedCount}
+      onCancel={bulkRemoval.cancel}
+      onConfirm={() => void bulkRemoval.confirm()}
+    />
+  );
+}
 
 function SessionTabContent({
   props,
@@ -461,6 +423,7 @@ function SessionTabContent({
   onDoubleClick,
   onCommitRename,
   onCloseTab,
+  closeBehavior,
   onDelete,
   onRemoveScope,
   onPointerDownCapture,
@@ -494,6 +457,7 @@ function SessionTabContent({
             isActive={isActive}
             showDeleteOnClose={showDeleteOnClose}
             isDeleting={isDeletingFromTab}
+            closeBehavior={closeBehavior}
             onCloseTab={onCloseTab}
           />
         </ContextMenuTrigger>
@@ -526,14 +490,7 @@ function SessionTabContent({
         sessionId={sessionId}
         groupId={props.api.group?.id}
       />
-      <BulkSessionRemoveDialog
-        scope={bulkRemoval.snapshot?.scope ?? null}
-        count={bulkRemoval.snapshot?.targetIds.length ?? 0}
-        pending={bulkRemoval.pending}
-        removedCount={bulkRemoval.removedCount}
-        onCancel={bulkRemoval.cancel}
-        onConfirm={() => void bulkRemoval.confirm()}
-      />
+      <SessionTabBulkRemovalDialog bulkRemoval={bulkRemoval} />
     </>
   );
 }
@@ -577,9 +534,12 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   useSessionTabTitleSync(api, tabTitle);
 
   const showMultiSessionBadges = sessionCount > 1;
-  // Multi-session tab close means delete, not hide-only. Running/starting sessions are
-  // not deletable, so we omit the X rather than reviving hide-only close behavior.
-  const showDeleteOnClose = showMultiSessionBadges && !!sessionState && isDeletable(sessionState);
+  const agentTabCloseBehavior = useAppStore((state) => state.userSettings.agentTabCloseBehavior);
+  const showDeleteOnClose = shouldShowSessionTabCloseAction(agentTabCloseBehavior, sessionState, {
+    sessionCount,
+    visibleSessionCount: actions.visibleSessionCount,
+    isRestarting: actions.isRestarting,
+  });
   const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
   const { handleCloseTab, handleMenuDelete: openMenuDelete, isDeletingFromTab } = deleteState;
   const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =
@@ -613,7 +573,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
       bulkRemoval={bulkRemoval}
       onDoubleClick={onDoubleClick}
       onCommitRename={handleCommitRename}
-      onCloseTab={handleCloseTab}
+      onCloseTab={agentTabCloseBehavior === "hide_panel" ? actions.handleHide : handleCloseTab}
+      closeBehavior={agentTabCloseBehavior}
       onDelete={handleMenuDelete}
       onRemoveScope={handleRemoveScope}
       onPointerDownCapture={handlePointerDownCapture}

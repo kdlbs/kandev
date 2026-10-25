@@ -116,6 +116,7 @@ GET    /api/v1/system/info                        - versions, commit, build time
 GET    /api/v1/system/disk-usage                  - cached breakdown + computedAt; null while computing
 POST   /api/v1/system/disk-usage/refresh          - kick async recompute; 202
 GET    /api/v1/system/database                    - driver, path, sizeBytes, walSizeBytes, schemaVersion, lastBackupAt
+POST   /api/v1/system/database/refresh             - request a logical-stat scan retry; 204
 POST   /api/v1/system/database/vacuum             - 202 + jobId
 POST   /api/v1/system/database/optimize           - 202 + jobId
 POST   /api/v1/system/database/reset              - factory reset; body { confirm: "RESET" }
@@ -147,6 +148,30 @@ Storage endpoints are defined separately in [Storage Maintenance](../requirement
 
 Long-running operations (vacuum, optimize, reset, restore, snapshot create, disk walk) return `202 Accepted` with a `jobId` and publish progress on the existing event bus. The frontend subscribes via WS (`system.job.update` event) to render progress and final result. On success/failure the operation flips a corresponding entry in the existing health surface (e.g., a "VACUUM completed: reclaimed X MB" info issue that auto-expires).
 
+### Restore integrity admission
+
+For `AC-SYSTEM-PAGE-SYSTEM-PAGE-001.9`, `internal/system/backups.Service`
+holds the existing pool maintenance gate while copying the selected snapshot
+to `<configured-database-path>.new`. A zero-byte copy is rejected as empty
+before shutdown: SQLite itself accepts an empty file as an empty database.
+After a nonempty copy is synced and closed,
+`runRestore` verifies that actual staged file using the existing read-only
+`verifySnapshot` helper in `retention_preparation.go`. Its escaped native path,
+`mode=ro`, and complete `PRAGMA integrity_check` result contract are reused;
+creation-time verification or checking only the source file is insufficient.
+The returned digest need not become restore metadata.
+
+Verification must finish before `PersistenceUnavailable`, `RestoreQuiesce`
+(or legacy `OrchestratorShutdown`), live WAL checkpoint, pool close, quarantine,
+or replacement. Any verification error fails the existing restore job, removes
+its staged file, and leaves the working pool, current data, and live main/WAL/SHM
+files untouched. The existing job failure projection serves desktop and phone;
+there is no new UI, API shape, or restart requirement for this rejection.
+After verification succeeds, existing quiescence, checkpoint, close,
+rollback-capable replacement, and required restart behavior continue unchanged.
+This is structural SQLite integrity admission, not schema-version compatibility,
+migration validation, or cross-process mutation coordination.
+
 ### Updates poller
 
 A background goroutine in `internal/system/updates/poller.go` starts on backend boot and polls the
@@ -177,6 +202,10 @@ per-process to one call per 30 seconds. If the GitHub or npm call fails (offline
 
 ### Disk-usage cache
 
+The frontend snapshot owner and job-event recovery path are defined in the
+[Disk Usage Query Cache design](disk-usage-query-cache.md). This section
+continues to own the backend cache and endpoint behavior.
+
 Cache is an in-memory `{ value *Breakdown, computedAt time.Time, computing bool }` guarded by a mutex. The walk is lazy — never runs at boot. `GET /api/v1/system/disk-usage` returns immediately:
 
 - If `value == nil && !computing` → start the walk in a goroutine, return `{ data: null, computing: true }`.
@@ -184,7 +213,7 @@ Cache is an in-memory `{ value *Breakdown, computedAt time.Time, computing bool 
 - If `value != nil && time.Since(computedAt) < 2h` → return `{ data: value, computing: false }`.
 - If `value != nil && time.Since(computedAt) >= 2h` → return `{ data: value, computing: true }` and start a background refresh.
 
-`POST /api/v1/system/disk-usage/refresh` forces a refresh regardless of TTL. The job publishes a `system.job.update` event so the frontend can swap the cached value for the fresh one without polling.
+`POST /api/v1/system/disk-usage/refresh` forces a refresh regardless of TTL. The job publishes a `system.job.update` event. The frontend revalidates the disk snapshot on terminal success or failure and keeps a 1.5-second recovery interval only while its latest snapshot says `computing=true`; see the [Disk Usage Query Cache design](disk-usage-query-cache.md).
 
 ### Licenses generation
 
@@ -202,7 +231,7 @@ The page reads the JSON statically; no backend endpoint is needed.
 
 ## Scenarios
 
-- **GIVEN** a user opens `/settings/system/status` for the first time after backend boot, **WHEN** the page mounts, **THEN** the Disk Usage card shows a spinner and "Calculating…", the backend kicks off the walk, and the value populates within seconds without further interaction (via WS job update or 5s poll fallback).
+- **GIVEN** a user opens `/settings/system/status` for the first time after backend boot, **WHEN** the page mounts, **THEN** the Disk Usage card shows a spinner and "Calculating…", the backend kicks off the walk, and the value populates without further interaction via a terminal job update or conditional 1.5-second recovery polling after a `computing=true` response.
 - **GIVEN** the disk-usage cache is 30 minutes old, **WHEN** the user reopens the Status page, **THEN** the cached value renders instantly with "as of <30 min ago>" and **no** refresh kicks off.
 - **GIVEN** the disk-usage cache is 3 hours old, **WHEN** the user reopens the Status page, **THEN** the stale value renders immediately, the page badge shows "Refreshing…", and the value updates when the background walk completes.
 - **GIVEN** the user is on `1.2.3` and the GitHub latest release is `1.2.4`, **WHEN** they open `/settings/system/updates`, **THEN** an "Update available" badge renders next to the version, the changelog list shows `1.2.4` highlighted as the new entry, and the System sidebar group shows a `1` badge.
@@ -271,7 +300,7 @@ The Message Queue settings GET is readable by members, while its PATCH is admin-
 - **VACUUM failure** — DB is unaffected (VACUUM is atomic); the job ends `failed` with the SQLite error string. Status page shows a recoverable error issue.
 - **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
 - **Factory reset failure mid-run** — the pre-reset snapshot remains in the sibling SQLite backup directory. The user can restore it from the Backups page on the next boot. Recovery is documented inline in the failure UI.
-- **Restore failure** — the original DB file and SQLite sidecars remain available when checkpointing is busy, and are restored from quarantine when replacement fails; restore stages the snapshot, validates the checkpoint result, quarantines the originals, and rolls them back if installation fails. PostgreSQL restore is rejected before staging or shutdown.
+- **Restore failure** — staged-file integrity failure is rejected before persistence is marked unavailable or workers are stopped, with owned staging removed and the live pool usable. After validation, the original DB file and SQLite sidecars remain available when checkpointing is busy, and are restored from quarantine when replacement fails; restore stages the snapshot, validates the checkpoint result, quarantines the originals, and rolls them back if installation fails. PostgreSQL restore is rejected before staging or shutdown.
 - **Log file missing / unreadable** — bundle creation continues with available
   sources, marks the result partial, and records the missing/unreadable backend
   source in `manifest.json`.
@@ -281,7 +310,7 @@ The Message Queue settings GET is readable by members, while its PATCH is admin-
 - `kandev_meta` writes are SQLite-atomic.
 - The SQLite backup directory is `backups/` under the parent of the configured database path. The default remains `<home>/data/backups/`.
 - Snapshot files in the SQLite backup directory are created via `VACUUM INTO <tmp>` then atomic-renamed. Partial files cannot appear.
-- Restore writes the snapshot to `<configured-database-path>.new`, stops scheduling, active executions, and database-backed workers, checkpoints and closes the SQLite pool, then quarantines the main file and `-wal`/`-shm` sidecars before installing the staged file. A failed replacement restores the quarantine. The frontend requires an immediate backend restart before database-backed work resumes.
+- Restore writes the snapshot to `<configured-database-path>.new`, verifies the staged SQLite file read-only before any disruptive effect, stops scheduling, active executions, and database-backed workers, checkpoints and closes the SQLite pool, then quarantines the main file and `-wal`/`-shm` sidecars before installing the staged file. A failed replacement restores the quarantine. The frontend requires an immediate backend restart before database-backed work resumes.
 - Kandev does not migrate snapshots from another backup directory. It cannot prove that those files belong to the configured database.
 - The existing boot-time backup retention (newest 2) is preserved, but **only auto-snapshots are subject to it**. Snapshots are distinguished by filename prefix:
   - `kandev-<version>-<ts>.db` — created automatically on a version-change boot or as the pre-reset snapshot before factory reset. Pruned by the existing "keep newest 2" rule (operating only on files with the `kandev-` prefix).

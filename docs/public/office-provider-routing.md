@@ -1,6 +1,7 @@
 ---
 title: "Office Provider Routing"
 description: "Route persistent Office agent identities through interchangeable provider execution profiles."
+status: experimental
 ---
 
 # Office Provider Routing
@@ -8,6 +9,8 @@ description: "Route persistent Office agent identities through interchangeable p
 Office provider routing separates an agent's persistent role from the CLI profile used to run it. This lets a CTO, reviewer, or other custom Office agent keep the same instructions, skills, permissions, budget, task ownership, and history while Kandev selects a Codex, Claude Code, or another configured execution profile for each launch. Lightweight routine runs use the same routing choices without inventing a task: each fire has its own run-owned session and attempt identity.
 
 Office mode is currently feature-flagged. The routing settings appear under **Office > Routing** when Office is enabled.
+
+Start with [Get started with Office](office-getting-started.md) to enable Office and create a workspace. Use [Configure an Office agent team](office-agents.md) for roles, instructions, skills, and permissions, and [Office operations](office-operations.md) for blocked or failed runs.
 
 ## Configure Routes
 
@@ -27,6 +30,8 @@ The selectors store execution-profile IDs. Model names shown in the editor are d
 **Automatic provider fallback on** evaluates configured profiles in order. A provider that reports a recognized authentication, quota, rate-limit, outage, subscription, or model-availability failure can be degraded and skipped for later launches. Kandev then tries the next healthy configured profile. Agent-level provider-order overrides constrain this list; an agent pinned to Claude does not fall back to Codex.
 
 If no route is available, Kandev keeps the task assigned to the same Office agent and waits for provider capacity or user action. Retryable limits are retried automatically after their retry time. Credential and configuration failures remain blocked until corrected or retried manually.
+
+A launch rejected because its built agent or continue command is invalid fails the run immediately and reports the error, without consuming the retry budget. Correct the profile command before retrying. Temporary provider and workspace failures retain their existing recovery behavior.
 
 ## What A Provider Switch Preserves
 

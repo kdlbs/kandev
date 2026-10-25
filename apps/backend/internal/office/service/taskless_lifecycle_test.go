@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -20,13 +22,17 @@ type tasklessTestLauncher struct {
 	svc   *service.Service
 	calls []service.LaunchContext
 	next  int
+	err   error
 }
 
 func (l *tasklessTestLauncher) StartRunSession(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	launch service.LaunchContext, _ *service.RouteOverride,
 ) (service.RunSessionLaunch, error) {
 	l.calls = append(l.calls, launch)
+	if l.err != nil {
+		return service.RunSessionLaunch{}, l.err
+	}
 	l.next++
 	id := fmt.Sprintf("run-session-%d", l.next)
 	now := time.Now().UTC()
@@ -54,6 +60,36 @@ func (l *tasklessTestLauncher) StartRunSession(
 		ExecutionProfileID: launch.ProfileID, Adapter: "test-adapter", Model: "test-model",
 		ACPSessionID: "acp-" + id,
 	}, nil
+}
+
+func TestTasklessLaunchErrorUsesRunRetryHandler(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+	launchErr := errors.New("dynamic profile store is temporarily unavailable")
+	launcher := &tasklessTestLauncher{svc: svc, err: launchErr}
+	svc.SetRunSessionLauncher(launcher)
+	agent := &models.AgentInstance{
+		ID: "taskless-retry-agent", WorkspaceID: "ws-1", Name: "taskless-retry-agent",
+		Role: models.AgentRoleCEO, Status: models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"local_pc"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, "taskless-retry"); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	runs, err := svc.ListRuns(ctx, agent.WorkspaceID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("list runs: runs=%#v err=%v", runs, err)
+	}
+	if runs[0].Status != service.RunStatusQueued || runs[0].RetryCount != 1 || runs[0].ScheduledRetryAt == nil {
+		t.Fatalf("run after launch error = status %q retry_count %d retry_at %v, want queued with a scheduled retry",
+			runs[0].Status, runs[0].RetryCount, runs[0].ScheduledRetryAt)
+	}
 }
 
 func TestTasklessRoutineRunLaunchesRunSessionAndCompletes(t *testing.T) {

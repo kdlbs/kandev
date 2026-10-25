@@ -37,7 +37,7 @@ export class SessionPage {
     this.changes = page.getByTestId("changes-panel");
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
-    this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.passthroughTerminal = page.locator('[data-testid="passthrough-terminal"]:visible');
     this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
     this.newSessionDialogPage = new NewSessionDialogPage(page);
   }
@@ -51,6 +51,15 @@ export class SessionPage {
   }
   get mobileSessionMenu() {
     return this.page.getByTestId("mobile-task-picker-trigger");
+  }
+  get mobilePanels() {
+    return this.page.getByTestId("mobile-session-nav-panels");
+  }
+  get mobilePortForwardingOpen() {
+    return this.page.getByTestId("mobile-port-forwarding-open");
+  }
+  get portForwardHeaderShortcut() {
+    return this.page.getByTestId("port-forward-header-shortcut");
   }
   get mobilePortForwardingToggle() {
     return this.page.getByTestId("mobile-port-forwarding-toggle");
@@ -71,7 +80,7 @@ export class SessionPage {
     return this.page.getByTestId(`port-forward-row-${port}`);
   }
   portForwardTunnelToggle(port: number) {
-    return this.portForwardRow(port).getByRole("button").first();
+    return this.portForwardRow(port).getByTestId(`port-forward-tunnel-toggle-${port}`);
   }
   portForwardTunnelStart(port: number) {
     return this.portForwardRow(port).getByRole("button", { name: "Start", exact: true });
@@ -192,9 +201,10 @@ export class SessionPage {
     while (Date.now() - start < timeout) {
       const remaining = timeout - (Date.now() - start);
       const now = Date.now();
+      const reloadReadinessBudget = Math.min(2_000, Math.floor(attemptTimeout / 2));
       // Re-drive SSR hydration once per attemptTimeout slice while budget remains
       // for the reloaded page to settle.
-      if (now - lastReloadAt >= attemptTimeout && remaining > attemptTimeout) {
+      if (now - lastReloadAt >= attemptTimeout && remaining > reloadReadinessBudget) {
         lastReloadAt = now;
         await this.page.reload();
       }
@@ -247,7 +257,8 @@ export class SessionPage {
     const idle = this.anyIdleInput();
     const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
     const isReady = async () =>
-      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
+      (await idle.isVisible()) &&
+      (!opts.requireEditable || (await editor.getAttribute("contenteditable")) === "true");
     const start = Date.now();
     let lastReloadAt = start;
 
@@ -388,7 +399,7 @@ export class SessionPage {
   }
 
   async openSidebarTaskContextMenu(title: string): Promise<void> {
-    const taskRow = this.sidebarTaskItem(title).first();
+    const taskRow = this.sidebarTaskItem(title);
     await taskRow.waitFor({ state: "visible" });
     await taskRow.click({ button: "right" });
   }
@@ -693,7 +704,7 @@ export class SessionPage {
 
   /** "Start fresh session" button shown after agent crash. */
   recoveryFreshButton(): Locator {
-    return this.page.getByTestId("recovery-fresh-button");
+    return this.page.getByTestId("recovery-fresh-button").last();
   }
 
   /** Terminal-state banner shown when the active session has completed. */
@@ -776,16 +787,20 @@ export class SessionPage {
    * React re-render (e.g. WS-driven sidebar update) between open and click.
    */
   async openSidebarMenuAndClick(title: string, itemName: string, retries = 3): Promise<void> {
-    const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
-    for (let attempt = 0; attempt < retries; attempt++) {
+    const taskRow = this.sidebarTaskItem(title);
+    const attempts = Math.max(1, retries);
+    await taskRow.waitFor({ state: "visible", timeout: 10_000 });
+    for (let attempt = 0; attempt < attempts; attempt++) {
       try {
-        await taskRow.hover();
-        await taskRow.getByRole("button", { name: "Task actions" }).click();
+        await taskRow.scrollIntoViewIfNeeded({ timeout: 3_000 });
+        await taskRow.hover({ timeout: 3_000 });
+        await taskRow.getByRole("button", { name: "Task actions" }).click({ timeout: 3_000 });
         const menuItem = this.page.getByRole("menuitem", { name: itemName });
         await menuItem.waitFor({ state: "visible", timeout: 3_000 });
         await menuItem.click({ timeout: 3_000 });
         return;
-      } catch {
+      } catch (error) {
+        if (attempt === attempts - 1) throw error;
         // Menu was likely detached by a re-render — dismiss and retry
         await this.page.keyboard.press("Escape");
         await dwell(
@@ -796,10 +811,6 @@ export class SessionPage {
         );
       }
     }
-    // Final attempt without catch
-    await taskRow.hover();
-    await taskRow.getByRole("button", { name: "Task actions" }).click();
-    await this.page.getByRole("menuitem", { name: itemName }).click();
   }
 
   stepperStep(name: string): Locator {
@@ -868,8 +879,10 @@ export class SessionPage {
 
   /** Tap the chip and wait for the mobile drawer to be visible. */
   async tapPRStatusChip(): Promise<void> {
-    await this.prStatusChip().tap();
-    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
+    const chip = this.prStatusChip();
+    await expect(chip).toHaveAttribute("aria-haspopup", "dialog", { timeout: 15_000 });
+    await chip.tap();
+    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 15_000 });
   }
 
   // --- GitLab MR status chip accessors: mirrors the PR status chip shape
@@ -1071,12 +1084,23 @@ export class SessionPage {
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
   async clickTab(label: string, options: { force?: boolean } = {}): Promise<void> {
+    const dockviewLayout = this.page.locator('[data-testid="dockview-task-layout"]:visible');
+    const layoutCount = await dockviewLayout.count();
+    if (layoutCount > 0) {
+      await expect(dockviewLayout).toHaveCount(1);
+      await expect(dockviewLayout).toHaveAttribute("aria-busy", "false", { timeout: 15_000 });
+    }
+
     const tab = this.page
       .locator(".dv-default-tab:visible")
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
     await tab.click(options);
+    const tabWrapper = tab.locator(
+      "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' dv-tab ')][1]",
+    );
+    await expect(tabWrapper).toHaveClass(/dv-active-tab/, { timeout: 10_000 });
   }
 
   /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
@@ -1240,17 +1264,30 @@ export class SessionPage {
   }
 
   /**
-   * Types a message into the TipTap chat input and sends it.
-   * Default submit key is Cmd+Enter (chatSubmitKey = "cmd_enter").
-   * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
+   * Enters text into the TipTap chat input without submitting it.
    */
-  async sendMessage(text: string) {
+  async fillMessage(text: string): Promise<Locator> {
     const editor = await this.composerReady();
     await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
+    return editor;
+  }
+
+  /**
+   * Submits a prepared message with the default Cmd/Ctrl+Enter shortcut.
+   */
+  async submitMessageWithKeyboard(editor: Locator): Promise<void> {
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
+  }
+
+  /**
+   * Enters and sends a message with the default Cmd/Ctrl+Enter shortcut.
+   */
+  async sendMessage(text: string): Promise<void> {
+    const editor = await this.fillMessage(text);
+    await this.submitMessageWithKeyboard(editor);
   }
 
   /**
@@ -1258,10 +1295,7 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = await this.composerReady();
-    await this.waitForDirectInput();
-    await editor.click();
-    await editor.fill(text);
+    await this.fillMessage(text);
     const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
     if (isTouch) {
       await this.tapSubmitWhenReady();
@@ -1373,24 +1407,48 @@ export class SessionPage {
       .waitFor({ state: "hidden", timeout });
   }
 
+  /** Wait for the active shell to emit its initial prompt before sending input. */
+  async expectTerminalShellReady(timeout = 20_000): Promise<void> {
+    await expect
+      .poll(async () => (await this.readXtermBuffer("terminal-panel")).trim().length > 0, {
+        timeout,
+        message: "Waiting for terminal shell output",
+      })
+      .toBe(true);
+  }
+
   /** Wait for the terminal WebSocket to connect, then type a command and press Enter. */
   async typeInTerminal(command: string): Promise<void> {
     await this.expectTerminalConnected();
 
     const xterm = this.activePanel("terminal-panel").locator(".xterm");
     await expect(xterm).toBeVisible();
+    // The terminal WebSocket can open before the shell starts and emits its prompt.
+    await expect
+      .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
+        timeout: TERMINAL_READY_TIMEOUT,
+        message: "Waiting for the terminal shell prompt before typing",
+      })
+      .toBe(true);
     await xterm.click();
-    await this.page.keyboard.type(command);
+    const input = xterm.locator(".xterm-helper-textarea");
+    await input.focus();
+    await expect(input).toBeFocused();
+    // xterm forwards each key through a PTY. A zero-delay burst can overrun
+    // that bridge under hosted CI load, which drops characters before the
+    // shell has consumed them. A small delay keeps the command intact while
+    // remaining much faster than a fixed sleep.
+    await this.page.keyboard.type(command, { delay: 5 });
     await this.page.keyboard.press("Enter");
   }
 
   /**
    * Assert the terminal buffer contains the given text.
    */
-  async expectTerminalHasText(text: string, timeout = 30_000): Promise<void> {
+  async expectTerminalHasText(text: string): Promise<void> {
     await expect
       .poll(async () => (await this.readXtermBuffer("terminal-panel")).includes(text), {
-        timeout,
+        timeout: 10_000,
         message: `Expected terminal to contain "${text}"`,
       })
       .toBe(true);

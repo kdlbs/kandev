@@ -146,7 +146,7 @@ func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPat
 		if err != nil {
 			return "", err
 		}
-		return buildHostedURL(cfg.URL, absPath, line, column)
+		return buildHostedURL(cfg.URL, worktreePath, absPath, line, column)
 	case editorKindCustomCommand:
 		cfg, err := parseCommandConfig(editor.Config)
 		if err != nil {
@@ -159,13 +159,12 @@ func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPat
 }
 
 // buildInternalVscodeURL returns a sentinel URL that the frontend intercepts
-// to open the embedded code-server panel. Includes goto params when a specific
-// file is requested.
+// to open the embedded code-server panel. The private query carries an encoded
+// file path separately from its positive line and column coordinates.
 func buildInternalVscodeURL(worktreePath, absPath string, line, column int) string {
 	if absPath == "" || absPath == worktreePath {
 		return "internal://vscode"
 	}
-	// Build goto param: relative/path:line:col
 	relPath := absPath
 	if worktreePath != "" {
 		rel, err := filepath.Rel(worktreePath, absPath)
@@ -173,14 +172,14 @@ func buildInternalVscodeURL(worktreePath, absPath string, line, column int) stri
 			relPath = rel
 		}
 	}
-	goto_ := relPath
+	query := url.Values{"goto": {relPath}}
 	if line > 0 {
-		goto_ = fmt.Sprintf("%s:%d", goto_, line)
+		query.Set("line", strconv.Itoa(line))
 		if column > 0 {
-			goto_ = fmt.Sprintf("%s:%d", goto_, column)
+			query.Set("column", strconv.Itoa(column))
 		}
 	}
-	return fmt.Sprintf("internal://vscode?goto=%s", goto_)
+	return "internal://vscode?" + query.Encode()
 }
 
 func openRemoteSSHEditor(editor *models.Editor, absPath string, line, column int) (string, error) {
@@ -322,7 +321,7 @@ func (s *Service) resolveFilePath(worktreePath, filePath string) (string, error)
 	if err != nil {
 		return "", ErrEditorConfigInvalid
 	}
-	if strings.HasPrefix(rel, "..") {
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", ErrEditorConfigInvalid
 	}
 	return abs, nil
@@ -346,13 +345,16 @@ func buildRemoteSSHURL(scheme, user, host, path string, line, column int) string
 	return fmt.Sprintf("%s://vscode-remote/ssh-remote+%s:%s", scheme, remoteHost, location)
 }
 
-func buildHostedURL(baseURL, path string, line, column int) (string, error) {
+func buildHostedURL(baseURL, worktreePath, path string, line, column int) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
 		return "", ErrEditorConfigInvalid
 	}
 	query := parsed.Query()
-	if path != "" {
+	switch {
+	case worktreePath != "" && filepath.Clean(path) == filepath.Clean(worktreePath):
+		query.Set("folder", worktreePath)
+	case path != "":
 		location := path
 		if line > 0 {
 			location = fmt.Sprintf("%s:%d", path, line)
@@ -361,7 +363,7 @@ func buildHostedURL(baseURL, path string, line, column int) (string, error) {
 			}
 		}
 		query.Set("file", location)
-	} else {
+	default:
 		query.Set("folder", "/")
 	}
 	parsed.RawQuery = query.Encode()

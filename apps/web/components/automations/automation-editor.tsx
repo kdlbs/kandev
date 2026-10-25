@@ -28,6 +28,8 @@ import { RunsSection } from "./runs-section";
 import {
   type CreatedWebhookDetails,
   type FormState,
+  DEFAULT_RETRY_POLICY,
+  normalizeRetryPolicyForTaskMode,
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
@@ -73,9 +75,10 @@ const defaultForm: FormState = {
   maxConcurrentRuns: 1,
   continuationPolicy: "new_task",
   taskMode: "automation_run",
+  managedDestination: undefined,
   repositoryMode: "none",
+  retryPolicy: DEFAULT_RETRY_POLICY,
 };
-
 function formFromAutomation(a: Automation): FormState {
   return {
     name: a.name,
@@ -85,6 +88,7 @@ function formFromAutomation(a: Automation): FormState {
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
     taskMode: a.task_mode ?? "automation_run",
+    managedDestination: a.managed_destination,
     repositoryMode: (a.repositories?.length ?? a.repository_ids.length) > 0 ? "selected" : "none",
     repositorySelections: (
       a.repositories ?? a.repository_ids.map((id) => ({ repository_id: id, base_branch: "" }))
@@ -99,6 +103,7 @@ function formFromAutomation(a: Automation): FormState {
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
+    retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
   };
 }
 
@@ -150,10 +155,12 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
       // executor stops supporting multi-repo. It doesn't truncate the
       // underlying array, so resolveNormalizedRepositoryIds re-enforces the
       // same invariant right before persisting.
+      const repositoryMode =
+        form.taskMode === "managed_conversation" ? "none" : form.repositoryMode;
       const { repositories, selections: promotedSelections } = await resolveRepositoryIdsForMode(
         workspaceId,
         form.repositorySelections,
-        form.repositorySelections.length > 0 ? "selected" : "none",
+        repositoryMode,
         {
           supportsMultiRepo,
         },
@@ -220,7 +227,10 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
       .then((a) => {
         const loadedForm = formFromAutomation(a);
         const loadedTriggers = a.triggers ?? [];
-        setForm(loadedForm);
+        setForm({
+          ...loadedForm,
+          retryPolicy: normalizeRetryPolicyForTaskMode(loadedForm.taskMode, loadedForm.retryPolicy),
+        });
         loadTriggers(loadedTriggers);
         onLoaded(loadedForm, loadedTriggers);
       })
@@ -350,9 +360,14 @@ function useAutomationPersistence(options: AutomationPersistenceOptions) {
   const canSave =
     options.form.name.trim().length > 0 &&
     (options.form.taskMode !== "normal_task" || options.form.workflowId.trim().length > 0) &&
-    options.form.repositorySelections.every(
-      (selection) => selection.kind !== "none" && Boolean(selection.branch?.trim()),
-    );
+    (options.form.taskMode !== "managed_conversation" ||
+      Boolean(
+        options.form.managedDestination?.plugin_id && options.form.managedDestination?.instance_key,
+      )) &&
+    (options.form.taskMode === "managed_conversation" ||
+      options.form.repositorySelections.every(
+        (selection) => selection.kind !== "none" && Boolean(selection.branch?.trim()),
+      ));
   useAutomationSaveContributor({
     isNew: options.isNew,
     currentId: options.currentId,
@@ -423,6 +438,7 @@ function AutomationDeleteControls({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- The editor coordinates its form, trigger, settings-save, and deletion lifecycles.
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
   const router = useRouter();
   const { create, update, remove } = useAutomations(workspaceId);
@@ -451,7 +467,15 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   });
 
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      return key === "taskMode"
+        ? {
+            ...next,
+            retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
+          }
+        : next;
+    });
   }, []);
 
   const discard = useCallback(() => {
@@ -506,9 +530,18 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         updateField={updateField}
       />
       <Separator />
-      <SettingsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
+      <SettingsSection
+        form={form}
+        savedForm={dirtyBaseline}
+        workspaceId={workspaceId}
+        updateField={updateField}
+      />
       <Separator />
-      <RunsSection automationId={currentId} workspaceId={workspaceId} />
+      <RunsSection
+        automationId={currentId}
+        workspaceId={workspaceId}
+        historyMode={form.retryPolicy.history_mode}
+      />
       <AutomationDeleteControls
         saving={saving}
         isNew={isNew}

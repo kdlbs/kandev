@@ -48,7 +48,7 @@ export function TaskEditDialogDependencies({
         <Button
           type="button"
           variant="ghost"
-          className="h-11 min-h-11 shrink-0 cursor-pointer px-3 text-xs"
+          className="shrink-0 cursor-pointer px-3 text-xs"
           onClick={state.retry}
           data-testid="task-edit-dependencies-retry"
         >
@@ -81,8 +81,8 @@ export function TaskEditDialogDependencies({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="h-11 min-h-11 w-11 min-w-11 cursor-pointer p-0 text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground md:h-6 md:min-h-6 md:w-6 md:min-w-6"
+              size="icon-sm"
+              className="max-md:size-11 [@media(pointer:coarse)]:size-11 cursor-pointer p-0 text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground"
               aria-label={t("task:dependencyInfoLabel")}
               data-testid="task-edit-dependency-info"
             >
@@ -103,7 +103,7 @@ export function TaskEditDialogDependencies({
           <Button
             type="button"
             variant="ghost"
-            className="h-11 min-h-11 shrink-0 cursor-pointer px-3 text-xs"
+            className="shrink-0 cursor-pointer px-3 text-xs"
             onClick={state.retryCandidates}
             data-testid="task-edit-dependencies-candidates-retry"
           >

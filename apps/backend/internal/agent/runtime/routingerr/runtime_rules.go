@@ -65,6 +65,21 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
+		// Route the bounded DeepSeek missing-reasoning diagnostic through the
+		// existing manual fresh-session recovery policy across adapters.
+		// Require the raw signature too, so redaction cannot shorten its gap.
+		id:       reasoningContentNonReplayableRuleID,
+		pattern:  reasoningContentMissingRe,
+		rawMatch: reasoningContentMissingRe.MatchString,
+		build: func(string) *Error {
+			return &Error{
+				Code:            CodeResumeCorrupted,
+				Confidence:      ConfHigh,
+				RemediationPath: RemediationStartFreshSession,
+			}
+		},
+	},
+	{
 		// Anthropic 529 Overloaded surfaced over ACP as a prompt-time error
 		// event: a transient, server-side condition the orchestrator should
 		// retry with backoff rather than tear down. Provider-agnostic because
@@ -95,10 +110,46 @@ var runtimeEnvironmentRules = []runtimeRule{
 	},
 	{
 		// Cursor emits this control prefix as an assistant message chunk for
-		// transient provider failures. Keep the fingerprint anchored to the
+		// transient provider failures. Keep the fingerprints anchored to the
 		// control frame and bounded so user-authored prose cannot turn into an
-		// automatic retry. The custom matcher shares the adapter's byte and
+		// automatic retry. The custom matchers share the adapter's byte and
 		// Unicode-whitespace contract.
+		id:         cursorRetriableResourceExhaustedRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableResourceExhausted,
+		rawMatch:   matchCursorRetriableResourceExhausted,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderResourceExhausted,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
+		id:         cursorRetriableUnavailableRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableUnavailable,
+		rawMatch:   matchCursorRetriableUnavailable,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderUnavailable,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
+		id:         cursorRetriableConnectionStalledRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableConnectionStalled,
+		rawMatch:   matchCursorRetriableConnectionStalled,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeNetworkUnavailable,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
 		id:         cursorRetriableStreamResetRuleID,
 		providerID: cursorRetriableProviderID,
 		match:      matchCursorRetriableStreamReset,
@@ -152,11 +203,18 @@ var cancellationOrDeadlineRe = regexp.MustCompile(`(?i)\bcontext (?:canceled|dea
 
 const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
 
+const reasoningContentNonReplayableRuleID = "deepseek.reasoning_content.nonreplayable.v1"
+
 const overloadedRuleID = "anthropic.overloaded.529.v1"
 
 const gatewayServerFailureRuleID = "acp.gateway_server_failure.v1"
 
-const cursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
+const (
+	cursorRetriableResourceExhaustedRuleID = "cursor.retriable_resource_exhausted.v1"
+	cursorRetriableUnavailableRuleID       = "cursor.retriable_unavailable.v1"
+	cursorRetriableConnectionStalledRuleID = "cursor.retriable_connection_stalled.v1"
+	cursorRetriableStreamResetRuleID       = "cursor.retriable_stream_reset.v1"
+)
 
 const transportLostRuleID = "acp.transport_lost.v1"
 
@@ -177,22 +235,56 @@ const (
 	cursorRetriableProviderID         = "cursor-acp"
 )
 
+func parseCursorRetriableSuffix(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
+		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
+		return "", false
+	}
+	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
+	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || IsCursorRetriableCancellation(suffix) {
+		return "", false
+	}
+	return suffix, true
+}
+
+func matchCursorRetriableResourceExhausted(text string) bool {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(suffix, "[resource_exhausted] Error")
+}
+
+func matchCursorRetriableUnavailable(text string) bool {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(suffix, "[unavailable] PING timed out")
+}
+
+func matchCursorRetriableConnectionStalled(text string) bool {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(suffix, "connection stalled")
+}
+
 // matchCursorRetriableStreamReset matches Cursor's complete bounded control
 // diagnostic using the same trim, prefix, byte-limit, and cancellation-veto
 // rules as the ACP adapter. The byte limit prevents the classifier from
 // accepting a diagnostic that the adapter would reject after multibyte text is
 // measured.
 func matchCursorRetriableStreamReset(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
-		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
 		return false
 	}
-	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
-	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || IsCursorRetriableCancellation(suffix) {
-		return false
-	}
-	return true
+	lower := strings.ToLower(suffix)
+	return strings.Contains(lower, "stream closed with error code cancel") ||
+		strings.Contains(lower, "http/2 stream closed with error code cancel")
 }
 
 // IsCursorRetriableCancellation reports whether Cursor's RetriableError
@@ -243,7 +335,7 @@ func isTransientProviderError(e *Error) bool {
 		return false
 	}
 	switch e.Code {
-	case CodeProviderOverloaded, CodeModelCapacity, CodeNetworkUnavailable, CodeProviderUnavailable, CodeAgentTransportLost:
+	case CodeProviderOverloaded, CodeModelCapacity, CodeNetworkUnavailable, CodeProviderUnavailable, CodeAgentTransportLost, CodeProviderResourceExhausted:
 		return true
 	default:
 		return false
@@ -257,12 +349,24 @@ func isTransientProviderError(e *Error) bool {
 // an unrelated "cannot be modified".
 var thinkingBlocksImmutableRe = regexp.MustCompile(`(?i)(?:redacted_)?thinking[^\n]*blocks[^\n]*cannot be modified`)
 
-// IsResumeCorrupted reports whether the error message carries the
-// resume-corrupted (thinking-blocks-immutable) signature. Exposed for callers
-// outside the classify path (e.g. the orchestrator's recovery UI) that need to
-// steer the user toward a fresh session without re-running full Classify.
+// reasoningContentMissingRe accepts the canonical bare DeepSeek diagnostic or
+// an error line carrying both phrases within 80 characters. Anchoring rejects
+// agent prose quoting the diagnostic. The signature does not identify whether
+// saved history or the adapter omitted the required reasoning field.
+var reasoningContentMissingRe = regexp.MustCompile(
+	`(?i)(?:\A\s*The \x60?reasoning_content\x60? in the thinking mode must be passed back to the API\.\s*\z|` +
+		`(?:\A|\n)[ \t]*(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[^\n]*reasoning_content[^\n]{0,80}must be passed back)`,
+)
+
+// IsResumeCorrupted reports whether the message matches an Anthropic
+// thinking-blocks-immutable or DeepSeek missing-reasoning signature assigned
+// to the existing fresh-session guidance. Callers outside the classify path
+// can select that guidance without re-running full Classify.
 func IsResumeCorrupted(message string) bool {
-	return message != "" && thinkingBlocksImmutableRe.MatchString(message)
+	if message == "" {
+		return false
+	}
+	return thinkingBlocksImmutableRe.MatchString(message) || reasoningContentMissingRe.MatchString(message)
 }
 
 type runtimeRule struct {
@@ -294,10 +398,6 @@ func extractNpxCachePath(text string) string {
 
 func matchRuntimeEnvironmentRules(text string) (*Error, bool) {
 	return matchRuntimeRules(text, text, "", false)
-}
-
-func matchLegacyRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, text, "", true)
 }
 
 func matchRuntimeEnvironmentRulesForProvider(providerID, text, rawText string) (*Error, bool) {

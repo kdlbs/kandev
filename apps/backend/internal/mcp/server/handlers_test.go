@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kandev/kandev/internal/task/service"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -54,7 +54,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "title")
 	titleProp, ok := props["title"].(map[string]interface{})
 	require.True(t, ok, "title should be an object")
-	assert.Equal(t, float64(service.TaskTitleMaxLength), titleProp["maxLength"])
+	assert.Equal(t, float64(taskcontract.TaskTitleMaxLength), titleProp["maxLength"])
 	titleDesc, ok := titleProp["description"].(string)
 	require.True(t, ok, "title should have a description")
 	assert.Contains(t, titleDesc, "concise")
@@ -95,7 +95,13 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "agent_profile_id schema should be an object")
 	agentProfileDesc, ok := agentProfileProp["description"].(string)
 	require.True(t, ok, "agent_profile_id should have a description")
-	assert.Contains(t, agentProfileDesc, "outranks it")
+	assert.Contains(t, agentProfileDesc, "outranks an explicit ID")
+	// The two policy words appear only as what they are: values of the user
+	// setting, not accepted arguments. AC-TASKS-MCP-CREATE-TASK-PROFILE-VALIDATION-001.4.
+	assert.Contains(t, agentProfileDesc, "Accepts an agent profile ID only")
+	assert.Contains(t, agentProfileDesc,
+		"the words current_task and workspace_default are values of the mcp_task_agent_profile_default user setting, not accepted arguments")
+	assert.Contains(t, agentProfileDesc, "omit this argument to use the configured policy")
 	assert.Contains(t, agentProfileDesc, "current_task")
 	assert.Contains(t, agentProfileDesc, "workspace_default")
 	assert.Contains(t, agentProfileDesc, "verified creating session")
@@ -177,7 +183,7 @@ func TestUpdateTask_ToolSchema_HasTitleMaxLength(t *testing.T) {
 	require.True(t, ok, "schema should have properties")
 	titleProp, ok := props["title"].(map[string]interface{})
 	require.True(t, ok, "title should be an object")
-	assert.Equal(t, float64(service.TaskTitleMaxLength), titleProp["maxLength"])
+	assert.Equal(t, float64(taskcontract.TaskTitleMaxLength), titleProp["maxLength"])
 }
 
 func TestCreateTask_PromptCanonical(t *testing.T) {
@@ -1110,7 +1116,7 @@ func TestGetTaskPlan_ExplicitTaskIDForwardedNotBound(t *testing.T) {
 
 	assert.False(t, result.IsError)
 	assert.Equal(t, ws.ActionMCPGetTaskPlan, backend.lastAction)
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-B", payload["task_id"], "explicit task_id must reach the backend, not the bound task")
 }
@@ -1144,7 +1150,7 @@ func TestGetTaskPlan_FallsBackToBoundTask(t *testing.T) {
 	result := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{})
 
 	assert.False(t, result.IsError)
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-A", payload["task_id"])
 }

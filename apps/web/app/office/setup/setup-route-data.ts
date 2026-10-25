@@ -3,7 +3,7 @@ import type { OnboardingFSWorkspace } from "@/lib/api/domains/office-api";
 import { fetchUserSettings, listAgents } from "@/lib/api/domains/settings-api";
 import { listWorkspaces } from "@/lib/api/domains/workspace-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 import type { Agent } from "@/lib/types/http";
 
 export type SetupWizardRouteProps = {
@@ -39,9 +39,7 @@ export async function loadSetupRouteData(mode?: string): Promise<SetupRouteData>
     listWorkspaces(requestOptions).catch(() => ({ workspaces: [] })),
   ]);
 
-  const profiles = agentsResponse.agents.flatMap((agent) =>
-    agent.profiles.map((p) => toAgentProfileOption(agent, p)),
-  );
+  const profiles = toSelectorProfileOptions(agentsResponse.agents);
 
   const defaultProfileId = pickDefaultProfile(
     userSettings?.settings?.default_utility_agent_id,

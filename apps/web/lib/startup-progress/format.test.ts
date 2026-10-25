@@ -3,6 +3,7 @@ import i18next from "i18next";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   formatDuration,
+  formatTimingDuration,
   formatElapsed,
   formatEta,
   formatPhaseLabel,
@@ -115,4 +116,9 @@ describe("percentDone", () => {
   it("clamps above 100", () => {
     expect(percentDone(15, 10)).toBe(100);
   });
+});
+
+it("keeps subsecond startup timing visible without a zero-second estimate", () => {
+  expect(formatTimingDuration(t, 82)).toBe("82 milliseconds");
+  expect(formatTimingDuration(t, 2000)).toBe("2 seconds");
 });

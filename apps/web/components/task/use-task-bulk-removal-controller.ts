@@ -50,10 +50,8 @@ export function useTaskBulkRemovalController({
     const state = store.getState();
     return {
       sessions: taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
-      isLoading:
-        !taskId ||
-        !state.taskSessionsByTask.loadedByTaskId[taskId] ||
-        !!state.taskSessionsByTask.loadingByTaskId[taskId],
+      // This forced read has settled; another observer's refresh does not invalidate it.
+      isLoading: !taskId || !state.taskSessionsByTask.loadedByTaskId[taskId],
       hasError: taskId ? !!state.taskSessionsByTask.errorByTaskId?.[taskId] : false,
     };
   }, [loadSessions, store, taskId]);

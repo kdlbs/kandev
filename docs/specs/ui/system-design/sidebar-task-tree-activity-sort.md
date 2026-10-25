@@ -64,3 +64,9 @@ The aggregate exists only during sidebar view derivation. It adds no API field, 
 
 - [Sidebar effective task tree state](sidebar-effective-task-tree-state.md) defines the corresponding state grouping and sorting pattern.
 - [Activity timestamp decision](../../../decisions/2026-08-17-separate-task-activity-from-summary-freshness.md) defines the source activity value.
+
+## Planned sidebar query
+
+[Sidebar task browsing](sidebar-archived-filter.md) proposes server evaluation of these
+semantics for bounded pages in every sidebar view. Non-sidebar consumers keep their existing path.
+A sidebar consumer must not derive complete-tree values from a partial page.

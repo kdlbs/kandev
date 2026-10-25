@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -15,7 +17,7 @@ import (
 )
 
 func TestExecutionProfilePersistence_ModelFields(t *testing.T) {
-	assertModelField(t, reflect.TypeOf(models.Run{}), "ResolvedExecutionProfileID",
+	assertModelField(t, reflect.TypeOf(runsmodels.Run{}), "ResolvedExecutionProfileID",
 		"resolved_execution_profile_id")
 	assertModelField(t, reflect.TypeOf(models.RouteAttempt{}), "ExecutionProfileID",
 		"execution_profile_id")

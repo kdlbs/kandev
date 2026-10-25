@@ -320,6 +320,7 @@ func (r *KubernetesExecutor) connectRestartedKubernetesAgentctl(
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: restarted nonce handshake: %w", err)
 	}
 	createRequest := buildReconnectCreateInstanceRequest(req, remoteInstanceID)
+	applyKubernetesDurableJournalPath(createRequest, req)
 	response, err := createOrReconcileKubernetesAgentctlInstance(ctx, control, createRequest)
 	if err != nil {
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: recreate agentctl instance: %w", err)
@@ -417,7 +418,7 @@ func (r *KubernetesExecutor) recreateMissingKubernetesPod(
 	if createErr != nil {
 		return nil, createErr
 	}
-	binary, err := r.resolveBinary(profile.Platform)
+	binary, err := r.resolveBinary(ctx, req, profile.Platform)
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes lifecycle: resolve replacement agentctl: %w", err)
 	}

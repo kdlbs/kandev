@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -14,11 +15,20 @@ import (
 // embed-and-panic-on-touch pattern in prompt_steer_routing_test.go.
 type turnStartRecordingAdapter struct {
 	adapter.AgentAdapter
-	turnStart time.Time
-	recorded  bool
+	sessionID              string
+	turnStart              time.Time
+	recorded               bool
+	requestedSessionID     string
+	recordedTurnStartCalls int
 }
 
-func (a turnStartRecordingAdapter) RecordedTurnStart(_ string) (time.Time, bool) {
+func (a *turnStartRecordingAdapter) GetSessionID() string {
+	return a.sessionID
+}
+
+func (a *turnStartRecordingAdapter) RecordedTurnStart(sessionID string) (time.Time, bool) {
+	a.requestedSessionID = sessionID
+	a.recordedTurnStartCalls++
 	return a.turnStart, a.recorded
 }
 
@@ -49,7 +59,8 @@ func TestHandleWSBackgroundProbe_AdapterWithoutTurnStartRecorder_Unknown(t *test
 // turn ever started) resolves to unknown.
 func TestHandleWSBackgroundProbe_NoRecordedTurnStart_Unknown(t *testing.T) {
 	s := newTestServer(t)
-	s.procMgr.SetAdapterForTest(turnStartRecordingAdapter{recorded: false})
+	s.cfg.SessionID = "sess-1"
+	s.procMgr.SetAdapterForTest(&turnStartRecordingAdapter{sessionID: "acp-1", recorded: false})
 	msg, _ := ws.NewRequest("req-1", "agent.background.probe", map[string]string{"session_id": "sess-1"})
 
 	resp := s.handleWSBackgroundProbe(context.Background(), msg)
@@ -67,11 +78,70 @@ func TestHandleWSBackgroundProbe_NoRecordedTurnStart_Unknown(t *testing.T) {
 // answer: a pid-0 root must never be walked into a false "live".
 func TestHandleWSBackgroundProbe_RecordedTurnStart_NoRunningProcess_Unknown(t *testing.T) {
 	s := newTestServer(t)
-	s.procMgr.SetAdapterForTest(turnStartRecordingAdapter{turnStart: time.Now(), recorded: true})
+	s.cfg.SessionID = "sess-1"
+	s.procMgr.SetAdapterForTest(&turnStartRecordingAdapter{sessionID: "acp-1", turnStart: time.Now(), recorded: true})
 	msg, _ := ws.NewRequest("req-1", "agent.background.probe", map[string]string{"session_id": "sess-1"})
 
 	resp := s.handleWSBackgroundProbe(context.Background(), msg)
 	assertBackgroundProbeResult(t, resp, "unknown")
+}
+
+// AC-002.4: the handler must forward req.SessionID into
+// probe.ProbeBackgroundWorkloads unchanged. Every other case in this file
+// short-circuits before the identity scan (no adapter, no recorder, or
+// AgentPID()==0 reading unknown before sessionID is ever used), so none of
+// them can catch a call site that drops or blanks the session id — this
+// stubs the probe seam to capture what the handler actually forwards.
+func TestHandleWSBackgroundProbe_ForwardsSessionID(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.SessionID = "sess-42"
+	adpt := &turnStartRecordingAdapter{sessionID: "acp-42", turnStart: time.Now(), recorded: true}
+	s.procMgr.SetAdapterForTest(adpt)
+
+	var gotSessionID string
+	orig := probeBackgroundWorkloads
+	probeBackgroundWorkloads = func(_ int, _ time.Time, sessionID string) (probe.Result, error) {
+		gotSessionID = sessionID
+		return probe.ResultLive, nil
+	}
+	t.Cleanup(func() { probeBackgroundWorkloads = orig })
+
+	msg, _ := ws.NewRequest("req-1", "agent.background.probe", map[string]string{"session_id": "sess-42"})
+	resp := s.handleWSBackgroundProbe(context.Background(), msg)
+
+	assertBackgroundProbeResult(t, resp, "live")
+	if adpt.requestedSessionID != "acp-42" {
+		t.Fatalf("recorder session id = %q, want active ACP session %q", adpt.requestedSessionID, "acp-42")
+	}
+	if gotSessionID != "sess-42" {
+		t.Fatalf("handler forwarded session id %q, want %q", gotSessionID, "sess-42")
+	}
+}
+
+func TestHandleWSBackgroundProbe_ForeignKandevSession_Unknown(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.SessionID = "active-kandev-session"
+	adpt := &turnStartRecordingAdapter{sessionID: "active-acp-session", turnStart: time.Now(), recorded: true}
+	s.procMgr.SetAdapterForTest(adpt)
+
+	probeCalls := 0
+	orig := probeBackgroundWorkloads
+	probeBackgroundWorkloads = func(_ int, _ time.Time, _ string) (probe.Result, error) {
+		probeCalls++
+		return probe.ResultLive, nil
+	}
+	t.Cleanup(func() { probeBackgroundWorkloads = orig })
+
+	msg, _ := ws.NewRequest("req-1", "agent.background.probe", map[string]string{"session_id": "other-kandev-session"})
+	resp := s.handleWSBackgroundProbe(context.Background(), msg)
+
+	assertBackgroundProbeResult(t, resp, "unknown")
+	if adpt.recordedTurnStartCalls != 0 {
+		t.Fatalf("looked up turn start %d times for a foreign Kandev session", adpt.recordedTurnStartCalls)
+	}
+	if probeCalls != 0 {
+		t.Fatalf("probed %d times for a foreign Kandev session", probeCalls)
+	}
 }
 
 func assertBackgroundProbeResult(t *testing.T, resp *ws.Message, want string) {

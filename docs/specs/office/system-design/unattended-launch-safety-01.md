@@ -25,6 +25,13 @@ driven by `SchedulerIntegration.tick`
 (`internal/office/service/scheduler_integration.go`). Every control in this design
 attaches either to that transition or to the enqueue that precedes it.
 
+This design owns the Office launch policy attached to enqueue and claim. The
+shared `Run` and `RunEvent` data contracts live in `internal/runs/models`, per
+[the run contract ownership decision](../../../decisions/2026-09-26-run-contract-ownership.md).
+Office requirements continue to own the meaning and derivation of Office policy
+fields carried by those records. This boundary does not change persistence or
+wire behavior.
+
 Adjacent contracts this design uses but does not own:
 
 - `agent_profiles` and its `max_concurrent_sessions` column belong to the agent
@@ -271,6 +278,16 @@ each call site:
 | Wake caused by a task | the actor on the task carrier | as carried |
 | Retry / recovery / re-dispatch | re-queues an existing row; actor unchanged | as persisted |
 | Workflow engine `queue_run` action, task carrier unresolved | none; a task with no carrier and no live claimed run is itself a root cause | `system` |
+| Step-entry wake (ledger `DispatchStepEntry` actions, Office `auto_start_agent`) | the `task_step_transitions` row for the entry: `agent` resolves its `causing_run_id`; legacy rows without that ID use the session-and-time lookup; `human` is a human-rooted root; anything else falls back to the task carrier | `agent`, `user`, or as carried |
+
+The seventh row exists because step-entry wakes run after the transition commits and
+carry no live session in `MachineState`. The Office scheduler includes the immutable
+causing run ID in a task-owned launch. Lifecycle retains it across a restart and adds
+it to the first turn-completion event. Run-owned executions use their owner run ID.
+The orchestrator records the ID in the transition row, and the wake loads that exact
+run. It does not depend on later session binding or claim fields, which retry and
+recovery can clear (AC-OFFICE-RUN-CAUSATION-001.25). Older rows use the
+session-and-time lookup because they do not contain the trusted run ID.
 
 The sixth row is the workflow engine's `queue_run` bridge
 (`runsServiceEngineAdapter.QueueRun`, `internal/backendapp/main.go`): it always resolves

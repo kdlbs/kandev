@@ -5,18 +5,28 @@ import { StateProvider, useAppStore } from "@/components/state-provider";
 import { prKey, usePRKeyToTasks } from "./use-pr-key-to-tasks";
 import type { TaskPR } from "@/lib/types/github";
 
-vi.mock("./use-task-pr", () => ({
-  // The hook is fire-and-forget side-effect; mocking it keeps the test
-  // focused on the inversion logic and avoids a real network call.
-  useWorkspacePRs: () => undefined,
+const transport = vi.hoisted(() => ({ list: vi.fn() }));
+vi.mock("@/lib/api/domains/github-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/github-api")>()),
+  listWorkspaceTaskPRs: transport.list,
 }));
 
-afterEach(() => cleanup());
+const heldResponses: Array<() => void> = [];
+transport.list.mockImplementation(
+  () => new Promise((resolve) => heldResponses.push(() => resolve({ task_prs: {} }))),
+);
+
+afterEach(async () => {
+  cleanup();
+  heldResponses.splice(0).forEach((resolve) => resolve());
+  await Promise.resolve();
+  await Promise.resolve();
+});
 
 function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr",
-    workspace_id: "workspace-1",
+    workspace_id: "ws-1",
     task_id: "task-1",
     owner: "kdlbs",
     repo: "kandev",
@@ -48,7 +58,14 @@ function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
 }
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(StateProvider, null, children);
+  return createElement(StateProvider, {
+    initialState: {
+      workspaces: { items: [], activeId: "ws-1" },
+      workspaceContextGeneration: 1,
+      taskPRs: { byTaskId: {}, workspaceId: "ws-1", workspaceContextGeneration: 1 },
+    },
+    children,
+  });
 }
 
 // Render usePRKeyToTasks alongside the store's setTaskPRs action so tests can

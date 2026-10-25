@@ -1,0 +1,20 @@
+[
+  {
+    "route": "/?workflowId=journey-workflow-0",
+    "ms": 742.1548431739211,
+    "status": 200,
+    "completed_before_release": false
+  },
+  {
+    "route": "/api/v1/workflows/journey-workflow-0/snapshot",
+    "ms": 636.5827163681388,
+    "status": 200,
+    "completed_before_release": false
+  },
+  {
+    "route": "/api/v1/task-sessions/journey-task-0001-session-0",
+    "ms": 9.43036563694477,
+    "status": 200,
+    "completed_before_release": true
+  }
+]

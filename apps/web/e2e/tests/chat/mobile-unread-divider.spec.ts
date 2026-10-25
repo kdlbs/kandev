@@ -151,6 +151,8 @@ test.describe("Mobile unread divider", () => {
       });
 
     await responseHold.releaseHeldResponse();
+    const serverSession = await apiClient.getTaskSession(taskA.sessionId);
+    expect(serverSession.session.last_read_message_id).toBe(taskA.newestMessageId);
     await switchMobileTask(testPage, "Completed read cursor mobile A");
     await waitForStableActiveSession(testPage, taskA.sessionId);
 

@@ -8,10 +8,11 @@ import { waitForSessionState } from "../../helpers/session";
 import {
   seedActiveSessionForegroundActivity,
   waitForActiveSessionForegroundActivity,
+  waitForTaskSessionsSettled,
 } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,9 +87,6 @@ async function recordSessionTabHistory(page: Page): Promise<void> {
 // ---------------------------------------------------------------------------
 
 test.describe("Session resume (ACP mode)", () => {
-  // These tests restart the backend mid-test, which can be flaky
-  test.describe.configure({ retries: 1 });
-
   test("resume after backend restart preserves messages and accepts new prompts", async ({
     testPage,
     apiClient,
@@ -200,25 +198,43 @@ test.describe("Session resume (ACP mode)", () => {
       message: "Resumed session did not settle before activity reconciliation",
       timeout: 30_000,
     });
+    await waitForTaskSessionsSettled(testPage, task.id);
 
-    // Reproduce the stale client projection left behind when the reconnect
-    // state_changed event is missed. The real session-list refresh must clear it.
-    await seedActiveSessionForegroundActivity(testPage, "background");
-    await waitForActiveSessionForegroundActivity(testPage, "background");
-    await expect(session.agentStatus()).toHaveAccessibleName("Background work is running");
+    const sessionsPath = `/api/v1/tasks/${task.id}/sessions`;
+    const matchesSessions = (url: URL) => url.pathname === sessionsPath;
+    const releaseResponse = Promise.withResolvers<void>();
+    const holdSessionResponse = async (route: Route) => {
+      await releaseResponse.promise;
+      await route.continue();
+    };
+    await testPage.route(matchesSessions, holdSessionResponse);
+    try {
+      const refreshRequested = testPage.waitForRequest(
+        (request) => request.method() === "GET" && matchesSessions(new URL(request.url())),
+      );
+      await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await refreshRequested;
 
-    const refreshedSessions = testPage.waitForResponse((response) => {
-      const path = new URL(response.url()).pathname;
-      return response.request().method() === "GET" && path === `/api/v1/tasks/${task.id}/sessions`;
-    });
-    await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
-    expect((await refreshedSessions).ok()).toBe(true);
+      // Hold authoritative hydration while installing the missed-event projection.
+      await seedActiveSessionForegroundActivity(testPage, "background", sessionId);
+      await waitForActiveSessionForegroundActivity(testPage, "background", sessionId);
+      await expect(session.agentStatus()).toHaveAccessibleName("Background work is running");
+      const refreshedSessions = testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" && matchesSessions(new URL(response.url())),
+      );
+      releaseResponse.resolve();
+      expect((await refreshedSessions).ok()).toBe(true);
 
-    await waitForActiveSessionForegroundActivity(testPage, null);
-    await expect(testPage.getByRole("status", { name: "Background work is running" })).toHaveCount(
-      0,
-    );
-    await expect(session.anyIdleInput()).toBeVisible();
+      await waitForActiveSessionForegroundActivity(testPage, null, sessionId);
+      await expect(
+        testPage.getByRole("status", { name: "Background work is running" }),
+      ).toHaveCount(0);
+      await expect(session.anyIdleInput()).toBeVisible();
+    } finally {
+      releaseResponse.resolve();
+      await testPage.unroute(matchesSessions, holdSessionResponse);
+    }
   });
 
   // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.2
@@ -430,8 +446,8 @@ test.describe("Session resume (TUI passthrough mode)", () => {
       },
     );
 
-    // 3. Open the task by its API id. The Kanban projection can lag while a
-    // passthrough task is starting, even though the task already exists.
+    // 3. Open by task API id. Kanban hydration can lag while passthrough starts
+    // and is unrelated to reconnecting the session after a backend restart.
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`));

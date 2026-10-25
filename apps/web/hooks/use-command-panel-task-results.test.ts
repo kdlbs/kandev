@@ -2,7 +2,9 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const listTasksByWorkspace = vi.fn();
+const searchTaskConversations = vi.fn().mockResolvedValue({ tasks: [], state: "ready" });
 vi.mock("@/lib/api", () => ({
+  searchTaskConversations: (...args: unknown[]) => searchTaskConversations(...args),
   listTasksByWorkspace: (...args: unknown[]) => listTasksByWorkspace(...args),
 }));
 
@@ -32,6 +34,8 @@ const STEPS = [{ id: "step-1", position: 0, show_in_command_panel: true }];
 type HarnessProps = {
   mode: "commands" | "search-tasks";
   search?: string;
+  open?: boolean;
+  workspace?: string;
 };
 
 function harness(
@@ -40,12 +44,12 @@ function harness(
   search = "",
 ) {
   return renderHook(
-    ({ mode, search = "" }: HarnessProps) =>
+    ({ mode, search = "", open = true, workspace = "workspace-1" }: HarnessProps) =>
       useInlineTaskSearchEffect({
         mode,
         search,
-        open: true,
-        workspaceId: "workspace-1",
+        open,
+        workspaceId: workspace,
         steps: STEPS,
         setTaskResults,
         setIsSearching,
@@ -58,6 +62,7 @@ function harness(
 
 afterEach(() => {
   listTasksByWorkspace.mockReset();
+  searchTaskConversations.mockReset().mockResolvedValue({ tasks: [], state: "ready" });
 });
 
 describe("useInlineTaskSearchEffect", () => {
@@ -172,4 +177,76 @@ describe("useInlineTaskSearchEffect", () => {
       onlyArchived: true,
     });
   });
+});
+
+describe("conversation matches", () => {
+  it("keeps metadata usable while conversations load, then orders and deduplicates", async () => {
+    const metadata = task("metadata", "Metadata");
+    const archived = task("archive", "Archived", { archived_at: "2026-01-01" });
+    const conversation = task("conversation", "Conversation");
+    listTasksByWorkspace.mockImplementation((_id, params) =>
+      Promise.resolve({ tasks: params.onlyArchived ? [archived] : [metadata] }),
+    );
+    let resolve!: (value: unknown) => void;
+    searchTaskConversations.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const setResults = vi.fn();
+    harness(setResults, vi.fn(), "needle");
+    await waitFor(() => expect(setResults).toHaveBeenLastCalledWith([metadata, archived]));
+    resolve({ tasks: [conversation, metadata], state: "ready", has_more: false });
+    await waitFor(() =>
+      expect(setResults).toHaveBeenLastCalledWith([metadata, conversation, archived]),
+    );
+  });
+
+  it("keeps metadata when conversation search fails", async () => {
+    const metadata = task("metadata", "Metadata");
+    listTasksByWorkspace.mockResolvedValue({ tasks: [metadata] });
+    searchTaskConversations.mockRejectedValue(new Error("unavailable"));
+    const setResults = vi.fn();
+    harness(setResults, vi.fn(), "needle");
+    await waitFor(() => expect(setResults).toHaveBeenLastCalledWith([metadata]));
+  });
+});
+
+it("fences late conversations when the workspace changes or the palette closes", async () => {
+  const pending: Array<{ resolve: (value: unknown) => void; signal: AbortSignal }> = [];
+  searchTaskConversations.mockImplementation(
+    (_workspace, _query, _limit, options) =>
+      new Promise((resolve) => {
+        pending.push({ resolve, signal: options.init.signal });
+      }),
+  );
+  listTasksByWorkspace.mockResolvedValue({ tasks: [] });
+  const setResults = vi.fn();
+  const { rerender } = harness(setResults, vi.fn(), "needle");
+  await waitFor(() => expect(pending).toHaveLength(1));
+  rerender({ mode: "commands", search: "needle", workspace: "workspace-2" });
+  expect(pending[0].signal.aborted).toBe(true);
+  await waitFor(() => expect(pending).toHaveLength(2));
+  rerender({ mode: "commands", search: "needle", workspace: "workspace-2", open: false });
+  expect(pending[1].signal.aborted).toBe(true);
+  pending[0].resolve({ tasks: [task("foreign", "Foreign")], state: "ready" });
+  pending[1].resolve({ tasks: [task("late", "Late")], state: "ready" });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(setResults).toHaveBeenLastCalledWith([]);
+});
+
+it("keeps the empty state loading until both search sources settle", async () => {
+  listTasksByWorkspace.mockResolvedValue({ tasks: [] });
+  let finish!: (value: unknown) => void;
+  searchTaskConversations.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const searching = vi.fn();
+  harness(vi.fn(), searching, "needle");
+  await waitFor(() => expect(searchTaskConversations).toHaveBeenCalled());
+  expect(searching).not.toHaveBeenCalledWith(false);
+  finish({ tasks: [], state: "ready" });
+  await waitFor(() => expect(searching).toHaveBeenLastCalledWith(false));
 });

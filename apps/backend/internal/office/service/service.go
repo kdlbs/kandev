@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -92,7 +94,7 @@ type RunSessionLaunch struct {
 // task session. A route is optional; when present it is the concrete provider
 // selection chosen by the routing dispatcher.
 type RunSessionLauncher interface {
-	StartRunSession(ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	StartRunSession(ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 		launch LaunchContext, route *RouteOverride) (RunSessionLaunch, error)
 }
 
@@ -110,6 +112,20 @@ func (s *Service) ReconcileRunSessions(ctx context.Context) error {
 	return reconciler.ReconcileRunSessions(ctx)
 }
 
+// SessionRecoveryBlockReader exposes the task-owned recovery record to Office
+// after an autonomous launch fails. Office keeps only a durable run reference;
+// the task repository remains authoritative for block identity and settlement.
+type SessionRecoveryBlockReader interface {
+	GetOpenSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
+}
+
+// SessionRecoveryBlockLookup reads a block by stable identity so the Office
+// scheduler can distinguish an unresolved block from an explicitly settled
+// one after a restart.
+type SessionRecoveryBlockLookup interface {
+	GetSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -118,9 +134,12 @@ func (s *Service) ReconcileRunSessions(ctx context.Context) error {
 // The scheduler.RoutingDispatcher implementation translates this to
 // the scheduler-side LaunchContext when calling StartTaskWithRoute.
 type LaunchContext struct {
-	ExecutorID           string
-	ExecutorProfileID    string
-	Priority             string
+	ExecutorID        string
+	ExecutorProfileID string
+	Priority          string
+	// CausingRunID is the immutable Office run that initiated this task-owned
+	// execution. It is carried through lifecycle events for transition records.
+	CausingRunID         string
 	Prompt               string
 	WorkflowStepID       string
 	PlanMode             bool
@@ -152,17 +171,17 @@ type RoutingDispatcher interface {
 	// with err=nil means routing is disabled (caller falls through to
 	// the legacy launch path) OR the run was parked (caller treats as
 	// handled — no failure escalation).
-	DispatchWithRouting(ctx context.Context, run *models.Run,
+	DispatchWithRouting(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance, launch LaunchContext) (launched bool, parked bool, err error)
 	// HandlePostStartFailure classifies a streaming/tool failure for a
 	// run that was launched via routing. Returns handled=true when the
 	// routing path requeued the run (caller should NOT escalate).
-	HandlePostStartFailure(ctx context.Context, run *models.Run,
+	HandlePostStartFailure(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance, errorMessage string,
 		providerError *streams.ProviderError) (handled bool, err error)
 	// MarkRunSuccessHealth flips a successful run's resolved provider /
 	// model / tier scopes back to healthy.
-	MarkRunSuccessHealth(ctx context.Context, run *models.Run,
+	MarkRunSuccessHealth(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance)
 }
 
@@ -357,6 +376,13 @@ type TaskPRLister interface {
 	ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]TaskPRLink, error)
 }
 
+// DeferredAssignmentQueue is the scheduler-owned queue seam used when a
+// deferred assignment is replayed. The scheduler owns the assignment wake
+// rate gate; the office service owns the deferred row and its lifecycle.
+type DeferredAssignmentQueue interface {
+	QueueDeferredAssignment(ctx context.Context, assignment models.DeferredAssignment) error
+}
+
 // ServiceOptions holds all dependencies for the office Service constructor.
 // Required fields: Repo and Logger. All other fields are optional and may be
 // set to nil/zero to disable the corresponding feature.
@@ -439,7 +465,8 @@ type Service struct {
 	// (QueueRun) and finalize processing terminally (see
 	// scheduler_integration.go). Optional — nil means the kill switch
 	// gate is not wired (older tests, transitional deployments).
-	pauseGate shared.PauseGate
+	pauseGate               shared.PauseGate
+	deferredAssignmentQueue DeferredAssignmentQueue
 
 	// workflowStepGetter resolves a task's current workflow step so
 	// task_assigned wakes (queueTaskAssignedRun, the unstarted-task
@@ -547,6 +574,14 @@ func (s *Service) RoutingDispatcherHandle() RoutingDispatcher {
 // in-package implementation that writes through the office repo.
 func (s *Service) SetRunsService(runs *runsservice.Service) {
 	s.runsService = runs
+}
+
+// SetDeferredAssignmentQueue wires the scheduler-owned queue seam used by
+// deferred assignment replay. Keeping this optional preserves isolated
+// service tests and the defensive task-boundary fallback used during startup
+// composition.
+func (s *Service) SetDeferredAssignmentQueue(q DeferredAssignmentQueue) {
+	s.deferredAssignmentQueue = q
 }
 
 // CancelTaskExecution delegates to the configured TaskCanceller (the
@@ -1119,7 +1154,7 @@ func (s *Service) ReleaseTaskCheckout(ctx context.Context, taskID string) error 
 // -- Runs --
 
 // ListRuns returns run requests for a workspace.
-func (s *Service) ListRuns(ctx context.Context, wsID string) ([]*models.Run, error) {
+func (s *Service) ListRuns(ctx context.Context, wsID string) ([]*runsmodels.Run, error) {
 	return s.repo.ListRuns(ctx, wsID)
 }
 

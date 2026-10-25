@@ -126,6 +126,9 @@ type MCPAttachmentTestResult struct {
 // It deliberately has no headers, environment, command arguments, tool input,
 // tool result, or full endpoint URL fields.
 type MCPServerAttachment struct {
+	DefinitionID         string                   `json:"definition_id,omitempty"`
+	DefinitionRevision   int64                    `json:"definition_revision,omitempty"`
+	Origins              []MCPSelectionOrigin     `json:"origins,omitempty"`
 	Name                 string                   `json:"name"`
 	Source               MCPServerSource          `json:"source,omitempty"`
 	Transport            string                   `json:"transport,omitempty"`
@@ -152,6 +155,9 @@ type MCPServerAttachment struct {
 // raw network/stdio target or error summary, but Apply persists only the
 // sanitized projection.
 type MCPAttachmentEvidence struct {
+	DefinitionID       string                    `json:"definition_id,omitempty"`
+	DefinitionRevision int64                     `json:"definition_revision,omitempty"`
+	Origins            []MCPSelectionOrigin      `json:"origins,omitempty"`
 	AttemptID          string                    `json:"attachment_attempt_id"`
 	ServerName         string                    `json:"server_name,omitempty"`
 	Kind               MCPAttachmentEvidenceKind `json:"kind"`
@@ -272,6 +278,11 @@ func (s *MCPServerAttachment) applyEvidence(evidence MCPAttachmentEvidence, cata
 }
 
 func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidence, catalogTruncated bool) {
+	if evidence.DefinitionID != "" {
+		s.DefinitionID = evidence.DefinitionID
+		s.DefinitionRevision = evidence.DefinitionRevision
+		s.Origins = normalizeMCPOrigins(evidence.Origins)
+	}
 	if evidence.Source != "" {
 		s.Source = evidence.Source
 	}
@@ -460,6 +471,8 @@ func appendBoundedMCPAttachmentEvidence(existing []MCPAttachmentEvidence, eviden
 
 func sanitizeMCPAttachmentEvidence(evidence MCPAttachmentEvidence) (MCPAttachmentEvidence, bool) {
 	var catalogTruncated bool
+	evidence.DefinitionID = boundedMCPIdentity(evidence.DefinitionID)
+	evidence.Origins = normalizeMCPOrigins(evidence.Origins)
 	if evidence.Transport == "stdio" {
 		evidence.Target = SanitizeMCPStdioTarget(evidence.Target)
 	} else if evidence.Target != "" {

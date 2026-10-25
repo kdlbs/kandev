@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/tasks/system-design/task-dependencies.md
+requirements:
+  - REQ-TASKS-TASK-DEPENDENCIES-001
+system_design:
+  - ../../specs/tasks/system-design/task-dependencies.md
 created: 2026-08-09
 status: not_started
 ---
@@ -369,3 +372,9 @@ No task is marked `parallel-safe`; waves do not authorize subagent execution.
 - **`shouldRenderChatStatusBar`.** A chip added without extending that predicate
   is dead in exactly the case it matters most: a blocked task with no PR, no
   todos, and no queued prompts.
+
+## Prepared-session follow-up
+
+Issue #4579 is tracked in
+[dependency prepared session reuse](../dependency-prepared-session/plan.md),
+with consumer coverage through predecessor completion and MCP movement.

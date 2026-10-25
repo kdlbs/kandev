@@ -33,11 +33,11 @@ func (r *Repository) CreateTaskRepository(ctx context.Context, taskRepo *models.
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_repositories (
-			id, task_id, repository_id, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
+			id, task_id, repository_id, workspace_relative_path, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
 			branch_policy_base_branch, branch_policy_branch_template, branch_policy_pull_request_target,
 			position, metadata, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.CheckoutBranch,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.WorkspaceRelativePath, taskRepo.BaseBranch, taskRepo.CheckoutBranch,
 		taskRepo.BranchPolicyID, taskRepo.BranchPolicyName, taskRepo.BranchPolicyBaseBranch,
 		taskRepo.BranchPolicyBranchTemplate, taskRepo.BranchPolicyPullRequestTarget,
 		taskRepo.Position, string(metadataJSON), taskRepo.CreatedAt, taskRepo.UpdatedAt)
@@ -50,7 +50,7 @@ func (r *Repository) GetTaskRepository(ctx context.Context, id string) (*models.
 	var metadataJSON string
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, repository_id, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
+		SELECT id, task_id, repository_id, workspace_relative_path, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
 			branch_policy_base_branch, branch_policy_branch_template, branch_policy_pull_request_target,
 			position, metadata, created_at, updated_at
 		FROM task_repositories WHERE id = ?
@@ -58,6 +58,7 @@ func (r *Repository) GetTaskRepository(ctx context.Context, id string) (*models.
 		&taskRepo.ID,
 		&taskRepo.TaskID,
 		&taskRepo.RepositoryID,
+		&taskRepo.WorkspaceRelativePath,
 		&taskRepo.BaseBranch,
 		&taskRepo.CheckoutBranch,
 		&taskRepo.BranchPolicyID,
@@ -87,7 +88,7 @@ func (r *Repository) GetTaskRepository(ctx context.Context, id string) (*models.
 // ListTaskRepositories returns all repository links for a task
 func (r *Repository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, repository_id, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
+		SELECT id, task_id, repository_id, workspace_relative_path, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
 			branch_policy_base_branch, branch_policy_branch_template, branch_policy_pull_request_target,
 			position, metadata, created_at, updated_at
 		FROM task_repositories
@@ -107,6 +108,7 @@ func (r *Repository) ListTaskRepositories(ctx context.Context, taskID string) ([
 			&taskRepo.ID,
 			&taskRepo.TaskID,
 			&taskRepo.RepositoryID,
+			&taskRepo.WorkspaceRelativePath,
 			&taskRepo.BaseBranch,
 			&taskRepo.CheckoutBranch,
 			&taskRepo.BranchPolicyID,
@@ -183,11 +185,11 @@ func (r *Repository) UpdateTaskRepository(ctx context.Context, taskRepo *models.
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_repositories SET
-			task_id = ?, repository_id = ?, base_branch = ?, checkout_branch = ?, branch_policy_id = ?, branch_policy_name = ?,
+			task_id = ?, repository_id = ?, workspace_relative_path = ?, base_branch = ?, checkout_branch = ?, branch_policy_id = ?, branch_policy_name = ?,
 			branch_policy_base_branch = ?, branch_policy_branch_template = ?, branch_policy_pull_request_target = ?,
 			position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`), taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.CheckoutBranch,
+	`), taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.WorkspaceRelativePath, taskRepo.BaseBranch, taskRepo.CheckoutBranch,
 		taskRepo.BranchPolicyID, taskRepo.BranchPolicyName, taskRepo.BranchPolicyBaseBranch,
 		taskRepo.BranchPolicyBranchTemplate, taskRepo.BranchPolicyPullRequestTarget,
 		taskRepo.Position, string(metadataJSON), taskRepo.UpdatedAt, taskRepo.ID)
@@ -249,6 +251,19 @@ func (r *Repository) DeleteTaskRepository(ctx context.Context, id string) error 
 // ListTaskRepositoriesByTaskIDs returns all repository links for the given task IDs,
 // grouped by task ID. This eliminates N+1 queries when loading repositories for multiple tasks.
 func (r *Repository) ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskRepository, error) {
+	return listTaskRepositoriesByTaskIDs(ctx, r.ro, taskIDs)
+}
+
+type taskRepositoryQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	Rebind(query string) string
+}
+
+func listTaskRepositoriesByTaskIDs(
+	ctx context.Context,
+	queryer taskRepositoryQueryer,
+	taskIDs []string,
+) (map[string][]*models.TaskRepository, error) {
 	result := make(map[string][]*models.TaskRepository, len(taskIDs))
 	if len(taskIDs) == 0 {
 		return result, nil
@@ -262,7 +277,7 @@ func (r *Repository) ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs 
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, task_id, repository_id, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
+		SELECT id, task_id, repository_id, workspace_relative_path, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
 			branch_policy_base_branch, branch_policy_branch_template, branch_policy_pull_request_target,
 			position, metadata, created_at, updated_at
 		FROM task_repositories
@@ -270,7 +285,7 @@ func (r *Repository) ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs 
 		ORDER BY position ASC, created_at ASC, id ASC
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	rows, err := queryer.QueryContext(ctx, queryer.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +298,7 @@ func (r *Repository) ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs 
 			&taskRepo.ID,
 			&taskRepo.TaskID,
 			&taskRepo.RepositoryID,
+			&taskRepo.WorkspaceRelativePath,
 			&taskRepo.BaseBranch,
 			&taskRepo.CheckoutBranch,
 			&taskRepo.BranchPolicyID,

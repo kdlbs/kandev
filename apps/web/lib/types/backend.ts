@@ -1,9 +1,20 @@
 import type {
+  RepositoryDeletedPayload,
+  RepositorySetPayload,
+  RepositoryBranchPolicyPayload,
+} from "./repository-events";
+export type {
+  RepositoryDeletedPayload,
+  RepositorySetPayload,
+  RepositoryBranchPolicyPayload,
+} from "./repository-events";
+import type {
   TaskPlanCommentEventPayload,
   TaskPlanEventPayload,
   TaskPlanRevisionEventPayload,
 } from "./task-plan-events";
 import type { CaptureRequest } from "@/lib/logger/capture";
+import type { AgentUpdateJob } from "@/lib/api/domains/agent-update-api";
 
 export const SYSTEM_AGENT_RUNTIME_STATUS_CHANGED = "system.agent_runtime.status_changed" as const;
 
@@ -17,9 +28,11 @@ export type { SessionBackendMessageMap } from "./session-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 import type { RunEventAppendedPayload } from "./run-events";
 export type { RunEventAppendedPayload } from "./run-events";
+import type { CoordinatorUpdatedPayload } from "@/lib/api/domains/coordinator-api";
 
 import type {
   Agent,
+  AgentProfilesReorderedPayload as ProfileOrderPayload,
   AvailableAgent,
   ForegroundActivity,
   ReorderBand,
@@ -198,6 +211,9 @@ export type AgentInstallOutputPayload = {
 };
 
 export type AgentUpdateJobPayload = {
+  automatic?: boolean;
+  runtime_id?: string;
+  previous_version?: string;
   job_id: string;
   agent_name: string;
   status: "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
@@ -233,11 +249,27 @@ export type DiffUpdatePayload = {
 };
 
 export type UpdateAvailablePayload = {
-  version: string;
+  notification_kind?: "agent_runtime_summary";
+  runtime_updates?: RuntimeUpdateSummaryMember[];
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
+  version?: string;
   url?: string;
   title: string;
   body: string;
   occurrence_id: string;
+};
+
+export type RuntimeUpdateSummaryMember = {
+  occurrence_id: string;
+  agent_name: string;
+  runtime_id: string;
+  display_name: string;
+  previous_version: string;
+  version: string;
 };
 
 export type WorkspacePayload = {
@@ -250,32 +282,14 @@ export type WorkspacePayload = {
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
   default_config_agent_profile_id?: string | null;
-  created_at?: string;
-  updated_at?: string;
-};
-
-/**
- * A `repository_set.*` event. `repositories` is absent on the delete event, whose
- * payload only has to identify the set and its workspace.
- */
-export type RepositorySetPayload = {
-  id: string;
-  workspace_id: string;
-  name?: string;
-  description?: string;
-  repositories?: Array<{ repository_id: string; position: number; base_branch?: string }>;
-  created_at?: string;
-  updated_at?: string;
-};
-
-export type RepositoryBranchPolicyPayload = {
-  id: string;
-  repository_id: string;
-  name?: string;
-  description?: string;
-  base_branch?: string;
-  branch_template?: string;
-  pull_request_target?: string;
+  /**
+   * Idle-suspension policy carried on workspace lifecycle events. Both keys
+   * are absent from payloads sent by older backends; each consumer checks
+   * key presence rather than reading the value, so it can keep its current
+   * state when an older backend omits them.
+   */
+  acp_idle_suspension_enabled?: boolean;
+  acp_idle_timeout_minutes?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -311,6 +325,7 @@ export type StepPayload = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
@@ -338,6 +353,7 @@ export type FileChangeFacet = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
 };
 
 export type FileInfo = {
@@ -350,6 +366,7 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
 };
@@ -378,6 +395,9 @@ export type AgentProfilePayload = {
   allow_indexing: boolean;
   cli_passthrough?: boolean;
   cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
+  mcp_selection_mode?: "inherit" | "selected";
+  mcp_selected_servers?: string[];
   plan: string;
   created_at?: string;
   updated_at?: string;
@@ -450,6 +470,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
   import("@/lib/types/review").ReviewBackendMessageMap & {
+    "prompts.changed": BackendMessage<"prompts.changed", Record<string, never>>;
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;
     "task.created": BackendMessage<"task.created", TaskEventPayload>;
@@ -489,9 +510,9 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "agent.install.started": BackendMessage<"agent.install.started", AgentInstallJobPayload>;
     "agent.install.output": BackendMessage<"agent.install.output", AgentInstallOutputPayload>;
     "agent.install.finished": BackendMessage<"agent.install.finished", AgentInstallJobPayload>;
-    "agent.update.started": BackendMessage<"agent.update.started", AgentUpdateJobPayload>;
+    "agent.update.started": BackendMessage<"agent.update.started", AgentUpdateJob>;
     "agent.update.output": BackendMessage<"agent.update.output", AgentUpdateOutputPayload>;
-    "agent.update.finished": BackendMessage<"agent.update.finished", AgentUpdateJobPayload>;
+    "agent.update.finished": BackendMessage<"agent.update.finished", AgentUpdateJob>;
     "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
@@ -513,9 +534,11 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
     "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
+    "coordinator.updated": BackendMessage<"coordinator.updated", CoordinatorUpdatedPayload>;
     "repository_set.created": BackendMessage<"repository_set.created", RepositorySetPayload>;
     "repository_set.updated": BackendMessage<"repository_set.updated", RepositorySetPayload>;
     "repository_set.deleted": BackendMessage<"repository_set.deleted", RepositorySetPayload>;
+    "repository.deleted": BackendMessage<"repository.deleted", RepositoryDeletedPayload>;
     "repository_branch_policy.created": BackendMessage<
       "repository_branch_policy.created",
       RepositoryBranchPolicyPayload
@@ -550,6 +573,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
 
     "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
+    "executor.catalogue.invalidated": BackendMessage<
+      "executor.catalogue.invalidated",
+      Record<string, never>
+    >;
     "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
     "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
     "executor.profile.created": BackendMessage<"executor.profile.created", ExecutorProfilePayload>;
@@ -574,6 +601,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "agent.profile.deleted": BackendMessage<"agent.profile.deleted", AgentProfileDeletedPayload>;
     "agent.profile.created": BackendMessage<"agent.profile.created", AgentProfileChangedPayload>;
     "agent.profile.updated": BackendMessage<"agent.profile.updated", AgentProfileChangedPayload>;
+    "agent.profiles.reordered": BackendMessage<"agent.profiles.reordered", ProfileOrderPayload>;
     "user.settings.updated": BackendMessage<"user.settings.updated", UserSettingsUpdatedPayload>;
     "user.agent_profile_recent_use.updated": BackendMessage<
       "user.agent_profile_recent_use.updated",
@@ -632,3 +660,5 @@ export type {
   ProcessStatusPayload,
   QueueStatusChangedPayload,
 } from "./session-events";
+
+export type { AgentProfilesReorderedPayload } from "./http-agents";

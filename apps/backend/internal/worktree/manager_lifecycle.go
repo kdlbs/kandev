@@ -309,7 +309,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
-	handle, valid, err := m.openReusableWorktreePath(wt.Path, wt)
+	handle, valid, err := m.openReusableWorktreePath(ctx, wt.Path, wt)
 	if err != nil {
 		return nil, err
 	}
@@ -378,14 +378,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
-			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
 			if err != nil {
 				return nil, true, err
 			}
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid && m.IsValid(existing.Path) {
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -414,14 +414,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
-			handle, valid, err := m.openReusableWorktreePath(existing.Path, existing)
+			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
 			if err != nil {
 				return nil, true, err
 			}
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid && m.IsValid(existing.Path) {
+			if valid {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -505,7 +505,10 @@ func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspac
 	return handle, nil
 }
 
-func (m *Manager) openReusableWorktreePath(worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
+func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
+	if _, err := m.validateWorkspaceAdoptionBinding(ctx, wt); err != nil {
+		return nil, false, err
+	}
 	handle, err := m.validateWorktreePathSafe(worktreePath)
 	if err != nil {
 		return nil, false, err
@@ -516,7 +519,15 @@ func (m *Manager) openReusableWorktreePath(worktreePath string, wt *Worktree) (s
 		}
 		return nil, false, err
 	}
-	if handle == nil || !handle.IsValidWorktree() {
+	if handle == nil {
+		return nil, false, nil
+	}
+	inspection := m.inspectCheckout(ctx, worktreePath, handle)
+	if inspection.operationalErr != nil {
+		_ = handle.Close()
+		return nil, false, fmt.Errorf("inspect checkout before reuse: %w", inspection.operationalErr)
+	}
+	if inspection.class != checkoutLinkedHealthy && inspection.class != checkoutMainHealthy {
 		if handle != nil {
 			_ = handle.Close()
 		}
@@ -616,13 +627,6 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 		return SanitizeBranchSlug(req.BranchIdentitySlug)
 	}
 	return SanitizeBranchSlug(req.BranchSlug)
-}
-
-func recreateSourceBranch(existingBranch, checkoutBranch string) string {
-	if checkoutBranch != "" {
-		return checkoutBranch
-	}
-	return existingBranch
 }
 
 // resolveBaseRefWithFallback resolves the base ref for a new worktree, optionally
@@ -819,15 +823,30 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	if err != nil {
 		return nil, err
 	}
+	if req.RemoteContribution != nil {
+		return m.createContributionInTaskDir(ctx, req, worktreePath, fallbackWarning, fallbackDetail)
+	}
+	nestedExclusionChanged := false
+	if req.WorkspaceRelativePath != "" {
+		nestedExclusionChanged, err = m.addNestedWorkspaceExclusion(ctx, req.RepositoryPath, worktreePath)
+		if err != nil {
+			return nil, fmt.Errorf("protect nested workspace path: %w", err)
+		}
+	}
+	nestedExclusionCommitted := false
+	defer func() {
+		if nestedExclusionChanged && !nestedExclusionCommitted {
+			if cleanupErr := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), req.RepositoryPath, worktreePath); cleanupErr != nil {
+				m.logger.Warn("failed to remove provisional nested workspace exclusion", zap.String("path", worktreePath), zap.Error(cleanupErr))
+			}
+		}
+	}()
 
 	_, branchName := m.buildWorktreeNames(req)
 	startPoint := baseRef
 
 	var fetchResult *FetchBranchResult
 	checkoutMode := req
-	if req.RemoteContribution != nil {
-		return m.createContributionInTaskDir(ctx, req, worktreePath, fallbackWarning, fallbackDetail)
-	}
 	if req.CheckoutBranch != "" {
 		switch {
 		case req.QualifiedPRBase != nil:
@@ -920,6 +939,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
 		return nil, err
 	}
+	nestedExclusionCommitted = true
 
 	// Surface any base-branch fallback before signaling readiness so the
 	// "Create worktree" step can show the warning when completed early.
@@ -958,6 +978,22 @@ func (m *Manager) createContributionInTaskDir(
 	req CreateRequest,
 	worktreePath, fallbackWarning, fallbackDetail string,
 ) (*Worktree, error) {
+	nestedExclusionChanged := false
+	if req.WorkspaceRelativePath != "" {
+		var err error
+		nestedExclusionChanged, err = m.addNestedWorkspaceExclusion(ctx, req.RepositoryPath, worktreePath)
+		if err != nil {
+			return nil, fmt.Errorf("protect nested workspace path: %w", err)
+		}
+	}
+	nestedExclusionCommitted := false
+	defer func() {
+		if nestedExclusionChanged && !nestedExclusionCommitted {
+			if cleanupErr := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), req.RepositoryPath, worktreePath); cleanupErr != nil {
+				m.logger.Warn("failed to remove provisional nested workspace exclusion", zap.String("path", worktreePath), zap.Error(cleanupErr))
+			}
+		}
+	}()
 	remoteName, contributionRef, err := m.materializeRemoteContribution(ctx, req.RepositoryPath, req.RemoteContribution)
 	if err != nil {
 		return nil, err
@@ -971,6 +1007,7 @@ func (m *Manager) createContributionInTaskDir(
 	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
 		return nil, err
 	}
+	nestedExclusionCommitted = true
 	if fallbackWarning != "" {
 		wt.BaseBranchFallbackWarning = fallbackWarning
 		wt.BaseBranchFallbackDetail = fallbackDetail
@@ -984,6 +1021,9 @@ func (m *Manager) createContributionInTaskDir(
 }
 
 func (m *Manager) prepareTaskWorktreePath(req CreateRequest) (string, error) {
+	if req.WorkspaceRelativePath != "" {
+		return m.prepareTaskRelativeWorktreePath(req)
+	}
 	repoDir := SanitizeRepoDirName(req.RepoName)
 	if repoDir == "" {
 		return "", ErrInvalidRepoName
@@ -1011,6 +1051,71 @@ func (m *Manager) prepareTaskWorktreePath(req CreateRequest) (string, error) {
 		return "", m.describeOwnershipMarkerFailure(taskDir, req.TaskID, err)
 	}
 	return worktreePath, nil
+}
+
+func (m *Manager) prepareTaskRelativeWorktreePath(req CreateRequest) (string, error) {
+	relative, err := validateTaskRelativeWorktreeRequest(req)
+	if err != nil {
+		return "", err
+	}
+	root, path, err := m.resolveTaskRelativeWorktreePath(req.TaskDirName, relative)
+	if err != nil {
+		return "", err
+	}
+	parent := filepath.Dir(path)
+	if err := m.validateTaskDir(parent); err != nil {
+		return "", err
+	}
+	if err := ensureWorkspacePathAvailable(path); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return "", fmt.Errorf("failed to create task directory: %w", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(root, storageworkspaces.OwnershipMarker{
+		TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskDirName,
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		return "", m.describeOwnershipMarkerFailure(root, req.TaskID, err)
+	}
+	return path, nil
+}
+
+func validateTaskRelativeWorktreeRequest(req CreateRequest) (string, error) {
+	if req.TaskDirName == "" || filepath.Base(req.TaskDirName) != req.TaskDirName {
+		return "", fmt.Errorf("invalid task directory name")
+	}
+	relative := filepath.Clean(filepath.FromSlash(req.WorkspaceRelativePath))
+	if invalidWorkspaceRelativePath(relative) {
+		return "", fmt.Errorf("invalid workspace relative path")
+	}
+	return relative, nil
+}
+
+func invalidWorkspaceRelativePath(relative string) bool {
+	return relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+func (m *Manager) resolveTaskRelativeWorktreePath(taskDirName, relative string) (string, string, error) {
+	root, err := m.TaskRoot(taskDirName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve task root: %w", err)
+	}
+	path := filepath.Join(root, relative)
+	contained, err := filepath.Rel(root, path)
+	if err != nil || invalidWorkspaceRelativePath(contained) {
+		return "", "", fmt.Errorf("workspace relative path escapes task root")
+	}
+	return root, path, nil
+}
+
+func ensureWorkspacePathAvailable(path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%w: %s", ErrWorkspacePathOccupied, path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect workspace path: %w", err)
+	}
+	return nil
 }
 
 // describeOwnershipMarkerFailure enriches a WriteOwnershipMarker failure with
@@ -1274,9 +1379,16 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	if isFetchRefusedCheckedOut(outputStr) {
 		if result := m.retryFetchAsRemoteTrackingRef(ctx, repoPath, branch, prNumber, required); result != nil {
 			if required && result.Warning != "" {
+				detail := strings.TrimSpace(result.WarningDetail)
+				if detail == "" {
+					detail = strings.TrimSpace(result.Warning)
+				}
+				m.logger.Warn("required checkout branch refresh could not verify the refreshed ref",
+					zap.String("branch", branch),
+					zap.String("detail", detail))
 				return nil, fmt.Errorf(
-					"required refresh of checkout branch %q could not verify the refreshed ref: %w",
-					branch, ErrGitCommandFailed,
+					"required refresh of checkout branch %q could not verify the refreshed ref: %s: %w",
+					branch, detail, ErrGitCommandFailed,
 				)
 			}
 			return result, nil
@@ -2121,6 +2233,22 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	if err := m.restoreMissingTasksBaseForRecreate(worktreePath, existing); err != nil {
 		return nil, err
 	}
+	var nestedExclusionChanged bool
+	if req.WorkspaceRelativePath != "" {
+		var exclusionErr error
+		nestedExclusionChanged, exclusionErr = m.addNestedWorkspaceExclusion(ctx, req.RepositoryPath, worktreePath)
+		if exclusionErr != nil {
+			return nil, fmt.Errorf("protect nested workspace path: %w", exclusionErr)
+		}
+	}
+	nestedExclusionCommitted := false
+	defer func() {
+		if nestedExclusionChanged && !nestedExclusionCommitted {
+			if cleanupErr := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), req.RepositoryPath, worktreePath); cleanupErr != nil {
+				m.logger.Warn("failed to remove provisional nested workspace exclusion", zap.String("path", worktreePath), zap.Error(cleanupErr))
+			}
+		}
+	}()
 
 	// Archive may safely compact an integrated managed local branch, so a
 	// recreate after unarchive must restore its persisted exact head first.
@@ -2170,7 +2298,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	}
 	refreshedStartPoint := ""
 	if shouldRefreshRecreatedBranch(req, recoveredFromHead, emptyRemoteBaseRef) {
-		sourceBranch, selectedRef, prepareErr := m.prepareRecreatedBranch(ctx, existing, req)
+		sourceBranch, selectedRef, prepareErr := m.prepareRecreatedBranch(ctx, existing, req, exists)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
@@ -2276,6 +2404,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 			return nil, fmt.Errorf("failed to update worktree record: %w", err)
 		}
 	}
+	nestedExclusionCommitted = true
 
 	// Update cache keyed by (sessionID, repositoryID, branchSlug).
 	if req.SessionID != "" {
@@ -2293,11 +2422,21 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 }
 
 func (m *Manager) prepareRecreatedBranch(
-	ctx context.Context, existing *Worktree, req CreateRequest,
+	ctx context.Context, existing *Worktree, req CreateRequest, localBranchExists bool,
 ) (string, string, error) {
 	sourceBranch := existing.Branch
 	if req.CheckoutBranch != "" {
 		sourceBranch = req.CheckoutBranch
+	}
+	// Ordinary task branches can remain local until the user publishes them.
+	if localBranchExists && req.CheckoutBranch == "" && req.PRNumber == 0 {
+		remoteExists, err := m.branchExists(ctx, req.RepositoryPath, "refs/remotes/origin/"+sourceBranch)
+		if err != nil {
+			return sourceBranch, "", err
+		}
+		if !remoteExists {
+			return sourceBranch, existing.Branch, nil
+		}
 	}
 	selectedRef, err := m.prepareBranchFromRefreshedOrigin(
 		ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,

@@ -266,6 +266,49 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
   });
 });
 
+// Split from the block above to stay inside the per-function line limit: this
+// half is only about the flag-gated Coordinators discovery entry.
+describe("resolveSettingsDiscovery coordinators entry (D1)", () => {
+  const WORKSPACE = { id: "workspace-coord-1", name: "Coordinator Workspace" };
+
+  it("omits the per-workspace Coordinators entry when the flag is off", () => {
+    const resolved = resolveSettingsDiscovery({
+      t,
+      showAccount: false,
+      showUsers: false,
+      showOrganizations: false,
+      workspaces: [WORKSPACE],
+      agents: [],
+      executors: [],
+      coordinatorEnabled: false,
+    });
+
+    expect(resolved.some((entry) => entry.id === "workspace:workspace-coord-1:coordinators")).toBe(
+      false,
+    );
+  });
+
+  it("adds a per-workspace Coordinators entry when the flag is on", () => {
+    const resolved = resolveSettingsDiscovery({
+      t,
+      showAccount: false,
+      showUsers: false,
+      showOrganizations: false,
+      workspaces: [WORKSPACE],
+      agents: [],
+      executors: [],
+      coordinatorEnabled: true,
+    });
+    const coordinators = resolved.find(
+      (entry) => entry.id === "workspace:workspace-coord-1:coordinators",
+    );
+
+    expect(coordinators?.label).toBe("Coordinators");
+    expect(coordinators?.href).toBe("/settings/workspaces/workspace-coord-1/coordinators");
+    expect(coordinators?.breadcrumb).toEqual(["Workspaces", "Coordinator Workspace"]);
+  });
+});
+
 describe("resolveSettingsDiscovery visibility", () => {
   it("omits account and user-management entries when their rendering gates are closed", () => {
     const hidden = resolveSettingsDiscovery({
@@ -327,4 +370,18 @@ describe("resolveSettingsDiscovery visibility", () => {
     // Per-workspace results carry the workspace name as their path prefix.
     expect(connection?.breadcrumb[1]).toBe("Main");
   });
+});
+
+it("orders appearance motion and image defaults to match the settings page", () => {
+  const ids = [
+    "appearance-rich-output-motion",
+    "appearance-chat-motion",
+    "appearance-image-preview-defaults",
+    "appearance-settings-menu",
+  ];
+  const controls = SETTINGS_DISCOVERY_DEFINITIONS.filter((entry) => ids.includes(entry.id)).sort(
+    (a, b) => a.order - b.order,
+  );
+  expect(controls.map((entry) => entry.id)).toEqual(ids);
+  expect(new Set(controls.map((entry) => entry.order)).size).toBe(controls.length);
 });

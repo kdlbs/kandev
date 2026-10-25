@@ -11,11 +11,11 @@ requirements:
 
 ## Boundary and mapping
 
-| Requirement | Design section |
-| --- | --- |
-| REQ-UI-CHAT-MOTION-001 | Live content rendering |
+| Requirement            | Design section                  |
+| ---------------------- | ------------------------------- |
+| REQ-UI-CHAT-MOTION-001 | Live content rendering          |
 | REQ-UI-CHAT-MOTION-002 | Preference and effective motion |
-| REQ-UI-CHAT-MOTION-003 | Scroll integration |
+| REQ-UI-CHAT-MOTION-003 | Scroll integration              |
 
 UI owns presentation only. Reuse the existing native transcript; do not replace
 its placement engine or broaden the shared Markdown renderer's default behavior.
@@ -90,6 +90,19 @@ comment-selection tests must prove span boundaries do not change offsets. Only
 marked motion spans use the motion renderer; unmarked spans retain the caller
 renderer.
 
+Every script animation owner releases its handle with `releaseAnimation` from
+`@kandev/ui/animation-utils`: cancel, then set `effect` to null. This severs the
+handle's effect-to-target relationship for chat entrance and text motion, shared
+spinners and pulse, and settings-search motion. Settings search also clears its
+owned finish callback before cancellation or removal from the ownership map.
+The callback captures a primitive key rather than a DOM entry and checks exact
+handle identity, so a queued old finish cannot release a replacement animation.
+
+The contributor reported canceled and finished script-animation target retention
+in a macOS WKWebView reproduction. Detachment assertions establish ownership
+cleanup; they do not establish native heap collection or a browser-wide memory
+fix. Collection and long-uptime behavior require separate native-browser evidence.
+
 ## Scroll integration
 
 `useAutoScroll` and its helpers in `message-list-native-scroll.ts` remain the
@@ -97,11 +110,35 @@ policy authority. Add one small cancelable follow driver per visible native
 scroll container. Existing allowed live-follow calls request a target instead
 of synchronously writing the bottom when motion is effective. Frame callbacks
 read current geometry, then perform one scroll write, easing toward a moving
-bottom target and landing exactly within 300 ms of the last growth. New content
-updates the target of the active driver, never queues another animation. Retargeting
-preserves elapsed frame time so continuous growth cannot stall scroll progress.
+bottom target. When the browser can place the scroll position within 2 px of
+the target, the driver settles within 300 ms after the last growth. If the
+browser clamps the target beyond that tolerance, the driver stops at the
+interpolation deadline and accepts the returned position; it does not retry
+while idle. New content updates the target of the active driver, never queues
+another animation. Retargeting preserves elapsed frame time so continuous
+growth cannot stall scroll progress.
 Use existing resize notifications for late content growth. Keep synchronous
 content-size reads out of message commits (the existing stability invariant).
+
+### Bounded settlement with browser rounding
+
+`scrollHeight` and `clientHeight` use integer CSS pixels. The browser can return
+a fractional `scrollTop` after a write, especially under zoom. Exact equality
+between that value and the calculated target is not a termination condition.
+
+The driver uses a 1 px settlement tolerance after its scroll write. It also
+stops scheduling frames when the current 180 ms interpolation reaches its end.
+At that endpoint, it attempts the target once and accepts the browser's returned
+position. A clamped or quantized write must not start an idle retry loop.
+Subsequent content or resize requests can restart the driver. Target growth
+retains the existing retargeting behavior and never queues additional drivers.
+
+This implements AC-UI-CHAT-MOTION-003.1 without changing follow eligibility.
+Cancellation and disposal still stop pending work before another geometry read.
+Regression coverage includes fractional values on either side of the target,
+an unreachable target, subsequent growth, and reader interruption.
+The [bounded settlement repair](../../../plans/chat-scroll-bounded-settlement/plan.md)
+records implementation scope and the limits of its relationship to issue 4100.
 
 Follow intent is distinct from instantaneous distance to bottom while the driver
 runs: its own intermediate scroll events must not incorrectly clear intent.

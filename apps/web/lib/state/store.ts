@@ -1,3 +1,4 @@
+import { invalidateExecutorCatalogue } from "@/lib/api/executor-catalogue";
 import { createStore } from "zustand/vanilla";
 import { immer } from "zustand/middleware/immer";
 import { hydrateState } from "./hydration/hydrator";
@@ -5,6 +6,10 @@ import type { AppState, HydrationState } from "./app-state-types";
 import { mergeInitialState } from "./default-state";
 import { buildStateOverrides } from "./store-overrides";
 import { getQuickChatSelectionIdentity } from "@/lib/quick-chat/selection-storage";
+import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
+import { createTaskOverviewSlice } from "./slices/task-overview";
+import { withTaskOverviewNormalization } from "./slices/task-overview-normalize";
+import { observeSettingsAgentRemovals } from "./settings-agent-removals";
 
 import {
   createKanbanSlice,
@@ -22,6 +27,7 @@ import {
   createFeaturesSlice,
   createAuthSlice,
   createAutomationsSlice,
+  createCoordinatorsSlice,
   createSystemSlice,
   createPluginsSlice,
   createReviewSlice,
@@ -41,60 +47,44 @@ export function createAppStore(initialState?: HydrationState) {
   const merged = mergeInitialState(initialState);
 
   const store = createStore<AppState>()(
-    immer((set, get, api) => ({
-      ...merged,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createKanbanSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createWorkspaceSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createSettingsSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createSessionSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createSessionRuntimeSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createGitHubSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createGitLabSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createAzureDevOpsSlice(set as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createJiraSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createLinearSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createOfficeSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createFeaturesSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createAuthSlice(set as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createSystemSlice(set as any, get as any, api as any),
-      setAgentRuntime: (snapshot) =>
-        set((draft) => {
-          draft.agentRuntime = snapshot;
-        }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createUISlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createAutomationsSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createPluginsSlice(set as any, get as any, api as any),
-      // createReviewSlice only needs `set`; passing get/api would be superfluous
-      // arguments (CodeQL js/superfluous-trailing-arguments).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createReviewSlice(set as any),
-      ...createNeedsYouInboxSlice(set),
-      ...createFailedInboxSlice(set, get),
-      ...createPreviewFeedbackSlice(set),
-      ...createInboxHistorySlice(set),
-      // Re-assert merged initial state so caller-supplied values win over slice defaults.
-      ...buildStateOverrides(merged),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),
-    })),
+    withTaskOverviewNormalization(
+      immer((set, get, api) => ({
+        ...merged,
+        ...createTaskOverviewSlice(set, get, api),
+        ...createKanbanSlice(set, get),
+        ...createWorkspaceSlice(set, get),
+        ...createSettingsSlice(set, get),
+        ...createSessionSlice(set, get),
+        ...createSessionRuntimeSlice(set, get),
+        ...createGitHubSlice(set, get),
+        ...createGitLabSlice(set, get),
+        ...createAzureDevOpsSlice(set),
+        ...createJiraSlice(set, get),
+        ...createLinearSlice(set, get),
+        ...createOfficeSlice(set, get),
+        ...createFeaturesSlice(set),
+        ...createAuthSlice(set),
+        ...createSystemSlice(set, get),
+        setAgentRuntime: (snapshot) =>
+          set((draft) => {
+            draft.agentRuntime = newerAgentRuntimeSnapshot(draft.agentRuntime, snapshot);
+          }),
+        ...createUISlice(set, get),
+        ...createAutomationsSlice(set, get),
+        ...createCoordinatorsSlice(set),
+        ...createPluginsSlice(set, get),
+        ...createReviewSlice(set),
+        ...createNeedsYouInboxSlice(set),
+        ...createFailedInboxSlice(set, get),
+        ...createPreviewFeedbackSlice(set),
+        ...createInboxHistorySlice(set),
+        // Re-assert merged initial state so caller-supplied values win over slice defaults.
+        ...buildStateOverrides(merged),
+        hydrate: (state, options) => set((draft) => hydrateState(draft, state, options)),
+      })),
+    ),
   );
+  observeSettingsAgentRemovals(store);
   let previousAuth = store.getState().auth;
   const syncQuickChatSelectionIdentity = (auth: AppState["auth"]) => {
     const identity = getQuickChatSelectionIdentity(auth);
@@ -105,6 +95,18 @@ export function createAppStore(initialState?: HydrationState) {
   syncQuickChatSelectionIdentity(previousAuth);
   store.subscribe((state) => {
     if (state.auth === previousAuth) return;
+    const changedUser = state.auth.user?.id !== previousAuth.user?.id;
+    const loggedOut = previousAuth.authenticated && !state.auth.authenticated;
+    const changedAuthority =
+      state.auth.user?.role !== previousAuth.user?.role ||
+      state.auth.user?.status !== previousAuth.user?.status ||
+      state.auth.mode !== previousAuth.mode;
+    if (changedUser || loggedOut || changedAuthority) {
+      invalidateExecutorCatalogue();
+      previousAuth = state.auth;
+      store.getState().setExecutors([]);
+      store.getState().setSettingsData({ executorsLoaded: false });
+    }
     previousAuth = state.auth;
     syncQuickChatSelectionIdentity(state.auth);
   });

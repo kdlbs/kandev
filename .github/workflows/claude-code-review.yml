@@ -48,7 +48,7 @@ jobs:
 
       - name: Run Claude Code Review (App token, inline comments)
         id: claude-review
-        uses: anthropics/claude-code-action@78a7209fd893bd50d1b2b784da9b6f240a66373a # v1
+        uses: anthropics/claude-code-action@ae68417a745a5df4b2124873632bd73a2255e6f6 # v1.0.259
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # No github_token: the action performs the OIDC -> installation-token
@@ -147,7 +147,7 @@ jobs:
 
       - name: Run Claude Code Review (GITHUB_TOKEN fallback)
         id: claude-review
-        uses: anthropics/claude-code-action@78a7209fd893bd50d1b2b784da9b6f240a66373a # v1
+        uses: anthropics/claude-code-action@ae68417a745a5df4b2124873632bd73a2255e6f6 # v1.0.259
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Skip the Claude GitHub App's OIDC -> installation-token exchange,

@@ -7,6 +7,7 @@ import { toast } from "@/lib/toast/sonner";
 
 import {
   type ContainerLiveStatus,
+  type PluginExecutorLiveStatus,
   type SSHLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
@@ -38,6 +39,7 @@ export function EnvironmentInfo({
   kubernetesError = null,
   loading,
   kubernetesActions,
+  pluginExecutor,
 }: {
   env: TaskEnvironment | null;
   container: ContainerLiveStatus | null;
@@ -47,6 +49,7 @@ export function EnvironmentInfo({
   kubernetesError?: string | null;
   loading: boolean;
   kubernetesActions?: React.ReactNode;
+  pluginExecutor?: PluginExecutorLiveStatus | null;
 }) {
   const { t } = useTranslation();
   if (loading && !env) {
@@ -89,6 +92,7 @@ export function EnvironmentInfo({
           kubernetes={kubernetes ?? null}
           kubernetesLoaded={kubernetesLoaded}
           kubernetesError={kubernetesError}
+          pluginExecutor={pluginExecutor}
         />
       </div>
       <EnvironmentFields
@@ -109,12 +113,14 @@ function StatusBadge({
   kubernetes,
   kubernetesLoaded,
   kubernetesError,
+  pluginExecutor,
 }: {
   env: TaskEnvironment;
   container: ContainerLiveStatus | null;
   kubernetes: KubernetesSession | null;
   kubernetesLoaded: boolean;
   kubernetesError: string | null;
+  pluginExecutor?: PluginExecutorLiveStatus | null;
 }) {
   // For container-backed envs the live state is the source of truth; for the
   // others fall back to the recorded TaskEnvironment.status.
@@ -124,6 +130,7 @@ function StatusBadge({
     env.executor_type === "k8s"
       ? { session: kubernetes, loaded: kubernetesLoaded, error: kubernetesError }
       : undefined,
+    pluginExecutor,
   );
   const className = TONE_CLASSES[tone];
   return (

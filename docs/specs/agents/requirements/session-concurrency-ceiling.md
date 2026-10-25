@@ -53,7 +53,10 @@ bounded instance capacity, so that one installation does not overload its host.
   caller shall receive an explicit conflict so it retains ownership.
 - **AC-AGENTS-SESSION-CEILING-001.5:** A retry sweep shall replay deferred
   launches by their stored kind. It shall preserve a record when capacity is
-  still full or replay fails for a non-ceiling reason.
+  still full or replay fails for a non-ceiling reason, except for the
+  permanent failures in AC-AGENTS-SESSION-CEILING-001.11 and
+  AC-AGENTS-SESSION-CEILING-001.12. The log entry for a preserved non-ceiling
+  failure shall name its cause.
 - **AC-AGENTS-SESSION-CEILING-001.6:** A callback from an older execution shall
   not release or confirm a reservation held by a successor execution for the
   same session.
@@ -69,6 +72,36 @@ bounded instance capacity, so that one installation does not overload its host.
   trigger retry of eligible ceiling-deferred launches without losing their
   payload, entry ownership, or original queue time. Disabling shall not stop the
   retry mechanism or bypass workflow WIP and task eligibility checks.
+- **AC-AGENTS-SESSION-CEILING-001.10:** A newly created automation task shall
+  have one initial-start owner before feeder publication. Workflow auto-start
+  shall yield until definitive admission or termination releases that exact
+  owner. Continuations shall preserve the existing ownership identity. Restart,
+  lease expiry, unknown acknowledgement and failed Stop shall not release
+  unresolved durable retry ownership or authorize generic replay.
+  When the ceiling refuses the start of an
+  admitted automation run, the system shall keep the run open, holding its
+  concurrency slot, and keep its task and deferred start. The replayed start
+  shall bind its session and turn to that run, regardless of workflow-step
+  auto-start eligibility. A replay that fails for a non-ceiling reason, or a
+  dropped start, shall fail the run; a replay whose session launched but could
+  not be bound shall also stop that session. A start whose run is no longer
+  open shall be dropped without launching. This includes a record that
+  AC-AGENTS-SESSION-CEILING-001.5 preserved after its replay failed the run,
+  so the next sweep drops it instead of replaying it. If the task is deleted
+  while its start waits, the unbound run shall fail and release its concurrency
+  slot.
+- **AC-AGENTS-SESSION-CEILING-001.11:** When a replayed launch fails validation
+  of its built agent or continue command, the sweep shall drop the record with
+  a launch-invalid reason instead of preserving it. A later pass would build the
+  same command and leave another failed session. Wrapping the command-validation
+  error shall not change this disposition. A transient failure whose message
+  only mentions validation shall still be preserved.
+- **AC-AGENTS-SESSION-CEILING-001.12:** When a record's workflow entry can never
+  become valid, the sweep shall drop it as superseded. This covers a legacy
+  `start` with no recipient session, a binding that cannot be derived or is
+  incomplete, an unrouted entry whose step now routes sessions, and a task with
+  no durable entry identity. A failed step, transition, or task read during that
+  check shall preserve the record for a later pass.
 
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 

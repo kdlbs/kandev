@@ -71,9 +71,11 @@ def main(argv: list[str] | None = None) -> int:
         paths = tracked_files(root)
         baselines = load_baselines(root, RULES)
         findings = scan_architecture(root, paths)
-        diagnostics = baseline_diagnostics(findings, baselines, RULES)
         ledger_path = resolve_config_path(root, args.ledger)
-        diagnostics.extend(validate_ledger(root, ledger_path, set(paths), dt.date.today()))
+        ledger_validation = validate_ledger(root, ledger_path, set(paths), dt.date.today(), findings)
+        unregistered = [finding for finding in findings if finding not in ledger_validation.registered_findings]
+        diagnostics = baseline_diagnostics(unregistered, baselines, RULES)
+        diagnostics.extend(ledger_validation.diagnostics)
 
         if args.baseline_base_ref:
             base = load_baselines_from_ref(

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -335,7 +337,7 @@ type lightweightRunLauncher struct {
 }
 
 func (l *lightweightRunLauncher) StartRunSession(
-	ctx context.Context, run *officemodels.Run, agent *officemodels.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *officemodels.AgentInstance,
 	launch officeservice.LaunchContext, _ *officeservice.RouteOverride,
 ) (officeservice.RunSessionLaunch, error) {
 	l.calls = append(l.calls, launch)
@@ -559,7 +561,7 @@ func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 	if err != nil || len(runs) != 2 {
 		t.Fatalf("list runs after second fire: runs=%#v err=%v", runs, err)
 	}
-	var secondRun *officemodels.Run
+	var secondRun *runsmodels.Run
 	for _, r := range runs {
 		if r.ID != firstRun.ID {
 			secondRun = r
@@ -593,11 +595,13 @@ func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 }
 
 // stubAgentManager implements executor.AgentManagerClient with just enough
-// behavior for LaunchAgent: capture the request and let the test proceed.
-// Every other method is a mechanical zero-value stub — the launch path this
-// test drives never reaches them.
+// behavior for LaunchAgent: capture the request and optionally delegate to a
+// real lifecycle adapter. Every other method is a mechanical zero-value stub.
 type stubAgentManager struct {
-	launched chan *executor.LaunchAgentRequest
+	launched       chan *executor.LaunchAgentRequest
+	launchDelegate interface {
+		LaunchAgent(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	}
 }
 
 func newStubAgentManager() *stubAgentManager {
@@ -615,8 +619,11 @@ func (m *stubAgentManager) awaitLaunch(t *testing.T) *executor.LaunchAgentReques
 	}
 }
 
-func (m *stubAgentManager) LaunchAgent(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+func (m *stubAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	m.launched <- req
+	if m.launchDelegate != nil {
+		return m.launchDelegate.LaunchAgent(ctx, req)
+	}
 	return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
 }
 

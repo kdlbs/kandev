@@ -133,22 +133,30 @@ vi.mock("@/components/task/branch-path-popover", () => ({
 }));
 
 describe("TaskTopBar executor environment controls", () => {
+  const executorSettingsButtonTestId = "executor-settings-button";
+
   it("hides the executor environment button for filesystem executors", () => {
     renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="worktree" />);
 
-    expect(screen.queryByTestId("executor-settings-button")).toBeNull();
+    expect(screen.queryByTestId(executorSettingsButtonTestId)).toBeNull();
   });
 
   it("shows the executor environment button for Docker executors", () => {
     renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="local_docker" />);
 
-    expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
+    expect(screen.getByTestId(executorSettingsButtonTestId)).toBeTruthy();
   });
 
   it("shows the executor environment button for Kubernetes executors", () => {
     renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="k8s" />);
 
-    expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
+    expect(screen.getByTestId(executorSettingsButtonTestId)).toBeTruthy();
+  });
+
+  it("shows the executor environment button for plugin remote executors", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="plugin_remote" />);
+
+    expect(screen.getByTestId(executorSettingsButtonTestId)).toBeTruthy();
   });
 });
 

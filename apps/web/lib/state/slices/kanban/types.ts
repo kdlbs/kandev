@@ -4,6 +4,8 @@ import type {
   ReorderedTaskPosition,
   TaskPendingAction,
   TaskOrigin,
+  TaskCoverage,
+  TaskWorkflowCoverage,
   TaskPriority,
   TaskState as TaskStatus,
   WorkflowProfileSessionEndPolicy,
@@ -32,6 +34,8 @@ export type KanbanStepEvents = {
   on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_pr_merged?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_pr_closed?: Array<{ type: string; config?: Record<string, unknown> }>;
 };
 
 /**
@@ -50,6 +54,9 @@ export type TaskDependencyRef = {
 };
 
 export type KanbanState = {
+  taskCoverage?: TaskCoverage;
+  /** Ordered membership; tasks is the canonical compatibility projection. */
+  taskIds?: string[];
   workflowId: string | null;
   steps: Array<{
     id: string;
@@ -66,6 +73,7 @@ export type KanbanState = {
     session_target?: WorkflowSessionTarget | null;
     profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
     profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+    disable_unclassified_fallback?: boolean;
     complete_task_on_enter?: boolean;
     cancel_triggers_turn_complete?: boolean;
     /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
@@ -99,6 +107,8 @@ export type KanbanState = {
     workflowStepId: string;
     workflowAgentOverrides?: WorkflowAgentOverrides;
     title: string;
+    /** Card identifier (e.g. "KAN-42"); shown in place of the title where the UI calls for it. */
+    identifier?: string;
     description?: string;
     autopilot?: boolean;
     priority?: TaskPriority;
@@ -117,6 +127,7 @@ export type KanbanState = {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       branch_policy_id?: string;
       branch_policy_name?: string;
       branch_policy_base_branch?: string;
@@ -130,6 +141,7 @@ export type KanbanState = {
       display_name: string;
       position: number;
     }>;
+    initialWorkspaceLayout?: "repository" | "task_root";
     primarySessionId?: string | null;
     primarySessionState?: string | null;
     primarySessionPendingAction?: TaskPendingAction | null;
@@ -214,6 +226,8 @@ export type KanbanState = {
 };
 
 export type WorkflowSnapshotData = {
+  taskIds?: string[];
+  taskCoverage?: TaskCoverage;
   workflowId: string;
   workflowName: string;
   steps: KanbanState["steps"];
@@ -264,6 +278,7 @@ export type SidebarArchivedTasksState = {
 };
 
 export type WorkflowsState = {
+  taskWorkflowCoverage?: TaskWorkflowCoverage;
   items: Array<{
     id: string;
     workspaceId: string;
@@ -334,6 +349,8 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   sidebarArchivedTasks: SidebarArchivedTasksState;
+  /** Fresh status projections for bounded sidebar pages, keyed by workspace then task. */
+  sidebarStatusSummaryByWorkspaceId: Record<string, Record<string, TaskStatusSummary>>;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;
@@ -364,7 +381,7 @@ export type KanbanSliceActions = {
   ) => void;
   requestWorkspaceContextRefresh: (resetRetryCycle?: boolean) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
+  setWorkflows: (workflows: WorkflowsState["items"], coverage?: TaskWorkflowCoverage) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   /** Automatic task selection that must not invalidate a user navigation revision. */
@@ -400,7 +417,11 @@ export type KanbanSliceActions = {
   ) => void;
   releaseTaskRemoval: (token: string) => void;
   advanceTaskNavigationRevision: () => void;
-  setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
+  setWorkflowSnapshot: (
+    workflowId: string,
+    data: WorkflowSnapshotData,
+    options?: { stageClaimsReconciled?: boolean },
+  ) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;

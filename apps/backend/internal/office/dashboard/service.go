@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -61,7 +63,7 @@ type Repository interface {
 	ListActivityEntriesByAction(ctx context.Context, workspaceID, action string, limit int) ([]*models.ActivityEntry, error)
 	ListActivityEntriesByTarget(ctx context.Context, workspaceID, targetID string, limit int) ([]*models.ActivityEntry, error)
 	ListPendingApprovals(ctx context.Context, workspaceID string) ([]*models.Approval, error)
-	ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error)
+	ListRuns(ctx context.Context, workspaceID string) ([]*runsmodels.Run, error)
 	SearchTasks(ctx context.Context, workspaceID, query string, limit int) ([]*sqlite.TaskSearchResult, error)
 	ListActivityEntriesByType(ctx context.Context, workspaceID, filterType string, limit int) ([]*models.ActivityEntry, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
@@ -98,6 +100,11 @@ type Repository interface {
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
+	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
+	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
+	// capacity — distinct from the workflow-scoped ListAllTaskParticipants
+	// used everywhere else (see sqlite.Repository's doc comments on both).
+	ListTaskParticipantsAtCurrentStep(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	AddTaskParticipant(ctx context.Context, taskID, agentID, role string) (sqlite.ParticipantWriteResult, error)
 	RemoveTaskParticipant(ctx context.Context, taskID, agentID, role string) error
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
@@ -186,6 +193,14 @@ type ProjectBudgetEvaluator interface {
 // activity row is logged with an empty run_id. Mirrors channels.RunResolver.
 type RunResolver interface {
 	ResolveRunForTask(ctx context.Context, taskID string) string
+}
+
+// RunEventAppender records runtime behavior against a run's event stream.
+// Satisfied by the office service; mirrors the runtime action surface's own
+// seam (internal/office/runtime.RunEventAppender) so a refused agent read
+// can be recorded the same way a refused runtime action already is.
+type RunEventAppender interface {
+	AppendRunEvent(ctx context.Context, runID, eventType, level string, payload map[string]interface{})
 }
 
 // TaskCanceller hard-cancels a task's active execution. Used by the
@@ -427,6 +442,7 @@ type DashboardService struct {
 	routingProvider       RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister         RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver           RunResolver                     // optional; nil means status-change activity rows have no run_id
+	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 }
@@ -541,6 +557,34 @@ func (s *DashboardService) SetTerminalShapeRecorder(r TerminalShapeRecorder) {
 // rows are logged with an empty run_id.
 func (s *DashboardService) SetRunResolver(r RunResolver) {
 	s.runResolver = r
+}
+
+// SetRunEventAppender wires the seam used to record a refused agent comment
+// read on the caller's run. Optional; when unset, refusals are not recorded
+// anywhere but the response.
+func (s *DashboardService) SetRunEventAppender(r RunEventAppender) {
+	s.runEvents = r
+}
+
+// appendDeniedCommentReadEvent records a refused agent comment read on the
+// caller's run, mirroring the runtime action surface's runtime.denied shape
+// (REQ-OFFICE-AGENT-COMMENT-READS-009). No-ops when no appender is wired or
+// the caller's JWT carries no run identifier; never changes the response or
+// the run's outcome.
+func (s *DashboardService) appendDeniedCommentReadEvent(
+	ctx context.Context, runID, targetTaskID, agentID, sessionID string, err error,
+) {
+	if s.runEvents == nil || runID == "" {
+		return
+	}
+	s.runEvents.AppendRunEvent(ctx, runID, string(runsmodels.RunEventTypeRuntimeDenied), string(runsmodels.RunEventLevelWarn), map[string]interface{}{
+		"action":      "read_comments",
+		"target_type": "task",
+		"target_id":   targetTaskID,
+		"agent_id":    agentID,
+		"session_id":  sessionID,
+		errorKey:      err.Error(),
+	})
 }
 
 // SetProjectBudgetEvaluator wires the seam used to re-evaluate a
@@ -780,7 +824,7 @@ func (s *DashboardService) ListActivityForTarget(ctx context.Context, wsID, targ
 }
 
 // ListRuns returns run requests for a workspace.
-func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*models.Run, error) {
+func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*runsmodels.Run, error) {
 	return s.repo.ListRuns(ctx, wsID)
 }
 
@@ -837,9 +881,9 @@ func (s *DashboardService) CreateComment(ctx context.Context, comment *models.Ta
 	if err := s.repo.CreateTaskComment(ctx, comment); err != nil {
 		return err
 	}
-	engineHandled := s.dispatchCommentEngineTrigger(ctx, comment)
-	s.publishCommentCreated(ctx, comment, engineHandled)
-	s.runReactivityForComment(ctx, comment, engineHandled)
+	dispatch := s.dispatchCommentEngineTrigger(ctx, comment)
+	s.publishCommentCreated(ctx, comment, dispatch)
+	s.runReactivityForComment(ctx, comment, dispatch.handled || dispatch.suppressAssigneeWake)
 	return nil
 }
 

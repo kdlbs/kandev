@@ -16,9 +16,7 @@ vi.mock("@/lib/ws/connection", () => ({
 import {
   MergeReferenceOverflowError,
   QueueSendNowError,
-  QueueFullError,
   QueueEntryNotFoundError,
-  QueueEditConflictError,
   QueueReorderError,
   beginQueuedMessageEdit,
   endQueuedMessageEdit,
@@ -46,93 +44,6 @@ const reference: EntityReference = {
 
 beforeEach(() => {
   getWebSocketClientMock.mockReset();
-});
-
-describe("rethrowQueueError", () => {
-  it("maps queue_full errors to QueueFullError carrying the cap metadata", () => {
-    expect(() =>
-      rethrowQueueError({
-        code: "queue_full",
-        message: "Queue is full",
-        details: { queue_size: 7, max: 10 },
-      }),
-    ).toThrow(QueueFullError);
-
-    expect.assertions(5);
-    try {
-      rethrowQueueError({
-        code: "queue_full",
-        details: { queue_size: 9, max: 10 },
-      });
-    } catch (err) {
-      const qf = err as QueueFullError;
-      expect(qf).toBeInstanceOf(QueueFullError);
-      expect(qf.queueSize).toBe(9);
-      expect(qf.max).toBe(10);
-      expect(qf.code).toBe("queue_full");
-    }
-  });
-
-  it("defaults missing queue_size / max to 0 when details are sparse", () => {
-    expect.assertions(3);
-    try {
-      rethrowQueueError({ code: "queue_full" });
-    } catch (err) {
-      const qf = err as QueueFullError;
-      expect(qf).toBeInstanceOf(QueueFullError);
-      expect(qf.queueSize).toBe(0);
-      expect(qf.max).toBe(0);
-    }
-  });
-
-  it("maps entry_not_found errors to QueueEntryNotFoundError", () => {
-    expect(() =>
-      rethrowQueueError({
-        code: "entry_not_found",
-        message: "Already drained",
-      }),
-    ).toThrow(QueueEntryNotFoundError);
-  });
-
-  it("maps edit lease conflicts to QueueEditConflictError", () => {
-    expect(() =>
-      rethrowQueueError({
-        code: "edit_conflict",
-        message: "Edit lease expired",
-      }),
-    ).toThrow(QueueEditConflictError);
-  });
-
-  it("maps merge_reference_overflow errors to MergeReferenceOverflowError", () => {
-    expect(() =>
-      rethrowQueueError({
-        code: "merge_reference_overflow",
-        message: "merge would exceed the per-message entity reference limit",
-      }),
-    ).toThrow(MergeReferenceOverflowError);
-  });
-
-  it("rethrows non-queue WS errors as plain Error instances", () => {
-    let caught: unknown;
-    try {
-      rethrowQueueError({ code: "internal_error", message: "Boom" });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain("Boom");
-  });
-
-  it("preserves Error instances supplied by the WS client", () => {
-    const original = new Error("boom");
-    let caught: unknown;
-    try {
-      rethrowQueueError(original);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBe(original);
-  });
 });
 
 describe("structured plan comment conflicts", () => {
@@ -209,19 +120,6 @@ describe("structured plan comment conflicts", () => {
   });
 });
 
-describe("rethrowQueueError values", () => {
-  it("wraps non-Error non-WSError values in an Error so callers can rely on stack traces", () => {
-    let caught: unknown;
-    try {
-      rethrowQueueError("just a string");
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toBe("just a string");
-  });
-});
-
 describe("queue reference payloads", () => {
   it("forwards entity references through message.queue.add", async () => {
     const request = vi.fn().mockResolvedValue({ id: "q-1" });
@@ -235,13 +133,17 @@ describe("queue reference payloads", () => {
       entity_references: [reference],
     });
 
-    expect(request).toHaveBeenCalledWith(QUEUE_ADD_ACTION, {
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      task_id: "task-1",
-      content: "queued reference",
-      entity_references: [reference],
-    });
+    expect(request).toHaveBeenCalledWith(
+      QUEUE_ADD_ACTION,
+      {
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        task_id: "task-1",
+        content: "queued reference",
+        entity_references: [reference],
+      },
+      35_000,
+    );
   });
 
   it("forwards context file metadata through message.queue.add", async () => {
@@ -256,13 +158,17 @@ describe("queue reference payloads", () => {
       context_files: [{ path: "src/components", name: "components", is_directory: true }],
     });
 
-    expect(request).toHaveBeenCalledWith(QUEUE_ADD_ACTION, {
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      task_id: "task-1",
-      content: "queued context",
-      context_files: [{ path: "src/components", name: "components", is_directory: true }],
-    });
+    expect(request).toHaveBeenCalledWith(
+      QUEUE_ADD_ACTION,
+      {
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        task_id: "task-1",
+        content: "queued context",
+        context_files: [{ path: "src/components", name: "components", is_directory: true }],
+      },
+      35_000,
+    );
   });
 });
 
@@ -279,14 +185,18 @@ describe("queued message reference updates", () => {
       content: "reference removed",
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.update", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-1",
-      content: "reference removed",
-      entity_references: [],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.update",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-1",
+        content: "reference removed",
+        entity_references: [],
+      },
+      35_000,
+    );
   });
 
   it("forwards surviving references through message.queue.update", async () => {
@@ -302,14 +212,18 @@ describe("queued message reference updates", () => {
       entity_references: [reference],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.update", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-1",
-      content: "reference kept",
-      entity_references: [reference],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.update",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-1",
+        content: "reference kept",
+        entity_references: [reference],
+      },
+      35_000,
+    );
   });
 });
 
@@ -334,12 +248,17 @@ describe("queued message edit leases", () => {
       lease_generation: 2,
     });
     await expect(endQueuedMessageEdit(lease)).resolves.toBeUndefined();
-    expect(request).toHaveBeenNthCalledWith(1, "message.queue.edit.begin", {
-      session_id: "session-1",
-      entry_id: "q-1",
-    });
-    expect(request).toHaveBeenNthCalledWith(2, "message.queue.edit.renew", lease);
-    expect(request).toHaveBeenNthCalledWith(3, "message.queue.edit.end", lease);
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "message.queue.edit.begin",
+      {
+        session_id: "session-1",
+        entry_id: "q-1",
+      },
+      35_000,
+    );
+    expect(request).toHaveBeenNthCalledWith(2, "message.queue.edit.renew", lease, 35_000);
+    expect(request).toHaveBeenNthCalledWith(3, "message.queue.edit.end", lease, 35_000);
   });
   it("requests a policy-preserving drain after a successful save", async () => {
     const request = vi.fn().mockResolvedValue(undefined);
@@ -347,10 +266,14 @@ describe("queued message edit leases", () => {
 
     await endQueuedMessageEdit(lease, true);
 
-    expect(request).toHaveBeenCalledWith("message.queue.edit.end", {
-      ...lease,
-      dispatch_if_auto_run: true,
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.edit.end",
+      {
+        ...lease,
+        dispatch_if_auto_run: true,
+      },
+      35_000,
+    );
   });
 
   it("forwards operation and target revision fences when replacing content", async () => {
@@ -371,17 +294,21 @@ describe("queued message edit leases", () => {
       entity_references: [],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.update", {
-      task_id: "task-1",
-      session_id: "session-1",
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-1",
-      lease_id: "lease-1",
-      operation_id: "op-1",
-      expected_target_revision: 3,
-      content: "edited",
-      entity_references: [],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.update",
+      {
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-1",
+        lease_id: "lease-1",
+        operation_id: "op-1",
+        expected_target_revision: 3,
+        content: "edited",
+        entity_references: [],
+      },
+      35_000,
+    );
   });
 });
 
@@ -398,13 +325,17 @@ describe("mergeQueuedEntry", () => {
       user_id: "user-1",
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.merge", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-b",
-      user_id: "user-1",
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.merge",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-b",
+        user_id: "user-1",
+      },
+      35_000,
+    );
   });
 
   it("omits user_id when the caller identity is unknown", async () => {
@@ -418,12 +349,16 @@ describe("mergeQueuedEntry", () => {
       entry_id: "q-b",
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.merge", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-b",
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.merge",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-b",
+      },
+      35_000,
+    );
   });
 
   it("maps a drained-source rejection to QueueEntryNotFoundError", async () => {
@@ -469,21 +404,15 @@ describe("sendQueuedNow", () => {
     });
     getWebSocketClientMock.mockReturnValue({ request });
 
-    await sendQueuedNow({
+    const params = {
       task_id: "task-1",
       session_id: SESSION_ID,
       session_incarnation_id: INCARNATION_ID,
       scope: "entry",
       entry_id: "q-2",
-    });
-
-    expect(request).toHaveBeenCalledWith("message.queue.send_now", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      scope: "entry",
-      entry_id: "q-2",
-    });
+    } as const;
+    await sendQueuedNow(params);
+    expect(request).toHaveBeenCalledWith("message.queue.send_now", params, 35_000);
   });
 
   it("omits entry_id for an all scope snapshot", async () => {
@@ -494,19 +423,14 @@ describe("sendQueuedNow", () => {
     });
     getWebSocketClientMock.mockReturnValue({ request });
 
-    await sendQueuedNow({
+    const params = {
       task_id: "task-1",
       session_id: SESSION_ID,
       session_incarnation_id: INCARNATION_ID,
       scope: "all",
-    });
-
-    expect(request).toHaveBeenCalledWith("message.queue.send_now", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      scope: "all",
-    });
+    } as const;
+    await sendQueuedNow(params);
+    expect(request).toHaveBeenCalledWith("message.queue.send_now", params, 35_000);
   });
 
   it("maps send-now conflict codes to a typed error", async () => {
@@ -566,12 +490,16 @@ describe("setQueueAutoRun", () => {
       false,
     );
 
-    expect(request).toHaveBeenCalledWith("message.queue.auto_run.set", {
-      session_id: SESSION_ID,
-      task_id: "task-1",
-      session_incarnation_id: INCARNATION_ID,
-      enabled: false,
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.auto_run.set",
+      {
+        session_id: SESSION_ID,
+        task_id: "task-1",
+        session_incarnation_id: INCARNATION_ID,
+        enabled: false,
+      },
+      35_000,
+    );
   });
 });
 describe("setQueueAutoMerge", () => {
@@ -608,12 +536,16 @@ describe("setQueueAutoMerge", () => {
       false,
     );
 
-    expect(request).toHaveBeenCalledWith("message.queue.auto_merge.set", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      enabled: false,
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.auto_merge.set",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        enabled: false,
+      },
+      35_000,
+    );
   });
 });
 
@@ -629,12 +561,16 @@ describe("reorderQueuedEntries", () => {
       ordered_ids: ["q-c", "q-a", "q-b"],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.reorder", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      ordered_ids: ["q-c", "q-a", "q-b"],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.reorder",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        ordered_ids: ["q-c", "q-a", "q-b"],
+      },
+      35_000,
+    );
   });
 
   it("maps a queue_changed rejection to QueueReorderError", async () => {

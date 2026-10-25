@@ -387,6 +387,9 @@ func handlePrompt(e *emitter, prompt, model string) {
 
 	// Extract the user-facing content for command routing.
 	cmd := stripKandevSystem(prompt)
+	if script := ciAutomationScript(prompt, cmd); script != "" {
+		cmd = script
+	}
 	if scenario, ok := parseSavedPromptDeliveryScenario(prompt); ok {
 		cmd = "/e2e:" + scenario
 	}
@@ -515,6 +518,11 @@ func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
 // open for the entire delay, so E2E can cover settled+background explicitly.
 func emitDetachedBackgroundWork(e *emitter, cmd string) {
 	d := parseCommandDuration(cmd, 8*time.Second)
+	backgroundCtx, cancel := context.WithCancel(context.Background())
+	release := func() {}
+	if e.registerDetachedWork != nil {
+		release = e.registerDetachedWork(e.sid, cancel)
+	}
 	e.text("Launching detached background work; this foreground turn is complete.")
 
 	taskToolID := nextToolID()
@@ -525,7 +533,14 @@ func emitDetachedBackgroundWork(e *emitter, cmd string) {
 
 	backgroundEmitter := &emitter{ctx: context.Background(), conn: e.conn, sid: e.sid}
 	go func() {
-		time.Sleep(d)
+		defer release()
+		defer cancel()
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-backgroundCtx.Done():
+		}
 		backgroundEmitter.completeDetachedWork()
 	}()
 }
@@ -667,7 +682,11 @@ func emitError(e *emitter, model string) {
 func emitCrash(e *emitter, model string) {
 	randomDelay(model)
 	e.text("Processing your request...")
-	randomDelay(model)
+	// SessionUpdate notifications are not acknowledged by ACP. Give the
+	// backend time to persist the final visible update before terminating the
+	// process, especially when the mock agent is running under a loaded E2E
+	// shard.
+	fixedDelay(500)
 	fmt.Fprintln(os.Stderr, "mock-agent: simulating crash (exit 1)")
 	os.Exit(1)
 }
@@ -679,20 +698,19 @@ func emitSlowResponse(e *emitter, prompt, model string) {
 	steps := 5
 	stepDelay := totalDuration / time.Duration(steps)
 
-	emitThinking(e, model)
-	time.Sleep(stepDelay)
-
-	e.text(fmt.Sprintf("Running slow response (%s total)...", totalDuration))
-	time.Sleep(stepDelay)
-
-	emitReadFile(e, model)
-	time.Sleep(stepDelay)
-
-	emitCodeSearch(e, model)
-	time.Sleep(stepDelay)
-
-	e.text(fmt.Sprintf("Slow response complete after %s.", totalDuration))
-	time.Sleep(stepDelay)
+	for _, emit := range []func(){
+		func() { emitThinking(e, model) },
+		func() { e.text(fmt.Sprintf("Running slow response (%s total)...", totalDuration)) },
+		func() { emitReadFile(e, model) },
+		func() { emitCodeSearch(e, model) },
+		func() { e.text(fmt.Sprintf("Slow response complete after %s.", totalDuration)) },
+	} {
+		if e.ctx != nil && e.ctx.Err() != nil {
+			return
+		}
+		emit()
+		waitForDelay(e.ctx, int(stepDelay.Milliseconds()))
+	}
 }
 
 // emitRandomResponse generates a random mix of 2-5 events.

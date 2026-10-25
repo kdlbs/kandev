@@ -1,29 +1,33 @@
 package models
 
-import "testing"
+import (
+	"testing"
+
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+)
 
 func TestContinuationScopeForRun(t *testing.T) {
 	tests := []struct {
 		name           string
-		run            *Run
+		run            *runsmodels.Run
 		agentProfileID string
 		want           string
 	}{
 		{
 			name:           "routine scope",
-			run:            &Run{ContextSnapshot: `{"routine_id":"routine-1"}`},
+			run:            &runsmodels.Run{ContextSnapshot: `{"routine_id":"routine-1"}`},
 			agentProfileID: "agent-1",
 			want:           "routine:routine-1",
 		},
 		{
 			name:           "agent fallback",
-			run:            &Run{ContextSnapshot: `{}`},
+			run:            &runsmodels.Run{ContextSnapshot: `{}`},
 			agentProfileID: "agent-1",
 			want:           "agent:agent-1",
 		},
 		{
 			name:           "malformed snapshot fallback",
-			run:            &Run{ContextSnapshot: "not-json"},
+			run:            &runsmodels.Run{ContextSnapshot: "not-json"},
 			agentProfileID: "agent-1",
 			want:           "agent:agent-1",
 		},

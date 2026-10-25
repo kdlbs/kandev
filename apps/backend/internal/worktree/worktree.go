@@ -66,6 +66,11 @@ type Worktree struct {
 	// Stored for recreation if the worktree directory is lost.
 	RepositoryPath string `json:"repository_path"`
 
+	// SourceClonePath and SourceCommonDir identify the managed clone that owns
+	// this linked worktree. They are internal recovery metadata.
+	SourceClonePath string `json:"-"`
+	SourceCommonDir string `json:"-"`
+
 	// Path is the absolute filesystem path to the worktree directory.
 	Path string `json:"path"`
 
@@ -316,6 +321,11 @@ type CreateRequest struct {
 	// reuse lookup, cache keys, and persisted task_environment_repos rows. It
 	// may differ from BranchSlug when the primary branch keeps the flat path.
 	BranchIdentitySlug string
+
+	// WorkspaceRelativePath is an internal, server-validated path relative to
+	// the owned task root. It is used for explicit nested attachments and must
+	// never be populated from an arbitrary client path.
+	WorkspaceRelativePath string
 
 	// ScriptEnv carries resolved executor-profile environment variables
 	// (secrets already revealed) that must be exported into the repository

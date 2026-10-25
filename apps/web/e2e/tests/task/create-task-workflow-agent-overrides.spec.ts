@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionDone } from "../../helpers/session";
 import {
   createOverrideTask,
   deleteFixtureTasks,
@@ -31,6 +32,7 @@ async function selectWorkflow(page: Page, dialog: Locator, workflowName: string)
     .getByRole("button", { name: new RegExp(`^${escapeRegExp(workflowName)}`) })
     .last()
     .click();
+  await expect(page.getByTestId("workflow-selector-popover")).toHaveCount(0);
 }
 
 test.describe("task-specific workflow agent overrides", () => {
@@ -201,6 +203,12 @@ test.describe("task-specific workflow agent overrides", () => {
         .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
         .toBe(initialSessionId);
       await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+      await waitForSessionDone(
+        apiClient,
+        runtimeTask.id,
+        initialSessionId,
+        "Reused workflow session settled before proceeding",
+      );
       await testPage.reload();
       await sessionPage.waitForLoad();
 

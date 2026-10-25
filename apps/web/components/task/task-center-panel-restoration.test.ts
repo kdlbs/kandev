@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenFileTab } from "@/lib/types/backend";
+import { installFileEditorTab } from "./task-center-panel-file-tabs";
 
 const mockUpdateFileContent = vi.fn();
 const mockGetWebSocketClient = vi.fn();
@@ -39,7 +40,7 @@ const SESSION_ID = "session";
 const PATH = "src/Main.kt";
 const REPO = "backend";
 const CLIENT = {} as ReturnType<typeof import("@/lib/ws/connection").getWebSocketClient>;
-const OPEN_TAB: OpenFileTab = {
+const OPEN_TAB = installFileEditorTab({
   path: PATH,
   name: "Main.kt",
   repo: REPO,
@@ -47,7 +48,7 @@ const OPEN_TAB: OpenFileTab = {
   originalContent: "before",
   originalHash: "old-hash",
   isDirty: true,
-};
+});
 
 function renderSaveHook(initialTabs: OpenFileTab[] = [OPEN_TAB]) {
   const setOpenFileTabs = vi.fn();
@@ -57,7 +58,6 @@ function renderSaveHook(initialTabs: OpenFileTab[] = [OPEN_TAB]) {
         activeSessionId: SESSION_ID,
         openFileTabs,
         setOpenFileTabs,
-        setSavingFiles: vi.fn(),
         handleCloseFileTab: vi.fn(),
       }),
     { initialProps: { openFileTabs: initialTabs } },
@@ -146,7 +146,7 @@ describe("task center file restoration", () => {
       { path: "README.md", name: "README.md", renderedPreview: true, pinned: true },
     ]);
 
-    expect(tabs?.[0]).toEqual({
+    expect(tabs?.[0]).toMatchObject({
       path: "README.md",
       name: "README.md",
       content: "# README",

@@ -444,18 +444,16 @@ func TestTaskIsOfficeOwnedAndAssigned(t *testing.T) {
 // fails with `exec: "<host-abs-path>": not found` (the bug fixed in
 // commit 8518f65).
 //
-// When you add a new ExecutorType, add a row here and a matching
-// case in the Runtime() switch. The default-fallthrough probe at the
-// end keeps the implementation honest: it exercises an unknown value
-// and asserts the host-side default, so introducing a new container
-// type without registering it surfaces as a real mismatch upstream
-// rather than as a quiet wrong answer.
+// When you add a new ExecutorType, add a row here and a matching case in the
+// Runtime() switch. The default-fallthrough probe keeps unknown types fail
+// closed instead of silently routing them to a local runtime.
 func TestExecutorTypeRuntime(t *testing.T) {
 	cases := []struct {
 		in   ExecutorType
 		want agentruntime.Runtime
 	}{
 		{ExecutorTypeLocal, agentruntime.RuntimeStandalone},
+		{ExecutorType("local_pc"), agentruntime.RuntimeStandalone},
 		{ExecutorTypeWorktree, agentruntime.RuntimeStandalone},
 		{ExecutorTypeMockRemote, agentruntime.RuntimeStandalone},
 		{ExecutorTypeLocalDocker, agentruntime.RuntimeDocker},
@@ -471,14 +469,12 @@ func TestExecutorTypeRuntime(t *testing.T) {
 		})
 	}
 
-	// Unknown ExecutorType falls back to standalone — documented in the
-	// switch's default branch. Pin it so a future "treat unknown as
-	// docker" refactor can't happen silently.
-	t.Run("unknown_falls_back_to_standalone", func(t *testing.T) {
+	// Unknown executor types fail closed so they cannot select a local runtime.
+	t.Run("unknown_fails_closed", func(t *testing.T) {
 		got := ExecutorType("not-a-real-type").Runtime()
-		if got != agentruntime.RuntimeStandalone {
-			t.Errorf("unknown ExecutorType.Runtime() = %q, want %q (host-side fallback)",
-				got, agentruntime.RuntimeStandalone)
+		if got != agentruntime.RuntimeUnknown {
+			t.Errorf("unknown ExecutorType.Runtime() = %q, want %q",
+				got, agentruntime.RuntimeUnknown)
 		}
 	})
 }

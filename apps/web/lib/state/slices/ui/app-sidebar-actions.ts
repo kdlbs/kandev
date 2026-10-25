@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import {
   getStoredAppSidebarCollapsed,
   getStoredAppSidebarSectionExpanded,
@@ -7,7 +8,7 @@ import {
   setStoredAppSidebarSectionExpanded,
   setStoredAppSidebarWidth,
 } from "@/lib/local-storage-app-sidebar";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import type { AppSidebarState, UISlice } from "./types";
 
 /** Keep primary navigation and entity groups open by default so first-time
@@ -35,7 +36,7 @@ export function loadAppSidebarState(): AppSidebarState {
   };
 }
 
-type ImmerSet = Parameters<StateCreator<UISlice, [["zustand/immer", never]], [], UISlice>>[0];
+type ImmerSet = Parameters<SliceCreator<UISlice>>[0];
 
 /**
  * Force-expand the rail and persist it — surfaces that render only in the

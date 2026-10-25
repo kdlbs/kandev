@@ -146,3 +146,17 @@ steering delivery. Palette sources do not deduplicate matching command IDs.
 - Final review cleanup adds an assertion that the underlying task cancel control
   remains enabled after Quick Chat closes. The desktop Quick Chat suite passes
   all 3 tests with this assertion.
+
+
+### CI opening-turn readiness follow-up, 2026-10-06
+
+Run `37460626206`, shard 14 job `112264886156`, submitted the detached-background
+command while the opening turn was RUNNING. Backend admission correctly rejected
+it. The cancellation cases now use the existing simple-response mock scenario,
+observe its persisted answer, and wait for backend settlement before submitting
+the command under test. Submission occurs once. The per-spec retry override was
+removed so the runner's zero-retry request applies. Cancellation deadlines, native
+behavior, pending-state assertions, and underlying-task isolation are unchanged.
+
+- `cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/chat/quick-chat-cancel-palette.spec.ts -- --repeat-each 3 --retries 0 --trace=retain-on-failure`: nine passed in 4.9 minutes; all three cases passed independently three times.
+- Focused ESLint and the web typecheck passed. Hosted verification follows the next pushed head.

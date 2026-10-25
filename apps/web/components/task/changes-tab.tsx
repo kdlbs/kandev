@@ -10,6 +10,7 @@ import {
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -28,6 +29,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
 
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
+  const { loaded: commitsLoaded } = useSessionCommits(activeSessionId ?? null);
   const totalCount = useSessionChangesCount(activeSessionId ?? null);
 
   // gitStatus is undefined until the first WS git-status event arrives,
@@ -38,8 +40,8 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   const seenCountRef = useRef(api.isActive ? totalCount : 0);
   const activeSessionRef = useRef(activeSessionId);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Armed once we know the initial git data has settled. Until then, any
-  // 0→N transition is treated as an initial load, not a real new change.
+  // Armed once both sources of the displayed count have settled. Until then,
+  // any 0→N transition is treated as an initial load, not a real new change.
   const initializedRef = useRef(false);
 
   const [isFlashing, setIsFlashing] = useState(false);
@@ -76,11 +78,11 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     const increased = totalCount > prev && totalCount > 0;
     const decreased = totalCount < prev;
 
-    // Auto-activate on real post-load updates, but only after initial git data
-    // has settled. gitStatusLoaded is false until the first WS git-status event
-    // arrives, guaranteeing existing changes on page refresh do not steal focus.
+    // Auto-activate on real post-load updates only after both git status and
+    // commit history have loaded. Commit history can arrive after git status,
+    // and its initial count must not steal focus from the user's selected tab.
     if (!initializedRef.current) {
-      if (gitStatusLoaded) initializedRef.current = true;
+      if (gitStatusLoaded && commitsLoaded) initializedRef.current = true;
     } else if (increased) {
       // The product behavior is to surface every new git update unless the
       // changes panel shares a group with agent session panels.
@@ -98,7 +100,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
       const unseen = Math.max(0, totalCount - seenCountRef.current);
       requestAnimationFrame(() => setBadgeCount(unseen));
     }
-  }, [totalCount, api, gitStatusLoaded, activeSessionId]);
+  }, [totalCount, api, gitStatusLoaded, commitsLoaded, activeSessionId]);
 
   // Cleanup flash timer on unmount
   useEffect(() => {

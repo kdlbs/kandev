@@ -1,11 +1,13 @@
 import { expect, test } from "../../fixtures/test-base";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForHttp } from "../../helpers/causal-waits";
-import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 
@@ -66,11 +68,17 @@ function activeFileTab(page: Page, filename: string) {
 }
 
 async function submitWorkspaceSources(page: Page, submit: Locator) {
-  const responsePromise = waitForHttp(page, "POST", WORKSPACE_SOURCES_PATH);
+  await page.getByRole("radio", { name: /Inside the current/ }).click();
+  await expect(submit).toBeEnabled();
+  const responsePromise = waitForHttp(page, "POST", WORKSPACE_SOURCES_PATH, { timeout: 60_000 });
 
   await submit.click();
   const response = await responsePromise;
-  expect(response.ok()).toBe(true);
+  const responseBody = response.ok() ? "" : await response.text();
+  expect(
+    response.ok(),
+    `workspace source request returned ${response.status()}: ${responseBody}`,
+  ).toBe(true);
   await response.finished();
 }
 
@@ -91,6 +99,22 @@ async function waitForWorkspaceReady(
       },
     )
     .toMatch(/\S/);
+}
+
+async function waitForCompletedSessionTurns(
+  apiClient: ApiClient,
+  sessionId: string,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { turns } = await apiClient.listSessionTurns(sessionId);
+        return turns.length > 0 && turns.every((turn) => Boolean(turn.completed_at));
+      },
+      { timeout: 60_000, message },
+    )
+    .toBe(true);
 }
 
 test.describe("Attach local workspace sources", () => {
@@ -138,24 +162,34 @@ test.describe("Attach local workspace sources", () => {
       })
       .toBeTruthy();
 
+    const wsWatcher = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 60_000 });
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "the task's initial prompt should finish before changing its workspace",
+      60_000,
+    );
+    await waitForCompletedSessionTurns(
+      apiClient,
+      task.session_id,
+      "the initial task turn should be persisted and complete before changing its workspace",
+    );
     await session.clickTab("Files");
 
     const workspaceActions = testPage.getByTestId("files-workspace-actions");
+    const createMenu = testPage.getByTestId("files-create-menu");
     await expect(workspaceActions).toBeEnabled();
     await expect(workspaceActions).toHaveAccessibleName("Workspace actions");
     const workspaceActionsBox = await workspaceActions.boundingBox();
     expect(workspaceActionsBox).not.toBeNull();
     expect(workspaceActionsBox!.width).toBeLessThanOrEqual(44);
     await workspaceActions.click();
-    const addSources = testPage.getByRole("menuitem", {
-      name: "Add Repositories to workspace",
-    });
     const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
-    await expect(addSources).toBeEnabled();
     await expect(openFolder).toBeEnabled();
     await Promise.all([
       testPage.waitForRequest(
@@ -166,8 +200,8 @@ test.describe("Attach local workspace sources", () => {
       openFolder.click(),
     ]);
     await expect(openFolder).not.toBeVisible();
-    await workspaceActions.click();
-    await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+    await createMenu.click();
+    await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();
     const dialog = testPage.getByTestId("add-workspace-sources-dialog");
     await expect(dialog).toBeVisible();
     const [dialogBox, viewport] = await Promise.all([
@@ -175,28 +209,22 @@ test.describe("Attach local workspace sources", () => {
       testPage.evaluate(() => ({ width: innerWidth, height: innerHeight })),
     ]);
     expect(dialogBox).not.toBeNull();
+    expect(dialogBox!.width).toBeGreaterThanOrEqual(Math.min(900, viewport.width - 32));
     expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
     expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewport.height);
     await expect(dialog.getByTestId("add-workspace-sources-dialog-scroll")).toHaveCSS(
       "overflow-y",
       "auto",
     );
-    const consequences = dialog.getByTestId("workspace-change-consequences");
-    await expect(consequences).toBeVisible();
-    await expect(consequences).toContainText("This restarts the task workspace");
-    await expect(consequences).toContainText("Cancel leaves the workspace unchanged");
-    await expect(consequences).toContainText(
-      "terminals, dev servers, and other workspace processes stop",
-    );
-    const fullImpactDetails = consequences.getByText("Full impact details");
-    await fullImpactDetails.click();
-    await expect(
-      consequences.getByText(/The task root becomes the agent's working directory/),
-    ).toBeVisible();
-    await fullImpactDetails.click();
+    await expect(dialog.getByTestId("workspace-change-consequences")).toHaveCount(0);
+    await expect(dialog.getByTestId("workspace-source-continuity")).toBeVisible();
     await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);
     const addRepository = dialog.getByRole("button", { name: "Add repository" });
     const submit = dialog.getByTestId("add-workspace-sources-submit");
+    const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancel, 28);
+    await expectControlHeight(submit, 28);
     await expect(submit).toBeDisabled();
     await addRepository.click();
     await expect(testPage.getByRole("menuitem", { name: "Local Git repository" })).toBeVisible();
@@ -215,7 +243,10 @@ test.describe("Attach local workspace sources", () => {
     const savedRepositoryError = savedRepositoryRow.getByRole("alert");
     await expect(savedRepositoryError).toHaveText("Choose a repository and base branch.");
     await expect(savedRepositoryError).toHaveCSS("font-size", "12px");
-    await savedRepositoryRow.getByRole("button", { name: "Remove source" }).click();
+    const removeSource = savedRepositoryRow.getByRole("button", { name: "Remove source" });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3
+    await expectControlHeight(removeSource, 28);
+    await removeSource.click();
     await addRepository.click();
     await testPage.getByRole("menuitem", { name: "Local Git repository" }).click();
     const repositoryRow = dialog.getByTestId("workspace-source-row");
@@ -228,19 +259,38 @@ test.describe("Attach local workspace sources", () => {
     await repositoryRow.getByRole("textbox", { name: "Base branch" }).fill("main");
     await submitWorkspaceSources(testPage, submit);
     await expect(dialog).not.toBeVisible();
-    await expect(
-      session.files
-        .getByTestId("file-tree-node")
-        .filter({ hasText: "second-local-repository-main" }),
-    ).toBeVisible({ timeout: 30_000 });
+    const secondRepositoryNode = session.files.locator(
+      '[data-testid="file-tree-node"][data-path="second-local-repository-main"]',
+    );
+    await expect(secondRepositoryNode).toBeVisible({ timeout: 30_000 });
+    await expect(secondRepositoryNode).toContainText("second-local-repository");
     if (!task.session_id) throw new Error("task creation did not return a session id");
-    const turnsAfterFirstAttachment = await apiClient.listSessionTurns(task.session_id);
-    expect(turnsAfterFirstAttachment.turns.filter((turn) => !turn.completed_at)).toEqual([]);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "the session should be idle after the first workspace rebind",
+      60_000,
+    );
+    await waitForCompletedSessionTurns(
+      apiClient,
+      task.session_id,
+      "all persisted turns should be complete before attaching another workspace source",
+    );
 
-    await workspaceActions.click();
-    await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+    await createMenu.click();
+    await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();
     await expect(dialog).toBeVisible();
+    for (const name of ["Add repository", "Add folder", "Cancel", "Add to workspace"]) {
+      await expect
+        .poll(
+          async () =>
+            (await dialog.getByRole("button", { name, exact: true }).boundingBox())?.height,
+        )
+        .toBeCloseTo(28, 0);
+    }
     await dialog.getByRole("button", { name: "Add folder" }).click();
+    await expect(dialog.getByText(/Folders are live links/)).toBeVisible();
     const folderRow = dialog.getByTestId("workspace-source-row");
     await chooseDirectory(
       testPage,
@@ -248,6 +298,7 @@ test.describe("Attach local workspace sources", () => {
       backend.tmpDir,
       folderPath,
     );
+    await expect(testPage.getByTestId("folder-picker-popover")).toHaveCount(0);
     await prCapture.screenshot("workspace-actions-mixed-sources", {
       caption: "Desktop Add to workspace dialog with a local folder configured",
     });
@@ -256,7 +307,7 @@ test.describe("Attach local workspace sources", () => {
 
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
 
     const sessionData = (await apiClient.listTaskSessions(task.id)) as {
       sessions: Array<{ worktrees?: Array<{ worktree_path?: string }> }>;
@@ -265,14 +316,28 @@ test.describe("Attach local workspace sources", () => {
       worktree.worktree_path ? [worktree.worktree_path] : [],
     );
     expect(repoPaths).toHaveLength(2);
+    const filePaths = repoPaths.map((_, index) => `changes/repository-${index}.txt`);
+    await session.clickTab("Files");
+    const pendingDir = path.join(backend.tmpDir, "pending-changes");
+    fs.mkdirSync(pendingDir, { recursive: true });
+    const pendingFiles = filePaths.map((_, index) => {
+      const pendingFile = path.join(pendingDir, `repository-${index}.txt`);
+      fs.writeFileSync(pendingFile, `repository ${index}\n`);
+      return pendingFile;
+    });
     for (const [index, repoPath] of repoPaths.entries()) {
-      new GitHelper(repoPath, makeGitEnv(backend.tmpDir)).createFile(
-        `changes/repository-${index}.txt`,
-        `repository ${index}\n`,
-      );
+      const destination = path.join(repoPath, filePaths[index]!);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.renameSync(pendingFiles[index]!, destination);
     }
 
+    const refreshResponse = wsWatcher.waitForResponse("session.git.refresh");
     await session.clickTab("Changes");
+    const refresh = await refreshResponse;
+    expect(refresh.payload.mode).toBe("fresh");
+    expect(refresh.payload.task_environment_id).toBeTruthy();
+    expect(Array.isArray(refresh.payload.snapshots)).toBe(true);
+    expect(refresh.payload.snapshots).toHaveLength(2);
     const changes = session.changes;
     await expect(changes.getByTestId("changes-repo-group")).toHaveCount(2, { timeout: 30_000 });
     await expect(
@@ -287,21 +352,18 @@ test.describe("Attach local workspace sources", () => {
       ({ id }) => id === task.session_id,
     );
     expect(refreshedPrimarySession).toMatchObject({
-      workspace_path: path.dirname(repoPaths[0]),
+      workspace_path: repoPaths[0],
       worktree_path: repoPaths[0],
     });
     await session.clickTab("Files");
-    await expect(
-      session.files
-        .getByTestId("file-tree-node")
-        .filter({ hasText: "second-local-repository-main" }),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(secondRepositoryNode).toBeVisible({ timeout: 30_000 });
+    await expect(secondRepositoryNode).toContainText("second-local-repository");
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
 
     // Chat links in a multi-repository workspace are absolute on the host but
-    // must resolve relative to the task root (not the primary repository).
+    // must resolve against the established root and the active checkout inventory.
     const taskState = await apiClient.getTask(task.id);
     const activeSessionId = taskState.primary_session_id;
     if (!activeSessionId) throw new Error("task has no primary session after source attachment");
@@ -380,16 +442,126 @@ test.describe("Attach local workspace sources", () => {
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await session.clickTab("Files");
 
-    const workspaceActions = testPage.getByTestId("files-workspace-actions");
-    await expect(workspaceActions).toBeEnabled();
-    await workspaceActions.click();
+    const createMenu = testPage.getByTestId("files-create-menu");
+    await expect(createMenu).toBeEnabled();
+    await createMenu.click();
     const action = testPage.getByRole("menuitem", {
-      name: "Add Repositories to workspace",
+      name: "Add repositories or folders",
     });
     await expect(action).toBeDisabled();
     await expect(action).toContainText(
       "Wait for the active turn or tool call to finish before adding sources.",
     );
+    await testPage.keyboard.press("Escape");
+    await testPage.getByTestId("files-workspace-actions").click();
     await expect(testPage.getByRole("menuitem", { name: "Open workspace folder" })).toBeEnabled();
   });
 });
+
+for (const workspaceMode of ["folder", "scratch"] as const) {
+  test(`Local ${workspaceMode} materializes mixed sources under the established root`, async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const { executors } = await apiClient.listExecutors();
+    const local = executors.find((executor) => executor.type === "local");
+    if (!local) throw new Error("Local executor is required");
+    const profile = await apiClient.createExecutorProfile(local.id, `Local QA ${workspaceMode}`);
+    const userRoot = path.join(backend.tmpDir, `user-root-${workspaceMode}`);
+    fs.mkdirSync(userRoot, { recursive: true });
+    const response = await testPage.request.post(`${backend.baseUrl}/api/v1/tasks`, {
+      data: {
+        workspace_id: seedData.workspaceId,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: profile.id,
+        title: `Local ${workspaceMode} source QA`,
+        description: "/e2e:simple-message",
+        start_agent: true,
+        ...(workspaceMode === "folder" ? { workspace_path: userRoot } : {}),
+      },
+    });
+    expect(response.ok()).toBe(true);
+    const task = (await response.json()) as { id: string; session_id: string };
+    await waitForWorkspaceReady(apiClient, task.id, task.session_id);
+    await waitForSessionDone(apiClient, task.id, task.session_id, "Local source fixture settled");
+    const before = (await apiClient.listTaskSessions(task.id)).sessions.find(
+      ({ id }) => id === task.session_id,
+    );
+    const root = before?.workspace_path;
+    if (!root) throw new Error("Local root is missing");
+    if (workspaceMode === "folder") expect(root).toBe(userRoot);
+    const hadGitMetadata = fs.existsSync(path.join(root, ".git"));
+    fs.writeFileSync(path.join(root, "keep.txt"), "existing file\n");
+    const { repositoryPath, folderPath } = createSourceDirectories(
+      path.join(backend.tmpDir, workspaceMode),
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    if (hadGitMetadata) await waitForSessionGitHydration(testPage, task.session_id);
+    await session.clickTab("Files");
+    await testPage.getByTestId("files-create-menu").click();
+    await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();
+    const dialog = testPage.getByTestId("add-workspace-sources-dialog");
+    await dialog.getByRole("button", { name: "Add repository", exact: true }).click();
+    await testPage.getByRole("menuitem", { name: "Local Git repository" }).click();
+    await chooseDirectory(
+      testPage,
+      dialog.getByTestId("folder-picker-trigger"),
+      backend.tmpDir,
+      repositoryPath,
+    );
+    await dialog.getByRole("textbox", { name: "Base branch" }).fill("main");
+    await dialog.getByRole("button", { name: "Add folder", exact: true }).click();
+    await chooseDirectory(
+      testPage,
+      dialog.getByTestId("workspace-source-row").last().getByTestId("folder-picker-trigger"),
+      backend.tmpDir,
+      folderPath,
+    );
+    await expect(testPage.getByTestId("folder-picker-popover")).toHaveCount(0);
+    await expect(dialog.getByText(/Folders are live links/)).toBeVisible();
+    await prCapture.screenshot(`qa-fixed-local-${workspaceMode}-sources`, {
+      caption: "Source rows and the live-folder explanation before choosing placement",
+    });
+    await dialog.getByRole("radio", { name: /Inside the current/ }).click();
+    await expect(dialog.getByTestId("add-workspace-sources-submit")).toBeEnabled();
+    await prCapture.screenshot(`qa-fixed-local-${workspaceMode}`, {
+      caption: `Local ${workspaceMode}: mixed sources, exact destinations, and live-link explanation`,
+    });
+    await submitWorkspaceSources(testPage, dialog.getByTestId("add-workspace-sources-submit"));
+    await expect(dialog).not.toBeVisible();
+    expect(fs.readFileSync(path.join(root, "keep.txt"), "utf8")).toBe("existing file\n");
+    expect(
+      fs.readFileSync(path.join(root, "second-local-repository", "second-source.txt"), "utf8"),
+    ).toBe("repository source\n");
+    fs.writeFileSync(
+      path.join(root, "plain-local-folder", "folder-source.txt"),
+      "edited through link\n",
+    );
+    expect(fs.readFileSync(path.join(folderPath, "folder-source.txt"), "utf8")).toBe(
+      "edited through link\n",
+    );
+    expect(fs.existsSync(path.join(root, ".git"))).toBe(hadGitMetadata);
+    await backend.restart();
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.sendMessage("/e2e:simple-message");
+    await session.waitForChatIdle({ timeout: 30_000 });
+    const after = (await apiClient.listTaskSessions(task.id)).sessions.find(
+      ({ id }) => id === task.session_id,
+    );
+    expect(after?.workspace_path).toBe(root);
+    await session.clickTab("Files");
+    await expect(
+      session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
+    ).toBeVisible({ timeout: 30_000 });
+  });
+}

@@ -179,27 +179,22 @@ func TestAggregateCursorMCPAuth(t *testing.T) {
 
 func TestAggregateCursorMCPAuth_NoSourcesAndProtectedMaster(t *testing.T) {
 	requireSymlinkSupport(t)
-	t.Run("no valid source leaves stale master unchanged", func(t *testing.T) {
+	t.Run("no valid source clears the owned stale master", func(t *testing.T) {
 		cursorHome := t.TempDir()
 		projects := filepath.Join(cursorHome, "projects")
 		if err := os.MkdirAll(projects, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		master := filepath.Join(cursorHome, cursorMCPAuthUnifiedFilename)
-		before := []byte(`{"stale":{"token":"do-not-link"}}`)
-		if err := os.WriteFile(master, before, 0o600); err != nil {
+		if err := os.WriteFile(master, []byte(`{"stale":{"token":"do-not-link"}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		writeCursorAuth(t, projects, "bad", `not-json`, time.Now())
 		if err := AggregateCursorMCPAuth(cursorHome); err != nil {
 			t.Fatalf("AggregateCursorMCPAuth: %v", err)
 		}
-		after, err := os.ReadFile(master)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(after, before) {
-			t.Fatalf("stale master changed: %s", after)
+		if _, err := os.Lstat(master); !os.IsNotExist(err) {
+			t.Fatalf("owned stale master remains available: %v", err)
 		}
 	})
 
@@ -323,7 +318,11 @@ func TestAggregateCursorMCPAuthExcludesLegacyConfiguredTaskRootSlug(t *testing.T
 	}
 
 	// Before slug normalization, the separator before the dot produced two dashes.
-	legacyTaskSlug := DeriveCursorProjectSlug(taskStorage) + "--tasks-dir-task-123-repository"
+	canonicalTaskStorage, err := filepath.EvalSymlinks(taskStorage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyTaskSlug := DeriveCursorProjectSlug(canonicalTaskStorage) + "--tasks-dir-task-123-repository"
 	writeCursorAuth(t, projects, legacyTaskSlug, `{"legacy-task":{"token":"excluded"}}`, time.Now())
 	writeCursorAuth(t, projects, "ordinary-project", `{"ordinary":{"token":"included"}}`, time.Now())
 
@@ -517,7 +516,7 @@ func TestLinkCursorMCPAuth(t *testing.T) {
 		}
 	})
 
-	t.Run("existing bridge link remains when refresh has no valid source", func(t *testing.T) {
+	t.Run("existing bridge link is harmless when refresh has no valid source", func(t *testing.T) {
 		cursorHome := t.TempDir()
 		projects := filepath.Join(cursorHome, "projects")
 		if err := os.MkdirAll(projects, 0o755); err != nil {
@@ -546,6 +545,9 @@ func TestLinkCursorMCPAuth(t *testing.T) {
 		}
 		if got != master {
 			t.Fatalf("existing link target = %q, want %q", got, master)
+		}
+		if _, err := os.ReadFile(destination); !os.IsNotExist(err) {
+			t.Fatalf("existing link still exposes a stale snapshot, read error = %v", err)
 		}
 	})
 }

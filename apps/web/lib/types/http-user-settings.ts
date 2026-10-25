@@ -4,6 +4,7 @@ export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task" | "threads";
 export type LspStatusLocation = "toolbar" | "status_bar";
 export type LastSeenDisplay = "absolute" | "relative";
+export type MessageTimeDisplay = "relative" | "absolute_short" | "absolute_long";
 
 export type SavedLayout = {
   id: string;
@@ -17,8 +18,14 @@ export type SidebarViewApi = {
   id: string;
   name: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
   collapsed_groups: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
 };
@@ -26,8 +33,14 @@ export type SidebarViewApi = {
 export type SidebarViewDraftApi = {
   base_view_id: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
   task_row?: SidebarTaskRowPresentationApi | null;
 };
 
@@ -172,6 +185,8 @@ export type SidebarLayoutNodeApi = {
 };
 
 export type SidebarLayoutApi = {
+  navigation_height?: number;
+  navigation_expanded?: boolean;
   version: number;
   revision: number;
   nodes: SidebarLayoutNodeApi[];
@@ -199,12 +214,14 @@ export type UserSettings = {
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
   show_todo_list_panel_only_when_not_empty?: boolean;
+  show_turn_changed_files?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   auto_focus_new_tasks?: boolean;
+  agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -241,8 +258,11 @@ export type UserSettings = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
   sidebar_hover_enabled?: boolean;
   sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
@@ -280,12 +300,14 @@ export type UserSettingsUpdatePayload = {
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
   show_todo_list_panel_only_when_not_empty?: boolean;
+  show_turn_changed_files?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   auto_focus_new_tasks?: boolean;
+  agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -331,8 +353,11 @@ export type UserSettingsUpdatePayload = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
   sidebar_hover_enabled?: boolean;
   sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;

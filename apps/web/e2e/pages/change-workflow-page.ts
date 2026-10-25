@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../helpers/animations";
 
 export class ChangeWorkflowPage {
   readonly form: Locator;
@@ -16,12 +17,13 @@ export class ChangeWorkflowPage {
 
   async chooseWorkflow(workflowId: string) {
     const trigger = this.form.getByTestId("change-workflow-destination");
-    await expect(trigger).toBeVisible();
-    if (this.mobile) await trigger.tap();
-    else await trigger.click();
+    await this.openSelector(trigger);
     const option = this.option(workflowId);
+    await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
     await expect
       .poll(async () => {
         const stepPicker = this.form.getByTestId("change-workflow-step");
@@ -34,21 +36,58 @@ export class ChangeWorkflowPage {
   async chooseStep(stepId: string) {
     const trigger = this.form.getByTestId("change-workflow-step");
     await expect(trigger).toBeEnabled();
-    if (this.mobile) await trigger.tap();
-    else await trigger.click();
+    await this.openSelector(trigger);
     const option = this.option(stepId);
+    await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
   }
 
   async chooseProfile(sourceProfileId: string, replacementProfileName: string) {
     const trigger = this.form.getByTestId(`change-workflow-profile-selector-${sourceProfileId}`);
-    await expect(trigger).toBeVisible();
-    if (this.mobile) await trigger.tap();
-    else await trigger.click();
+    await this.openSelector(trigger);
     const option = this.page.getByRole("option").filter({ hasText: replacementProfileName }).last();
+    await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
+  }
+
+  async expectStepOptionColor(stepId: string, cssColor: string) {
+    await this.openSelector(this.form.getByTestId("change-workflow-step"));
+    await this.expectColorDot(this.option(stepId), cssColor);
+  }
+
+  async expectSelectedStepColor(cssColor: string) {
+    await this.expectColorDot(this.form.getByTestId("change-workflow-step"), cssColor);
+  }
+
+  private async expectColorDot(container: Locator, cssColor: string) {
+    const expectedColor = await this.page.evaluate((color) => {
+      const reference = document.createElement("span");
+      reference.style.backgroundColor = color;
+      document.body.append(reference);
+      const resolved = getComputedStyle(reference).backgroundColor;
+      reference.remove();
+      return resolved;
+    }, cssColor);
+    expect(expectedColor).not.toBe("rgba(0, 0, 0, 0)");
+    const dot = container.locator(".rounded-full");
+    await expect(dot).toBeVisible();
+    await expect(dot).toHaveCSS("background-color", expectedColor);
+  }
+
+  private async openSelector(trigger: Locator) {
+    await expect(trigger).toBeVisible();
+    if (this.mobile) await waitForFiniteAnimations(this.phoneDrawer);
+    if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+      if (this.mobile) await trigger.tap();
+      else await trigger.click();
+    }
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
   }
 
   async submit() {

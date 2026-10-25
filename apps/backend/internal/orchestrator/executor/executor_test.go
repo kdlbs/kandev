@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests
@@ -224,6 +225,33 @@ func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
 	}
 	if created.ExecutorProfileID != "profile-new" {
 		t.Fatalf("session executor profile = %q, want profile-new", created.ExecutorProfileID)
+	}
+}
+
+func TestResolveTaskLaunchScopeExcludesAutomationOrigins(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["automation-run"] = &models.Task{ID: "automation-run", Origin: models.TaskOriginAutomationRun}
+	repo.tasks["automation-task"] = &models.Task{ID: "automation-task", Origin: models.TaskOriginAutomationTask}
+	repo.tasks["office-automation-run"] = &models.Task{ID: "office-automation-run", Origin: models.TaskOriginAutomationRun, IsFromOffice: true}
+	repo.tasks["office-automation-task"] = &models.Task{ID: "office-automation-task", Origin: models.TaskOriginAutomationTask, IsFromOffice: true}
+	repo.tasks["manual-task"] = &models.Task{ID: "manual-task", Origin: models.TaskOriginManual}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	for _, tc := range []struct {
+		taskID string
+		want   lifecycle.TaskLaunchScope
+	}{
+		{taskID: "automation-run", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "automation-task", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "office-automation-run", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "office-automation-task", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "manual-task", want: lifecycle.TaskLaunchScopeTask},
+	} {
+		t.Run(tc.taskID, func(t *testing.T) {
+			got, err := exec.resolveTaskLaunchScope(context.Background(), tc.taskID)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
 	}
 }
 
@@ -571,6 +599,7 @@ func TestPrepareSession_WithRepository(t *testing.T) {
 
 func TestLaunchPreparedSession_Success(t *testing.T) {
 	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123"}
 
 	// Pre-create session (as PrepareSession would)
 	session := &models.TaskSession{
@@ -588,6 +617,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if req.CausingRunID != "office-run-1" {
+				t.Errorf("causing run ID = %q, want office-run-1", req.CausingRunID)
+			}
 			if !req.StartAgent {
 				t.Error("expected lifecycle launch to retain initial-agent activity")
 			}
@@ -599,6 +631,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 			}
 			if req.TaskEnvironmentID == "" {
 				t.Error("Expected non-empty task environment ID")
+			}
+			if req.TaskScope != lifecycle.TaskLaunchScopeTask {
+				t.Errorf("task scope = %q, want %q from the canonical task row", req.TaskScope, lifecycle.TaskLaunchScopeTask)
 			}
 			launchedEnvID = req.TaskEnvironmentID
 			return &LaunchAgentResponse{
@@ -618,7 +653,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 		Description: "Test description",
 	}
 
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true})
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true, CausingRunID: "office-run-1",
+	})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
@@ -1593,6 +1630,7 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 	}
 
 	var commandConfigured atomic.Bool
+	var admissions, starts atomic.Int32
 	var executionDescription string
 	startDone := make(chan error, 1)
 	agentManager := &mockAgentManager{
@@ -1606,7 +1644,13 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 			executionDescription = description
 			return nil
 		},
-		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			if admissions.Load() != 0 {
+				return nil, errors.New("admission consumed before full-launch promotion")
+			}
+			if req.SessionID != session.ID || req.InitialDeliverySubmissionID != "reserved-submission" {
+				return nil, errors.New("promotion lost immutable launch identity")
+			}
 			if executionDescription != "implement the approved plan" {
 				return nil, fmt.Errorf("execution description was not updated before promotion: %q", executionDescription)
 			}
@@ -1617,6 +1661,10 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 			}, nil
 		},
 		startAgentProcessFunc: func(_ context.Context, _ string) error {
+			starts.Add(1)
+			if admissions.Load() != 1 {
+				return errors.New("provider start did not have exactly one admission")
+			}
 			if !commandConfigured.Load() {
 				err := errors.New(`execution "exec-workspace-only" has no agent command configured`)
 				startDone <- err
@@ -1630,9 +1678,23 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
 
 	_, err := executor.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
-		AgentProfileID: session.AgentProfileID,
-		Prompt:         "implement the approved plan",
-		StartAgent:     true,
+		AgentProfileID:       session.AgentProfileID,
+		Prompt:               "implement the approved plan",
+		StartAgent:           true,
+		TurnID:               "reserved-turn",
+		DeliverySubmissionID: "reserved-submission",
+		BeforeAgentStart: func(_ context.Context, executionID, dispatchPrompt string) error {
+			if dispatchPrompt != "implement the approved plan" {
+				return errors.New("promotion lost final prompt")
+			}
+			if !commandConfigured.Load() || executionID != "exec-workspace-only" {
+				return errors.New("admission did not belong to promoted execution")
+			}
+			if !admissions.CompareAndSwap(0, 1) {
+				return errors.New("admission already consumed")
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession: %v", err)
@@ -1647,6 +1709,9 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for StartAgentProcess")
+	}
+	if admissions.Load() != 1 || starts.Load() != 1 {
+		t.Fatalf("admission/start counts = %d/%d", admissions.Load(), starts.Load())
 	}
 }
 
@@ -2557,6 +2622,105 @@ func TestStartAgentProcessAsyncNotifiesAfterProcessStartFailure(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for process-start failure callback")
+	}
+}
+
+func TestRunAgentProcessAsync_ReattachmentFailurePreservesPeerAndSession(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+	var stopCalls atomic.Int32
+	startErr := &lifecycle.AgentReattachmentFailure{
+		ExecutionID: "exec-456", SessionID: "session-123", Cause: errors.New("peer identity unavailable"),
+	}
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return startErr },
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, _, _, _ string, err error) {
+		failed <- err
+	})
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(context.Context) { t.Error("onSuccess ran after reattachment failure") }, false, true)
+	select {
+	case err := <-failed:
+		if !errors.Is(err, lifecycle.ErrAgentReattachment) {
+			t.Fatalf("failure callback error = %v, want ErrAgentReattachment", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reattachment failure callback")
+	}
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0 for a pre-existing peer", got)
+	}
+	session, err := repo.GetTaskSession(context.Background(), "session-123")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateStarting {
+		t.Fatalf("session state = %q, want STARTING", session.State)
+	}
+	repo.mu.Lock()
+	taskState := repo.tasks["task-123"].State
+	repo.mu.Unlock()
+	if taskState != v1.TaskStateScheduling {
+		t.Fatalf("task state = %q, want SCHEDULING", taskState)
+	}
+}
+
+func TestRunAgentProcessAsync_LateReattachCancellationPreservesPeer(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	var stopCalls atomic.Int32
+	agentManager := &mockAgentManager{
+		startupDisposition: lifecycle.AgentStartupReattachedExisting,
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(startEntered)
+			<-releaseStart
+			return nil
+		},
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, _, _, _ string, err error) {
+		failed <- err
+	})
+	ctx, cancel := context.WithCancel(WithCancellableResumeContext(context.Background()))
+	defer cancel()
+	exec.runAgentProcessAsync(ctx, "task-123", "session-123", "exec-456",
+		func(context.Context) { t.Error("onSuccess ran after cancelled reattachment") }, false, true)
+	select {
+	case <-startEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reattachment startup")
+	}
+	cancel()
+	close(releaseStart)
+	select {
+	case err := <-failed:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("failure callback error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for cancelled reattachment callback")
+	}
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0 for reattached existing peer", got)
 	}
 }
 

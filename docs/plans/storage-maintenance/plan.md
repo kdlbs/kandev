@@ -28,6 +28,9 @@ The current [temporary storage visibility and cleanup package](../storage-tempor
 extends this completed maintenance system with read-only system temporary-folder visibility and an
 opt-in policy for verified registered artifacts.
 
+The completed [optional Go-cache launch fallback package](../managed-go-cache-launch-fallback/plan.md)
+adds launch availability and recovery behavior while retaining strict cache maintenance safety.
+
 ---
 
 ## Backend

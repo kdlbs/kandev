@@ -1,12 +1,15 @@
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { getMockAgentId } from "../../helpers/mock-agent";
 
 export type WorkflowTaskSessions = Awaited<ReturnType<ApiClient["listTaskSessions"]>>["sessions"];
 
-export async function createWorkflowAgentProfiles(apiClient: ApiClient) {
+export async function createWorkflowAgentProfiles(apiClient: ApiClient, seedProfileId?: string) {
   const { agents } = await apiClient.listAgents();
-  if (agents.length === 0) throw new Error("no agents available in test fixtures");
-  const agentId = agents[0].id;
+  const candidates = seedProfileId
+    ? agents.filter((agent) => agent.profiles.some((profile) => profile.id === seedProfileId))
+    : agents;
+  const agentId = getMockAgentId(candidates);
   const profileA = await apiClient.createAgentProfile(agentId, "Profile A (fast)", {
     model: "mock-fast",
   });
@@ -39,6 +42,7 @@ export async function waitForWorkflowProfileSession(
   apiClient: ApiClient,
   taskId: string,
   profileId: string,
+  timeoutMs = 60_000,
 ) {
   let sessionId = "";
   let details = "";
@@ -57,7 +61,7 @@ export async function waitForWorkflowProfileSession(
         return session?.state === "WAITING_FOR_INPUT";
       },
       {
-        timeout: 60_000,
+        timeout: timeoutMs,
         intervals: [250, 500, 1_000],
         message: `profile ${profileId} never became answerable`,
       },
