@@ -650,6 +650,37 @@ retry a failed connection immediately, and it does not move, reconfigure, or
 otherwise repair a host that has become unreachable or changed address;
 fixing the host or the connection settings remains an operator action.
 
+## Per-session MCP token
+
+Each agent instance authenticates its Kandev MCP endpoint (`/mcp`, `/sse`, `/message`) with a token that only that session's agent receives. The backend derives the token from a signing key held in its secret store and the instance identity, and hands it to the agent through the agent's own MCP configuration. Same-host instances also reach the Git credential broker through a loopback route on their own agentctl listener instead of the backend address.
+
+A launch that cannot carry the token stops before the agent starts. The failure text begins with one of these codes, then a fixed sentence, then an optional `cause=` value.
+
+| Code | Meaning | Action |
+|------|---------|--------|
+| `mcp_token_carrier_unavailable` | The agent has no verified way to receive the token. | Use a verified agent, or see the `cause=` value below. |
+| `mcp_token_unsupported` | The agentctl build behind the executor does not enforce the token. | Upgrade agentctl, then retry. |
+| `mcp_token_key_unavailable` | The signing key could not be read from the secret store. | Check the secret store and `data/master.key`, then retry. |
+| `mcp_token_key_replaced` | The stored signing key was unusable and a new one was generated (logged as a warning, not a refusal). | Running sessions relaunch once; no action needed. |
+
+Causes:
+
+- `agent_not_verified`: the agent's MCP carrier has not been verified.
+- `workspace_file_carrier_deferred`: Cursor and Pi read MCP settings from a workspace file, which is not supported yet.
+- `custom_tui_deferred`: custom terminal agents are not supported yet.
+- `codex_wrapper`: Codex is started through a wrapper, so the token cannot be verified.
+- `codex_version`: the installed Codex is older than 0.47.0, the first release with custom MCP HTTP headers.
+- `codex_probe_failed`: the Codex version could not be read on the executor.
+- `retained_instance_deferred`: Kubernetes and SSH executors do not yet adopt a retained instance across a backend restart; the session is relaunched instead.
+
+Operator notes:
+
+- **Upgrade order:** upgrade the backend before any operator-pinned agentctl image, so a new agentctl is never paired with a backend that cannot mint tokens.
+- **First restart:** the local control server restarts once on upgrade so it picks up the token check.
+- **`master.key` regeneration:** if the key is regenerated, the signing key is replaced and running sessions relaunch.
+- **Refusals in logs:** agentctl logs `mcp request refused` with the route and a reason such as `missing` when a request carries no valid token.
+- **Backend bind:** `server.host` is unchanged by this feature.
+
 ## Lifecycle and cleanup
 
 The task environment reports `creating`, `ready`, `stopped`, or `failed`; individual execution records have finer states. Stop is deliberately not synonymous with destroy for resumable Docker, Kubernetes, and Sprites environments.
