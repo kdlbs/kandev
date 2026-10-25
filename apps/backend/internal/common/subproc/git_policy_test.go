@@ -469,8 +469,18 @@ func TestClassifyGitSubcommand(t *testing.T) {
 	if classifyGitSubcommand("cat-file", []string{"--filters", "x"}) != classContentWriting {
 		t.Error("cat-file --filters must be content-writing")
 	}
-	if classifyGitSubcommand("branch", []string{"--show-current"}) != classFilterFree {
-		t.Error("branch must be filter-free")
+	if classifyGitSubcommand("branch", []string{"--list"}) != classFilterFree {
+		t.Error("branch --list must be filter-free")
+	}
+	for _, rest := range [][]string{nil, {"--show-current"}, {"-m", "x"}, {"yy"}} {
+		if classifyGitSubcommand("branch", rest) != classContentWriting {
+			t.Errorf("branch %v must be content-writing", rest)
+		}
+	}
+	for _, sub := range []string{"update-ref", "symbolic-ref", "fetch", "remote", "write-tree"} {
+		if classifyGitSubcommand(sub, nil) != classFilterReading {
+			t.Errorf("%s must be filter-reading", sub)
+		}
 	}
 }
 
@@ -478,6 +488,15 @@ func TestIsDryRunPush(t *testing.T) {
 	for args, want := range map[string]bool{"--dry-run": true, "-n": true, "-nv": true, "-fn": true, "--force": false, "-u": false, "-o": false} {
 		if got := isDryRunPush([]string{args}); got != want {
 			t.Errorf("%s: %v want %v", args, got, want)
+		}
+	}
+}
+
+func TestManagedGitEnumeratesOutsideARepository(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"credential", "reject"}} {
+		if _, err := buildManagedGitVector(context.Background(), dir, os.Environ(), args); err != nil {
+			t.Errorf("%v outside a repository: %v", args, err)
 		}
 	}
 }

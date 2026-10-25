@@ -60,13 +60,17 @@ const (
 	classFilterFree
 )
 
+// filterFreeSubcommands are pure reads and object writes: they can neither
+// apply a filter or merge driver nor start a hook, so they never enumerate.
 var filterFreeSubcommands = setOf(
-	"rev-parse", "config", "symbolic-ref", "for-each-ref", "rev-list", "merge-base", "show-ref",
-	"ls-remote", "remote", "branch", "var", "version", "ls-tree", "fetch", "update-ref",
-	"write-tree", "commit-tree", "cat-file", "credential", "init", "check-ignore", "reflog", "clean",
+	"rev-parse", "config", "for-each-ref", "rev-list", "merge-base", "show-ref",
+	"ls-remote", "var", "version", "ls-tree", "commit-tree",
 )
 
+// filterReadingSubcommands can apply a filter or start a hook but write no
+// content.
 var filterReadingSubcommands = setOf(
+	"symbolic-ref", "remote", "fetch", "update-ref", "write-tree",
 	"status", "diff", "diff-tree", "diff-index", "diff-files", "log", "show", "format-patch",
 	"range-diff", "ls-files", "push",
 )
@@ -92,10 +96,17 @@ func classifyGitSubcommand(sub string, rest []string) gitCommandClass {
 			return classContentWriting
 		}
 		switch rest[0] {
-		case "list", "prune", "move", "lock", "unlock", "repair":
+		case "list", "prune":
 			return classFilterFree
 		case "remove":
 			return classFilterReading
+		}
+		return classContentWriting
+	case "branch":
+		// Only the listing form is a pure read; every other form can update
+		// refs and start a reference-transaction hook.
+		if len(rest) > 0 && rest[0] == "--list" {
+			return classFilterFree
 		}
 		return classContentWriting
 	case "cat-file":

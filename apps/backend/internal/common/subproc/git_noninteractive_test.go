@@ -20,6 +20,9 @@ func TestGitFinalEnvironment(t *testing.T) {
 	fakeGitDir := t.TempDir()
 	fakeGit := filepath.Join(fakeGitDir, "git")
 	if err := os.WriteFile(fakeGit, []byte(`#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "--get-regexp" ]; then exit 1; fi
+done
 printf 'GIT_TERMINAL_PROMPT=%s\n' "${GIT_TERMINAL_PROMPT-}"
 printf 'GCM_INTERACTIVE=%s\n' "${GCM_INTERACTIVE-}"
 printf 'GCM_GUI_PROMPT=%s\n' "${GCM_GUI_PROMPT-}"

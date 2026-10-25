@@ -17,7 +17,8 @@ import (
 // that the policy treats as content-writing (the default class).
 var contentWritingSubcommands = setOf(
 	"add", "commit", "checkout", "switch", "restore", "merge", "pull", "revert", "reset", "rebase",
-	"cherry-pick", "worktree", "apply", "stash", "submodule", "am", "mv", "clone",
+	"cherry-pick", "worktree", "apply", "stash", "submodule", "am", "mv", "clone", "init", "branch",
+	"tag", "rm", "check-ignore", "reflog", "clean", "credential", "sparse-checkout",
 )
 
 // spreadingCallFiles is the inventory of production files whose NewGitCommand
@@ -145,5 +146,5 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 }
 
 func knownSubcommand(sub string) bool {
-	return filterFreeSubcommands[sub] || filterReadingSubcommands[sub] || contentWritingSubcommands[sub]
+	return sub == "cat-file" || filterFreeSubcommands[sub] || filterReadingSubcommands[sub] || contentWritingSubcommands[sub]
 }

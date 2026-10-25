@@ -106,3 +106,38 @@ func TestManagedGitLFSExtensionRemovesLFSFromAllowlist(t *testing.T) {
 		t.Fatalf("lfs filter was not neutralized: %v", pairs)
 	}
 }
+
+func TestManagedGitRefUpdatingCommandsRunConfigDefinedHooksOnlyWhenOptedIn(t *testing.T) {
+	if !gitSupportsConfigHooks(t) {
+		t.Skip("installed Git has no configuration-defined hooks")
+	}
+	commands := map[string][]string{
+		"update-ref":   {"update-ref", "refs/heads/zz", "HEAD"},
+		"symbolic-ref": {"symbolic-ref", "HEAD", "refs/heads/zz"},
+		"fetch":        {"fetch", "--tags", "."},
+		"branch":       {"branch", "yy"},
+	}
+	for name, args := range commands {
+		for _, optedIn := range []bool{false, true} {
+			t.Run(name, func(t *testing.T) {
+				repo := newPolicyRepo(t)
+				plainGit(t, repo.dir, "commit", "--allow-empty", "-q", "-m", "base")
+				if name == "fetch" {
+					plainGit(t, repo.dir, "tag", "tt")
+				}
+				plainGit(t, repo.dir, "config", "hook.mark.event", "reference-transaction")
+				plainGit(t, repo.dir, "config", "hook.mark.command", "echo config-hook >> '"+repo.marker+"'")
+				ctx := WithGitHooks(context.Background(), optedIn)
+				if name == "fetch" {
+					args = []string{"fetch", "--tags", "--force", repo.dir, "refs/heads/main:refs/heads/fetched"}
+				}
+				if out, err := runGit(ctx, t, repo.dir, args...); err != nil {
+					t.Fatalf("%s: %v\n%s", name, err, out)
+				}
+				if got := strings.Contains(repo.markerText(), "config-hook"); got != optedIn {
+					t.Fatalf("%s opted-in=%v: config hook ran=%v\n%s", name, optedIn, got, repo.markerText())
+				}
+			})
+		}
+	}
+}
