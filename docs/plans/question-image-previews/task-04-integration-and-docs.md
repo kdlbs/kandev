@@ -298,3 +298,22 @@ runs and nine desktop runs across the four affected cases. Each command used
 Logs: `/tmp/question-images-checks/kandev-run.e2e.8cCskM17.log` (3 phone cases) and
 `/tmp/question-images-checks/kandev-run.e2e.fTxRkb3m.log` (9 desktop cases).
 The latest full CI and review gates are tracked on PR #4766.
+
+
+### Quick Chat CI fixture correction
+
+E2E workflow [40195458118](https://github.com/kdlbs/kandev/actions/runs/40195458118)
+passed 4,245 cases on the first attempt and skipped 40. One Quick Chat goal
+disclosure case passed only after retry, so the E2E gate failed. Its failure
+snapshot shows the goal command before the opening prompt, with a rejected
+message while the agent was already running. The test now waits for the existing
+completed-turn baseline and direct-input state before it sends the goal command.
+This changes test setup only. Goal behavior and its UI assertions remain intact.
+
+The original focused case passed three local runs with retries disabled. That
+result does not invalidate the recorded CI race. The corrected full goal spec
+passed all nine runs under two CPUs and one worker with retries disabled.
+Command: `pnpm --dir apps/web e2e:run --host --no-build --project chromium
+tests/chat/agent-goal.spec.ts --retries=0 --repeat-each=3`, through the managed
+runner with `taskset`. Log: `/tmp/question-images-checks/kandev-run.e2e.ywYEMNB7.log`.
+Changed-file ESLint, specification lint, and documentation coverage passed.
