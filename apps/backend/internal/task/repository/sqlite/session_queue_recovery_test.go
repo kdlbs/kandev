@@ -207,6 +207,76 @@ func TestRecoverTaskSessionQueueRedactsReceiptAfterExactDisposition(t *testing.T
 	}
 }
 
+func TestRecoverTaskSessionQueueRedactsSourceLineageAfterFinalDisposition(t *testing.T) {
+	repo, queueRepo := newSessionQueueRecoveryFixture(t)
+	ctx := context.Background()
+	entry := insertSessionQueueRecoveryMessage(t, queueRepo, "body from source A")
+	first, err := repo.RecoverTaskSessionQueue(ctx, sessionQueueRecoveryScope())
+	if err != nil {
+		t.Fatalf("recover A to B: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "final", TaskID: "task-recovery", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("create final session: %v", err)
+	}
+	if err := repo.SetSessionPrimary(ctx, "final"); err != nil {
+		t.Fatalf("promote final session: %v", err)
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "destination", models.TaskSessionStateCompleted, ""); err != nil {
+		t.Fatalf("complete intermediate session: %v", err)
+	}
+	unrelated := &messagequeue.QueuedMessage{
+		SessionID: "final", TaskID: "task-recovery", Content: "unrelated pending dispatch", QueuedBy: messagequeue.QueuedByUser,
+	}
+	if err := queueRepo.Insert(ctx, unrelated, 10); err != nil {
+		t.Fatalf("insert unrelated final entry: %v", err)
+	}
+	second, err := repo.RecoverTaskSessionQueue(ctx, messagequeue.QueueRecoveryScope{
+		TaskID: "task-recovery", WorkspaceID: "workspace-recovery",
+		SourceSessionID: "destination", DestinationSessionID: "final",
+	})
+	if err != nil {
+		t.Fatalf("recover B to C: %v", err)
+	}
+	if claimed, err := queueRepo.TakeHead(ctx, "final"); err != nil || claimed == nil || claimed.ID != unrelated.ID {
+		t.Fatalf("claim unrelated final entry = %#v, err=%v", claimed, err)
+	}
+	unrelatedPending := &messagequeue.QueuedMessage{
+		SessionID: "final", TaskID: "task-recovery", Content: "unrelated queued body", QueuedBy: messagequeue.QueuedByUser,
+	}
+	if err := queueRepo.Insert(ctx, unrelatedPending, 10); err != nil {
+		t.Fatalf("insert unrelated pending entry: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	queue := messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, log)
+	census, err := queue.Census(ctx, "final")
+	if err != nil || len(census.Entries) != 2 || census.Entries[0].ID != entry.ID {
+		t.Fatalf("final census = %#v, err=%v", census, err)
+	}
+	if _, err := queue.DisposeExact(ctx, "final", []messagequeue.QueueEntryClaim{{
+		ID: entry.ID, Claim: census.Entries[0].Claim,
+	}}); err != nil {
+		t.Fatalf("dispose original entry at C: %v", err)
+	}
+	for _, receiptID := range []string{first.Receipt.ID, second.Receipt.ID} {
+		var snapshot string
+		if err := repo.db.GetContext(ctx, &snapshot, `SELECT snapshot_json FROM queue_recovery_receipts WHERE id = ?`, receiptID); err != nil {
+			t.Fatalf("read receipt %s: %v", receiptID, err)
+		}
+		if snapshot != "[]" {
+			t.Fatalf("receipt %s retained original body after final disposition: %q", receiptID, snapshot)
+		}
+	}
+	remaining, err := queueRepo.ListBySession(ctx, "final")
+	if err != nil || len(remaining) != 1 || remaining[0].ID != unrelatedPending.ID {
+		t.Fatalf("unrelated queued work changed = %#v, err=%v", remaining, err)
+	}
+}
+
 func TestRecoverTaskSessionQueueRedactsReceiptAfterDeliveryAcknowledgement(t *testing.T) {
 	repo, queueRepo := newSessionQueueRecoveryFixture(t)
 	ctx := context.Background()

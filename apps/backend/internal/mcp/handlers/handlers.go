@@ -2922,11 +2922,11 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
 	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
-	applyScheduledRoutineWakeMetadata(ctx, prompt, senderTask, req.SenderSessionID, senderMeta)
 	if req.ReplyToQuestionID != "" {
 		senderMeta[models.MetaKeyParentQuestionID] = req.ReplyToQuestionID
 		senderMeta[models.MetaKeyParentQuestionResponse] = req.Prompt
 	}
+	applyScheduledRoutineWakeMetadata(ctx, prompt, senderTask, req.SenderSessionID, senderMeta)
 
 	// Interrupt intent is explicit, never inferred: a parent/child
 	// relationship alone no longer drives interruption (see

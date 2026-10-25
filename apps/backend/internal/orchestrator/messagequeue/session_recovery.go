@@ -247,23 +247,113 @@ func rejectRecoveryInFlightStateTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB
 }
 
 func redactRecoveryReceiptsIfEmptyTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, destinationSessionID string) error {
-	for _, table := range []string{"queued_messages", "queue_dispatch_claims", "queue_send_now_claims"} {
-		present, err := internaldb.TableExists(tx, table)
+	present, err := internaldb.TableExists(tx, "queue_recovery_receipts")
+	if err != nil {
+		return fmt.Errorf("inspect recovery receipt table: %w", err)
+	}
+	if !present {
+		return nil
+	}
+	var receipts []storedQueueRecoveryReceipt
+	err = tx.SelectContext(ctx, &receipts, db.Rebind(`
+		WITH RECURSIVE lineage(task_id, session_id) AS (
+			SELECT task_id, destination_session_id FROM queue_recovery_receipts
+			WHERE destination_session_id = ?
+			UNION
+			SELECT r.task_id, r.source_session_id FROM queue_recovery_receipts r
+			JOIN lineage l ON r.task_id = l.task_id AND r.destination_session_id = l.session_id
+		)
+		SELECT r.id, r.task_id, r.workspace_id, r.source_session_id, r.destination_session_id,
+			r.entry_count, r.snapshot_sha256, r.snapshot_json, r.snapshot_redacted, r.occurred_at
+		FROM queue_recovery_receipts r
+		JOIN lineage l ON r.task_id = l.task_id AND r.destination_session_id = l.session_id
+		WHERE r.snapshot_redacted = 0
+	`), destinationSessionID)
+	if err != nil {
+		return fmt.Errorf("list recovery receipt lineage: %w", err)
+	}
+	if len(receipts) == 0 {
+		return nil
+	}
+	claimIDs, err := recoverySendNowClaimEntryIDsTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, receipt := range receipts {
+		var entries []QueuedMessage
+		if err := json.Unmarshal([]byte(receipt.SnapshotJSON), &entries); err != nil {
+			return fmt.Errorf("decode recovery receipt entries: %w", err)
+		}
+		pending, err := recoveryReceiptEntriesPendingTx(ctx, tx, db, entries, claimIDs)
 		if err != nil {
-			return fmt.Errorf("inspect recovery retention state: %w", err)
+			return err
 		}
-		if !present {
-			continue
-		}
-		var count int
-		if err := tx.GetContext(ctx, &count, db.Rebind(`SELECT COUNT(*) FROM `+table+` WHERE session_id = ?`), destinationSessionID); err != nil {
-			return fmt.Errorf("count recovery retention state: %w", err)
-		}
-		if count != 0 {
-			return nil
+		if !pending {
+			if err := redactRecoveryReceiptTx(ctx, tx, db, receipt.QueueRecoveryReceipt, "destination_dispositioned", now); err != nil {
+				return err
+			}
 		}
 	}
-	return redactRecoveryReceiptsTx(ctx, tx, db, "", destinationSessionID, "destination_dispositioned")
+	return nil
+}
+
+func recoverySendNowClaimEntryIDsTx(ctx context.Context, tx *sqlx.Tx) (map[string]struct{}, error) {
+	ids := make(map[string]struct{})
+	present, err := internaldb.TableExists(tx, "queue_send_now_claims")
+	if err != nil || !present {
+		return ids, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT claim_json FROM queue_send_now_claims`)
+	if err != nil {
+		return nil, fmt.Errorf("read recovery Send Now claims: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan recovery Send Now claim: %w", err)
+		}
+		var claim SendNowClaim
+		if err := json.Unmarshal([]byte(raw), &claim); err != nil {
+			return nil, fmt.Errorf("decode recovery Send Now claim: %w", err)
+		}
+		for _, source := range claim.Sources {
+			ids[source.ID] = struct{}{}
+		}
+		ids[claim.Dispatch.ID] = struct{}{}
+	}
+	return ids, rows.Err()
+}
+
+func recoveryReceiptEntriesPendingTx(
+	ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, entries []QueuedMessage, sendNowClaimIDs map[string]struct{},
+) (bool, error) {
+	for _, entry := range entries {
+		if _, pending := sendNowClaimIDs[entry.ID]; pending {
+			return true, nil
+		}
+		for _, table := range []struct{ name, column string }{
+			{name: "queued_messages", column: "id"},
+			{name: "queue_dispatch_claims", column: "entry_id"},
+		} {
+			present, err := internaldb.TableExists(tx, table.name)
+			if err != nil {
+				return false, fmt.Errorf("inspect recovery entry state: %w", err)
+			}
+			if !present {
+				continue
+			}
+			var count int
+			if err := tx.GetContext(ctx, &count, db.Rebind(`SELECT COUNT(*) FROM `+table.name+` WHERE `+table.column+` = ?`), entry.ID); err != nil {
+				return false, fmt.Errorf("count recovery entry state: %w", err)
+			}
+			if count != 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func redactRecoveryReceiptsTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID, destinationSessionID, reason string) error {
@@ -286,22 +376,31 @@ func redactRecoveryReceiptsTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, tas
 	}
 	now := time.Now().UTC()
 	for _, receipt := range receipts {
-		if _, err := tx.ExecContext(ctx, db.Rebind(`
+		if err := redactRecoveryReceiptTx(ctx, tx, db, receipt, reason, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func redactRecoveryReceiptTx(
+	ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, receipt QueueRecoveryReceipt, reason string, now time.Time,
+) error {
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
 			UPDATE queue_recovery_receipts
 			SET snapshot_json = '[]', snapshot_redacted = 1, redacted_at = ?
 			WHERE id = ? AND snapshot_redacted = 0
 		`), now, receipt.ID); err != nil {
-			return fmt.Errorf("redact recovery receipt: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, db.Rebind(`
+		return fmt.Errorf("redact recovery receipt: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
 			INSERT INTO queue_recovery_cleanup_events
 				(receipt_id, task_id, workspace_id, source_session_id,
 				 destination_session_id, reason, occurred_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 		`), receipt.ID, receipt.TaskID, receipt.WorkspaceID, receipt.SourceSessionID,
-			receipt.DestinationSessionID, reason, now); err != nil {
-			return fmt.Errorf("audit recovery receipt cleanup: %w", err)
-		}
+		receipt.DestinationSessionID, reason, now); err != nil {
+		return fmt.Errorf("audit recovery receipt cleanup: %w", err)
 	}
 	return nil
 }

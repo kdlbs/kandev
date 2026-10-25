@@ -982,20 +982,28 @@ func TestMessageQueueCensusToolSchemasExposeNoScopeOrMessageBodyControls(t *test
 	tools := s.mcpServer.ListTools()
 	census, ok := tools["get_message_queue_census_kandev"]
 	require.True(t, ok)
-	censusSchema, err := json.Marshal(census.Tool.InputSchema)
+	censusTool, err := json.Marshal(census.Tool)
 	require.NoError(t, err)
-	assert.NotContains(t, string(censusSchema), "task_id")
-	assert.NotContains(t, string(censusSchema), "session_id")
-	assert.NotContains(t, string(censusSchema), "content")
+	var censusWire struct {
+		InputSchema json.RawMessage `json:"inputSchema"`
+	}
+	require.NoError(t, json.Unmarshal(censusTool, &censusWire))
+	assert.NotContains(t, string(censusWire.InputSchema), "task_id")
+	assert.NotContains(t, string(censusWire.InputSchema), "session_id")
+	assert.NotContains(t, string(censusWire.InputSchema), "content")
 
 	dispose, ok := tools["dispose_message_queue_entries_kandev"]
 	require.True(t, ok)
-	disposeSchema, err := json.Marshal(dispose.Tool.InputSchema)
+	disposeTool, err := json.Marshal(dispose.Tool)
 	require.NoError(t, err)
-	assert.Contains(t, string(disposeSchema), "entries")
-	assert.Contains(t, string(disposeSchema), "claim")
+	var disposeWire struct {
+		InputSchema json.RawMessage `json:"inputSchema"`
+	}
+	require.NoError(t, json.Unmarshal(disposeTool, &disposeWire))
+	assert.Contains(t, string(disposeWire.InputSchema), "entries")
+	assert.Contains(t, string(disposeWire.InputSchema), "claim")
 	for _, forbidden := range []string{"task_id", "session_id", "content", "all", "force"} {
-		assert.NotContains(t, string(disposeSchema), forbidden)
+		assert.NotContains(t, string(disposeWire.InputSchema), forbidden)
 	}
 	annotations := dispose.Tool.Annotations
 	require.NotNil(t, annotations.DestructiveHint)

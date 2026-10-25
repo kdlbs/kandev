@@ -621,11 +621,13 @@ func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
 		"update_task_kandev", "move_task_kandev", "archive_task_kandev",
 		"add_task_dependency_kandev", "remove_task_dependency_kandev", "message_task_kandev",
 		"stop_task_kandev", "spawn_session_kandev", "list_pending_questions_kandev",
-		"get_message_queue_census_kandev", "dispose_message_queue_entries_kandev", "recover_session_queue_kandev", "close_task_session_kandev",
+		"get_message_queue_census_kandev", "dispose_message_queue_entries_kandev",
 		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
 	}
 	assert.ElementsMatch(t, want, getRegisteredToolNames(s))
 	assert.NotContains(t, getRegisteredToolNames(s), "transfer_task_kandev")
+	assert.NotContains(t, getRegisteredToolNames(s), "recover_session_queue_kandev")
+	assert.NotContains(t, getRegisteredToolNames(s), "close_task_session_kandev")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {

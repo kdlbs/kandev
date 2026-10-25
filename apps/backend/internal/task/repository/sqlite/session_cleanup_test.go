@@ -44,6 +44,48 @@ func TestDeleteTaskSessionArchivesTerminalTranscript(t *testing.T) {
 	require.True(t, primary.IsPrimary)
 }
 
+func TestDeleteTaskSessionDistinguishesStoppedResumeRecordFromLiveExecution(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      string
+		wantArchive bool
+	}{
+		{name: "stopped with resume token", status: models.ExecutorRunningStatusStopped, wantArchive: true},
+		{name: "ready execution", status: models.ExecutorRunningStatusReady},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			seedForMsgTest(t, repo, "task-executor-cleanup", "helper-executor-cleanup", "turn-executor-cleanup")
+			require.NoError(t, repo.UpdateTaskSessionState(ctx, "helper-executor-cleanup", models.TaskSessionStateCompleted, ""))
+			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: "primary-executor-cleanup", TaskID: "task-executor-cleanup", State: models.TaskSessionStateWaitingForInput,
+			}))
+			require.NoError(t, repo.SetSessionPrimary(ctx, "primary-executor-cleanup"))
+			require.NoError(t, repo.CreateMessage(ctx, &models.Message{
+				ID: "message-executor-cleanup", TaskSessionID: "helper-executor-cleanup", TaskID: "task-executor-cleanup",
+				TurnID: "turn-executor-cleanup", AuthorType: models.MessageAuthorAgent,
+				Type: models.MessageTypeMessage, Content: "retained transcript",
+			}))
+			require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: "executor-cleanup", TaskID: "task-executor-cleanup", SessionID: "helper-executor-cleanup",
+				AgentExecutionID: "execution-cleanup", Status: tc.status, ResumeToken: "retained-conversation",
+			}))
+			source, err := repo.GetTaskSession(ctx, "helper-executor-cleanup")
+			require.NoError(t, err)
+			_, err = repo.DeleteTaskSessionWithAttachments(ctx, source)
+			if !tc.wantArchive {
+				require.ErrorContains(t, err, "live execution")
+				return
+			}
+			require.NoError(t, err)
+			archived, err := repo.GetTaskSession(ctx, source.ID)
+			require.NoError(t, err)
+			require.NotNil(t, archived.ArchivedAt)
+		})
+	}
+}
+
 func TestDeleteTaskSessionRejectsPrimaryAndDeletesDisposableTerminalSession(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

@@ -228,6 +228,41 @@ func TestExactDispositionPreservesReservedLifecycleRows(t *testing.T) {
 	}
 }
 
+func TestExactDispositionPreservesEntryUnderActiveEditLease(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	svc := censusTestService(t, repo)
+	ctx := context.Background()
+	leased, err := svc.QueueMessage(ctx, "session-edit-disposition", "task-edit-disposition", "editing", "", QueuedByUser, false, nil)
+	if err != nil {
+		t.Fatalf("queue leased entry: %v", err)
+	}
+	other, err := svc.QueueMessage(ctx, leased.SessionID, leased.TaskID, "safe to remove", "", QueuedByUser, false, nil)
+	if err != nil {
+		t.Fatalf("queue other entry: %v", err)
+	}
+	census, err := svc.Census(ctx, leased.SessionID)
+	if err != nil {
+		t.Fatalf("census: %v", err)
+	}
+	if _, err := svc.BeginEdit(ctx, leased.SessionID, leased.ID, "connection-a"); err != nil {
+		t.Fatalf("begin edit: %v", err)
+	}
+	result, err := svc.DisposeExact(ctx, leased.SessionID, []QueueEntryClaim{
+		{ID: leased.ID, Claim: census.Entries[0].Claim},
+		{ID: other.ID, Claim: census.Entries[1].Claim},
+	})
+	if err != nil {
+		t.Fatalf("dispose exact: %v", err)
+	}
+	if result.Outcomes[0].Status != QueueDispositionChanged || result.Outcomes[1].Status != QueueDispositionRemoved {
+		t.Fatalf("disposition outcomes = %#v", result.Outcomes)
+	}
+	remaining, err := repo.ListBySession(ctx, leased.SessionID)
+	if err != nil || len(remaining) != 1 || remaining[0].ID != leased.ID {
+		t.Fatalf("leased entry was lost: %#v, err=%v", remaining, err)
+	}
+}
+
 func TestIdenticalRoutineWakeCoalescingIsConcurrentRestartDurableAndCapacitySafe(t *testing.T) {
 	tests := []struct {
 		name string

@@ -88,3 +88,25 @@ func TestHandleMessageTask_CoalescesOnlyIdenticalScheduledRoutineWakes(t *testin
 	assert.NotEqual(t, true, status.Entries[1].Metadata[messagequeue.MetadataRoutineWake], "ordinary peer message must not be routine-coalesced")
 	assert.NotEqual(t, true, status.Entries[3].Metadata[messagequeue.MetadataRoutineWake], "event automation message must not be routine-coalesced")
 }
+
+func TestScheduledRoutineWakeKeyIncludesFinalParentQuestionMetadata(t *testing.T) {
+	sender := &models.Task{ID: "routine-parent", Origin: models.TaskOriginAutomationRun, Metadata: map[string]interface{}{
+		"automation_id": "automation-1", "trigger_id": "trigger-1", "trigger_type": string(automation.TriggerTypeScheduled),
+	}}
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		AutomationID: "automation-1", CallerTaskID: sender.ID, CallerSessionID: "routine-session",
+		Surface: mcpprofile.SurfaceAutomation,
+	})
+	key := func(questionID, answer string) string {
+		metadata := map[string]interface{}{
+			models.MetaKeyParentQuestionID: questionID, models.MetaKeyParentQuestionResponse: answer,
+		}
+		applyScheduledRoutineWakeMetadata(ctx, "same expanded prompt", sender, "routine-session", metadata)
+		value, ok := metadata[messagequeue.MetadataCoalesceKey].(string)
+		require.True(t, ok)
+		return value
+	}
+	require.Equal(t, key("question-1", "first answer"), key("question-1", "first answer"))
+	require.NotEqual(t, key("question-1", "first answer"), key("question-2", "first answer"))
+	require.NotEqual(t, key("question-1", "first answer"), key("question-1", "second answer"))
+}

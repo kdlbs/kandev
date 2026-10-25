@@ -167,6 +167,9 @@ var (
 	// ErrSessionIdentityMismatch means the supplied immutable session identity
 	// no longer names the authoritative task-session row.
 	ErrSessionIdentityMismatch = errors.New("queue session identity mismatch")
+	// ErrSessionQueueNotEmpty keeps session deletion retryable after its
+	// unread or in-flight queue state has been resolved.
+	ErrSessionQueueNotEmpty = errors.New("session queue is not empty")
 	// ErrWorkflowEntryMismatch means a workflow prompt was admitted after its
 	// captured task-step entry had been superseded.
 	ErrWorkflowEntryMismatch = errors.New("queue workflow entry identity mismatch")

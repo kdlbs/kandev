@@ -4669,7 +4669,10 @@ func (r *Repository) confirmTaskSessionDeletionIdentityTx(
 		return fmt.Errorf("cannot delete session in %s state", found.State)
 	}
 	var running int
-	if err := tx.GetContext(ctx, &running, r.db.Rebind(`SELECT COUNT(*) FROM executors_running WHERE session_id = ?`), session.ID); err != nil {
+	if err := tx.GetContext(ctx, &running, r.db.Rebind(`
+		SELECT COUNT(*) FROM executors_running
+		WHERE session_id = ? AND COALESCE(status, '') <> ?
+	`), session.ID, models.ExecutorRunningStatusStopped); err != nil {
 		return fmt.Errorf("inspect session execution: %w", err)
 	}
 	if running != 0 {

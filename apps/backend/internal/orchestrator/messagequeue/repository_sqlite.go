@@ -2036,19 +2036,6 @@ func deleteTaskRecoveryRowsTx(
 	return nil
 }
 
-// PurgeTaskInTransaction lets the task repository make archive/delete and
-// durable queue invalidation one SQLite transaction. It is backend-internal:
-// user queue handlers must keep using ownership-checked deletion methods.
-//
-// taskSessions is the task's authoritative session set, discovered by the
-// caller from its own task_sessions schema. The queue repository never reaches
-// across schemas because a failed cross-schema query would abort the caller's
-// transaction on PostgreSQL. Standalone purges discover sessions from visible
-// queue rows and durable recovery records.
-// caller from its own task_sessions schema — the queue repository never
-// reaches across schemas, and a failed cross-schema query would abort the
-// caller's transaction on PostgreSQL. The standalone PurgeTask passes nil and
-// locks only the sessions that currently hold queue rows.
 // DeleteSessionInTransaction removes queue state only when the authoritative
 // task-session row still matches identity. The caller must lock the task row first.
 func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, identity QueueSessionIdentity) error {
@@ -2087,7 +2074,7 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 			return fmt.Errorf("count deleted session %s: %w", table, err)
 		}
 		if pending > 0 {
-			return fmt.Errorf("cannot delete session %s: %d pending %s records remain; inspect and dispose or recover them first", identity.SessionID, pending, table)
+			return fmt.Errorf("%w: session %s has %d pending %s records; inspect and dispose or recover them first", ErrSessionQueueNotEmpty, identity.SessionID, pending, table)
 		}
 	}
 	if _, err := PurgeSessionInTransaction(ctx, tx, db, identity.SessionID); err != nil {
@@ -2096,6 +2083,13 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	return nil
 }
 
+// PurgeTaskInTransaction lets the task repository make archive/delete and
+// durable queue invalidation one transaction. It is backend-internal; user
+// queue handlers keep using ownership-checked deletion methods. taskSessions
+// is the task's authoritative session set, discovered by the caller from its
+// own task_sessions schema; the queue repository avoids cross-schema queries
+// that would abort a PostgreSQL transaction. Standalone purges discover sessions
+// from visible queue rows and recovery records.
 func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string, taskSessions []string) (int, error) {
 	// Task lifecycle operations can run before the optional queue repository has
 	// been initialized. PostgreSQL aborts a transaction on a missing-table
@@ -2758,6 +2752,13 @@ func (r *sqliteRepository) disposeExactStoredClaim(
 		return QueueDispositionNotFound, nil
 	}
 	if stored.message.IsReservedInFlight() || queueSnapshotClaim(stored.message) != claim.Claim {
+		return QueueDispositionChanged, nil
+	}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, claim.ID)
+	if err != nil {
+		return "", err
+	}
+	if blocked {
 		return QueueDispositionChanged, nil
 	}
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), claim.ID, sessionID)

@@ -236,14 +236,13 @@ function SessionTabTriggerContent({
   closeBehavior: "delete_session" | "hide_panel";
   onCloseTab: () => void;
 }) {
-  const showDeleteOnClose =
-    !isPrimary &&
-    !isArchived &&
-    shouldShowSessionTabCloseAction(closeBehavior, sessionState, {
-      sessionCount,
-      visibleSessionCount,
-      isRestarting,
-    });
+  const showDeleteOnClose = shouldShowSessionTabCloseAction(closeBehavior, sessionState, {
+    sessionCount,
+    visibleSessionCount,
+    isRestarting,
+    isPrimary,
+    isArchived,
+  });
   return (
     <div className="flex items-center">
       {isPrimary && showMultiSessionBadges && (

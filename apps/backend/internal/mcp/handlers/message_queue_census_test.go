@@ -55,8 +55,8 @@ func TestHandleGetMessageQueueCensusBindsTrustedCallerTaskAndSession(t *testing.
 	if payload.TaskID != "task-1" || payload.SessionID != "session-1" || len(payload.Entries) != 1 || payload.Entries[0].ID != entry.ID {
 		t.Fatalf("payload = %#v", payload)
 	}
-	if bytes, _ := json.Marshal(payload); string(bytes) == "" || containsJSONBody(bytes, "secret body") {
-		t.Fatalf("census leaked message body: %s", bytes)
+	if len(resp.Payload) == 0 || containsJSONBody(resp.Payload, "secret body") {
+		t.Fatalf("census leaked message body: %s", resp.Payload)
 	}
 }
 

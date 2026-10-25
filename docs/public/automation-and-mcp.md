@@ -988,7 +988,9 @@ inspect again before deciding. `not_found` means another consumer or normal
 delivery already removed it. Retrying is safe, and a new or changed row is
 never selected by an old claim.
 
-### Recover and close a terminal helper session
+### Recover and close a terminal helper session (task mode)
+
+These tools are available to task sessions, not automation Coordinator sessions.
 
 From a task's current primary session, use `recover_session_queue_kandev` with
 `target_session_id` to move a terminal non-primary session's unread FIFO into
@@ -1013,16 +1015,15 @@ session, and the backend verifies that binding against the task workspace. If
 the tools are unavailable, preserve the queue and wait for normal FIFO delivery
 or use the authenticated queue UI. Do not use database edits as a fallback.
 
+### Scheduled wakes and other task-mode tools
+
 Trusted scheduled automation messages use the same durable queue with an
 additional guard: identical pending wakes from the same automation and trigger
 with the same complete expanded payload retain one FIFO entry. Different
 payloads and messages from peers, users, webhooks, or provider events remain
 separate.
 
-`add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. A task may also target its same-workspace direct child; Kandev verifies the calling task and session on the backend, so agents cannot provide or override that provenance. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The target must be repository-backed and have no active turn or tool call. Exact normalized retries are idempotent; contradictory duplicates, unsupported, or failed sources roll back the batch.
-
-
-The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
+For workspace source attachment described above, the HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 

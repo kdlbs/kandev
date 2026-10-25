@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -31,8 +32,8 @@ func TestDeleteTaskSessionPreservesPendingQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.DeleteTaskSession(ctx, session); err == nil {
-		t.Fatal("session deletion removed an unread queue entry")
+	if err := repo.DeleteTaskSession(ctx, session); !errors.Is(err, messagequeue.ErrSessionQueueNotEmpty) {
+		t.Fatalf("session deletion error = %v, want pending queue conflict", err)
 	}
 	if _, err := repo.GetTaskSession(ctx, sessionID); err != nil {
 		t.Fatalf("session was removed after rejected deletion: %v", err)

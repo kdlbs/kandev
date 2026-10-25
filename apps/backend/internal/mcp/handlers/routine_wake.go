@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 
 	"github.com/kandev/kandev/internal/automation"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -30,7 +31,19 @@ func applyScheduledRoutineWakeMetadata(
 	if automationID == "" || triggerID == "" || automationID != principal.AutomationID {
 		return
 	}
-	payloadDigest := sha256.Sum256([]byte(prompt))
+	payload, err := json.Marshal(struct {
+		Prompt         string `json:"prompt"`
+		QuestionID     string `json:"question_id"`
+		QuestionAnswer string `json:"question_answer"`
+	}{
+		Prompt:         prompt,
+		QuestionID:     models.StringFromAny(metadata[models.MetaKeyParentQuestionID]),
+		QuestionAnswer: models.StringFromAny(metadata[models.MetaKeyParentQuestionResponse]),
+	})
+	if err != nil {
+		return
+	}
+	payloadDigest := sha256.Sum256(payload)
 	identity := automationID + ":" + triggerID
 	keyDigest := sha256.Sum256([]byte(identity + "\x00" + hex.EncodeToString(payloadDigest[:])))
 	metadata[messagequeue.MetadataRoutineWake] = true

@@ -1311,6 +1311,8 @@ func (s *Server) registerAutomationTools() {
 	s.registerConfigWorkflowTools()
 	s.registerConfigExecutorTools()
 	s.mcpServer.DeleteTools(
+		"recover_session_queue_kandev",
+		"close_task_session_kandev",
 		"delete_task_kandev",
 		"update_task_state_kandev",
 		"create_workflow_kandev",

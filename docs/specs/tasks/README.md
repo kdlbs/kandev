@@ -11,18 +11,18 @@ owners:
 
 ## Purpose
 
-Owns durable work items, task relationships, execution lifecycle, workflow
-steps, queued launches, and task process contracts.
+Owns durable tasks, execution, workflows, queued launches and process contracts.
 
 ## Ownership
 
-Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
-documents, attachments, parent and dependency relationships, creation, launch,
-runtime state publication, workflow definitions and transitions, completion
-signals, and task scheduling.
+Owns task identity and metadata; [workspace discovery](requirements/workspace-search.md);
+documents and attachments; parent and dependency relationships; creation and
+launch; runtime state publication; workflow definitions, transitions, and
+completion signals; and scheduling.
 
-Turn change sets bind repository intervals to capture policy and transcript
-anchors. Workspaces own checkout identity; runtime owns ordered executor access.
+Turn change sets bind immutable repository intervals to capture policy,
+historical content availability, and transcript anchors. Workspaces supply
+checkout identity; runtime supplies ordered executor access.
 
 ## Exclusions
 
