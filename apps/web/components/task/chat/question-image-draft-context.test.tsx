@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { useEffect } from "react";
+import { afterEach, expect, it, vi } from "vitest";
 import { QuestionImageDraftProvider, useQuestionImageDraft } from "./question-image-draft-context";
 
 const answers = { q1: { question_id: "q1", selected_options: ["yes"] } };
@@ -33,7 +34,7 @@ function Page({
   settled?: boolean;
 }) {
   return (
-    <QuestionImageDraftProvider>
+    <QuestionImageDraftProvider taskId="task">
       <Draft key={mount} bundle={bundle} retain={retain} settled={settled} />
     </QuestionImageDraftProvider>
   );
@@ -66,4 +67,24 @@ it("clears a settled bundle and leaves image-free forms local", () => {
   act(() => screen.getByRole("button").click());
   rerender(<Page mount="legacy-phone" bundle="legacy" retain={false} />);
   expect(screen.getByTestId("draft").textContent).toBe(JSON.stringify([{}, 0, undefined]));
+});
+
+it("clears task-owned drafts without remounting the layout", () => {
+  const mounted = vi.fn();
+  function Layout() {
+    useEffect(mounted, []);
+    return <Draft />;
+  }
+  const page = (taskId: string) => (
+    <QuestionImageDraftProvider taskId={taskId}>
+      <Layout />
+    </QuestionImageDraftProvider>
+  );
+  const { rerender } = render(page("task-a"));
+  act(() => screen.getByRole("button").click());
+  rerender(page("task-b"));
+  expect(screen.getByTestId("draft").textContent).toBe(JSON.stringify([{}, 0, undefined]));
+  rerender(page("task-a"));
+  expect(screen.getByTestId("draft").textContent).toBe(JSON.stringify([{}, 0, undefined]));
+  expect(mounted).toHaveBeenCalledTimes(1);
 });

@@ -64,7 +64,7 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
   }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
-      <QuestionImageDraftProvider key={props.taskId}>
+      <QuestionImageDraftProvider taskId={props.taskId ?? null}>
         <ResponsiveTaskLayout {...props} />
       </QuestionImageDraftProvider>
       <ResponsiveTaskPicker

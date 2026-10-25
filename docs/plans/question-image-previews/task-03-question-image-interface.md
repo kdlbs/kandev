@@ -148,6 +148,7 @@ that suite too. Use the normal E2E capture fixture for rendered evidence.
 - `apps/web/components/task/chat/image-preview-dialog.tsx` only for compatible opt-in reuse
 - `apps/web/src/locales/*/task.json` and generated locale outputs as required
 - New `apps/web/e2e/tests/chat/question-image-previews.spec.ts` and `mobile-question-image-previews.spec.ts`
+- `apps/web/e2e/tests/task/mobile-threads-composer-disclosure.spec.ts` for picker transition regression checks
 - Mock-agent or script fixtures under `apps/web/e2e` and `apps/backend/cmd/mock-agent` as needed
 
 ## Dependencies
@@ -254,3 +255,31 @@ drains its deferred mocks during cleanup.
 `pnpm exec vitest run hooks/domains/session/use-question-images.test.ts` passed
 (three tests). The helper is
 `apps/web/hooks/domains/session/question-image-scheduler.ts`.
+
+
+### PR CI remediation
+
+The task-keyed draft provider remounted the desktop layout during task navigation.
+This discarded pending Changes attention and failed both inactive-task focus cases
+in `tests/layout/changes-panel-focus.spec.ts`. The provider now replaces its cache
+on task changes and preserves child component identity. A new unit case failed
+before the fix and passed after it; it checks task isolation and a single layout
+mount across task switches.
+
+The mobile thread composer case reopened the picker before the previous close
+transition settled. It now waits for the first sheet to close and its finite
+animations to finish before opening the picker again, as it already did for the
+second selection. Assertions, timeouts, and retry policy remain unchanged.
+
+
+Focused validation after the CI fixes:
+
+- Draft context unit tests: four passed, including task isolation without a layout remount.
+- Original inactive-task/saved-layout focus E2E cases: two passed without changing either test.
+- Full mobile composer disclosure spec plus both mobile image cases: seven passed,
+  with retries disabled. Log: `/tmp/question-images-checks/kandev-run.e2e.mzFKW8VP.log`.
+- Web typecheck and changed-file lint passed.
+
+- Desktop image previews: three passed with retries disabled, including choice
+  inspection, reload, and draft retention across the phone breakpoint.
+  Log: `/tmp/question-images-checks/kandev-run.e2e.KWL3Dxky.log`.

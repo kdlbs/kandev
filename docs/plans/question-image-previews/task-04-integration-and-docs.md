@@ -242,3 +242,14 @@ the container fixture artifacts and run the two executor cases with a working
 Docker daemon. Reconcile these results before marking this work order or the plan
 complete. No further product-scope question is required. Issue #4667 remains open;
 this implementation keeps its existing answer envelope and question barrier.
+
+
+### PR CI executor fixture correction
+
+CI run `40190002697` executed both real executor image cases and reported missing
+files. The fixtures used the executor-only `prepare_script` field on a repository
+PATCH, so neither wrote the image. They now set the repository `setup_script`,
+which runs in the authorized checkout, and restore its captured original value
+in `finally`. The image path, rendering assertions, and answer flow are unchanged.
+The local host has no Docker daemon; real Docker and SSH execution remains a CI
+gate for this correction.

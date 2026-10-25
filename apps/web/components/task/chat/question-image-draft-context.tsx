@@ -18,9 +18,16 @@ const DraftContext = createContext<Map<string, Draft> | null>(null);
 
 // The task page owns transient drafts across its desktop/phone layout remounts.
 // This cache contains no image bytes and does not survive page navigation or reload.
-export function QuestionImageDraftProvider({ children }: { children: ReactNode }) {
-  const [drafts] = useState(() => new Map<string, Draft>());
-  return <DraftContext.Provider value={drafts}>{children}</DraftContext.Provider>;
+export function QuestionImageDraftProvider({
+  children,
+  taskId,
+}: {
+  children: ReactNode;
+  taskId: string | null;
+}) {
+  const [cache, setCache] = useState(() => ({ taskId, drafts: new Map<string, Draft>() }));
+  if (cache.taskId !== taskId) setCache({ taskId, drafts: new Map<string, Draft>() });
+  return <DraftContext.Provider value={cache.drafts}>{children}</DraftContext.Provider>;
 }
 
 export function useQuestionImageDraft(
@@ -40,7 +47,7 @@ export function useQuestionImageDraft(
   useEffect(() => {
     setCustomDrafts(saved?.customDrafts ?? {});
     setActiveIndex(saved?.activeIndex ?? 0);
-  }, [bundleKey, saved]);
+  }, [cache, bundleKey, saved]);
   useEffect(() => {
     if (lastKey.current !== bundleKey) {
       lastKey.current = bundleKey;

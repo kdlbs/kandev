@@ -346,7 +346,9 @@ The task page keeps a bounded, memory-only draft context above its responsive
 layout. Image-bearing active bundles use a key composed of source session, pending
 ID, and form mode. The context restores the text, keyed choices, and current
 question when the desktop/phone layout remounts. It holds at most eight bundles
-and removes locally settled bundles. A task change or page reload discards the context.
+and removes locally settled bundles. A task change replaces only the draft cache;
+the provider preserves the mounted task layout and its pending panel-focus state.
+A page reload discards the context.
 It contains no image bytes and does not persist unsent answers. Image-free forms
 and late-answer forms keep their existing local state behavior. The answer hook
 and server claim remain authoritative; restoring a draft never submits it.

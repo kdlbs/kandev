@@ -33,7 +33,7 @@ export function seedQuestionImage(repositoryPath: string) {
   );
 }
 
-export function questionImagePrepareScript() {
+export function questionImageSetupScript() {
   const base64 = fs
     .readFileSync(path.resolve(__dirname, "../../fixtures/rich-output-image.png"))
     .toString("base64");
