@@ -64,9 +64,10 @@ A fresh `make -C apps/backend build` resolved that. Later fixture-only attempts
 confirmed the bind and Chromium library issues before any UI assertions ran.
 
 A broad handler test attempt timed out at 600 seconds during a large existing
-suite. The focused built-in handler tests pass. The separate native subprocess
-cancellation fixture also failed because its fixed `/usr/bin:/bin` PATH cannot
-find `sleep` on this Nix host. Neither is reported as a passing full-package audit.
+suite. The focused built-in handler tests pass; the broad suite is not reported
+as a passing audit. The native subprocess cancellation fixture initially failed
+because its fixed `/usr/bin:/bin` PATH cannot find `sleep` on this Nix host. The
+follow-up below resolves that fixture limitation.
 The earlier SQLite/PostgreSQL store conformance run, including upgrades, passed
 with `-race` in 618 seconds; this continuation did not alter its schema.
 
@@ -94,3 +95,25 @@ The first commit attempt found two newly staged orchestrator imports that
 bypassed the public runtime seam. Both now use the existing runtime history
 loader. The staged architecture check exposed this gap in the earlier check of
 tracked files; all other hooks passed on that attempt.
+
+## Validation follow-up: portable cancellation fixture
+
+The coordinator supplied the focused test-only change from assignment commit
+`d44e77e7157a019f2dbb553a12a6dcaad56a97ce`. Its one-line diff was inspected through
+the GitHub API and applied by intent: the subprocess fixture now receives the
+host PATH instead of `/usr/bin:/bin`. No sibling feature commits or branch base
+were imported. Production behavior and cancellation assertions are unchanged.
+
+Before the edit, the targeted cancellation test reproduced the expected failure
+(`runner error = <nil>, want context cancellation`). After the edit, the complete
+`internal/agent/mcpconfig` package passed with `-race` in 3.029 seconds:
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -race -p=1 ./internal/agent/mcpconfig -count=1 -timeout=5m
+```
+
+The historical automatic-prompt and Office inventory failures were already
+resolved in the completed WO02 implementation. The passing prompt-producer run
+covered sysprompt, MCP server, orchestrator executor, orchestrator and task
+handlers (`/tmp/kandev-builtin-prompt-producers-green.log`). The earlier partial
+publication checkpoint is historical; it does not describe remaining work.
