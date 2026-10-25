@@ -2031,7 +2031,7 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if incarnationID != identity.SessionIncarnationID {
 		return ErrSessionIdentityMismatch
 	}
-	for _, table := range []string{"queued_messages", "queue_dispatch_claims", "queue_send_now_claims"} {
+	for _, table := range []string{"queued_messages", "queue_dispatch_claims", "queue_send_now_claims", "pending_moves"} {
 		present, err := internaldb.TableExists(tx, table)
 		if err != nil {
 			return fmt.Errorf("check deleted session %s: %w", table, err)

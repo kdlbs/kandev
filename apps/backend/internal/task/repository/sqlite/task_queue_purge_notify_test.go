@@ -334,7 +334,7 @@ func TestDeleteTaskSessionNotifiesQueueSessionPurge(t *testing.T) {
 	}
 }
 
-func TestDeleteTaskSessionPurgesPendingMove(t *testing.T) {
+func TestDeleteTaskSessionPreservesPendingMove(t *testing.T) {
 	repo := newRepoForArchiveTests(t, "task-session-pending-move")
 	ctx := context.Background()
 	seedLiveSessionForQueue(t, repo, "session-drop", "task-session-pending-move")
@@ -349,40 +349,15 @@ func TestDeleteTaskSessionPurgesPendingMove(t *testing.T) {
 		t.Fatalf("SetPendingMove: %v", err)
 	}
 
-	if err := deleteTaskSessionByID(ctx, repo, "session-drop"); err != nil {
-		t.Fatalf("DeleteTaskSession: %v", err)
+	if err := deleteTaskSessionByID(ctx, repo, "session-drop"); err == nil {
+		t.Fatal("DeleteTaskSession removed a session with a pending lifecycle move")
 	}
 	move, err := mqRepo.GetPendingMove(ctx, "session-drop")
 	if err != nil {
 		t.Fatalf("GetPendingMove: %v", err)
 	}
-	if move != nil {
-		t.Fatalf("pending move after session delete = %#v, want nil", move)
-	}
-
-	err = mqRepo.Insert(ctx, &messagequeue.QueuedMessage{
-		SessionID: "session-drop",
-		TaskID:    "task-session-pending-move",
-		Content:   "must reject deleted session",
-		QueuedBy:  "user",
-	}, 0)
-	if !errors.Is(err, messagequeue.ErrTaskInactive) {
-		t.Fatalf("queue admission after session delete error = %v, want ErrTaskInactive", err)
-	}
-	if err := mqRepo.SetPendingMove(ctx, "session-drop", &messagequeue.PendingMove{
-		TaskID: "task-session-pending-move",
-	}); !errors.Is(err, messagequeue.ErrTaskInactive) {
-		t.Fatalf("pending move after session delete error = %v, want ErrTaskInactive", err)
-	}
-	err = mqRepo.ReplaceSession(ctx, "session-drop", []messagequeue.QueuedMessage{{
-		ID:        "restored-after-delete",
-		SessionID: "session-drop",
-		TaskID:    "task-session-pending-move",
-		Content:   "must not restore",
-		QueuedBy:  "user",
-	}}, nil)
-	if !errors.Is(err, messagequeue.ErrTaskInactive) {
-		t.Fatalf("session restore after delete error = %v, want ErrTaskInactive", err)
+	if move == nil || move.TaskID != "task-session-pending-move" {
+		t.Fatalf("pending move after rejected session delete = %#v, want preserved move", move)
 	}
 }
 
