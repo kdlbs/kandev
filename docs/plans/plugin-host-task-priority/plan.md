@@ -46,7 +46,8 @@ behavior.
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| AC-PLUGINS-PLUGINS-001.7 | The fixture declares `api_read: tasks` and `api_write: tasks`; the external-process test proves authorized Host task writes preserve an explicit `high` priority. |
+| AC-PLUGINS-PLUGINS-001.7 (capability access) | The fixture declares `api_read: tasks` and `api_write: tasks`; existing Host tests verify undeclared access returns `PermissionDenied`. |
+| Task 01 priority persistence | The external-process test proves authorized Host task writes preserve `high`, omitted priority defaults to `medium`, and rejected values leave stored tasks unchanged. |
 
 ## Work orders
 

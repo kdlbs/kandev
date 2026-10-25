@@ -39,6 +39,8 @@ plugin can persist `priority: high` through the Host task-write path. See
 - Updating that task through the same Host boundary persists `priority: high`.
 - Omitted priority retains the task-service `medium` default, and invalid
   create or update priority is rejected.
+- Host task calls without a declared read or write capability return
+  `PermissionDenied`, as required by AC-PLUGINS-PLUGINS-001.7.
 
 ## Verification
 
@@ -69,4 +71,5 @@ The fixture declares the necessary task capabilities and exposes a private test
 webhook. The external-process regression exercises the real go-plugin broker,
 plugin Host, task service, and isolated SQLite readback. It proves create and
 update retain `high`, omitted create defaults to `medium`, and invalid values
-are rejected.
+are rejected. Existing Host capability tests cover AC-PLUGINS-PLUGINS-001.7;
+the priority persistence outcomes are this work order's local acceptance.
