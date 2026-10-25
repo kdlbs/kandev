@@ -1180,12 +1180,6 @@ func (s *Service) startCreatedSession(
 		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
-	receiptAttempted = true
-	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(ctx), taskID, sessionID,
-		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
-		return execution, err
-	}
-
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
@@ -1199,6 +1193,11 @@ func (s *Service) startCreatedSession(
 	// PrepareTaskSession may have already created one, but if that goroutine failed
 	// or hadn't completed, this guarantees coverage.
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
+	receiptAttempted = true
+	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(ctx), taskID, sessionID,
+		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
+		return execution, err
+	}
 
 	return execution, nil
 }
@@ -3761,11 +3760,6 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
-	receiptAttempted = true
-	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(resumeCtx), taskID, sessionID,
-		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
-		return execution, err
-	}
 	seam4Res.consume()
 	persistBranchRecovery()
 	if err := s.activateResumedDynamicRoute(resumeCtx, readySession); err != nil {
@@ -3799,6 +3793,11 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 		zap.String("session_id", sessionID))
 
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
+	receiptAttempted = true
+	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(resumeCtx), taskID, sessionID,
+		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
+		return execution, err
+	}
 	if continuation != nil {
 		continuationErr := continuation(resumeCtx, attempt, execution)
 		if initialPromptHeld {

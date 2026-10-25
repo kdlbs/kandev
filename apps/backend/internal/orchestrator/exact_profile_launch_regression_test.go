@@ -22,6 +22,82 @@ type exactProfileWorkflowSwitchTaskRepo struct {
 	once     sync.Once
 }
 
+func seedExactProfileBindingSnapshot(t *testing.T, repo *sqliterepo.Repository, revision int64) {
+	t.Helper()
+	for _, statement := range []string{
+		`CREATE TABLE IF NOT EXISTS agent_profiles (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, enabled INTEGER NOT NULL, deleted_at TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS agent_profile_revisions (profile_id TEXT PRIMARY KEY, revision BIGINT NOT NULL)`,
+		`INSERT INTO agent_profiles (id, workspace_id, enabled) VALUES ('profile-exact', 'ws1', 1)`,
+	} {
+		if _, err := repo.DB().ExecContext(context.Background(), statement); err != nil {
+			t.Fatalf("seed exact profile: %v", err)
+		}
+	}
+	if _, err := repo.DB().ExecContext(context.Background(),
+		`INSERT INTO agent_profile_revisions (profile_id, revision) VALUES (?, ?)`, "profile-exact", revision); err != nil {
+		t.Fatalf("seed exact profile revision: %v", err)
+	}
+}
+
+type exactReceiptFailingSessionRepo struct {
+	*sqliterepo.Repository
+	err error
+}
+
+func (r *exactReceiptFailingSessionRepo) RecordExactProfileLaunchReceipt(context.Context, *models.ExactProfileLaunchReceipt) (bool, error) {
+	return false, r.err
+}
+
+func TestStartCreatedSessionReceiptErrorKeepsPostLaunchBookkeeping(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorkspaceID = "ws1"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	const revision int64 = 42
+	seedExactProfileBindingSnapshot(t, repo, revision)
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.AgentProfileID = "profile-exact"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	baseTaskRepo := newMockTaskRepo()
+	baseTaskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Test Task", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{
+		resolveProfileInfo: &executor.AgentProfileInfo{ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: true,
+			Revision: revision, Model: "gpt-exact"},
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-receipt-fail"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), baseTaskRepo, agentMgr)
+	storageErr := errors.New("receipt storage unavailable")
+	svc.repo = &exactReceiptFailingSessionRepo{Repository: repo, err: storageErr}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	execution, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile-exact", "start", false, false, true, nil, nil)
+	if !errors.Is(err, storageErr) || execution == nil {
+		t.Fatalf("launch result = (%v, %v), want running execution and receipt error", execution, err)
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("post-launch messages = %d, want 1 despite receipt error", len(messages.userMessages))
+	}
+}
+
 type exactProfileAssignmentFenceRepo struct {
 	sessionExecutorStore
 	exactProfileAssignmentStore
@@ -112,19 +188,7 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	}
 
 	revision := time.Unix(1_726_500_000, 0).UTC()
-	for _, statement := range []string{
-		`CREATE TABLE IF NOT EXISTS agent_profiles (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, enabled INTEGER NOT NULL, deleted_at TIMESTAMP)`,
-		`CREATE TABLE IF NOT EXISTS agent_profile_revisions (profile_id TEXT PRIMARY KEY, revision BIGINT NOT NULL)`,
-		`INSERT INTO agent_profiles (id, workspace_id, enabled) VALUES ('profile-exact', 'ws1', 1)`,
-	} {
-		if _, err := repo.DB().ExecContext(ctx, statement); err != nil {
-			t.Fatalf("seed exact profile: %v", err)
-		}
-	}
-	if _, err := repo.DB().ExecContext(ctx,
-		`INSERT INTO agent_profile_revisions (profile_id, revision) VALUES (?, ?)`, "profile-exact", revision.UnixNano()); err != nil {
-		t.Fatalf("seed exact profile revision: %v", err)
-	}
+	seedExactProfileBindingSnapshot(t, repo, revision.UnixNano())
 	const generation int64 = 1
 	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
 		TaskID:          "task1",
@@ -309,6 +373,7 @@ func TestStartCreatedSession_RejectsExactAssignmentReplacedAtSessionBinding(t *t
 	}
 
 	revision := time.Unix(1_726_500_000, 0).UTC()
+	seedExactProfileBindingSnapshot(t, repo, revision.UnixNano())
 	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
 		TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision.UnixNano(), Generation: 1,
 	}); err != nil {
@@ -394,6 +459,7 @@ func TestStartCreatedSession_RejectsSessionProfileChangedAtExactBinding(t *testi
 	}
 
 	revision := time.Unix(1_726_500_000, 0).UTC()
+	seedExactProfileBindingSnapshot(t, repo, revision.UnixNano())
 	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
 		TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision.UnixNano(), Generation: 1,
 	}); err != nil {
