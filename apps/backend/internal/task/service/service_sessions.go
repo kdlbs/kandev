@@ -302,7 +302,7 @@ func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSess
 		EnvironmentID: session.EnvironmentID, RepositoryID: session.RepositoryID,
 		BaseBranch: session.BaseBranch, BaseCommitSHA: session.BaseCommitSHA, WorkspacePath: session.WorkspacePath,
 		State: session.State, ErrorMessage: session.ErrorMessage,
-		StartedAt: session.StartedAt, CompletedAt: session.CompletedAt, UpdatedAt: session.UpdatedAt,
+		StartedAt: session.StartedAt, CompletedAt: session.CompletedAt, ArchivedAt: session.ArchivedAt, UpdatedAt: session.UpdatedAt,
 		IsPrimary: session.IsPrimary, IsPassthrough: session.IsPassthrough, ReviewStatus: session.ReviewStatus,
 		TaskEnvironmentID: session.TaskEnvironmentID, LastReadMessageID: session.LastReadMessageID,
 		Worktrees: session.Worktrees,

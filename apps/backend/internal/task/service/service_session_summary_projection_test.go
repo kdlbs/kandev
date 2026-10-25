@@ -3,10 +3,14 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+type fallbackSessionSummaryRepository struct{ repository.SessionRepository }
 
 type countingSessionSummaryRepository struct {
 	*sqliterepo.Repository
@@ -78,5 +82,30 @@ func TestSessionSummaryServiceUsesNarrowReads(t *testing.T) {
 	if reader.batchSummaryCalls != 1 || reader.listSummaryCalls != 1 || reader.fullBatchCalls != 0 || reader.fullListCalls != 0 {
 		t.Fatalf("summary/full read counts = batch %d/list %d/full batch %d/full list %d",
 			reader.batchSummaryCalls, reader.listSummaryCalls, reader.fullBatchCalls, reader.fullListCalls)
+	}
+}
+
+func TestSessionSummaryServiceFallbackPreservesArchivedAt(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	createTaskWithoutRepositories(t, ctx, repo)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-archived-fallback", TaskID: "task-1",
+		State: models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	archivedAt := time.Date(2026, time.October, 25, 0, 0, 0, 0, time.UTC)
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET archived_at = ? WHERE id = ?`, archivedAt, "session-archived-fallback"); err != nil {
+		t.Fatal(err)
+	}
+	svc.sessions = &fallbackSessionSummaryRepository{SessionRepository: repo}
+	listed, err := svc.ListTaskSessionSummaryObservations(ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ArchivedAt == nil || !listed[0].ArchivedAt.Equal(archivedAt) {
+		t.Fatalf("fallback summary archive timestamp = %+v", listed)
 	}
 }
