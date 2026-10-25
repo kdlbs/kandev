@@ -19,6 +19,7 @@ acceptance_criteria:
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-002.9
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-002.10
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-002.11
+  - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-002.12
 system_design:
   - ../../specs/executors/system-design/session-control-plane-isolation.md
 ---
