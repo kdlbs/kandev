@@ -103,10 +103,12 @@ func (h *Handlers) checkGuardedCall(
 		return scopeRefusal(), nil
 	}
 	rewriteGuardedAttribution(payload, principal, tool)
-	if tool.Class != mcpprofile.ClassRead {
-		if refusal := h.checkGuardedScope(ctx, principal, tool, msg.Action, payload); refusal != nil {
+	if tool.Class == mcpprofile.ClassRead {
+		if refusal := h.checkGuardedReadScope(ctx, principal, payload); refusal != nil {
 			return refusal, nil
 		}
+	} else if refusal := h.checkGuardedScope(ctx, principal, tool, msg.Action, payload); refusal != nil {
+		return refusal, nil
 	}
 	replacement := *msg
 	replacement.Payload = payload.marshal()
@@ -144,6 +146,76 @@ func (h *Handlers) checkGuardedScope(
 	}
 	if refusal := h.checkGuardedRefs(ctx, principal, tool, refs); refusal != nil {
 		return refusal
+	}
+	return nil
+}
+
+// checkGuardedReadScope confines a read to the caller's workspace: every
+// referenced task, session, workflow and workspace must belong to it.
+func (h *Handlers) checkGuardedReadScope(
+	ctx context.Context,
+	principal mcpscope.Principal,
+	payload *guardedPayload,
+) *guardedRefError {
+	workspace, _, typed := payload.stringField(fieldWorkspaceID)
+	if !typed || (workspace != "" && workspace != principal.WorkspaceID) {
+		return scopeRefusal()
+	}
+	taskID, _, taskTyped := payload.stringField(keyTaskID)
+	sessionID, _, sessionTyped := payload.stringField(keySessionID)
+	workflowID, _, workflowTyped := payload.stringField("workflow_id")
+	if !taskTyped || !sessionTyped || !workflowTyped {
+		return scopeRefusal()
+	}
+	if taskID == "" && sessionID == "" && workflowID == "" {
+		return nil
+	}
+	if h.taskSvc == nil {
+		return lookupRefusal()
+	}
+	if taskID != "" {
+		if refusal := h.checkTaskWorkspace(ctx, principal, taskID); refusal != nil {
+			return refusal
+		}
+	}
+	if refusal := h.checkSessionWorkspace(ctx, principal, sessionID); refusal != nil {
+		return refusal
+	}
+	return h.checkWorkflowWorkspace(ctx, principal, workflowID)
+}
+
+func (h *Handlers) checkSessionWorkspace(ctx context.Context, principal mcpscope.Principal, sessionID string) *guardedRefError {
+	if sessionID == "" {
+		return nil
+	}
+	owner, refusal := h.taskOfSession(ctx, sessionID)
+	if refusal != nil {
+		return refusal
+	}
+	return h.checkTaskWorkspace(ctx, principal, owner)
+}
+
+func (h *Handlers) checkWorkflowWorkspace(ctx context.Context, principal mcpscope.Principal, workflowID string) *guardedRefError {
+	if workflowID == "" {
+		return nil
+	}
+	workflow, err := h.taskSvc.GetWorkflow(ctx, workflowID)
+	if err != nil || workflow == nil {
+		return refusalForLookup(err)
+	}
+	if workflow.WorkspaceID != principal.WorkspaceID {
+		return scopeRefusal()
+	}
+	return nil
+}
+
+func (h *Handlers) checkTaskWorkspace(ctx context.Context, principal mcpscope.Principal, taskID string) *guardedRefError {
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return refusalForLookup(err)
+	}
+	if task.WorkspaceID != principal.WorkspaceID {
+		return scopeRefusal()
 	}
 	return nil
 }
@@ -232,6 +304,7 @@ func isLookupMiss(err error) bool {
 		errors.Is(err, sql.ErrNoRows) ||
 		errors.Is(err, repoerrors.ErrTaskNotFound) ||
 		errors.Is(err, repoerrors.ErrWorkspaceNotFound) ||
+		errors.Is(err, repoerrors.ErrWorkflowNotFound) ||
 		errors.Is(err, models.ErrTaskSessionNotFound) ||
 		service.IsForbidden(err)
 }

@@ -223,13 +223,6 @@ func TestGuardedGuard_AttributionRewrite(t *testing.T) {
 	require.JSONEq(t, `"`+fxCaller+`"`, string(replacementFields(t, replacement)["caller_task_id"]))
 }
 
-func TestGuardedGuard_ReadSkipsReferenceChecks(t *testing.T) {
-	f := newGuardedFixture(t)
-	guarded, replacement := f.call(t, f.principal, ws.ActionMCPListTasks, map[string]any{"workflow_id": "w", "task_id": 5})
-	require.Nil(t, guarded)
-	require.NotNil(t, replacement)
-}
-
 func TestGuardedGuard_SelfClassAcceptsOnlyOwnTask(t *testing.T) {
 	f := newGuardedFixture(t)
 	guarded, _ := f.call(t, f.principal, ws.ActionMCPCreateTaskPlan, map[string]any{"task_id": fxCaller})

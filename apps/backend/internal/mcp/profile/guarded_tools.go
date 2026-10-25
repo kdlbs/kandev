@@ -6,7 +6,8 @@ import "strings"
 type GuardedToolClass string
 
 const (
-	// ClassRead tools only read within the caller's workspace.
+	// ClassRead tools only read, and only tasks, sessions and workflows of the
+	// caller's workspace. A tool that writes anywhere is never ClassRead.
 	ClassRead GuardedToolClass = "read"
 	// ClassSelf tools act on the caller's own task and never take another target.
 	ClassSelf GuardedToolClass = "self"
@@ -52,7 +53,7 @@ func buildGuardedTools() map[string]GuardedTool {
 		"list_workflows", "list_workflow_steps", "list_tasks", "list_repositories", "list_workspaces", "list_agents",
 		"list_executor_profiles", "get_task_conversation", "list_task_sessions", "get_task_plan",
 		"list_task_plan_revisions", "get_task_plan_revision", "get_walkthrough", "get_task_change_requests",
-		"get_task_pr_automation", "get_task_mr_automation", "get_diagnostic_bundle", "list_pending_questions",
+		"get_task_pr_automation", "get_task_mr_automation", "list_pending_questions",
 		"list_pending_agent_permissions", "list_canvases", "get_canvas", "get_canvas_state", "read_canvas_authoring_skill")
 	add(ClassRead, attrCallerT, "list_related_tasks", "list_task_documents", "get_task_document")
 	add(ClassSelf, nil,
@@ -61,6 +62,7 @@ func buildGuardedTools() map[string]GuardedTool {
 		"ask_parent_question", "clarification_timeout", "show_rich_output", "publish_review_findings",
 		"report_change_request_auto_fix_outcome", "report_pr_auto_fix_outcome", "create_canvas", "set_canvas_state")
 	add(ClassSelf, attrCallerT, "write_task_document")
+	add(ClassSelf, nil, "get_diagnostic_bundle")
 	add(ClassChildWrite, nil,
 		"update_task", "add_task_dependency", "remove_task_dependency",
 		"update_repository_base_branch", "update_task_change_request_automation", "update_task_pr_automation",
