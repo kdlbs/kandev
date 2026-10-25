@@ -170,6 +170,7 @@ No broad suite or generic review work order is added.
 - [ ] [Task 10: Deliver Execution settings and session visibility](task-10-execution-surfaces.md)
 - [ ] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
 - [ ] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
+- [ ] [Task 11: Authenticate ordinary-session MCP and relay the Git broker](task-11-session-token-broker-relay.md)
 
 Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09.
 Task IDs remain stable after adding Task 10. Dependency lists state hard prerequisites, not permission to delegate.

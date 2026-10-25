@@ -191,9 +191,10 @@ A provider translates approved descriptors into explicit routes. It cannot inven
 For HTTP MCP, expose an operation-owned MCP-only relay that validates method, route, and session authentication.
 It forwards only the resolved MCP service. Settings, generic API paths, redirects, CONNECT, and other sessions remain inaccessible.
 Grant only the relay endpoint through Nono's verified network proxy rules.
-Do not grant the entire backend port as an unrestricted network destination.
+Never grant the whole backend port.
 The approval callback uses a separate port and remains unreachable to the child.
 Keep ordinary MCP session credentials scoped to their existing tools. They never become policy-management credentials.
+Unsandboxed sessions: `executors/system-design/session-control-plane-isolation.md`.
 
 Verify DNS changes, direct-IP bypass, IPv4/IPv6 loopback, proxy bypass variables, redirects, and unrelated local ports.
 On endpoint rotation, close the old relay and revoke its lease before authorizing a new attempt mapping.
