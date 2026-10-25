@@ -358,3 +358,38 @@ scenarios selected by title. Log:
 `/tmp/question-images-checks/kandev-run.e2e.kGjfcgey.log`. Together with the port
 case, all 18 constrained checks passed. Documentation catalog, specification
 lint, and changed-file coverage checks passed.
+
+
+### SPA recovery CI boundary
+
+The next CI run exposed a Settings chunk-recovery fixture race in
+`apps/web/e2e/tests/layout/spa-resilience.spec.ts`. The failure snapshot still
+showed `Loading Settings…` during the replacement navigation. The test now
+waits for the successful replacement chunk response to finish before asserting
+the rendered Updates title. The exact two-document and two-chunk counts remain
+unchanged. This is a test-only readiness correction, with no timeout increase
+or change to SPA recovery behavior.
+
+The original case passed three focused local runs under two CPUs with retries
+disabled. The corrected full three-case spec passed all nine runs under the same
+constraint (`--project chromium tests/layout/spa-resilience.spec.ts --retries=0
+--repeat-each=3`). Log: `/tmp/question-images-checks/kandev-run.e2e.zQr5lN6X.log`.
+Changed-file lint passed.
+
+
+Workflow [40199411519](https://github.com/kdlbs/kandev/actions/runs/40199411519)
+finished with 4,244 first-attempt passes, two flaky cases, and 40 skips. The second
+flaky case was mobile Changes-panel setup: a late timeline hydration restored
+the top position after a one-shot scroll, leaving the section heading mounted.
+The fixture now repeats its idempotent scroll until the heading is unmounted,
+then retains the existing recovery, filename-width, action-containment, and
+file-opening assertions. The complete artifact audit found no other failures.
+
+
+The original mobile Changes case passed three constrained local runs. After the
+setup correction, three more runs passed with retries disabled under two CPUs
+and one worker (`--project mobile-chrome tests/task/mobile-changes-panel.spec.ts
+--grep 'deep tree rows keep' --retries=0 --repeat-each=3`). Log:
+`/tmp/question-images-checks/kandev-run.e2e.0spo4MBM.log`. The nine SPA checks and
+three Changes-panel checks all passed. Changed-file lint, specification lint,
+and the documentation catalog passed.
