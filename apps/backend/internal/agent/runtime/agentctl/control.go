@@ -82,6 +82,10 @@ type CreateInstanceRequest struct {
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
 	// — notably opencode acp.
 	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+	// OfflineBudgetMinutes is the longest the instance runs without a stable
+	// backend connection. Launch always sets it; an agentctl without the
+	// capability ignores the field.
+	OfflineBudgetMinutes *int `json:"offline_budget_minutes,omitempty"`
 
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty). Propagated from

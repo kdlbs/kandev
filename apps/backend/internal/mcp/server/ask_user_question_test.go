@@ -416,9 +416,9 @@ func (b *blockingAskBackend) RequestPayload(ctx context.Context, action string, 
 // result. This is the regression guard for the agent's MCP client aborting the
 // call with "fetch failed" after its idle timeout.
 func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
-	prev := askQuestionKeepAliveInterval
-	askQuestionKeepAliveInterval = 5 * time.Millisecond
-	t.Cleanup(func() { askQuestionKeepAliveInterval = prev })
+	prev := toolKeepAliveInterval
+	toolKeepAliveInterval = 5 * time.Millisecond
+	t.Cleanup(func() { toolKeepAliveInterval = prev })
 
 	release := make(chan struct{})
 	backend := &blockingAskBackend{
@@ -585,6 +585,6 @@ func TestStampTransportRequestID_PreservesExistingMeta(t *testing.T) {
 // documented configuration edge. TestAskUserQuestion_StreamsKeepAliveDuringWait
 // cannot catch a default-value regression because it overrides the interval.
 func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
-	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
-	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
+	assert.Greater(t, toolKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
+	assert.LessOrEqual(t, toolKeepAliveInterval, 60*time.Second)
 }
