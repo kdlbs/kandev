@@ -12,12 +12,15 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// updatedAtAssignment is the shared SET clause that stamps a row as modified.
+const updatedAtAssignment = "updated_at = ?"
+
 func repositoryUpdateQuery(row *models.Repository, intent models.RepositoryCheckoutIntent) (string, []any) {
 	assignments := []string{
 		"name = ?", "source_type = ?", "local_path = ?", "provider = ?", "provider_repo_id = ?",
 		"provider_host = ?", "provider_scope = ?", "provider_owner = ?", "provider_name = ?", "remote_url = ?",
 		"worktree_branch_prefix = ?", "worktree_branch_template = ?", "setup_script = ?", "cleanup_script = ?",
-		"dev_script = ?", "copy_files = ?", "updated_at = ?",
+		"dev_script = ?", "copy_files = ?", updatedAtAssignment,
 	}
 	args := []any{row.Name, row.SourceType, row.LocalPath, row.Provider, row.ProviderRepoID,
 		row.ProviderHost, row.ProviderScope, row.ProviderOwner, row.ProviderName, row.RemoteURL,
@@ -30,6 +33,10 @@ func repositoryUpdateQuery(row *models.Repository, intent models.RepositoryCheck
 	if intent.PullBeforeWorktree != nil {
 		assignments = append(assignments, "pull_before_worktree = ?")
 		args = append(args, dialect.BoolToInt(*intent.PullBeforeWorktree))
+	}
+	if intent.RunGitHooks != nil {
+		assignments = append(assignments, "run_git_hooks = ?")
+		args = append(args, dialect.BoolToInt(*intent.RunGitHooks))
 	}
 	args = append(args, row.ID)
 	return "UPDATE repositories SET " + strings.Join(assignments, ", ") + " WHERE id = ? AND deleted_at IS NULL", args
@@ -57,9 +64,9 @@ func (r *Repository) writeRepositoryCheckout(ctx context.Context, row *models.Re
 	proposed.UpdatedAt = time.Now().UTC()
 	query, args := repositoryUpdateQuery(&proposed, intent)
 	var branch string
-	var pull bool
+	var pull, hooks bool
 	var updated time.Time
-	err = tx.QueryRowContext(ctx, r.db.Rebind(query+" RETURNING default_branch, pull_before_worktree, updated_at"), args...).Scan(&branch, &pull, &updated)
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query+" RETURNING default_branch, pull_before_worktree, run_git_hooks, updated_at"), args...).Scan(&branch, &pull, &hooks, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("repository not found: %s", row.ID)
 	}
@@ -76,6 +83,7 @@ func (r *Repository) writeRepositoryCheckout(ctx context.Context, row *models.Re
 	}
 	row.DefaultBranch = branch
 	row.PullBeforeWorktree = pull
+	row.RunGitHooks = hooks
 	row.UpdatedAt = updated
 	return nil
 }

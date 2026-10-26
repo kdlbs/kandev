@@ -69,7 +69,13 @@ func TestInspectDirtyWorktreesAllowsCheckoutRemovedDuringGitStatus(t *testing.T)
 	shimDir := t.TempDir()
 	gitShim := filepath.Join(shimDir, "git")
 	script := fmt.Sprintf(`#!/bin/sh
-if [ "$3" = "status" ]; then
+for a in "$@"; do
+  if [ "$a" = "status" ]; then
+    rm -rf -- "$KDEV_TEST_REMOVE_WORKTREE"
+    exit 128
+  fi
+done
+if false; then
   rm -rf -- "$KDEV_TEST_REMOVE_WORKTREE"
   exit 128
 fi

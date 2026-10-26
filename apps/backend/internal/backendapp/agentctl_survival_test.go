@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
@@ -164,7 +164,7 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/identity":
 			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
 				ServerIdentity: "survivor-identity",
-				Capabilities:   lifecycle.RequiredSurvivalCapabilities,
+				Capabilities:   localAdoptionCapabilities(),
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":
 			var req struct {
@@ -292,7 +292,7 @@ func TestAdoptSurvivingAgentctlRenewalOutlivesAttemptCtx(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/identity":
 			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
 				ServerIdentity:  "survivor-identity",
-				Capabilities:    lifecycle.RequiredSurvivalCapabilities,
+				Capabilities:    localAdoptionCapabilities(),
 				UnownedPeriodMS: 200,
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":
@@ -353,5 +353,69 @@ func TestAdoptSurvivingAgentctlRenewalOutlivesAttemptCtx(t *testing.T) {
 	}
 	if got := claims.Load(); got < 3 {
 		t.Fatalf("ownership claims after attempt ctx cancelled = %d, want >= 3", got)
+	}
+}
+
+// A surviving local control server that predates the managed Git policy
+// advertises the survival set only. It is refused through the existing
+// capability_incompatible path: authenticated, stopped, and not adopted.
+func TestAdoptSurvivingAgentctlRefusesServerWithoutManagedGitPolicy(t *testing.T) {
+	const homeDir = "/home/kandev-test"
+	var shutdown atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/identity":
+			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
+				ServerIdentity: "survivor-identity",
+				Capabilities:   agentruntime.RequiredSurvivalCapabilities,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":
+			var req struct {
+				Challenge string `json:"challenge"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewEncoder(w).Encode(map[string][]string{
+				"proofs": {ownershipproof.Derive("bootstrap-credential", req.Challenge, homeDir)},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ownership/details":
+			_ = json.NewEncoder(w).Encode(agentctlclient.ServerDetails{HomeDir: homeDir})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/rotate":
+			_ = json.NewEncoder(w).Encode(agentctlclient.CredentialRotationResult{RotationID: 1, Credential: "rotated-credential"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/confirm":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/shutdown":
+			shutdown.Store(true)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	secretStore := newIDGeneratingSecretStore()
+	var seedSecret secrets.SecretWithValue
+	seedSecret.Name = "seed"
+	seedSecret.Value = "bootstrap-credential"
+	if err := secretStore.Create(context.Background(), &seedSecret); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+	store := &fakeControlServerStore{record: &models.ControlServerRecord{
+		Endpoint:           server.Listener.Addr().String(),
+		ServerIdentity:     "survivor-identity",
+		CredentialSecretID: seedSecret.ID,
+	}}
+	cfg := &config.Config{}
+	cfg.HomeDir = homeDir
+
+	result, _ := adoptSurvivingAgentctl(context.Background(), context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
+
+	if result != nil {
+		t.Fatalf("result = %+v, want nil: a server without the managed Git policy must not be adopted", result)
+	}
+	if !shutdown.Load() {
+		t.Fatal("the pre-change local server was not stopped")
+	}
+	if cfg.Agent.StandaloneAuthToken != "" {
+		t.Fatalf("StandaloneAuthToken = %q, want it untouched by a refused adoption", cfg.Agent.StandaloneAuthToken)
 	}
 }

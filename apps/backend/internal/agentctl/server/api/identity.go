@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // SurvivalCapabilities lists every named capability this build of agentctl
@@ -21,7 +22,7 @@ const sandboxSupportedOS = "linux"
 var SurvivalCapabilities = executionCapabilities()
 
 func executionCapabilities() []string {
-	capabilities := []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, SessionMCPTokenCapability}
+	capabilities := []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, SessionMCPTokenCapability, subproc.ManagedGitPolicyCapability}
 	if runtime.GOOS == sandboxSupportedOS {
 		capabilities = append(capabilities, sandbox.LaunchCapability)
 	}

@@ -92,6 +92,13 @@ describe("repository secret binding draft state", () => {
     expect(isRepositoryDirty(draft, saved)).toBe(true);
   });
 
+  it("treats a changed Run Git hooks setting as dirty", () => {
+    const saved = repository({ run_git_hooks: false });
+
+    expect(isRepositoryDirty(repository({ run_git_hooks: true }), saved)).toBe(true);
+    expect(isRepositoryDirty(repository({ run_git_hooks: false }), saved)).toBe(false);
+  });
+
   it("clones scripts alongside repository bindings", () => {
     const source = repository({ scripts: [script()] });
     const cloned = cloneRepository(source);

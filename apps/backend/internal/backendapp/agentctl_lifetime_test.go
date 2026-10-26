@@ -13,7 +13,6 @@ import (
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ownershipproof"
@@ -43,7 +42,7 @@ func newLifetimeControlServer(t *testing.T) *lifetimeControlServer {
 		case r.Method == http.MethodGet && r.URL.Path == "/identity":
 			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
 				ServerIdentity:  "lifetime-identity",
-				Capabilities:    lifecycle.RequiredSurvivalCapabilities,
+				Capabilities:    localAdoptionCapabilities(),
 				UnownedPeriodMS: 200,
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":

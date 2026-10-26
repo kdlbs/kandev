@@ -410,6 +410,8 @@ func (s *kubernetesRecoveryAgentctlServers) serveControl(w http.ResponseWriter, 
 	switch {
 	case request.Method == http.MethodGet && request.URL.Path == "/health":
 		w.WriteHeader(http.StatusOK)
+	case request.Method == http.MethodGet && request.URL.Path == "/identity":
+		writeManagedGitIdentity(w)
 	case request.Method == http.MethodPost && request.URL.Path == "/auth/handshake":
 		if seen.nonce == "" {
 			http.Error(w, `{"error":"nonce required"}`, http.StatusUnauthorized)

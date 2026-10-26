@@ -1258,7 +1258,7 @@ func (s *Service) workspaceRepositorySpec(
 		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
 		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree, RunGitHooks: repository.RunGitHooks,
 	}
 	selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]
 	if selected == nil && projectionCounts[taskRepository.RepositoryID] == 1 {

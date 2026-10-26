@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -69,6 +70,7 @@ var errRecoveryOperationClaimed = errors.New("recovery operation is currently cl
 //
 //nolint:cyclop,gocognit,nestif,funlen // Recovery is one stateful transaction boundary.
 func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateRequest) (*Worktree, error) {
+	ctx = subproc.WithGitHooks(ctx, req.RunGitHooks)
 	if wt == nil || wt.TaskID == "" || wt.TaskID != req.TaskID || wt.Path == "" || req.RepositoryPath == "" {
 		return nil, fmt.Errorf("%w: recovery identity is incomplete", ErrWorktreeCorrupted)
 	}

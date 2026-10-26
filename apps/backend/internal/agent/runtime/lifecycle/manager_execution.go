@@ -1117,6 +1117,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		metadata[key] = value
 	}
 	delete(metadata, managedGoCacheMetadataKey)
+	delete(metadata, MetadataKeyGitHooks)
 	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
 	if envPreparation.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = envPreparation.managedGoCachePath
@@ -1169,6 +1170,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if journalOwnerID == "" {
 		journalOwnerID = info.TaskEnvironmentID
 	}
+	m.seedExecutionGitHooks(ctx, taskID, info.ExecutorType, metadata)
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -1360,7 +1362,7 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			PRNumber: repository.PRNumber, QualifiedPRBase: repository.QualifiedPRBase,
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree, RunGitHooks: repository.RunGitHooks,
 			RemoteSyncHandled: repository.RemoteSyncHandled,
 			BranchSlug:        repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
 			WorkspaceRelativePath: repository.WorkspaceRelativePath,

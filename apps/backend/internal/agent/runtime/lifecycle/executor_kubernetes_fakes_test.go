@@ -460,6 +460,7 @@ func startKubernetesAgentctlServerWithToken(
 			require.NotEmpty(t, body["nonce"])
 			_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
 		})
+		mux.HandleFunc("/identity", func(w http.ResponseWriter, _ *http.Request) { writeManagedGitIdentity(w) })
 		mux.HandleFunc("/api/v1/instances", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "instance-1", "port": instanceRemotePort})

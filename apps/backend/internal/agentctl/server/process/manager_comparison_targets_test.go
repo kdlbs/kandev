@@ -466,7 +466,7 @@ func installComparisonTargetGitShimMode(t *testing.T, mode string) string {
 }
 
 func runComparisonTargetGitShim() {
-	args := os.Args[1:]
+	args := stripLeadingGitConfig(os.Args[1:])
 	if logPath := os.Getenv("KANDEV_TEST_GIT_LOG"); logPath != "" {
 		if file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666); err == nil {
 			_, _ = fmt.Fprintln(file, strings.Join(args, " "))

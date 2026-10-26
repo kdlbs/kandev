@@ -1143,6 +1143,7 @@ func (s *Service) createRepository(
 		WorktreeBranchPrefix:   prefix,
 		WorktreeBranchTemplate: template,
 		PullBeforeWorktree:     pullBeforeWorktree,
+		RunGitHooks:            req.RunGitHooks != nil && *req.RunGitHooks,
 		SetupScript:            req.SetupScript,
 		CleanupScript:          req.CleanupScript,
 		DevScript:              req.DevScript,
@@ -1458,7 +1459,7 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			}
 			updateErr = exact.UpdateRepositoryWithSecretBindingsIfUnchanged(ctx, repository, replacement, *req.ExpectedUpdatedAt)
 		} else {
-			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree})
+			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree, RunGitHooks: req.RunGitHooks})
 		}
 		if updateErr != nil {
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(updateErr))
@@ -1473,7 +1474,7 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 			return nil, err
 		}
-	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree}); err != nil {
+	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree, RunGitHooks: req.RunGitHooks}); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -1590,6 +1591,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	}
 	if req.PullBeforeWorktree != nil {
 		repository.PullBeforeWorktree = *req.PullBeforeWorktree
+	}
+	if req.RunGitHooks != nil {
+		repository.RunGitHooks = *req.RunGitHooks
 	}
 	if req.SetupScript != nil {
 		repository.SetupScript = *req.SetupScript

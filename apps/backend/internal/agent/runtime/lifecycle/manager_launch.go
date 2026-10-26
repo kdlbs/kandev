@@ -409,6 +409,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if branches := collectBaseBranches(req); len(branches) > 0 {
 		metadata[MetadataKeyBaseBranches] = branches
 	}
+	delete(metadata, MetadataKeyGitHooks)
 	setSelectedCheckoutMetadata(req, metadata)
 	applyTrustedRepositoryContextToMetadata(metadata, req)
 	return metadata
@@ -603,6 +604,26 @@ func sameContributionDestinationTarget(left, right models.ContributionDestinatio
 		left.TargetRepository.RemoteURL == right.TargetRepository.RemoteURL
 }
 
+// workspaceEntryKey returns the agentctl workspace-entry key for the
+// repository at index. The empty key is the workspace root; remote executors
+// key later repositories (and every plugin remote repository) by their
+// materialized directory name. ok is false when the repository has no key.
+func workspaceEntryKey(req *LaunchRequest, index int, spec RepoLaunchSpec) (key string, ok bool) {
+	key = baseBranchMetadataKey(spec)
+	if req != nil && models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
+		if req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0 {
+			key = remoteWorkspaceRepositoryDirectory(spec)
+		} else {
+			key = ""
+		}
+		if key == "" && (req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0) {
+			return "", false
+		}
+		return key, true
+	}
+	return key, key != ""
+}
+
 // collectBaseBranches builds the per-workspace-entry base-branch map that
 // agentctl reads to scope diff stats. Entries at the workspace root use the
 // empty key; plugin remote entries use their materialized directory names.
@@ -618,17 +639,8 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 		if spec.BaseBranch == "" {
 			continue
 		}
-		key := baseBranchMetadataKey(spec)
-		if req != nil && models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
-			if req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0 {
-				key = remoteWorkspaceRepositoryDirectory(spec)
-			} else {
-				key = ""
-			}
-			if key == "" && (req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0) {
-				continue
-			}
-		} else if key == "" {
+		key, ok := workspaceEntryKey(req, index, spec)
+		if !ok {
 			continue
 		}
 		out[key] = spec.BaseBranch
@@ -1437,6 +1449,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		env[providerKeyEnvVar] = providerKey
 	}
 
+	m.seedExecutionGitHooks(ctx, reqWithWorktree.TaskID, reqWithWorktree.ExecutorType, metadata)
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
 		IsPassthrough:                  reqWithWorktree.IsPassthrough,
@@ -1668,6 +1681,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorktreeBranchTemplate:     req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       req.WorktreeBranchTicket,
 		PullBeforeWorktree:         req.PullBeforeWorktree,
+		RunGitHooks:                req.RunGitHooks,
 		RemoteSyncHandled:          req.RemoteSyncHandled,
 		RefreshRepository:          req.RefreshRepository,
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
@@ -1708,6 +1722,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 				WorktreeBranchTicket:       r.WorktreeBranchTicket,
 				PullBeforeWorktree:         r.PullBeforeWorktree,
+				RunGitHooks:                r.RunGitHooks,
 				RemoteSyncHandled:          r.RemoteSyncHandled,
 				RefreshRepository:          r.RefreshRepository,
 				RefreshRepositoryWithState: r.RefreshRepositoryWithState,

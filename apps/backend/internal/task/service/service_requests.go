@@ -280,28 +280,30 @@ type FindOrCreateRepositoryRequest struct {
 
 // CreateRepositoryRequest contains the data for creating a new repository
 type CreateRepositoryRequest struct {
-	ID                         string                         `json:"-"`
-	ExpectedWorkspaceUpdatedAt *time.Time                     `json:"-"`
-	WorkspaceID                string                         `json:"workspace_id"`
-	Name                       string                         `json:"name"`
-	SourceType                 string                         `json:"source_type"`
-	LocalPath                  string                         `json:"local_path"`
-	Provider                   string                         `json:"provider"`
-	ProviderRepoID             string                         `json:"provider_repo_id"`
-	ProviderHost               string                         `json:"provider_host"`
-	ProviderScope              string                         `json:"provider_scope"`
-	ProviderOwner              string                         `json:"provider_owner"`
-	ProviderName               string                         `json:"provider_name"`
-	RemoteURL                  string                         `json:"remote_url"`
-	DefaultBranch              string                         `json:"default_branch"`
-	WorktreeBranchPrefix       string                         `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate     string                         `json:"worktree_branch_template"`
-	PullBeforeWorktree         *bool                          `json:"pull_before_worktree"`
-	SetupScript                string                         `json:"setup_script"`
-	CleanupScript              string                         `json:"cleanup_script"`
-	DevScript                  string                         `json:"dev_script"`
-	CopyFiles                  string                         `json:"copy_files"`
-	SecretBindings             []RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
+	ID                         string     `json:"-"`
+	ExpectedWorkspaceUpdatedAt *time.Time `json:"-"`
+	WorkspaceID                string     `json:"workspace_id"`
+	Name                       string     `json:"name"`
+	SourceType                 string     `json:"source_type"`
+	LocalPath                  string     `json:"local_path"`
+	Provider                   string     `json:"provider"`
+	ProviderRepoID             string     `json:"provider_repo_id"`
+	ProviderHost               string     `json:"provider_host"`
+	ProviderScope              string     `json:"provider_scope"`
+	ProviderOwner              string     `json:"provider_owner"`
+	ProviderName               string     `json:"provider_name"`
+	RemoteURL                  string     `json:"remote_url"`
+	DefaultBranch              string     `json:"default_branch"`
+	WorktreeBranchPrefix       string     `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate     string     `json:"worktree_branch_template"`
+	PullBeforeWorktree         *bool      `json:"pull_before_worktree"`
+	// RunGitHooks is set only by the repository settings REST handlers.
+	RunGitHooks    *bool                          `json:"-"`
+	SetupScript    string                         `json:"setup_script"`
+	CleanupScript  string                         `json:"cleanup_script"`
+	DevScript      string                         `json:"dev_script"`
+	CopyFiles      string                         `json:"copy_files"`
+	SecretBindings []RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
 }
 
 // RepositorySecretBindingInput is the write-only reference shape accepted by
@@ -335,10 +337,12 @@ type UpdateRepositoryRequest struct {
 	WorktreeBranchPrefix   *string    `json:"worktree_branch_prefix,omitempty"`
 	WorktreeBranchTemplate *string    `json:"worktree_branch_template,omitempty"`
 	PullBeforeWorktree     *bool      `json:"pull_before_worktree,omitempty"`
-	SetupScript            *string    `json:"setup_script,omitempty"`
-	CleanupScript          *string    `json:"cleanup_script,omitempty"`
-	DevScript              *string    `json:"dev_script,omitempty"`
-	CopyFiles              *string    `json:"copy_files,omitempty"`
+	// RunGitHooks is set only by the repository settings REST handlers.
+	RunGitHooks   *bool   `json:"-"`
+	SetupScript   *string `json:"setup_script,omitempty"`
+	CleanupScript *string `json:"cleanup_script,omitempty"`
+	DevScript     *string `json:"dev_script,omitempty"`
+	CopyFiles     *string `json:"copy_files,omitempty"`
 	// SecretBindings uses nil to preserve the current set and a non-nil empty
 	// slice to clear it.
 	SecretBindings *[]RepositorySecretBindingInput `json:"secret_bindings,omitempty"`

@@ -568,6 +568,9 @@ func TestExecutePromptRecreatesStaleCachedInstance(t *testing.T) {
 	var deleteCalls atomic.Int32
 	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/identity":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(managedGitIdentityJSON))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
 			createCalls.Add(1)
 			w.Header().Set("Content-Type", "application/json")
@@ -672,6 +675,9 @@ func TestRefreshRecreatesStaleCachedInstance(t *testing.T) {
 	var deleteCalls atomic.Int32
 	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/identity":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(managedGitIdentityJSON))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
 			createCalls.Add(1)
 			w.Header().Set("Content-Type", "application/json")
@@ -741,6 +747,9 @@ func TestExecutePromptDoesNotRecreateWhenParentContextCanceled(t *testing.T) {
 	var deleteCalls atomic.Int32
 	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/identity":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(managedGitIdentityJSON))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
 			createCalls.Add(1)
 			w.WriteHeader(http.StatusCreated)

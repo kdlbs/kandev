@@ -301,5 +301,7 @@
   "cloneSourceMissing": "The source workspace is no longer available.",
   "cloneConfigurationUnsupported": "This workspace has managed settings, unavailable defaults, or workflow references that cannot be cloned.",
   "cloneFailed": "Could not clone the workspace. Please try again.",
-  "workspaceActionsNamed": "Actions for {{name}}"
+  "workspaceActionsNamed": "Actions for {{name}}",
+  "runGitHooks": "Run Git hooks",
+  "runGitHooksHelp": "Repository Git hooks run with Kandev's permissions, and anyone or any agent who can write to the repository can change them. While this is off, hooks from user-global and system Git configuration are skipped too. A change applies to agent instances created afterward, not to running ones (Reset environment starts a new one). Turning it on disables submodule recursion for Kandev's pull, fetch, and push in this repository. File-system monitors, filters other than standard Git LFS and git-crypt, text converters, and merge drivers stay disabled."
 }

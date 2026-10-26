@@ -220,6 +220,7 @@ var ready atomic.Bool
 func Run(args []string, build BuildInfo) int {
 	setBuildInfo(build)
 	ready.Store(false)
+	defer subproc.RemoveManagedGitHooksDir()
 
 	parsedFlags, usage, err := parseBackendFlags(args)
 	if err != nil {
@@ -711,6 +712,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetGitHooksProvider(services.Task.TaskGitHooks)
 
 	// ============================================
 	// WORKTREE MANAGER

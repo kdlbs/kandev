@@ -20,7 +20,7 @@ func TestWorkspaceCloneGraph(t *testing.T) {
 	ctx := t.Context()
 	source := &models.Workspace{ID: "clone-source", Name: "Source"}
 	require.NoError(t, repo.CreateWorkspace(ctx, source))
-	local := &models.Repository{ID: "clone-local", WorkspaceID: source.ID, Name: "Local", SourceType: "local", LocalPath: t.TempDir(), DefaultBranch: "develop", WorktreeBranchPrefix: "feature/", WorktreeBranchTemplate: "{task_id}", PullBeforeWorktree: true, SetupScript: "setup", CleanupScript: "clean", DevScript: "dev", CopyFiles: ".env"}
+	local := &models.Repository{ID: "clone-local", WorkspaceID: source.ID, Name: "Local", SourceType: "local", LocalPath: t.TempDir(), DefaultBranch: "develop", WorktreeBranchPrefix: "feature/", WorktreeBranchTemplate: "{task_id}", PullBeforeWorktree: true, RunGitHooks: true, SetupScript: "setup", CleanupScript: "clean", DevScript: "dev", CopyFiles: ".env"}
 	remote := &models.Repository{ID: "clone-remote", WorkspaceID: source.ID, Name: "Remote", SourceType: "provider", Provider: "github", ProviderHost: "github.com", ProviderRepoID: "42", ProviderOwner: "acme", ProviderName: "tools", RemoteURL: "https://github.com/acme/tools.git", LocalPath: "/managed/source"}
 	require.NoError(t, repo.CreateRepository(ctx, local))
 	require.NoError(t, repo.CreateRepository(ctx, remote))
@@ -58,6 +58,8 @@ func TestWorkspaceCloneGraph(t *testing.T) {
 	copyLocal := byName[local.Name]
 	copyRemote := byName[remote.Name]
 	require.NotEqual(t, local.ID, copyLocal.ID)
+	require.True(t, copyLocal.RunGitHooks, "a workspace clone copies the hooks setting")
+	require.False(t, copyRemote.RunGitHooks)
 	require.Equal(t, local.LocalPath, copyLocal.LocalPath)
 	require.Equal(t, local.SetupScript, copyLocal.SetupScript)
 	require.Equal(t, local.CleanupScript, copyLocal.CleanupScript)

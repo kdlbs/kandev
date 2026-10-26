@@ -308,6 +308,7 @@ func buildStandaloneCreateInstanceRequest(
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		GitHooks:                   gitHooksFromMetadata(req.Metadata),
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,

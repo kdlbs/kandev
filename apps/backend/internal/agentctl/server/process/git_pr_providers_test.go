@@ -242,6 +242,7 @@ func TestGitOperatorCreatePRValidatesGitLabOriginBeforePush(t *testing.T) {
 	op, scriptDir := prepareGitLabPRRepo(t, "https://gitlab.com/acme/widgets.git")
 	pushMarker := filepath.Join(scriptDir, "push-called")
 	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf(`#!/bin/sh
+while [ "${1:-}" = "-c" ]; do shift 2; done
 if [ "$1" = "remote" ] && [ "$2" = "get-url" ]; then
   printf 'https://gitlab.com/acme/widgets.git\n'
   exit 0
@@ -284,6 +285,7 @@ func TestSanitizeGitPushOutputRedactsCredentialBearingURLsAndTokens(t *testing.T
 func TestGitOperatorCreatePRReturnsOnlySanitizedPushFailure(t *testing.T) {
 	op, scriptDir := prepareGitLabPRRepo(t, "https://gitlab.com/acme/widgets.git")
 	writeExecutable(t, filepath.Join(scriptDir, "git"), `#!/bin/sh
+while [ "${1:-}" = "-c" ]; do shift 2; done
 if [ "$1" = "remote" ] && [ "$2" = "get-url" ]; then
   printf 'https://gitlab.com/acme/widgets.git\n'
   exit 0

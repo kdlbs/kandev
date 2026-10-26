@@ -79,6 +79,7 @@ type ContainerConfig struct {
 	RemoteContributions         map[string]models.RemoteContribution
 	ContributionDestinations    map[string]models.ContributionDestination
 	ComparisonTargets           map[string]models.ComparisonTarget
+	GitHooks                    map[string]bool
 	DurableJournalHostPath      string
 	DurableJournalContainerPath string
 	DeliveryStreamID            string
@@ -158,6 +159,7 @@ func buildContainerCreateInstanceRequest(
 		RemoteContributions:        config.RemoteContributions,
 		ContributionDestinations:   config.ContributionDestinations,
 		ComparisonTargets:          config.ComparisonTargets,
+		GitHooks:                   config.GitHooks,
 		DurableJournalPath:         config.DurableJournalContainerPath,
 		DeliveryStreamID:           config.DeliveryStreamID,
 		DeliveryIncarnationID:      config.DeliveryIncarnationID,

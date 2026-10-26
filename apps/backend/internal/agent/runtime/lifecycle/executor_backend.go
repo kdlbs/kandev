@@ -211,7 +211,10 @@ const (
 	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.
-	MetadataKeyBaseBranches             = "base_branches"
+	MetadataKeyBaseBranches = "base_branches"
+	// MetadataKeyGitHooks holds the map[string]bool Git hooks decision (workspace
+	// entry key to opt-in) set only by Manager.seedExecutionGitHooks.
+	MetadataKeyGitHooks                 = "git_hooks"
 	MetadataKeyRemoteContributions      = "remote_contributions"
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyComparisonTargets        = "comparison_targets"

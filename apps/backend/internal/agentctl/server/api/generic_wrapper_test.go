@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func TestGenericWrapperRequiresAuthenticatedControl(t *testing.T) {
@@ -91,6 +92,7 @@ func TestGenericWrapperCapabilityMatchesInstanceAndControl(t *testing.T) {
 			} else {
 				require.NotContains(t, identity.Capabilities, sandbox.LaunchCapability)
 			}
+			require.Contains(t, identity.Capabilities, subproc.ManagedGitPolicyCapability)
 			require.Equal(t, SurvivalCapabilities, identity.Capabilities)
 		})
 	}
