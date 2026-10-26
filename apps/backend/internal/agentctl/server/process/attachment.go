@@ -18,15 +18,17 @@ type attachTracker struct {
 	ready    int
 	epoch    uint64
 	changeCh chan struct{}
+	budget   budgetClock
 }
 
 // AttachmentSnapshot is the instance's attach state at one instant. ChangeCh
 // is closed, and replaced, on every change of Attached or Ready.
 type AttachmentSnapshot struct {
-	Attached bool
-	Ready    bool
-	Epoch    uint64
-	ChangeCh <-chan struct{}
+	Attached  bool
+	Ready     bool
+	Exhausted bool
+	Epoch     uint64
+	ChangeCh  <-chan struct{}
 }
 
 func (t *attachTracker) changeLocked() {
@@ -41,10 +43,11 @@ func (t *attachTracker) snapshotLocked() AttachmentSnapshot {
 		t.changeCh = make(chan struct{})
 	}
 	return AttachmentSnapshot{
-		Attached: len(t.streams) > 0,
-		Ready:    t.ready > 0,
-		Epoch:    t.epoch,
-		ChangeCh: t.changeCh,
+		Attached:  len(t.streams) > 0,
+		Ready:     t.ready > 0,
+		Exhausted: t.budget.exhausted,
+		Epoch:     t.epoch,
+		ChangeCh:  t.changeCh,
 	}
 }
 
@@ -57,7 +60,11 @@ func (m *Manager) AttachStream(streamID string) {
 	if t.streams == nil {
 		t.streams = make(map[string]bool)
 	}
+	_, existed := t.streams[streamID]
 	t.streams[streamID] = false
+	if !existed && len(t.streams) == 1 {
+		m.armStabilityLocked()
+	}
 	t.changeLocked()
 }
 
@@ -84,16 +91,24 @@ func (m *Manager) MarkWriterReady(streamID string) {
 func (m *Manager) DetachStream(streamID string) {
 	t := &m.attach
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	ready, ok := t.streams[streamID]
 	if !ok {
+		t.mu.Unlock()
 		return
 	}
 	delete(t.streams, streamID)
 	if ready {
 		t.ready--
 	}
+	var decide func()
+	if len(t.streams) == 0 {
+		decide = m.lastStreamEndedLocked()
+	}
 	t.changeLocked()
+	t.mu.Unlock()
+	if decide != nil {
+		decide()
+	}
 }
 
 // IsAttached reports whether this instance currently has at least one live

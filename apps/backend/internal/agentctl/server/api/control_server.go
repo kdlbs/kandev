@@ -13,6 +13,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
@@ -212,6 +213,14 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 		})
 		return
 	}
+
+	minutes, err := offlinebudget.ParseJSON(req.OfflineBudgetMinutes)
+	if err != nil {
+		m.logger.Warn("invalid offline budget in create instance request", zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.OfflineBudget = offlinebudget.Duration(minutes)
 
 	resp, err := m.instMgr.CreateInstance(c.Request.Context(), &req)
 	if err != nil {

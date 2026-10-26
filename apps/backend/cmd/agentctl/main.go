@@ -221,10 +221,11 @@ func run(cfg *config.Config, log *logger.Logger) {
 		mcpBackendClient.SetAttachmentSnapshotter(func() mcpserver.AttachmentSnapshot {
 			snap := procMgr.AttachmentSnapshot()
 			return mcpserver.AttachmentSnapshot{
-				Attached: snap.Attached,
-				Ready:    snap.Ready,
-				Epoch:    snap.Epoch,
-				ChangeCh: snap.ChangeCh,
+				Attached:  snap.Attached,
+				Ready:     snap.Ready,
+				Exhausted: snap.Exhausted,
+				Epoch:     snap.Epoch,
+				ChangeCh:  snap.ChangeCh,
 			}
 		})
 

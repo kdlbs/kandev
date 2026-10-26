@@ -19,7 +19,7 @@ func newWaitingBackend(t *testing.T, procMgr *process.Manager) *mcpserver.Channe
 	backend := mcpserver.NewChannelBackendClient(newTestLogger())
 	backend.SetAttachmentSnapshotter(func() mcpserver.AttachmentSnapshot {
 		snap := procMgr.AttachmentSnapshot()
-		return mcpserver.AttachmentSnapshot{Attached: snap.Attached, Ready: snap.Ready, Epoch: snap.Epoch, ChangeCh: snap.ChangeCh}
+		return mcpserver.AttachmentSnapshot{Attached: snap.Attached, Ready: snap.Ready, Exhausted: snap.Exhausted, Epoch: snap.Epoch, ChangeCh: snap.ChangeCh}
 	})
 	t.Cleanup(backend.Close)
 	return backend

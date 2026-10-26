@@ -726,7 +726,11 @@ func (m *Manager) DispatchDeliverySubmission(
 		m.deliveryActiveMu.Unlock()
 	}()
 	stopping := m.shutdownIntent.Load()
-	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, call)
+	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, func(ctx context.Context) error {
+		m.setBudgetInFlight(id)
+		defer m.clearBudgetInFlight(id)
+		return call(ctx)
+	})
 }
 
 func (m *Manager) activeDeliverySubmissionID() string {
@@ -822,7 +826,7 @@ func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error
 		Type:                 adapter.EventTypeComplete,
 		SessionID:            submission.SessionID,
 		DeliverySubmissionID: id,
-		Data:                 map[string]any{"stop_reason": "cancelled"},
+		Data:                 map[string]any{"stop_reason": stopReasonCancelled},
 	})
 	if err != nil {
 		return err
@@ -2596,6 +2600,10 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	}
 	events := make([]journal.Event, len(updates))
 	for i, update := range updates {
+		if update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError {
+			update = m.applyTerminalStamp(update)
+			updates[i] = update
+		}
 		payload, err := json.Marshal(update)
 		if err != nil {
 			return updates, err

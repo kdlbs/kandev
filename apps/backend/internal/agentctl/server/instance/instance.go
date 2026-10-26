@@ -5,6 +5,7 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -209,6 +210,14 @@ type CreateRequest struct {
 	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
 	// clients that append the injected server name to every tool.
 	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
+
+	// OfflineBudgetMinutes is the raw JSON offline budget. Absent or null
+	// means the default; the control server validates it and stores the result
+	// in OfflineBudget so a malformed value is never silently replaced.
+	OfflineBudgetMinutes json.RawMessage `json:"offline_budget_minutes,omitempty"`
+
+	// OfflineBudget is the validated budget; zero means no budget clock.
+	OfflineBudget time.Duration `json:"-"`
 
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
