@@ -169,12 +169,14 @@ SQLite during core schema initialization. Available timeout output identifies
 `TestCompleteActiveClarificationBundlePersistsRecoverableDeliveryIntent` in
 the `newRepoForSessionTests` initialization path. The full goroutine stacks and
 lock/connection owners are unavailable because the original output was
-truncated and not saved. The isolated comparison of that test passed on both
-the unchanged base and implementation under matching settings (2.502s and
-2.558s); this shows it does not reproduce in isolation but does not establish
-the cause of the broad timeout. The full package and PostgreSQL verification
-gaps remain open. See the [Task 01 results](task-01-persist-text-segment-boundaries.md#results)
-for exact commands and outcomes.
+truncated and not saved. The exact test was run sequentially, with no concurrent
+Go tests, using matching race, package, parallelism, and timeout settings. It
+passed on unchanged base `7fb28fc022d5320922608bf57cc9fd9351a8b8da` (2.841s)
+and current implementation `ace998ed67f5204513ca3d2c16ee68307128cbb6`
+(2.170s). The isolated test does not reproduce or explain the broad timeout.
+The full package and PostgreSQL verification gaps remain open. See the
+[Task 01 results](task-01-persist-text-segment-boundaries.md#results) for exact
+commands and outcomes.
 
 ## Risks
 
