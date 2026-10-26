@@ -119,6 +119,9 @@ creation and swipes on the persistent header instead of replaceable code rows.
 Its two-file precondition and all negative auto-mark assertions remain enforced.
 Approval persistence checks now await their PATCH response. Oversized-message
 task switching waits for the drawer animation before tapping a task row.
+Branch-refresh and filter setup wait for repository-picker focus restoration
+before opening the executor picker. Their original selection and request
+assertions remain unchanged.
 
 ## Risks
 

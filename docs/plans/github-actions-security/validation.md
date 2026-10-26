@@ -265,10 +265,36 @@ summary agree: 4261 first-attempt passes, 2 retry passes, and 40 skipped browser
 cases. No other failure was found. CodeRabbit reviewed that head with no
 actionable comments.
 
-Current main `7fb28fc022d` was integrated with normal hooks. Its Copilot change
+Main `7fb28fc022d` was integrated with normal hooks. Its Copilot change
 has no overlapping files and does not change the workflow/helper verification
 inputs. A fresh managed build passed the oversized-message case, and all three
 approval-flow cases passed with retries disabled on two CPUs. The first office
 attempt hit an occupied port before setup; a checked explicit test-port offset
 resolved that infrastructure collision. Full web typecheck passed again with
 the process-local 8 GiB heap. Fresh-head CI remains the external delivery gate.
+
+CI run `40355035994` at `be8d2ab3974` finished with 65 passed checks, 19 skipped,
+and 2 failures: the branch-selector shard and its aggregate. All earlier fixes
+passed. The 118 blob reports and retry summary agree on 4264 first-attempt
+passes, 1 retry pass, and 40 skipped browser cases.
+
+The branch-refresh fixture opened the executor picker immediately after
+repository selection. The trace shows its Worktree option becoming detached
+before any click was dispatched. It proves premature menu closure, but does
+not establish its exact cause. Fresh-worker repetitions and controlled motion
+probes did not reproduce the timeout. The fixture now waits for focus to return
+to the repository trigger before opening the executor picker. The adjacent
+filter case uses the same readiness precondition. The independent reviewer
+confirmed that this serializes the supported popover lifecycle without weakening
+the profile, branch, filtering, or refresh-request assertions.
+
+Three focused repetitions and all 13 cases in the file passed on two CPUs with
+retries disabled. The three describe-level retry settings were temporarily
+disabled for this check and restored before commit. Motion and focus probes
+were removed. Full web typecheck with the process-local 8 GiB heap, scoped
+ESLint, formatting, and diff checks passed. Targeted open-PR searches found no
+branch-refresh fix. Open PR #3968 covers other flaky tests and does not modify
+this fixture or its popover components.
+
+The base then advanced to `6a1a2ae1000`. Its worktree-placement change has no
+overlapping files. Current-base compatibility remains a separate delivery check.

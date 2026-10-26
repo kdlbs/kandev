@@ -652,10 +652,12 @@ test.describe("Branch refresh + filter", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("Refresh button test");
     await testPage.getByTestId("task-description-input").fill("triggers git fetch");
-    await testPage.getByTestId("repo-chip-trigger").first().click();
+    const repoSelector = testPage.getByTestId("repo-chip-trigger").first();
+    await repoSelector.click();
     // Repository names are not unique after earlier specs register additional
     // worktrees. cmdk's stable data-value is the repository ID.
     await testPage.locator(`[cmdk-item][data-value="${seedData.repositoryId}"]`).click();
+    await expect(repoSelector).toBeFocused();
     // Worktree executor → branch selector enabled and refresh button visible.
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
@@ -741,11 +743,13 @@ test.describe("Branch refresh + filter", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("Filter ranking test");
     await testPage.getByTestId("task-description-input").fill("exact match wins");
-    await testPage.getByTestId("repo-chip-trigger").first().click();
+    const repoSelector = testPage.getByTestId("repo-chip-trigger").first();
+    await repoSelector.click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${repoName}\\b`, "i") })
       .first()
       .click();
+    await expect(repoSelector).toBeFocused();
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
     // Finish the executor popover's focus restoration before opening the next picker.
