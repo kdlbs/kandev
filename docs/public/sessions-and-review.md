@@ -45,6 +45,13 @@ The New Session dialog does not accept a session name. Rename the session from i
 
 The empty-panel watermark has the same **New Agent** action. On mobile, open the **Sessions** picker and select **New session**.
 
+To add MCP servers before launch, expand **Advanced settings** below the prompt.
+Select the count beside **MCP servers** to open the picker. On phones and touch
+tablets, the picker opens as a bottom sheet. The count includes only your session
+additions. Servers inherited from the profile, repositories, and task remain
+included. Closing the picker or collapsing Advanced settings preserves the draft.
+Handoff uses the same controls.
+
 If simultaneous starts are still preparing the shared workspace, the later
 start waits for that preparation and tries to attach once. Failed or unfinished
 preparation leaves the start retryable without creating another workspace.
