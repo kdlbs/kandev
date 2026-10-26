@@ -1,6 +1,6 @@
 # Contribution notes: Nomad executor and worker pool
 
-Branch `feature/nomad-native-executor`.
+Branch `feature/nomad-native-executor`. Upstream design issue kdlbs/kandev#4834; draft PR kdlbs/kandev#4835.
 
 ## What it contains
 
