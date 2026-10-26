@@ -156,11 +156,15 @@ records feed the shared chat transcript on phone.
 Task 01 remains in progress while broad SQLite verification is unresolved.
 Change-aware lifecycle and SQLite race tests passed, including real retention
 pruning and reopen, duplicate replay after a later boundary, old pruned-receipt
-fallback, schema upgrade, rollback/retry, and whole-row expiry. The Chromium
-durable-v1 E2E passed 1/1 after rebuilding backend and web assets. SQL guard,
-store conformance, changed-Go lint, documentation validation, spec lint, and
-`git diff --check` passed. PostgreSQL migration and fallback subtests skipped
-because `KANDEV_TEST_POSTGRES_DSN` is not configured.
+fallback, schema upgrade, rollback/retry, and whole-row expiry. The
+migration-order regression proves the columns are absent after schema
+initialization and added by `runMigrations()`; it failed before and passed
+after this fix. The implicated broad-timeout test passed alone again after the
+migration change (2.103s). The Chromium durable-v1 E2E passed 1/1 after
+rebuilding backend and web assets. SQL guard, store conformance, changed-Go
+lint, documentation validation, spec lint, and `git diff --check` passed.
+PostgreSQL migration and fallback subtests skipped because
+`KANDEV_TEST_POSTGRES_DSN` is not configured.
 
 Both broad race attempts failed overall. The default-timeout run timed out in
 lifecycle, SQLite, and orchestrator while agentctl passed. The controlled
@@ -172,8 +176,8 @@ lock/connection owners are unavailable because the original output was
 truncated and not saved. The exact test was run sequentially, with no concurrent
 Go tests, using matching race, package, parallelism, and timeout settings. It
 passed on unchanged base `7fb28fc022d5320922608bf57cc9fd9351a8b8da` (2.841s)
-and current implementation `ace998ed67f5204513ca3d2c16ee68307128cbb6`
-(2.170s). The isolated test does not reproduce or explain the broad timeout.
+and implementation `8bafa71d33be8d20029699202605f136dae41bc3` (2.103s). The
+isolated test does not reproduce or explain the broad timeout.
 The full package and PostgreSQL verification gaps remain open. See the
 [Task 01 results](task-01-persist-text-segment-boundaries.md#results) for exact
 commands and outcomes.
