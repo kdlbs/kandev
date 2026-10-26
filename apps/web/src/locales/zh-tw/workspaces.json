@@ -301,5 +301,8 @@
   "cloneSourceMissing": "源工作區已不可用。",
   "cloneConfigurationUnsupported": "此工作區包含無法複製的受管理設定、不可用的預設設定或工作流程引用。",
   "cloneFailed": "無法複製工作區，請重試。",
-  "workspaceActionsNamed": "{{name}}的操作"
+  "workspaceActionsNamed": "{{name}}的操作",
+  "runGitHooks": "執行 Git 鉤子",
+  "runGitHooksHelp": "儲存庫的 Git 鉤子以 Kandev 的權限執行，任何能寫入該儲存庫的人或代理程式都可以修改它們。關閉時，使用者全域和系統 Git 設定中的鉤子也會被跳過。更改僅適用於之後建立的代理程式實例，不影響正在執行的實例。開啟後，Kandev 在此儲存庫中的 pull、fetch 和 push 將不再遞迴處理子模組。檔案系統監視器、標準 Git LFS 和 git-crypt 以外的過濾器、文字轉換器以及合併驅動仍然保持停用。",
+  "runGitHooksInactive": "在「設定」、「系統」、「功能開關」中或通過環境變數 KANDEV_FEATURES_MANAGED_GIT_ISOLATION 啟用受管 Git 隔離並重啟 Kandev 之前，此設定不會生效。"
 }

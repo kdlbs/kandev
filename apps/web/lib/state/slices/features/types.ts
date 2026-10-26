@@ -18,6 +18,7 @@ export const defaultFeatureFlags = {
   claudeMidTurnSteering: false,
   needsYouInbox: false,
   agentSurvival: false,
+  managedGitIsolation: false,
   coordinator: false,
   coordinatorPhase2: false,
   coordinatorPhase3: false,

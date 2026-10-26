@@ -77,6 +77,7 @@ function repositoryPayload(repo: RepositoryWithScripts) {
     worktree_branch_prefix: repo.worktree_branch_prefix,
     worktree_branch_template: repo.worktree_branch_template ?? defaultWorktreeBranchTemplate,
     pull_before_worktree: repo.pull_before_worktree,
+    run_git_hooks: repo.run_git_hooks ?? false,
     setup_script: repo.setup_script,
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,

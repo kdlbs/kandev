@@ -301,5 +301,8 @@
   "cloneSourceMissing": "원본 워크스페이스를 더 이상 사용할 수 없습니다.",
   "cloneConfigurationUnsupported": "이 워크스페이스에 복제할 수 없는 관리 설정, 사용할 수 없는 기본 구성 또는 워크플로 참조가 있습니다.",
   "cloneFailed": "워크스페이스를 복제할 수 없습니다. 다시 시도하세요.",
-  "workspaceActionsNamed": "{{name}} 작업"
+  "workspaceActionsNamed": "{{name}} 작업",
+  "runGitHooks": "Git 훅 실행",
+  "runGitHooksHelp": "저장소의 Git 훅은 Kandev의 권한으로 실행되며, 저장소에 쓸 수 있는 사람이나 에이전트는 누구나 이를 변경할 수 있습니다. 꺼져 있는 동안에는 사용자 전역 및 시스템 Git 설정의 훅도 건너뜁니다. 변경 사항은 이후에 생성되는 에이전트 인스턴스에 적용되며 실행 중인 인스턴스에는 적용되지 않습니다. 켜면 이 저장소에서 Kandev의 pull, fetch, push에 대한 서브모듈 재귀 처리가 비활성화됩니다. 파일 시스템 모니터, 표준 Git LFS와 git-crypt 이외의 필터, 텍스트 변환기, 병합 드라이버는 계속 비활성화됩니다.",
+  "runGitHooksInactive": "설정, 시스템, 기능 토글 또는 환경 변수 KANDEV_FEATURES_MANAGED_GIT_ISOLATION(으)로 관리형 Git 격리를 켜고 Kandev를 다시 시작하기 전에는 이 설정이 적용되지 않습니다."
 }
