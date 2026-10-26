@@ -35,7 +35,11 @@ for (const zoom of [1, 0.9]) {
       await apiClient.seedAgentMessages(task.session_id!, 35, "Question history");
       await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer });
       await withNativeThreadZoom(backend.frontendUrl, zoom, testInfo, async (page) => {
+        const messagesLoaded = watchWs(page).waitForResponse("message.list", {
+          requestWhere: (payload) => payload.session_id === task.session_id,
+        });
         await page.goto(`/threads?taskId=${task.id}`);
+        await messagesLoaded;
         const board = page.getByTestId("threads-board");
         const tile = page.getByTestId(`thread-column-${task.id}`);
         await expect(board).toHaveAttribute("data-layout", "grid");

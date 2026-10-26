@@ -190,8 +190,9 @@ test.describe("File tree drag and drop", () => {
     const renameResponse = ws.waitForResponse("workspace.file.rename");
     await dispatchHtmlDnd(session.fileTree, "movable.ts", "target-dir");
     await renameResponse;
-    // The dirty worktree activates Changes after the rename completes.
-    await expect(session.changes).toBeVisible();
+    // Initial Git loading can preserve Files, so select Changes explicitly.
+    await session.clickTab("Changes");
+    await expect(session.changesFileRow("target-dir/movable.ts")).toBeVisible();
     await session.clickTab("Files");
 
     // The completed move removes the source from the active Files tree.
@@ -299,8 +300,8 @@ test.describe("File tree drag and drop", () => {
       { session_id: sessionId, old_path: "src", new_path: "dest/src" },
     ]);
     expect(replies.get(requests[0].id)?.payload.success).toBe(true);
-    // New Git changes activate Changes before the moved tree is inspected.
-    await expect(session.changes).toBeVisible();
+    await session.clickTab("Changes");
+    await expect(session.changesFileRow("dest/src/a.txt")).toBeVisible();
     await session.clickTab("Files");
     await session.fileTreeNode("dest").click();
     await session.fileTree.waitForFileTreeNode("dest/src");
