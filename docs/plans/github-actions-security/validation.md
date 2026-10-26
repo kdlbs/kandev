@@ -207,3 +207,36 @@ browser cases, separate from the 249 workflow/helper cases above.
 The independent reviewer found no weakened behavioral contract or remaining
 defect in these two corrections. Scoped ESLint, formatting, document validation,
 and the full web typecheck with the same process-local 8 GiB heap passed again.
+
+CI run `40330795890` at `a7b70c02593` passed 64 checks and skipped 19, but
+failed two E2E shards and their aggregate. An audit of all 118 blob reports and
+the retry summary found 4261 first-attempt passes, 2 retry passes, and 40 skipped
+browser cases. Both flaky verdicts remained failures under the strict gate.
+CodeRabbit reviewed the latest delta and reported no actionable comments.
+
+The review checkbox scenario inherited two files from preceding CLI tests.
+Its failure screenshot contained four files, while the fresh-worker retry
+contained only its intended two. The same CLI, watcher, and review sequence
+reproduced the checkbox failure locally with retries disabled. Reset the
+disposable seed checkout with the existing helper before task creation, and
+assert exactly two review headers. This preserves the shared fixture boundary.
+
+A repeated mobile check then exposed a separate gesture defect. Browser probes
+recorded a touch starting on a code node that became disconnected during diff
+rendering. The content scrolled, but no touch-move event reached the review root.
+The gesture now starts on the persistent file header and keeps its coordinates
+within the viewport. It still uses native touch input and checks real scrolling.
+All checkbox, manual-uncheck, return-and-pass, and disabled-auto-mark assertions
+remain unchanged. The probes were removed after the cause was established.
+
+The manual-port case also failed once in that CI run and passed its retry.
+Its exact case passed three local repetitions, and all 11 cases in its spec
+passed with retries disabled on two CPUs, including the preceding tests.
+The Add operation is synchronous local state. Available evidence does not prove
+a product defect, so its original test and product code are retained. Fresh CI
+remains the delivery gate for this case.
+
+The corrected native gesture passed five mobile repetitions without retries on
+two CPUs. The final ordered CLI, watcher, and review sequence passed all 12
+cases without retries. Full web typecheck with the process-local 8 GiB heap, scoped ESLint,
+formatting, document validation, and diff checks passed again.
