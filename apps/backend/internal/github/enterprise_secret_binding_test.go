@@ -3,7 +3,7 @@ package github
 import (
 	"context"
 	"errors"
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"io"
 	"net/http"
 	"strings"

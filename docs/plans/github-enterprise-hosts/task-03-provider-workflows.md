@@ -151,3 +151,8 @@ GOMAXPROCS=2 go test -trimpath -p 1 -race ./internal/task/service ./internal/bac
 The targeted race suites passed. Documentation catalog validation, specification
 lint, and `git diff --check` passed. Public guidance already describes the
 supported host and repository behavior; no public documentation change is needed.
+
+
+### Greptile follow-up
+
+Retained old-host PR watches no longer abort current-host batches. Host-aware fallback keys keep otherwise identical PR targets separate. The persisted-result regression covers batch, poller fallback, and passive fallback, with old-host data unchanged.

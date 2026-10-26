@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"testing"
 )
 

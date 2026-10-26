@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 type enterpriseTransportFunc func(*http.Request) (*http.Response, error)

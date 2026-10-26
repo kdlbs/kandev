@@ -225,3 +225,8 @@ Focused frontend ESLint and the targeted GitHub/backendapp race tests passed.
 The complete GitHub race suite also passed with the CI ambient integration
 environment (173.161 seconds), and the issue-link cancellation boundary passed
 against PostgreSQL under the race detector (5.362 seconds).
+
+
+### Greptile follow-up
+
+Status refreshes no longer replace the selected method in an open connection draft. Four deferred-save cases cover success and failure on desktop and phone. The dialog suite passes all 17 cases, including stale dismissal/reopen behavior. This changes shared state ownership only, with no visual or touch changes.

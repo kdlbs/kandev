@@ -493,7 +493,7 @@ func prWatchFallbackTargetKey(watch *PRWatch) string {
 	if watch == nil {
 		return ""
 	}
-	return watch.WorkspaceID + "\x00" + watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch + "\x00" + fmt.Sprintf("%010d", watch.PRNumber)
+	return watch.WorkspaceID + "\x00" + defaultAuthFlowHost(watch.GitHubHost) + "\x00" + watch.Owner + "\x00" + watch.Repo + "\x00" + watch.Branch + "\x00" + fmt.Sprintf("%010d", watch.PRNumber)
 }
 
 func prWatchFallbackShouldStopWorkspace(err error) bool {

@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/githubauth"
-	"github.com/kandev/kandev/internal/githubhost"
 	"github.com/kandev/kandev/internal/task/models"
 )
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/subproc"
-	"github.com/kandev/kandev/internal/githubhost"
 )
 
 // ProtocolSSH is the SSH git protocol.

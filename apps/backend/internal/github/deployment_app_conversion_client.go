@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"encoding/json"
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"io"
 	"net/http"
 	"net/url"

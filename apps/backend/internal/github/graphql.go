@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 // GraphQLExecutor runs a single GraphQL query against the GitHub API. Both

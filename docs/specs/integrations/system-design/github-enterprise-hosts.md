@@ -59,7 +59,7 @@ explicit provider origins, while GitHub's broker adapter rejected non-public hos
 
 ## Host value and endpoints
 
-Introduce a small pure `internal/githubhost` package for normalization,
+Introduce a small pure `internal/common/githubhost` package for normalization,
 classification, endpoint derivation, and CLI token-family selection. It has no
 database or HTTP dependencies and can be imported by GitHub, clone, and agentctl
 code without introducing runtime-tier imports. Use a validated immutable value;
@@ -243,6 +243,8 @@ and mutations compare record host with the operation's resolved credential befor
 provider access and before projecting results. A mismatch produces a paused or
 unavailable outcome, not a request to the new host. Reconnecting the old host
 requires current permissions and valid credentials before those records resume.
+Workspace batches exclude other-host watches before provider lookup, and fallback
+groups include the watch host so retained records cannot suppress current watches.
 Do not stop unrelated agent processes; reject stale broker redemption instead.
 
 Fence asynchronous results by captured host and generation. In-flight requests
@@ -334,6 +336,9 @@ invalidates stale lookup responses, and regenerates setup instructions. Show
 current and proposed host plus the host replacement effects before Save. Keep
 non-secret values after a failure; never copy saved secret material into inputs.
 App root credentials remain ephemeral form data and are cleared after submission.
+An open connection draft owns its selected method across status refreshes. Choose
+the latest saved method when opening the dialog. A refresh must not interrupt
+pending-save completion or failure recovery.
 
 Use `GitHubConnectionDialog` as the nearest shipped feature exemplar and the
 curated mobile menu sheet's fixed-header/one-scroll-body pattern. Desktop keeps

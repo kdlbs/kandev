@@ -53,7 +53,7 @@ in dependency order; independent implementation slices may proceed as below.
 
 ## Technical approach
 
-1. **Host-aware transport:** introduce `internal/githubhost`; add explicit host
+1. **Host-aware transport:** introduce `internal/common/githubhost`; add explicit host
    constructors to `TokenClient`, `AppClient`, OAuth, and manifest conversion.
    Keep public compatibility wrappers, central URL validation, separate GHES
    REST/GraphQL endpoints, redirect restrictions, and TLS/network rules.
@@ -177,7 +177,7 @@ logic, and extend neighboring suites rather than mirroring helper implementation
 
 | Acceptance criteria (prefix `AC-INTEGRATIONS-GITHUB-ENTERPRISE-`) | Planned test location and test |
 | --- | --- |
-| 001.2, 001.3, 001.4, 001.5 | `internal/githubhost/host_test.go`: `TestHostNormalization`, `TestEndpointFamilies`; `internal/github/enterprise_transport_test.go`: `TestEnterpriseHostTransport` (TLS, redirects, pagination, endpoint paths, no foreign-server credential receipt) |
+| 001.2, 001.3, 001.4, 001.5 | `internal/common/githubhost/host_test.go`: `TestHostNormalization`, `TestEndpointFamilies`; `internal/github/enterprise_transport_test.go`: `TestEnterpriseHostTransport` (TLS, redirects, pagination, endpoint paths, no foreign-server credential receipt) |
 | 001.1, 002.1, 001.5 | `internal/github/enterprise_connections_test.go`: `TestEnterpriseCLIConnectionSaveAndRead`, `TestEnterprisePATConnection`, with a fake CLI runner and real service/handler/HTTP client path |
 | 002.2, 002.3, 002.4 | `internal/github/enterprise_app_auth_test.go`: `TestEnterpriseAppLifecycle`, `TestEnterpriseOAuthPolicy`, `TestEnterpriseWebhookIsolation` (same IDs across hosts; replay; replacement; refresh and non-expiring tokens) |
 | 002.5 | `internal/github/enterprise_capabilities_test.go`: `TestEnterpriseOptionalCapabilities` (basic reads survive absent optional fields; auth errors remain auth errors) |
@@ -429,3 +429,47 @@ retries disabled. Live GHES/GHE.com testing remains unverified.
 - Live GHES and GHE.com test environments have not been supplied. Record any
   real smoke evidence separately, including version and auth method; do not
   represent fixture-only testing as live-provider validation.
+
+
+### Greptile follow-up: retained watches, draft ownership, and shared package
+
+- Workspace batches skip retained watches from other hosts. Fallback groups include
+  the host so an old watch cannot consume the current watch's result or prevent its update.
+  Host-replacement and mixed-workspace guards remain active.
+- Connection dialogs retain the selected method during status refreshes. Each opening
+  initializes the method from current status. Save completion and failure recovery use
+  the existing draft guard, including dismissal/reopen protection.
+- The pure host package and its tests now live under `internal/common/githubhost`.
+  Backend, agentctl, clone, executor, task, and workflow-sync imports use that shared path.
+  No compatibility copy remains at the old location.
+
+The mixed-host regression covers batch, poller fallback, and passive fallback through
+persisted task PRs. All three cases fail on the previous production source and pass
+with the repairs. Four deferred-save cases reproduce status refresh during successful
+and failed saves on both desktop and phone. The full dialog suite passes (17 tests),
+as do frontend type checking and affected ESLint. Full race checks passed for
+`internal/common/githubhost` (1.012s), `internal/github` (314.109s), and
+`cmd/agentctl` (8.523s). Both backend and agentctl builds pass. Documentation catalog
+and specification checks pass. Final CI and thread disposition are recorded on the PR.
+
+This UI change only changes draft state ownership. It does not change layout, touch
+handling, navigation, scrolling, or breakpoint behavior. The existing desktop dialog
+and phone drawer share the fix. Component coverage exercises both compositions;
+new mobile E2E coverage is not required for this state-only correction. Public setup
+instructions remain accurate. Live GHES/GHE.com smoke testing remains unverified.
+
+
+Follow-up commands:
+
+```bash
+# apps/backend
+GOMAXPROCS=2 GOMEMLIMIT=3GiB go test -race -p 1 ./internal/common/githubhost ./internal/github ./cmd/agentctl
+GOMAXPROCS=2 GOMEMLIMIT=3GiB go build -p 1 ./cmd/kandev ./cmd/agentctl
+# apps/web
+pnpm exec vitest run components/github/github-connection-dialog.test.tsx
+pnpm run typecheck
+pnpm exec eslint components/github/github-connection-dialog.tsx components/github/github-connection-dialog.test.tsx
+# repository root
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+```

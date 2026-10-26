@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 // @covers AC-INTEGRATIONS-GITHUB-ENTERPRISE-002.5

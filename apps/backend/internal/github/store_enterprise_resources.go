@@ -7,8 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/gitcredentials"
-	"github.com/kandev/kandev/internal/githubhost"
 )
 
 var enterpriseResourceTables = []string{

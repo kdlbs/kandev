@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/githubauth"
-	"github.com/kandev/kandev/internal/githubhost"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"

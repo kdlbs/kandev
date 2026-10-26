@@ -24,7 +24,7 @@ Introduce the shared validated host value and route all direct GitHub client fam
 
 ## In scope
 
-- Own `internal/githubhost` normalization, endpoint derivation, and CLI token-family classification.
+- Own `internal/common/githubhost` normalization, endpoint derivation, and CLI token-family classification.
 - Add host-aware token, App, OAuth, and manifest-conversion clients; preserve explicit public compatibility constructors.
 - Enforce authenticated redirect/pagination boundaries, TLS verification, private-host connectivity, and restricted direct dialing.
 - Add table-driven family tests and adversarial request-destination tests using injected TLS transports.
@@ -48,7 +48,7 @@ Go file paths; frontend changes run ESLint on the explicit changed TS/TSX paths.
 Record the expanded commands in Results. Do not mark skipped database tests as passed.
 
 ```bash
-(cd apps/backend && go test ./internal/githubhost -count=1)
+(cd apps/backend && go test ./internal/common/githubhost -count=1)
 (cd apps/backend && go test ./internal/github -run 'TestEnterpriseHostTransport|TestPATClient|TestTokenClient|TestAppClient|TestGraphQL' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -57,7 +57,7 @@ git diff --check
 
 ## Files likely touched
 
-- `apps/backend/internal/githubhost/host.go`, `host_test.go` (new).
+- `apps/backend/internal/common/githubhost/host.go`, `host_test.go` (new).
 - `apps/backend/internal/github/token_client.go`, `pat_client.go`, `graphql.go`, and related REST helpers.
 - `apps/backend/internal/github/app_client.go`, `oauth_flow.go`, `deployment_app_conversion_client.go`.
 - `apps/backend/internal/github/enterprise_transport_test.go` (new) and neighboring client tests.
@@ -89,10 +89,15 @@ regressions were observed failing before implementation.
 Passed from `apps/backend`:
 
 ```bash
-PATH=/usr/local/go/bin:$PATH GOMAXPROCS=2 go test -trimpath -p 1 ./internal/githubhost ./internal/github -run 'TestHost|TestEnterpriseHostTransport|TestPATClient|TestTokenClient|TestAppClient|TestGraphQL' -count=1
+PATH=/usr/local/go/bin:$PATH GOMAXPROCS=2 go test -trimpath -p 1 ./internal/common/githubhost ./internal/github -run 'TestHost|TestEnterpriseHostTransport|TestPATClient|TestTokenClient|TestAppClient|TestGraphQL' -count=1
 ```
 
 Combined changed-Go lint passed with zero issues after all implementation lanes
 stabilized. The complete GitHub package with actual PostgreSQL passed in
 142.070 seconds; Enterprise race tests passed in 19.565 seconds. Host-family
 fixtures verify routing and TLS behavior, not live-provider certification.
+
+
+### Greptile follow-up
+
+The shared host package and its existing tests moved to `internal/common/githubhost` to satisfy the backend/agentctl ownership boundary. All consumers and verification paths use the neutral package.

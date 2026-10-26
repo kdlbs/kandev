@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 const (

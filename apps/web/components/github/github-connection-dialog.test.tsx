@@ -214,6 +214,70 @@ describe("GitHubConnectionDialog task access", () => {
   });
 });
 
+describe("GitHubConnectionDialog status refresh during save", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "settles a pending save after status refresh (mobile=%s, success=%s)",
+    async (mobile, success) => {
+      mocks.mobile = mobile;
+      let resolveSave: (value: unknown) => void = () => {};
+      let rejectSave: (reason: Error) => void = () => {};
+      mocks.setConnection.mockImplementation(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveSave = resolve;
+            rejectSave = reject;
+          }),
+      );
+      const onSaved = vi.fn();
+      const renderDialog = (current: GitHubStatus) => (
+        <ToastProvider>
+          <GitHubConnectionDialog
+            status={current}
+            workspaceId={WORKSPACE_ID}
+            onSaved={onSaved}
+            taskAccess={taskAccess}
+          />
+        </ToastProvider>
+      );
+      const rendered = render(renderDialog(status));
+      const trigger = screen.getByRole("button", { name: changeConnectionLabel });
+      fireEvent.click(trigger);
+      fireEvent.change(screen.getByLabelText(personalAccessTokenLabel), {
+        target: { value: "ghp_pending" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+      rendered.rerender(
+        renderDialog({ ...status, automation: { ...status.automation!, source: "gh_cli" } }),
+      );
+      await act(async () => {
+        if (success) resolveSave(status.automation);
+        else rejectSave(new Error("Token rejected"));
+      });
+      if (success) {
+        await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+        expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      } else {
+        await screen.findByText("Token rejected");
+        expect(screen.getByLabelText(personalAccessTokenLabel)).toHaveProperty("disabled", false);
+        expect(screen.getByLabelText(personalAccessTokenLabel)).toHaveProperty(
+          "value",
+          "ghp_pending",
+        );
+        expect(screen.getByRole("button", { name: saveChangesLabel })).toHaveProperty(
+          "disabled",
+          false,
+        );
+        expect(onSaved).not.toHaveBeenCalled();
+      }
+    },
+  );
+});
+
 describe("GitHubConnectionDialog stale save results", () => {
   it("ignores a save result after closing and reopening the same connection draft", async () => {
     let finish: (value: unknown) => void = () => {};

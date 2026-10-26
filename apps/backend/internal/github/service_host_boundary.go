@@ -3,7 +3,7 @@ package github
 import (
 	"context"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 // BindWorkspaceGitHubHost captures the connection identity for a multi-read operation.

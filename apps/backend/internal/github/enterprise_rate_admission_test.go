@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/stretchr/testify/require"
 )
 

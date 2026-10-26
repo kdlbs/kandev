@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/securityutil"
-	"github.com/kandev/kandev/internal/githubhost"
 )
 
 // Defaults for optional config fields.

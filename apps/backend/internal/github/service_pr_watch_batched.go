@@ -67,11 +67,29 @@ func (s *Service) syncWorkspaceWatchesBatched(
 		if watch == nil || watch.WorkspaceID != workspaceID {
 			return nil, ErrGitHubWorkspaceRequired
 		}
+	}
+	host, err := s.selectedGitHubHost(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	currentWatches := make([]*PRWatch, 0, len(watches))
+	for _, watch := range watches {
+		if err := requireExpectedGitHubHost(withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost)), host); err != nil {
+			if errors.Is(err, ErrGitHubHostMismatch) {
+				continue
+			}
+			return nil, err
+		}
 		if err := s.validatePRWatchHost(ctx, workspaceID, watch); err != nil {
 			return nil, err
 		}
+		currentWatches = append(currentWatches, watch)
 	}
-	ctx = withExpectedGitHubHost(ctx, defaultAuthFlowHost(watches[0].GitHubHost))
+	if len(currentWatches) == 0 {
+		return nil, nil
+	}
+	watches = currentWatches
+	ctx = withExpectedGitHubHost(ctx, host.String())
 	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
 	if err != nil {
 		return nil, err

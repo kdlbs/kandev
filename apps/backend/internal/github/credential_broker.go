@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/gitcredentials"
-	"github.com/kandev/kandev/internal/githubhost"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 

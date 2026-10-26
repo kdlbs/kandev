@@ -55,10 +55,6 @@ export function GitHubConnectionDialog({
   const connected = Boolean(status.automation);
 
   useEffect(() => {
-    setMethod(methodForStatus(status));
-  }, [status]);
-
-  useEffect(() => {
     setOpen(false);
   }, [workspaceId]);
 

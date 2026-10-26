@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 // TokenCredentialKind identifies the authority represented by a token. It is

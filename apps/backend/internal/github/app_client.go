@@ -14,7 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"io"
 	"net/http"
 	"strconv"

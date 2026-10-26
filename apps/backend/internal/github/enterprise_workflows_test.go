@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"net/http"
 	"net/http/httptest"
@@ -171,12 +171,14 @@ func TestEnterpriseHostOldPRWatchDoesNotRunOnReplacement(t *testing.T) {
 		"workspace": {WorkspaceID: "workspace", GitHubHost: "git.example.com", Source: ConnectionSourcePAT, Status: ConnectionStatusActive, CredentialGeneration: 2},
 	}}
 	resolver := NewCredentialResolver(connections, nil)
-	resolver.SetAutomationProvider(testAutomationCredentialProvider{client: NewMockClient()})
+	client := &hostBoundaryWatchClient{repositoryVisibilityClient: repositoryVisibilityClient{Client: NewMockClient()}}
+	resolver.SetAutomationProvider(enterpriseWatchCredentials{client: client})
 	svc := NewService(nil, AuthMethodNone, nil, newTestStore(t), nil, testLogger(t))
+	t.Cleanup(svc.Stop)
 	svc.resolver = resolver
-	_, err := svc.SyncWorkspaceWatchesBatched(context.Background(), "workspace", []*PRWatch{{ID: "watch", GitHubHost: "github.com", WorkspaceID: "workspace", Owner: "acme", Repo: "widget", Branch: "main"}})
-	if !errors.Is(err, ErrGitHubHostMismatch) {
-		t.Fatalf("old watch admitted with replaced host: %v", err)
+	results, err := svc.SyncWorkspaceWatchesBatched(context.Background(), "workspace", []*PRWatch{{ID: "watch", GitHubHost: "github.com", WorkspaceID: "workspace", Owner: "acme", Repo: "widget", Branch: "main"}})
+	if err != nil || len(results) != 0 || client.calls.Load() != 0 {
+		t.Fatalf("old watch reached provider: results=%v err=%v calls=%d", results, err, client.calls.Load())
 	}
 }
 func TestEnterpriseHostReviewAndIssueChildPersistence(t *testing.T) {

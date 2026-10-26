@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kandev/kandev/internal/githubhost"
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 // MockAuthState supplies workspace-scoped principals while delegating API
