@@ -1026,6 +1026,8 @@
   "modelSelectionRemediationUnknown": "Check the executor configuration.",
   "modelSelectionRequested": "Requested model",
   "modelSelectionWarning": "The executor could not use the saved model selection.",
+  "turnEndedDetached": "The turn ended while Kandev was unreachable.",
+  "pausedOfflineBudget": "The turn was paused because Kandev stayed unreachable beyond the offline budget.",
   "branchRecreatedWarning": "The saved branch was unavailable, so a new branch was created.",
   "branchRecreatedOriginal": "Original branch",
   "branchRecreatedNew": "New branch",

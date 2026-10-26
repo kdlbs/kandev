@@ -1026,6 +1026,8 @@
   "modelSelectionRemediationUnknown": "実行者設定を確認。",
   "modelSelectionRequested": "要求モデル",
   "modelSelectionWarning": "実行者は保存されたモデル選択を使えなかった。",
+  "turnEndedDetached": "Kandev に接続できない間にターンが終了した。",
+  "pausedOfflineBudget": "Kandev への接続不能がオフライン予算を超えたため、ターンを一時停止した。",
   "branchRecreatedWarning": "保存ブランチが使えなかったため、新しいブランチを作成した。",
   "branchRecreatedOriginal": "元ブランチ",
   "branchRecreatedNew": "新ブランチ",

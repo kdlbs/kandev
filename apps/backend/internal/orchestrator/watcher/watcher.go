@@ -53,6 +53,10 @@ type AgentEventData struct {
 	DeliverySequence          uint64                                `json:"delivery_sequence,omitempty"`
 	DeliverySubmissionID      string                                `json:"delivery_submission_id,omitempty"`
 	DeliveryOutcome           string                                `json:"delivery_outcome,omitempty"`
+	DetachedAtCommit          bool                                  `json:"detached_at_commit,omitempty"`
+	CommittedAt               *time.Time                            `json:"committed_at,omitempty"`
+	CancelCause               string                                `json:"cancel_cause,omitempty"`
+	CancelDecidedAt           *time.Time                            `json:"cancel_decided_at,omitempty"`
 	Status                    string                                `json:"status,omitempty"`
 	ExitCode                  *int                                  `json:"exit_code,omitempty"`
 	ErrorMessage              string                                `json:"error_message,omitempty"`
