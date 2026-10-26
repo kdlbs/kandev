@@ -42,6 +42,12 @@ Kandev keeps growing external integrations and surface-specific behavior directl
   git-describe, and unknown or malformed development host versions shall retain
   their compatibility-comparison exemption; independent manifest validation
   shall still apply.
+- **AC-PLUGINS-PLUGINS-001.15:** When a plugin creates a task with launch
+  profiles (`launch.agent_profile_id`, `launch.executor_profile_id`), Kandev
+  shall reject a profile that does not exist with `InvalidArgument`, whether or
+  not the plugin asks to start an agent. A task created without starting an
+  agent shall keep those profiles, so that a later start by a workflow step,
+  including a step that pulls the task from another step, launches with them.
 
 ## System design
 
