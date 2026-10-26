@@ -334,7 +334,7 @@ Old ambiguous records fail closed. Preserve journals, native state, and user edi
 Reuse existing agent_delivery_* metrics with bounded reasons; keep IDs out of metric labels.
 The [work package](../../../plans/durable-agent-reattachment/plan.md) owns implementation and validation.
 The [shutdown and recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the later closed-journal and missing-execution regressions.
-Detached MCP waiting/offline budgets and richer remote-working UI remain follow-up work.
+Detached MCP waiting and offline budgets are specified in [detached MCP call wait](detached-mcp-call-wait.md). Richer remote-working UI remains follow-up work.
 
 ## Pending backend retention extension
 

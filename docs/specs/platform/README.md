@@ -73,6 +73,7 @@ and repository-context identity.
 - [Browser console retention](requirements/browser-console-retention.md)
 - [Diagnostic logging](requirements/diagnostic-logging.md)
 - [Runtime failure attribution](requirements/runtime-failure-attribution.md)
+- [Detached MCP call wait](requirements/detached-mcp-call-wait.md) (draft)
 - [Durable agent delivery](requirements/durable-agent-delivery.md) (draft)
 - [Duration-aware E2E sharding and CI reliability](requirements/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](requirements/external-e2e-runner-capacity.md)
