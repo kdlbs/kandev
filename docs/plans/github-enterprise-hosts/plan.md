@@ -492,3 +492,28 @@ The mobile plugin diagnostic case also failed once with `Route is already handle
 in its response mock. Its CI retry and three exact local repetitions passed. No
 plugin source or test change was made. The next head must confirm both browser
 checks through CI before this follow-up is complete.
+
+
+### Browser CI synchronization repairs
+
+The next CI run exposed four test synchronization gaps. The mobile Quick Chat
+case checked a transient disabled button after cancellation had already settled.
+It now uses the existing cancellation observation helper to hold settlement until
+the pending-state assertions finish, with release in `finally`. The Settings
+recovery case now observes the second failed chunk request before checking the
+error screen. Kotlin completion sends the shortcut to Monaco's actual input,
+instead of relying on page focus after a click. Attachment reloads use the existing
+chat-panel readiness helper before checking persisted previews.
+
+Controlled probes reproduced the original Settings and Kotlin failures by delaying
+the second chunk failure and removing editor focus. Both passed with the fixes.
+Delaying the desktop panel chunk reproduced the attachment failure; waiting for
+session HTTP data alone did not fix it, while chat-panel readiness did. All
+latency and focus probes were removed. These are test-only corrections with no
+product, translation, public documentation, or screenshot changes.
+
+Baseline resource-bounded runs passed 24 desktop cases and two mobile cancellation
+cases with retries disabled, CPU quota 200%, and memory limit 4 GiB. The final eight
+changed desktop/mobile cases passed (1.8m), and the shared attachment helper passed
+its phone case (27.2s) under the same limits. ESLint passed with zero warnings.
+Normal commit hooks and exact-head CI remain delivery gates.
