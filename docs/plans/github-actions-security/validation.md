@@ -191,3 +191,19 @@ The 249 workflow/helper cases, shell contract, action pinning, document checks,
 and diff checks passed again after main integration. Zizmor returned the expected
 exit code 14 with the same 10 reviewed residual findings. Local PR-documentation
 coverage validation returned `covered` with no errors.
+
+The next CI run, `40326593499` at `e8c8718d1d5`, reported two more flaky
+fixtures. Both passed their retries, so the strict flake gate remained active.
+The tablet workflow test measured a 44px control as `43.99993896484375px`
+during drawer animation. It now waits for the actual drawer animation and uses
+the existing touch-control helper's 0.01px precision allowance. The mobile
+sidebar test measured Retry before that button was visible. Both recovery cases
+now wait for the Retry button within their own error row before measuring it.
+The 44px touch requirement and product rendering are preserved.
+
+With retries disabled on two CPUs, all six repeated mobile recovery cases and
+all five desktop/tablet workflow-navigation cases passed. These are additional
+browser cases, separate from the 249 workflow/helper cases above.
+The independent reviewer found no weakened behavioral contract or remaining
+defect in these two corrections. Scoped ESLint, formatting, document validation,
+and the full web typecheck with the same process-local 8 GiB heap passed again.
