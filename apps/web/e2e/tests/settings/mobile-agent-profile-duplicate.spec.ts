@@ -82,4 +82,48 @@ test.describe("Mobile agent profile duplicate", () => {
       }
     }
   });
+
+  test("keeps an open profile menu usable when another profile is removed", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = agent.profiles[0];
+    const extraName = "Temporary mobile profile";
+    const copyName = `${profile.name} Copy`;
+    const extra = await apiClient.createAgentProfile(agent.id, extraName, {
+      model: profile.model || "mock-fast",
+    });
+    try {
+      await testPage.goto("/settings/agents");
+      const extraRow = testPage.getByTestId("agent-profile-row").filter({ hasText: extraName });
+      await expect(extraRow).toHaveCount(1);
+      await testPage.waitForFunction(
+        () =>
+          Reflect.get(window, "__KANDEV_E2E_STORE__")?.getState().connection.status === "connected",
+      );
+      const row = testPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
+      const trigger = row.getByTestId(`profile-actions-menu-${profile.id}`);
+      await trigger.tap();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
+      await expect(menu).toBeVisible();
+
+      await apiClient.deleteAgentProfile(extra.id, true);
+      await expect(extraRow).toHaveCount(0);
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await waitForFiniteAnimations(menu);
+      await menu.getByTestId(`duplicate-profile-${profile.id}`).tap();
+      await expect(testPage.getByRole("link", { name: copyName, exact: true })).toBeVisible();
+    } finally {
+      const { agents: currentAgents } = await apiClient.listAgents();
+      const currentAgent = currentAgents.find((candidate) => candidate.id === agent.id);
+      for (const candidate of currentAgent?.profiles ?? []) {
+        if (candidate.id === extra.id || candidate.name === copyName) {
+          await apiClient.deleteAgentProfile(candidate.id, true);
+        }
+      }
+    }
+  });
 });

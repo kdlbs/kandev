@@ -116,6 +116,46 @@ test.describe("Agent profile duplicate", () => {
     await expect(tabletTestPage.getByTestId(`delete-profile-${profile.id}`)).toBeVisible();
   });
 
+  test("keeps the profile menu open when another profile is added or removed", async ({
+    tabletTestPage,
+    apiClient,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = agent.profiles[0];
+    const extraName = "Temporary profile for menu refresh";
+    let extraId: string | undefined;
+    try {
+      await tabletTestPage.goto("/settings/agents");
+      await tabletTestPage.waitForFunction(
+        () =>
+          Reflect.get(window, "__KANDEV_E2E_STORE__")?.getState().connection.status === "connected",
+      );
+      const row = tabletTestPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
+      const trigger = row.getByTestId(`profile-actions-menu-${profile.id}`);
+      await trigger.tap();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(tabletTestPage.getByTestId(`duplicate-profile-${profile.id}`)).toBeVisible();
+
+      const extra = await apiClient.createAgentProfile(agent.id, extraName, {
+        model: profile.model || "mock-fast",
+      });
+      extraId = extra.id;
+      const extraRow = tabletTestPage
+        .getByTestId("agent-profile-row")
+        .filter({ hasText: extraName });
+      await expect(extraRow).toHaveCount(1);
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await apiClient.deleteAgentProfile(extraId, true);
+      extraId = undefined;
+      await expect(extraRow).toHaveCount(0);
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(tabletTestPage.getByTestId(`delete-profile-${profile.id}`)).toBeVisible();
+    } finally {
+      if (extraId) await apiClient.deleteAgentProfile(extraId, true);
+    }
+  });
+
   test("duplicates from the profile page header and navigates to the copy", async ({
     testPage,
     apiClient,

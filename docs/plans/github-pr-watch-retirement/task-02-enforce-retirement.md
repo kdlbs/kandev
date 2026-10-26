@@ -196,3 +196,37 @@ empty repository ID.
 - `go test -timeout=90s -race -trimpath -tags fts5 ./internal/github -run '^TestPRWatchRetirement_HTTPResumeLegacyEmptyRepositoryID$' -count=1`: passed.
 - `make -C apps/backend build`: passed; Darwin packaging emitted the expected missing codesign-tool warnings.
 - `bash scripts/lint-go-changed apps/backend/internal/github/service_pr_watch_retirement.go apps/backend/internal/github/store_pr_watch_retirement_test.go`: 0 issues.
+
+## E2E CI fixup results
+
+The E2E run for PR head `9cc174a` reported four flaky tests across 4,265
+executed tests; 40 tests were skipped. Its blob audit found the same four
+failed attempts and no report parse errors.
+
+- Azure saved-view setup now waits for the configuration save response. A
+  deliberately delayed save reproduced the 503 before the wait and passed
+  four retry-free runs afterward.
+- The restart test drains and holds individual session reads while testing
+  list hydration. The original missing-activity failure reproduced locally,
+  and the corrected test passed eight retry-free runs.
+- Profile rows retain their open menu when another profile is added or
+  removed. The removal case failed before the change; tablet and phone
+  regressions now cover the update, with phone duplicate and touch ordering
+  paths also exercised.
+- Pseudo-locale setup installs its cookie before the first navigation and
+  checks the document request. The original CI symptom did not reproduce in
+  local stress runs; the first-request cookie assertion failed before the
+  setup change, and the complete preceding-test sequence passed 54
+  retry-free cases afterward under a two-CPU, 4 GB container.
+
+Validation also passed for the affected component's 19 Vitest tests, changed
+frontend lint, E2E sleep lint and ratchet, and frontend typecheck with
+`NODE_OPTIONS=--max-old-space-size=8192`. The default 4 GB Node heap was
+insufficient for the typecheck.
+
+- The rebuilt desktop E2E selection passed 9 tests with retries disabled;
+  the phone duplicate, deletion, and touch-order selection passed 6.
+- With two CPUs and 4 GB of memory, the CI-neighbor restart sequence passed
+  12 tests and the delayed-save Azure sequence passed 8, all without retries.
+- The same resource limits and retry-free settings produced 34 passing tests
+  in the profile sequence, including the CI predecessor specs.
