@@ -30,6 +30,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
     }
     await route.fulfill({
       status: 503,
+      headers: { "Retry-After": "120" },
       contentType: "application/json",
       json: { error: "workspace context temporarily unavailable" },
     });
@@ -62,6 +63,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   });
   try {
     await retry.tap();
+    await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
   } finally {
     recovery.resolve();
   }

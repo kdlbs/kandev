@@ -111,8 +111,8 @@ None.
 
 ## Results
 
-The implementation changes are complete, but this work order remains in
-progress because broad SQLite and PostgreSQL verification are incomplete.
+At child delivery, implementation was complete but verification remained in
+progress. The parent takeover evidence below supersedes those earlier gaps.
 SQLite stores the top-level tool boundary beside the projected cursor and
 commits it atomically with message effects. Canonical text IDs derive from a
 stable base and committed boundary. The inbox `canonical_message_id` column
@@ -177,7 +177,7 @@ same order so a failed assertion cannot hang cleanup. No launcher behavior chang
 ```
 
 This passed locally in 3.174s. The Windows rerun remains a CI check.
-The PR will be marked ready after pushing these corrections, as the user requested.
+The PR was marked ready after pushing these corrections, as the user requested.
 
 
 ## Post-hold PR fixup (2026-10-26)
@@ -189,3 +189,24 @@ forced disconnect, then releases the marker after the disconnect call. Backend
 transcript polling precedes rendered-row waits and chronological DOM checks.
 The updated managed Chromium test rebuilt production assets and passed 1/1
 in 10.9s. Targeted ESLint passed. No product behavior changed in this fixup.
+
+## CI fixture follow-up (2026-10-26)
+
+Backend CI run `40401492531` passed at head `6d3eb21a9624`, including
+PostgreSQL, Windows native execution, and all three SQLite cohorts.
+E2E run `40401492777` exposed three fixture failures on that head:
+
+- The mobile sidebar recovery fixture now supplies `Retry-After` so automatic
+  retry cannot replace the manual retry control. It verifies retained task rows
+  while the manual refresh response is held.
+- Concurrent PR-watcher agents now use isolated worktree executors. Their
+  offline remote publishes branch and PR-head refs before the watcher starts.
+- The selected-filter fixture removes repositories left by earlier tests.
+  Replaying repository-set creation followed by filter ordering reproduced
+  the duplicate-label failure before this correction.
+
+With retries disabled, the mobile recovery spec passed six checks over three
+runs. The watcher and repository-set/filter sequence passed all seven checks.
+Two more runs each of the watcher and phone filter tests passed four checks.
+Targeted ESLint, Prettier, and diff checks passed. These changes affect test
+fixtures only.

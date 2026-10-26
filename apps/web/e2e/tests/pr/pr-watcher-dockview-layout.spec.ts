@@ -155,13 +155,15 @@ test.describe("PR watcher dockview layout stability", () => {
       provider_name: "testrepo",
     });
 
-    // Create the PR head branches in the local seed repo so the executor's
-    // git checkout for auto-started review tasks succeeds (in production these
-    // branches would have been fetched during clone).
+    // Each review workspace fetches its branch and PR head from the fixture remote.
     const gitEnv = makeGitEnv(backend.tmpDir);
     for (const branch of ["fix/auth", "feat/dashboard", "docs/update"]) {
       execSync(`git branch -f ${branch} main`, { cwd: repoDir, env: gitEnv });
     }
+    execSync(
+      "git push origin fix/auth feat/dashboard docs/update fix/auth:refs/pull/101/head feat/dashboard:refs/pull/202/head docs/update:refs/pull/303/head",
+      { cwd: repoDir, env: gitEnv },
+    );
 
     // --- Seed workflow ---
     const workflow = await apiClient.createWorkflow(
@@ -245,6 +247,7 @@ test.describe("PR watcher dockview layout stability", () => {
       reviewStep.id,
       seedData.agentProfileId,
       {
+        executor_profile_id: seedData.worktreeExecutorProfileId,
         repos: [{ owner: "testorg", name: "testrepo" }],
         prompt: "Review {{pr.link}}",
       },
