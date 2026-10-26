@@ -51,8 +51,8 @@ type canonicalProjectionFailureDeliveryRepository struct {
 
 func (r *canonicalProjectionFailureDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
 	context.Context, *models.AgentDeliveryEvent, *models.AgentDeliveryEffect,
-) (bool, error) {
-	return false, r.projectionErr
+) (models.CanonicalAgentDeliveryProjectionResult, error) {
+	return models.CanonicalAgentDeliveryProjectionResult{}, r.projectionErr
 }
 
 type canonicalProjectionDeliveryRepository struct {
@@ -66,21 +66,21 @@ type canonicalBatchProjectionDeliveryRepository struct {
 
 func (r *canonicalProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
 	_ context.Context, event *models.AgentDeliveryEvent, _ *models.AgentDeliveryEffect,
-) (bool, error) {
+) (models.CanonicalAgentDeliveryProjectionResult, error) {
 	r.projected = append(r.projected, event)
-	return false, nil
+	return models.CanonicalAgentDeliveryProjectionResult{CanonicalMessageID: "projected-message"}, nil
 }
 
 func (r *canonicalBatchProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvents(
 	_ context.Context, events []*models.AgentDeliveryEvent, _ []*models.AgentDeliveryEffect,
-) ([]bool, error) {
+) ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 	r.batchCalls++
 	r.projected = append(r.projected, events...)
-	appendMessages := make([]bool, len(events))
+	results := make([]models.CanonicalAgentDeliveryProjectionResult, len(events))
 	for index := range events {
-		appendMessages[index] = index > 0
+		results[index] = models.CanonicalAgentDeliveryProjectionResult{CanonicalMessageID: "projected-message", Appended: index > 0}
 	}
-	return appendMessages, nil
+	return results, nil
 }
 
 func (r *immutableDeliveryRepository) ReceiveAgentDeliveryEvent(

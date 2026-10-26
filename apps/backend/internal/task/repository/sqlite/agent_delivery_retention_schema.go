@@ -52,6 +52,11 @@ var agentDeliveryRetentionColumns = []agentDeliveryRetentionColumn{
 	{table: "agent_delivery_cursors", column: "retired_sequence", definition: "BIGINT NOT NULL DEFAULT 0 CHECK (retired_sequence >= 0)"},
 }
 
+var agentDeliverySegmentationColumns = []agentDeliveryRetentionColumn{
+	{table: "agent_delivery_inbox", column: "canonical_message_id", definition: "TEXT NOT NULL DEFAULT ''"},
+	{table: "agent_delivery_cursors", column: "message_segment_boundary_sequence", definition: "BIGINT CHECK (message_segment_boundary_sequence IS NULL OR message_segment_boundary_sequence >= 0)"},
+}
+
 var agentDeliveryRetentionIndexes = []struct {
 	name  string
 	query string
@@ -146,6 +151,22 @@ func (r *Repository) initAgentDeliveryRetentionSchema() error {
 			query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s", column.table, column.column, column.definition)
 		}
 		if err := r.migrate.Apply("agent_delivery_retention.column."+column.table+"."+column.column, query); err != nil {
+			return err
+		}
+	}
+	for _, column := range agentDeliverySegmentationColumns {
+		exists, err := db.ColumnExistsContext(r.migrationContext(), r.db, column.table, column.column)
+		if err != nil {
+			return fmt.Errorf("check agent delivery segmentation column %s.%s: %w", column.table, column.column, err)
+		}
+		if exists {
+			continue
+		}
+		query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", column.table, column.column, column.definition)
+		if dialect.IsPostgres(r.db.DriverName()) {
+			query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s", column.table, column.column, column.definition)
+		}
+		if err := r.migrate.Apply("agent_delivery_segmentation.column."+column.table+"."+column.column, query); err != nil {
 			return err
 		}
 	}

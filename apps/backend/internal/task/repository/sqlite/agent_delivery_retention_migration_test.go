@@ -26,11 +26,17 @@ func TestDeliveryRetentionSchemaUpgradePreservesPreRetentionEvidence(t *testing.
 			}
 			assertPreRetentionDeliveryEvidence(t, db)
 			assertDeliveryRetentionSchema(t, repo)
+			if err := assertNullSegmentBoundary(db, "stream-settling"); err != nil {
+				t.Fatalf("pre-boundary cursor must remain uninitialized for lazy projection migration: %v", err)
+			}
 
 			if _, err := NewWithDB(db, db, nil); err != nil {
 				t.Fatalf("reopen upgraded schema: %v", err)
 			}
 			assertPreRetentionDeliveryEvidence(t, db)
+			if err := assertNullSegmentBoundary(db, "stream-settling"); err != nil {
+				t.Fatalf("reopen must not reset or prematurely initialize the boundary: %v", err)
+			}
 		})
 	}
 }

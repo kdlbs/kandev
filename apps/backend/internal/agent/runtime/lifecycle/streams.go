@@ -696,7 +696,7 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 			zap.String("event_type", event.Type))
 		return event, false, nil
 	}
-	isAppend, err := projector.ProjectCanonicalAgentDeliveryEvent(
+	projectionResult, err := projector.ProjectCanonicalAgentDeliveryEvent(
 		ctx, durableEvent, deliveryEffectForEvent(event),
 	)
 	if err != nil {
@@ -712,11 +712,12 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 			return event, false, err
 		}
 		if event.Type == streams.EventTypeToolCall {
-			event.CanonicalMessageAppend = isAppend
+			event.CanonicalMessageAppend = projectionResult.Appended
 		}
 	} else {
-		event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
-		event.CanonicalMessageAppend = isAppend
+		event.CanonicalMessageBaseID = canonicalAgentMessageID(execution, event)
+		event.CanonicalMessageID = projectionResult.CanonicalMessageID
+		event.CanonicalMessageAppend = projectionResult.Appended
 	}
 	event.CanonicalProjection = true
 	// Projection is the canonical commit boundary. ACK transport is scheduled
@@ -755,14 +756,14 @@ func (sm *StreamManager) projectCanonicalAgentEvents(
 	if err != nil {
 		return err
 	}
-	appendMessages, err := projector.ProjectCanonicalAgentDeliveryEvents(ctx, events, effects)
+	projectionResults, err := projector.ProjectCanonicalAgentDeliveryEvents(ctx, events, effects)
 	if err != nil {
 		return err
 	}
-	if len(appendMessages) != len(prepared) {
-		return fmt.Errorf("canonical delivery projector returned %d results for %d events", len(appendMessages), len(prepared))
+	if len(projectionResults) != len(prepared) {
+		return fmt.Errorf("canonical delivery projector returned %d results for %d events", len(projectionResults), len(prepared))
 	}
-	sm.notifyCanonicalAgentEventBatch(execution, prepared, appendMessages, client, startupGeneration)
+	sm.notifyCanonicalAgentEventBatch(execution, prepared, projectionResults, client, startupGeneration)
 	return nil
 }
 
@@ -806,7 +807,7 @@ func canonicalDeliveryBatchInputs(
 func (sm *StreamManager) notifyCanonicalAgentEventBatch(
 	execution *AgentExecution,
 	prepared []preparedAgentEvent,
-	appendMessages []bool,
+	projectionResults []models.CanonicalAgentDeliveryProjectionResult,
 	client *agentctl.Client,
 	startupGeneration uint64,
 ) {
@@ -815,9 +816,10 @@ func (sm *StreamManager) notifyCanonicalAgentEventBatch(
 	var content strings.Builder
 	for i, item := range prepared {
 		event := item.event
-		event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+		event.CanonicalMessageBaseID = canonicalAgentMessageID(execution, event)
+		event.CanonicalMessageID = projectionResults[i].CanonicalMessageID
 		event.CanonicalProjection = true
-		event.CanonicalMessageAppend = appendMessages[i]
+		event.CanonicalMessageAppend = projectionResults[i].Appended
 		sm.scheduleDurableDeliveryAck(execution, client, event)
 		if item.skipCallback {
 			continue
