@@ -145,6 +145,8 @@ product changes.
 - `apps/backend/internal/backendapp/office_scope_test.go` (case tables only;
   put new test functions in a separate file if needed for file-size limits)
 - `apps/backend/internal/backendapp/office_label_scope_test.go` (new)
+- `apps/backend/internal/workflowsync/service_test.go` (required-CI test
+  synchronization correction only; see results).
 - `apps/web/lib/api/domains/office-extended-api.ts`
 - `apps/web/lib/api/domains/office-label-removal-api.test.ts` (new)
 - `apps/web/components/task/simple/components/labels-picker.test.tsx` (new)
@@ -226,3 +228,28 @@ No managed E2E, browser build, browser reload, or rendered phone-geometry
 verification was performed. Shared click/touch-pointer/keyboard component
 behavior plus production-client serialization and real persisted-state rereads
 provide the explicitly bounded state/data evidence for AC-TASKS-LABELS-002.6.
+
+### Required-CI test synchronization correction
+
+The PostgreSQL package gate exposed an existing asynchronous test race in
+`TestPermanentFailureSuspendsPollingUntilManualRecovery`: persisted suspension
+became observable before the original automatic job emitted its transition
+metric. The test now requires that job's `automaticInFlight` entry to clear
+under `automaticMu` before checking metrics or advancing the fake clock.
+All suspension, polling, recovery and metric assertions remain intact; no
+production behavior, sleeps or timeout increases were added.
+
+The unchanged targeted test passed 20 race-enabled repetitions locally, so
+local reproduction was unsuccessful; the hosted failure supplied the actual
+zero-versus-one metric result. The corrected targeted test passed 20
+repetitions, followed sequentially by one passing workflowsync package run.
+Both used `GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB`, GNU timeout
+300 seconds with a 10-second kill grace, and
+`go test -trimpath -race -tags fts5 -p 1 ./internal/workflowsync -timeout=270s`.
+The targeted runs added
+`-run '^TestPermanentFailureSuspendsPollingUntilManualRecovery$' -count=20`;
+the package run used `-count=1`. Test times were 1.166 seconds unchanged,
+1.161 seconds corrected, and 1.305 seconds for the package.
+Canonical `bash scripts/lint-go-changed
+apps/backend/internal/workflowsync/service_test.go` passed with `0 issues`
+using its separate default 3 GiB memory budget.
