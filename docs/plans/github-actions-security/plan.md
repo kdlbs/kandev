@@ -122,6 +122,9 @@ task switching waits for the drawer animation before tapping a task row.
 Branch-refresh and filter setup wait for repository-picker focus restoration
 before opening the executor picker. Their original selection and request
 assertions remain unchanged.
+The silent-prompt fixture releases output only after the real watchdog notice
+is observed. The mobile routing fixture waits for save confirmation before
+checking persisted settings. Both retain their original behavior assertions.
 
 ## Risks
 

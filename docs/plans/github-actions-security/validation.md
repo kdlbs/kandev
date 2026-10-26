@@ -298,3 +298,39 @@ this fixture or its popover components.
 
 The base then advanced to `6a1a2ae1000`. Its worktree-placement change has no
 overlapping files. Current-base compatibility remains a separate delivery check.
+
+The committed picker fix `0bff99cfd84` was recovered unchanged into an independent
+checkout after the shared repository developed an empty HEAD object. It was
+pushed with its existing three-repeat and full 13-case verification evidence.
+Run `40372137482` passed shard 27, including the previously failing picker case.
+
+That run exposed three retry-passing cases in shards 6 and 19. The mobile
+silent-prompt test spent over 12 seconds navigating and establishing readiness,
+but its mock emitted output after 10 seconds. The failed snapshot already showed
+the progress text; the backend log confirmed that the real watchdog had fired.
+A temporary 12-second navigation delay reproduced the same missing-notice
+assertion. Replacing the initial timed delay with the existing mock-agent
+`e2e:await_file` command passed under the same probe. The fixture releases output
+after asserting the notice and its touch target, and cleans up the release file.
+The output, ongoing-turn, reload, and overflow assertions remain unchanged.
+
+The mobile routing test read configuration immediately after clicking Save.
+A temporary 500 ms delay before its PUT reproduced the missing role-tier value.
+Waiting for the existing save-confirmation toast passed with that delay. The
+toast is emitted after the awaited update. Persistence and reload assertions
+remain unchanged. Both diagnostic delays were removed before full verification.
+
+The quick-chat failure retained its finished indicator while the navigation
+menu stayed open. Its first failure has a screenshot, while the trace covers
+only the successful retry. The exact case passed three local repetitions and
+both cases in its full spec passed without retries. No speculative product or
+fixture change was made for that case; the next complete CI run remains its
+delivery check.
+
+On two CPUs with retries disabled, all 8 cases across the affected mobile specs
+and all 5 desktop watchdog cases passed. Full web typecheck with the process-local
+8 GiB heap, scoped ESLint, formatting, document checks, and diff checks passed.
+The local runner required removal of inherited launcher-config variables and
+explicit loopback binding, plus the host's Chromium library paths. Setup failures
+before those corrections were not counted as test evidence. Product code,
+timeouts, retry policies, and negative assertions were not changed.
