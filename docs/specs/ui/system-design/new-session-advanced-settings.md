@@ -57,8 +57,10 @@ context without an explicit shared boundary.
 The launch dialog owns the popover container and passes it through the form.
 Its content must allow overflow so the anchored picker is not clipped at the
 dialog edge. The picker itself bounds and scrolls its list.
-Picker Enter events cannot reach the dialog's default launch action. Enter in
-the search field also prevents implicit form submission.
+Ordinary picker Enter events cannot reach the dialog's default launch action.
+Enter in the search field also prevents implicit form submission. IME candidate
+confirmation (`isComposing` or key code 229) retains its native behavior. The
+trigger's accessible name includes its translated label and selected count.
 
 Touch uses one Drawer/sheet with title, close action, safe-area padding and a
 single internally scrolling list. Bottom padding is at least 8px so the list

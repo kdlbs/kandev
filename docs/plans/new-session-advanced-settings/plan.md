@@ -69,11 +69,13 @@ captures; record any unavailable state fixture rather than claiming coverage.
 
 ## Verification results
 
-Implementation is complete. All 46 targeted unit tests, 20 desktop browser tests
+Implementation is complete. All 48 targeted unit tests, 20 desktop browser tests
 and 13 mobile browser tests passed. Web typecheck, full lint and i18n checks
 passed. Desktop, phone, 320px pseudo-locale and coarse-tablet captures were
 inspected. See [Task 01](task-01-compact-launch-configuration.md#results) for
 commands, regression coverage, documentation checks and runner setup.
+PR review added IME confirmation and accessible-count regressions. Remote CI
+and automated review verification remain in progress.
 
 ## Risks
 

@@ -26,7 +26,8 @@ export type NewSessionMCPPickerProps = MCPSessionSelectorProps & {
 };
 
 function containPickerEnter(event: KeyboardEvent) {
-  if (event.key !== "Enter") return;
+  if (event.key !== "Enter" || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)
+    return;
   event.stopPropagation();
   // Search must not invoke the launch dialog's default action or submit its form.
   if (event.target instanceof HTMLInputElement) event.preventDefault();
@@ -47,7 +48,7 @@ export function NewSessionMCPPicker({ portalContainer, ...selection }: NewSessio
       id={id}
       type="button"
       variant="outline"
-      aria-label={title}
+      aria-labelledby={`${id}-label ${id}-count`}
       aria-haspopup="dialog"
       aria-expanded={open && !unavailable}
       data-testid="new-session-mcp-select"
@@ -57,7 +58,7 @@ export function NewSessionMCPPicker({ portalContainer, ...selection }: NewSessio
         "w-32 max-w-full justify-between border-border/60 bg-muted/30 hover:bg-muted/60 cursor-pointer",
       )}
     >
-      <span className="min-w-0 truncate tabular-nums">
+      <span id={`${id}-count`} className="min-w-0 truncate tabular-nums">
         {t("settings:mcpSelectedCount", { count: selection.selectedIds.length })}
       </span>
       <IconChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -74,7 +75,7 @@ export function NewSessionMCPPicker({ portalContainer, ...selection }: NewSessio
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="new-session-mcp-row">
       <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-        <label htmlFor={id} className="wrap-anywhere">
+        <label id={`${id}-label`} htmlFor={id} className="wrap-anywhere">
           {title}
         </label>
         <SettingsInfo label={title}>{description}</SettingsInfo>

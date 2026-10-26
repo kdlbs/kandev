@@ -141,7 +141,7 @@ Playwright output directories.
 
 ### Final checks
 
-- Targeted Vitest command: **46 tests passed across 4 files**.
+- Targeted Vitest command after PR review: **48 tests passed across 4 files**.
 - Required desktop command: **20 passed**, one worker, zero retries. Log:
   `/tmp/kandev-run.e2e.BAhCbyIh.log`.
 - Required mobile command: **13 passed**, one worker, zero retries. Log:
@@ -158,8 +158,8 @@ Playwright output directories.
 The desktop set contains the new Advanced settings suite, the existing New
 Session suite and Task MCP selection. The mobile set contains their mobile
 counterparts. These suites include existing-session Customize and New Task
-regression controls. All 33 browser tests passed against the final production
-build. The final formatter changed only the test callback layout.
+regression controls. All 33 browser tests passed against the implementation
+build before the PR review corrections below.
 
 Final browser commands used the verification paths above with
 `KANDEV_SERVER_HOST=127.0.0.1`, `E2E_PORT_OFFSET=26` and a process-local
@@ -185,3 +185,18 @@ selection was passed as `--project mobile-chrome` before the test arguments.
   layout does not contain the desktop tab-add control.
 - Runs use one worker, zero retries and isolated runner data. Rebuilt artifacts
   are reused with `--no-build` only when production sources have not changed.
+
+### PR review corrections
+
+CodeRabbit's aggregate review identified two valid accessibility issues. The
+trigger now includes the translated selected count in its accessible name.
+The Enter guard allows native IME candidate confirmation for both `isComposing`
+and key code 229. The visible layout and creation contract are unchanged.
+
+The existing selection test now checks accessible names before and after a
+selection. Two input regressions check IME confirmation, ordinary Enter
+containment, and an explicit launch positive control. All three new assertions
+failed before the fix. The targeted Vitest command above then passed all 48
+tests across four files. The affected-file ESLint check, full web typecheck
+(8GB Node heap), and full specification lint also passed. Remote CI and
+automated review verification are pending.

@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
@@ -105,6 +113,7 @@ describe("New session optional selections", () => {
     );
     expect(screen.queryByTestId(MCP_TRIGGER)).toBeNull();
     const picker = expandAndOpen();
+    expect(screen.getByRole("button", { name: "MCP servers 0 selected" })).toBeTruthy();
     expect(within(picker).getByText("Inherited documentation")).toBeTruthy();
     fireEvent.click(within(picker).getByRole("checkbox", { name: "Documentation" }));
     fireEvent.keyDown(within(picker).getByRole("textbox"), { key: "Enter" });
@@ -112,6 +121,7 @@ describe("New session optional selections", () => {
     fireEvent.keyDown(within(picker).getByRole("textbox"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByTestId("new-session-mcp-options")).toBeNull());
     expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "MCP servers 1 selected" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: ADVANCED_LABEL }));
     const reopened = expandAndOpen();
     expect(
@@ -121,6 +131,25 @@ describe("New session optional selections", () => {
     ).toBe("true");
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  it.each([{ isComposing: true }, { keyCode: 229 }])(
+    "preserves IME candidate confirmation for %j",
+    (composition) => {
+      const onSubmit = vi.fn();
+      render(<Form onSubmit={onSubmit} />);
+      const search = within(expandAndOpen()).getByRole("textbox");
+      const confirmation = createEvent.keyDown(search, { key: "Enter", ...composition });
+      fireEvent(search, confirmation);
+      expect(confirmation.defaultPrevented).toBe(false);
+      expect(onSubmit).not.toHaveBeenCalled();
+      const enter = createEvent.keyDown(search, { key: "Enter" });
+      fireEvent(search, enter);
+      expect(enter.defaultPrevented).toBe(true);
+      expect(onSubmit).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Launch agent" }));
+      expect(onSubmit).toHaveBeenCalledOnce();
+    },
+  );
 
   it.each(["coarse tablet", "fine-pointer phone"])("uses a sheet for %s", (mode) => {
     viewport.touch = mode === "coarse tablet";
