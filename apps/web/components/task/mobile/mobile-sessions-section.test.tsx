@@ -58,6 +58,8 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
   isSessionResumable: () => false,
 }));
 
+const SESSIONS_LABEL = "Sessions";
+const DATA_STATE_ATTR = "data-state";
 const PILL_TESTID = "mobile-sessions-pill";
 const ICON_CIRCLE_CHECK = "tabler-icon-circle-check";
 const SESSION_ACTIONS_LABEL = "Session actions";
@@ -415,7 +417,7 @@ describe("MobileSessionsPicker session delete confirmation", () => {
     try {
       render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
       fireEvent.click(screen.getByTestId(PILL_TESTID));
-      const picker = screen.getByRole("dialog", { name: "Sessions" });
+      const picker = screen.getByRole("dialog", { name: SESSIONS_LABEL });
       const row = screen.getByTestId(`mobile-session-row-${SESSION_A}`);
       fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }));
       fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -424,7 +426,7 @@ describe("MobileSessionsPicker session delete confirmation", () => {
       expect(screen.getByRole("group").textContent).toContain("Alpha");
       expect(screen.queryByRole("button", { name: SESSION_ACTIONS_LABEL })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Back" }));
-      expect(screen.getByRole("dialog", { name: "Sessions" })).toBe(picker);
+      expect(screen.getByRole("dialog", { name: SESSIONS_LABEL })).toBe(picker);
       expect(row.isConnected).toBe(true);
       await vi.waitFor(() =>
         expect(document.activeElement).toBe(
@@ -479,19 +481,19 @@ describe("MobileSessionsPicker session delete confirmation", () => {
     fireEvent.pointerDown(screen.getByRole("button", { name: SESSION_ACTIONS_LABEL }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(screen.getByRole("group", { name: /delete session/i })).toBeTruthy();
-    const picker = screen.getByRole("dialog", { name: "Sessions" });
-    expect(picker.getAttribute("data-state")).toBe("open");
+    const picker = screen.getByRole("dialog", { name: SESSIONS_LABEL });
+    expect(picker.getAttribute(DATA_STATE_ATTR)).toBe("open");
 
     fireEvent.keyDown(document, { key: "Escape" });
 
     await vi.waitFor(() => {
-      expect(picker.getAttribute("data-state")).toBe("closed");
+      expect(picker.getAttribute(DATA_STATE_ATTR)).toBe("closed");
     });
     expect(mocks.removeSession).not.toHaveBeenCalled();
     expect(screen.queryByRole("group", { name: /delete session/i })).toBeNull();
 
     fireEvent.click(screen.getByTestId(PILL_TESTID));
-    expect(screen.getByRole("dialog", { name: "Sessions" }).getAttribute("data-state")).toBe(
+    expect(screen.getByRole("dialog", { name: SESSIONS_LABEL }).getAttribute(DATA_STATE_ATTR)).toBe(
       "open",
     );
     expect(screen.queryByRole("group", { name: /delete session/i })).toBeNull();
@@ -515,6 +517,7 @@ describe("Mobile session restart", () => {
   it("restarts the chosen row without selecting it", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const picker = screen.getByRole("dialog", { name: SESSIONS_LABEL });
     const row = screen.getByTestId(SESSION_B_ROW);
     fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }), {
       button: 0,
@@ -523,6 +526,7 @@ describe("Mobile session restart", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Restart session" }));
     expect(mocks.restartSession).toHaveBeenCalledWith("session-b");
     expect(mocks.setActiveSession).not.toHaveBeenCalled();
+    expect(picker.getAttribute(DATA_STATE_ATTR)).toBe("closed");
   });
 
   it("disables conflicting actions while restarting", () => {

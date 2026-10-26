@@ -41,6 +41,13 @@ func restartScopeMatches(previous *Attempt, selection SelectionContext, sessionI
 }
 
 func (s *Service) resolveCapture(ctx context.Context, request CaptureRequest) (*Resolved, *Attempt, error) {
+	if request.Selection.RestartReview != nil {
+		resolved, previous, err := s.ResolveReviewedRestart(ctx, request.Selection, request.SessionID, request.WorkDir, request.RestartOf)
+		if err == nil && previous.Snapshot.Provider != request.Provider {
+			return nil, nil, ErrConflict
+		}
+		return resolved, previous, err
+	}
 	if request.RestartOf == "" {
 		resolved, err := s.Resolve(ctx, request.Selection)
 		return resolved, nil, err

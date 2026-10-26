@@ -1,6 +1,9 @@
 package sandbox
 
-import "context"
+import (
+	"context"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
+)
 
 const (
 	ScopeExecutor     = "executor"
@@ -31,6 +34,7 @@ type Binding struct {
 
 // SelectionContext contains IDs derived from the persisted launch context.
 type SelectionContext struct {
+	RestartReview  *contract.RestartPolicyReview
 	OrgID          string
 	WorkspaceID    string
 	ExecutorID     string

@@ -143,14 +143,11 @@ A browser disconnect affects only its UI connection.
 Plugin loss disables new launches and pending approval grants. Static confinement stays active until core stops the owned process.
 Do not let plugin removal delete artifacts needed by a running attempt.
 
-Persist unresolved policy intent plus the immutable resolved revision and provider/runtime versions.
-Recovery must bind the retained runtime to the same owner, generation, policy digest, and process identity before adoption.
-Never adopt an unknown supervisor by name or replace it using mutable defaults.
-Missing evidence produces recovery-required status with Stop available.
-Backend-owned callback and egress leases cannot survive detachment. A graceful backend shutdown stops these sandbox executions even when ordinary agent survival is enabled. Recovery checks the private attempt store before reconstructing commands or replaying prompts. A retained process whose callback owner was lost is stopped through the existing bounded recovery path. It is not adopted as an ordinary agent. A replacement can reuse the frozen policy only after core verifies that the captured supervisor and every process in its kernel container ended. Missing supervisor birth evidence keeps the attempt blocked and retains its private files.
+Persist policy intent, resolved revision, and provider/runtime versions. Adoption requires matching owner, generation, policy digest, and process identity. Names and mutable defaults prove nothing. Missing evidence requires recovery with Stop available.
+Callback and egress leases end on detachment. Graceful shutdown stops sandbox executions despite agent survival. Before reconstructing commands or replaying prompts, recovery reads private attempts. Lost callback ownership requires bounded stop, not ordinary adoption. Replacement requires proof that the captured supervisor and kernel container ended; missing supervisor birth evidence blocks replacement and preserves private files.
 
-Retain bounded, authenticated startup receipts. `not_started` proves no spawn. `terminated` requires matching attempt, generation, policy, supervisor identity, and an empty kernel container. Missing or mismatched receipts prove neither. Keep replay tombstones until attempt files are removed. Reject excess receipts before dispatch. Never expose receipt evidence in public errors.
-Automatic replacement retains policy and work directory. Refuse rebinding. Explicit restart requires review of selection changes.
+Bound and authenticate startup receipts. `not_started` proves no spawn. `terminated` requires matching attempt, generation, policy, supervisor identity, and empty kernel container. Missing or mismatched receipts prove neither. Keep replay tombstones until file removal; reject excess receipts before dispatch. Public errors omit receipts.
+Automatic replacement retains policy, provider package, and work directory. Manual restart reviews captured/current approved policy before stop. Current policy requires a browser operator, previous attempt, server-derived scope, and a digest of revisions, ceilings, and binding versions. Recheck admission, compilation, and atomic capture; reject stale choices. Capture operator, time, and digest before dispatch; consume the review before recovery. Admission can advance the private task guard, never saved policies. Phone uses a full-height view, fixed actions, and one scroller. Cancel sends no stop.
 
 ## Approval protocol
 

@@ -25,8 +25,10 @@ func (a sandboxLaunchAdmission) admit(ctx context.Context, req *runtime.LaunchRe
 	if err != nil {
 		return err
 	}
-	identity, identified := authn.IdentityFromContext(ctx)
-	if selection.WorkspaceID == "" && (!identified || identity.Synthetic || identity.Instance || identity.UserID == "") {
+	if req.SandboxRestartReview != nil {
+		return a.admitReviewedRestart(ctx, req, selection)
+	}
+	if unscopedSandboxCaller(ctx, selection.WorkspaceID) {
 		hasBindings, err := a.policies.HasAnyBindings(ctx)
 		if err != nil {
 			return err
@@ -137,4 +139,9 @@ func (a sandboxLaunchAdmission) sessionExecutor(ctx context.Context, req *runtim
 	}
 	selection.ExecutorID = profile.ExecutorID
 	return nil
+}
+
+func unscopedSandboxCaller(ctx context.Context, workspaceID string) bool {
+	identity, identified := authn.IdentityFromContext(ctx)
+	return workspaceID == "" && (!identified || identity.Synthetic || identity.Instance || identity.UserID == "")
 }

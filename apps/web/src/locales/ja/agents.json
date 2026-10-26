@@ -713,5 +713,15 @@
   "reportShowHidden": "非表示の拒否記録を表示",
   "reportHideHelp": "非表示はこのビューにのみ適用されます。アクセス権限の付与やレポートの証拠の変更は行いません。",
   "reportHidden_one": "このビューでは拒否記録を {{count}} 件非表示にしています。",
-  "reportHidden_other": "このビューでは拒否記録を {{count}} 件非表示にしています。"
+  "reportHidden_other": "このビューでは拒否記録を {{count}} 件非表示にしています。",
+  "restartReviewTitle": "サンドボックスの再起動を確認",
+  "restartReviewHelp": "記録済みのポリシーを保持するか、再起動前に現在の承認済みポリシーを確認してください。自動復旧では記録済みのポリシーが保持されます。",
+  "restartKeepCaptured": "記録済みのポリシーで再起動",
+  "restartUseCurrent": "現在のポリシーで再起動",
+  "restartReviewStale": "セッションまたはポリシーが変更されました。再起動前に現在の詳細を確認してください。",
+  "restartReviewCurrentUnavailable": "現在のポリシーを確認できません。記録済みのポリシーを保持できます。",
+  "restartReviewReadOnly": "別のポリシーを選択できるのはオペレーターのみです。",
+  "restartReviewChanged": "現在のポリシーは記録済みのポリシーと異なります。",
+  "restartReviewSame": "現在のポリシーは記録済みのポリシーと一致します。",
+  "restartPermissions": "権限"
 }

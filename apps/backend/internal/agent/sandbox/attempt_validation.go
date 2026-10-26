@@ -19,7 +19,7 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 	if err != nil {
 		return AttemptSnapshot{}, err
 	}
-	if resolved == nil || resolved.Revision.ID != request.Resolved.Revision.ID || resolved.Revision.Digest != request.Launch.PolicyDigest || resolved.BindingVersion != request.Resolved.BindingVersion || !slices.Equal(resolved.Bindings, request.Resolved.Bindings) {
+	if !capturedResolutionMatches(resolved, request) {
 		return AttemptSnapshot{}, ErrConflict
 	}
 	if !validAttemptProvider(request.Provider, resolved, request.Launch) {
@@ -44,7 +44,11 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 	if previous != nil {
 		restartVersion = previous.Version
 	}
-	return AttemptSnapshot{RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
+	review, err := s.restartReviewReceipt(ctx, request.Selection)
+	if err != nil {
+		return AttemptSnapshot{}, err
+	}
+	return AttemptSnapshot{RestartReview: review, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
 		SessionID: request.SessionID, ExecutionID: request.ExecutionID, WorkDir: request.WorkDir, Resolved: resolved, Grants: grants, Ceiling: ceiling,
 		Launch: request.Launch.Clone(), Provider: request.Provider, CreatedAt: time.Now().UTC()}, nil
 }
@@ -123,4 +127,10 @@ func resolveAttemptCeiling(grants contract.Grants, request CaptureRequest, prote
 		grants.Filesystem = slices.DeleteFunc(slices.Clone(grants.Filesystem), func(grant contract.FilesystemGrant) bool { return grant.Reference == contract.ReferenceAgentState })
 	}
 	return contract.ResolveRuntimeDirectories(grants, request.WorkDir, request.AgentState, protected)
+}
+
+func capturedResolutionMatches(resolved *Resolved, request CaptureRequest) bool {
+	return resolved != nil && resolved.Revision.ID == request.Resolved.Revision.ID &&
+		resolved.Revision.Digest == request.Launch.PolicyDigest && resolved.BindingVersion == request.Resolved.BindingVersion &&
+		slices.Equal(resolved.Bindings, request.Resolved.Bindings)
 }

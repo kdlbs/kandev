@@ -32,6 +32,9 @@ func (s *Service) AdmitTask(ctx context.Context, selection SelectionContext, par
 	if err = s.checkParentGuard(ctx, selection, parentID, resolved); err != nil {
 		return nil, err
 	}
+	if err = s.validateReviewedSelection(ctx, selection, resolved); err != nil {
+		return nil, err
+	}
 	if resolved == nil {
 		return nil, nil
 	}

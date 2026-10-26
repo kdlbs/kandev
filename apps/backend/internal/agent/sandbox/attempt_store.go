@@ -54,7 +54,10 @@ func appendCaptureAuthority(query string, args []any, snapshot AttemptSnapshot) 
 	query, args = appendRevisionAuthority(query, args, snapshot)
 	if snapshot.RestartOf != "" {
 		query += ` AND EXISTS (SELECT 1 FROM sandbox_attempts a WHERE a.org_id=? AND a.attempt_id=? AND a.version=? AND a.state=?)`
-		return query, append(args, snapshot.OrgID, snapshot.RestartOf, snapshot.RestartVersion, AttemptStopped)
+		args = append(args, snapshot.OrgID, snapshot.RestartOf, snapshot.RestartVersion, AttemptStopped)
+		if snapshot.RestartReview == nil {
+			return query, args
+		}
 	}
 	for _, binding := range snapshot.Resolved.Bindings {
 		query += ` AND COALESCE((SELECT b.version FROM sandbox_policy_bindings b WHERE b.org_id=? AND b.scope=? AND b.target_id=?),0)=?`

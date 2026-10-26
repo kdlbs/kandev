@@ -39,6 +39,7 @@ type CaptureRequest struct {
 
 // AttemptSnapshot is private launch evidence. It is never a public API projection.
 type AttemptSnapshot struct {
+	RestartReview  *RestartReviewReceipt        `json:"restart_review,omitempty"`
 	RestartOf      string                       `json:"restart_of,omitempty"`
 	RestartVersion int64                        `json:"restart_version,omitempty"`
 	AgentProfileID string                       `json:"agent_profile_id"`

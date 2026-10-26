@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"io"
 	"strings"
 	"sync"
@@ -1695,7 +1696,8 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	SandboxSelection *policy.SelectionContext `json:"-"`
+	SandboxRestartReview *contract.RestartPolicyReview `json:"-"`
+	SandboxSelection     *policy.SelectionContext      `json:"-"`
 	// ResumePassthrough preserves provider resume intent after runtime cleanup.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string

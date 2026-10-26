@@ -18,6 +18,7 @@ type PreviewContext struct {
 }
 
 type SelectionPreview struct {
+	SelectionDigest string      `json:"selection_digest,omitempty"`
 	Resolved        *Resolved   `json:"resolved"`
 	Eligible        []*Revision `json:"eligible"`
 	ResolutionError string      `json:"resolution_error,omitempty"`
@@ -48,6 +49,12 @@ func (s *Service) PreviewSelection(ctx context.Context, request PreviewContext) 
 		return nil, ErrConflict
 	}
 	result := &SelectionPreview{Resolved: resolved}
+	if resolved != nil {
+		result.SelectionDigest, err = resolvedReviewDigest(resolved)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if resolutionErr != nil {
 		_, result.ResolutionError = sandboxHTTPError(resolutionErr)
 	}

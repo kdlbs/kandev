@@ -713,5 +713,15 @@
   "reportShowHidden": "显示隐藏的拒绝记录",
   "reportHideHelp": "隐藏仅影响当前视图，不会授予访问权限或更改报告证据。",
   "reportHidden_one": "此视图中已隐藏 {{count}} 条拒绝记录。",
-  "reportHidden_other": "此视图中已隐藏 {{count}} 条拒绝记录。"
+  "reportHidden_other": "此视图中已隐藏 {{count}} 条拒绝记录。",
+  "restartReviewTitle": "检查沙箱重启",
+  "restartReviewHelp": "保留已捕获的策略，或在重启前检查当前已批准的策略。自动恢复会保留已捕获的策略。",
+  "restartKeepCaptured": "保留已捕获的策略并重启",
+  "restartUseCurrent": "使用当前策略并重启",
+  "restartReviewStale": "会话或策略已更改。请在重启前检查当前详细信息。",
+  "restartReviewCurrentUnavailable": "无法检查当前策略。您可以保留已捕获的策略。",
+  "restartReviewReadOnly": "只有操作员可以选择其他策略。",
+  "restartReviewChanged": "当前策略与已捕获的策略不同。",
+  "restartReviewSame": "当前策略与已捕获的策略相同。",
+  "restartPermissions": "权限"
 }

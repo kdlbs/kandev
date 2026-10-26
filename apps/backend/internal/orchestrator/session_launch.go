@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"strings"
 	"time"
 
@@ -182,6 +183,7 @@ type continuationCheckpoint struct {
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
+	SandboxRestartReview *contract.RestartPolicyReview `json:"sandbox_restart_review,omitempty"`
 	// reusePreparedPrimary is reserved for the recorded dependency launch consumer.
 	reusePreparedPrimary  bool
 	TaskID                string                        `json:"task_id"`
@@ -1099,6 +1101,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		resumeCtx = withSessionOpenRecoveryContext(ctx)
 	}
 	resumeOptions := executor.ResumeOptions{
+		SandboxRestartReview:             req.SandboxRestartReview,
 		AllowBranchReplacement:           req.AllowBranchReplacement,
 		RepairWorkspaceInventory:         req.RepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: req.WorkspaceInventoryIdempotencyKey,

@@ -159,6 +159,7 @@ function SessionRowTrailingActions({
   onCancelDelete,
   onHandoffProfile,
   actions,
+  onClosePicker,
 }: {
   row: SessionRow;
   taskId: string;
@@ -168,6 +169,7 @@ function SessionRowTrailingActions({
   onCancelDelete: () => void;
   onHandoffProfile: (profileId: string) => void;
   actions: ReturnType<typeof useSessionActions>;
+  onClosePicker: () => void;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -205,7 +207,10 @@ function SessionRowTrailingActions({
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
-          onRestart={() => void actions.restart()}
+          onRestart={() => {
+            onClosePicker();
+            void actions.restart();
+          }}
           isRestarting={actions.isRestarting}
           onAskDelete={onAskDelete}
           onExecution={() => setExecutionOpen(true)}
@@ -225,6 +230,7 @@ function SessionRowItem({
   onAskDelete,
   onCancelDelete,
   onSelect,
+  onClosePicker,
 }: {
   row: SessionRow;
   taskId: string;
@@ -234,6 +240,7 @@ function SessionRowItem({
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onSelect: (sessionId: string) => void;
+  onClosePicker: () => void;
 }) {
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
@@ -291,6 +298,7 @@ function SessionRowItem({
           onCancelDelete={onCancelDelete}
           onHandoffProfile={handleHandoffProfile}
           actions={actions}
+          onClosePicker={onClosePicker}
         />
       </div>
       {handoffPreset && (
@@ -420,6 +428,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
             onAskDelete={() => setConfirmDeleteSessionId(row.id)}
             onCancelDelete={() => setConfirmDeleteSessionId(null)}
             onSelect={handleSelect}
+            onClosePicker={onClose}
           />
         ))}
       </div>

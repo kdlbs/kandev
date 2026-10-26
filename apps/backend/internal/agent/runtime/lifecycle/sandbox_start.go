@@ -94,6 +94,9 @@ func (m *Manager) prepareExecutionSandbox(ctx context.Context, execution *AgentE
 	if attempt == nil {
 		return nil, errors.New("selected sandbox is unavailable")
 	}
+	selection := *execution.SandboxSelection
+	selection.RestartReview = nil
+	execution.SandboxSelection = &selection
 	execution.sandboxAttempt = attempt
 	execution.sandboxDispatched = false
 	return attempt, nil

@@ -713,5 +713,15 @@
   "reportShowHidden": "Mostrar operações negadas ocultas",
   "reportHideHelp": "A ocultação aplica-se apenas a esta vista. Não concede acesso nem altera as provas do relatório.",
   "reportHidden_one": "Está oculta {{count}} operação negada nesta vista.",
-  "reportHidden_other": "Estão ocultas {{count}} operações negadas nesta vista."
+  "reportHidden_other": "Estão ocultas {{count}} operações negadas nesta vista.",
+  "restartReviewTitle": "Rever o reinício da sandbox",
+  "restartReviewHelp": "Mantenha a política capturada ou reveja a política aprovada atual antes de reiniciar. A recuperação automática mantém a política capturada.",
+  "restartKeepCaptured": "Manter a política capturada e reiniciar",
+  "restartUseCurrent": "Usar a política atual e reiniciar",
+  "restartReviewStale": "A sessão ou a política mudou. Reveja os detalhes atuais antes de reiniciar.",
+  "restartReviewCurrentUnavailable": "Não é possível verificar a política atual. Pode manter a política capturada.",
+  "restartReviewReadOnly": "Apenas um operador pode selecionar uma política diferente.",
+  "restartReviewChanged": "A política atual difere da política capturada.",
+  "restartReviewSame": "A política atual corresponde à política capturada.",
+  "restartPermissions": "Permissões"
 }

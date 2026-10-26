@@ -32,6 +32,9 @@ vi.mock("@/components/needs-you-inbox/needs-you-inbox-bridge", () => ({
 vi.mock("@/components/quick-chat/quick-chat-provider", () => ({
   QuickChatProvider: mocks.passthrough,
 }));
+vi.mock("@/components/task/sandbox-restart-review-host", () => ({
+  SandboxRestartReviewHost: () => null,
+}));
 vi.mock("@/components/task/recent-task-switcher", () => ({ RecentTaskSwitcher: () => null }));
 vi.mock("@/components/session-failure-toast-bridge", () => ({
   SessionFailureToastBridge: () => null,

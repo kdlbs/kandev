@@ -73,6 +73,7 @@ export type SandboxResolved = {
 };
 
 export type SandboxSelectionPreview = {
+  selection_digest?: string;
   resolved: SandboxResolved | null;
   eligible: SandboxRevision[];
   resolution_error?: string;

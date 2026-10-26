@@ -7,14 +7,15 @@ import type { ExecutionSnapshot } from "@/lib/types/execution";
 
 const mocks = vi.hoisted(() => ({
   access: { enabled: true, identity: "operator", canRead: true, canEdit: true },
-  task: { id: "task", workspaceId: "workspace", workflowStepId: "step" },
+  fetchTask: vi.fn(),
   fetchSandboxRevision: vi.fn(),
   previewSandboxSelection: vi.fn(),
 }));
 vi.mock("@/hooks/domains/settings/use-sandbox-access", () => ({
   useSandboxAccess: () => mocks.access,
 }));
-vi.mock("@/hooks/use-task", () => ({ useTask: () => mocks.task }));
+vi.mock("@/lib/api/domains/kanban-api", () => ({ fetchTask: mocks.fetchTask }));
+vi.mock("@/hooks/use-task", () => ({ useTask: () => null }));
 vi.mock("@/lib/api/domains/sandbox-api", () => mocks);
 const snapshot = {
   task_id: "task",
@@ -28,6 +29,11 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.fetchTask.mockResolvedValue({
+    id: "task",
+    workspace_id: "workspace",
+    workflow_step_id: "step",
+  });
   mocks.access = { enabled: true, identity: "operator", canRead: true, canEdit: true };
   mocks.fetchSandboxRevision.mockResolvedValue({ id: "captured", digest: "digest" });
   mocks.previewSandboxSelection.mockResolvedValue({ resolved: null, eligible: [] });
@@ -68,4 +74,15 @@ it("keeps member reads separate from operator preview and rejects a mismatched r
   await waitFor(() => expect(result.current.revision.isSuccess).toBe(true));
   expect(result.current.captured).toBeUndefined();
   expect(mocks.previewSandboxSelection).not.toHaveBeenCalled();
+});
+
+it("reads the current saved task when the board cache does not contain it", async () => {
+  const { result } = renderHook(() => useExecutionPolicyDetails(snapshot), { wrapper });
+  await waitFor(() => expect(mocks.fetchTask).toHaveBeenCalled());
+  await waitFor(() => expect(result.current.preview.data).toBeDefined());
+  expect(mocks.previewSandboxSelection.mock.calls[0][0]).toMatchObject({
+    task_id: "task",
+    workspace_id: "workspace",
+    workflow_step_id: "step",
+  });
 });

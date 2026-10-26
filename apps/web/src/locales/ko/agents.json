@@ -713,5 +713,15 @@
   "reportShowHidden": "숨긴 거부 기록 표시",
   "reportHideHelp": "숨기기는 이 보기에만 적용됩니다. 접근 권한을 부여하거나 보고서 증거를 변경하지 않습니다.",
   "reportHidden_one": "{{count}}개의 거부 기록이 이 보기에 숨겨져 있습니다.",
-  "reportHidden_other": "{{count}}개의 거부 기록이 이 보기에 숨겨져 있습니다."
+  "reportHidden_other": "{{count}}개의 거부 기록이 이 보기에 숨겨져 있습니다.",
+  "restartReviewTitle": "샌드박스 재시작 검토",
+  "restartReviewHelp": "기록된 정책을 유지하거나 재시작 전에 현재 승인된 정책을 검토하세요. 자동 복구는 기록된 정책을 유지합니다.",
+  "restartKeepCaptured": "기록된 정책으로 재시작",
+  "restartUseCurrent": "현재 정책으로 재시작",
+  "restartReviewStale": "세션 또는 정책이 변경되었습니다. 재시작 전에 현재 세부 정보를 검토하세요.",
+  "restartReviewCurrentUnavailable": "현재 정책을 확인할 수 없습니다. 기록된 정책을 유지할 수 있습니다.",
+  "restartReviewReadOnly": "운영자만 다른 정책을 선택할 수 있습니다.",
+  "restartReviewChanged": "현재 정책은 기록된 정책과 다릅니다.",
+  "restartReviewSame": "현재 정책은 기록된 정책과 같습니다.",
+  "restartPermissions": "권한"
 }

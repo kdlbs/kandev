@@ -59,6 +59,9 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 }
 
 func (m *Manager) resolve(ctx context.Context, req PrepareRequest) (*policy.Resolved, *policy.Attempt, error) {
+	if req.Selection.RestartReview != nil {
+		return m.policies.ResolveReviewedRestart(ctx, req.Selection, req.SessionID, req.WorkDir, req.RestartOf)
+	}
 	if req.RestartOf != "" {
 		previous, err := m.policies.ResolveRestart(ctx, req.Selection, req.SessionID, req.WorkDir, req.RestartOf)
 		if err != nil {

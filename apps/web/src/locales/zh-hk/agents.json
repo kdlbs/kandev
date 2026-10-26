@@ -713,5 +713,15 @@
   "reportShowHidden": "顯示隱藏的拒絕記錄",
   "reportHideHelp": "隱藏僅影響目前視圖，不會授予存取權限或更改報告證據。",
   "reportHidden_one": "此視圖中已隱藏 {{count}} 條拒絕記錄。",
-  "reportHidden_other": "此視圖中已隱藏 {{count}} 條拒絕記錄。"
+  "reportHidden_other": "此視圖中已隱藏 {{count}} 條拒絕記錄。",
+  "restartReviewTitle": "檢查沙箱重啓",
+  "restartReviewHelp": "保留已捕獲的策略，或在重啓前檢查目前已批准的策略。自動恢復會保留已捕獲的策略。",
+  "restartKeepCaptured": "保留已捕獲的策略並重啓",
+  "restartUseCurrent": "使用目前策略並重啓",
+  "restartReviewStale": "工作階段或策略已更改。請在重啓前檢查目前詳細資訊。",
+  "restartReviewCurrentUnavailable": "無法檢查目前策略。您可以保留已捕獲的策略。",
+  "restartReviewReadOnly": "只有操作員可以選擇其他策略。",
+  "restartReviewChanged": "目前策略與已捕獲的策略不同。",
+  "restartReviewSame": "目前策略與已捕獲的策略相同。",
+  "restartPermissions": "權限"
 }
