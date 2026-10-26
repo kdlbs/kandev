@@ -59,7 +59,7 @@ and changes to unrelated MCP surfaces.
 Run from the repository root:
 
 ```bash
-(cd apps/backend && go test ./internal/mcp/server ./internal/mcp/handlers -count=1)
+(cd apps/backend && go test ./internal/mcp/server ./internal/mcp/handlers -count=1 -timeout=30m)
 (cd apps/backend && go test ./internal/task/service -run '^TestExecutorOwnership' -count=1)
 bash scripts/lint-go-changed apps/backend/internal/mcp/server/server.go apps/backend/internal/mcp/server/config_handlers.go apps/backend/internal/mcp/server/server_test.go apps/backend/internal/mcp/server/task_executor_discovery_integration_test.go
 node --test scripts/validate-public-docs.test.mjs
@@ -124,6 +124,14 @@ The implementation and verification are complete.
   a real profile for its explicit-selection case.
 - Changed-Go lint passed with zero issues. `make build` passed for the backend
   and agentctl targets.
+- PR fixup verification added an explicit read-only annotation for
+  `list_executors_kandev`; its metadata regression test failed before the
+  annotation and passed after it. The MCP server package test passed.
+- The sidebar presentation E2E now waits for saved task-row settings to reach
+  the API. The active-task storage E2E has a 180-second test deadline for its
+  bounded setup, activity, and cleanup waits, and the SSH cleanup E2E waits
+  75 seconds against the runtime's 60-second cleanup bound. All three affected
+  E2E cases passed locally with retries disabled.
 - Public-doc tests passed (63/63), public-doc validation passed (54 pages),
   catalogue validation passed (403 decisions and 1,742 specs), specification
   lint tests passed (36/36), all-spec lint passed, and `git diff --check`

@@ -348,11 +348,14 @@ func (s *Server) registerConfigExecutorTools() {
 }
 
 func (s *Server) registerListExecutorsTool() {
+	listTool := mcp.NewToolWithRawSchema("list_executors_kandev",
+		"List every executor available to the authenticated caller, including custom executor IDs, with its visible profiles. Use a returned profile ID as executor_profile_id in create_task_kandev. Visibility does not grant authority to launch later; task creation and executor admission check current ownership.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	// NewToolWithRawSchema does not accept option functions, so set annotations directly.
+	listTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
 	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_executors_kandev",
-			"List every executor available to the authenticated caller, including custom executor IDs, with its visible profiles. Use a returned profile ID as executor_profile_id in create_task_kandev. Visibility does not grant authority to launch later; task creation and executor admission check current ownership.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
+		listTool,
 		s.wrapHandler("list_executors_kandev", s.listExecutorsHandler()),
 	)
 }
