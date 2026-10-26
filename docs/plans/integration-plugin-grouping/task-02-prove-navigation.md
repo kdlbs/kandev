@@ -241,3 +241,46 @@ The previous-head CI locale setup failure (`pseudo-coverage.spec.ts`, Office wor
 Claude's review at `a07ef4e6edb` raised a possible ID collision. Inspection confirmed that valid custom sections may use `integrations`. The materializer now follows the existing Coordinator suffix convention to choose the first unused node ID, preserving custom IDs and destination ownership. A behavioral regression failed with `duplicate_id` before the fix and passed afterward. It covers multiple occupied suffixes, stable repeated materialization, editable parent visibility, and unchanged custom sections.
 
 The desktop legacy-layout flow now seeds a custom section with that colliding ID and an explicit integration shortcut. It hides and restores the distinct Integrations parent through real settings writes and reload, checks unique persisted IDs, and keeps the custom shortcut visible. The fixture explicitly expands navigation so this case tests identity and persistence. The normal desktop, phone, and geometry cases remain covered separately. Final collision validation passed: 112 focused tests in 16 suites, typecheck, zero-warning changed-file ESLint, 12 desktop/tablet browser cases, and 11 phone cases. The browser cases used retries disabled and the same fresh frontend build. Logs: `/tmp/youtrack-e2e-logs/kandev-run.e2e.0VfWh9CF.log` and `/tmp/youtrack-e2e-logs/kandev-run.e2e.LLasneTS.log`.
+
+
+## CI fixture follow-up
+
+The user authorized CI remediation and merge after the implementation. The full
+run on the grouping fix passed all non-browser checks. Four browser shards failed;
+each case passed locally without a retry, but the retained CI artifacts expose
+specific setup or readiness races:
+
+- `layout/mobile-sidebar-read-recovery.spec.ts`: start a valid idle session before
+  simulating failed workspace reads. Settle drawer animation and hold recovery
+  responses until the native Retry tap ends, so recovery cannot move another
+  control under the same gesture. Retain the row and 44px assertions.
+- `pages/mobile-github-page.ts` and `github/mobile-github-sidebar.spec.ts`: target
+  the saved-query button, settle drawer animation, and verify selection dismisses
+  the drawer before checking the repository filter and reload persistence.
+- `chat/question-image-previews.spec.ts`: arm the image-response wait before
+  reload and await its body before checking the rendered preview. The CI snapshot
+  showed the correct question with its image still loading.
+- `task/workspace-file-transfer.spec.ts`: assert the uploaded copy in Changes,
+  then return to Files before checking both filenames. The CI snapshot showed
+  the upload succeeded and the default layout activated Changes.
+
+These changes preserve the existing behavioral assertions and native input. No
+production behavior, retry setting, or timeout budget changed. They extend this
+work order only for the user's explicit PR cleanup request.
+
+Verification commands, from repository root with the isolated runtime environment
+described above:
+
+```bash
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/layout/mobile-sidebar-read-recovery.spec.ts tests/github/mobile-github-sidebar.spec.ts --retries 0 --trace on
+pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/chat/question-image-previews.spec.ts tests/task/workspace-file-transfer.spec.ts --retries 0 --trace on
+```
+
+The two mobile failure cases passed three consecutive repetitions (six tests).
+The final full mobile files passed all nine tests with retries disabled. Logs:
+`/tmp/youtrack-e2e-logs/kandev-run.e2e.mSkDwWyz.log` (repetitions) and
+`/tmp/youtrack-e2e-logs/kandev-run.e2e.PuqLl6RH.log` (full files).
+The final full desktop files passed all nine tests with retries disabled. Log:
+`/tmp/youtrack-e2e-logs/kandev-run.e2e.sQMBV1VB.log`. Changed-file ESLint,
+specification validation, and whitespace checks passed. Fresh exact-head CI and
+review remain pending.

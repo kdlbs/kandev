@@ -261,3 +261,18 @@ The previous-head CI locale setup failure (`pseudo-coverage.spec.ts`, Office wor
 Claude's review at `a07ef4e6edb` raised a possible ID collision. Inspection confirmed that valid custom sections may use `integrations`. The materializer now follows the existing Coordinator suffix convention to choose the first unused node ID, preserving custom IDs and destination ownership. A behavioral regression failed with `duplicate_id` before the fix and passed afterward. It covers multiple occupied suffixes, stable repeated materialization, editable parent visibility, and unchanged custom sections.
 
 The desktop legacy-layout flow now seeds a custom section with that colliding ID and an explicit integration shortcut. It hides and restores the distinct Integrations parent through real settings writes and reload, checks unique persisted IDs, and keeps the custom shortcut visible. The fixture explicitly expands navigation so this case tests identity and persistence. The normal desktop, phone, and geometry cases remain covered separately. Final collision validation passed: 112 focused tests in 16 suites, typecheck, zero-warning changed-file ESLint, 12 desktop/tablet browser cases, and 11 phone cases. The browser cases used retries disabled and the same fresh frontend build. Logs: `/tmp/youtrack-e2e-logs/kandev-run.e2e.0VfWh9CF.log` and `/tmp/youtrack-e2e-logs/kandev-run.e2e.LLasneTS.log`.
+
+
+## CI fixture remediation
+
+The user authorized full PR cleanup and merge. Four browser-shard failures on the
+reviewed source exposed independent test setup and readiness races. The E2E-only
+follow-up uses a valid idle session and gated recovery for the mobile Retry tap,
+the saved-query button after drawer animation, an image-response wait after
+reload, and the existing return-to-Files flow after upload activates Changes.
+All behavioral assertions remain, with native input, no added retries, and no
+longer timeouts. The affected full files passed nine mobile and nine desktop
+tests with retries disabled; the mobile failure cases also passed six stress
+repetitions. Details and exact commands are in Task 02. The product grouping
+proof remains valid because these changes do not alter production source. Fresh
+CI and review of the remediation commit remain external delivery gates.
