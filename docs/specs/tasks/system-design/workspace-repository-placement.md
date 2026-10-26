@@ -83,6 +83,40 @@ Record the resulting task-relative path in the new attachment row and physical p
 Never move an existing worktree. Expansion after prior nested additions retains those nested paths and shows them in the preview.
 For legacy sibling attachments outside the live CWD, disable nested choices until the existing root mismatch is resolved.
 
+### Canonical inventory publication
+
+The physical worktree writer can create `task_environment_repos` before batch inventory publication.
+For a newly inserted slot, it must carry the attachment's recorded `WorkspaceRelativePath` and
+`Position` together with physical identity. `branchMaterializer.prepareMaterializeRequest` passes
+these values through `worktree.CreateRequest` and `Manager.buildWorktreeRecord` to
+`SQLiteStore.CreateWorktree`. Placement metadata on `Worktree` is internal, not a new JSON contract.
+The store inserts both values in the existing identity-checked transaction. On conflict, active
+and incompletely tombstoned slots retain their recorded placement, including when incoming
+creation metadata is omitted or different. Placement may change only when the old row has
+`status = deleted` and non-null `deleted_at`, and the incoming materialization has `status = active`
+and null `deleted_at`. Under that strict predicate, path and position are replaced together from
+the newly admitted creation inputs, including legitimate empty paths and zero positions, in the
+same transaction as physical identity and status. Row identity, session/environment validation,
+cleanup/recovery authority and physical-claim locking remain unchanged. This is reactivation of
+a fully deleted slot by a new materialization, not automatic repair during ordinary resume.
+
+`workspaceSourceInventoryRows` may skip an existing repository/branch key because a successful
+physical insert already published complete placement. It must not repair historical rows by
+repository identity alone. Ordinary resume continues to require exactly one matching active
+canonical slot for every requested repository/branch, including recorded path equality.
+
+Batch failure retains the existing compensation sequence: restore runtime roots and exclusions,
+clean only newly created worktrees, and compensate new source associations. Existing inventory
+and physical identities remain unchanged. Inactive cleanup history follows the existing store
+policy; a successful retry has exactly one active slot at the selected location. A new valid
+attachment after rollback may choose a different placement and order when it reactivates a fully
+deleted slot. After database reopen, actual materialization reuse must retain the existing physical
+ID/path and canonical placement/order; a persisted lookup alone is insufficient evidence. The
+[attachment inventory fix package](../../../plans/attached-worktree-inventory/plan.md) owns the
+real-store persistence, compensation, and retry regressions after manager reconstruction for
+AC-001.2/001.4/003.6/003.7. The independent live multi-session cache-eviction defect is deferred
+by that package; it does not weaken canonical inventory admission.
+
 ## Preview contract
 
 Add an owner-authorized `POST /api/v1/tasks/:id/workspace-sources/preview` beside the existing mutation endpoint.

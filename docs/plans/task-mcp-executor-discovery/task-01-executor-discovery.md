@@ -138,3 +138,27 @@ The implementation and verification are complete.
   passed.
 - Actual-path PR documentation coverage returned `covered` with no errors and
   selected this work order.
+
+### PR fixup after base advancement
+
+- CI rerun `40376689011`, attempt 2, failed shard 13 because
+  `a breadcrumb too long to fit keeps the reveal control inside the popover`
+  measured the breadcrumb before the final asynchronous directory navigation
+  completed. The `test-results-13` artifact's
+  `normal-13-4/task-mobile-directory-brow-f64cb--control-inside-the-popover-mobile-chrome/error-context.md`
+  captured the failure. The retry summary recorded one flaky test and zero
+  final test failures; `E2E_FAIL_ON_FLAKY=1` correctly failed the shard.
+- `navigateIntoDeepDirectory` now waits for the final breadcrumb to become the
+  disabled current-directory item before measuring layout. The focused mobile
+  test passed four repetitions with retries disabled through the managed E2E
+  runner on the merged `main` tree:
+  `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --project mobile-chrome e2e/tests/task/mobile-directory-browser-hidden-folders.spec.ts -- --grep 'a breadcrumb too long to fit' --repeat-each=4 --retries=0`
+  (4 passed, 46.0s). The complete spec also passed with retries disabled:
+  `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build --project mobile-chrome e2e/tests/task/mobile-directory-browser-hidden-folders.spec.ts -- --retries=0`
+  (2 passed, 18.0s).
+- The affected backend packages passed on the merged tree:
+  `go test -trimpath ./internal/mcp/handlers ./internal/mcp/server -count=1 -timeout=30m`
+  (`handlers` 599.897s, `server` 24.942s). This verifies main's task-priority
+  fields and the PR's explicit executor-profile selection flag together.
+- Changed-Go lint reported zero issues, and `make -C apps/backend build`
+  passed. Fresh PR checks for the pushed merge commit remain the final CI gate.

@@ -1241,8 +1241,8 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_task_plan_kandev")
 	assert.NotContains(t, tools, "delete_task_plan_kandev")
 
-	// External mode does NOT include kanban update_task_kandev (config has its own update_task_state)
-	assert.NotContains(t, tools, "update_task_kandev")
+	// External mode reuses the generic task update alongside config's state-only tool.
+	assert.Contains(t, tools, "update_task_kandev")
 
 	// External mode does NOT include message_task_kandev (no live session context)
 	assert.NotContains(t, tools, "message_task_kandev")
@@ -1261,10 +1261,10 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// Baseline 42 tools plus the five compact settings tools and the audited
-	// cross-workspace transfer tool.
+	// Baseline 42 tools plus the five compact settings tools, the audited
+	// cross-workspace transfer tool, and generic task update.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 50, len(tools))
+	assert.Equal(t, 51, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

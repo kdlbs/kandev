@@ -60,6 +60,7 @@ func TestExternalMCP_ToolsListOverHTTP(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	assert.Contains(t, names, "create_task_kandev", "external mode must expose create_task_kandev")
+	assert.Contains(t, names, "update_task_kandev", "external mode must expose the generic task update tool")
 	assert.Contains(t, names, "list_workspaces_kandev")
 	assert.Contains(t, names, "get_mcp_config_kandev")
 	assert.Contains(t, names, "list_pending_questions_kandev", "external mode must expose the external question-answering tools")

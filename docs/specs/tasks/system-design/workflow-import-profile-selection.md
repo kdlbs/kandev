@@ -15,7 +15,8 @@ The existing matcher remains authoritative for automatic exact matches.
 Selections use profile IDs, so duplicate descriptors cannot redirect a user's choice to another local profile.
 
 No database migration or portable YAML version change is required.
-The implementation does not change unattended sync or the legacy raw-YAML import path.
+Profile selection does not change unattended sync or legacy raw-YAML profile matching.
+One-time import name selection is shared by preview, browser submission, and raw-YAML/MCP import.
 This is a local import extension. Its requirement and design preserve the rationale without a separate ADR.
 
 ## Requirement mapping
@@ -26,6 +27,7 @@ This is a local import extension. Its requirement and design preserve the ration
 | 001.4, 001.5 | Validation and persistence |
 | 001.6, 001.9 | Client flow and recovery |
 | 001.8 | Responsive composition |
+| 001.7, 001.10, 001.11 | Shared workflow-name selection |
 
 All identifiers in this table have prefix `AC-TASKS-IMPORT-PROFILES-`.
 
@@ -91,6 +93,35 @@ The backend distinguishes the JSON envelope by content type, not body guessing.
 Existing raw YAML, including JSON-shaped portable exports submitted with the existing YAML content type, retains its current parsing path.
 Both request forms retain the existing success shape: `created` and `skipped`.
 Body limits apply to both forms. Oversized or truncated bodies return an explicit request error.
+
+## Shared workflow-name selection
+
+`ImportWorkflows`, `PreviewImportWorkflows`, and `ImportWorkflowsWithBindings` apply one document-order selection policy after authorization and whole-envelope normalization/validation.
+Read destination workflows with `ListWorkflows(ctx, workspaceID, true)` so hidden names participate.
+Use a request-local selection helper beside the import service code. It copies the existing-name set, walks the original workflow array, and returns retained original indexes plus skipped names.
+An exact name enters the local seen set when its first eligible occurrence is retained.
+Do not trim, case-fold, compact, reorder, or mutate the portable workflow array.
+Selection is not a persistence operation or a concurrent-request reservation.
+
+The raw path imports retained indexes through `importSingleWorkflow` and appends a name to `Created` only after successful creation.
+It keeps its existing error and partial-storage-failure behavior; a failed first occurrence never selects a later duplicate as a fallback.
+The preview passes retained indexes to `collectImportProfileSteps` and reports skipped names from the same selection.
+The bound submission computes selection once from its freshly loaded destination state and passes those indexes to both `resolveImportProfileBindings` and `prepareImportedWorkflows`.
+These stages must not independently consume or mutate a shared seen-name set: a second pass would otherwise skip the first pass's retained items.
+Profile IDs and bindings remain keyed by original workflow index and validated step position.
+
+`expectedImportProfileSteps` and `validateImportProfileBindings` continue to check the original whole document.
+Unknown or duplicate binding keys and descriptor mismatches remain errors even for skipped occurrences.
+After that structural check, only retained occurrences resolve profiles and prepare/persist steps.
+Thus an omitted binding or an unavailable profile on a later duplicate cannot block the retained first occurrence.
+Whole-envelope validation still rejects malformed steps or references in skipped entries before writes.
+Retained entries keep existing profile, step-reference, and session-target validation.
+
+Submission re-reads destination names rather than trusting preview as a reservation.
+For unchanged destination state, preview and submission select identical occurrences; if a name was created after preview, submission skips it under the same policy.
+Neither path updates or merges a skipped workflow or writes its steps.
+No uniqueness index, migration, cross-request lock, or new batch transaction is introduced.
+`importSingleWorkflow` and `sync_apply.go` keep their conversion and sync contracts.
 
 ## Validation and persistence
 
@@ -175,6 +206,11 @@ Phone tests also verify focused picker navigation, containment, scroll ownership
 Public documentation changes belong in `docs/public/workflow-import-export.md` with the implementation.
 It must distinguish the browser selection flow from legacy raw-YAML and unattended imports.
 All new UI text uses locale keys for English, Portuguese, and the three Chinese locales, plus generated pseudo-locale content.
+
+The bounded [workflow import name-selection repair](../../../plans/workflow-import-name-deduplication/plan.md) covers shared selection only.
+Its service regressions use real task/workflow repositories, real UUID-producing task-service creation, and SQLite foreign keys; HTTP and MCP boundary tests cover their separate request forms.
+No frontend composition or control change is needed for this backend-owned selection correction.
+The existing profile-selection delivery record remains historical; this amendment does not promote the broader draft requirement or design.
 
 ## Related contracts
 

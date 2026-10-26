@@ -566,6 +566,8 @@ The published APIs include `defineCatalog`, `catalog.validate`,
 
 ## Implementation records
 
+- [Copilot rich-output identity repair](../../../plans/copilot-rich-output-identity/plan.md)
+
 - [CSV header BOM repair](../../../plans/rich-output-csv-header-bom/plan.md)
 - [Structured evidence extension](../../../plans/rich-output-evidence-components/plan.md)
 

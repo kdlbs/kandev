@@ -115,6 +115,13 @@ Implementation verification passed on 2026-10-26:
 - Public-doc tests and validation, docs catalogue validation, specification
   lint tests, all-spec lint, and the actual-path PR documentation coverage
   preflight passed.
+- PR fixup after main advanced: the merged handler preserves task-priority
+  updates and explicit executor-profile validation. The changed Go packages,
+  changed-file lint, and full backend build passed. CI's only remaining leaf
+  failure was one retried mobile breadcrumb-layout assertion; a final-directory
+  readiness wait now stabilizes the measurement, and its focused mobile test
+  passed four repetitions with retries disabled on the merged tree. Fresh PR
+  checks for the pushed merge commit remain required.
 - `gofmt` reported no changed Go files; `git diff --check` passed.
 
 ## Risks
