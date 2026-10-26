@@ -176,7 +176,9 @@ function FileRow({
   const counts = fileCounts(file);
   const statusContent =
     file.binary || !counts ? (
-      <span className="text-muted-foreground">{statusLabel(file, t)}</span>
+      <span className="min-w-0 [overflow-wrap:anywhere] text-muted-foreground">
+        {statusLabel(file, t)}
+      </span>
     ) : (
       <LineStat added={counts.added} removed={counts.deleted} className="shrink-0" />
     );
@@ -211,8 +213,10 @@ function FileRow({
           </span>
         )}
       </span>
-      <span className="flex shrink-0 items-center gap-2">
-        <span className={KIND_COLOR_CLASS[file.kind] ?? "text-muted-foreground"}>
+      <span className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span
+          className={`min-w-0 [overflow-wrap:anywhere] ${KIND_COLOR_CLASS[file.kind] ?? "text-muted-foreground"}`}
+        >
           {kindLabel(file, t)}
         </span>
         {statusContent}

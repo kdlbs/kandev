@@ -107,6 +107,13 @@ Implementation verification passed:
 - Desktop changed-files E2E: 6 passed, including the 390px fine-pointer case.
 - Desktop scroll E2E: 1 passed.
 - Mobile changed-files and scroll E2E: 4 passed, including 390px, 767px, and 768px checks.
+- PR fixup: the phone regression for long unbroken metadata failed before the
+  wrapping change and passed after it. The unavailable-capture case now reloads
+  persisted history before checking its baseline card. The final mobile suite
+  passed all 4 cases, and the desktop suite passed all 6 cases.
+- Unknown-file icon comparisons now require both rendered fallback icons.
+- After the fixup, the focused card test passed 7 cases; web typecheck, focused
+  ESLint, the E2E web build, and `git diff --check` passed.
 - Catalog validation covered 403 decisions and 1,740 specifications; specification lint and `git diff --check` passed.
 
 ## Risks

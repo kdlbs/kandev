@@ -198,11 +198,15 @@ it("uses shared file icons, kind colors, and line statistics for known counts", 
   const treeUnknownIcon = screen
     .getByTestId("file-tree-unknown-icon")
     .querySelector<HTMLSpanElement>("span[style*='font-family']");
+  const rowUnknownIcon = iconFor(unknownRow);
+  if (!rowUnknownIcon || !treeUnknownIcon) {
+    throw new Error("Expected both unknown-file icons to render before comparing them");
+  }
 
   expect(iconFor(knownRow)?.textContent).toBe(treeKnownIcon?.textContent);
   expect(iconFor(knownRow)?.style.color).toBe(treeKnownIcon?.style.color);
-  expect(iconFor(unknownRow)?.textContent).toBe(treeUnknownIcon?.textContent);
-  expect(iconFor(unknownRow)?.style.color).toBe(treeUnknownIcon?.style.color);
+  expect(rowUnknownIcon.textContent).toBe(treeUnknownIcon.textContent);
+  expect(rowUnknownIcon.style.color).toBe(treeUnknownIcon.style.color);
 
   expect(within(knownRow).getByText("Modified").className).toContain("text-amber-600");
   expect(within(unknownRow).getByText("Added").className).toContain("text-emerald-600");

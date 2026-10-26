@@ -94,6 +94,41 @@ export async function assertCardResponsiveContainment(
   }
 }
 
+export async function assertLongFileMetadataWraps(page: Page) {
+  const row = page.getByTestId("turn-changed-files-card").locator("[data-turn-file-change-id]");
+  await expect(row).toHaveCount(1);
+  const kind = row.getByText("Renamed", { exact: true });
+  await expect(kind).toHaveCount(1);
+  const geometry = await kind.evaluate((element, longLabel) => {
+    const row = element.closest<HTMLElement>("[data-turn-file-change-id]");
+    const metadata = element.parentElement;
+    if (!row || !metadata) throw new Error("Expected file row metadata elements");
+    const originalText = element.textContent;
+    try {
+      element.textContent = longLabel;
+      const rowBounds = row.getBoundingClientRect();
+      const metadataBounds = metadata.getBoundingClientRect();
+      return {
+        rowWidth: row.clientWidth,
+        rowScrollWidth: row.scrollWidth,
+        rowRight: rowBounds.right,
+        rowBottom: rowBounds.bottom,
+        metadataRight: metadataBounds.right,
+        metadataBottom: metadataBounds.bottom,
+        kindHeight: element.getBoundingClientRect().height,
+        fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+      };
+    } finally {
+      element.textContent = originalText;
+    }
+  }, "translatedfilekindlabelthatmustwraptoremainreadableonphone".repeat(8));
+
+  expect(geometry.rowScrollWidth).toBeLessThanOrEqual(geometry.rowWidth + 1);
+  expect(geometry.metadataRight).toBeLessThanOrEqual(geometry.rowRight + 1);
+  expect(geometry.metadataBottom).toBeLessThanOrEqual(geometry.rowBottom + 1);
+  expect(geometry.kindHeight).toBeGreaterThan(geometry.fontSize * 1.5);
+}
+
 export async function assertCardTouchTargets(page: Page) {
   const card = page.getByTestId("turn-changed-files-card");
   await expect(card).toBeVisible();

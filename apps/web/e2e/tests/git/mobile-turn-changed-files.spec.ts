@@ -124,14 +124,23 @@ test("keeps renamed file paths readable in the phone diff", async ({
       routeRenamedTurnFile,
       assertCardResponsiveContainment,
       assertCardTouchTargets,
+      assertLongFileMetadataWraps,
       assertTurnFileDisclosure,
     } = await import("./turn-changed-files-qa-helpers");
     await routeRenamedTurnFile(testPage);
     const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
     resetTurnQaFile(seedData.repositoryPath);
+    const fileTreeLoaded = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/repositories/") &&
+        response.url().includes("/files?") &&
+        response.status() === 200,
+    );
     const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);
+    await fileTreeLoaded;
     const card = testPage.getByTestId("turn-changed-files-card");
+    await expect(card).toBeVisible();
     const expandAll = card.getByRole("button", { name: "Expand all", exact: true });
     await expect(expandAll).toBeVisible();
     await expandAll.tap();
@@ -142,6 +151,7 @@ test("keeps renamed file paths readable in the phone diff", async ({
       if (width === 390) await assertCardTouchTargets(testPage);
     }
     await testPage.setViewportSize({ width: 390, height: 844 });
+    await assertLongFileMetadataWraps(testPage);
     await assertTurnFileDisclosure(testPage, true);
     await testPage.screenshot({ path: test.info().outputPath("renamed-path-phone.png") });
   } finally {
@@ -163,6 +173,9 @@ test("hides an unavailable empty capture after reload", async ({
     resetTurnQaFile(seedData.repositoryPath);
     const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle();
     await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
     await routeEmptyUnavailableTurn(testPage, sessionId);
     const historyLoaded = waitForHttp(testPage, "GET", /\/turn-changes$/);
