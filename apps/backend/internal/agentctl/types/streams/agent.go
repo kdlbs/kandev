@@ -220,6 +220,17 @@ type AgentEvent struct {
 	// beside the committed event so a retry cannot project twice.
 	DeliveryEventID string `json:"delivery_event_id,omitempty"`
 
+	// DetachedAtCommit is stamped on a terminal event when the instance had no
+	// live backend stream at the moment agentctl committed it, and CommittedAt
+	// is the agentctl clock at that moment.
+	DetachedAtCommit bool       `json:"detached_at_commit,omitempty"`
+	CommittedAt      *time.Time `json:"committed_at,omitempty"`
+
+	// CancelCause is "offline_budget" when the offline budget cancelled the
+	// turn; CancelDecidedAt is the time of that expiry decision.
+	CancelCause     string     `json:"cancel_cause,omitempty"`
+	CancelDecidedAt *time.Time `json:"cancel_decided_at,omitempty"`
+
 	// OperationID identifies an operation when the agent exposes an operation ID.
 	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
