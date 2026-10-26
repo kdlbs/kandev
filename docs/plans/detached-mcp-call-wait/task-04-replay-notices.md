@@ -1,7 +1,7 @@
 ---
 id: "04-replay-notices"
 title: "Record detached episodes in the conversation"
-status: todo
+status: done
 wave: 3
 depends_on:
   - "02-offline-budget"

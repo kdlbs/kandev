@@ -1,7 +1,7 @@
 ---
 id: "02-offline-budget"
 title: "Offline budget tracker and configuration"
-status: todo
+status: done
 wave: 2
 depends_on:
   - "01-wait-and-outcome"
