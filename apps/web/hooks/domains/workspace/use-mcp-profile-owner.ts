@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { getMCPProfileOwner } from "@/lib/api/domains/mcp-api";
+import { ApiError } from "@/lib/api/client";
 import type { MCPProfileOwner } from "@/lib/types/http-mcp";
+
+class ProfileOwnerContextError extends Error {}
 
 type OwnerState = { key: string; owner: MCPProfileOwner | null; loading: boolean; error: unknown };
 
@@ -25,8 +28,7 @@ export function useMCPProfileOwner(
           (owner.workspace_id !== "" && owner.workspace_id !== workspaceId) ||
           (owner.agent_id !== agentKey && owner.agent_name !== agentKey)
         ) {
-          // i18n-exempt: internal identity guard; the presenter uses localized unavailable copy.
-          throw new Error("MCP profile owner context changed");
+          throw new ProfileOwnerContextError();
         }
         setState({ key, owner, loading: false, error: null });
       })
@@ -38,5 +40,9 @@ export function useMCPProfileOwner(
     };
   }, [key, workspaceId, agentKey, profileId]);
   const reload = useCallback(() => setRevision((value) => value + 1), []);
-  return { ...current, reload };
+  const canRetry =
+    Boolean(current.error) &&
+    !(current.error instanceof ProfileOwnerContextError) &&
+    !(current.error instanceof ApiError && [403, 404].includes(current.error.status));
+  return { ...current, canRetry, reload };
 }

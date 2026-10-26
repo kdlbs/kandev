@@ -31,6 +31,7 @@ it.each([owner("other"), { ...owner(), agent_id: "other" }, owner("w", "other")]
     const { result } = renderHook(() => useMCPProfileOwner("w", "a", "p"));
     await waitFor(() => expect(result.current.error).toBeTruthy());
     expect(result.current.owner).toBeNull();
+    expect(result.current.canRetry).toBe(false);
   },
 );
 it("masks the old context immediately and rejects late completions or denied reads", async () => {
@@ -53,4 +54,10 @@ it("never reads without explicit valid context", () => {
   const { result } = renderHook(() => useMCPProfileOwner(null, "a", "p"));
   expect(read).not.toHaveBeenCalled();
   expect(result.current.owner).toBeNull();
+});
+
+it("offers retry only for a recoverable owner read failure", async () => {
+  read.mockRejectedValueOnce(new Error("offline"));
+  const { result } = renderHook(() => useMCPProfileOwner("w", "a", "p"));
+  await waitFor(() => expect(result.current.canRetry).toBe(true));
 });

@@ -39,14 +39,12 @@ and regression evidence.
 not included. Inherited rows should remain read-only in this PR. Workspace-wide
 disabling is a different operation and already exists.
 
-**Deferred profile UI:** global agent profiles still use the legacy JSON editor.
-The user explicitly moved global-profile catalog navigation and management/status
-clarity to unstarted follow-up task `2adba1ca-619e-4bfc-b705-3bbc628df4dd`, based on
-this PR. Workspace-owned profiles have the shared picker. The original sandbox
-agents are global, so do not count their legacy editor as a successful catalog
-picker test. Existing API/resolution support for workspace-scoped global-profile
-associations is separate from the deferred UI. The original reproduction is in
-the [consistency review](ux-consistency-review.md#functional-finding-global-profile-catalog-picker-is-absent).
+**Global profile UI:** saved global agent profiles now use a workspace-aware
+catalog selection list. Test workspace switching and shared Save changes with
+the global Mock profile. The legacy JSON editor remains recovery only, behind
+**Global profile legacy configuration**; it is separate from catalog selection.
+The [consistency review](ux-consistency-review.md#functional-finding-global-profile-catalog-picker-is-absent)
+records the original missing-picker reproduction and is historical.
 
 ### Review repair checks
 

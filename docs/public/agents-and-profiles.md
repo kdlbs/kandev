@@ -1019,7 +1019,10 @@ For a saved global profile, **Workspace** selects the catalog context without
 changing your active workspace. If settings have unsaved changes, switching
 workspaces offers Save and leave, Discard and leave, or continued editing.
 A failed save keeps the current workspace and draft. Repository and profile
-choices still use the shared **Save changes** action. Profile MCP choices appear
+choices still use the shared **Save changes** action. If a Used in list cannot
+refresh, its retained rows stay unavailable until Retry succeeds. A failed
+Load more request keeps earlier accepted links available. Opening a session
+link after a temporary read failure offers Retry for that same conversation. Profile MCP choices appear
 as one searchable checkbox list below the workspace selector on desktop and
 phone. To edit catalog definitions, open **Settings > Workspaces > _workspace_ >
 MCP servers**.

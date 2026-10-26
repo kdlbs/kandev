@@ -162,9 +162,7 @@ export async function listMCPUsage(
   cursor?: string,
   options?: ApiRequestOptions,
 ): Promise<MCPCatalogUsagePage> {
-  const params = new URLSearchParams();
-  if (cursor) params.set("cursor", cursor);
-  const suffix = params.size ? `?${params.toString()}` : "";
+  const suffix = cursor ? `?${new URLSearchParams({ cursor })}` : "";
   return fetchJson<MCPCatalogUsagePage>(
     `${workspacePath(workspaceId)}/mcp-servers/${encodeURIComponent(definitionId)}/usage${suffix}`,
     { ...options, cache: "no-store" },

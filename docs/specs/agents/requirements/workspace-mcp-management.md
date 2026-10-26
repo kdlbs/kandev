@@ -43,7 +43,9 @@ from aggregate counts or navigating to unrelated settings.
 - **AC-AGENTS-MCP-MANAGEMENT-001.2:** An authorized owner row shall navigate to
   that owner's existing management surface with the correct workspace and,
   where applicable, task session. Opening a row shall not change any selection.
-  A view-only destination shall not imply permission to edit it.
+  A view-only destination shall not imply permission to edit it. A failed
+  session-list read shall offer retry for the same requested conversation;
+  confirmed missing sessions shall never open a fallback conversation.
 - **AC-AGENTS-MCP-MANAGEMENT-001.3:** Names, identifiers, links, and usage totals
   shall not reveal inaccessible owners. Missing or removed owners shall not
   produce broken links. An authorized owner with no name shall use a localized
@@ -52,6 +54,8 @@ from aggregate counts or navigating to unrelated settings.
   read, and an incomplete result shall be distinct. Members shall be able to
   retrieve all visible usage. Refresh shall reconcile renamed or removed owners
   without discarding catalog edits or showing another workspace's result.
+  Failed continuation shall keep accepted pages usable. A failed refresh shall
+  disable retained destinations until a successful retry replaces them.
 
 ### REQ-AGENTS-MCP-MANAGEMENT-002: Workspace-aware global profile selection
 
@@ -121,7 +125,8 @@ and pending selection changes using the existing session evidence authority.
   ordinary controls shall retain the standard 28px density.
 - **AC-AGENTS-MCP-MANAGEMENT-004.3:** Keyboard activation, visible focus,
   predictable back/dismiss behavior, and focus return shall work for all new
-  destinations. Resizing shall preserve drafts and the single editor owner.
+  destinations. Resizing shall preserve drafts, accepted usage pages and their
+  continuation, and the single editor owner.
   New copy shall exist in all shipped locales and use text alongside state icons.
 
 ## Out of scope

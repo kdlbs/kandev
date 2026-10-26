@@ -1,4 +1,5 @@
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, Suspense, startTransition, useLayoutEffect, useState } from "react";
+import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listMCPUsage } from "@/lib/api/domains/mcp-api";
 import { ApiError } from "@/lib/api/client";
@@ -99,4 +100,70 @@ describe("MCP usage reads", () => {
     expect(result.current.items.map((row) => row.owner_id)).toEqual(["fresh"]);
     expect(result.current.busy).toBe(false);
   });
+});
+
+// @covers AC-AGENTS-MCP-MANAGEMENT-001.3, AC-AGENTS-MCP-MANAGEMENT-001.4
+it("keeps stale destinations disabled until a refresh retry succeeds", async () => {
+  read.mockResolvedValueOnce(page([owner("one")], "next"));
+  const { result } = renderHook(() => useMCPUsage("w", "d"));
+  await waitFor(() => expect(result.current.items).toHaveLength(1));
+  read.mockRejectedValueOnce(new Error("offline"));
+  await act(() => result.current.reload());
+  await act(() => result.current.loadMore());
+  expect(read).toHaveBeenCalledTimes(2);
+  const retry = deferred<MCPCatalogUsagePage>();
+  read.mockReturnValueOnce(retry.promise);
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.reload();
+  });
+  expect(result.current.stale).toBe(true);
+  await act(async () => {
+    retry.resolve(page([owner("fresh")]));
+    await pending;
+  });
+  expect(result.current.stale).toBe(false);
+  expect(result.current.items[0].owner_id).toBe("fresh");
+});
+it("retains accepted pages and their links after a next-page failure", async () => {
+  read.mockResolvedValueOnce(page([owner("one")], "next"));
+  const { result } = renderHook(() => useMCPUsage("w", "d"));
+  await waitFor(() => expect(result.current.hasMore).toBe(true));
+  read.mockRejectedValueOnce(new Error("offline"));
+  await act(() => result.current.loadMore());
+  expect(result.current.error).toBeNull();
+  expect(result.current.pageError).toBeTruthy();
+  expect(result.current.stale).toBe(false);
+  expect(result.current.items[0].owner_id).toBe("one");
+});
+
+it("accepts the committed usage response while another context render is suspended", async () => {
+  const pending = deferred<MCPCatalogUsagePage>();
+  read.mockReturnValueOnce(pending.promise);
+  const never = new Promise<void>(() => {});
+  let current!: ReturnType<typeof useMCPUsage>;
+  let select!: (workspace: string) => void;
+  let suspended = false;
+  function Consumer({ workspace }: { workspace: string }) {
+    const usage = useMCPUsage(workspace, "d");
+    useLayoutEffect(() => {
+      current = usage;
+    });
+    if (workspace === "speculative") {
+      suspended = true;
+      throw never;
+    }
+    return createElement("span", null, workspace);
+  }
+  function Harness() {
+    const [workspace, setWorkspace] = useState("w");
+    select = setWorkspace;
+    return createElement(Suspense, { fallback: null }, createElement(Consumer, { workspace }));
+  }
+  render(createElement(Harness));
+  act(() => startTransition(() => select("speculative")));
+  expect(suspended).toBe(true);
+  await act(async () => pending.resolve(page([owner("committed")])));
+  expect(current.items.map((item) => item.owner_id)).toEqual(["committed"]);
+  expect(current.busy).toBe(false);
 });

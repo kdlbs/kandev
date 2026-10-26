@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listMCPUsage } from "@/lib/api/domains/mcp-api";
 import { ApiError } from "@/lib/api/client";
 import type { MCPOwnerUsage } from "@/lib/types/http-mcp";
@@ -11,10 +11,21 @@ type UsageState = {
   busy: boolean;
   loaded: boolean;
   error: unknown;
+  pageError: unknown;
+  stale: boolean;
   unavailable: boolean;
 };
 function emptyUsage(key: string): UsageState {
-  return { key, items: [], busy: false, loaded: false, error: null, unavailable: false };
+  return {
+    key,
+    items: [],
+    busy: false,
+    loaded: false,
+    error: null,
+    pageError: null,
+    stale: false,
+    unavailable: false,
+  };
 }
 function mergeOwners(current: MCPOwnerUsage[], incoming: MCPOwnerUsage[]) {
   return [
@@ -32,9 +43,11 @@ export function useMCPUsage(workspaceId: string | null, definitionId: string | n
   const [state, setState] = useState(() => emptyUsage(key));
   const current = state.key === key ? state : emptyUsage(key);
   const stateRef = useRef(current);
-  stateRef.current = current;
   const contextRef = useRef(key);
-  contextRef.current = key;
+  useLayoutEffect(() => {
+    stateRef.current = current;
+    contextRef.current = key;
+  });
   const requestRef = useRef(0);
   const busyRef = useRef(false);
 
@@ -47,7 +60,7 @@ export function useMCPUsage(workspaceId: string | null, definitionId: string | n
       setState((previous) => ({
         ...(previous.key === key ? previous : emptyUsage(key)),
         busy: true,
-        error: null,
+        pageError: null,
       }));
       try {
         const page = await listMCPUsage(workspaceId, definitionId, cursor);
@@ -67,6 +80,8 @@ export function useMCPUsage(workspaceId: string | null, definitionId: string | n
           busy: false,
           loaded: true,
           error: null,
+          pageError: null,
+          stale: false,
           unavailable: false,
         }));
       } catch (error) {
@@ -75,7 +90,9 @@ export function useMCPUsage(workspaceId: string | null, definitionId: string | n
         setState((previous) => ({
           ...(previous.key === key && !unavailable ? previous : emptyUsage(key)),
           busy: false,
-          error,
+          error: cursor && !unavailable ? previous.error : error,
+          pageError: cursor && !unavailable ? error : null,
+          stale: !unavailable && (cursor ? previous.stale : previous.items.length > 0),
           unavailable,
         }));
       } finally {
@@ -96,7 +113,7 @@ export function useMCPUsage(workspaceId: string | null, definitionId: string | n
   const reload = useCallback(() => load(), [load]);
   const loadMore = useCallback(async () => {
     const cursor = stateRef.current.cursor;
-    if (cursor) await load(cursor);
+    if (cursor && !stateRef.current.stale) await load(cursor);
   }, [load]);
   return {
     items: current.items,
@@ -104,6 +121,8 @@ export function useMCPUsage(workspaceId: string | null, definitionId: string | n
     busy: current.busy,
     hasMore: Boolean(current.cursor),
     error: current.error,
+    pageError: current.pageError,
+    stale: current.stale,
     unavailable: current.unavailable,
     reload,
     loadMore,

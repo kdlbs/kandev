@@ -133,13 +133,20 @@ Validation:
 - `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck`: passed. The initial
   default 4 GB Node heap run failed from heap exhaustion, not a type diagnostic.
 - ESLint and Prettier for the client, client tests, and HTTP types: passed.
-- Affected Go packages: zero lint issues. The standard script initially lacked
-  golangci-lint in PATH and then encountered a shared-host lock. The same package
-  and base check passed with the installed binary, two workers, 3 GiB memory
-  target, and `--allow-parallel-runners`; no hook or lint rule was bypassed.
+- Affected Go packages: zero lint issues in a historical manual fallback. The
+  standard script initially lacked golangci-lint in PATH and then encountered a
+  shared-host lock. The fallback used the installed binary, two workers, a
+  3 GiB memory target, and `--allow-parallel-runners`. That disables startup
+  locking and is not a compliant `scripts/lint-go-changed` wrapper result.
+  The review follow-up reruns the normal wrapper without that flag.
 - Documentation catalog/spec lint and actual changed-file PR coverage passed.
   Coverage status: covered, zero errors. `git diff --check` passed.
 
 No UI was implemented in this work order. Navigation and rendered evidence
 remain task 02. PostgreSQL fixtures used task-owned temporary directories and
 Unix sockets and were shut down after the checks.
+
+PR review follow-up: the normal `bash scripts/lint-go-changed <PR Go files>`
+wrapper passed with zero issues, without `--allow-parallel-runners`. This
+provides the compliant affected-package result missing from the historical
+manual fallback above. No Go production behavior changed in the follow-up.

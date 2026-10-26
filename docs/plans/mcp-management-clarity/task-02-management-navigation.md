@@ -250,3 +250,29 @@ specification lint/catalog, work-order coverage and whitespace checks passed.
 No new user-facing strings were introduced. Screenshots were inspected, and
 the isolated Tailscale instance received the updated web assets with its data
 and backend preserved.
+
+### PR review recovery corrections
+
+Reconcile Claude and Greptile findings: distinguish session-list read failures
+from confirmed missing owners; preserve existing route recovery for ordinary
+errors; keep stale usage links disabled through refresh retry; retain valid
+prior pages after continuation failure; preserve paging above responsive
+composition; add pointer styling and scope/owner row keys; show legacy recovery
+only after accepted selection evidence; separate retryable owner read failures
+from deterministic admission failures. Route/hook RED/GREEN and desktop/phone
+regressions cover these corrections. Also synchronize usage/draft refs after
+commit so abandoned renders cannot change save ownership, and preserve cursor
+encoding without requiring `URLSearchParams.size`. Correct the parent's obsolete
+global-profile testing note.
+
+RED reproduced the route/usage/owner failures, suspended-render races and cursor
+loss without `URLSearchParams.size`. GREEN: 54 focused tests across nine files
+passed. Five desktop management scenarios passed before the final nonvisual
+ref/transport corrections. Affected ESLint and the normal Go lint wrapper passed.
+Final committed-tree desktop/phone runs and current-head remote CI/review state
+are required before publication and merge; their exact receipts are external.
+
+The raw-error logging suggestions are not applied: owner readers and database
+errors can contain private metadata, and the design forbids logging names,
+cursors or response bodies. Generic safe logs and HTTP request metadata remain.
+No raw diagnostic text is added to either logging or client responses.

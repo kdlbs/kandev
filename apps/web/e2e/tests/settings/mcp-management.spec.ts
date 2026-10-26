@@ -1,3 +1,4 @@
+import { checkMCPSessionAdmission } from "../../helpers/mcp-session-admission";
 import { checkWorkspaceProfileDestination } from "../../helpers/mcp-workspace-profile";
 import { test } from "../../fixtures/test-base";
 import {
@@ -32,4 +33,12 @@ test("opens workspace-owned profile metadata without global inventory leakage", 
   seedData,
 }) => {
   await checkWorkspaceProfileDestination(testPage, apiClient, seedData, false);
+});
+
+test("retries exact-session reads without opening a fallback conversation", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await checkMCPSessionAdmission(testPage, apiClient, seedData, false);
 });

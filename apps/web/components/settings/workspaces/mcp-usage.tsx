@@ -69,7 +69,7 @@ function UsageOwner({
   return href ? (
     <Link
       href={href}
-      className={`${className} hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring`}
+      className={`${className} cursor-pointer hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring`}
     >
       {content}
     </Link>
@@ -80,15 +80,14 @@ function UsageOwner({
 
 function UsageBody({
   workspaceId,
-  definitionId,
+  usage,
   invalid,
 }: {
   workspaceId: string;
-  definitionId: string | null;
+  usage: ReturnType<typeof useMCPUsage>;
   invalid: boolean;
 }) {
   const { t } = useTranslation();
-  const usage = useMCPUsage(workspaceId, invalid ? null : definitionId);
   const unavailable = invalid || usage.unavailable;
   return (
     <div
@@ -118,24 +117,29 @@ function UsageBody({
                   </h3>
                   {owners.map((owner) => (
                     <UsageOwner
-                      key={owner.owner_id}
+                      key={`${owner.scope}:${owner.owner_id}`}
                       owner={owner}
                       workspaceId={workspaceId}
-                      stale={Boolean(usage.error)}
+                      stale={usage.stale}
                     />
                   ))}
                 </section>
               )
             );
           })}
+          {Boolean(usage.pageError) && (
+            <p role="alert" className="text-sm text-muted-foreground">
+              {t("settings:mcpLoadFailed")}
+            </p>
+          )}
           {usage.hasMore && (
             <Button
               variant="outline"
               className={`${ACTION_CLASS} w-full`}
-              disabled={usage.busy}
+              disabled={usage.busy || usage.stale}
               onClick={() => void usage.loadMore()}
             >
-              {t("settings:mcpUsageLoadMore")}
+              {t(usage.pageError ? "agents:retry" : "settings:mcpUsageLoadMore")}
             </Button>
           )}
           <Button
@@ -179,10 +183,9 @@ export function MCPUsage({
     }
   };
   const { isMobile } = useResponsiveBreakpoint();
+  const usage = useMCPUsage(workspaceId, invalid ? null : definitionId);
   const title = name ? t("settings:mcpUsedInTitle", { name }) : t("settings:mcpUsedIn");
-  const body = (
-    <UsageBody workspaceId={workspaceId} definitionId={definitionId} invalid={invalid} />
-  );
+  const body = <UsageBody workspaceId={workspaceId} usage={usage} invalid={invalid} />;
   if (isMobile)
     return (
       <Drawer open onOpenChange={(open) => !open && onClose()}>

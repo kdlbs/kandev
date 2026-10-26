@@ -17,7 +17,7 @@ export function MCPProfileDestination({
   profileId: string;
 }) {
   const { t } = useTranslation();
-  const { owner, loading, error, reload } = useMCPProfileOwner(workspaceId, agentKey, profileId);
+  const { owner, loading, canRetry, reload } = useMCPProfileOwner(workspaceId, agentKey, profileId);
   if (!owner)
     return (
       <Card>
@@ -25,7 +25,7 @@ export function MCPProfileDestination({
           <p role={loading ? "status" : "alert"}>
             {t(loading ? "settings:mcpLoading" : "settings:mcpOwnerUnavailable")}
           </p>
-          {Boolean(error) && (
+          {canRetry && (
             <Button variant="outline" onClick={reload}>
               {t("agents:retry")}
             </Button>

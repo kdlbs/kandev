@@ -33,13 +33,15 @@ import {
   readTaskNavigationIdentity,
   useTaskNavigationReadState,
 } from "@/lib/state/task-navigation-reads";
-import type {
-  TaskNavigationIdentity,
-  TaskNavigationContext,
-} from "@/lib/state/task-navigation-reads";
+import type { TaskNavigationContext } from "@/lib/state/task-navigation-reads";
 import { getOwnedTaskSessionId, useTaskRouteProjection } from "./task-route-projection";
 import { useTaskDetailRouteRecovery } from "./task-detail-route-recovery";
 import { deriveTaskDetailRouteView } from "./task-detail-route-view";
+import {
+  assertRequestedSession,
+  TaskSessionAdmissionError,
+  TaskSessionUnavailable,
+} from "./task-session-admission";
 import type { TaskDetailRouteState } from "./task-detail-route-state";
 
 type TaskDetailRouteProps = {
@@ -108,8 +110,12 @@ export function TaskDetailRoute({
     (route.currentRouteStatus === "loaded" &&
       (route.initialState === null || hydratedState === route.initialState));
 
-  if (sessionId && route.currentRouteStatus === "error") {
-    return <TaskSessionUnavailable />;
+  if (route.sessionAdmission) {
+    return (
+      <TaskSessionUnavailable
+        retry={route.sessionAdmission === "read_failed" ? route.retrySessionRead : undefined}
+      />
+    );
   }
 
   if (route.showInitialLoading) {
@@ -248,7 +254,7 @@ function useTaskDetailRouteData({
     taskId,
     sessionId,
   );
-  useTaskDetailRouteFetch({
+  const retrySessionRead = useTaskDetailRouteFetch({
     taskId,
     sessionId,
     selectedSessionId: selectedSessionForNavigation,
@@ -292,7 +298,7 @@ function useTaskDetailRouteData({
     setRouteState,
     previousLoadedRouteRef,
   });
-  return { ...view, readState };
+  return { ...view, readState, retrySessionRead };
 }
 
 function useTaskDetailRouteEnrichment(args: {
@@ -401,7 +407,7 @@ function resolveCurrentRouteState(
   return initialRouteState(routeInitialData, taskId, sessionId);
 }
 
-function useTaskDetailRouteFetch(args: {
+type TaskDetailRouteFetchArgs = {
   taskId: string;
   sessionId?: string;
   selectedSessionId?: string;
@@ -414,7 +420,9 @@ function useTaskDetailRouteFetch(args: {
   hydrationEpochsAtRequestStartRef: MutableRefObject<
     Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
   >;
-}) {
+};
+
+function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
   const {
     taskId,
     sessionId,
@@ -427,6 +435,8 @@ function useTaskDetailRouteFetch(args: {
     navigationContext,
     hydrationEpochsAtRequestStartRef,
   } = args;
+  const [revision, setRevision] = useState(0);
+  const retry = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
     const previous = previousLoadedRouteRef.current;
     const activeWorkspaceId = store.getState().workspaces.activeId;
@@ -455,7 +465,10 @@ function useTaskDetailRouteFetch(args: {
       store.getState(),
       taskId,
     );
-    readTaskNavigationIdentity(store, taskId, { context: navigationContext })
+    readTaskNavigationIdentity(store, taskId, {
+      context: navigationContext,
+      ...(revision ? { refresh: true } : {}),
+    })
       .then((identity) => {
         if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
         assertRequestedSession(identity, taskId, sessionId);
@@ -474,14 +487,12 @@ function useTaskDetailRouteFetch(args: {
         );
       })
       .catch((error) => {
-        if (!cancelled && isTaskNavigationCurrent(store, navigationContext)) {
-          if (!(error instanceof Error && error.name === "AbortError")) {
-            console.warn(
-              "Could not load /t/:taskId route data; task page will fall back to client fetches:",
-              error instanceof Error ? error.message : String(error),
-            );
-            setRouteState({ routeKey, status: "error", data: null });
-          }
+        if (
+          !cancelled &&
+          isTaskNavigationCurrent(store, navigationContext) &&
+          !(error instanceof Error && error.name === "AbortError")
+        ) {
+          setRouteState(taskRouteReadError(routeKey, error));
         }
       });
     return () => {
@@ -497,7 +508,22 @@ function useTaskDetailRouteFetch(args: {
     setRouteState,
     store,
     navigationContext,
+    revision,
   ]);
+  return retry;
+}
+
+function taskRouteReadError(routeKey: string, error: unknown): TaskDetailRouteState {
+  console.warn(
+    "Could not load /t/:taskId route data:",
+    error instanceof Error ? error.message : String(error),
+  );
+  return {
+    routeKey,
+    status: "error",
+    data: null,
+    sessionAdmission: error instanceof TaskSessionAdmissionError ? error.reason : undefined,
+  };
 }
 
 function TaskRouteLoading({
@@ -518,34 +544,4 @@ function TaskRouteLoading({
       </p>
     </div>
   );
-}
-
-function TaskSessionUnavailable() {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="flex h-full items-center justify-center p-4"
-      data-testid="task-session-unavailable"
-    >
-      <p role="alert" className="text-sm text-muted-foreground">
-        {t("settings:mcpOwnerUnavailable")}
-      </p>
-    </div>
-  );
-}
-
-function assertRequestedSession(
-  identity: TaskNavigationIdentity,
-  taskId: string,
-  sessionId?: string,
-) {
-  if (
-    !sessionId ||
-    identity.allSessionsResponse.sessions.some(
-      (session) => session.id === sessionId && session.task_id === taskId,
-    )
-  )
-    return;
-  // i18n-exempt: internal admission failure. The route renders a localized unavailable state.
-  throw new Error("Requested task session is unavailable");
 }

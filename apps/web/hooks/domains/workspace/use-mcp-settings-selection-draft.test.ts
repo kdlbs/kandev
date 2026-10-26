@@ -1,4 +1,5 @@
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, Suspense, startTransition, useLayoutEffect } from "react";
+import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMCPSelections, replaceMCPSelections } from "@/lib/api/domains/mcp-api";
 import type { MCPSelectionResponse } from "@/lib/types/http-mcp";
@@ -89,4 +90,30 @@ describe("settings-owned MCP draft", () => {
     expect(result.current.selectedIds).toEqual(["saved"]);
     expect(result.current.dirty).toBe(false);
   });
+});
+
+it("submits only the committed draft while a newer edit is suspended", async () => {
+  let current!: ReturnType<typeof useMCPSettingsSelectionDraft>;
+  let suspended = false;
+  const never = new Promise<void>(() => {});
+  vi.mocked(replaceMCPSelections).mockResolvedValue(selection("a", ["committed"]));
+  function Consumer() {
+    const draft = useMCPSettingsSelectionDraft("profile", "profile", "a");
+    useLayoutEffect(() => {
+      current = draft;
+    });
+    if (draft.selectedIds.includes("speculative")) {
+      suspended = true;
+      throw never;
+    }
+    return createElement("span", null, draft.selectedIds.join(","));
+  }
+  const view = render(createElement(Suspense, { fallback: null }, createElement(Consumer)));
+  await waitFor(() => expect(current.selectedIds).toEqual(["saved"]));
+  act(() => current.setSelectedIds(["committed"]));
+  act(() => startTransition(() => current.setSelectedIds(["speculative"])));
+  expect(suspended).toBe(true);
+  expect(view.container.textContent).toBe("committed");
+  await act(() => current.save());
+  expect(replaceMCPSelections).toHaveBeenCalledWith("profile", "profile", "a", ["committed"]);
 });

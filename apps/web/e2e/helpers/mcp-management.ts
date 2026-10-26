@@ -120,6 +120,9 @@ export async function checkGlobalProfileWorkspaceGuard(
     await expect(
       page.getByText("Select a workspace before configuring MCP servers.", { exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Global profile legacy configuration", exact: true }),
+    ).toHaveCount(0);
     await workspace.click();
     await page.getByRole("option", { name: workspaceName, exact: true }).click();
     const picker = page.getByTestId(`profile-mcp-selection-${seed.agentProfileId}`);
@@ -231,17 +234,19 @@ export async function checkMCPUsagePaging(page: Page, api: ApiClient, seed: Seed
     owner_state: "available",
     destination: { kind: "repository", workspace_id: seed.workspaceId, owner_id: `owner-${index}` },
   }));
-  let mode: "sparse" | "failure" | "rows" | "denied" = "sparse";
+  let mode: "sparse" | "failure" | "rows" | "denied" | "delayed" = "sparse";
+  const retryPage = Promise.withResolvers<void>();
   await page.route(
     `**/api/v1/workspaces/${seed.workspaceId}/mcp-servers/${server.id}/usage**`,
     async (route) => {
-      const status = { failure: 500, denied: 404, sparse: 200, rows: 200 }[mode];
+      if (mode === "delayed") await retryPage.promise;
+      const status = { failure: 500, denied: 404, sparse: 200, rows: 200, delayed: 200 }[mode];
       const body =
         status === 200
           ? {
               workspace_id: seed.workspaceId,
               definition_id: server.id,
-              items: mode === "rows" ? items : [],
+              items: mode === "rows" || mode === "delayed" ? items : [],
               ...(mode === "sparse" ? { next_cursor: "opaque-next" } : {}),
             }
           : { error: "unavailable" };
@@ -260,20 +265,33 @@ export async function checkMCPUsagePaging(page: Page, api: ApiClient, seed: Seed
     await more.click();
     await expect(usage.getByRole("alert")).toBeVisible();
     mode = "rows";
-    await more.click();
+    await usage.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(usage.getByRole("link")).toHaveCount(30);
     await usage.getByRole("link").last().scrollIntoViewIfNeeded();
     await expect(usage.getByRole("link").last()).toBeInViewport();
     await assertNoDocumentHorizontalOverflow(page, "paged MCP owners");
     mode = "failure";
+    const viewport = page.viewportSize()!;
+    for (const width of [393, 900, viewport.width]) {
+      await page.setViewportSize({ width, height: viewport.height });
+      await expect(usage.getByRole("link")).toHaveCount(30);
+    }
     await usage.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(usage.getByRole("alert")).toContainText("out of date");
     await expect(usage.getByRole("link")).toHaveCount(0);
+    mode = "delayed";
+    const retry = usage.getByRole("button", { name: "Retry", exact: true });
+    await retry.click();
+    await expect(retry).toBeDisabled();
+    await expect(usage.getByRole("link")).toHaveCount(0);
+    retryPage.resolve();
+    await expect(usage.getByRole("link")).toHaveCount(30);
     mode = "denied";
-    await usage.getByRole("button", { name: "Retry", exact: true }).click();
+    await usage.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(usage.getByRole("alert")).toContainText("destination is unavailable");
     await expect(usage.getByText(items[0].display_name, { exact: true })).toHaveCount(0);
   } finally {
+    retryPage.resolve();
     await api.deleteMCPServer(seed.workspaceId, server.id, server.revision);
   }
 }

@@ -41,3 +41,19 @@ it("reads only authorized profile metadata with uncached encoded context", async
     expect.objectContaining({ cache: "no-store" }),
   );
 });
+
+it("continues usage paging without URLSearchParams.size", async () => {
+  const size = vi
+    .spyOn(URLSearchParams.prototype, "size", "get")
+    .mockReturnValue(undefined as unknown as number);
+  try {
+    fetchMock.mockResolvedValue({ items: [] });
+    await mcpAPI.listMCPUsage("w", "d", "opaque+cursor");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/workspaces/w/mcp-servers/d/usage?cursor=opaque%2Bcursor",
+      expect.anything(),
+    );
+  } finally {
+    size.mockRestore();
+  }
+});

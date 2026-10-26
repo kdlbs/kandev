@@ -308,6 +308,32 @@ and existing primitive motion. Do not animate routine refresh or row ordering.
 Any new motion respects reduced motion and disabled controls. Keep one editor
 above responsive composition so resizing does not register duplicate savers.
 
+## Read failures and recovery
+
+Keep confirmed missing sessions separate from unavailable session-list reads.
+An explicit session link must validate its exact task/session pair before
+admission. A failed list read renders task-scoped retry copy and refreshes the
+same requested session on retry. Ordinary route errors retain the existing
+client recovery shell. No error path substitutes another conversation.
+
+Synchronize usage and settings-draft ownership refs after React commits. A
+suspended or abandoned render must not change which draft is saved or suppress
+a committed context response. Cursor transport must not require optional
+`URLSearchParams.size` support.
+
+The usage reader lives above Dialog/Drawer composition so accepted pages and
+cursor survive breakpoint changes. A failed refresh marks retained rows stale;
+links and continuation stay disabled through retries until a successful fresh
+page replaces them. Next-page errors retain valid earlier rows and their links,
+with a continuation retry. Access loss clears all rows. Row identity includes
+scope and owner ID; actionable owner links use the shared pointer styling.
+
+Profile legacy recovery is shown only after an accepted selection read confirms
+incomplete/unknown import, or after explicit recovery has been opened. No
+workspace/loading/error state invents legacy-import evidence. Owner response
+identity mismatches and denied/missing owners do not offer a futile retry;
+recoverable metadata read failures do.
+
 ## Failure, privacy, and documentation
 
 No usage response contains endpoints, arguments, headers, environment,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMCPSelectionEditor } from "./use-mcp-selection-editor";
 
 function sameIds(left: string[], right: string[]) {
@@ -19,9 +19,11 @@ export function useMCPSettingsSelectionDraft(
   const [draft, setDraft] = useState<Draft>({ key, ids: [], baseline: [] });
   const current = draft.key === key ? draft : { key, ids: [], baseline: [] };
   const context = useRef(key);
-  context.current = key;
   const draftRef = useRef(current);
-  draftRef.current = current;
+  useLayoutEffect(() => {
+    context.current = key;
+    draftRef.current = current;
+  });
   useEffect(() => {
     const saved = editor.selection;
     if (!saved) return;
