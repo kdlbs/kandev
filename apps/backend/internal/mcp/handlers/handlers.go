@@ -2135,16 +2135,11 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 	}
-
-	// Applied before the ordinary field update so a rejected prompt edit does
-	// not half-apply the call: a caller correcting a stale brief needs to know
-	// the prompt did not change, and a partially applied update hides that.
-	if req.DeferredLaunchPrompt != nil {
-		if errResp := h.applyDeferredLaunchPromptUpdate(ctx, msg, req.TaskID, *req.DeferredLaunchPrompt); errResp != nil {
-			return errResp, nil
+	if req.Title != nil {
+		if err := service.ValidateTaskTitle(*req.Title); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 	}
-
 	var state *v1.TaskState
 	if req.State != nil {
 		normalized := normalizeTaskState(*req.State)
@@ -2152,6 +2147,14 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid task state: "+*req.State, nil)
 		}
 		state = &normalized
+	}
+
+	// All handler-owned validation runs first. Keep this write before the
+	// ordinary update so a rejected prompt edit does not apply other fields.
+	if req.DeferredLaunchPrompt != nil {
+		if errResp := h.applyDeferredLaunchPromptUpdate(ctx, msg, req.TaskID, *req.DeferredLaunchPrompt); errResp != nil {
+			return errResp, nil
+		}
 	}
 
 	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -96,11 +97,18 @@ func (s *Service) ReadCeilingDeferredLaunch(
 // precise error instead of a bare conflict; it is not what makes the update
 // safe.
 func (s *Service) UpdateDeferredLaunchPrompt(ctx context.Context, taskID, prompt string) (*models.Task, error) {
-	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+	if err := s.authorizeTaskScope(ctx, taskID, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(prompt) == "" {
 		return nil, ErrDeferredLaunchPromptEmpty
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeTaskExecutorMutation(ctx, task); err != nil {
+		return nil, err
 	}
 	launch, prior, err := s.tasks.GetTaskDeferredLaunch(ctx, taskID)
 	if err != nil {

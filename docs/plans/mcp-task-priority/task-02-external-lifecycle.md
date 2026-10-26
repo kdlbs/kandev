@@ -48,6 +48,11 @@ retain configuration, Office, and automation authority boundaries.
   through production transport/dispatch context. Allow an owned task and deny a
   foreign user's task without mutation. Include authorized Kanban and Office
   targets using the four canonical priority tokens, not Office-only `none`.
+- `TestExternalMCPViewerCannotChangeDeferredLaunchPrompt` verifies that an
+  authorized owner can refresh a pending prompt and a workspace viewer cannot
+  replace it through the external update tool. The task service also checks
+  executor authority before rewriting a prompt, with a regression for a task
+  writer targeting another user's private executor.
 - Document default creation, priority-only update, invalid values, and retry
   semantics in the public MCP reference and coordination guide.
 - Replace the visibility requirement's factual note that MCP cannot write
@@ -78,8 +83,9 @@ registration changes, then run this complete block after implementation.
 
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/mcp/server ./internal/mcp/handlers -run 'Test(MCPTaskPriority|ExternalMCPTaskPriority)' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/task/service -run '^TestUpdateDeferredLaunchPromptRejectsForeignExecutor$' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/mcp/server ./internal/mcp/handlers -count=1)
-bash scripts/lint-go-changed apps/backend/internal/mcp/server/server.go apps/backend/internal/mcp/server/server_test.go apps/backend/internal/mcp/server/task_priority_test.go apps/backend/internal/mcp/server/task_priority_integration_test.go apps/backend/internal/mcp/handlers/task_priority_test.go
+bash scripts/lint-go-changed apps/backend/internal/mcp/server/server.go apps/backend/internal/mcp/server/server_test.go apps/backend/internal/mcp/server/task_priority_test.go apps/backend/internal/mcp/server/task_priority_integration_test.go apps/backend/internal/mcp/handlers/handlers.go apps/backend/internal/mcp/handlers/deferred_launch_prompt_test.go apps/backend/internal/mcp/handlers/task_priority_test.go apps/backend/internal/task/service/service_deferred_launch.go apps/backend/internal/task/service/service_deferred_launch_test.go
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -169,6 +175,18 @@ Task 01. Both work orders share registration and test files.
   task listing, events, and external-ID retries.
 - HTTP authorization tests pass for owned Kanban and Office tasks and deny a
   foreign user's task without mutation.
+- Deferred-prompt writes require task-write scope and executor authority.
+  External MCP denies a viewer before changing the queued prompt, and the task
+  service denies a task writer who cannot access the configured private
+  executor. Handler tests reject invalid task state and overlong title before
+  changing the queued prompt.
+- Follow-up MCP handler, external MCP/SQLite, and task-service deferred-prompt
+  focused tests passed. `make -C apps/backend build` and changed-file Go lint
+  passed.
+- A non-race full handler package run timed out at ten minutes while SQLite
+  initialized a repository in `TestHandleMessageTask_CancelledPrimaryFallsBackToTheLiveSession`.
+  Focused changed-handler tests passed; the earlier full race-suite timeout
+  remains recorded above.
 - The full server package test, focused MCP tests, and focused MCP race tests
   pass. The full server/handler race command exposed stale catalog assertions,
   which were fixed, then the handler package reached its 10-minute timeout

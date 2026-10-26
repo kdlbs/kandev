@@ -308,8 +308,8 @@ Each exclusion below is a decision, not an omission.
 - **Server-side rejection of an invalid priority token.** This capability adds
   fixed four-option controls, so its user-facing writers cannot emit an invalid
   token. Consistent validation for every API writer is a separate hardening task.
-- **MCP priority write support.** The MCP task contract is unchanged. Adding a
-  priority argument to MCP tools is a separate contract change.
+- **The MCP priority write API.** This requirement does not define the MCP write
+  API. The [MCP task priority contract](mcp-task-priority.md) owns it.
 - **The Office task UI.** Office already surfaces priority, over a different
   five-token vocabulary that includes `none` and supports workspace-supplied
   labels. Nothing here changes it, and the two vocabularies are deliberately not

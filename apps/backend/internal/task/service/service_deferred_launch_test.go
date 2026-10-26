@@ -202,6 +202,23 @@ func TestUpdateDeferredLaunchPromptReplacesOnlyThePrompt(t *testing.T) {
 	}
 }
 
+func TestUpdateDeferredLaunchPromptRejectsForeignExecutor(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedDeferredLaunchTask(t, repo)
+	ctx := t.Context()
+	executor := &models.Executor{ID: "private-prompt-executor", Name: "Private", Type: models.ExecutorTypeLocal}
+	require.NoError(t, repo.CreateExecutor(ctx, executor))
+	require.NoError(t, repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "private-prompt-profile", ExecutorID: executor.ID, Name: "Personal", OwnerUserID: "alice",
+	}))
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, deferredLaunchTaskID, models.MetaKeyExecutorProfileID, "private-prompt-profile"))
+
+	bob := authn.WithIdentity(ctx, authn.Identity{UserID: "bob", Role: authn.RoleMember})
+	_, err := svc.UpdateDeferredLaunchPrompt(bob, deferredLaunchTaskID, "a prompt for another user's executor")
+	require.Error(t, err, "a task writer cannot use another user's private executor")
+	require.Equal(t, "the brief written before the work started", storedLaunch(t, repo)["prompt"])
+}
+
 func TestUpdateDeferredLaunchPromptPatchesNestedCeilingPayload(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedDeferredLaunchTask(t, repo)

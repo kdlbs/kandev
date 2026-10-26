@@ -116,16 +116,17 @@ Use the shared update action and existing authority rather than add an endpoint.
 
 ## Tests
 
-Permanent tests are implementation work. Each name below is the planned
-regression, not a claim that the test exists or passes.
+The table lists regression coverage for this package. Completed results are
+recorded below.
 
 | Acceptance criteria | Planned tests and files |
 | --- | --- |
 | 001.1, 001.2, 001.5 | `server/task_priority_test.go`: `TestMCPTaskPrioritySchema`, `TestMCPTaskPriorityArguments`, `TestMCPTaskPriorityForwarding` |
 | 001.1, 001.2, 001.4, 001.6, 001.7 | `handlers/task_priority_test.go`: `TestHandleCreateTaskPriority`, `TestHandleUpdateTaskPriority`, `TestMCPTaskPriorityDeduplication` |
-| 001.5 | Same handler file: `TestMCPTaskPriorityValidationPrecedesMutation` |
+| 001.5 | Same handler file: `TestMCPTaskPriorityValidationPrecedesMutation`; `handlers/deferred_launch_prompt_test.go`: `TestHandleUpdateTask_InvalidStateDoesNotChangeLaunchPrompt`, `TestHandleUpdateTask_OverlongTitleDoesNotChangeLaunchPrompt` |
 | 001.3, 001.8, 001.9 | `server/task_priority_test.go`: `TestMCPTaskPriorityCatalog`; `handlers/task_priority_test.go`: `TestMCPTaskPriorityAutomationScope` |
-| 001.1, 001.3, 001.6, 001.7, 001.8 | `server/task_priority_integration_test.go`: `TestExternalMCPTaskPriorityJourney`, `TestExternalMCPTaskPriorityAuthorization` |
+| 001.1, 001.3, 001.6, 001.7, 001.8 | `server/task_priority_integration_test.go`: `TestExternalMCPTaskPriorityJourney`, `TestExternalMCPTaskPriorityAuthorization`, `TestExternalMCPViewerCannotChangeDeferredLaunchPrompt` |
+| 001.8 | `service/service_deferred_launch_test.go`: `TestUpdateDeferredLaunchPromptRejectsForeignExecutor` |
 
 All numeric entries abbreviate `AC-TASKS-MCP-PRIORITY-`.
 Existing priority service/repository tests remain the storage baseline.
@@ -160,8 +161,8 @@ Existing UI priority behavior is supplied by the unchanged DTO and event path.
   take the documentation-only exemption. The Task 02 command uses actual paths.
 - New-artifact relative links: all resolve.
 - `git diff --check -- docs/plans/mcp-task-priority docs/specs`: passed.
-- `git status --short`: only this documentation package and the external MCP
-  umbrella requirement changed. New files remain unstaged and uncommitted.
+- The design package was handed off uncommitted before implementation. The
+  implementation and remediation are recorded in this tracked plan package.
 - Task 01 and Task 02 focused MCP tests passed. The real Streamable HTTP tests
   passed for create, list, priority-only update, omitted priority, retry,
   event propagation, and authorized Kanban and Office writes.
@@ -180,6 +181,16 @@ Existing UI priority behavior is supplied by the unchanged DTO and event path.
   spec lint passed.
 - The Task 02 PR documentation preflight returned `covered`; both work orders
   and their requirement/design references were accepted.
+- PR review regressions prove deferred-prompt writes require task-write and
+  executor authority, and invalid title/state values do not mutate a pending
+  prompt. The public guide links to its owning MCP priority contract, and the
+  visibility requirement no longer says the MCP contract is unchanged.
+- Follow-up focused tests passed for MCP handlers, external MCP/SQLite
+  authorization, and the task service's deferred-prompt cases. Backend build
+  and changed-file Go lint passed after the review fixes.
+- A non-race full handler package run timed out at ten minutes during SQLite
+  schema initialization in `TestHandleMessageTask_CancelledPrimaryFallsBackToTheLiveSession`.
+  No assertion failure occurred; focused changed-handler tests passed.
 
 ## Risks
 

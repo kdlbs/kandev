@@ -75,11 +75,11 @@ The backend creation handler validates nonempty priority with
 repository resolution and creation. Empty internal creation input retains the
 service's omission convention. Explicit empty MCP arguments fail schema validation.
 
-The update handler validates a non-nil priority pointer before
-`applyDeferredLaunchPromptUpdate`. This prevents an invalid priority from
-replacing a deferred prompt before the task service rejects the field.
-Return `ws.ErrorCodeValidation` through the existing error envelope.
-The service retains its own canonical validation.
+Before `applyDeferredLaunchPromptUpdate`, the update handler validates every
+provided priority, title length, and normalized state. A rejected field cannot
+replace a deferred prompt first. Return `ws.ErrorCodeValidation` through the
+existing error envelope. The task service retains its own priority and title
+validation.
 
 An omitted update priority never receives a schema or server default.
 The task service supplies error and event behavior for failed writes.
@@ -97,6 +97,8 @@ Do not bypass it with a repository update or add an alternate event publisher.
 
 `NewExternalDispatcherBackendClient` preserves external identity and auth context.
 `Service.UpdateTask` enforces task-write and executor authority.
+`Service.UpdateDeferredLaunchPrompt` enforces task-write and executor authority
+before mutation.
 The guarded dispatcher retains automation target admission and self-denial.
 Do not alter permission maps, trust markers, task scope, or Office CLI routes.
 Test supported profiles explicitly rather than infer support from shared code.
@@ -118,7 +120,8 @@ validation before deferred-prompt writes, and denied targets.
 
 An external Streamable HTTP journey uses `NewExternal`, registered backend
 handlers, and SQLite. It exercises create, list, update, and list again.
-It also proves auth context propagation and denied-target preservation.
+It also proves auth context propagation, viewer denial before a deferred-prompt
+write, authorized owner updates, and denied-target preservation.
 This is the end-to-end boundary for this API change. Existing task events and
 UI priority consumers are reused without rendered UI changes.
 

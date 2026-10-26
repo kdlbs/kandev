@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
@@ -303,6 +304,47 @@ func TestExternalMCPTaskPriorityAuthorization(t *testing.T) {
 	unchanged, err := fixture.taskService.GetTask(ctx, foreignTask.ID)
 	require.NoError(t, err)
 	assert.Equal(t, models.TaskPriorityMedium, unchanged.Priority)
+}
+
+func TestExternalMCPViewerCannotChangeDeferredLaunchPrompt(t *testing.T) {
+	fixture := newExternalTaskPriorityFixture(t)
+	ctx := context.Background()
+	workspace, workflowID := fixture.createWorkspace(t, "priority-viewer-workspace", "Viewer workspace", "priority-owner")
+	require.NoError(t, fixture.repository.UpsertWorkspaceMember(ctx, &models.WorkspaceMember{
+		WorkspaceID: workspace.ID,
+		UserID:      "priority-viewer",
+		Role:        string(authz.WorkspaceRoleViewer),
+	}))
+	created, err := fixture.taskService.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflowID,
+		Title:       "Deferred viewer task",
+		StartAgent:  true,
+		DeferredLaunch: map[string]interface{}{
+			"intent":           "start",
+			"agent_profile_id": "profile-1",
+			"prompt":           "owner supplied brief",
+		},
+	})
+	require.NoError(t, err)
+	owner := fixture.httpClient(t, authn.Identity{UserID: "priority-owner", Role: authn.RoleMember})
+	ownerUpdate := owner.callTool(t, "update_task_kandev", map[string]interface{}{
+		"task_id":                created.Task.ID,
+		"deferred_launch_prompt": "owner supplied updated brief",
+	})
+	require.False(t, ownerUpdate.isError, ownerUpdate.text)
+
+	viewer := fixture.httpClient(t, authn.Identity{UserID: "priority-viewer", Role: authn.RoleMember})
+	result := viewer.callTool(t, "update_task_kandev", map[string]interface{}{
+		"task_id":                created.Task.ID,
+		"deferred_launch_prompt": "viewer supplied brief",
+	})
+	assert.True(t, result.isError, "viewer task update must be denied")
+
+	stored, err := fixture.repository.GetTask(ctx, created.Task.ID)
+	require.NoError(t, err)
+	launch := stored.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	assert.Equal(t, "owner supplied updated brief", launch["prompt"], "denial must not change the queued prompt")
 }
 
 func createExternalPriorityTask(

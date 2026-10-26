@@ -136,20 +136,16 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 
 ### Set or change task priority from MCP
 
-`create_task_kandev` accepts `priority: "critical"`, `"high"`, `"medium"`,
-or `"low"`. Omit the field to use `medium`, even when the parent has another
-priority. The same four exact values are available on `update_task_kandev`:
+`create_task_kandev` uses `medium` when `priority` is omitted, even when the
+parent has another priority. Use `update_task_kandev` to change priority
+without changing task state:
 
 ```json
 { "task_id": "task-uuid", "priority": "high" }
 ```
 
-This update can change priority by itself and leaves task state unchanged. If
-you omit `priority`, Kandev preserves the stored value. Empty, padded,
-uppercase, and unknown values are rejected.
-
-If a create retry returns an existing task for `external_id`, it keeps that
-task's stored priority. Use `update_task_kandev` to change it after the retry.
+See [Set task priority through MCP](automation-and-mcp.md#set-task-priority-through-mcp)
+for accepted values, omission behavior, validation, and retry behavior.
 
 ## Coordinate with targeted messages
 
