@@ -14,6 +14,7 @@ Users can import workflows whose step profiles do not exist on the destination i
 They choose an existing replacement profile for each affected step before import.
 The task system owns this behavior because it owns workflow definitions and their session targets.
 The agent system continues to own profile configuration and eligibility.
+Name selection is the shared prerequisite for browser and noninteractive one-time imports.
 
 ## Terminology
 
@@ -46,6 +47,11 @@ The agent system continues to own profile configuration and eligibility.
   Cancellation shall create nothing. Recoverable errors shall preserve the YAML and valid selections.
   A YAML or destination change shall invalidate the previous selection review.
 - **AC-TASKS-IMPORT-PROFILES-001.7:** Workflows skipped under existing name deduplication shall not require profile selections.
+  For each supported document, Kandev shall process workflow occurrences in document order using exact, case-sensitive names without trimming.
+  Every occurrence whose name already exists in the destination workspace, including hidden workflows, shall be skipped.
+  Otherwise, the first occurrence shall be retained and every later occurrence of that name shall be skipped.
+  Preview shall report only retained occurrences' explicit step profiles, using their original document indexes and step positions.
+  A missing profile on a skipped occurrence shall not block a retained occurrence's import.
   Kandev shall identify repeated step names by their workflow and position.
 - **AC-TASKS-IMPORT-PROFILES-001.8:** Desktop and phone users shall complete the same selection and import flow.
   The phone surface shall provide internal scrolling, visible navigation, safe-area spacing, and touch targets of at least 44 px.
@@ -53,15 +59,25 @@ The agent system continues to own profile configuration and eligibility.
 - **AC-TASKS-IMPORT-PROFILES-001.9:** Loading and retry states shall have localized status text.
   Duplicate submissions shall remain unavailable while an import request is pending.
   After success and reload, each imported step shall retain its selected profile and session targets.
+- **AC-TASKS-IMPORT-PROFILES-001.10:** Browser preview, browser submission, raw-YAML API import, and MCP import shall use the same workflow-name selection rule for the same document and destination state.
+  On successful submission, `created` shall contain each retained occurrence's name once, and `skipped` shall contain every skipped occurrence's name, each list in document order.
+  Skipped occurrences shall create no workflows or steps and shall not modify existing or earlier retained definitions.
+  Distinct exact names shall remain independently importable, including names differing only in case or surrounding whitespace.
+- **AC-TASKS-IMPORT-PROFILES-001.11:** All one-time import paths shall retain structural validation of the entire supported document before name selection can lead to creation.
+  A malformed skipped occurrence shall still reject the document without creating workflows or steps.
+  Browser submissions shall retain structural binding validation, including for supplied bindings on skipped occurrences; missing selections or unavailable profiles on skipped occurrences shall not require resolution.
 
 ## Compatibility and exclusions
 
 This change covers explicit step profiles in manual browser imports of supported workflow exports.
-The existing raw-YAML API and MCP import contracts retain their behavior.
+The shared name-selection rule also covers the raw-YAML API and MCP imports.
+Their profile matching and failure contracts otherwise retain their behavior.
 The browser uses an explicit selection submission contract.
 Workflow-default profiles, review-action profiles, conditional session rules, and unattended workflow sync retain their existing behavior.
 Inline profile creation, profile configuration changes, runtime model fallback, and automatic replacement selection are outside this capability.
 The capability does not create agent sessions or change existing workflows.
+Name selection is per document. Concurrent-request uniqueness, global name constraints,
+schema changes, and choosing a later occurrence when the first retained occurrence fails are outside this capability.
 
 ## Related contracts
 
