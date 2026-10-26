@@ -6,6 +6,7 @@ test("opens the retained rich-output error in a contained phone drawer", async (
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chrome", "phone-only rich-output disclosure");
   const session = await seedRichOutputTask({
@@ -65,6 +66,9 @@ test("opens the retained rich-output error in a contained phone drawer", async (
     ),
   ).toBe(true);
   await testPage.screenshot({ path: testInfo.outputPath("rich-output-error-phone.png") });
+  await prCapture.screenshot("phone-error-drawer", {
+    caption: "Phone rich-output error disclosure",
+  });
 
   await close.tap();
   await expect(drawer).toBeHidden();

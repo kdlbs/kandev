@@ -8,6 +8,8 @@ type MediaListener = (event: MediaQueryListEvent) => void;
 const listeners = new Set<MediaListener>();
 const originalMatchMedia = window.matchMedia;
 const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+const errorDialogName = "Visual output error";
+const errorTriggerName = "Show visual output error";
 
 function setViewport(width: number) {
   Object.defineProperty(window, "innerWidth", {
@@ -62,19 +64,34 @@ describe("RichOutputErrorDisclosure responsive state", () => {
       </TooltipProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Show visual output error" }));
-    expect(screen.getByRole("dialog", { name: "Visual output error" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: errorTriggerName }));
+    expect(screen.getByRole("dialog", { name: errorDialogName })).toBeTruthy();
 
     resizeViewport(767);
-    expect(screen.getByRole("dialog", { name: "Visual output error" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: errorDialogName })).toBeTruthy();
     expect(screen.getByTestId("rich-output-error-drawer").textContent).toContain(
       "Retained validation detail.",
     );
 
     resizeViewport(768);
-    expect(screen.getByRole("dialog", { name: "Visual output error" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: errorDialogName })).toBeTruthy();
     expect(screen.getByTestId("rich-output-error-popover").textContent).toContain(
       "Retained validation detail.",
     );
+  });
+
+  it("toggles the desktop disclosure closed when its trigger is activated again", () => {
+    render(
+      <TooltipProvider>
+        <RichOutputErrorDisclosure diagnostic="Retained validation detail." />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: errorTriggerName });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: errorDialogName })).toBeTruthy();
+
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("dialog", { name: errorDialogName })).toBeNull();
   });
 });

@@ -173,6 +173,11 @@ Design and implementation validation on 2026-10-26:
   memory during the first attempt.
 - Chromium rich-output error E2E passed. Mobile Chromium passed both disclosure
   tests. Managed E2E builds completed successfully.
+- PR review remediation on 2026-10-26: a red unit regression reproduced the
+  open-popover toggle defect, then all 7 targeted component tests passed with
+  `PopoverTrigger` in place. The 8 GB web typecheck, targeted lint/format checks,
+  and fresh-build desktop (1 test) and mobile (2 tests) E2E runs passed. The
+  desktop and phone screenshots were recaptured from the fixed build.
 - Public-doc tests passed (63 tests), public-doc validation passed (54 pages),
   specification validation and lint passed, and `git diff --check` passed.
 

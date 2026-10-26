@@ -214,3 +214,21 @@ The default-heap typecheck first hit Node's 4 GB heap limit. The 8 GB retry
 passed. The first mock-agent failure fixture did not create a persisted error
 status message, so the E2E helper now seeds ordered failed and successful
 transcript messages after the agent turn ends.
+
+PR review remediation on 2026-10-26 adds `cursor-pointer` to the trigger and
+uses `PopoverTrigger` so activating an open desktop disclosure closes it. The
+new component regression first failed because the dialog remained open after a
+second activation. Mobile dialog-name and diagnostic-description checks remain
+in the browser test. Desktop and phone PR screenshots were recaptured from the
+fixed build.
+
+Follow-up verification passed:
+
+- RED: `(cd apps/web && pnpm exec vitest run components/task/chat/messages/kandev/rich-output/rich-output-error-disclosure.test.tsx)` failed because the popup did not close on a second click.
+- GREEN: `(cd apps/web && pnpm exec vitest run components/task/chat/messages/kandev/rich-output/rich-output-error-disclosure.test.tsx components/task/chat/messages/kandev-tool-message-rich-output-errors.test.tsx)` passed (7 tests).
+- `(cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)` passed.
+- `(cd apps/web && pnpm exec eslint components/task/chat/messages/kandev/rich-output/rich-output-error-disclosure.tsx components/task/chat/messages/kandev/rich-output/rich-output-error-disclosure.test.tsx e2e/tests/chat/rich-output-errors.spec.ts e2e/tests/chat/mobile-rich-output-errors.spec.ts)` passed.
+- `(cd apps/web && pnpm exec prettier --check components/task/chat/messages/kandev/rich-output/rich-output-error-disclosure.tsx components/task/chat/messages/kandev/rich-output/rich-output-error-disclosure.test.tsx e2e/tests/chat/rich-output-errors.spec.ts e2e/tests/chat/mobile-rich-output-errors.spec.ts)` passed.
+- `git diff --check` passed.
+- `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project chromium tests/chat/rich-output-errors.spec.ts` passed (1 test) and rebuilt the web app.
+- `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project mobile-chrome tests/chat/mobile-rich-output-errors.spec.ts` passed (2 tests) and rebuilt the web app.

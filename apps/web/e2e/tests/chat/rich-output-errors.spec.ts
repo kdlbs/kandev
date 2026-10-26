@@ -6,6 +6,7 @@ test("discloses a retained rich-output failure beside its successful retry", asy
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }, testInfo) => {
   const session = await seedRichOutputTask({
     page: testPage,
@@ -21,6 +22,7 @@ test("discloses a retained rich-output failure beside its successful retry", asy
   await expect(report.getByRole("heading", { name: "Release health" })).toBeVisible();
   await expect(report).toContainText("Corrected verification");
   await expect(trigger).toHaveCount(1);
+  await expect(trigger).toHaveCSS("cursor", "pointer");
   const fileToggle = report.getByTestId("rich-output-file-preview-toggle");
   await fileToggle.click();
   await expect(report).toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
@@ -42,11 +44,18 @@ test("discloses a retained rich-output failure beside its successful retry", asy
   await expect(report).toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
   await expect(chartFilter).toHaveAttribute("aria-pressed", "false");
   await testPage.screenshot({ path: testInfo.outputPath("rich-output-error-desktop.png") });
+  await prCapture.screenshot("desktop-error-popover", {
+    caption: "Desktop rich-output error disclosure",
+  });
 
   await testPage.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
   await expect(chartFilter).toHaveAttribute("aria-pressed", "false");
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await trigger.click();
+  await expect(dialog).toBeHidden();
   await trigger.click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();

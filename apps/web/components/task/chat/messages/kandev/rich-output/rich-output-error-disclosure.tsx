@@ -4,7 +4,7 @@ import { useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerClose, DrawerContent, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
-import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
@@ -39,13 +39,12 @@ export function RichOutputErrorDisclosure({ diagnostic }: { diagnostic: string }
     <button
       ref={triggerRef}
       type="button"
-      className={`inline-flex shrink-0 items-center justify-center rounded text-red-500 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${usesDrawer ? "size-11" : "size-6"}`}
+      className={`inline-flex shrink-0 cursor-pointer items-center justify-center rounded text-red-500 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${usesDrawer ? "size-11" : "size-6"}`}
       aria-label={t("task:richOutputErrorTrigger")}
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-controls={open ? `${id}-dialog` : undefined}
       data-testid="rich-output-error-trigger"
-      onClick={() => setOpen(true)}
     >
       <IconX aria-hidden="true" className="size-3.5" />
     </button>
@@ -140,9 +139,9 @@ function DesktopErrorPopover({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip open={!open && tooltipOpen} onOpenChange={setTooltipOpen}>
-        <PopoverAnchor asChild>
+        <PopoverTrigger asChild>
           <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-        </PopoverAnchor>
+        </PopoverTrigger>
         <TooltipContent data-testid="rich-output-error-tooltip" side="top" sideOffset={6}>
           {summary}
         </TooltipContent>
