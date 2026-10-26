@@ -1,7 +1,7 @@
 ---
 id: "01-session-mcp-token-and-broker-relay"
 title: "Authenticate agent MCP per instance and relay the Git broker, behind a flag"
-status: draft
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -85,3 +85,27 @@ python3 scripts/list-docs.py validate
 
 Pre-existing failures are proven against `origin/main` by a control run of the same
 packages and a `comm -13` of the `--- FAIL` names.
+
+## Results
+
+- **Ported.** The reviewed implementation was brought over as a squash onto `main`, minus the sandbox-only
+  private MCP route exemption and its `execution.SandboxSelection` test (both re-apply when the sandbox
+  provider lands). The runtime flag `features.sessionMcpToken` is registered in `profiles.yaml` (off in prod,
+  dev and e2e), the config, `runtimeflags/registry.go` and the web feature types. One `SessionMCPPolicy` gates
+  all backend behaviour; agentctl holds no flag.
+- **Review fixes.** `verifyRetainedSessionToken` fails closed when the record carries a nonce and no key store
+  exists; the revoke retry waits on a timer in a `select` instead of `time.Sleep`; the identity decode error
+  wraps with `%w: %w`. Review round 1 also fixed token-less instances answering 503 (they stay unguarded until
+  revoked), scoped the relay control-auth exemption to instances with an upstream broker URL, and made a
+  reconnected Kubernetes pod count as retained.
+- **Receipts.** Tests in agentctl api, instance and config, lifecycle, agent runtime agentctl, sessionmcp,
+  backendapp, runtimeflags and the mock agent pass, with flag-off parity tests and `-race` on the new tests.
+  Remaining failures in those packages fail identically on `origin/main` (macOS `/var` symlink and socket
+  path limits). `scripts/lint-go-changed`, `lint-spec-files.py --all` and `list-docs.py validate` pass. One
+  Playwright spec covers the Feature Toggles row.
+- **Manual check.** A real `agentctl` binary with an enforcing and a token-less instance: no or wrong token on
+  `/mcp` and `/message` of the enforcing instance answered 401 and the right token reached the handler; the
+  token-less instance was reachable as today; after the revoke route both answered 503.
+- **Known limitation.** Recovered Sprites and plugin-runtime instances expose no conditional-delete or revoke
+  handle, so a retained instance there ends in a fail-closed unknown outcome. A control handle for those
+  runtimes is follow-up work.

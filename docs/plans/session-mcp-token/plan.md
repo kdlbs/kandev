@@ -1,6 +1,6 @@
 ---
 created: 2026-10-26
-status: draft
+status: done
 requirements:
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-001
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-002
