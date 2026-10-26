@@ -97,6 +97,10 @@ func copyDeliveryTerminalIdentity(
 	payload.DeliverySequence = terminal.DeliverySequence
 	payload.DeliverySubmissionID = terminal.DeliverySubmissionID
 	copyTerminalStorageIdentity(payload, terminal, execution)
+	payload.DetachedAtCommit = terminal.DetachedAtCommit
+	payload.CommittedAt = terminal.CommittedAt
+	payload.CancelCause = terminal.CancelCause
+	payload.CancelDecidedAt = terminal.CancelDecidedAt
 	payload.DeliveryOutcome = string(models.DeliverySubmissionCompleted)
 	if isError, _ := terminal.Data["is_error"].(bool); isError {
 		payload.DeliveryOutcome = string(models.DeliverySubmissionFailed)
