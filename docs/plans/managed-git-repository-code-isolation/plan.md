@@ -59,5 +59,4 @@ Only task 03 changes rendered UI.
 - `cd apps/web && pnpm run typecheck && pnpm run i18n:check`, targeted vitest, and the
   Playwright repository-settings spec on desktop and mobile projects.
 - `python3 scripts/lint-spec-files.py --all` and `python3 scripts/list-docs.py validate`.
-- Delivery: the operator lifted the earlier embargo for this port. Delivery is a pull
-  request on `nova28/kandev` with base `sandbox/nono-plus`, never on `kdlbs/kandev`.
+- Delivery: ships in the follow-up PR that builds on kdlbs/kandev#4769.

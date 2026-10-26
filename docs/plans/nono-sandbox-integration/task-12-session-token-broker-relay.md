@@ -69,11 +69,11 @@ Derive, inject, carry and enforce the per-instance token on /mcp, /sse, /message
 - Carriers for ACP, Codex (native and passthrough with version gate, variable set by agentctl in the Codex process) and Claude/OpenCode passthrough via the private `TempConfigPath` file; Cursor, Pi and custom TUI fail closed (`workspace_file_carrier_deferred`, `custom_tui_deferred`); Codex variable never in `PassthroughArtifacts.Env`.
 - Single-flight ensure-key that replaces an undecryptable or wrong-length key at startup (before recovery) and at launch, logging `mcp_token_key_replaced`.
 - Typed launch failures with `cause` tokens, unknown-outcome delete-by-ID, public docs for the three codes, causes, upgrade order and stuck-resume outcome.
-- Bind decision: file the local-only follow-up card (REQ-003) with the EMBARGO section verbatim and record its ID in the task plan.
+- Bind decision (REQ-003): record the loopback-default follow-up in the design.
 
 #### Exclusions
 
-Broker relay, executor routes, workspace-file carriers, Kubernetes and SSH retained-instance adoption (follow-up `5c04885e-9899-4db6-992d-241cacd90dba`).
+Broker relay, executor routes, workspace-file carriers, Kubernetes and SSH retained-instance adoption (follow-up).
 
 #### Acceptance
 

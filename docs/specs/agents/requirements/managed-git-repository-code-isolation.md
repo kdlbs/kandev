@@ -99,4 +99,4 @@ This capability applies with or without a sandbox.
 - **Closing the window between driver determination and the command, and write protection of the shared Git directory** (`hooks`, `config`, `info`): no current specification protects that directory from agent writes ([sandbox policies](sandbox-policies.md) make no such claim).
 - **Git started by other tools:** the `git` that `gh`, `glab`, and `az` start for PR creation is not managed Git.
 - **Changing a running instance:** a runtime route that lowers hooks to off, delivery of a change to a running or retained agentctl instance, and a capability check when a retained remote or container instance is adopted.
-- **Docker reconnect errors:** surfacing the AC-AGENTS-GITISOLATION-001.12 error when a Docker or remote_docker reconnect is refused (card b7c9ed26-e1dd-46a8-bbde-a866fe811100).
+- **Docker reconnect errors:** surfacing the AC-AGENTS-GITISOLATION-001.12 error when a Docker or remote_docker reconnect is refused (follow-up).

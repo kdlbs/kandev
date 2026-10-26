@@ -53,7 +53,7 @@ Sandbox policies confine the agent process but not managed Git. A hook or filter
 
 Execute the three ordered work orders of the [managed Git isolation plan](../managed-git-repository-code-isolation/plan.md): policy seam and default isolation, hooks setting persistence and propagation, settings switch and public guide.
 Resolve integration with the sandbox launch path in favour of the structure on `sandbox/nono-plus`. Known integration points: the agentctl `executionCapabilities()` list (append `managed-git-policy.v1` outside the Linux-only sandbox branch), `CreateInstanceRequest` and the lifecycle create-request builders (`manager_launch.go`, `executor_docker.go`, `manager_execution.go`), the repository column lists and DTOs that enumerate `pull_before_worktree`, and `base_schema.go`.
-Delivery is a pull request on `nova28/kandev` with base `sandbox/nono-plus`. The operator lifted the earlier no-push embargo for this port.
+Delivery is the follow-up PR that builds on kdlbs/kandev#4769.
 Status ownership: the [managed Git plan](../managed-git-repository-code-isolation/plan.md) records results for its three work orders; this wrapper turns `done` when all three do.
 
 ## Out of scope

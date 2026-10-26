@@ -354,9 +354,7 @@ retained sessions; and the `missing` refusal log line for troubleshooting.
 reason the change was proposed for the session channels. The follow-up is a gated
 runtime flag that defaults the bind to loopback for single-user installs, with
 public documentation and a migration note for LAN, container and service users.
-Build files it as a local Kandev task (`parent_id` self, `start_agent` false, never a public tracker),
-with the whole `EMBARGO: LOCAL ONLY` section of the originating task description copied verbatim at
-its start, and records its ID in the task plan.
+It is tracked outside this change.
 
 ## No kill switch
 
@@ -369,5 +367,5 @@ codes, and the only safe rollback is a revert.
 Two independent work orders (token, relay) share one card because they close one
 sandbox-contract layer; each ships and tests alone, except that the relay reuses the
 create-request extension from the token order. The bind decision (REQ-003) is recorded in the
-design and the follow-up card is filed by the token order. Executor route guards and
+design; the follow-up is tracked outside this change. Executor route guards and
 workspace-file carriers are deferred (requirements Out of scope).
