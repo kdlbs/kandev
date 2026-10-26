@@ -306,6 +306,11 @@ cannot set provenance itself.
 placement defaults when the plugin omits them (single workspace; that
 workspace's first workflow — ambiguous → `InvalidArgument`), accepts an optional
 `start_agent` that best-effort auto-launches an agent, and requires a title.
+Launch profiles (`launch.agent_profile_id` / `launch.executor_profile_id`) are
+validated whenever they are given and stored in the task's `agent_profile_id` /
+`executor_profile_id` metadata, the keys native issue watchers use, so a task
+created without `start_agent` and started later by a workflow step's
+`auto_start_agent` launches with the profiles the plugin chose.
 `UpdateTask` accepts a conservative field mask — `title` / `description` /
 `state` / `priority`, each optional (a nil field is left unchanged);
 a present `workflow_step_id` is rejected and workflow transitions use

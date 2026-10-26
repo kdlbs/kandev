@@ -1949,13 +1949,23 @@ func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) err
 	return a.svc.DeleteTask(ctx, id)
 }
 
+// pluginTaskMetadata builds a plugin-created task's metadata. The launch
+// profiles are stored under the same keys native issue watchers use, so a task
+// that a workflow step starts later launches with the profiles the plugin chose.
 func pluginTaskMetadata(in plugins.TaskCreateInput) (map[string]interface{}, error) {
-	if in.Metadata == nil && in.Source == "" {
+	agentProfileID, executorProfileID := in.Launch.AgentProfileID, in.Launch.ExecutorProfileID
+	if in.Metadata == nil && in.Source == "" && agentProfileID == "" && executorProfileID == "" {
 		return nil, nil
 	}
-	metadata := make(map[string]interface{}, len(in.Metadata)+1)
+	metadata := make(map[string]interface{}, len(in.Metadata)+3)
 	for key, value := range in.Metadata {
 		metadata[key] = value
+	}
+	if agentProfileID != "" {
+		metadata[taskmodels.MetaKeyAgentProfileID] = agentProfileID
+	}
+	if executorProfileID != "" {
+		metadata[taskmodels.MetaKeyExecutorProfileID] = executorProfileID
 	}
 	if in.Source == "" {
 		return metadata, nil

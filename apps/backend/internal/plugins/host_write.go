@@ -335,10 +335,8 @@ func (r taskReader) prepareCreate(ctx context.Context, in pluginsdk.CreateTaskIn
 	if err != nil {
 		return TaskCreateInput{}, TaskLaunchInput{}, err
 	}
-	if in.StartAgent {
-		if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
-			return TaskCreateInput{}, TaskLaunchInput{}, err
-		}
+	if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
 	}
 	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)
 	if err != nil {
@@ -608,10 +606,10 @@ func taskLaunchInput(launch *pluginsdk.PluginTaskLaunchOptions) (TaskLaunchInput
 	return TaskLaunchInput{}, invalidArgument("launch.plan_mode must be one of: off, on, replace")
 }
 
-// validateTaskLaunch confirms that auto-start profile references exist before
-// the task is created. This avoids a plugin creating a task that is guaranteed
-// to fail its requested launch, while keeping launch failures after creation
-// best-effort as documented by taskStarter.
+// validateTaskLaunch confirms that launch profile references exist before the
+// task is created, whether the plugin starts the agent now or leaves the task
+// for a workflow step to start later: either way the task keeps the profiles.
+// Launch failures after creation stay best-effort as documented by taskStarter.
 func (h *pluginHost) validateTaskLaunch(ctx context.Context, launch TaskLaunchInput) error {
 	if err := h.validateLaunchAgentProfile(ctx, launch.AgentProfileID); err != nil {
 		return err

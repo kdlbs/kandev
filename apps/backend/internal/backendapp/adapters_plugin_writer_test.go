@@ -442,3 +442,32 @@ func TestPluginsTaskWriter_ExactCreateRejectsLostSourceIdentity(t *testing.T) {
 	require.Nil(t, task)
 	require.False(t, alreadyApplied)
 }
+
+func TestPluginsTaskWriter_CreateStoresLaunchProfilesInMetadata(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "todo", Title: "Investigate", Source: "plugin:acme",
+		Launch: plugins.TaskLaunchInput{AgentProfileID: "agent-1", ExecutorProfileID: "executor-profile-1"},
+	})
+	require.NoError(t, err)
+	require.False(t, svc.lastCreate.StartAgent)
+	require.Equal(t, "agent-1", svc.lastCreate.Metadata[taskmodels.MetaKeyAgentProfileID],
+		"a task started later by a workflow step launches with the plugin's agent profile")
+	require.Equal(t, "executor-profile-1", svc.lastCreate.Metadata[taskmodels.MetaKeyExecutorProfileID],
+		"a task started later by a workflow step launches with the plugin's executor profile")
+	require.Equal(t, "plugin:acme", svc.lastCreate.Metadata["source"])
+}
+
+func TestPluginsTaskWriter_CreateStoresOnlyTheLaunchProfilesGiven(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+
+	_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "x",
+		Launch: plugins.TaskLaunchInput{ExecutorProfileID: "executor-profile-1"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[string]interface{}{taskmodels.MetaKeyExecutorProfileID: "executor-profile-1"}, svc.lastCreate.Metadata)
+}
