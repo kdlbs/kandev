@@ -1,0 +1,148 @@
+{
+  "allocation_id": "11555eae-4303-7319-6221-34575ff94414",
+  "backend_pids": {
+    "after_restart": 31127,
+    "before_crash": 31015
+  },
+  "cleanup": {
+    "allocation_state_after_stop": "running",
+    "backend_pid_stopped": 31127,
+    "fence_retained": true,
+    "fence_sha256_after_stop": "9b2aaa3b3e3ac904b3e6f39a5f4f1c8731b6c4c52d14d5ba2917a962bb8c2416",
+    "git_daemon_pid_stopped": 31011,
+    "job_status_after_stop": "running",
+    "operator_teardown_required": {
+      "allocation_id": "11555eae-4303-7319-6221-34575ff94414",
+      "environment_id": "5266bd80-8841-4a1a-876b-8b4b2781d9df",
+      "fence_path": "<fixture-home>/worker-state/5dd33836-f337-39c7-8bd3-d60004c67585/active-environment",
+      "job_id": "kandev-f2bedea5c9b1d0ab231da7576ffe2cce",
+      "reason": "an ordinary session stop retains the allocation, fence, controller and workspace; ending the Nomad job is not part of this path"
+    },
+    "production_cleanup": false,
+    "remote_processes_retained": 2,
+    "ssh_identity_removed": true
+  },
+  "environment_id": "5266bd80-8841-4a1a-876b-8b4b2781d9df",
+  "environment_status": {
+    "after": "ready",
+    "before": "creating"
+  },
+  "execution_id": "115810d8-3d76-4d57-8e2e-f72c4a6bf42a",
+  "fence_sha256": "9b2aaa3b3e3ac904b3e6f39a5f4f1c8731b6c4c52d14d5ba2917a962bb8c2416",
+  "finished": "2026-10-25T13:37:52+00:00",
+  "fixture_root": "<fixture-home>/runs/nomad-e2e-fixture-<id>",
+  "identities": {
+    "after": {
+      "allocation_id": "11555eae-4303-7319-6221-34575ff94414",
+      "environment_status": "ready",
+      "execution_id": "115810d8-3d76-4d57-8e2e-f72c4a6bf42a",
+      "fence_owner_sha256": "9b2aaa3b3e3ac904b3e6f39a5f4f1c8731b6c4c52d14d5ba2917a962bb8c2416",
+      "inventory_phase": "ready",
+      "job_create_index": 186,
+      "job_id": "kandev-f2bedea5c9b1d0ab231da7576ffe2cce",
+      "job_modify_index": 186,
+      "node_id": "5dd33836-f337-39c7-8bd3-d60004c67585",
+      "remote_process_count": 2
+    },
+    "before": {
+      "allocation_id": "11555eae-4303-7319-6221-34575ff94414",
+      "environment_status": "creating",
+      "execution_id": "115810d8-3d76-4d57-8e2e-f72c4a6bf42a",
+      "fence_owner_sha256": "9b2aaa3b3e3ac904b3e6f39a5f4f1c8731b6c4c52d14d5ba2917a962bb8c2416",
+      "inventory_phase": "ready",
+      "job_create_index": 186,
+      "job_id": "kandev-f2bedea5c9b1d0ab231da7576ffe2cce",
+      "job_modify_index": 186,
+      "node_id": "5dd33836-f337-39c7-8bd3-d60004c67585",
+      "remote_process_count": 2
+    }
+  },
+  "inventory_phase": {
+    "after": "ready",
+    "before": "ready"
+  },
+  "job_id": "kandev-f2bedea5c9b1d0ab231da7576ffe2cce",
+  "mode": "created-real-pre-ready-recovery",
+  "node_id": "5dd33836-f337-39c7-8bd3-d60004c67585",
+  "port": 64258,
+  "prompts_sent": 0,
+  "server_identity": "2484fbc3a9e2ec794d4ef5f62179c64792a75e22568f72e929d93366db990499",
+  "session_id": "51143acb-86de-4339-ace7-bc5f0f92d03f",
+  "started": "2026-10-25T13:37:42+00:00",
+  "status": "passed",
+  "steps": [
+    {
+      "duration_s": 0.3,
+      "name": "start-git-daemon",
+      "started": "2026-10-25T13:37:42+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.687,
+      "name": "start-backend-with-barrier",
+      "started": "2026-10-25T13:37:42+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.027,
+      "name": "create-fixture-objects",
+      "started": "2026-10-25T13:37:44+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 2.064,
+      "name": "await-pre-publish-barrier",
+      "started": "2026-10-25T13:37:44+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.142,
+      "name": "snapshot-before-crash",
+      "started": "2026-10-25T13:37:46+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.056,
+      "name": "crash-backend",
+      "started": "2026-10-25T13:37:46+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.372,
+      "name": "restart-backend-without-barrier",
+      "started": "2026-10-25T13:37:46+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.14,
+      "name": "await-recovery",
+      "started": "2026-10-25T13:37:47+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.0,
+      "name": "assert-identity-preserved",
+      "started": "2026-10-25T13:37:47+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.091,
+      "name": "workspace-read-before-any-prompt",
+      "started": "2026-10-25T13:37:47+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 5.32,
+      "name": "session-stop-and-teardown",
+      "started": "2026-10-25T13:37:47+00:00",
+      "status": "passed"
+    }
+  ],
+  "task_id": "22220a86-6e11-45a3-8f74-0a0f2ead2aa3",
+  "workspace_path": "<fixture-home>/worker/workspace/environments/5266bd80-8841-4a1a-876b-8b4b2781d9df/g1",
+  "workspace_read": {
+    "contains_expected_file": true,
+    "ok": true,
+    "repo_head": "4c687ac69a70a67447ba936ed7b79ac861002683"
+  }
+}

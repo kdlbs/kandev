@@ -1,0 +1,81 @@
+#!/bin/sh
+# Print the Nomad client "meta" block that makes a node usable by Kandev pool profiles.
+#
+#   nomad-pool-onboard ssh   <state_root> <ssh_host> <ssh_port> <ssh_host_key_fingerprint>
+#   nomad-pool-onboard local <state_root>
+#
+# ssh mode prints the block only. local mode also creates the host-identity token under
+# ${KANDEV_HOME_DIR:-$HOME/.kandev}/data/nomad-host-identity (mode 600, kept if present) and prints its sha256.
+# The script never edits Nomad configuration or restarts anything; paste the block into the client
+# stanza of the node and restart the Nomad client yourself.
+set -eu
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+[ $# -ge 2 ] || usage
+mode=$1
+state_root=$2
+case "$state_root" in /*) ;; *) echo "state_root must be an absolute path" >&2; exit 2 ;; esac
+case "$state_root" in *[!A-Za-z0-9._/@:+-]*) echo "state_root contains unsupported characters" >&2; exit 2 ;; esac
+
+case "$mode" in
+ssh)
+  [ $# -eq 5 ] || usage
+  host=$3 port=$4 fingerprint=$5
+  case "$port" in ''|*[!0-9]*) echo "ssh_port must be a number" >&2; exit 2 ;; esac
+  case "$fingerprint" in SHA256:*) ;; *) echo "fingerprint must look like SHA256:<base64> (ssh-keygen -lf)" >&2; exit 2 ;; esac
+  cat <<BLOCK
+client {
+  meta {
+    "kandev.attach"              = "ssh"
+    "kandev.state_root"          = "$state_root"
+    "kandev.ssh_host"            = "$host"
+    "kandev.ssh_port"            = "$port"
+    "kandev.ssh_host_key_sha256" = "$fingerprint"
+  }
+}
+BLOCK
+  ;;
+local)
+  [ $# -eq 2 ] || usage
+  home=${KANDEV_HOME_DIR:-$HOME/.kandev}
+  token_file=$home/data/nomad-host-identity
+  if [ ! -f "$token_file" ]; then
+    mkdir -p "$home/data"
+    umask 077
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"$token_file"
+  fi
+  chmod 600 "$token_file"
+  digest=$(tr -d ' \n\r\t' <"$token_file" | shasum -a 256 | cut -d' ' -f1)
+  # Nomad fingerprints CPU itself; on Apple Silicon it reports only a few dozen
+  # MHz, which leaves nothing after the reservation below. Set NOMAD_CPU_TOTAL_MHZ
+  # to pin cpu_total_compute and size the reservation relative to it (a quarter).
+  cpu_total=${NOMAD_CPU_TOTAL_MHZ:-}
+  reserved_cpu=1000
+  total_line="# cpu_total_compute is not set; check \`nomad node status -self -verbose\` reports enough CPU"
+  if [ -n "$cpu_total" ]; then
+    case $cpu_total in *[!0-9]*|'') echo "NOMAD_CPU_TOTAL_MHZ must be a number of MHz" >&2; exit 2 ;; esac
+    reserved_cpu=$((cpu_total / 4))
+    total_line="cpu_total_compute = $cpu_total"
+  fi
+  cat <<BLOCK
+$total_line
+client {
+  meta {
+    "kandev.attach"                = "local"
+    "kandev.state_root"            = "$state_root"
+    "kandev.host_identity_sha256"  = "$digest"
+  }
+  # Reserve headroom for Kandev itself; a local node without it is refused.
+  reserved {
+    cpu    = $reserved_cpu
+    memory = 2048
+  }
+}
+BLOCK
+  ;;
+*) usage ;;
+esac

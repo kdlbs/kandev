@@ -1,0 +1,496 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kandev isolated native Nomad E2E fixture config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_only",
+    "fixture_root",
+    "kandev_home",
+    "backend",
+    "nomad",
+    "ssh",
+    "partition"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "fixture_only": {
+      "const": true
+    },
+    "fixture_root": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "kandev_home": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binary",
+        "port"
+      ],
+      "properties": {
+        "binary": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "nomad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binary",
+        "version",
+        "server_rpc",
+        "client_rpc_proxy",
+        "node_name"
+      ],
+      "properties": {
+        "binary": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "version": {
+          "const": "2.0.7"
+        },
+        "server_rpc": {
+          "type": "string",
+          "pattern": "^127\\.0\\.0\\.1:[0-9]{1,5}$"
+        },
+        "client_rpc_proxy": {
+          "type": "string",
+          "pattern": "^127\\.0\\.0\\.1:[0-9]{1,5}$"
+        },
+        "node_name": {
+          "type": "string",
+          "pattern": "^ff-fixture-[a-zA-Z0-9-]+$"
+        }
+      }
+    },
+    "ssh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client",
+        "server",
+        "keygen",
+        "host",
+        "user",
+        "port",
+        "private_key",
+        "known_hosts"
+      ],
+      "properties": {
+        "client": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "server": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "keygen": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "host": {
+          "const": "127.0.0.1"
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,31}$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "private_key": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "known_hosts": {
+          "type": "string",
+          "pattern": "^/"
+        }
+      }
+    },
+    "partition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "listen",
+        "can_drop_active_connections"
+      ],
+      "properties": {
+        "mode": {
+          "const": "loopback-tcp-relay"
+        },
+        "listen": {
+          "type": "string",
+          "pattern": "^127\\.0\\.0\\.1:[0-9]{1,5}$"
+        },
+        "can_drop_active_connections": {
+          "const": true
+        }
+      }
+    },
+    "pre_ready_recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "process_label",
+        "operation_id",
+        "server_identity",
+        "job_create_index",
+        "job_definition_index",
+        "expected_repo_count",
+        "expected_file"
+      ],
+      "properties": {
+        "process_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "server_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "job_create_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "job_definition_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expected_repo_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_file": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api_base",
+        "ws_base",
+        "nomad_http",
+        "task_id",
+        "session_id",
+        "environment_id",
+        "node_id",
+        "node_name",
+        "job_id",
+        "allocation_id",
+        "workspace_path",
+        "repo_name",
+        "repo_head",
+        "repo_file",
+        "repo_file_marker",
+        "agentctl_pid",
+        "acp_pid",
+        "child_pid",
+        "grandchild_pid",
+        "nomad_client_pid",
+        "kandev_backend_pid",
+        "agentctl_binary_path",
+        "agentctl_runtime_path",
+        "agentctl_sha256",
+        "kandev_binary_path",
+        "kandev_sha256",
+        "kandev_build_identity"
+      ],
+      "properties": {
+        "api_base": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}/api/v1$"
+        },
+        "ws_base": {
+          "type": "string",
+          "pattern": "^ws://127\\.0\\.0\\.1:[0-9]{1,5}$"
+        },
+        "nomad_http": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}$"
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environment_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "node_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "node_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "job_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allocation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "workspace_path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "repo_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo_head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "repo_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo_file_marker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agentctl_pid": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "acp_pid": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "child_pid": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "grandchild_pid": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "nomad_client_pid": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "kandev_backend_pid": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "agentctl_binary_path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "agentctl_runtime_path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "agentctl_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "kandev_binary_path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "kandev_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "kandev_build_identity": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "createFixtureBootstrap": {
+      "title": "Bootstrap config for run --scenario pre-ready-recovery --create-fixture",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kandev_binary",
+        "nomad",
+        "ssh",
+        "workspace_root",
+        "allocation_root",
+        "cpu_mhz",
+        "memory_mb",
+        "repository",
+        "expected_file",
+        "temp_root_parent"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kandev_binary": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "nomad": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address",
+            "token_file",
+            "namespace",
+            "region",
+            "datacenter",
+            "node_id",
+            "platform"
+          ],
+          "properties": {
+            "address": {
+              "type": "string",
+              "description": "http only for loopback; https required otherwise; explicit port; no credentials/path/query",
+              "pattern": "^https?://[^/@?#]+:[0-9]{1,5}/?$"
+            },
+            "token_file": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string"
+            },
+            "datacenter": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "platform": {
+              "type": "string",
+              "pattern": "^(linux|darwin)/(amd64|arm64)$"
+            }
+          }
+        },
+        "ssh": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "port",
+            "host_fingerprint",
+            "identity_file"
+          ],
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "host_fingerprint": {
+              "type": "string",
+              "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+            },
+            "identity_file": {
+              "type": "string",
+              "pattern": "^/"
+            }
+          }
+        },
+        "workspace_root": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "allocation_root": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "cpu_mhz": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "repository": {
+          "type": "object",
+          "required": [
+            "base_branch"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https://"
+            },
+            "base_branch": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "path"
+              ]
+            },
+            {
+              "required": [
+                "url"
+              ]
+            }
+          ]
+        },
+        "expected_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temp_root_parent": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "agent_profile_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,304 @@
+{
+  "backend_pids": {
+    "before_crash": 13236
+  },
+  "capacity": {
+    "available_cpu_mhz": 48,
+    "available_memory_mb": 49152,
+    "exhausted_dimensions": [
+      "cpu"
+    ],
+    "request_cpu_mhz": 48,
+    "request_memory_mb": 1024,
+    "reserved_cpu_mhz": 0,
+    "reserved_memory_mb": 0,
+    "total_cpu_mhz": 48,
+    "total_memory_mb": 49152
+  },
+  "cleanup": {
+    "eligibility": "not needed",
+    "git_daemon_pid_stopped": 13232,
+    "jobs": {
+      "A": "dead",
+      "B": "dead"
+    },
+    "relay": "stopped",
+    "released": [
+      {
+        "fence": "removed",
+        "job": "ended purge=false",
+        "job_id": "kandev-45dfd213c04724a02e934a5f079ae3ea",
+        "kill_exact": {
+          "13272": "already_gone",
+          "13429": "already_gone",
+          "13430": "already_gone",
+          "13433": "killed",
+          "13437": "killed"
+        },
+        "label": "A",
+        "processes_gone": true,
+        "production_cleanup": false,
+        "recorded_processes": [
+          [
+            13272,
+            "Mon Oct 26 00:30:18 2026"
+          ],
+          [
+            13429,
+            "Mon Oct 26 00:30:22 2026"
+          ],
+          [
+            13430,
+            "Mon Oct 26 00:30:22 2026"
+          ],
+          [
+            13433,
+            "Mon Oct 26 00:30:22 2026"
+          ],
+          [
+            13437,
+            "Mon Oct 26 00:30:22 2026"
+          ]
+        ],
+        "release": "operator-teardown"
+      },
+      {
+        "job": "ended purge=false",
+        "job_id": "kandev-2a9eac1bb6c1e8be330614423c9ef38a",
+        "label": "B",
+        "processes_gone": true,
+        "production_cleanup": false,
+        "recorded_processes": [],
+        "release": "operator-teardown"
+      }
+    ],
+    "session_stop": "skipped: the backend is not running",
+    "ssh_identity_removed": true
+  },
+  "environments": {
+    "A": {
+      "allocation_id": "17e53dfd-5411-a5e7-f060-5b256f29f441",
+      "job_id": "kandev-45dfd213c04724a02e934a5f079ae3ea"
+    },
+    "B": {
+      "allocation_id": "05335470-13c2-ea3d-b713-1c2873dbab1b",
+      "job_id": "kandev-2a9eac1bb6c1e8be330614423c9ef38a"
+    }
+  },
+  "finished": "2026-10-25T16:30:50+00:00",
+  "fixture_root": "<fixture-home>/runs/nomad-e2e-fixture-bp1iosr8",
+  "identities": {
+    "A": {
+      "after_heal": {
+        "allocation_client_status": "running",
+        "prompts_sent": 0
+      },
+      "allocated_resources": {
+        "cpu_mhz": 48,
+        "memory_mb": 1024
+      },
+      "allocation_id": "17e53dfd-5411-a5e7-f060-5b256f29f441",
+      "backend_pid": 13236,
+      "environment_id": "88c7df9a-727e-40f3-9c1e-4d51b28c8fc3",
+      "fence_owner_sha256": "757d85b00dd9047ebd181a00cc3bc1056ca6a92cb8548fd958b4d5c330d84d61",
+      "job_id": "kandev-45dfd213c04724a02e934a5f079ae3ea",
+      "messages": 4,
+      "node_id": "ae1146b6-fa40-e9f1-d384-e5c3c571820f",
+      "processes": [
+        {
+          "pid": 13272,
+          "role": "agentctl",
+          "started": "Mon Oct 26 00:30:18 2026"
+        },
+        {
+          "pid": 13429,
+          "role": "acp",
+          "started": "Mon Oct 26 00:30:22 2026"
+        },
+        {
+          "pid": 13430,
+          "role": "acp",
+          "started": "Mon Oct 26 00:30:22 2026"
+        },
+        {
+          "pid": 13433,
+          "role": "child",
+          "started": "Mon Oct 26 00:30:22 2026"
+        },
+        {
+          "pid": 13437,
+          "role": "grandchild",
+          "started": "Mon Oct 26 00:30:22 2026"
+        }
+      ],
+      "remote_processes": 1,
+      "roles": [
+        "agentctl"
+      ],
+      "server_identity": "4a02a9ed9f47d160728ffb9ab799f9cc028716ef06bff6e994d253aa690f4eb3",
+      "session_id": "ace7e4f9-f09a-461e-96a5-388cd62a6e0d",
+      "task_id": "8e334dd9-6578-43ca-b56c-3bb40cd830e6"
+    },
+    "B": {
+      "a_fence_owner_unchanged": true,
+      "allocation_id": "05335470-13c2-ea3d-b713-1c2873dbab1b",
+      "allocations": 1,
+      "client_status": "failed",
+      "environment_id": "06996472-a556-40ce-9ecd-5b1d26411bc3",
+      "exit_code": 73,
+      "job_id": "kandev-2a9eac1bb6c1e8be330614423c9ef38a",
+      "node_id": "ae1146b6-fa40-e9f1-d384-e5c3c571820f",
+      "queued": {
+        "blocked_evaluation": true,
+        "dimensions_exhausted": [
+          "cpu"
+        ]
+      },
+      "remote_processes": 0,
+      "reserved_ports_listener": "not asserted",
+      "session_id": "e304ba27-972c-4b53-881b-7dba9a997588",
+      "task_id": "f33f8828-c2d8-4558-b55b-fa9f195d1f58"
+    }
+  },
+  "limitations": [
+    "native reservations are scheduler accounting, not hard OS limits",
+    "release is an operator teardown (job end with purge disabled and compare-owner fence removal), not production cleanup",
+    "quarantine behaviour is covered by Go tests and WO07, not by this scenario",
+    "node ACL scope is not per node; the dedicated-node check is the profile-pinned NodeID, datacenter and platform"
+  ],
+  "mode": "created-real-disconnect",
+  "node": {
+    "datacenter": "dc1",
+    "meta_compared": false,
+    "node_id": "ae1146b6-fa40-e9f1-d384-e5c3c571820f",
+    "platform": "darwin/arm64"
+  },
+  "observed_statuses": [
+    {
+      "allocation": "running",
+      "node": "ready",
+      "phase": "partitioned"
+    },
+    {
+      "allocation": "unknown",
+      "node": "disconnected",
+      "phase": "partitioned"
+    },
+    {
+      "allocation": "running",
+      "node": "ready",
+      "phase": "healed"
+    }
+  ],
+  "port": 61396,
+  "production_cleanup": false,
+  "relay_partitioned_at_exit": false,
+  "release": "operator-teardown",
+  "scenario": "disconnect",
+  "started": "2026-10-25T16:30:14+00:00",
+  "status": "passed",
+  "steps": [
+    {
+      "duration_s": 0.001,
+      "name": "verify-node-identity",
+      "started": "2026-10-25T16:30:14+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.007,
+      "name": "poll-node-ready",
+      "started": "2026-10-25T16:30:14+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.001,
+      "name": "capacity-precondition",
+      "started": "2026-10-25T16:30:15+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.302,
+      "name": "start-git-daemon",
+      "started": "2026-10-25T16:30:15+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.68,
+      "name": "start-backend",
+      "started": "2026-10-25T16:30:16+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.022,
+      "name": "create-fixture-objects",
+      "started": "2026-10-25T16:30:17+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 3.494,
+      "name": "await-a-running",
+      "started": "2026-10-25T16:30:17+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 5.013,
+      "name": "start-managed-process-tree",
+      "started": "2026-10-25T16:30:21+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.004,
+      "name": "snapshot-a",
+      "started": "2026-10-25T16:30:26+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 17.2,
+      "name": "partition-and-assert-nothing-changes",
+      "started": "2026-10-25T16:30:26+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 2.299,
+      "name": "heal-and-assert-original-allocation-survives",
+      "started": "2026-10-25T16:30:43+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.223,
+      "name": "queue-b",
+      "started": "2026-10-25T16:30:45+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.064,
+      "name": "crash-backend",
+      "started": "2026-10-25T16:30:47+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.184,
+      "name": "kill-a-agentctl-leader",
+      "started": "2026-10-25T16:30:47+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 2.01,
+      "name": "await-b-start-fence-rejection",
+      "started": "2026-10-25T16:30:47+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.359,
+      "name": "assert-b-rejected-and-a-survivors-intact",
+      "started": "2026-10-25T16:30:49+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.08,
+      "name": "teardown",
+      "started": "2026-10-25T16:30:49+00:00",
+      "status": "passed"
+    }
+  ]
+}

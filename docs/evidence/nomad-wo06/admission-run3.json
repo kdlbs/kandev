@@ -1,0 +1,202 @@
+{
+  "capacity": {
+    "available_cpu_mhz": 48,
+    "available_memory_mb": 49152,
+    "exhausted_dimensions": [
+      "cpu"
+    ],
+    "request_cpu_mhz": 48,
+    "request_memory_mb": 1024,
+    "reserved_cpu_mhz": 0,
+    "reserved_memory_mb": 0,
+    "total_cpu_mhz": 48,
+    "total_memory_mb": 49152
+  },
+  "cleanup": {
+    "backend_pid_stopped": 2402,
+    "eligibility": "not needed",
+    "git_daemon_pid_stopped": 2398,
+    "jobs": {
+      "A": "dead",
+      "B": "dead"
+    },
+    "released": [
+      {
+        "fence": "removed",
+        "job": "ended purge=false",
+        "job_id": "kandev-f3522d6603ace98d7178d81e9cb46736",
+        "label": "B",
+        "processes_gone": true,
+        "production_cleanup": false,
+        "recorded_processes": [
+          [
+            3321,
+            "Sun Oct 25 22:50:47 2026"
+          ]
+        ],
+        "release": "operator-teardown"
+      }
+    ],
+    "session_stop": "skipped: the fixture jobs are ended by the operator path and the fixture database is discarded",
+    "ssh_identity_removed": true
+  },
+  "eligibility_window": {
+    "b_allocations_during_window": 0,
+    "changed_by_runner": true,
+    "node_id": "5dd33836-f337-39c7-8bd3-d60004c67585",
+    "original": "eligible",
+    "restore_with": "nomad node eligibility -enable 5dd33836-f337-39c7-8bd3-d60004c67585",
+    "restored": true
+  },
+  "environments": {
+    "A": {
+      "allocation_id": "dfb081e4-1233-d39a-7508-4f62e301b762",
+      "job_id": "kandev-4cf1f8daaf2f3fca66a45d3789d00556"
+    },
+    "B": {
+      "allocation_id": "848af604-5c0f-7071-005e-dfd353167781",
+      "job_id": "kandev-f3522d6603ace98d7178d81e9cb46736"
+    }
+  },
+  "finished": "2026-10-25T14:50:49+00:00",
+  "fixture_root": "<fixture-home>/runs/nomad-e2e-fixture-jmq9jy65",
+  "identities": {
+    "A": {
+      "allocated_resources": {
+        "cpu_mhz": 48,
+        "memory_mb": 1024
+      },
+      "allocation_id": "dfb081e4-1233-d39a-7508-4f62e301b762",
+      "environment_id": "f1cf1f3c-a303-4c08-8813-ebbe6f559b9e",
+      "fence_owner_sha256": "a3e8d74e2b74416131dcf385c2bae3361f245decd3aa9b86d29eb9e615e3c604",
+      "job_id": "kandev-4cf1f8daaf2f3fca66a45d3789d00556",
+      "node_id": "5dd33836-f337-39c7-8bd3-d60004c67585",
+      "remote_processes": 1,
+      "roles": [
+        "agentctl"
+      ],
+      "session_id": "49f76b1a-dc5c-4c8d-82e8-26c839a79096",
+      "task_id": "c927f67d-f57e-4fad-b02b-797f911a43c4"
+    },
+    "B": {
+      "allocation_id": "848af604-5c0f-7071-005e-dfd353167781",
+      "allocations": 1,
+      "environment_id": "8bdea468-bad7-4fc9-8da9-89cf45762b82",
+      "fence_owner_sha256": "d62c2b073bf535fff2e9983cead21ebd9e59b0bd10c27aa9d215d5fd2883d949",
+      "job_id": "kandev-f3522d6603ace98d7178d81e9cb46736",
+      "node_id": "5dd33836-f337-39c7-8bd3-d60004c67585",
+      "queued": {
+        "blocked_evaluation": true,
+        "dimensions_exhausted": [
+          "cpu"
+        ]
+      },
+      "remote_processes": 1,
+      "session_id": "3b5339ac-7c49-43b9-bb58-8636872dc679",
+      "task_id": "96953989-567b-49c6-9c1f-b0d20bcc8ca8"
+    }
+  },
+  "limitations": [
+    "native reservations are scheduler accounting, not hard OS limits",
+    "release is an operator teardown (job end with purge disabled and compare-owner fence removal), not production cleanup",
+    "quarantine behaviour is covered by Go tests and WO07, not by this scenario",
+    "node ACL scope is not per node; the dedicated-node check is the profile-pinned NodeID, datacenter and platform"
+  ],
+  "mode": "created-real-admission",
+  "node": {
+    "datacenter": "dc1",
+    "meta_compared": false,
+    "node_id": "5dd33836-f337-39c7-8bd3-d60004c67585",
+    "platform": "darwin/arm64"
+  },
+  "port": 58017,
+  "production_cleanup": false,
+  "release": "operator-teardown",
+  "release_a": {
+    "eligibility": "restored",
+    "fence": "removed",
+    "job": "ended purge=false",
+    "job_id": "kandev-4cf1f8daaf2f3fca66a45d3789d00556",
+    "label": "A",
+    "processes_gone": true,
+    "production_cleanup": false,
+    "recorded_processes": [
+      [
+        2446,
+        "Sun Oct 25 22:50:40 2026"
+      ]
+    ],
+    "release": "operator-teardown"
+  },
+  "scenario": "admission",
+  "started": "2026-10-25T14:50:38+00:00",
+  "status": "passed",
+  "steps": [
+    {
+      "duration_s": 0.001,
+      "name": "verify-node-identity",
+      "started": "2026-10-25T14:50:38+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.0,
+      "name": "poll-node-ready",
+      "started": "2026-10-25T14:50:38+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.0,
+      "name": "capacity-precondition",
+      "started": "2026-10-25T14:50:38+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.287,
+      "name": "start-git-daemon",
+      "started": "2026-10-25T14:50:38+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.898,
+      "name": "start-backend",
+      "started": "2026-10-25T14:50:38+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 0.014,
+      "name": "create-fixture-objects",
+      "started": "2026-10-25T14:50:39+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 4.639,
+      "name": "await-a-running",
+      "started": "2026-10-25T14:50:39+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.417,
+      "name": "queue-b-and-assert-a-unchanged",
+      "started": "2026-10-25T14:50:44+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.496,
+      "name": "release-a-operator-teardown",
+      "started": "2026-10-25T14:50:45+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.245,
+      "name": "observe-b-placement",
+      "started": "2026-10-25T14:50:47+00:00",
+      "status": "passed"
+    },
+    {
+      "duration_s": 1.494,
+      "name": "teardown",
+      "started": "2026-10-25T14:50:48+00:00",
+      "status": "passed"
+    }
+  ]
+}
