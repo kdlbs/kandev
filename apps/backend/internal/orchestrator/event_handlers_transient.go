@@ -220,7 +220,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	previousEntry, _ := previous.(*transientRetryEntry)
 	continuing := previousEntry != nil && previousEntry.mode == recoveryModeContinue
 	if continuing || !s.promptAttemptPreResultSafe(data) {
-		binding = s.continuationBindingForFailure(ctx, data)
+		binding = s.continuationBindingForFailureWithPrevious(ctx, data, previousEntry)
 		if continuing && binding != nil && *binding != *previousEntry.continuation {
 			binding = nil
 		}

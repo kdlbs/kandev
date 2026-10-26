@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-02
-updated: 2026-10-08
+updated: 2026-10-26
 requirements:
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-001
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-002
@@ -36,6 +36,11 @@ the completed continuation packages.
 The [capacity amendment](transient-turn-runtime-continuity.md#capacity-recovery-admission) uses a separate policy for completed effects on a retained runtime.
 Its live-runtime support does not satisfy this document's native restoration capability or versioned foreground-outcome predicate.
 
+The [pending-tool policy decision](../../../decisions/2026-10-26-cursor-pending-tool-continuation.md)
+amends foreground admission for retained Cursor transport failures. This is an
+agent-managed recovery policy, not an attestation that pending tools are safe
+or stopped. The existing capacity policy remains separate.
+
 ## Requirement mapping
 
 | Requirement | Design sections |
@@ -54,7 +59,7 @@ no orchestrator branch inspects Cursor names, tool titles, or shell commands.
 
 Introduce `native_saved_history_completed_tools_v2` alongside
 `native_saved_history_v1`. V1 retains its read-only meaning. Do not reinterpret
-an older wire snapshot as proof of successful effectful-tool completion. New
+an older wire snapshot as proof of successful effectful-tool completion. Legacy
 Cursor and test-only mock producers attest V2; absent or unknown support fails
 closed. A new backend may consume a valid V1 output/read-only snapshot under
 its original boundary. An old backend receiving V2 must refuse continuation.
@@ -68,7 +73,8 @@ outputs, paths, prompts, or provider identity tokens in the snapshot.
 | --- | --- | --- |
 | Cursor ACP V2 with saved history and all foreground tools completed | New internal `continue` using the same native conversation | Ordered fixtures, isolated native completion probe |
 | Cursor ACP V1 output or completed supported reads | Existing limited continuation | Existing native compatibility evidence |
-| Pending, failed, cancelled, conflicting, malformed, or incomplete outcomes | Manual recovery | Negative and mixed-completion fixtures |
+| Cursor V3, retained runtime, transport loss, valid pending foreground tools | Internal `continue`; Cursor manages unfinished work | Mixed-tool fixture and external probe limitations |
+| V1/V2 pending tools; failed, cancelled, conflicting, malformed, or incomplete evidence | Manual recovery | Negative and version-skew fixtures |
 | Unresolved permission, active background work, or subagent work | Manual recovery | Existing ownership signals and negative fixtures |
 | Old remote helper, unknown support, or missing identity | Existing policy only | Remote JSON and version-skew tests |
 | Other providers, dynamic profiles, Office, utilities, or passthrough | Existing policy owner | Compatibility regressions |
@@ -93,22 +99,25 @@ lifecycle signals. A resolved allowed permission is not an unresolved permission
 a denial or user cancellation cannot be overridden by recovery. Cover the
 ordinary permission-resolution path rather than poisoning every resolved request.
 Track pending permission counts and their tool IDs on the owning prompt turn.
-Only an offered allow option resolves successfully. Every permission's matching
-tool must eventually report completion, including when approval precedes the
-first tool notification. A delayed response updates its captured turn, and
+Only an offered allow option resolves successfully. Under V1/V2 every permission's
+matching tool must report completion. Under V3 it must have a valid observed
+foreground ledger entry; it can remain pending after approval. A delayed response updates its captured turn, and
 published terminal snapshots remain immutable.
 
-Admission uses a universal predicate: every observed foreground call must have
-successful completion, and no unresolved permission/background owner may remain.
-An empty complete ledger permits output-only recovery. Include the mixed case
-of one successful call and one pending call; one completion never authorizes
-the whole turn. Do not reconstruct this evidence from persisted chat.
+V1/V2 admission uses a universal predicate: every observed foreground call must
+have successful completion, and no unresolved permission/background owner may remain.
+V3 permits each call to be completed, pending, or in progress under the retained
+transport policy below. One failed or invalid call rejects the whole attempt.
+An empty complete ledger permits output-only recovery. Cover one completed call plus one pending call: V1/V2 refuse; the retained V3
+transport policy admits it. Also cover completed plus pending plus failed calls,
+which must refuse under every version. Do not reconstruct this evidence from persisted chat.
 
 Capture the immutable snapshot before prompt-end cancellation sweeps. A synthetic
 cancelled status is not success. Historical restore notifications do not enter
 the active ledger. Provider response-attempt resets cannot erase prompt outcome
 evidence. Preserve unsafe episode evidence across continuation attempts; an
-uncertain earlier attempt cannot become eligible because a later ledger is empty.
+invalid earlier attempt cannot become eligible because a later ledger is empty.
+Valid V3 pending foreground work is not invalid evidence under the new policy.
 Successful completed writes need not poison a later continuation episode.
 
 The new native compatibility probe operates only on a disposable conversation.
@@ -118,6 +127,61 @@ response in the same native ID. Observe the original dispatch count and workspac
 result so original-prompt replay cannot pass the probe. Record Cursor version,
 restore advertisement, and sanitized result. Native evidence is required before
 V2 support is declared ready; mock success alone does not establish it.
+
+### Agent-managed pending-tool policy
+
+Add `ContinuationNativeHistoryAgentManagedToolsV3` with wire value
+`native_history_agent_managed_tools_v3` in `types/streams/continuation.go`.
+Keep V1/V2 meanings unchanged. Cursor's dialect emits V3; other production
+providers do not acquire it through shared ACP code. The mock producer supports
+it only for explicit fixtures. Old consumers reject the unknown support value.
+
+Add `PermissionsResolved bool` (`permissions_resolved`) to
+`ContinuationSafetySnapshot`. V3 requires explicit true; absence fails closed.
+Keep `Pending` true whenever foreground tools remain unfinished. Do not clear it
+to gain admission. V1/V2 continue to reject `Pending`; V3's `SafeFor` validates
+known evidence, generation, `Unsafe == false`, and resolved permissions.
+The method denotes policy eligibility, not proof of tool completion.
+
+In `adapter_continuation.go`, separate permission eligibility from unfinished
+foreground work. Set `PermissionsResolved` only when the captured turn has zero
+outstanding permission requests and every granted permission names an observed
+valid ledger entry. Missing entries, denial, cancellation, invalid status,
+background ownership, overflow, and malformed evidence still fail closed.
+Update `beginContinuationPermission` to accept V3 as well as V2. Preserve the
+captured-turn callback owner and all permission option validation.
+
+In `continuationBindingForFailure` / `continuationFailureHasEvidence`, admit a
+V3 pending snapshot only for `agent_transport_lost` with
+`PromptFailureDispositionRetainRuntime`. Keep classification confidence and
+all existing task, native-ID, execution, generation, queue, and profile checks.
+A V3 snapshot without pending work preserves the existing completed-tool policy.
+Do not extend `CapacityContinuationSnapshot` or its separate timing contract.
+
+Bind a pending-tool episode to the retained execution. Revalidate runtime
+continuity at timer fire and final dispatch, not only at failure receipt.
+If preparation would replace, tear down, load, or resume that runtime, stop the
+pending-tool episode with an accurate refusal. Do not silently convert it to
+saved-history restoration. Keep this restriction for the episode after an
+accepted continuation, even if a later snapshot contains no pending tools.
+
+Send exact `continue` through the existing dispatcher and five-attempt schedule.
+No process polling, command/title heuristics, additional reconciliation prompt,
+or mandatory delay beyond existing backoff is introduced. Kandev does not join,
+kill, or replay native tools. Preserve original prompt replay refusal after effects.
+
+Capture evidence before synthetic prompt-end cancellation as today. That UI
+cleanup never changes `Pending`, establishes termination, or poisons the earlier
+snapshot as a genuine user Stop. Do not fabricate missing native results.
+Late notifications must not mutate published snapshots or authorize successor
+work; retain captured-turn and ambiguous-handoff guards. A future live event
+without reliable generation attribution cannot prove a pending tool completed.
+
+The [external probe](https://github.com/kdlbs/kandev/issues/4801#issuecomment-6418179442)
+shows a surviving command, absent terminal ACP results, and a qualified repeat.
+It does not establish generic reconciliation or no-overlap guarantees. This
+policy intentionally does not require that proof. Deterministic integration
+fixtures must establish host dispatch, identity, budget, and exclusion behavior.
 
 ## Admission
 
@@ -131,7 +195,7 @@ conversation, choose continuation after output/tools when:
    and the explicit retryable resource-exhaustion category.
 3. Snapshot, local prompt evidence, execution, generation, saved native ID,
    and task-session identities agree under their declared support version.
-4. All foreground tool outcomes meet the applicable V1/V2 boundary, and no
+4. All foreground tool outcomes meet the applicable versioned boundary, and no
    human queue entry, unresolved permission, or other live owner has priority.
 5. The same task, workspace, execution profile, model, mode, and permission
    configuration still owns the conversation.
@@ -202,6 +266,16 @@ and Cancel. Continuing shows backend-owned phase, without claiming a TCP failure
 for resource exhaustion. Cancellation/exhaustion reports attempts actually started.
 The internal prompt never renders in any message surface or user-prompt index.
 
+Retained-runtime refusals must carry `recovery_reason` from the same admission
+checks used for dispatch. Keep the closed existing reasons (`unsafe_work`,
+`unsupported_restore`, `missing_evidence`) and do not derive them from prose.
+For zero started attempts, `retainedTurnRecoveryKey` selects localized reason
+copy prefixed with “Automatic continuation did not start.” An absent historical
+reason uses a neutral fallback; it must not invent a cause or claim exhaustion.
+Positive attempt counts use the actual count. Pending V3 tools alone produce
+no refusal. Reuse existing progress and Cancel controls; do not add a warning
+or confirmation dialog.
+
 Retain task Chat as the only transcript scroll owner. Desktop keeps existing
 compact inline controls. Phone reuses the shipped continuation card and stacked
 44px Cancel action within the safe-area-aware chat/composer; no new modal,
@@ -257,7 +331,7 @@ owns flag removal, default-behavior checks, and public guidance updates.
 retains its native compatibility evidence and historical results. Retain the completed October 2/3 plans as
 historical results; their V1 read-only and long-instruction assertions are
 superseded only where the completed-tool contract explicitly changes them. Test actual
-provider category, V1/V2 omission/skew, universal completion admission, exact hidden
+provider category, V1/V2/V3 omission/skew, versioned foreground admission, exact hidden
 payload, same native identity, shared budget, cancellation, human supersession,
 reload/pagination/second viewer, and ordinary visible user `continue`. Keep the
 data-only generic ACP error projection, dynamic/Office behavior, and original
@@ -273,3 +347,6 @@ their captured turn owner.
 Confirmed continuation cancellation requires WAITING_FOR_INPUT independently
 of workflow completion eligibility, under the existing captured-turn guard.
 Disabling workflow advancement must not skip the session settlement.
+
+The [pending-tool package](../../../plans/cursor-pending-tool-continuation/plan.md)
+owns V3 admission and refusal feedback. Earlier completed plans remain historical.

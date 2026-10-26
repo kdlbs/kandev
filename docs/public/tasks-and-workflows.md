@@ -677,22 +677,40 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
-For a supported interactive task, Kandev can continue an unfinished request
-in the same live conversation after the normal retry delay when the model is
-at capacity and at least one tool has a confirmed result. Kandev keeps those
-actions in the conversation and asks the agent to continue without repeating
-them. This does not guarantee exactly-once execution. Eligible capacity recovery
-uses up to 11 additional attempts within 30 minutes, with waits increasing from
-5 seconds to at most 5 minutes. The inline notice shows the attempt count, next
-retry, recovery deadline, and **Cancel** action. Sending a new message, changing
-the session configuration, or cancelling stops pending recovery. A backend
-restart also stops automatic recovery; it does not restore the retry schedule.
-The deadline prevents another retry but does not interrupt a turn already running.
-Kandev leaves the
-error for you to handle when a tool or permission is still pending, an outcome
-is uncertain, background work is unaccounted for, the provider does not
-support live continuation, or the runtime is no longer usable. The composer
-remains available for a new message.
+## Recover from provider errors
+
+### Connection loss
+
+After a recognized connection loss, Kandev can continue an unfinished request
+on the same live Cursor runtime when conversation evidence is valid. A
+foreground tool can remain pending after its permission is resolved. Cursor
+inspects this pending work and chooses what to do next. Kandev sends a hidden
+`continue` prompt. It does not resend the original prompt or replay pending tool
+calls. Cursor can repeat an action, so this policy does not promise exactly-once
+effects. Failed, cancelled, unknown, or background tool work still requires
+your review. If the runtime is unavailable or evidence is incomplete, Kandev
+leaves the session waiting for you. A new message, a session change, **Cancel**,
+or a backend restart stops pending automatic recovery.
+
+### Model capacity
+
+For interactive tasks, Kandev retries a model-capacity error when the runtime
+supports live continuation and at least one tool has a confirmed result. Kandev
+keeps confirmed actions in the conversation. It asks the agent to continue
+without repeating those actions. This does not guarantee exactly-once effects.
+
+Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
+from 5 seconds to a maximum of 5 minutes. The inline notice shows the attempt
+count, next retry, deadline, and **Cancel** action. A new message, a session
+configuration change, or **Cancel** stops pending recovery. A backend restart
+also stops automatic recovery. It does not restore the retry schedule. The
+deadline does not stop a turn that is already running.
+
+Kandev leaves a model-capacity error for you to handle when a tool or permission
+is pending, an outcome is uncertain, background work is unaccounted for, the
+provider does not support live continuation, or the runtime is unavailable.
+The composer stays available for a new message. These limits apply to capacity
+recovery. Connection-loss recovery uses the normal short retry policy.
 
 ## Answer clarification questions
 
