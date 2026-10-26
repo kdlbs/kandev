@@ -159,6 +159,8 @@ both pass with retries disabled. `pnpm run typecheck` and ESLint on the three
 Copilot rich-output E2E files pass. This is test synchronization only; no
 product behavior or specification contract changed. Two unrelated tests were
 flaky in the initial CI run but pass in retry-free local reproductions; the
-updated pull request CI result will replace that initial run's status. The
-initial walkthrough generation reached its workflow deadline; the fresh-head
-run will replace that result.
+initial results were superseded by a successful updated-head run. After the
+failed shards were rerun, the PR waiter reported 63 passed checks, 18 skipped,
+and zero failed or pending checks. The three rerun shard reports contained 440
+passes and four skips with no retries. The initial walkthrough timeout was
+also superseded by the successful updated-head run.

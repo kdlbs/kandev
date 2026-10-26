@@ -178,8 +178,10 @@ changes E2E synchronization and does not change product behavior. The initial
 pull request CI failures in unrelated mention-refresh and session-tab-restart
 scenarios passed retry-free local reproductions; their initial CI result is
 superseded by verification on the updated pull request head. The initial
-walkthrough generation also reached its workflow deadline and is superseded by
-the fresh-head run.
+walkthrough generation reached its workflow deadline and was superseded by a
+successful updated-head run. After the failed shard jobs were rerun, `pr-await`
+reported 63 passed checks, 18 skipped, and zero failed or pending checks. The
+three rerun shard reports contained 440 passes and four skips with no retries.
 
 ## Risks
 
