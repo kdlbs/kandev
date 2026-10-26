@@ -82,14 +82,29 @@ func TestMCPGuard_RefusalMovesNoActivity(t *testing.T) {
 	}
 }
 
-func TestMCPGuard_UnconfiguredAnswers503(t *testing.T) {
+func TestMCPGuard_LegacyInstanceServesMCPRoutesUnguarded(t *testing.T) {
 	h, _, served, _ := guardFixture(t, "")
+	for _, path := range []string{"/mcp", "/sse", "/message"} {
+		for _, hdr := range [][]string{nil, {"Authorization", "Bearer anything"}} {
+			if rec := doReq(h, http.MethodGet, path, hdr...); rec.Code != http.StatusOK {
+				t.Fatalf("legacy %s %v: status %d, want 200", path, hdr, rec.Code)
+			}
+		}
+	}
+	if served.Load() != 6 {
+		t.Fatalf("legacy requests dispatched %d times, want 6", served.Load())
+	}
+}
+
+func TestMCPGuard_RevokedLegacyInstanceAnswers503(t *testing.T) {
+	h, _, served, holder := guardFixture(t, "")
+	holder.Revoke()
 	rec := doReq(h, http.MethodGet, "/sse", "Authorization", "Bearer anything")
 	if rec.Code != http.StatusServiceUnavailable || !containsAny(rec.Body.String(), "mcp_token_unconfigured") {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 	if served.Load() != 0 {
-		t.Fatal("unconfigured instance dispatched")
+		t.Fatal("revoked instance dispatched")
 	}
 }
 

@@ -149,6 +149,15 @@ func TestGitCredentialRelayNeedsNoControlCredential(t *testing.T) {
 	}
 }
 
+func TestGitCredentialRelayKeepsControlCredentialWithoutUpstream(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), AuthToken: "control", SessionMCP: config.NewSessionMCPToken("")}
+	s := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
+	if rec := doRelay(s, http.MethodPost, "/git-credentials/resolve", "{}", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("an instance without an upstream keeps control auth on the relay path, got %d", rec.Code)
+	}
+}
+
 func TestGitCredentialRelayUpstreamFailures(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
 		up := newRelayUpstream(t, func(http.ResponseWriter, *http.Request) {})

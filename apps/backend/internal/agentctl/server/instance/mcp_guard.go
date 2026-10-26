@@ -32,14 +32,19 @@ func isMCPPath(path string) bool {
 	return false
 }
 
-// newMCPGuard returns a handler wrapper that admits an MCP route only when the
-// request carries the instance's session token. It is installed outside the
+// newMCPGuard returns a handler wrapper that admits an MCP route of an
+// enforcing instance only when the request carries the instance's session
+// token, answers 503 once revoked, and leaves a legacy instance unguarded. It is installed outside the
 // activity accounting, so a refused request moves no counter.
 func newMCPGuard(token *config.SessionMCPToken, log *logger.Logger) func(http.Handler) http.Handler {
 	var lastLogged atomic.Int64
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !isMCPPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !token.Enforcing() && !token.Revoked() {
 				next.ServeHTTP(w, r)
 				return
 			}

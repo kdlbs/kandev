@@ -91,12 +91,17 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 	// Exempt paths from auth:
 	// - /health: liveness probe
-	// - /git-credentials/: the Git credential relay; the lease in the body is
-	//   the capability and the upstream broker validates it.
+	// - /git-credentials/: the Git credential relay of an instance holding an
+	//   upstream broker URL; the lease in the body is the capability and the
+	//   upstream broker validates it.
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess, which
 	//   does not hold the control credential. They are authenticated by the
 	//   per-instance MCP token guard instead.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp", GitCredentialRelayPrefix))
+	exempt := []string{"/health", "/sse", "/message", "/mcp"}
+	if cfg.BrokerUpstreamURL != "" {
+		exempt = append(exempt, GitCredentialRelayPrefix)
+	}
+	s.router.Use(s.instanceAuth(cfg.AuthToken, exempt...))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or

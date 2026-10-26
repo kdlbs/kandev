@@ -50,3 +50,43 @@ func TestMCPRoutesRejectSiblingAndMissingToken(t *testing.T) {
 		})
 	}
 }
+
+// An instance created without a token serves its MCP routes unguarded until a
+// revoke, after which they answer 503.
+func TestLegacyInstanceServesMCPRoutesUntilRevoked(t *testing.T) {
+	cs, mgr := tokenFixture(t)
+	if rec := createTokenInstance(t, cs, "legacy", ""); rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rec.Code)
+	}
+	t.Cleanup(func() { _ = mgr.StopInstance(t.Context(), "legacy") })
+	inst, _ := mgr.GetInstance("legacy")
+	base := "http://127.0.0.1:" + strconv.Itoa(inst.Port)
+	status := func(method, path string) int {
+		req, err := http.NewRequestWithContext(t.Context(), method, base+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", method, path, err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	routes := []struct{ method, path string }{
+		{http.MethodGet, "/sse"}, {http.MethodPost, "/message"}, {http.MethodPost, "/mcp"},
+	}
+	for _, r := range routes {
+		if got := status(r.method, r.path); got == http.StatusUnauthorized || got == http.StatusServiceUnavailable {
+			t.Fatalf("legacy %s %s refused: %d", r.method, r.path, got)
+		}
+	}
+	if rec := controlDo(cs, http.MethodPost, "/api/v1/instances/legacy/mcp-token/revoke", ""); rec.Code != http.StatusOK {
+		t.Fatalf("revoke: %d", rec.Code)
+	}
+	for _, r := range routes {
+		if got := status(r.method, r.path); got != http.StatusServiceUnavailable {
+			t.Fatalf("revoked %s %s: %d, want 503", r.method, r.path, got)
+		}
+	}
+}

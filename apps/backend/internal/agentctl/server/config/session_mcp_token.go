@@ -9,22 +9,29 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
-// SessionMCPToken holds the per-instance MCP bearer token in memory only. The
-// zero value holds no token. The value never appears in JSON, String() or log
-// fields.
+// sessionMCPState is the guard mode and expected token, replaced as one value.
+type sessionMCPState struct {
+	revoked bool
+	token   string
+}
+
+// SessionMCPToken holds the per-instance MCP bearer token in memory only. An
+// instance created with a token is enforcing, one created without is legacy
+// (MCP routes unguarded), and a revoke moves either to revoked. The value
+// never appears in JSON, String() or log fields.
 type SessionMCPToken struct {
-	value atomic.Pointer[string]
+	state atomic.Pointer[sessionMCPState]
 	// header is the Authorization value minted with the token. It outlives a
 	// revoke so the managed-tool policy keeps recognizing the entry it injected.
 	header string
 }
 
-// NewSessionMCPToken returns a holder for token, or a holder with no token when
-// token is empty.
+// NewSessionMCPToken returns an enforcing holder for token, or a legacy holder
+// when token is empty.
 func NewSessionMCPToken(token string) *SessionMCPToken {
 	t := &SessionMCPToken{}
+	t.state.Store(&sessionMCPState{token: token})
 	if token != "" {
-		t.value.Store(&token)
 		t.header = "Bearer " + token
 	}
 	return t
@@ -35,10 +42,22 @@ func (t *SessionMCPToken) Value() string {
 	if t == nil {
 		return ""
 	}
-	if p := t.value.Load(); p != nil {
-		return *p
+	if st := t.state.Load(); st != nil {
+		return st.token
 	}
 	return ""
+}
+
+// Enforcing reports whether MCP requests must present the held token.
+func (t *SessionMCPToken) Enforcing() bool { return t.Value() != "" }
+
+// Revoked reports whether the holder was revoked.
+func (t *SessionMCPToken) Revoked() bool {
+	if t == nil {
+		return false
+	}
+	st := t.state.Load()
+	return st != nil && st.revoked
 }
 
 // Headers returns the single Authorization header carrying the token, or nil
@@ -60,10 +79,11 @@ func (t *SessionMCPToken) MatchesHeaders(headers map[string]string) bool {
 		subtle.ConstantTimeCompare([]byte(headers["Authorization"]), []byte(t.header)) == 1
 }
 
-// Revoke clears the token so the instance answers MCP routes as unconfigured.
+// Revoke clears the token so the instance answers MCP routes as unconfigured,
+// whether it was enforcing or legacy.
 func (t *SessionMCPToken) Revoke() {
 	if t != nil {
-		t.value.Store(nil)
+		t.state.Store(&sessionMCPState{revoked: true})
 	}
 }
 

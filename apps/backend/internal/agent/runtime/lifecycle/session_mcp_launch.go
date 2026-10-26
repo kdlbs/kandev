@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/sessionmcp"
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -176,7 +177,7 @@ func (m *Manager) createOnce(ctx context.Context, rt ExecutorBackend, req *Execu
 	}
 	// A runtime that reconnected to a retained process returned an instance
 	// this launch did not create: it is refused, never stopped.
-	retained := getMetadataBool(inst.Metadata, MetadataKeyReuseExistingProcess)
+	retained := reconnectedInstance(req, inst)
 	if retained && deferredTokenRuntime(inst.RuntimeName) {
 		return nil, false, &LaunchRefusal{Code: CodeMCPTokenUnsupported, Cause: CauseRetainedInstanceDeferred, Err: errRetainedTokenUnverified}
 	}
@@ -202,6 +203,20 @@ func (m *Manager) createOnce(ctx context.Context, rt ExecutorBackend, req *Execu
 		return nil, true, fmt.Errorf("instance %s holds a different token after create", req.InstanceID)
 	}
 	return inst, false, nil
+}
+
+// reconnectedInstance reports whether the runtime returned an instance that
+// already existed. A Kubernetes reconnect marks nothing, but it keeps the
+// recorded Pod identity of the request; a recreated Pod carries a new one.
+func reconnectedInstance(req *ExecutorCreateRequest, inst *ExecutorInstance) bool {
+	if getMetadataBool(inst.Metadata, MetadataKeyReuseExistingProcess) {
+		return true
+	}
+	if inst.RuntimeName != agentruntime.RuntimeKubernetes {
+		return false
+	}
+	recorded := getMetadataString(req.Metadata, MetadataKeyKubernetesPodUID)
+	return recorded != "" && recorded == getMetadataString(inst.Metadata, MetadataKeyKubernetesPodUID)
 }
 
 // agentctlSessionMCPCapability is advertised by instances that enforce the token.

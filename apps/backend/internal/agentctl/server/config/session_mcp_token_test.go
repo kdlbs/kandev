@@ -24,3 +24,22 @@ func TestNewSessionMCPTokenCarriesBearerHeader(t *testing.T) {
 		t.Fatal("a revoked token must not report a value")
 	}
 }
+
+func TestSessionMCPTokenModes(t *testing.T) {
+	legacy := NewSessionMCPToken("")
+	if legacy.Enforcing() || legacy.Revoked() {
+		t.Fatal("empty token must be legacy")
+	}
+	legacy.Revoke()
+	if !legacy.Revoked() || legacy.Enforcing() {
+		t.Fatal("revoking a legacy holder must mark it revoked")
+	}
+	enforcing := NewSessionMCPToken("abc")
+	if !enforcing.Enforcing() || enforcing.Revoked() {
+		t.Fatal("a held token must be enforcing")
+	}
+	enforcing.Revoke()
+	if !enforcing.Revoked() || enforcing.Enforcing() {
+		t.Fatal("revoking an enforcing holder must mark it revoked and stop enforcing")
+	}
+}
