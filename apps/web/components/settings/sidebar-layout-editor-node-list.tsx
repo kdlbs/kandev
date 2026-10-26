@@ -229,7 +229,6 @@ function SidebarLayoutNodeList({
         return (
           <div key={node.id} className={isIntegrationPlugin(node) ? "ml-4" : undefined}>
             <SidebarLayoutNodeEditor
-              key={node.id}
               node={node}
               index={siblings.findIndex((item) => item.id === node.id)}
               total={siblings.length}

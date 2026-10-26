@@ -116,6 +116,7 @@ describe("integration plugin hierarchy", () => {
       },
     ]);
     expect(nodes.some((n) => n.destinationId === "integrations")).toBe(true);
+    expect(nodes.at(-1)?.destinationId).toBe("integrations");
     expect(layout.nodes).toHaveLength(1);
   });
 });

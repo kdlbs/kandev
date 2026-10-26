@@ -120,7 +120,7 @@ From repository root. Install once if this worktree lacks dependencies.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run lib/sidebar/integration-plugin-layout.test.ts lib/sidebar/layout-projection.test.ts lib/sidebar/layout-operations.test.ts lib/sidebar/immediate-writer.test.ts components/app-sidebar/sidebar-layout-navigation.test.tsx components/app-sidebar/sidebar-customize-menu.test.tsx components/navigation/mobile-sidebar-customization.test.tsx components/app-sidebar/sidebar-draggable-navigation.test.tsx components/app-sidebar/sections/integrations-section.test.tsx components/navigation/app-nav-sheet.test.tsx components/integrations/mobile-integrations-section.test.tsx components/settings/sidebar-layout-editor.test.tsx components/settings/sidebar-layout-editor-dnd.test.ts components/settings/sidebar-layout-editor-save.test.ts components/app-sidebar/sidebar-navigation-split.test.tsx)
+(cd apps/web && pnpm exec vitest run lib/sidebar/integration-plugin-layout.test.ts lib/sidebar/layout-projection.test.ts lib/sidebar/layout-operations.test.ts lib/sidebar/immediate-writer.test.ts components/app-sidebar/sidebar-layout-navigation.test.tsx components/app-sidebar/sidebar-customize-menu.test.tsx components/navigation/mobile-sidebar-customization.test.tsx components/app-sidebar/sidebar-draggable-navigation.test.tsx components/app-sidebar/sections/integrations-section.test.tsx components/navigation/app-nav-sheet.test.tsx components/integrations/mobile-integrations-section.test.tsx components/settings/sidebar-layout-editor.test.tsx components/settings/sidebar-layout-editor-dnd.test.ts components/settings/sidebar-layout-editor-save.test.ts components/app-sidebar/sidebar-navigation-split.test.tsx components/settings/sidebar-layout-editor-state.test.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -161,7 +161,7 @@ All paths below are under `apps/web/`, except the final guidance file.
   `mobile-integrations-section.test.tsx`.
 - `components/settings/sidebar-layout-editor.tsx`,
   `sidebar-layout-editor-node-list.tsx`, `sidebar-layout-editor-dnd.ts`,
-  `sidebar-layout-editor-preview.tsx`, related node editor components and their tests.
+  `sidebar-layout-editor-preview.tsx`, `sidebar-layout-editor-state.test.tsx`, related node editor components and their tests.
 - Existing locale files only if unavoidable new copy is introduced.
 - `apps/web/AGENTS.md`: remove the outdated standalone integration-plugin rule.
 
@@ -191,7 +191,7 @@ Completed on 2026-10-26 against base `6677802efa4fac6c2ecc909cb433477c90f7fb2d`.
 
 - Behavioral RED: the desktop layout test could not find YouTrack inside
   Integrations. Scoped-move and no-op-write tests also failed before correction.
-- The final Vitest command above passed: 15 suites, 108 tests. It includes direct menu, phone controls, and portaled-focus isolation.
+- The final Vitest command above passed: 16 suites, 111 tests. It includes direct menu, phone controls, and portaled-focus isolation.
 - Typecheck passed with an 8 GB Node heap. The default heap exhausted memory.
 - ESLint passed on all changed/new TS and TSX files with zero warnings.
 - i18n check and new-code ratchet passed. No new UI copy or locale keys.
@@ -216,7 +216,7 @@ presentation choice through instead of applying it to every consumer.
 Regression tests reproduce both defects before correction. The desktop browser
 flow additionally edits a layout that originally lacks the parent, and a new
 coarse-pointer tablet flow opens the listing menu with expanded plugin links.
-Fresh published-plugin screenshots passed on desktop, phone, and tablet. The touch/pen pointer handler now preserves propagation to the context-menu trigger. The Office singleton check passes without a code change because builtin eligibility removes its Integrations parent. The shared draft materialization also supplies the legacy parent to Settings, so its controls remain editable. Focused validation passed: 108 tests in 15 suites, typecheck, changed-file ESLint, i18n, docs, and specification checks. Final browser regression passed: 12 desktop tests, including legacy-parent editing and tablet navigation, plus 11 phone tests owned by Task 02.
+Fresh published-plugin screenshots passed on desktop, phone, and tablet. The touch/pen pointer handler now preserves propagation to the context-menu trigger. The Office singleton check passes without a code change because builtin eligibility removes its Integrations parent. The shared draft materialization also supplies the legacy parent to Settings, so its controls remain editable. Focused validation passed: 111 tests in 16 suites, typecheck, changed-file ESLint, i18n, docs, and specification checks. Final browser regression passed: 12 desktop tests, including legacy-parent editing and tablet navigation, plus 11 phone tests owned by Task 02.
 
 ### UI-04: Tablet listing menu, expanded Integrations
 
@@ -237,3 +237,15 @@ Final review-validation logs, 2026-10-26:
 - Focused reproductions of four initial CI failures: `/tmp/youtrack-e2e-logs/kandev-run.e2e.a5BE0TWh.log`, 4 passed, retries disabled. These unchanged tests cover Jira auth health, cancellation across task switches, jump-to-latest, and the Quick Chat goal disclosure. Fresh PR CI remains required.
 
 The final source also excludes portaled menu focus from sidebar expansion, with a behavioral regression and a positive control for clipped-row focus. The final browser runs above include the legacy-parent hide, save, reload, and restore flow. Fresh published YouTrack captures cover desktop, phone, and tablet.
+
+## Final Claude observations
+
+The review at head `8c21847710c` confirmed the earlier fixes. The possible Settings dirty-draft issue was not reproduced: the actual draft and drag/action hooks keep both directions of a rejected cross-group move clean. A valid integration sibling move marks the draft dirty. Three new hook regressions cover those outcomes. The full focused command now passes 111 tests in 16 suites.
+
+A missing legacy parent intentionally appends to the flat list, preserving the prior fallback position and existing node order. The design and projection assertion now state that position. Settings move controls disable boundary actions and clamp their positions; sibling lists always include the rendered node, so those controls cannot request an out-of-range position.
+
+Removed the redundant inner editor key and used `cn()` for the existing phone-row classes. The rendered class values and keyed row identity are unchanged. Typecheck and focused tests passed. Fresh desktop/tablet and phone browser checks passed before this follow-up is pushed.
+
+The final follow-up incorporates base `e5c38184cf9c191075dc88c1ffad28c636858bf5` by rebasing the existing branch. Base and PR paths do not overlap, and the update applied without conflicts. The combined source passed 111 focused tests and typecheck. The fresh combined-source browser build passed 12 desktop/tablet cases and 11 phone cases with retries disabled. Logs: `/tmp/youtrack-e2e-logs/kandev-run.e2e.2rP49zaU.log` and `/tmp/youtrack-e2e-logs/kandev-run.e2e.zsiyyYKR.log`.
+
+The previous-head CI locale setup failure (`pseudo-coverage.spec.ts`, Office workspace org) passed three consecutive focused repetitions on the combined source, with retries disabled. Log: `/tmp/youtrack-e2e-logs/kandev-run.e2e.gLW8excu.log`. The failed CI artifact's retry trace also showed a successful pseudo-cookie request; the first attempt had no retained trace. No locale source change was made. Fresh exact-head CI is still required; this focused pass does not by itself classify the original failure as resolved.

@@ -15,6 +15,7 @@ import {
 } from "@kandev/ui/drawer";
 import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 import { useRouter } from "@/lib/routing/client-router";
+import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { useSidebarCustomization } from "@/hooks/domains/sidebar/use-sidebar-customization";
 import {
@@ -122,7 +123,10 @@ function CustomizationRows({
         return (
           <div
             key={node.id}
-            className={`flex min-h-11 items-center gap-2 border-b py-1 ${isIntegrationPlugin(node) ? "ml-4" : ""}`}
+            className={cn(
+              "flex min-h-11 items-center gap-2 border-b py-1",
+              isIntegrationPlugin(node) && "ml-4",
+            )}
           >
             <label className="flex min-h-11 min-w-0 flex-1 items-center gap-3">
               <Checkbox
