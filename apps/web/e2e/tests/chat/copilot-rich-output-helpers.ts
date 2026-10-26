@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import { watchWs, type WsWatcher } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
@@ -41,6 +42,7 @@ export async function openCopilotRichOutputSession({
   seedData: SeedData;
   title: string;
 }) {
+  const ws = watchWs(page);
   const task = await apiClient.createTask(seedData.workspaceId, title, {
     description: "Copilot rich output transcript fixture",
     workflow_id: seedData.workflowId,
@@ -56,7 +58,16 @@ export async function openCopilotRichOutputSession({
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  return { session, sessionId };
+  return { session, sessionId, ws };
+}
+
+export function waitForCopilotRichOutputMessage(ws: WsWatcher, sessionId: string) {
+  return ws.waitForEvent("session.message.added", {
+    where: (payload) =>
+      payload.session_id === sessionId &&
+      (payload.message_type === "tool_call" || payload.type === "tool_call") &&
+      payload.content === COPILOT_RICH_OUTPUT_TITLE,
+  });
 }
 
 function shellActivityMetadata(toolCallId: string, command: string) {
@@ -141,7 +152,7 @@ export async function expectCopilotRichOutput(
   const report = chat.getByTestId("rich-output");
   const rows = copilotRichOutputRows(chat, ids);
 
-  await expect(report).toHaveCount(1, { timeout: 30_000 });
+  await expect(report).toHaveCount(1);
   await expect(report).toContainText("Synthetic report");
   await expect(report.getByText("Synthetic check completed.", { exact: true })).toBeVisible();
   await expect(report).not.toContainText("This presentation is unavailable.");

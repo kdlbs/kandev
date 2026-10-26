@@ -144,4 +144,21 @@ string acknowledgement result. Do not silently rewrite the fixture.
 ## Results
 
 Complete. The parser regression was observed before the production change, and
-the final focused unit suite passes 91 tests across five files. `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck` and the targeted ESLint command pass. The desktop and phone managed E2E commands each pass one test after rebuilding the backend, frontend, and fixture plugin. The phone test confirms viewport containment and no document horizontal overflow after replay. These tests use synthetic Copilot metadata, not a live provider execution. Specification validation, spec lint, `git diff --check`, and PR documentation coverage pass.
+the final focused unit suite passes 91 tests across five files.
+`NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck` and the targeted
+ESLint command pass. The desktop and phone managed E2E commands each pass one
+test after rebuilding the backend, frontend, and fixture plugin. The phone test
+confirms viewport containment and no document horizontal overflow after replay.
+These tests use synthetic Copilot metadata, not a live provider execution.
+Specification validation, spec lint, `git diff --check`, and PR documentation
+coverage pass.
+
+Subsequent pull request fixup verification: the desktop and phone E2E scenarios
+wait for the exact seeded report event before asserting rendered output, and
+both pass with retries disabled. `pnpm run typecheck` and ESLint on the three
+Copilot rich-output E2E files pass. This is test synchronization only; no
+product behavior or specification contract changed. Two unrelated tests were
+flaky in the initial CI run but pass in retry-free local reproductions; the
+updated pull request CI result will replace that initial run's status. The
+initial walkthrough generation reached its workflow deadline; the fresh-head
+run will replace that result.

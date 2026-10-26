@@ -166,8 +166,20 @@ Copilot metadata and do not claim a live Copilot ACP execution.
 Specification validation passes for 403 decisions and 1740 specifications;
 `lint-spec-files.py --all`, `git diff --check`, and the PR documentation
 coverage preflight pass. The changed work order reports `covered` against the
-linked plan, requirements, criteria, and designs. At plan completion,
-implementation changes were unstaged and uncommitted.
+linked plan, requirements, criteria, and designs. The planning checkpoint
+preceded implementation and commit; later verification is recorded below.
+
+Subsequent pull request fixup: both browser scenarios now arm a
+`session.message.added` wait before seeding, filtered by session, `tool_call`
+type, and the exact report title. After that delivery event, the report
+assertion uses Playwright's default timeout. Desktop and phone scenarios pass
+with retries disabled; web typecheck and targeted ESLint pass. This only
+changes E2E synchronization and does not change product behavior. The initial
+pull request CI failures in unrelated mention-refresh and session-tab-restart
+scenarios passed retry-free local reproductions; their initial CI result is
+superseded by verification on the updated pull request head. The initial
+walkthrough generation also reached its workflow deadline and is superseded by
+the fresh-head run.
 
 ## Risks
 
