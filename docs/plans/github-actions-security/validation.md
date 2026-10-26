@@ -334,3 +334,20 @@ The local runner required removal of inherited launcher-config variables and
 explicit loopback binding, plus the host's Chromium library paths. Setup failures
 before those corrections were not counted as test evidence. Product code,
 timeouts, retry policies, and negative assertions were not changed.
+
+Run `40380935160` at `f9b518abed5` exposed a different shard-19 failure: the
+Office title-edit fixture read the original backend title after the optimistic
+heading had already changed. The first attempt failed and the CI retry passed.
+The production title commit deliberately patches local state before awaiting
+`PATCH /api/v1/tasks/:id`. The test is unchanged on main `fb4c6f19c00`.
+
+Three unmodified local repetitions passed. A temporary 500 ms PATCH delay then
+reproduced the exact original-title persistence failure. The fixture now arms
+the existing HTTP-response helper before Enter, retains both immediate render
+assertions, and requires a successful PATCH before its original backend read.
+It passed under the same delay. After removing the diagnostic route, all five
+cases in the title/description spec passed on two CPUs with retries disabled,
+including rollback and cross-client synchronization. No product behavior,
+timeout, retry policy, or original assertion changed.
+Full web typecheck, scoped ESLint, formatting, document checks, and diff checks
+passed. The remaining CI jobs were still pending when this fix was verified.

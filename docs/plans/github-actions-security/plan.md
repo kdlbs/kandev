@@ -125,6 +125,8 @@ assertions remain unchanged.
 The silent-prompt fixture releases output only after the real watchdog notice
 is observed. The mobile routing fixture waits for save confirmation before
 checking persisted settings. Both retain their original behavior assertions.
+The Office title-edit fixture checks the optimistic render before waiting for
+its PATCH response, then checks persistence after the successful save.
 
 ## Risks
 
