@@ -848,12 +848,10 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 		existingNames[wf.Name] = true
 	}
 
-	result := &ImportResult{}
-	for _, pw := range export.Workflows {
-		if existingNames[pw.Name] {
-			result.Skipped = append(result.Skipped, pw.Name)
-			continue
-		}
+	selection := selectWorkflowImports(export, existingNames)
+	result := &ImportResult{Skipped: selection.skipped}
+	for _, index := range selection.indexes {
+		pw := export.Workflows[index]
 		if _, err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
 			return nil, fmt.Errorf("failed to import workflow %q: %w", pw.Name, err)
 		}

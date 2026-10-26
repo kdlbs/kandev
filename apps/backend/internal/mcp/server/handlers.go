@@ -251,6 +251,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
+		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
 		}
@@ -335,6 +338,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		}
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc
+		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
 		}
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state

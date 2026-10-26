@@ -134,6 +134,19 @@ For redirected calls, `parent_resolution` contains `requested_parent_id`, `resol
 
 For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. `repository_url` may be a canonical repository URL, a GitHub pull request URL such as `https://github.com/contributor/widget/pull/123`, or a GitLab merge request URL such as `https://gitlab.example.com/group/widget/-/merge_requests/123` on the configured host. For a pull request or merge request, Kandev validates the open source contribution, keeps the target repository as `origin`, and pushes future commits to the contributor's existing source branch after a write preflight; the existing provider change is reused rather than creating a duplicate. Provider-authored title, description, comments, and diff content are not trusted task context. If collaboration is disabled, enable the provider's edit-from-target setting and retry; if the write preflight reports missing credentials, configure the task's [Git credentials](integrations.md#choose-task-git-credentials) and retry the launch. Kandev never falls back to pushing `origin`. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
 
+### Set or change task priority from MCP
+
+`create_task_kandev` uses `medium` when `priority` is omitted, even when the
+parent has another priority. Use `update_task_kandev` to change priority
+without changing task state:
+
+```json
+{ "task_id": "task-uuid", "priority": "high" }
+```
+
+See [Set task priority through MCP](automation-and-mcp.md#set-task-priority-through-mcp)
+for accepted values, omission behavior, validation, and retry behavior.
+
 ## Coordinate with targeted messages
 
 `message_task_kandev` sends a message to another task's primary session by default. Supply a session ID to target a particular sibling session on the current task.
