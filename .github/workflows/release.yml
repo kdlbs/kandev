@@ -3196,3 +3196,55 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+
+  announce-discord:
+    name: Announce release on Discord
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success' &&
+        needs.publish-npm.result == 'success' &&
+        needs.update-homebrew-tap.result == 'success' &&
+        needs.update-scoop-bucket.result == 'success' &&
+        inputs.backfill_tag == '' &&
+        github.run_attempt == 1
+      }}
+    uses: ./.github/workflows/announce-discord-release.yml
+    with:
+      release_tag: ${{ needs.prepare.outputs.tag }}
+      mode: create
+      acknowledge_create: true
+    permissions:
+      contents: read
+
+  discord-recovery-notice:
+    name: Discord recovery required
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success' &&
+        needs.publish-npm.result == 'success' &&
+        needs.update-homebrew-tap.result == 'success' &&
+        needs.update-scoop-bucket.result == 'success' &&
+        (inputs.backfill_tag != '' || github.run_attempt > 1)
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Explain manual recovery
+        run: |
+          echo "## Discord recovery required" >> "$GITHUB_STEP_SUMMARY"
+          echo "Publication succeeded. Automatic Discord delivery is skipped for reruns and backfills." >> "$GITHUB_STEP_SUMMARY"
+          echo "Inspect the channel, then run Announce Discord release with the exact release tag. Update an existing message, or acknowledge creation if no message exists." >> "$GITHUB_STEP_SUMMARY"

@@ -59,6 +59,7 @@ export function useQuestionImages(
     return () => {
       controller.abort();
       urls.forEach((url) => URL.revokeObjectURL(url));
+      setSnapshot({ key: "", states: {} });
     };
   }, [active, pendingId, questionId, imageKey, key, owner]);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);

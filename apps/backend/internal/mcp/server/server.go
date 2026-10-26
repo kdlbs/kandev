@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/mcp/tooltokens"
 	taskcontract "github.com/kandev/kandev/internal/task/contract"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -1202,6 +1203,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-transfer", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) || office(ctx) }, register: func(s *Server) { s.registerTaskTransferTool() }},
 		{name: "configuration-settings", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigSettingsTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		{name: "external-update-task", enabled: external, register: func(s *Server) { s.registerUpdateTaskTool() }},
 		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
 		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
 		// Dependency edges are manageable wherever a task can be created.
@@ -1397,17 +1399,7 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
 	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("update_task_kandev",
-			mcp.WithDescription("Update an existing task."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("title", mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
-			mcp.WithString("description", mcp.Description("New description")),
-			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
-			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
-		),
-		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
-	)
+	s.registerUpdateTaskTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
 			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry. Moving to a manual step that does not start an agent on entry (for example Waiting, Blocked, or Done) must not carry a prompt or entry_options; such a call is rejected with a validation error. Record the instruction in the task description or plan instead.`),
@@ -1486,6 +1478,21 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
 	s.registerListTaskSessionsTool()
+}
+
+func (s *Server) registerUpdateTaskTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_kandev",
+			mcp.WithDescription("Update an existing task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("title", mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
+			mcp.WithString("description", mcp.Description("New description")),
+			mcp.WithString("priority", mcp.Enum(models.TaskPriorityCritical, models.TaskPriorityHigh, models.TaskPriorityMedium, models.TaskPriorityLow), mcp.Description("New task priority")),
+			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
+			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
+		),
+		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
+	)
 }
 
 func (s *Server) registerPRAutomationTools() {
@@ -1616,6 +1623,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and reuses the parent's materialized workspace/worktree; new_workspace requests a separate workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
+			mcp.WithString("priority", mcp.Enum(models.TaskPriorityCritical, models.TaskPriorityHigh, models.TaskPriorityMedium, models.TaskPriorityLow), mcp.DefaultString(models.TaskPriorityMedium), mcp.Description("Task priority. Defaults to medium when omitted.")),
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),

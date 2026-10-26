@@ -1064,5 +1064,20 @@
   "mcpUnsupportedVariables": "Estas variáveis de configuração ainda não podem ser materializadas. Escolha outra configuração.",
   "mcpRequiredBadge": "Obrigatório",
   "mcpPlainInputsHelp": "Utilize aqui valores que não sejam secretos. Para credenciais, selecione referências de segredos abaixo.",
-  "mcpUnsupportedArguments": "Esta configuração pede argumentos de comando que ainda não podem ser configurados. Escolha outra configuração."
+  "mcpUnsupportedArguments": "Esta configuração pede argumentos de comando que ainda não podem ser configurados. Escolha outra configuração.",
+  "mcpUsedIn": "Usado em",
+  "mcpUsedInTitle": "{{name}}: usado em",
+  "mcpUsageProfiles": "Perfis",
+  "mcpUsageRepositories": "Repositórios",
+  "mcpUsageTasks": "Tarefas",
+  "mcpUsageSessions": "Sessões",
+  "mcpUnnamedOwner": "Proprietário sem nome",
+  "mcpOwnerUnavailable": "Este destino não está disponível. Volte ao catálogo ou escolha um espaço de trabalho acessível.",
+  "mcpUsageStale": "Não foi possível atualizar a utilização. Estas linhas podem estar desatualizadas. Tente novamente antes de abrir um proprietário.",
+  "mcpUsageEmpty": "Não existem seleções guardadas visíveis para si.",
+  "mcpUsageLoadMore": "Carregar mais",
+  "mcpUsageDescription": "Seleções guardadas a que tem acesso. A utilização herdada e o estado da ligação são apresentados na sessão.",
+  "mcpManageCatalog": "Gerir catálogo do espaço de trabalho",
+  "mcpLegacyRecoveryDescription": "A importação antiga não está confirmada para este espaço de trabalho. A configuração global existente do perfil pode continuar a aplicar-se. As seleções do espaço de trabalho e as definições globais antigas são guardadas separadamente.",
+  "mcpLegacyRecovery": "Configuração antiga do perfil global"
 }

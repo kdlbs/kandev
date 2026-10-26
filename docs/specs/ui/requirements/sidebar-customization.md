@@ -39,6 +39,14 @@ A shortcut is a reference to an existing destination or supported host action.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.8:** Coordinators shall use the same icon, sentence-case label, and disclosure treatment as Automations and Canvases. Its visibility and position shall be independent of Automations. The fast action preference shall govern its header shortcut. When fast actions are hidden, the expanded list shall provide the same destination through a labelled link.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.9:** When a saved layout lacks Coordinators, it shall gain that entry before Automations, or last when Automations is absent. Existing nodes shall retain their relative order and visibility. Ordinary reads shall never duplicate or reposition an existing Coordinators entry.
 
+The following criteria reconcile customization with the existing plugin
+integration placement contract. Delivery is tracked in the
+[integration plugin grouping repair](../../../plans/integration-plugin-grouping/plan.md).
+
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.10:** In regular workspace navigation, original plugin links registered for Integrations shall appear inside that section on desktop and phone. Each eligible visible link shall appear once there, after built-in providers and before Integration settings. Default, saved, and reset layouts shall use the same grouping.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.11:** Integration plugins shall retain individual visibility and relative order within Integrations. Moving Integrations shall move its contents together. Hiding or folding Integrations shall hide its child links without changing their individual visibility choices. Customization controls shall reflect this hierarchy and shall not offer moves that detach an integration link from its section.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.12:** Existing layouts shall retain plugin identities, individual visibility, relative integration-plugin order, unrelated entry order, and explicit shortcuts in custom groups. Original integration links previously positioned outside Integrations shall display inside it. Reading or rendering the corrected layout shall not save preferences. Hiding an original link or its parent shall not hide an explicit shortcut to that destination.
+
 ### REQ-UI-SIDEBAR-CUSTOMIZATION-002: Mixed shortcut sections
 
 - **AC-UI-SIDEBAR-CUSTOMIZATION-002.1:** Users shall create, rename, hide, remove, and reorder shortcut sections. Each section shall accept built-in destinations, supported host actions, plugin navigation links, workspace canvases, and workspace automations.

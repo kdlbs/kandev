@@ -77,6 +77,8 @@ function deriveFallbackTaskDetailRouteView({
   return {
     routeKey,
     currentRouteStatus: currentRouteState.status,
+    sessionAdmission:
+      currentRouteState.status === "error" ? currentRouteState.sessionAdmission : undefined,
     displayedRouteKey: displayedRouteState?.routeKey ?? null,
     data,
     task,

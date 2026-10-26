@@ -57,3 +57,8 @@ alter existing session selection, tab ordering, or repository isolation.
 ## Implementation plan
 
 [Quick Chat opening composer](../../../plans/quick-chat-opening-composer/plan.md).
+
+
+Follow-up implementation: [draft and rate retry package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+Criteria .9 and .10 already cover lossless accepted-payload cleanup; no new
+requirement is introduced for this regression.

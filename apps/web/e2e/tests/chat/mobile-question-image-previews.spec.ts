@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { exerciseChoiceImageQuestion } from "./choice-image-helpers";
 import {
+  exerciseImageCollapse,
   inspectAndAnswerImages,
   openImageQuestions,
   seedQuestionImage,
@@ -50,4 +52,25 @@ test("phone inspection preserves the question draft and all answer controls", as
       caption: "Image inspection preserves the answer draft",
     }),
   );
+});
+
+test("phone collapse releases previews and preserves the answer draft", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  seedQuestionImage(seedData.repositoryPath);
+  const { session } = await openImageQuestions(testPage, apiClient, seedData);
+  await exerciseImageCollapse(testPage, session, true);
+  await prCapture.screenshot("phone-question-images-reopened", {
+    caption: "Reopened clarification reloads its image and keeps the answer draft",
+  });
+  const skipped = waitForHttp(testPage, "POST", /\/api\/v1\/clarification\/[^/]+\/respond$/, {
+    predicate: (response) => response.ok(),
+  });
+  await session.clarificationSkip().click();
+  await skipped;
+  await expect(session.idleInput()).toBeVisible();
 });

@@ -1064,5 +1064,20 @@
   "mcpUnsupportedVariables": "目前尚無法準備這些設定變量。請選擇其他設定。",
   "mcpRequiredBadge": "必填",
   "mcpPlainInputsHelp": "請在此使用非機密值。認證資料請使用下方的密鑰引用。",
-  "mcpUnsupportedArguments": "此設定需要目前尚無法設定的命令參數。請選擇其他設定。"
+  "mcpUnsupportedArguments": "此設定需要目前尚無法設定的命令參數。請選擇其他設定。",
+  "mcpUsedIn": "使用位置",
+  "mcpUsedInTitle": "{{name}}：使用位置",
+  "mcpUsageProfiles": "設定檔",
+  "mcpUsageRepositories": "儲存庫",
+  "mcpUsageTasks": "任務",
+  "mcpUsageSessions": "工作階段",
+  "mcpUnnamedOwner": "未命名的所有者",
+  "mcpOwnerUnavailable": "此目標不可用。請返回目錄或選擇可存取的工作區。",
+  "mcpUsageStale": "無法刷新使用情況。這些條目可能已過時。請重試後再開啟所有者。",
+  "mcpUsageEmpty": "沒有您可查看的已儲存選擇。",
+  "mcpUsageLoadMore": "載入更多",
+  "mcpUsageDescription": "您有權存取的已儲存選擇。繼承的使用情況和連接狀態顯示在工作階段中。",
+  "mcpManageCatalog": "管理工作區目錄",
+  "mcpLegacyRecoveryDescription": "尚未確認此工作區的舊設定匯入。現有的全局設定檔設定仍可能生效。工作區選擇和全局舊設定分別儲存。",
+  "mcpLegacyRecovery": "全局設定檔的舊設定"
 }

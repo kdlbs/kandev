@@ -18,7 +18,7 @@ test("mobile Stats exposes a touch-sized retry and recovers a failed section", a
     if (!dailyAvailable) {
       await route.fulfill({
         status: 503,
-        headers: { "Retry-After": "5" },
+        headers: { "Retry-After": "300" },
         contentType: "application/json",
         json: { error: "statistics are busy", error_code: "analytics_busy" },
       });
@@ -39,8 +39,9 @@ test("mobile Stats exposes a touch-sized retry and recovers a failed section", a
   await expect(status).toBeVisible();
   const retry = status.getByRole("button", { name: "Retry", exact: true });
   // Automatic retries must not end the outage before the manual retry is tested.
-  await testPage.clock.fastForward(6_000);
-  await expect.poll(() => dailyRequests).toBeGreaterThan(1);
+  const requestsBeforeRetry = dailyRequests;
+  await testPage.clock.fastForward(301_000);
+  await expect.poll(() => dailyRequests).toBeGreaterThan(requestsBeforeRetry);
   const retryBox = await retry.boundingBox();
   if (!retryBox) throw new Error("mobile Stats retry control is not visible");
   expect(retryBox.height).toBeGreaterThanOrEqual(44);

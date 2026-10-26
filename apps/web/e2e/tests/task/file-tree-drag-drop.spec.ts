@@ -186,13 +186,16 @@ test.describe("File tree drag and drop", () => {
       taskTitle: "FT DnD Move",
       requiredPath: "movable.ts",
     });
-
     const renameResponse = ws.waitForResponse("workspace.file.rename");
     await dispatchHtmlDnd(session.fileTree, "movable.ts", "target-dir");
     await renameResponse;
     // Initial Git loading can preserve Files, so select Changes explicitly.
     await session.clickTab("Changes");
-    await expect(session.changesFileRow("target-dir/movable.ts")).toBeVisible();
+    await expect(session.changes).toBeVisible();
+    await expect(session.changesFileRow("movable.ts")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changesFileRow("target-dir/movable.ts")).toBeVisible({
+      timeout: 15_000,
+    });
     await session.clickTab("Files");
 
     // The completed move removes the source from the active Files tree.
@@ -301,6 +304,7 @@ test.describe("File tree drag and drop", () => {
     ]);
     expect(replies.get(requests[0].id)?.payload.success).toBe(true);
     await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible();
     await expect(session.changesFileRow("dest/src/a.txt")).toBeVisible();
     await session.clickTab("Files");
     await session.fileTreeNode("dest").click();

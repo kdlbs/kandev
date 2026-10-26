@@ -40,7 +40,7 @@ export class MobileGitHubPage {
   }
 
   savedQueryByLabel(label: string): Locator {
-    return this.mobileSidebar.getByText(label, { exact: true });
+    return this.mobileSidebar.getByRole("button", { name: label, exact: true });
   }
 
   savedQueryDefaultAction(label: string, action: "Set" | "Clear" = "Set"): Locator {

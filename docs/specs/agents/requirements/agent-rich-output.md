@@ -122,6 +122,8 @@ contracts rather than exposing a general-purpose UI library automatically.
 
 ## Implementation plans
 
+- [Copilot rich-output identity repair](../../../plans/copilot-rich-output-identity/plan.md)
+
 - [Image preview defaults](image-preview-defaults.md) and its
   [implementation plan](../../../plans/image-preview-defaults/plan.md) define
   the image exception to explicit expansion.

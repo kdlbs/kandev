@@ -13,6 +13,7 @@ import {
   selectAgentIfNeeded,
   sendQuickChatMessage,
   startQuickChatFromSetup,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 
 /**
@@ -1016,6 +1017,7 @@ test.describe("Quick Chat", () => {
     await startQuickChatFromSetup(dialog, testPage);
     const first = (await (await firstStart).json()) as { session_id: string; task_id: string };
     const firstReference = `conversation:${first.session_id}`;
+    await waitForSessionSettledBaseline(apiClient, first.task_id, first.session_id);
 
     // The deterministic script calls the real title MCP endpoint through the
     // mock agent, then the task.updated event relabels the open tab.

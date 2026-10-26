@@ -8,14 +8,16 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { mcpStatusPresentation } from "./mcp-explorer-view-model";
 
+const NEUTRAL_STATUS_DOT_CLASS = "bg-muted-foreground/50";
+
 export const MCP_STATUS_DOT_CLASS: Record<MCPAttachmentServer["status"], string> = {
   active: "bg-emerald-500",
   connected: "bg-amber-500",
-  delivered: "bg-amber-500",
+  delivered: NEUTRAL_STATUS_DOT_CLASS,
   failed: "bg-destructive",
-  filtered: "bg-muted-foreground/50",
-  unavailable: "bg-muted-foreground/50",
-  unknown: "bg-muted-foreground/50",
+  filtered: NEUTRAL_STATUS_DOT_CLASS,
+  unavailable: NEUTRAL_STATUS_DOT_CLASS,
+  unknown: NEUTRAL_STATUS_DOT_CLASS,
 };
 
 export function McpStatusDot({

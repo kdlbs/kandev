@@ -4,6 +4,36 @@ import { KandevToolMessage } from "./kandev-tool-message";
 import { richOutputExamples } from "@/lib/rich-output/examples";
 import { kandevToolCall } from "./kandev-tool-message.test-helpers";
 const UNAVAILABLE = "This presentation is unavailable.";
+const RICH_OUTPUT_TEST_ID = 'data-testid="rich-output"';
+const COPILOT_TOOL_TITLE = "kandev-show_rich_output_kandev";
+const COPILOT_CALLOUT_ARGS = {
+  version: 2,
+  catalog_version: 1,
+  title: "Synthetic report",
+  spec: {
+    root: "report",
+    elements: {
+      report: {
+        type: "Callout",
+        props: {
+          kind: "info",
+          title: "Synthetic report",
+          text: "Synthetic check completed.",
+        },
+        children: [],
+      },
+    },
+  },
+};
+
+function copilotToolCall(status: "pending" | "running" | "error" | "complete" = "complete") {
+  return kandevToolCall({
+    toolName: COPILOT_TOOL_TITLE,
+    input: { kind: "other", raw_input: COPILOT_CALLOUT_ARGS },
+    output: { content: "Rich output accepted." },
+    status,
+  });
+}
 
 describe("KandevToolMessage rich output", () => {
   // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.6
@@ -107,9 +137,37 @@ describe("KandevToolMessage rich output", () => {
       />,
     );
 
-    expect(html).toContain('data-testid="rich-output"');
+    expect(html).toContain(RICH_OUTPUT_TEST_ID);
     expect(html).toContain("Build health");
     expect(html).not.toContain(UNAVAILABLE);
+  });
+});
+
+describe("Copilot rich output compatibility", () => {
+  it("renders the saved Callout without rewriting its metadata", () => {
+    const html = renderToStaticMarkup(<KandevToolMessage comment={copilotToolCall()} />);
+
+    expect(html).toContain(RICH_OUTPUT_TEST_ID);
+    expect(html).toContain("Synthetic report");
+    expect(html).toContain("Synthetic check completed.");
+    expect(html).not.toContain(UNAVAILABLE);
+  });
+
+  it.each(["pending", "error"] as const)("keeps the existing %s activity surface", (status) => {
+    const copilot = renderToStaticMarkup(<KandevToolMessage comment={copilotToolCall(status)} />);
+    const canonical = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          toolName: "mcp__kandev__show_rich_output_kandev",
+          input: { kind: "other", raw_input: COPILOT_CALLOUT_ARGS },
+          output: { content: "Rich output accepted." },
+          status,
+        })}
+      />,
+    );
+
+    expect(copilot).toBe(canonical);
+    expect(copilot).not.toContain(RICH_OUTPUT_TEST_ID);
   });
 });
 
@@ -247,5 +305,5 @@ it("rejects an incomplete mixed snapshot and an unrelated tool identity", () => 
       })}
     />,
   );
-  expect(unrelated).not.toContain('data-testid="rich-output"');
+  expect(unrelated).not.toContain(RICH_OUTPUT_TEST_ID);
 });

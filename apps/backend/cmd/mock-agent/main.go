@@ -504,6 +504,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleOverloaded(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// This synthetic terminal ACP error follows the same projection path as a
+	// provider failure and exercises the Codex signature end to end.
+	if resp, err, handled := a.handleCodexRateLimit(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	// Same rationale as /overloaded above: /transport-lost must also surface a
 	// real prompt-time ACP error, so it is intercepted here rather than routed
 	// through handlePrompt's emitter.
@@ -697,6 +702,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 		}
 	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	_ = os.Remove(codexRateLimitCounterPath(req.SessionId))
 	clearRetainedCapacityCounters(req.SessionId)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))

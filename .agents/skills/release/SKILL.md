@@ -112,6 +112,18 @@ python3 .github/scripts/release-workflow-contract_test.py
 bash -n scripts/release/nightly-release.sh scripts/release/publish-npm.sh
 ```
 
+## Discord release announcements
+
+Normal Stable first attempts automatically call `announce-discord-release.yml` after GitHub Release, npm, Homebrew, and Scoop succeed. Configure `DISCORD_GENERAL_WEBHOOK_URL` in the `release` environment. It sends one compact message with whole-release counts, attributed highlights, emojis, and the exact GitHub release link.
+
+Reruns and backfills skip automatic Discord delivery and require manual recovery. Nightly, dry-run, desktop-validation, cancellation before delivery, and failed publication skip it too. Missing secrets and Discord failures fail only the announcement job; check package publication separately.
+
+Use **Announce Discord release** on `main` with an exact Stable `release_tag`. The default `preview` mode requires no Discord secret. Inspect its summary and public preview artifact. Before `create`, verify publication and inspect the channel, then set `acknowledge_create=true` only if no announcement exists. To correct an existing post, use `update` and its `message_id`.
+
+Confirmed sends retain a message ID/link in the summary and a 30-day receipt artifact. The helper validates the message's webhook and release before update. Uncertain POST/PATCH outcomes and cancellation during delivery require channel inspection; do not resend automatically. Only explicit rate limits receive bounded retries. Never print or commit the webhook URL.
+
+See [release operating instructions](../../../docs/public/release-process.md#announce-a-release-on-discord) for setup and recovery.
+
 ## Release-tag signing configuration
 
 The release workflow reads signing configuration from the GitHub `release`

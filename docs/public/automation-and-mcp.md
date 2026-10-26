@@ -350,6 +350,18 @@ Marketplace review shows the inputs requested by the selected setup. Complete re
 
 Marketplace entries come from Kandev-curated templates or cached public Registry metadata. Registry metadata is publisher supplied, not a Kandev security review. Review the publisher, selected remote or exact package version, transport, requested configuration, and secret bindings before adding an entry. A Registry outage shows the last successful cache with a stale or degraded status. Deprecated and deleted entries are not offered for new installation.
 
+Each saved catalog definition has **Used in**, which lists its directly selecting
+owners that you can access. Open a named owner to manage its existing selection.
+The list is paged and excludes inaccessible owners. It does not infer inherited
+use or connection health. Opening an owner never selects a server or starts an
+agent.
+
+Saved global profiles require an explicit workspace choice or a valid workspace
+link. Switching that context uses the shared unsaved-settings guard. Profile
+and repository edits retain **Save changes**; session edits keep their existing
+autosave behavior. See [Agents and profiles](agents-and-profiles.md#find-where-a-server-is-selected)
+for navigation and legacy configuration recovery.
+
 Select configured definitions at the profile, repository, task, or task-session scope. Repository selection is collapsed by default. Task creation keeps its selector inside collapsed **Advanced** settings. The effective set is additive across every task repository, the workspace-contextual profile, task, and session. Duplicate definitions are delivered once with all contributing origins; inherited definitions cannot be removed at a narrower scope.
 
 Selection lists show each server's runtime name, supplied description, setup
@@ -1128,7 +1140,10 @@ result, descriptions, schemas, or token estimates. The explorer still shows
 safe status metadata. The built-in Kandev server becomes **Connected** after
 protocol acceptance, either legacy MCP initialize or an accepted modern
 request. It becomes **Active** after it serves `tools/list`. Missing
-observation is not a failure. Red appears only for an explicit sanitized error.
+observation is not a failure. Delivered and unobserved rows use neutral styling.
+A configured name alone stays **Unknown**; another server's active report
+does not establish delivery. Saved-change notices remain independent of these
+connection states. Red appears only for an explicit sanitized error.
 
 The report is per Kandev session and execution. It stores only bounded,
 sanitized attachment facts. It does not store MCP headers, environment values,
@@ -1187,7 +1202,31 @@ External MCP exposes tools in these groups:
 - executors: list executors and profiles; create, update, or delete executor profiles;
 - saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; create new prompts or update custom prompts that allow agent edits;
 - agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
-- tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
+- tasks: list, create, move, delete, archive, update task fields and state, and change task priority; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
+
+### Set task priority through MCP
+
+`create_task_kandev` accepts the optional `priority` values `critical`, `high`,
+`medium`, and `low`. If you omit it, Kandev uses `medium`, including for a
+subtask whose parent has a different priority.
+
+External MCP, task MCP, and automation MCP expose `update_task_kandev`. Send
+`task_id` and `priority` to change priority without changing task state:
+
+```json
+{ "task_id": "task-uuid", "priority": "high" }
+```
+
+The update field accepts the same four exact values. Omit `priority` to leave
+the stored value unchanged. Empty, padded, uppercase, and unknown values are
+rejected. External updates use the authenticated caller's existing workspace
+permissions.
+
+If a `create_task_kandev` retry uses an `external_id` that already belongs to a
+task, Kandev returns that task with its current priority. A later priority in
+the retry does not change it. Call `update_task_kandev` to revise the task.
+Configuration MCP keeps its state-only task update, and Office task sessions do
+not receive the generic task update tool.
 
 ### Agent-accessible settings
 

@@ -1,3 +1,4 @@
+import { expectNeutralMCPEvidence, captureNeutralMCPEvidence } from "./mcp-neutral-evidence";
 import { expectMCPConnectionGeometry } from "./mcp-connection-geometry";
 import { expect, type Locator, type Page, type Route } from "@playwright/test";
 import type { ApiClient } from "./api-client";
@@ -97,6 +98,7 @@ export async function checkMCPStatusClarity({
       await expect(tooltip.getByTestId("mcp-tooltip-server-clarity-0")).toContainText(
         "The connection has not been verified.",
       );
+      await expectNeutralMCPEvidence(tooltip.getByTestId("mcp-tooltip-server-clarity-0"));
       await checkWrappedTooltipAlignment(
         page.locator('[data-slot="tooltip-content"] > [data-testid="mcp-status-popover"]'),
       );
@@ -108,6 +110,11 @@ export async function checkMCPStatusClarity({
       "This agent does not support HTTP MCP servers.",
     );
     await expectMCPConnectionGeometry(explorer, mobile);
+    await expectNeutralMCPEvidence(explorer.getByTestId("mcp-server-row-clarity-0"));
+    await explorer.getByTestId("mcp-server-row-clarity-0").click();
+    await expectNeutralMCPEvidence(explorer.getByTestId("mcp-server-detail"));
+    if (mobile)
+      await explorer.getByRole("button", { name: "Back to servers", exact: true }).click();
     await explorer.getByTestId("mcp-server-row-clarity-1").click();
     await expect(explorer.getByTestId("mcp-server-detail")).toContainText(
       "This agent does not support HTTP MCP servers.",
@@ -277,6 +284,8 @@ async function checkSavedReports(
       await expect(explorer.getByTestId("mcp-server-row-kandev")).toContainText(
         "Configuration sent to the agent. The connection has not been verified.",
       );
+      await expectNeutralMCPEvidence(explorer.getByTestId("mcp-server-row-kandev"));
+      if (apply_state === "pending_idle") await captureNeutralMCPEvidence(page, mobile);
       await explorer.getByTestId("mcp-explorer-close").click();
       if (!mobile) await expect(trigger).toBeFocused();
     }

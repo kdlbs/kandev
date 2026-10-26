@@ -39,6 +39,7 @@ type ClarificationInputOverlayProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
+  previewsEnabled?: boolean;
   /** True when the session no longer has a live clarification waiter. */
   agentDisconnected?: boolean;
   // Called when the user presses Escape. Unlike Skip, this must not answer or
@@ -123,6 +124,7 @@ function computeAllAnswered(
 }
 
 type CardProps = {
+  previewsEnabled: boolean;
   onInspectionChange: (open: boolean) => void;
   meta: SingleQuestionMeta;
   index: number;
@@ -186,6 +188,7 @@ function ClarificationCard(props: CardProps) {
         questionId={meta.questionId}
         sessionId={meta.message.session_id}
         images={question.images}
+        enabled={props.previewsEnabled}
         onInspectionChange={props.onInspectionChange}
       />
       <ClarificationMarkdown
@@ -207,6 +210,7 @@ function ClarificationCard(props: CardProps) {
               questionId={meta.questionId}
               sessionId={meta.message.session_id}
               images={option.images}
+              enabled={props.previewsEnabled}
               onInspectionChange={props.onInspectionChange}
             />
           ) : null
@@ -407,6 +411,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
 }
 
 type CarouselBodyProps = {
+  previewsEnabled: boolean;
   onInspectionChange: (open: boolean) => void;
   sortedMessages: Message[];
   meta: SingleQuestionMeta | null;
@@ -548,6 +553,7 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
   };
 }
 function ClarificationCarouselBody({
+  previewsEnabled,
   onInspectionChange,
   sortedMessages,
   meta,
@@ -598,6 +604,7 @@ function ClarificationCarouselBody({
   return (
     <>
       <ClarificationCard
+        previewsEnabled={previewsEnabled}
         onInspectionChange={onInspectionChange}
         meta={meta}
         index={activeIndex}
@@ -650,6 +657,7 @@ export function ClarificationInputOverlay({
   initialAnswers,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
+  previewsEnabled = true,
   agentDisconnected = false,
   onDismiss,
   onCollapse,
@@ -852,6 +860,7 @@ export function ClarificationInputOverlay({
         </div>
       )}
       <ClarificationCarouselBody
+        previewsEnabled={previewsEnabled}
         onInspectionChange={setInspectingImage}
         sortedMessages={sortedMessages}
         meta={meta}

@@ -85,3 +85,8 @@ and harness) and
 diagnostic text correlation, allowlisted prompt-error metadata), and
 [part 4](../system-design/provider-response-attempt-recovery.md)
 (provider-owned response-attempt replacement and transcript retraction).
+
+
+
+The [interactive rate-throttle extension](interactive-rate-throttle-retry.md)
+adds bounded retry eligibility when reset metadata is absent.

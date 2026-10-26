@@ -15,6 +15,7 @@ type Props = {
   sessionId: string;
   images?: QuestionImage[];
   historical?: boolean;
+  enabled?: boolean;
   onInspectionChange?: (open: boolean) => void;
 };
 
@@ -55,7 +56,11 @@ function QuestionImagesContent(props: Props) {
         .filter((image) => image && typeof image.id === "string" && typeof image.alt === "string")
         .slice(0, 4)
     : [];
-  const active = (!props.historical || expanded) && auth.authenticated && Boolean(props.sessionId);
+  const active =
+    props.enabled !== false &&
+    (!props.historical || expanded) &&
+    auth.authenticated &&
+    Boolean(props.sessionId);
   const { states, retry } = useQuestionImages(
     props.pendingId,
     props.questionId,

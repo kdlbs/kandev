@@ -239,6 +239,7 @@ function ClarificationPanelContent({
             lateAnswerState={lateAnswerState}
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
+            previewsEnabled={!collapsed}
             agentDisconnected={agentDisconnected}
             onDismiss={onCollapse}
             onCollapse={onCollapse}

@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-09-09
+updated: 2026-10-26
 owners:
   - cfl
 ---
@@ -25,7 +25,7 @@ own exact evidence, startup symbols, and table names.
 
 | Requirement | Design source |
 | --- | --- |
-| REQ-TASKS-RUNTIME-CLEANUP-001 | Migrated legacy design detail below |
+| REQ-TASKS-RUNTIME-CLEANUP-001 | Migrated legacy design detail below; [Worktree cache finalization](#worktree-cache-finalization) (AC-001.58) |
 
 ## Migrated design source
 
@@ -36,10 +36,8 @@ Branch retention amendment:
 
 ## Why
 
-Operators archive and delete completed tasks to keep the board usable and the
-workspace tidy. Those actions must also release the task's runtime resources;
-otherwise completed work leaves hidden ACP processes, host utility processes,
-worktrees, or executor rows behind and the machine slowly runs out of memory.
+Task lifecycle cleanup releases owned runtimes and worktrees while retaining
+the evidence needed for safe retry and workspace recovery.
 
 ## What
 
@@ -61,15 +59,10 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
   duration of that session. Cleanup can stop the current task's runtime rows, but
   must defer destructive worktree/container/sandbox teardown until no other
   active task session references the environment.
-- A task owns its materialized workspace independently of its sessions. Deleting
-  any session, including the task's last session, removes only that session and
-  its workspace references. It does not remove task workspace directories, Git
-  worktree registrations, or branches.
-- A task with zero sessions retains its materialized workspace so a later session
-  can reuse the same files and Git state.
-- Physical workspace cleanup is initiated only by task lifecycle operations:
-  archive, delete, cascade archive/delete, workspace delete, quick-chat expiry,
-  or explicit task-environment reset. Session deletion is not a cleanup trigger.
+- [Session deletion](session-delete-resource-cleanup.md) removes conversation
+  references only. The task retains its workspace, Git registration, branches,
+  and files even with zero sessions. Archive, delete, cascade, workspace delete,
+  quick-chat expiry, or explicit task-environment reset owns physical cleanup.
 - Agent shutdown escalates to the whole process group when its timeout expires
   and waits for descendants; neither agentctl nor backend shutdown reports
   completion while an owned process remains under PID 1.
@@ -137,6 +130,26 @@ capturing the cleanup snapshot.
 
 Managed branch compaction amends that disposition in
 [Managed Branch Compaction](managed-branch-compaction.md).
+
+## Worktree cache finalization
+
+`Manager.worktrees` session/repository/branch keys can share one `Worktree.ID`.
+Creation caches the creator session, while
+`SQLiteStore.GetWorktreesByTaskID` joins environment sessions and deduplicates by
+physical ID. Its selected session need not be the cached creator.
+
+After audited removal and successful metadata finalization,
+`finalizeRemovedWorktree` evicts every value with that nonempty ID under `m.mu`.
+Other physical IDs survive, including sibling repositories/branch slots.
+Empty IDs never group unrelated entries.
+
+`ReleaseWorktreeReference` alone retains its metadata update and exact session
+key eviction; it is not proof of physical removal. Shared-reference retention
+returns before physical cleanup/finalization. Audit, removal, or metadata
+failure preserves existing retry/error behavior without broader eviction.
+Path/repository locks, canonical ownership, and branch policy remain authoritative.
+This also applies to attachment compensation under
+[repository placement](workspace-repository-placement.md), AC-001.4/003.6/003.7.
 
 ## Data Model
 
@@ -403,10 +416,8 @@ reported missing rather than exposed.
 
 ## Scenarios
 
-- **GIVEN** a task with one stopped session, a registered worktree, and
-  uncommitted files, **WHEN** the session is deleted, **THEN** the task remains
-  with zero sessions and the directory, Git registration, branch, and files are
-  unchanged.
+- Deleting the only stopped session preserves the zero-session task's worktree
+  directory, Git registration, branch, and uncommitted files.
 - **GIVEN** a task whose last session was deleted, **WHEN** the backend restarts
   and a new session is created, **THEN** the session reuses the task-owned
   workspace and observes the preserved files.
@@ -425,12 +436,9 @@ reported missing rather than exposed.
   the barrier can be omitted from the cleanup inventory or survive as an
   untracked directory.
 
-- **GIVEN** a task has a `WAITING_FOR_INPUT` session and an
-  `executors_running` row, **WHEN** the task is archived, **THEN** the runtime is
-  stopped by `agent_execution_id` before the row and worktrees are removed.
-- **GIVEN** a task has a `COMPLETED` session but still has an
-  `executors_running` row, **WHEN** the task is deleted, **THEN** cleanup still
-  selects that row and attempts runtime shutdown.
+- Archive stops a `WAITING_FOR_INPUT` session's recorded runtime by
+  `agent_execution_id` before removing its row/worktrees; delete also selects a
+  `COMPLETED` session's recorded runtime for shutdown.
 - **GIVEN** runtime shutdown succeeds for every row owned by a deleted task,
   **WHEN** cleanup finishes, **THEN** the task's `executors_running` rows and
   worktrees are removed.
@@ -440,18 +448,11 @@ reported missing rather than exposed.
 - **GIVEN** the backend restarts with an `executors_running` row for an archived
   task, **WHEN** startup reconciliation runs, **THEN** it attempts cleanup for the
   row instead of treating the archived task as active.
-- **GIVEN** a missing, terminal, or failed session whose local runtime is already
-  absent and whose persisted PID is confirmed dead, **WHEN** startup
-  reconciliation receives a typed not-found result, **THEN** it safely removes or
-  repairs the row without an individual warning, and a second reconciliation has
-  no stale row to process.
-- **GIVEN** a typed not-found result for an alive local row, a local row without a
-  liveness handle, or a remote row, **WHEN** startup reconciliation runs, **THEN**
-  it preserves the row and includes the safe disposition in a bounded startup
-  summary.
-- **GIVEN** a stop fails with a generic error, **WHEN** startup reconciliation
-  runs, **THEN** it preserves the row and emits an individual structured warning
-  rather than reclassifying the runtime as absent.
+- Startup reconciliation of a missing, terminal, or failed session safely
+  removes/repairs a confirmed-dead local runtime after typed not-found, without
+  an individual warning or stale row on repeat. Alive, handle-less, and remote
+  rows survive typed not-found with a bounded summary. Generic stop errors
+  preserve rows with individual structured warnings, never absence claims.
 - **GIVEN** an `executors_running` row whose task session is missing and whose
   local liveness handle refers to a dead host process, **WHEN** startup
   reconciliation stops it and the stop reports the execution is not found, **THEN**
@@ -552,3 +553,4 @@ reported missing rather than exposed.
 - [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)
 - [Archive resume identity](../../../plans/archive-resume-identity/plan.md)
 - [Compact integrated managed branches](../../../plans/compact-integrated-managed-branches/plan.md)
+- [Live attachment retry cache cleanup](../../../plans/live-attachment-retry-cache/plan.md)

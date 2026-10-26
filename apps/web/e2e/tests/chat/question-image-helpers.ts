@@ -134,3 +134,29 @@ export async function inspectAndAnswerImages(
     ),
   ).toBe(true);
 }
+
+export async function exerciseImageCollapse(page: Page, session: SessionPage, mobile: boolean) {
+  const overlay = session.clarificationOverlay();
+  const draft = overlay.getByTestId("clarification-input");
+  await draft.fill("Keep the spacing.");
+  const image = overlay.getByRole("img", { name: "Proposed layout", exact: true });
+  const originalUrl = await image.getAttribute("src");
+  const collapse = overlay.getByRole("button", { name: "Collapse clarification" });
+  if (mobile) await collapse.tap();
+  else await collapse.click();
+  // The form remains mounted, but hidden image resources must be released.
+  await expect(image).toHaveCount(0);
+  const expand = page.getByRole("button", { name: "Expand clarification" });
+  if (mobile) await expand.tap();
+  else await expand.click();
+  await expect(image).toBeVisible();
+  await expect(image).not.toHaveAttribute("src", originalUrl!);
+  await expect(draft).toHaveValue("Keep the spacing.");
+  await expect(overlay).toContainText("Approve this layout?");
+  await expect(overlay.getByRole("button", { name: /^Submit/ })).toBeDisabled();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+}

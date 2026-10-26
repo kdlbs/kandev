@@ -80,3 +80,36 @@ it("shares two reads across question and choice hooks and cancels queued choices
   question.unmount();
   nextChoice.unmount();
 });
+
+it("clears revoked URLs before a four-image group reloads after collapse", async () => {
+  const group = [...images, { id: "image4", path: "4.png", alt: "Image 4" }];
+  mocks.fetch.mockResolvedValue(new Blob(["png"]));
+  const { result, rerender, unmount } = renderHook(
+    ({ active }) => useQuestionImages("collapse", "q", group, active, "owner"),
+    { initialProps: { active: true } },
+  );
+  await waitFor(() =>
+    expect(Object.values(result.current.states).every((state) => state.kind === "loaded")).toBe(
+      true,
+    ),
+  );
+  expect(mocks.fetch).toHaveBeenCalledTimes(4);
+  rerender({ active: false });
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(4);
+  const pending: ((blob: Blob) => void)[] = [];
+  mocks.fetch.mockImplementation(() => new Promise<Blob>((resolve) => pending.push(resolve)));
+  try {
+    rerender({ active: true });
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(6));
+    for (const image of group) expect(result.current.states[image.id]?.kind).not.toBe("loaded");
+    await act(async () => pending.slice().forEach((resolve) => resolve(new Blob(["fresh"]))));
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(8));
+    await act(async () => pending.slice(2).forEach((resolve) => resolve(new Blob(["fresh"]))));
+    expect(Object.values(result.current.states).every((state) => state.kind === "loaded")).toBe(
+      true,
+    );
+  } finally {
+    unmount();
+    await act(async () => pending.forEach((resolve) => resolve(new Blob(["cleanup"]))));
+  }
+});
