@@ -38,6 +38,46 @@ func newRepoForSessionTests(t *testing.T) *Repository {
 	return repo
 }
 
+func TestUpdateTaskSessionPreservesNewerExactBinding(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-exact-stale-row", Title: "Exact stale row"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-exact-stale-row", TaskID: "task-exact-stale-row", State: models.TaskSessionStateCreated,
+		AgentProfileID: "profile-a", AgentProfileSnapshot: map[string]interface{}{"id": "profile-a"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := repo.GetTaskSession(ctx, "session-exact-stale-row")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET agent_profile_id = 'profile-b',
+		agent_profile_snapshot = '{"id":"profile-b"}', exact_profile_generation = 2,
+		exact_profile_revision = 7 WHERE id = ?`, stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale.ErrorMessage = "unrelated update"
+	if err := repo.UpdateTaskSession(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetTaskSession(ctx, stale.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExactProfileGeneration != 2 || got.ExactProfileRevision != 7 {
+		t.Fatalf("exact binding = (%d, %d), want (2, 7)", got.ExactProfileGeneration, got.ExactProfileRevision)
+	}
+	if got.AgentProfileID != "profile-b" || got.AgentProfileSnapshot["id"] != "profile-b" {
+		t.Fatalf("profile binding = %q / %+v, want profile-b", got.AgentProfileID, got.AgentProfileSnapshot)
+	}
+	if got.ErrorMessage != "unrelated update" {
+		t.Fatalf("unrelated update = %q", got.ErrorMessage)
+	}
+}
+
 func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

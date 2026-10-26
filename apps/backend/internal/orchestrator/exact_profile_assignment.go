@@ -1,0 +1,324 @@
+package orchestrator
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+// ErrExactProfileAssignmentInvalid is returned before launch selection can
+// fall through to a workflow/default profile. Exact assignments are a strict
+// contract: a changed, disabled, or cross-workspace profile is never replaced.
+var ErrExactProfileAssignmentInvalid = errors.New("exact profile assignment is no longer valid")
+
+// ErrExactProfileModelMismatch is returned when a prompt requests a model
+// outside the profile bound to its session.
+var ErrExactProfileModelMismatch = errors.New("requested model conflicts with exact profile assignment")
+
+const exactProfileLaunchFailureReason = "launch_failed"
+
+type exactProfileAssignmentStore interface {
+	GetExactProfileAssignment(context.Context, string) (*models.ExactProfileAssignment, error)
+}
+
+type exactProfileAssignmentWriter interface {
+	exactProfileAssignmentStore
+	AssignExactProfileAssignmentIfProfileCurrent(context.Context, *models.ExactProfileAssignment) (bool, error)
+}
+
+type exactProfileLookup interface {
+	ResolveAgentProfile(context.Context, string) (*executor.AgentProfileInfo, error)
+}
+
+// ExactProfileLaunchDecision is the immutable assignment consumed by every
+// session-creation and agent-start chokepoint.
+type ExactProfileLaunchDecision struct {
+	AgentProfileID string
+	Generation     int64
+	Revision       int64
+	Model          string
+}
+
+// ExactProfileAssigner validates durable assignments against a current,
+// concrete profile snapshot.
+type ExactProfileAssigner struct {
+	Assignments exactProfileAssignmentStore
+	Profiles    exactProfileLookup
+}
+
+func (s *Service) resolveExactProfileAssignment(
+	ctx context.Context,
+	taskID string,
+) (*ExactProfileLaunchDecision, error) {
+	assignments, ok := s.repo.(exactProfileAssignmentStore)
+	if !ok {
+		return nil, nil
+	}
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load task for exact profile assignment: %w", err)
+	}
+
+	if task == nil {
+		return nil, ErrExactProfileAssignmentInvalid
+	}
+	return (ExactProfileAssigner{
+		Assignments: assignments,
+		Profiles:    s.agentManager,
+	}).Resolve(ctx, taskID, task.WorkspaceID)
+}
+
+func (s *Service) validateExactProfileModelRequest(
+	ctx context.Context,
+	taskID, requestedModel string,
+	session *models.TaskSession,
+) error {
+	if session == nil {
+		return nil
+	}
+	exact, err := s.resolveExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if exact == nil && session.ExactProfileGeneration == 0 {
+		return nil
+	}
+	if exact == nil || session.AgentProfileID != exact.AgentProfileID ||
+		session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision {
+		return ErrExactProfileAssignmentInvalid
+	}
+	if requestedModel != "" && requestedModel != exact.Model {
+		return fmt.Errorf("%w: requested %q, assigned profile requires %q", ErrExactProfileModelMismatch, requestedModel, exact.Model)
+	}
+	return nil
+}
+
+// ExactTaskProfileGeneration returns the currently active exact-assignment
+// generation. Zero preserves legacy routing for tasks without one.
+func (s *Service) ExactTaskProfileGeneration(ctx context.Context, taskID string) (int64, error) {
+	assignments, ok := s.repo.(exactProfileAssignmentStore)
+	if !ok {
+		return 0, nil
+	}
+	assignment, err := assignments.GetExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return 0, fmt.Errorf("load exact profile assignment: %w", err)
+	}
+	if assignment == nil || !assignment.Active {
+		return 0, nil
+	}
+	return assignment.Generation, nil
+}
+
+// AssignExactTaskProfile records and activates the next immutable profile
+// selection. The profile must be concrete, enabled, task-workspace scoped, and
+// unchanged at assignment time; later launch validation repeats those checks.
+func (s *Service) AssignExactTaskProfile(
+	ctx context.Context,
+	taskID, agentProfileID string,
+	generation int64,
+) (*ExactProfileLaunchDecision, error) {
+	assignments, ok := s.repo.(exactProfileAssignmentWriter)
+	if !ok || s.agentManager == nil {
+		return nil, ErrExactProfileAssignmentInvalid
+	}
+	if err := s.authorizeTaskPrompt(ctx, taskID); err != nil {
+		return nil, err
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load task for exact profile assignment: %w", err)
+	}
+	if task == nil {
+		return nil, ErrExactProfileAssignmentInvalid
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, agentProfileID)
+	if err != nil || profile == nil || !profile.Enabled || profile.WorkspaceID != task.WorkspaceID ||
+		profile.Revision < 1 || strings.TrimSpace(profile.Model) == "" {
+		return nil, ErrExactProfileAssignmentInvalid
+	}
+	assignment := &models.ExactProfileAssignment{
+		TaskID: taskID, WorkspaceID: task.WorkspaceID, AgentProfileID: agentProfileID,
+		ProfileRevision: profile.Revision, Generation: generation,
+		SourceWorkflowID: task.WorkflowID, SourceWorkflowStepID: task.WorkflowStepID,
+		SourceTaskState: string(task.State),
+	}
+	if _, err := assignments.AssignExactProfileAssignmentIfProfileCurrent(ctx, assignment); err != nil {
+		return nil, err
+	}
+	return &ExactProfileLaunchDecision{
+		AgentProfileID: agentProfileID, Generation: generation, Revision: profile.Revision, Model: profile.Model,
+	}, nil
+}
+
+// Resolve returns nil when this task has no active assignment, preserving
+// legacy routing. An active assignment that cannot be verified fails closed.
+func (a ExactProfileAssigner) Resolve(ctx context.Context, taskID, workspaceID string) (*ExactProfileLaunchDecision, error) {
+	if a.Assignments == nil {
+		return nil, nil
+	}
+	assignment, err := a.Assignments.GetExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load exact profile assignment: %w", err)
+	}
+	if assignment == nil || !assignment.Active {
+		return nil, nil
+	}
+	observed := &ExactProfileLaunchDecision{
+		AgentProfileID: assignment.AgentProfileID,
+		Generation:     assignment.Generation,
+		Revision:       assignment.ProfileRevision,
+	}
+	if assignment.WorkspaceID != workspaceID || a.Profiles == nil {
+		return observed, ErrExactProfileAssignmentInvalid
+	}
+	profile, err := a.Profiles.ResolveAgentProfile(ctx, assignment.AgentProfileID)
+	if err != nil || profile == nil || profile.ProfileID != assignment.AgentProfileID ||
+		!profile.Enabled || profile.WorkspaceID != workspaceID || profile.Revision < 1 ||
+		profile.Revision != assignment.ProfileRevision || strings.TrimSpace(profile.Model) == "" {
+		return observed, ErrExactProfileAssignmentInvalid
+	}
+	observed.Model = profile.Model
+	return observed, nil
+}
+
+// exactProfileAttemptResult describes this invocation from its observed
+// assignment and execution. The stored receipt can describe an earlier attempt.
+type exactProfileAttemptResult struct {
+	AgentProfileID   string
+	Generation       int64
+	ProfileRevision  int64
+	Model            string
+	ExecutionID      string
+	Outcome          string
+	InferenceStarted bool
+}
+
+func exactProfileAttemptResultFor(
+	exact *ExactProfileLaunchDecision, execution *executor.TaskExecution, launchErr error,
+) *exactProfileAttemptResult {
+	if exact == nil {
+		return nil
+	}
+	result := &exactProfileAttemptResult{
+		AgentProfileID: exact.AgentProfileID, Generation: exact.Generation,
+		ProfileRevision: exact.Revision, Model: exact.Model,
+		Outcome: models.ExactProfileLaunchOutcomeFailedClosed,
+	}
+	if launchErr == nil && execution != nil {
+		result.ExecutionID = execution.AgentExecutionID
+		result.Outcome = models.ExactProfileLaunchOutcomeApplied
+		result.InferenceStarted = true
+	}
+	return result
+}
+
+func (s *Service) recordExactProfileLaunchReceipt(
+	ctx context.Context, taskID, sessionID string, attempt *exactProfileAttemptResult,
+) error {
+	if attempt == nil {
+		return nil
+	}
+	receipts, ok := s.repo.(interface {
+		RecordExactProfileLaunchReceipt(context.Context, *models.ExactProfileLaunchReceipt) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("exact profile receipt repository unavailable")
+	}
+	receipt := &models.ExactProfileLaunchReceipt{
+		TaskID: taskID, SessionID: sessionID, AgentProfileID: attempt.AgentProfileID,
+		Generation: attempt.Generation, ProfileRevision: attempt.ProfileRevision, Model: attempt.Model,
+		Outcome: attempt.Outcome, InferenceStarted: attempt.InferenceStarted,
+	}
+	if attempt.Outcome == models.ExactProfileLaunchOutcomeFailedClosed {
+		receipt.FailureReason = exactProfileLaunchFailureReason
+	}
+	if _, err := receipts.RecordExactProfileLaunchReceipt(ctx, receipt); err != nil {
+		return fmt.Errorf("record exact-profile launch receipt: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) recordExactProfileResolutionDenial(
+	ctx context.Context, taskID, sessionID string, observed *ExactProfileLaunchDecision, resolutionErr error,
+) error {
+	if observed == nil {
+		return resolutionErr
+	}
+	return errors.Join(resolutionErr, s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID,
+		exactProfileAttemptResultFor(observed, nil, resolutionErr)))
+}
+
+func exactProfileModel(exact *ExactProfileLaunchDecision) string {
+	if exact == nil {
+		return ""
+	}
+	return exact.Model
+}
+
+func exactAssignmentRevision(exact *ExactProfileLaunchDecision) int64 {
+	if exact == nil {
+		return 0
+	}
+	return exact.Revision
+}
+
+func exactAssignmentGeneration(exact *ExactProfileLaunchDecision) int64 {
+	if exact == nil {
+		return 0
+	}
+	return exact.Generation
+}
+
+func (s *Service) persistExactProfileSessionBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	exact *ExactProfileLaunchDecision,
+) error {
+	if exact == nil {
+		return nil
+	}
+	if binder, ok := s.repo.(interface {
+		BindExactProfileSessionIfAssignmentCurrent(
+			context.Context, string, string, models.TaskSessionState, string, int64, int64,
+		) (bool, error)
+	}); ok {
+		changed, err := binder.BindExactProfileSessionIfAssignmentCurrent(
+			ctx, session.ID, session.TaskID, session.State,
+			exact.AgentProfileID, exact.Generation, exact.Revision,
+		)
+		if err != nil {
+			return fmt.Errorf("persist exact profile session binding: %w", err)
+		}
+		if !changed {
+			return ErrExactProfileAssignmentInvalid
+		}
+		session.ExactProfileGeneration = exact.Generation
+		session.ExactProfileRevision = exact.Revision
+		return nil
+	}
+	current, err := s.resolveExactProfileAssignment(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("validate current exact profile assignment: %w", err)
+	}
+	if current == nil || current.AgentProfileID != exact.AgentProfileID ||
+		current.Generation != exact.Generation || current.Revision != exact.Revision {
+		return ErrExactProfileAssignmentInvalid
+	}
+	if session.ExactProfileGeneration == exact.Generation && session.ExactProfileRevision == exact.Revision {
+		return nil
+	}
+
+	observedState := session.State
+	session.ExactProfileGeneration = exact.Generation
+	session.ExactProfileRevision = exact.Revision
+	if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
+		return fmt.Errorf("persist exact profile session binding: %w", err)
+	}
+	return nil
+}

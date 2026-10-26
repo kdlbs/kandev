@@ -181,6 +181,9 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 		GetAgentProfileFn: func(ctx context.Context, id string) (*models.AgentProfile, error) {
 			return &models.AgentProfile{
 				ID:                         "profile-123",
+				Revision:                   42,
+				WorkspaceID:                "workspace-789",
+				Enabled:                    true,
 				AgentID:                    "agent-456",
 				Name:                       "My Profile",
 				Model:                      "claude-3.5-sonnet",
@@ -212,6 +215,9 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info.ProfileID != "profile-123" {
 		t.Errorf("expected ProfileID 'profile-123', got '%s'", info.ProfileID)
+	}
+	if info.Revision != 42 || info.WorkspaceID != "workspace-789" || !info.Enabled {
+		t.Fatalf("profile identity = revision %d, workspace %q, enabled %t", info.Revision, info.WorkspaceID, info.Enabled)
 	}
 	if info.ProfileName != "My Profile" {
 		t.Errorf("expected ProfileName 'My Profile', got '%s'", info.ProfileName)

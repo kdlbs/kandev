@@ -283,6 +283,9 @@ type SpawnOrigin struct {
 
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
+	// ExactProfileLaunchReceipt is the first historical session audit. It may
+	// describe a different outcome than the current launch or retry.
+	ExactProfileLaunchReceipt         *models.ExactProfileLaunchReceipt         `json:"exact_profile_launch_receipt,omitempty"`
 	Success                           bool                                      `json:"success"`
 	InProgress                        bool                                      `json:"in_progress,omitempty"`
 	TaskID                            string                                    `json:"task_id"`
@@ -935,7 +938,32 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 			TaskID:  req.TaskID,
 		}, nil
 	}
-	return executionToLaunchResponse(req.TaskID, execution), nil
+	return s.withExactProfileLaunchReceipt(ctx, executionToLaunchResponse(req.TaskID, execution)), nil
+}
+
+func (s *Service) withExactProfileLaunchReceipt(
+	ctx context.Context,
+	response *LaunchSessionResponse,
+) *LaunchSessionResponse {
+	if response == nil || response.SessionID == "" {
+		return response
+	}
+	receipts, ok := s.repo.(interface {
+		GetExactProfileLaunchReceipt(context.Context, string, string) (*models.ExactProfileLaunchReceipt, error)
+	})
+	if !ok {
+		return response
+	}
+	receipt, err := receipts.GetExactProfileLaunchReceipt(ctx, response.TaskID, response.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load exact-profile launch receipt",
+			zap.String("task_id", response.TaskID),
+			zap.String("session_id", response.SessionID),
+			zap.Error(err))
+		return response
+	}
+	response.ExactProfileLaunchReceipt = receipt
+	return response
 }
 
 // shouldBlockAutoStart checks whether the task's workflow step allows auto-starting
@@ -1009,7 +1037,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	if execution != nil {
 		s.clearWorkflowParkingForSession(ctx, req.SessionID, parkingStamp)
 	}
-	return executionToLaunchResponse(req.TaskID, execution), nil
+	return s.withExactProfileLaunchReceipt(ctx, executionToLaunchResponse(req.TaskID, execution)), nil
 }
 
 // launchResume resumes a stopped session.
@@ -1101,7 +1129,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	if execution != nil {
 		s.clearWorkflowParkingForSession(ctx, req.SessionID, parkingStamp)
 	}
-	return executionToLaunchResponse(req.TaskID, execution), nil
+	return s.withExactProfileLaunchReceipt(ctx, executionToLaunchResponse(req.TaskID, execution)), nil
 }
 
 func (s *Service) sessionOpenRecoveryWaitingResponse(
@@ -1294,12 +1322,12 @@ func (s *Service) launchWorkflowStep(ctx context.Context, req *LaunchSessionRequ
 	if err != nil {
 		return nil, err
 	}
-	return &LaunchSessionResponse{
+	return s.withExactProfileLaunchReceipt(ctx, &LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
 		SessionID: req.SessionID,
 		State:     string(v1.TaskSessionStateRunning),
-	}, nil
+	}), nil
 }
 
 // launchRestoreWorkspace restores workspace access for a terminal-state session (COMPLETED, FAILED, CANCELLED).

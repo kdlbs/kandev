@@ -59,6 +59,9 @@ var (
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
 	profileID := executionProfileID(req)
 	if m.profileResolver == nil {
+		if req.ExactProfile {
+			return "", nil, fmt.Errorf("exact profile resolver is unavailable")
+		}
 		// Fallback: treat AgentProfileID as agent type directly (for backward compat)
 		m.logger.Warn("no profile resolver configured, using profile ID as agent type",
 			zap.String("agent_type", profileID))
@@ -67,6 +70,12 @@ func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (
 	profileInfo, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve agent profile: %w", err)
+	}
+	if req.ExactProfile && (profileInfo == nil || profileInfo.ProfileID != profileID ||
+		!profileInfo.Enabled || profileInfo.Revision < 1 || profileInfo.Revision != req.ExactProfileRevision ||
+		(profileInfo.WorkspaceID != req.WorkspaceID && req.WorkspaceID != "") ||
+		profileInfo.Model != req.ExactProfileModel) {
+		return "", nil, fmt.Errorf("exact profile changed before launch")
 	}
 	// Legacy model-only routes still use overlays until their persisted config
 	// is migrated. A concrete execution profile is authoritative and must not
@@ -79,6 +88,24 @@ func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (
 		zap.String("agent_name", profileInfo.AgentName),
 		zap.String("agent_type", profileInfo.AgentName))
 	return profileInfo.AgentName, profileInfo, nil
+}
+
+// AdmitExactProfilePreparedExecution verifies that an already configured agent
+// command was built from the same exact profile snapshot requested for start.
+func (m *Manager) AdmitExactProfilePreparedExecution(
+	ctx context.Context, executionID, workspaceID, profileID string, revision int64, model string,
+) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists || !execution.ExactProfile || execution.AgentProfileID != profileID ||
+		execution.WorkspaceID != workspaceID || execution.ExactProfileRevision != revision ||
+		execution.ExactProfileModel != model || strings.TrimSpace(model) == "" {
+		return fmt.Errorf("prepared execution has a different exact profile snapshot")
+	}
+	_, _, err := m.resolveAgentProfile(ctx, &LaunchRequest{
+		AgentProfileID: profileID, WorkspaceID: workspaceID,
+		ExactProfile: true, ExactProfileRevision: revision, ExactProfileModel: model,
+	})
+	return err
 }
 
 func (m *Manager) validateManagedToolPolicyAdmission(ctx context.Context, req *LaunchRequest) error {
@@ -725,6 +752,9 @@ func (m *Manager) buildAgentCommandWithContext(
 		permissionValues[agents.PermissionKeyAutoApprove] = profileInfo.AutoApprove
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
+	}
+	if req.ExactProfile && req.ExactProfileModel != "" {
+		model = req.ExactProfileModel
 	}
 	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo)
 	if err != nil {
@@ -1452,6 +1482,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		ForceContextContinuation:       reqWithWorktree.ForceContextContinuation,
 		ReplacesNativeConversation:     reqWithWorktree.ReplaceNativeConversation,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
+		ExactProfile:                   reqWithWorktree.ExactProfile,
+		ExactProfileModel:              reqWithWorktree.ExactProfileModel,
+		ExactProfileRevision:           reqWithWorktree.ExactProfileRevision,
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,

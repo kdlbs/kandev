@@ -117,6 +117,16 @@ func (s *Service) pendingMoveReapReason(
 	if record.Move.IsStaleAt(now, messagequeue.PendingMoveTTL) {
 		return "ttl_expired", true
 	}
+	current, known := s.pendingMoveExactProfileGenerationState(ctx, record.Move.TaskID, record.Move.ExactProfileGeneration)
+	if !known {
+		s.logger.Warn("pending-move sweep: exact profile generation lookup failed; row preserved for next tick",
+			zap.String("session_id", record.SessionID),
+			zap.String("task_id", record.Move.TaskID))
+		return "", false
+	}
+	if !current {
+		return "exact_profile_generation_stale", true
+	}
 	session, err := s.repo.GetTaskSession(ctx, record.SessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {

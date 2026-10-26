@@ -4042,6 +4042,23 @@ func (s *Service) finishWorkflowProfileSwitchSource(
 	return true, nil
 }
 
+func (s *Service) pendingMoveExactProfileGenerationState(
+	ctx context.Context, taskID string, generation int64,
+) (current, known bool) {
+	assignments, ok := s.repo.(exactProfileAssignmentStore)
+	if !ok {
+		return generation == 0, true
+	}
+	assignment, err := assignments.GetExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return false, false
+	}
+	if assignment == nil || !assignment.Active {
+		return generation == 0, true
+	}
+	return generation > 0 && assignment.Generation == generation, true
+}
+
 func (s *Service) restoreWorkflowProfileSwitchSourcePrimary(ctx context.Context, session *models.TaskSession) error {
 	if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 		s.logger.Warn("failed to restore source session after profile switch failure",
@@ -5131,6 +5148,22 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	record := messagequeue.PendingMoveRecord{SessionID: sessionID, Move: *move}
 	if move.MoveID == "" {
 		move.MoveID = legacyPendingMoveID(sessionID, move)
+	}
+	currentExactGeneration, exactGenerationKnown := s.pendingMoveExactProfileGenerationState(ctx, taskID, move.ExactProfileGeneration)
+	if !exactGenerationKnown {
+		s.logger.Warn("cannot verify exact-profile generation for pending move; preserving for retry",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID),
+			zap.String("move_id", move.MoveID), zap.Int64("exact_profile_generation", move.ExactProfileGeneration))
+		return
+	}
+	if !currentExactGeneration {
+		s.logger.Warn("discarding stale exact-profile pending move",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID),
+			zap.String("move_id", move.MoveID), zap.Int64("exact_profile_generation", move.ExactProfileGeneration))
+		if s.messageQueue != nil {
+			s.discardPendingMove(ctx, taskID, sessionID, move, record, "exact_profile_generation_stale")
+		}
+		return
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {

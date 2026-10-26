@@ -78,6 +78,10 @@ type AgentExecution struct {
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
 	AgentProfileID string
+	// ExactProfile prevents model fallback for a task-owned exact assignment.
+	ExactProfile         bool
+	ExactProfileModel    string
+	ExactProfileRevision int64
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID      string
@@ -1661,6 +1665,9 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
+	ExactProfile         bool
+	ExactProfileModel    string
+	ExactProfileRevision int64
 	// ResumePassthrough preserves provider resume intent after runtime cleanup.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string
@@ -1891,6 +1898,9 @@ type CredentialsManager interface {
 type AgentProfileInfo struct {
 	ProfileID     string
 	ProfileName   string
+	WorkspaceID   string
+	Enabled       bool
+	Revision      int64
 	AgentID       string
 	AgentName     string // e.g., "auggie", "claude", "codex"
 	Model         string // applied through ACP model selection at session start

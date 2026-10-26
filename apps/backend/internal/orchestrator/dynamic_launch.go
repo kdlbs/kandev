@@ -536,6 +536,27 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	if options.StartAgent && options.ExactProfile {
+		if task == nil || options.ExactProfileGeneration < 1 {
+			return nil, ErrExactProfileAssignmentInvalid
+		}
+		priorAdmission := options.BeforeAgentStart
+		options.BeforeAgentStart = func(admissionCtx context.Context, executionID, prompt string) error {
+			current, err := s.resolveExactProfileAssignment(admissionCtx, task.ID)
+			if err != nil {
+				return err
+			}
+			if current == nil || current.AgentProfileID != options.AgentProfileID ||
+				current.Generation != options.ExactProfileGeneration ||
+				current.Revision != options.ExactProfileRevision || current.Model != options.ExactProfileModel {
+				return ErrExactProfileAssignmentInvalid
+			}
+			if priorAdmission != nil {
+				return priorAdmission(admissionCtx, executionID, prompt)
+			}
+			return nil
+		}
+	}
 	if task != nil {
 		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err

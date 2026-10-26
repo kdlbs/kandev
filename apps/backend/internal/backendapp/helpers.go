@@ -2550,6 +2550,7 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
+	mcpHandlers.SetExactTaskProfileAssigner(p.orchestratorSvc)
 	mcpHandlers.SetPluginService(p.services.Plugins)
 	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
 		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(

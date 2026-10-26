@@ -464,6 +464,9 @@ func buildLifecycleLaunchRequest(
 		OnExecutionAllocated:          req.OnExecutionAllocated,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
+		ExactProfile:                  req.ExactProfile,
+		ExactProfileModel:             req.ExactProfileModel,
+		ExactProfileRevision:          req.ExactProfileRevision,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		AllowBranchReplacement:        req.AllowBranchReplacement,
@@ -667,6 +670,12 @@ func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
 // SetExecutionEnv updates per-run env vars in an existing execution.
 func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error {
 	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)
+}
+
+func (a *lifecycleAdapter) AdmitExactProfilePreparedExecution(
+	ctx context.Context, executionID, workspaceID, profileID string, revision int64, model string,
+) error {
+	return a.mgr.AdmitExactProfilePreparedExecution(ctx, executionID, workspaceID, profileID, revision, model)
 }
 
 // ExecutorProfileEnvForSession resolves the current executor profile
@@ -1201,6 +1210,9 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 	return &executor.AgentProfileInfo{
 		ProfileID:                  info.ProfileID,
 		ProfileName:                info.ProfileName,
+		WorkspaceID:                info.WorkspaceID,
+		Enabled:                    info.Enabled,
+		Revision:                   info.Revision,
 		AgentID:                    info.AgentID,
 		AgentName:                  info.AgentName,
 		Model:                      info.Model,

@@ -502,6 +502,9 @@ type RemoteStatusPollRequest struct {
 type AgentProfileInfo struct {
 	ProfileID                  string
 	ProfileName                string
+	WorkspaceID                string
+	Enabled                    bool
+	Revision                   int64
 	AgentID                    string
 	AgentName                  string
 	Model                      string
@@ -523,6 +526,9 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
+	ExactProfile         bool
+	ExactProfileModel    string
+	ExactProfileRevision int64
 	// ResumePassthrough selects conversation resume independently of runtime ownership.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string
@@ -765,11 +771,15 @@ const McpModeManagedConversation = "managed-conversation"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	CausingRunID         string
-	ExecutorID           string
-	TurnID               string
+	ExactProfile           bool
+	ExactProfileGeneration int64
+	ExactProfileModel      string
+	ExactProfileRevision   int64
+	AgentProfileID         string
+	OfficeAgentProfileID   string
+	CausingRunID           string
+	ExecutorID             string
+	TurnID                 string
 	// DeliverySubmissionID binds a persisted direct first message to the
 	// initial agentctl prompt.
 	DeliverySubmissionID string

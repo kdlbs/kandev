@@ -128,9 +128,23 @@ func (s *Service) validateWorkflowStepPromptSession(ctx context.Context, taskID 
 	if session.TaskID != taskID {
 		return fmt.Errorf("session does not belong to task")
 	}
-	effectiveProfile, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, step)
+	exact, err := s.resolveExactProfileAssignment(ctx, taskID)
 	if err != nil {
 		return err
+	}
+	effectiveProfile := ""
+	if exact != nil {
+		if session.AgentProfileID != exact.AgentProfileID ||
+			session.ExactProfileGeneration != exact.Generation ||
+			session.ExactProfileRevision != exact.Revision {
+			return ErrExactProfileAssignmentInvalid
+		}
+		effectiveProfile = exact.AgentProfileID
+	} else {
+		effectiveProfile, err = s.resolveStepAgentProfileForTaskID(ctx, taskID, step)
+		if err != nil {
+			return err
+		}
 	}
 	if effectiveProfile != "" && effectiveProfile != session.AgentProfileID {
 		return fmt.Errorf("workflow step profile mismatch: step %q resolves to profile %q but session %q uses profile %q; route the session before prompting", step.ID, effectiveProfile, session.ID, session.AgentProfileID)

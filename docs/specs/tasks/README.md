@@ -11,19 +11,15 @@ owners:
 
 ## Purpose
 
-Owns durable work items, task relationships, execution lifecycle, workflow
-steps, queued launches, and task process contracts.
+Owns tasks, relationships, execution, workflows, queued launches, and contracts.
 
 ## Ownership
 
-Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
-documents, attachments, parent and dependency relationships, creation, launch,
-runtime state publication, workflow definitions and transitions, completion
-signals, and task scheduling.
-
-Turn change sets bind immutable repository intervals to capture policy,
-historical content availability, and transcript anchors. Workspaces supply
-checkout identity; runtime supplies ordered executor access.
+Owns identity, metadata, [workspace discovery](requirements/workspace-search.md),
+documents, attachments, parent/dependency links, creation, launch, runtime
+state, workflow transitions, completion signals, and scheduling. Turn change
+sets bind repository intervals to capture policy, history, and transcript
+anchors. Workspaces supply checkout identity; runtime supplies executor access.
 
 ## Exclusions
 
@@ -38,6 +34,8 @@ checkout identity; runtime supplies ordered executor access.
 ## Specification map
 
 ### Requirements
+
+- [Exact profile launch](requirements/exact-profile-launch-assignment.md)
 
 - [Initial task brief](requirements/initial-task-brief.md)
 
@@ -157,6 +155,8 @@ checkout identity; runtime supplies ordered executor access.
 - [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
+
+- [Exact profile launch](system-design/exact-profile-launch-assignment.md)
 
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
