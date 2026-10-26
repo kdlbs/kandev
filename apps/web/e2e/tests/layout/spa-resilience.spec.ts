@@ -128,7 +128,11 @@ test.describe("SPA route resilience", () => {
       await route.continue();
     });
 
+    const recoveredChunk = testPage.waitForResponse(
+      (response) => SETTINGS_CHUNK_PATH.test(new URL(response.url()).pathname) && response.ok(),
+    );
     await testPage.goto(SETTINGS_URL);
+    expect(await (await recoveredChunk).finished()).toBeNull();
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Updates");
     expect(chunkRequests).toBe(2);
     expect(documentRequests()).toBe(2);

@@ -1,5 +1,8 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
+  MCPCatalogUsagePage,
+  MCPProfileOwner,
+  MCPProfileOwnerPage,
   MCPDefinitionInput,
   MCPDefinitionPatch,
   MCPMarketplaceEntry,
@@ -151,4 +154,43 @@ export async function replaceMCPSelections(
       body: JSON.stringify({ workspace_id: workspaceId, definition_ids: definitionIds }),
     },
   });
+}
+
+export async function listMCPUsage(
+  workspaceId: string,
+  definitionId: string,
+  cursor?: string,
+  options?: ApiRequestOptions,
+): Promise<MCPCatalogUsagePage> {
+  const suffix = cursor ? `?${new URLSearchParams({ cursor })}` : "";
+  return fetchJson<MCPCatalogUsagePage>(
+    `${workspacePath(workspaceId)}/mcp-servers/${encodeURIComponent(definitionId)}/usage${suffix}`,
+    { ...options, cache: "no-store" },
+  );
+}
+
+export async function listMCPProfileOwners(
+  workspaceId: string,
+  cursor?: string,
+  options?: ApiRequestOptions,
+): Promise<MCPProfileOwnerPage> {
+  const query = cursor ? `?${new URLSearchParams({ cursor })}` : "";
+  return fetchJson(`${workspacePath(workspaceId)}/mcp-profile-owners${query}`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export async function getMCPProfileOwner(
+  workspaceId: string,
+  profileId: string,
+  options?: ApiRequestOptions,
+): Promise<MCPProfileOwner> {
+  return fetchJson(
+    `${workspacePath(workspaceId)}/mcp-profile-owners/${encodeURIComponent(profileId)}`,
+    {
+      ...options,
+      cache: "no-store",
+    },
+  );
 }

@@ -150,7 +150,8 @@ test.describe("System storage maintenance", () => {
     await expect(testPage.getByTestId("storage-run-now")).toBeDisabled();
   });
 
-  test("reuses the cached snapshot until Analyze refreshes it", async ({ testPage }) => {
+  test("reuses the cached snapshot until Analyze refreshes it", async ({ testPage, apiClient }) => {
+    const originalSettings = await requestStorageMaintenanceSettings(apiClient, "GET");
     await testPage.goto("/settings/system/storage");
     const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
     await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
@@ -161,7 +162,6 @@ test.describe("System storage maintenance", () => {
     await expect(analyzedTime).toHaveAttribute("datetime", initialAnalyzedAt!);
 
     const scheduling = testPage.getByTestId("storage-scheduling-enabled");
-    const initialSchedulingState = await scheduling.getAttribute("data-state");
     try {
       await scheduling.click();
       await testPage.getByRole("button", { name: "Save changes" }).click();
@@ -175,11 +175,7 @@ test.describe("System storage maintenance", () => {
       );
       await expect.poll(() => analyzedTime.getAttribute("datetime")).not.toBe(initialAnalyzedAt);
     } finally {
-      if ((await scheduling.getAttribute("data-state")) !== initialSchedulingState) {
-        await scheduling.click();
-        await testPage.getByRole("button", { name: "Save changes" }).click();
-        await expect(testPage.getByText("Storage policy saved")).toBeVisible();
-      }
+      await restoreStorageMaintenanceSettings(apiClient, originalSettings.settings);
     }
   });
 

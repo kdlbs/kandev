@@ -2887,5 +2887,18 @@
   "sessionRestartRequested": "Śēśśĩōń ŕēśţàŕţ ŕēqũēśţēď",
   "sessionRestartFailed": "Śēśśĩōń ŕēśţàŕţ ƒàĩĺēď",
   "sessionRestartUnavailable": "Ţĥĩś śēśśĩōń ćàńńōţ ƀē ŕēśţàŕţēď ĩń ĩţś ćũŕŕēńţ śţàţē.",
-  "sessionRestartConnectionUnavailable": "Ţĥē ćōńńēćţĩōń ĩś ũńàvàĩĺàƀĺē. Ŕēćōńńēćţ, ţĥēń ţŕŷ àĝàĩń."
+  "sessionRestartConnectionUnavailable": "Ţĥē ćōńńēćţĩōń ĩś ũńàvàĩĺàƀĺē. Ŕēćōńńēćţ, ţĥēń ţŕŷ àĝàĩń.",
+  "questionImageInspect": "Ĩńśƥēćţ ĩḿàĝē",
+  "questionImageCanvas": "Ĩḿàĝē ĩńśƥēćţĩōń",
+  "questionImageFit": "Ƒĩţ",
+  "questionImageActualSize": "Àćţũàĺ śĩźē",
+  "questionImageShow": "Śĥōŵ ĩḿàĝēś",
+  "questionImageHide": "Ĥĩďē ĩḿàĝēś",
+  "questionImageLoading": "Ĺōàďĩńĝ ĩḿàĝē…",
+  "questionImageNotFound": "Ĩḿàĝē ƒĩĺē ńōţ ƒōũńď.",
+  "questionImageUnsupported": "Ĩḿàĝē ƥŕēvĩēŵ ĩś ńōţ śũƥƥōŕţēď.",
+  "questionImageInvalid": "Ţĥĩś ĩḿàĝē ĩś ďàḿàĝēď ōŕ ĥàś àń ũńśũƥƥōŕţēď ƒōŕḿàţ.",
+  "questionImageTooLarge": "Ţĥĩś ĩḿàĝē ēxćēēďś ţĥē ƥŕēvĩēŵ śĩźē ĺĩḿĩţ.",
+  "questionImageUnavailable": "Ĩḿàĝē ũńàvàĩĺàƀĺē. Ŷōũ ćàń śţĩĺĺ àńśŵēŕ ţĥē qũēśţĩōń.",
+  "questionImageRetry": "Ŕēţŕŷ"
 }

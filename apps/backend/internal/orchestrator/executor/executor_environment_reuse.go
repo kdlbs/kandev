@@ -50,6 +50,7 @@ func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
 	env.Repos = rows
 	if preserveCanonicalIdentity {
 		pinCanonicalWorktreeIdentities(req, env)
+		e.pinCanonicalCloneURLBaseIdentity(req, env)
 	}
 	if len(req.Repositories) > 0 {
 		specs = req.Repositories

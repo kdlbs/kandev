@@ -58,8 +58,7 @@ async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string)
 }
 
 async function waitForChildAnswerTurn(apiClient: ApiClient, sessionID: string): Promise<void> {
-  // A completed answer turn can settle back to WAITING_FOR_INPUT immediately.
-  // The durable turn count proves that the parent answer was admitted and run.
+  // Turn admission and message projection settle separately.
   await expect
     .poll(async () => (await apiClient.listSessionTurns(sessionID)).turns.length, {
       timeout: 60_000,
@@ -152,21 +151,27 @@ test.describe("Mobile task autopilot", () => {
     const questionID = await waitForParentQuestion(apiClient, parent.id);
     await waitForChildAnswerTurn(apiClient, childSessionId);
 
-    const childMessages = await apiClient.listSessionMessages(childSessionId);
-    expect(
-      childMessages.messages.find(
-        (message) =>
-          message.metadata?.status === "answered" && message.metadata.question_id === questionID,
-      ),
-    ).toBeDefined();
-    expect(
-      childMessages.messages.filter(
-        (message) =>
-          message.author_type === "user" &&
-          message.metadata?.parent_question_id === questionID &&
-          typeof message.metadata.parent_question_response === "string",
-      ),
-    ).toHaveLength(1);
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(childSessionId);
+          return {
+            answered: messages.some(
+              (message) =>
+                message.metadata?.status === "answered" &&
+                message.metadata.question_id === questionID,
+            ),
+            responses: messages.filter(
+              (message) =>
+                message.author_type === "user" &&
+                message.metadata?.parent_question_id === questionID &&
+                typeof message.metadata.parent_question_response === "string",
+            ).length,
+          };
+        },
+        { timeout: 60_000, message: "one parent answer should reach the child message history" },
+      )
+      .toEqual({ answered: true, responses: 1 });
 
     await testPage.goto(`/t/${child.id}`);
     const childSession = new SessionPage(testPage);

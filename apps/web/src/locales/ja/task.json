@@ -2887,5 +2887,18 @@
   "sessionRestartRequested": "セッションの再起動を要求しました",
   "sessionRestartFailed": "セッションの再起動に失敗しました",
   "sessionRestartUnavailable": "現在の状態ではこのセッションを再起動できません。",
-  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。"
+  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。",
+  "questionImageInspect": "画像を確認",
+  "questionImageCanvas": "画像の確認",
+  "questionImageFit": "画面に合わせる",
+  "questionImageActualSize": "実際のサイズ",
+  "questionImageShow": "画像を表示",
+  "questionImageHide": "画像を非表示",
+  "questionImageLoading": "画像を読み込み中…",
+  "questionImageNotFound": "画像ファイルが見つかりません。",
+  "questionImageUnsupported": "画像のプレビューには対応していません。",
+  "questionImageInvalid": "この画像は破損しているか、形式が対応していません。",
+  "questionImageTooLarge": "この画像はプレビューのサイズ制限を超えています。",
+  "questionImageUnavailable": "画像を表示できません。質問には引き続き回答できます。",
+  "questionImageRetry": "再試行"
 }

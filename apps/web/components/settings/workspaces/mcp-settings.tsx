@@ -24,6 +24,9 @@ import type {
   MCPServerDefinition,
   MCPSelectionImpact,
 } from "@/lib/types/http-mcp";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { mcpCatalogUsageHref, readMCPContextHint } from "@/lib/mcp/management-links";
+import { MCPUsage } from "./mcp-usage";
 import { MCPDefinitionForm } from "./mcp-definition-form";
 import { MCPMarketplace } from "./mcp-marketplace";
 
@@ -72,11 +75,13 @@ function ServerCard({
   onEdit,
   onToggle,
   onDelete,
+  onUsage,
 }: {
   server: MCPServerDefinition;
   onEdit: () => void;
   onToggle: () => void;
   onDelete: () => void;
+  onUsage: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -109,6 +114,15 @@ function ServerCard({
         </div>
         <SelectionImpact impact={server.selection_impact} />
         <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={STANDARD_ACTION_CLASS}
+            onClick={onUsage}
+          >
+            {t("settings:mcpUsedIn")}
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -171,6 +185,7 @@ function ConfiguredMCPServers({
   onEdit,
   onToggle,
   onDelete,
+  onUsage,
 }: {
   servers: MCPServerDefinition[];
   loading: boolean;
@@ -179,6 +194,7 @@ function ConfiguredMCPServers({
   onEdit: (server: MCPServerDefinition) => void;
   onToggle: (server: MCPServerDefinition) => void;
   onDelete: (server: MCPServerDefinition) => void;
+  onUsage: (server: MCPServerDefinition) => void;
 }) {
   if (servers.length === 0 && !loading) return <EmptyCatalog onAdd={onAdd} />;
   const gridClass = isMobile ? "grid grid-cols-1 gap-3" : "grid grid-cols-1 gap-4 xl:grid-cols-2";
@@ -191,6 +207,7 @@ function ConfiguredMCPServers({
           onEdit={() => onEdit(server)}
           onToggle={() => onToggle(server)}
           onDelete={() => onDelete(server)}
+          onUsage={() => onUsage(server)}
         />
       ))}
     </div>
@@ -309,11 +326,56 @@ function DeleteMCPServerDialog({
   );
 }
 
+function MCPUsageEntry({
+  workspaceId,
+  data,
+}: {
+  workspaceId: string;
+  data: ReturnType<typeof useMCPWorkspaceSettings>;
+}) {
+  const router = useRouter();
+  const params = useSearchParams();
+  const usageHint = readMCPContextHint(params, "serverId");
+  const usageOpen = params.getAll("view").length === 1 && params.get("view") === "usage";
+  const usageServer = data.servers.find(
+    (server) => server.id === usageHint.value && server.workspace_id === workspaceId,
+  );
+  if (!usageOpen) return null;
+  const close = () => {
+    const next = new URLSearchParams(params);
+    next.delete("view");
+    next.delete("serverId");
+    router.replace(`?${next}`, { scroll: false });
+  };
+  return (
+    <MCPUsage
+      workspaceId={workspaceId}
+      definitionId={usageHint.value}
+      name={usageServer?.display_name}
+      invalid={!usageHint.value || (!data.loading && !data.error && !usageServer)}
+      onClose={close}
+    />
+  );
+}
+
+async function toggleMCPServer(
+  data: ReturnType<typeof useMCPWorkspaceSettings>,
+  server: MCPServerDefinition,
+  onError: () => void,
+) {
+  try {
+    await data.update(server.id, { enabled: !server.enabled, expected_revision: server.revision });
+  } catch {
+    onError();
+  }
+}
+
 export function MCPSettings({ workspaceId }: MCPSettingsProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const { toast } = useToast();
   const data = useMCPWorkspaceSettings(workspaceId);
+  const router = useRouter();
   const [view, setView] = useState<"configured" | "marketplace">("configured");
   const [editor, setEditor] = useState<MCPServerDefinition | null | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<MCPServerDefinition | null>(null);
@@ -324,17 +386,6 @@ export function MCPSettings({ workspaceId }: MCPSettingsProps) {
     else await data.create(payload);
     setEditor(undefined);
     toast({ title: t("settings:mcpSaved"), variant: "success" });
-  };
-
-  const toggleServer = async (server: MCPServerDefinition) => {
-    try {
-      await data.update(server.id, {
-        enabled: !server.enabled,
-        expected_revision: server.revision,
-      });
-    } catch {
-      toast({ title: t("settings:mcpSaveFailed"), variant: "error" });
-    }
   };
 
   const deleteServer = async () => {
@@ -393,8 +444,16 @@ export function MCPSettings({ workspaceId }: MCPSettingsProps) {
           isMobile={isMobile}
           onAdd={() => setEditor(null)}
           onEdit={setEditor}
-          onToggle={(server) => void toggleServer(server)}
+          onToggle={(server) =>
+            void toggleMCPServer(data, server, () =>
+              toast({ title: t("settings:mcpSaveFailed"), variant: "error" }),
+            )
+          }
           onDelete={setDeleteTarget}
+          onUsage={(server) => {
+            const href = mcpCatalogUsageHref(workspaceId, server.id);
+            if (href) router.push(href, { scroll: false });
+          }}
         />
       ) : (
         <MCPMarketplaceView
@@ -403,6 +462,7 @@ export function MCPSettings({ workspaceId }: MCPSettingsProps) {
           onSaved={() => toast({ title: t("settings:mcpSaved"), variant: "success" })}
         />
       )}
+      <MCPUsageEntry workspaceId={workspaceId} data={data} />
       <DeleteMCPServerDialog
         target={deleteTarget}
         deleting={deleting}

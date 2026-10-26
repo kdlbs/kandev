@@ -1,6 +1,12 @@
 import { expect, test } from "../../fixtures/test-base";
 import { openTaskSession } from "../../helpers/session";
-import { openQuickChatWithAgent, sendQuickChatMessage } from "./quick-chat-helpers";
+import {
+  openQuickChatSetup,
+  sendQuickChatMessage,
+  startQuickChatFromSetup,
+  waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
+} from "./quick-chat-helpers";
 
 const GOAL_OBJECTIVE_FRAGMENT = "Coordinate contributor PR reviews";
 const GOAL_CONTINUATION_COPY = "The agent may continue automatically between replies.";
@@ -101,8 +107,11 @@ test.describe("agent goal visibility", () => {
     expect(bounds.width).toBeLessThanOrEqual(testPage.viewportSize()?.width ?? bounds.width);
   });
 
-  test("uses the same goal disclosure in Quick Chat", async ({ testPage }) => {
-    const dialog = await openQuickChatWithAgent(testPage);
+  test("uses the same goal disclosure in Quick Chat", async ({ testPage, apiClient }) => {
+    const dialog = await openQuickChatSetup(testPage);
+    const started = await startQuickChatFromSetup(dialog, testPage);
+    await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
+    await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
 
     const chip = dialog.getByTestId("agent-goal-chip");

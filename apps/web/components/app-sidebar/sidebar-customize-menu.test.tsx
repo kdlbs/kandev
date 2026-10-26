@@ -1,3 +1,4 @@
+import { IconPlug } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -8,9 +9,10 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (select: (state: unknown) => unknown) =>
     select({ userSettings: { sidebarFastActionsEnabled: true, sidebarNewTaskStyle: "simple" } }),
 }));
+const customization = vi.hoisted(() => ({ mutate: vi.fn() }));
 vi.mock("@/hooks/domains/sidebar/use-sidebar-customization", () => ({
   useSidebarCustomization: () => ({
-    mutate: vi.fn(),
+    mutate: customization.mutate,
     preferences: vi.fn(),
     enabled: true,
     status: null,
@@ -100,3 +102,55 @@ it.each(["pointerUp", "pointerCancel", "pointerMove"] as const)(
     expect(screen.queryByTestId(MENU_TEST_ID)).toBeNull();
   },
 );
+
+// @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.11
+it("targets the integration child and limits its menu moves to siblings", () => {
+  customization.mutate.mockReset();
+  const nodes = [
+    {
+      id: "a",
+      kind: "plugin" as const,
+      pluginSection: "integrations" as const,
+      visible: true,
+      label: "A",
+      icon: IconPlug,
+      shortcuts: [],
+    },
+    {
+      id: "home",
+      kind: "builtin" as const,
+      visible: true,
+      label: "Home",
+      icon: IconPlug,
+      shortcuts: [],
+    },
+    {
+      id: "b",
+      kind: "plugin" as const,
+      pluginSection: "integrations" as const,
+      visible: true,
+      label: "B",
+      icon: IconPlug,
+      shortcuts: [],
+    },
+  ];
+  render(
+    <SidebarCustomizeMenu nodes={nodes} catalog={[]}>
+      <div data-sidebar-node-id="integrations">
+        <a href="/a" data-sidebar-node-id="a">
+          A
+        </a>
+      </div>
+    </SidebarCustomizeMenu>,
+  );
+  fireEvent.contextMenu(screen.getByRole("link", { name: "A" }));
+  expect(
+    screen.getByRole("menuitem", { name: "Move up" }).getAttribute("data-disabled"),
+  ).not.toBeNull();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move down" }));
+  expect(customization.mutate).toHaveBeenCalledOnce();
+  const layout = { version: 1, revision: 0, nodes };
+  expect(
+    customization.mutate.mock.calls[0][0](layout).nodes.map((node: { id: string }) => node.id),
+  ).toEqual(["b", "home", "a"]);
+});

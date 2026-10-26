@@ -396,9 +396,23 @@ function McpProfileHint({
   );
 }
 
-export function ProfileMcpConfigCard({
+export function ProfileMcpConfigCard(props: ProfileMcpConfigCardProps) {
+  const canManage = useIsAdmin();
+  if (!props.supportsMcp) return null;
+  if (!props.draftState && props.profileId && !props.profileId.startsWith("draft-")) {
+    return (
+      <ProfileMCPSelectionCard
+        profileId={props.profileId}
+        workspaceId={props.workspaceId}
+        legacyEditor={canManage ? <LegacyProfileMcpConfigCard {...props} /> : undefined}
+      />
+    );
+  }
+  return <LegacyProfileMcpConfigCard {...props} />;
+}
+
+function LegacyProfileMcpConfigCard({
   profileId,
-  workspaceId,
   supportsMcp,
   cliPassthrough,
   mcpInjection,
@@ -446,10 +460,6 @@ export function ProfileMcpConfigCard({
   });
 
   if (!supportsMcp) return null;
-
-  if (!state.isDraft && workspaceId) {
-    return <ProfileMCPSelectionCard profileId={profileId} workspaceId={workspaceId} />;
-  }
 
   return (
     <SettingsCard isDirty={state.currentDirty}>

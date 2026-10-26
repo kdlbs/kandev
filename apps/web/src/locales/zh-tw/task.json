@@ -2887,5 +2887,18 @@
   "sessionRestartRequested": "已請求重啟工作階段",
   "sessionRestartFailed": "工作階段重啟失敗",
   "sessionRestartUnavailable": "此工作階段在目前狀態下無法重啟。",
-  "sessionRestartConnectionUnavailable": "連線不可用。請重新連線後再試。"
+  "sessionRestartConnectionUnavailable": "連線不可用。請重新連線後再試。",
+  "questionImageInspect": "檢視影像",
+  "questionImageCanvas": "影像檢視",
+  "questionImageFit": "適應視窗",
+  "questionImageActualSize": "實際大小",
+  "questionImageShow": "顯示影像",
+  "questionImageHide": "隱藏影像",
+  "questionImageLoading": "正在載入影像…",
+  "questionImageNotFound": "未找到影像檔案。",
+  "questionImageUnsupported": "不支援影像預覽。",
+  "questionImageInvalid": "此影像已損壞或格式不受支援。",
+  "questionImageTooLarge": "此影像超過預覽大小限制。",
+  "questionImageUnavailable": "影像不可用。您仍可回答問題。",
+  "questionImageRetry": "重試"
 }

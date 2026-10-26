@@ -1,23 +1,26 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import { MCPSelectionPicker } from "@/components/mcp/mcp-selection-picker";
+import {
+  SettingsSaveCancelledError,
+  useSettingsSaveCoordinator,
+  useSettingsSaveContributor,
+} from "@/components/settings/settings-save-provider";
+import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
 import { useAppStore } from "@/components/state-provider";
 import { useMCPWorkspaceDefinitions } from "@/hooks/domains/workspace/use-mcp-workspace-settings";
 import { isHandledApiError } from "@/lib/api/client";
 import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
+import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { readMCPContextHint } from "@/lib/mcp/management-links";
+import { useMCPSettingsSelectionDraft } from "@/hooks/domains/workspace/use-mcp-settings-selection-draft";
 import { SettingsCard } from "@/components/settings/settings-card";
-
-function sameSelection(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((id) => rightSet.has(id));
-}
 
 type ProfileMCPSelectionContentProps = {
   profileId: string;
@@ -28,6 +31,7 @@ type ProfileMCPSelectionContentProps = {
   definitions: ReturnType<typeof useMCPWorkspaceDefinitions>;
   editor: ReturnType<typeof useMCPSelectionEditor>;
   workspaceRequired: boolean;
+  switchingDisabled: boolean;
   onWorkspaceChange: (workspaceId: string) => void;
   onSelectedIdsChange: (ids: string[]) => void;
 };
@@ -41,10 +45,12 @@ function ProfileMCPSelectionContent({
   definitions,
   editor,
   workspaceRequired,
+  switchingDisabled,
   onWorkspaceChange,
   onSelectedIdsChange,
 }: ProfileMCPSelectionContentProps) {
   const { t } = useTranslation();
+  const [query, setQuery] = useState("");
   const hasLoadError = Boolean(definitions.error || editor.loadError);
   let selectionContent: ReactNode;
   if (workspaceRequired) {
@@ -61,13 +67,15 @@ function ProfileMCPSelectionContent({
     );
   } else {
     selectionContent = (
-      <MCPSelectionPicker
+      <MCPSelectionContent
+        query={query}
+        onQueryChange={setQuery}
+        workspaceId={selectedWorkspaceId ?? undefined}
         definitions={definitions.definitions}
         selectedIds={selectedIds}
         onSelectedIdsChange={onSelectedIdsChange}
         disabled={hasLoadError}
-        label={t("settings:mcpServers")}
-        description={t("settings:mcpProfileSelectionDescription")}
+        sectionLabel={t("settings:mcpProfileSelectionDescription")}
         testId={`profile-mcp-selection-${profileId}`}
       />
     );
@@ -77,7 +85,11 @@ function ProfileMCPSelectionContent({
       {!hasWorkspaceProp && (
         <div className="space-y-2">
           <Label htmlFor={`mcp-workspace-${profileId}`}>{t("agents:mcpWorkspace")}</Label>
-          <Select value={selectedWorkspaceId ?? ""} onValueChange={onWorkspaceChange}>
+          <Select
+            disabled={switchingDisabled}
+            value={selectedWorkspaceId ?? ""}
+            onValueChange={onWorkspaceChange}
+          >
             <SelectTrigger id={`mcp-workspace-${profileId}`} className="w-full">
               <SelectValue placeholder={t("agents:mcpSelectWorkspace")} />
             </SelectTrigger>
@@ -109,81 +121,139 @@ function ProfileMCPSelectionContent({
   );
 }
 
-export function ProfileMCPSelectionCard({
-  profileId,
-  workspaceId,
-}: {
-  profileId: string;
-  workspaceId?: string | null;
-}) {
-  const { t } = useTranslation();
+function useProfileMCPWorkspace(workspaceId?: string | null) {
   const workspaces = useAppStore((state) => state.workspaces.items);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId ?? null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [baselineIds, setBaselineIds] = useState<string[]>([]);
-  const definitions = useMCPWorkspaceDefinitions(selectedWorkspaceId);
-  const editor = useMCPSelectionEditor("profile", profileId, selectedWorkspaceId);
-  const selectionKey = editor.selection
-    ? `${editor.selection.workspace_id}:${editor.selection.owner_id}:${editor.selection.definition_ids.join(",")}`
-    : `${selectedWorkspaceId ?? "none"}:empty`;
-
-  useEffect(() => setSelectedWorkspaceId(workspaceId ?? null), [workspaceId]);
-  useEffect(() => {
-    if (!editor.selection) {
-      if (!selectedWorkspaceId) {
-        setSelectedIds([]);
-        setBaselineIds([]);
-      }
-      return;
-    }
-    setSelectedIds(editor.selection.definition_ids);
-    setBaselineIds(editor.selection.definition_ids);
-  }, [selectionKey, selectedWorkspaceId]);
-
-  const dirty = Boolean(editor.selection) && !sameSelection(selectedIds, baselineIds);
-  const workspaceRequired = !selectedWorkspaceId;
-  const save = async () => {
-    if (!selectedWorkspaceId) return;
-    await editor.save(selectedIds);
-    setBaselineIds(selectedIds);
+  const params = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const hint = readMCPContextHint(params, "workspaceId");
+  const hintAllowed =
+    !hint.present ||
+    Boolean(
+      hint.value &&
+      workspaces.some((w) => w.id === hint.value) &&
+      (!workspaceId || hint.value === workspaceId),
+    );
+  const selectedWorkspaceId = hintAllowed ? workspaceId || hint.value : null;
+  const changeWorkspace = (value: string) => {
+    if (value === selectedWorkspaceId || !workspaces.some((w) => w.id === value)) return;
+    const next = new URLSearchParams(params);
+    next.set("workspaceId", value);
+    router.replace(`${pathname}?${next}#mcp`, { scroll: false });
   };
+  return { workspaces, hintAllowed, selectedWorkspaceId, changeWorkspace };
+}
+
+function useProfileMCPDraft(
+  profileId: string,
+  selectedWorkspaceId: string | null,
+  definitions: ReturnType<typeof useMCPWorkspaceDefinitions>,
+) {
+  const draft = useMCPSettingsSelectionDraft("profile", profileId, selectedWorkspaceId);
+  const { editor, selectedIds, dirty } = draft;
   useSettingsSaveContributor({
-    id: `agent-profile-mcp-selection:${profileId}`,
+    id: `agent-profile-mcp-selection:${profileId}:${selectedWorkspaceId ?? ""}`,
     revision: JSON.stringify({ selectedWorkspaceId, selectedIds }),
     isDirty: dirty,
     canSave:
-      !workspaceRequired &&
       Boolean(editor.selection) &&
       !editor.loading &&
       !editor.saving &&
       !editor.loadError &&
       !definitions.error,
-    invalidReason: workspaceRequired ? t("agents:mcpWorkspaceRequired") : undefined,
-    save,
-    discard: () => setSelectedIds(baselineIds),
+    save: async () => {
+      if (!(await draft.save())) throw new SettingsSaveCancelledError();
+    },
+    discard: draft.discard,
   });
+  return draft;
+}
 
+export function ProfileMCPSelectionCard({
+  profileId,
+  workspaceId,
+  legacyEditor,
+}: {
+  profileId: string;
+  workspaceId?: string | null;
+  legacyEditor?: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const { workspaces, hintAllowed, selectedWorkspaceId, changeWorkspace } =
+    useProfileMCPWorkspace(workspaceId);
+  const coordinator = useSettingsSaveCoordinator();
+  const definitions = useMCPWorkspaceDefinitions(selectedWorkspaceId);
+  const draft = useProfileMCPDraft(profileId, selectedWorkspaceId, definitions);
+  const { editor, selectedIds, dirty, setSelectedIds } = draft;
+  const [legacyOpen, setLegacyOpen] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const revealed = useRef<string | null>(null);
+  useEffect(() => {
+    const key = JSON.stringify([profileId, selectedWorkspaceId]);
+    if (!editor.selection || window.location.hash !== "#mcp" || revealed.current === key) return;
+    revealed.current = key;
+    heading.current?.scrollIntoView({ block: "start" });
+    heading.current?.focus({ preventScroll: true });
+  }, [profileId, selectedWorkspaceId, editor.selection]);
+  const showLegacy =
+    !workspaceId &&
+    (legacyOpen ||
+      (editor.selection !== null && editor.selection.legacy_import_status !== "complete"));
   return (
-    <SettingsCard isDirty={dirty}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">{t("settings:mcpServers")}</CardTitle>
-      </CardHeader>
-      <ProfileMCPSelectionContent
-        profileId={profileId}
-        hasWorkspaceProp={Boolean(workspaceId)}
-        selectedWorkspaceId={selectedWorkspaceId}
-        selectedIds={selectedIds}
-        workspaces={workspaces}
-        definitions={definitions}
-        editor={editor}
-        workspaceRequired={workspaceRequired}
-        onWorkspaceChange={(value) => {
-          setSelectedWorkspaceId(value);
-          setSelectedIds([]);
-          setBaselineIds([]);
-        }}
-        onSelectedIdsChange={setSelectedIds}
-      />
-    </SettingsCard>
+    <>
+      <SettingsCard isDirty={dirty} id="mcp">
+        <CardHeader>
+          <CardTitle ref={heading} tabIndex={-1}>
+            {t("settings:mcpServers")}
+          </CardTitle>
+        </CardHeader>
+        {!hintAllowed && (
+          <p role="alert" className="px-6 text-sm text-muted-foreground">
+            {t("settings:mcpOwnerUnavailable")}
+          </p>
+        )}
+        <ProfileMCPSelectionContent
+          key={selectedWorkspaceId}
+          profileId={profileId}
+          hasWorkspaceProp={Boolean(workspaceId)}
+          selectedWorkspaceId={selectedWorkspaceId}
+          selectedIds={selectedIds}
+          workspaces={workspaces}
+          definitions={definitions}
+          editor={editor}
+          workspaceRequired={!selectedWorkspaceId}
+          switchingDisabled={
+            editor.saving || coordinator.status === "saving" || coordinator.exclusiveBusy
+          }
+          onSelectedIdsChange={setSelectedIds}
+          onWorkspaceChange={changeWorkspace}
+        />
+        {showLegacy && (
+          <div className="space-y-2 border-t px-6 py-4">
+            <p className="text-sm text-muted-foreground">
+              {t("settings:mcpLegacyRecoveryDescription")}
+            </p>
+            {legacyEditor && !legacyOpen && (
+              <Button
+                variant="outline"
+                className={controlSizingClassName(
+                  "standard",
+                  "h-auto max-w-full cursor-pointer whitespace-normal text-left",
+                )}
+                onClick={() => setLegacyOpen(true)}
+              >
+                {t("settings:mcpLegacyRecovery")}
+              </Button>
+            )}
+          </div>
+        )}
+      </SettingsCard>
+      {legacyOpen && legacyEditor && (
+        <section aria-label={t("settings:mcpLegacyRecovery")} className="space-y-2">
+          <h3 className="text-sm font-medium">{t("settings:mcpLegacyRecovery")}</h3>
+          {legacyEditor}
+        </section>
+      )}
+    </>
   );
 }

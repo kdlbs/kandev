@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskDetailRoute } from "./task-detail-route";
@@ -229,6 +229,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  mocks.readTaskNavigationIdentity.mockReset();
   let generation = 0;
   const ownerToken = {};
   let lastRouteKey: string | null = null;
@@ -482,21 +483,43 @@ describe("TaskDetailRoute client navigation", () => {
 });
 
 describe("TaskDetailRoute session selection", () => {
-  it("uses the session selected by route loading when the requested session is unavailable", async () => {
+  // @covers AC-AGENTS-MCP-MANAGEMENT-001.2
+  it("never opens a fallback conversation for an unavailable explicit session", async () => {
     mocks.readTaskNavigationIdentity.mockResolvedValueOnce(makeNavigationIdentity());
-
     renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="missing-session" />);
+    await screen.findByTestId("task-session-unavailable");
+    expect(screen.queryByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeNull();
+    expect(mocks.fetchTaskNavigationEnrichment).not.toHaveBeenCalled();
+  });
 
-    await waitFor(() => {
-      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-session-id")).toBe(
-        "session-1",
-      );
-    });
-    expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalledWith(
-      expect.anything(),
-      "session-1",
-      { store: expect.anything() },
+  it("retries an unavailable session list without opening another conversation", async () => {
+    const identity = makeNavigationIdentity();
+    mocks.readTaskNavigationIdentity
+      .mockResolvedValueOnce({
+        ...identity,
+        allSessionsResponse: { sessions: [], total: 0 },
+        sessionListUnavailable: true,
+      })
+      .mockResolvedValueOnce(identity);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(SESSION_DATA_ATTRIBUTE),
+      ).toBe("session-1"),
     );
+    expect(mocks.readTaskNavigationIdentity).toHaveBeenLastCalledWith(
+      expect.anything(),
+      TASK_ONE_ID,
+      expect.objectContaining({ refresh: true }),
+    );
+  });
+
+  it("preserves the existing recovery shell for ordinary explicit-route errors", async () => {
+    mocks.readTaskNavigationIdentity.mockRejectedValueOnce(new Error("temporary network error"));
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="session-1" />);
+    await screen.findByTestId(KANBAN_TASK_SHELL_TEST_ID);
+    expect(screen.queryByTestId("task-session-unavailable")).toBeNull();
   });
 
   it("rejects late enrichment from an earlier A-B-A navigation", async () => {

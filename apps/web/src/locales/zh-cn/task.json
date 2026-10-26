@@ -2887,5 +2887,18 @@
   "sessionRestartRequested": "已请求重启会话",
   "sessionRestartFailed": "会话重启失败",
   "sessionRestartUnavailable": "此会话在当前状态下无法重启。",
-  "sessionRestartConnectionUnavailable": "连接不可用。请重新连接后再试。"
+  "sessionRestartConnectionUnavailable": "连接不可用。请重新连接后再试。",
+  "questionImageInspect": "查看图像",
+  "questionImageCanvas": "图像查看",
+  "questionImageFit": "适应窗口",
+  "questionImageActualSize": "实际大小",
+  "questionImageShow": "显示图像",
+  "questionImageHide": "隐藏图像",
+  "questionImageLoading": "正在加载图像…",
+  "questionImageNotFound": "未找到图像文件。",
+  "questionImageUnsupported": "不支持图像预览。",
+  "questionImageInvalid": "此图像已损坏或格式不受支持。",
+  "questionImageTooLarge": "此图像超过预览大小限制。",
+  "questionImageUnavailable": "图像不可用。您仍可回答问题。",
+  "questionImageRetry": "重试"
 }

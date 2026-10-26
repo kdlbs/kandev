@@ -363,12 +363,21 @@ export type ListAvailableAgentsResponse = {
 
 // Clarification request types (for ask_user_question feature)
 export type ClarificationOption = {
+  images?: QuestionImage[];
   option_id: string;
   label: string;
   description: string;
 };
 
+export type QuestionImage = {
+  id: string;
+  path: string;
+  repo?: string;
+  alt: string;
+};
+
 export type ClarificationQuestion = {
+  images?: QuestionImage[];
   id: string;
   title: string;
   prompt: string;

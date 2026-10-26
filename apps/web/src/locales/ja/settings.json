@@ -1064,5 +1064,20 @@
   "mcpUnsupportedVariables": "これらの設定変数はまだ準備できません。別の設定を選択してください。",
   "mcpRequiredBadge": "必須",
   "mcpPlainInputsHelp": "ここには機密ではない値を入力してください。認証情報には下のシークレット参照を使用してください。",
-  "mcpUnsupportedArguments": "この設定には、まだ設定できないコマンド引数が必要です。別の設定を選択してください。"
+  "mcpUnsupportedArguments": "この設定には、まだ設定できないコマンド引数が必要です。別の設定を選択してください。",
+  "mcpUsedIn": "使用先",
+  "mcpUsedInTitle": "{{name}}：使用先",
+  "mcpUsageProfiles": "プロファイル",
+  "mcpUsageRepositories": "リポジトリ",
+  "mcpUsageTasks": "タスク",
+  "mcpUsageSessions": "セッション",
+  "mcpUnnamedOwner": "名前のない所有者",
+  "mcpOwnerUnavailable": "この移動先は利用できません。カタログに戻るか、アクセス可能なワークスペースを選択してください。",
+  "mcpUsageStale": "使用状況を更新できませんでした。表示内容が古い可能性があります。所有者を開く前に再試行してください。",
+  "mcpUsageEmpty": "閲覧可能な保存済みの選択はありません。",
+  "mcpUsageLoadMore": "さらに読み込む",
+  "mcpUsageDescription": "アクセス可能な保存済みの選択です。継承された使用状況と接続状態はセッションに表示されます。",
+  "mcpManageCatalog": "ワークスペースのカタログを管理",
+  "mcpLegacyRecoveryDescription": "このワークスペースの旧設定のインポートは確認されていません。既存のグローバルプロファイル設定が引き続き適用される場合があります。ワークスペースの選択とグローバルな旧設定は個別に保存されます。",
+  "mcpLegacyRecovery": "グローバルプロファイルの旧設定"
 }

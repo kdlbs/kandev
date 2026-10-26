@@ -141,6 +141,49 @@ Keep Office-only regions in their existing order; apply common customizable
 nodes before them. Inbox/Needs you entries retain their existing mode and feature
 gates but now participate in saved visibility and order through the extension below.
 
+## Integration plugin grouping
+
+AC-UI-SIDEBAR-CUSTOMIZATION-001.10 through 001.12 restore the
+[plugin placement contract](../../../plans/plugins/PLUGIN-API.md#registry-pluginregistry)
+within personal layouts. Plugin identity and registration retain their owners.
+
+Keep version-1 flat nodes, revisions, and wire serialization. Derive integration
+children from current catalog section metadata and projected plugin nodes.
+Use their saved relative order and visibility. Keep unavailable nodes in editing
+state but exclude them from active links. Never persist grouping during reads.
+Retain raw plugin item IDs for selectors and owner-qualified IDs for identity.
+
+Share pure grouping/movement helpers under `lib/sidebar/` across navigation,
+Settings preview, and customization. Integration children render under Integrations.
+Main/unknown and footer placements retain their current handling. Explicit
+shortcut references never enter this regrouping.
+
+`SidebarLayoutNavigation` passes ordered plugin destinations into
+`IntegrationsSection`; built-ins precede plugins and settings follows them.
+Legacy callers retain manifest defaults. Phone and wider saved menus pass the
+same destinations into `MobileIntegrationsSection`, preserving omission rules
+and first-party-only header shortcuts.
+
+Settings, its draft preview, direct menus, and phone customization show plugin
+visibility choices under Integrations. Child moves operate among integration
+siblings. Top-level moves operate among top-level nodes. Nested desktop dragging
+must not start a parent drag; reuse existing sensors with explicit scope guards.
+Keyboard and phone move controls use the same pure movement operation. Boundary,
+cross-group, cancelled, and unchanged moves do not save. Preserve unrelated and
+unavailable nodes in full replacement payloads through the existing CAS writer.
+Portaled menu focus must not expand navigation or write geometry. Only DOM-contained focus can reveal clipped rows.
+
+Existing standalone plugin positions become sibling order inside Integrations.
+Hidden/folded parents suppress children without mutating child visibility.
+Showing the parent restores individually visible children. Materialize a missing Integrations parent at the end for display and explicit edits, without saving on read. Use an unused ID. Office mode retains its
+current standalone plugin access where that mode intentionally omits Integrations;
+an explicitly hidden parent in regular navigation is not an Office fallback.
+No database migration, SDK change, plugin release, or new ADR is needed.
+
+Reuse the desktop disclosure/rail launcher and phone app drawer. Only phone app navigation starts collapsed; wider menus retain expanded links.
+Phone links retain 44px targets and the existing scroller.
+Settings preview matches navigation. Plugin reload restores saved choices.
+
 ## Inbox layout entries
 
 Promote the existing fixed Inbox presentations to optional built-in nodes:
@@ -423,9 +466,9 @@ Built-in resource sections do not use the custom group's icon-strip presentation
 Reuse `MobileAutomationsSection` and `MobileIntegrationsSection` for their labelled
 disclosures, availability, loading/retry, and setup paths. Saved automation rows
 consume the existing catalog and activity controller through the disclosure body
-slot, avoiding a second polling loop. Saved integration plugin
-nodes retain their own ordering and visibility, so the built-in integration section
-excludes those independently rendered plugin links. Canvases use a labelled phone
+slot, avoiding a second polling loop. Integration plugin nodes retain individual
+visibility and sibling order inside the built-in Integrations disclosure, as
+defined in Integration plugin grouping. Canvases use a labelled phone
 disclosure and the shared catalog, including loading/error state and workspace settings.
 Custom mixed groups retain direct shortcuts and automation activity, with an explicit
 chevron on the disclosure. The shared app drawer remains the only vertical scroller.
@@ -465,6 +508,7 @@ tradeoffs fit this document; no additional ADR is required.
 
 - [Plan and work orders](../../../plans/sidebar-customization/plan.md)
 - [Mobile saved navigation repair](../../../plans/mobile-saved-navigation/plan.md)
+- [Integration plugin grouping repair](../../../plans/integration-plugin-grouping/plan.md)
 
 The direct context menu uses a localized **Sidebar settings** label before its
 visibility choices.

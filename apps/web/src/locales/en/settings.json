@@ -1064,5 +1064,20 @@
   "mcpUnsupportedVariables": "These setup variables cannot be materialized yet. Choose another setup.",
   "mcpRequiredBadge": "Required",
   "mcpPlainInputsHelp": "Use non-secret values here. Select secret references below for credentials.",
-  "mcpUnsupportedArguments": "This setup requests command arguments that cannot be configured yet. Choose another setup."
+  "mcpUnsupportedArguments": "This setup requests command arguments that cannot be configured yet. Choose another setup.",
+  "mcpUsedIn": "Used in",
+  "mcpUsedInTitle": "{{name}}: used in",
+  "mcpUsageProfiles": "Profiles",
+  "mcpUsageRepositories": "Repositories",
+  "mcpUsageTasks": "Tasks",
+  "mcpUsageSessions": "Sessions",
+  "mcpUnnamedOwner": "Unnamed owner",
+  "mcpOwnerUnavailable": "This destination is unavailable. Return to the catalog or choose an accessible workspace.",
+  "mcpUsageStale": "Usage could not be refreshed. These rows may be out of date. Retry before opening an owner.",
+  "mcpUsageEmpty": "No saved selections are visible to you.",
+  "mcpUsageLoadMore": "Load more",
+  "mcpUsageDescription": "Saved selections you can access. Inherited use and connection status are shown in the session.",
+  "mcpManageCatalog": "Manage workspace catalog",
+  "mcpLegacyRecoveryDescription": "Legacy import is not confirmed for this workspace. Existing global profile configuration can still apply. Workspace selections and global legacy settings are saved separately.",
+  "mcpLegacyRecovery": "Global profile legacy configuration"
 }

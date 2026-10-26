@@ -11,7 +11,11 @@ export function createSidebarWriter({
   return (workspaceId: string, mutation: SidebarMutation): Promise<void> => {
     const job = tail
       .catch(() => undefined)
-      .then(() => write(workspaceId, mutation(read(workspaceId))));
+      .then(async () => {
+        const current = read(workspaceId);
+        const next = mutation(current);
+        if (next !== current) await write(workspaceId, next);
+      });
     tail = job;
     return job;
   };

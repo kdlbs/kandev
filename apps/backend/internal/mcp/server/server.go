@@ -1985,7 +1985,7 @@ func (s *Server) registerInteractionTools() {
 				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label), "allow_custom_text" (boolean, defaults to true).`),
 				mcp.MinItems(1),
 				mcp.MaxItems(4),
-				mcp.Items(buildQuestionSchemaItem()),
+				mcp.Items(buildOperatorQuestionSchemaItem()),
 			),
 			mcp.WithString("context", mcp.Description("Optional single block of shared background information. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
 			mcp.WithArray(contextParagraphsArg,

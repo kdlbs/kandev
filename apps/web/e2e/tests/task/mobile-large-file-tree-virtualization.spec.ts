@@ -41,6 +41,7 @@ test.describe("Mobile large file tree virtualization", () => {
     await expect(viewport).toBeHidden();
     await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     await expect(folder).toBeVisible({ timeout: 15_000 });
+    await waitForFileTreeLayoutSettle(testPage);
     await expectContiguousVisibleFileTreeRows(viewport);
     await expectVisibleFileTreePaths(viewport, collapsedPaths);
 

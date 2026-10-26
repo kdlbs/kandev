@@ -113,6 +113,18 @@ export function materializeSidebarPluginNodes(
       : node;
   });
 
+  if (
+    pluginEntries.some((entry) => entry.section === "integrations") &&
+    !nodes.some((node) => node.destinationId === "integrations")
+  ) {
+    const usedIds = new Set(nodes.map((node) => node.id));
+    let id = "integrations";
+    for (let suffix = 1; usedIds.has(id); suffix += 1) {
+      id = `integrations-${suffix}`;
+    }
+    nodes.push({ id, kind: "builtin", visible: true, destinationId: "integrations" });
+  }
+
   for (const entry of [...pluginEntries].reverse()) {
     if (nodes.some((node) => node.id === entry.target.id)) continue;
     const index = pluginInsertionIndex(nodes, entry.section);

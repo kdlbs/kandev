@@ -43,7 +43,7 @@ export function buildMcpExplorerServers(
           : {
               name,
               source: "profile" as const,
-              status: "delivered" as const,
+              status: "unknown" as const,
             },
       );
     return [...observedServers, ...configuredOnly];

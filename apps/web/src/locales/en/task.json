@@ -2887,5 +2887,18 @@
   "sessionRestartRequested": "Session restart requested",
   "sessionRestartFailed": "Session restart failed",
   "sessionRestartUnavailable": "This session cannot be restarted in its current state.",
-  "sessionRestartConnectionUnavailable": "The connection is unavailable. Reconnect, then try again."
+  "sessionRestartConnectionUnavailable": "The connection is unavailable. Reconnect, then try again.",
+  "questionImageInspect": "Inspect image",
+  "questionImageCanvas": "Image inspection",
+  "questionImageFit": "Fit",
+  "questionImageActualSize": "Actual size",
+  "questionImageShow": "Show images",
+  "questionImageHide": "Hide images",
+  "questionImageLoading": "Loading image…",
+  "questionImageNotFound": "Image file not found.",
+  "questionImageUnsupported": "Image preview is not supported.",
+  "questionImageInvalid": "This image is damaged or has an unsupported format.",
+  "questionImageTooLarge": "This image exceeds the preview size limit.",
+  "questionImageUnavailable": "Image unavailable. You can still answer the question.",
+  "questionImageRetry": "Retry"
 }

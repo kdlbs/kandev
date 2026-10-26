@@ -2887,5 +2887,18 @@
   "sessionRestartRequested": "Reinício da sessão solicitado",
   "sessionRestartFailed": "Falha ao reiniciar a sessão",
   "sessionRestartUnavailable": "Não é possível reiniciar esta sessão no estado atual.",
-  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente."
+  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente.",
+  "questionImageInspect": "Inspecionar imagem",
+  "questionImageCanvas": "Inspeção de imagem",
+  "questionImageFit": "Ajustar",
+  "questionImageActualSize": "Tamanho real",
+  "questionImageShow": "Mostrar imagens",
+  "questionImageHide": "Ocultar imagens",
+  "questionImageLoading": "A carregar imagem…",
+  "questionImageNotFound": "Ficheiro de imagem não encontrado.",
+  "questionImageUnsupported": "A pré-visualização da imagem não é suportada.",
+  "questionImageInvalid": "Esta imagem está danificada ou tem um formato não suportado.",
+  "questionImageTooLarge": "Esta imagem excede o limite de tamanho da pré-visualização.",
+  "questionImageUnavailable": "Imagem indisponível. Pode continuar a responder à pergunta.",
+  "questionImageRetry": "Tentar novamente"
 }

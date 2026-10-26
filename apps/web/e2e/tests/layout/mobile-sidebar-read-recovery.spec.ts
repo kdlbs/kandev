@@ -1,5 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { seedIdleSession } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 test("mobile task drawer retains rows while workspace context refresh recovers", async ({
@@ -7,17 +9,9 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   apiClient,
   seedData,
 }) => {
-  const task = await apiClient.createTask(seedData.workspaceId, "Mobile retained task", {
-    workflow_id: seedData.workflowId,
-    workflow_step_id: seedData.startStepId,
-  });
-
-  let readsUnavailable = false;
+  let readPhase: "healthy" | "unavailable" | "recovering" = "healthy";
+  const recovery = Promise.withResolvers<void>();
   await testPage.route("**/api/v1/**", async (route) => {
-    if (!readsUnavailable) {
-      await route.continue();
-      return;
-    }
     const url = new URL(route.request().url());
     const isWorkflowList =
       url.pathname === "/api/v1/workflows" &&
@@ -29,6 +23,11 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
       await route.continue();
       return;
     }
+    if (readPhase !== "unavailable") {
+      if (readPhase === "recovering") await recovery.promise;
+      await route.continue();
+      return;
+    }
     await route.fulfill({
       status: 503,
       contentType: "application/json",
@@ -36,12 +35,10 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
     });
   });
 
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile retained task");
   await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
 
-  readsUnavailable = true;
+  readPhase = "unavailable";
   const failedWorkflowRead = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
     predicate: (response) => response.status() === 503,
   });
@@ -53,16 +50,21 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   await expect(drawer).toBeVisible();
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
   await expect(drawer.getByTestId("sidebar-task-load-error")).toBeVisible();
+  await waitForFiniteAnimations(drawer);
   const retry = drawer.getByRole("button", { name: "Retry", exact: true });
   const retryBox = await retry.boundingBox();
   if (!retryBox) throw new Error("mobile sidebar retry control is not visible");
   expect(retryBox.height).toBeGreaterThanOrEqual(44);
 
-  readsUnavailable = false;
+  readPhase = "recovering";
   const recoveredWorkflowRead = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
     predicate: (response) => response.ok(),
   });
-  await retry.tap();
+  try {
+    await retry.tap();
+  } finally {
+    recovery.resolve();
+  }
   await recoveredWorkflowRead;
   await expect(drawer.getByTestId("sidebar-task-load-error")).toHaveCount(0);
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();

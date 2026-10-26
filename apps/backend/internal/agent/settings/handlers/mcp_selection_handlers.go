@@ -18,11 +18,12 @@ type mcpSelectionRequest struct {
 }
 
 type mcpSelectionResponse struct {
-	WorkspaceID   string                              `json:"workspace_id"`
-	Scope         mcpconfig.SelectionScope            `json:"scope"`
-	OwnerID       string                              `json:"owner_id"`
-	DefinitionIDs []string                            `json:"definition_ids"`
-	MCPState      *mcpconfig.SessionMCPSelectionState `json:"mcp_state,omitempty"`
+	LegacyImportStatus string                              `json:"legacy_import_status,omitempty"`
+	WorkspaceID        string                              `json:"workspace_id"`
+	Scope              mcpconfig.SelectionScope            `json:"scope"`
+	OwnerID            string                              `json:"owner_id"`
+	DefinitionIDs      []string                            `json:"definition_ids"`
+	MCPState           *mcpconfig.SessionMCPSelectionState `json:"mcp_state,omitempty"`
 }
 
 func (h *Handlers) httpListProfileMCPSelections(c *gin.Context) {
@@ -132,6 +133,9 @@ func (h *Handlers) writeMCPSelectionResponse(c *gin.Context, workspaceID string,
 	response := mcpSelectionResponse{
 		WorkspaceID: workspaceID, Scope: scope, OwnerID: ownerID,
 		DefinitionIDs: definitionIDs,
+	}
+	if scope == mcpconfig.SelectionScopeProfile {
+		response.LegacyImportStatus = h.selections.ProfileImportStatus(c.Request.Context(), workspaceID, ownerID)
 	}
 	if scope == mcpconfig.SelectionScopeTaskSession {
 		state, err := h.selections.SessionState(c.Request.Context(), workspaceID, ownerID)

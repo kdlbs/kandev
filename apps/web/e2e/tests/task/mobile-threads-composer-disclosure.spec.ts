@@ -93,6 +93,8 @@ test("keeps the touch composer visible and restores drafts through single-chat n
     await editor.fill("My mobile draft");
     await a.getByTestId("thread-picker-trigger").tap();
     await testPage.getByTestId(`thread-picker-row-${second.id}`).tap();
+    await expect(testPage.getByRole("dialog", { name: "Choose thread", exact: true })).toBeHidden();
+    await waitForFiniteAnimations(testPage.locator("body"));
     await expect(a.getByTestId("session-chat")).toHaveCount(0);
     await expect(b.getByTestId("chat-input-editor")).toBeVisible();
     await b.getByTestId("thread-picker-trigger").tap();

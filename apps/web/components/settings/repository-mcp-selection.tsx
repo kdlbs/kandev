@@ -1,22 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { IconChevronDown } from "@tabler/icons-react";
 import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import {
+  SettingsSaveCancelledError,
+  useSettingsSaveContributor,
+} from "@/components/settings/settings-save-provider";
 import { useMCPWorkspaceDefinitions } from "@/hooks/domains/workspace/use-mcp-workspace-settings";
 import { isHandledApiError } from "@/lib/api/client";
-import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
-
-function sameSelection(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((id) => rightSet.has(id));
-}
+import { useMCPSettingsSelectionDraft } from "@/hooks/domains/workspace/use-mcp-settings-selection-draft";
+import { useSearchParams } from "@/lib/routing/client-router";
+import { readMCPContextHint } from "@/lib/mcp/management-links";
 
 export function RepositoryMCPSelectionSection({
   repositoryId,
@@ -29,31 +28,29 @@ export function RepositoryMCPSelectionSection({
 }) {
   const { t } = useTranslation();
   const definitions = useMCPWorkspaceDefinitions(workspaceId);
-  const editor = useMCPSelectionEditor("repository", repositoryId, workspaceId);
+  const draft = useMCPSettingsSelectionDraft("repository", repositoryId, workspaceId);
+  const { editor, selectedIds, dirty, setSelectedIds } = draft;
+  const params = useSearchParams();
+  const hint = readMCPContextHint(params, "repositoryId");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [baselineIds, setBaselineIds] = useState<string[]>([]);
-  const selectionKey = editor.selection
-    ? `${editor.selection.workspace_id}:${editor.selection.owner_id}:${editor.selection.definition_ids.join(",")}`
-    : "empty";
-
+  const section = useRef<HTMLDivElement>(null);
+  const revealed = useRef(false);
   useEffect(() => {
-    if (!editor.selection) return;
-    setSelectedIds(editor.selection.definition_ids);
-    setBaselineIds(editor.selection.definition_ids);
-  }, [selectionKey]);
-
-  const dirty = Boolean(editor.selection) && !sameSelection(selectedIds, baselineIds);
+    if (hint.value !== repositoryId || window.location.hash !== "#mcp" || revealed.current) return;
+    revealed.current = true;
+    setOpen(true);
+    section.current?.scrollIntoView({ block: "start" });
+    section.current?.focus({ preventScroll: true });
+  }, [hint.value, repositoryId]);
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
   const save = async () => {
-    await editor.save(selectedIds);
-    setBaselineIds(selectedIds);
+    if (!(await draft.save())) throw new SettingsSaveCancelledError();
   };
   useSettingsSaveContributor({
-    id: `repository-mcp-selection:${repositoryId}`,
+    id: `repository-mcp-selection:${repositoryId}:${workspaceId}`,
     revision: JSON.stringify({ workspaceId, selectedIds }),
     isDirty: dirty,
     canSave:
@@ -63,11 +60,17 @@ export function RepositoryMCPSelectionSection({
       !editor.loadError &&
       !definitions.error,
     save,
-    discard: () => setSelectedIds(baselineIds),
+    discard: draft.discard,
   });
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="min-w-0 rounded-md border">
+    <Collapsible
+      ref={section}
+      tabIndex={-1}
+      open={open}
+      onOpenChange={setOpen}
+      className="min-w-0 rounded-md border"
+    >
       <RepositoryMCPSelectionTrigger open={open} count={selectedIds.length} />
       <CollapsibleContent
         className="min-w-0 border-t p-3"

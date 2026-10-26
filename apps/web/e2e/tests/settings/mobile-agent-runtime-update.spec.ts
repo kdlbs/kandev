@@ -255,7 +255,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     await expect(drawer).toBeVisible();
     const migrationChoice = drawer.getByTestId(`agent-update-migrate-family-${runtime.agentName}`);
-    const choiceBox = await migrationChoice.boundingBox();
+    const choiceBox = await settledBoundingBox(migrationChoice);
     expect(choiceBox).not.toBeNull();
     expect(choiceBox!.height).toBeGreaterThanOrEqual(44);
     expect(choiceBox!.width).toBeGreaterThanOrEqual(44);

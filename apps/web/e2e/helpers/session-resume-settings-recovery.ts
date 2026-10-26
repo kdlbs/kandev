@@ -461,7 +461,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     ).toBeVisible();
     await expect(session.activeChat()).not.toContainText(EMPTY_TURN_NO_OUTPUT_NOTICE);
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
-    const disclosure = session.activeChat().getByTestId("provider-restored-resume-disclosure");
+    const disclosure = startupRecoveryCard.getByTestId("provider-restored-resume-disclosure");
     await expect(disclosure).toBeVisible();
     await expect(disclosure).toContainText("mode/model");
     await assertNoDocumentHorizontalOverflow(page, "provider-restored resume disclosure");

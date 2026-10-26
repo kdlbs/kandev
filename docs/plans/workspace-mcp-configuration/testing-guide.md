@@ -39,14 +39,12 @@ and regression evidence.
 not included. Inherited rows should remain read-only in this PR. Workspace-wide
 disabling is a different operation and already exists.
 
-**Deferred profile UI:** global agent profiles still use the legacy JSON editor.
-The user explicitly moved global-profile catalog navigation and management/status
-clarity to unstarted follow-up task `2adba1ca-619e-4bfc-b705-3bbc628df4dd`, based on
-this PR. Workspace-owned profiles have the shared picker. The original sandbox
-agents are global, so do not count their legacy editor as a successful catalog
-picker test. Existing API/resolution support for workspace-scoped global-profile
-associations is separate from the deferred UI. The original reproduction is in
-the [consistency review](ux-consistency-review.md#functional-finding-global-profile-catalog-picker-is-absent).
+**Global profile UI:** saved global agent profiles now use a workspace-aware
+catalog selection list. Test workspace switching and shared Save changes with
+the global Mock profile. The legacy JSON editor remains recovery only, behind
+**Global profile legacy configuration**; it is separate from catalog selection.
+The [consistency review](ux-consistency-review.md#functional-finding-global-profile-catalog-picker-is-absent)
+records the original missing-picker reproduction and is historical.
 
 ### Review repair checks
 
@@ -151,9 +149,13 @@ and profile settings use shared Save changes; they do not autosave like session
 Customize. There should be no UUID-based origin labels.
 
 For the sandbox's global Mock profiles, open **Settings > Agents > Mock >
-profile** and confirm the known routing gap: **MCP Configuration / MCP servers
-(JSON)** appears instead of the catalog picker. Seeded profile inheritance can
-still be inspected in tasks, but that does not prove the missing editor works.
+profile** and choose the workspace in **MCP servers**. Confirm the workspace
+catalog picker is available, saved choices survive reload, and changing the
+workspace with edits uses Save changes, Discard, or Continue editing. A failed
+save must retain the current workspace and draft. When legacy import is pending
+or unknown, the separate global legacy configuration recovery stays available.
+This management follow-up closes the routing gap recorded at the parent
+checkpoint; the historical merge-readiness ledger is unchanged.
 
 ## 4. Create a task and add another agent (4 minutes)
 

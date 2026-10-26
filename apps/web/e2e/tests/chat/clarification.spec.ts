@@ -9,6 +9,7 @@ import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import { expectClarificationReferencePopup } from "../../helpers/clarification-markdown";
 
 /**
  * Seed a task + session with a clarification scenario and navigate to the session page.
@@ -673,6 +674,8 @@ test.describe("Clarification flow", () => {
     const guidance = card.getByRole("link", { name: "storage guidance" });
     await expect(guidance).toHaveAttribute("href", "https://example.com/storage");
     await expect(guidance).toHaveAttribute("rel", "noopener noreferrer");
+    await expectClarificationReferencePopup(testPage, () => guidance.click());
+    await expect(overlay).toBeVisible();
 
     await expect(firstOption.getByTestId("clarification-option-label").locator("code")).toHaveText(
       "Postgres",

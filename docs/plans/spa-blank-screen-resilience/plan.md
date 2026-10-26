@@ -123,9 +123,9 @@ primary session updates each task and this plan after accepting its results.
 
 ## Risks
 
-- Preventing a repeated `vite:preloadError` would swallow Vite's throw and
-  leave Suspense pending; only the first guarded reload attempt may call
-  `preventDefault()`.
+- Preventing `vite:preloadError` swallows Vite's rejection and can resolve an
+  undefined module before navigation finishes. Keep the rejection intact on
+  both the first guarded reload and repeated failures.
 - Clearing the preload marker at initial mount can recreate a loop before the
   lazy route succeeds; use expiration instead.
 - Error-boundary reset logic must not remount healthy routes or erase normal

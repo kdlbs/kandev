@@ -350,6 +350,18 @@ Marketplace review shows the inputs requested by the selected setup. Complete re
 
 Marketplace entries come from Kandev-curated templates or cached public Registry metadata. Registry metadata is publisher supplied, not a Kandev security review. Review the publisher, selected remote or exact package version, transport, requested configuration, and secret bindings before adding an entry. A Registry outage shows the last successful cache with a stale or degraded status. Deprecated and deleted entries are not offered for new installation.
 
+Each saved catalog definition has **Used in**, which lists its directly selecting
+owners that you can access. Open a named owner to manage its existing selection.
+The list is paged and excludes inaccessible owners. It does not infer inherited
+use or connection health. Opening an owner never selects a server or starts an
+agent.
+
+Saved global profiles require an explicit workspace choice or a valid workspace
+link. Switching that context uses the shared unsaved-settings guard. Profile
+and repository edits retain **Save changes**; session edits keep their existing
+autosave behavior. See [Agents and profiles](agents-and-profiles.md#find-where-a-server-is-selected)
+for navigation and legacy configuration recovery.
+
 Select configured definitions at the profile, repository, task, or task-session scope. Repository selection is collapsed by default. Task creation keeps its selector inside collapsed **Advanced** settings. The effective set is additive across every task repository, the workspace-contextual profile, task, and session. Duplicate definitions are delivered once with all contributing origins; inherited definitions cannot be removed at a narrower scope.
 
 Selection lists show each server's runtime name, supplied description, setup
@@ -1128,7 +1140,10 @@ result, descriptions, schemas, or token estimates. The explorer still shows
 safe status metadata. The built-in Kandev server becomes **Connected** after
 protocol acceptance, either legacy MCP initialize or an accepted modern
 request. It becomes **Active** after it serves `tools/list`. Missing
-observation is not a failure. Red appears only for an explicit sanitized error.
+observation is not a failure. Delivered and unobserved rows use neutral styling.
+A configured name alone stays **Unknown**; another server's active report
+does not establish delivery. Saved-change notices remain independent of these
+connection states. Red appears only for an explicit sanitized error.
 
 The report is per Kandev session and execution. It stores only bounded,
 sanitized attachment facts. It does not store MCP headers, environment values,

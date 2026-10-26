@@ -129,6 +129,8 @@ type SelectionOwnerValidator func(context.Context, SelectionScope, string, strin
 // SelectionService validates workspace ownership and atomically replaces
 // scope selections. It deliberately has no resolver or runtime side effects.
 type SelectionService struct {
+	usageOwnerReader  UsageOwnerReader
+	usageCursor       usageCursorCodec
 	repo              SelectionRepository
 	catalog           CatalogRepository
 	authorizer        WorkspaceAuthorizer

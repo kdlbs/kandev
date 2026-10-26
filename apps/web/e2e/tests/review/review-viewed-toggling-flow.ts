@@ -5,6 +5,7 @@ import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import type { GitStatusData } from "../../../lib/types/git-events";
 import { dwell, watchWs } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const TARGET = "a-review-viewed.ts";
 const TRAILING = "z-review-viewed.ts";
@@ -128,6 +129,9 @@ export function reviewViewedTogglingScenario(mobile: boolean) {
           .locator(`[data-testid="review-file-row"][data-file-path="${TARGET}"]`)
           .getByRole("checkbox");
     await expect(header).toBeVisible();
+    await expect(dialog.getByTestId("review-diff-pending")).toHaveCount(0);
+    await expect(dialog.getByText("export const line0 = 0;", { exact: true })).toBeVisible();
+    await waitForFiniteAnimations(dialog);
     await expect(checkbox).not.toBeChecked();
     await scrollReview(testPage, root, mobile, 1);
     await expect(checkbox).toBeChecked();

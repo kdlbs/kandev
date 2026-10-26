@@ -175,33 +175,42 @@ test.describe("Port Forward Dialog", () => {
       "Late tunnel snapshot",
     );
     ports.setSession(sessionId);
-    // Hydration belongs to the session control and survives closing its dialog.
-    ports.holdNext("port.tunnel.list");
-    await session.enablePortForwarding();
-    await expect.poll(ports.held).toBe(true);
-    await session.portForwardButton.click();
-    await session.portForwardInput.fill("9500");
-    await session.portForwardAddButton.click();
-    await session.portForwardTunnelToggle(9500).click();
-    await session.portForwardTunnelStart(9500).click();
-    await expect(session.portForwardRow(9500)).toHaveAttribute("data-forwarded", "true");
-    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
-      "Forwarded ports1",
-    );
-    expect(ports.held()).toBe(true);
-    ports.release();
-    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
-      "Forwarded ports2",
-    );
-    await expect(session.portForwardRow(9000).getByRole("link").first()).toHaveAttribute(
-      "href",
-      /:49152\/$/,
-    );
-    await expect(session.portForwardRow(9500).getByRole("link").first()).toHaveAttribute(
-      "href",
-      /:49153\/$/,
-    );
-    await session.portForwardDialog.press("Escape");
+    // Keep the deliberately held read inside the client's request deadline.
+    const clockStart = new Date();
+    await testPage.clock.install({ time: clockStart });
+    await testPage.clock.pauseAt(new Date(clockStart.getTime() + 60_000));
+    try {
+      // Hydration belongs to the session control and survives closing its dialog.
+      ports.holdNext("port.tunnel.list");
+      await session.enablePortForwarding();
+      await expect.poll(ports.held).toBe(true);
+      await session.portForwardButton.click();
+      await session.portForwardInput.fill("9500");
+      await session.portForwardAddButton.click();
+      await session.portForwardTunnelToggle(9500).click();
+      await session.portForwardTunnelStart(9500).click();
+      await expect(session.portForwardRow(9500)).toHaveAttribute("data-forwarded", "true");
+      await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
+        "Forwarded ports1",
+      );
+      expect(ports.held()).toBe(true);
+      ports.release();
+      await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
+        "Forwarded ports2",
+      );
+      await expect(session.portForwardRow(9000).getByRole("link").first()).toHaveAttribute(
+        "href",
+        /:49152\/$/,
+      );
+      await expect(session.portForwardRow(9500).getByRole("link").first()).toHaveAttribute(
+        "href",
+        /:49153\/$/,
+      );
+      await session.portForwardDialog.press("Escape");
+    } finally {
+      ports.release();
+      await testPage.clock.resume();
+    }
   });
 
   // @covers AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.1-.5, .7

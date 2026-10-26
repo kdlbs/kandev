@@ -1,5 +1,6 @@
+import { expectNeutralMCPEvidence, captureNeutralMCPEvidence } from "./mcp-neutral-evidence";
 import { expectMCPConnectionGeometry } from "./mcp-connection-geometry";
-import { expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page, type Route } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
 import { SessionPage } from "../pages/session-page";
@@ -97,6 +98,7 @@ export async function checkMCPStatusClarity({
       await expect(tooltip.getByTestId("mcp-tooltip-server-clarity-0")).toContainText(
         "The connection has not been verified.",
       );
+      await expectNeutralMCPEvidence(tooltip.getByTestId("mcp-tooltip-server-clarity-0"));
       await checkWrappedTooltipAlignment(
         page.locator('[data-slot="tooltip-content"] > [data-testid="mcp-status-popover"]'),
       );
@@ -108,6 +110,11 @@ export async function checkMCPStatusClarity({
       "This agent does not support HTTP MCP servers.",
     );
     await expectMCPConnectionGeometry(explorer, mobile);
+    await expectNeutralMCPEvidence(explorer.getByTestId("mcp-server-row-clarity-0"));
+    await explorer.getByTestId("mcp-server-row-clarity-0").click();
+    await expectNeutralMCPEvidence(explorer.getByTestId("mcp-server-detail"));
+    if (mobile)
+      await explorer.getByRole("button", { name: "Back to servers", exact: true }).click();
     await explorer.getByTestId("mcp-server-row-clarity-1").click();
     await expect(explorer.getByTestId("mcp-server-detail")).toContainText(
       "This agent does not support HTTP MCP servers.",
@@ -207,21 +214,25 @@ async function checkSavedReports(
 ) {
   const trigger = page.getByTestId("mcp-status-trigger");
   const explorer = page.getByTestId("mcp-server-explorer");
-  // Controlled application reports cover states this mock cannot naturally emit.
-  for (const apply_state of ["pending_idle", "deferred_restart", "failed", "applied"] as const) {
-    const url = `**/api/v1/task-sessions/${sessionId}/mcp-selections*`;
-    await page.route(url, async (route) => {
-      if (route.request().method() !== "GET") return route.continue();
-      const response = await route.fetch();
-      const body = await response.json();
-      body.mcp_state = {
-        desired_revision: 3,
-        applied_revision: apply_state === "applied" ? 3 : 1,
-        apply_state,
-      };
-      await route.fulfill({ response, json: body });
-    });
-    try {
+  // Keep one route installed while polling and page reloads change scenarios.
+  const url = `**/api/v1/task-sessions/${sessionId}/mcp-selections*`;
+  let currentState: MCPSessionApplyState = "pending_idle";
+  const handler = async (route: Route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const apply_state = currentState;
+    const response = await route.fetch();
+    const body = await response.json();
+    body.mcp_state = {
+      desired_revision: 3,
+      applied_revision: apply_state === "applied" ? 3 : 1,
+      apply_state,
+    };
+    await route.fulfill({ response, json: body });
+  };
+  await page.route(url, handler);
+  try {
+    for (const apply_state of ["pending_idle", "deferred_restart", "failed", "applied"] as const) {
+      currentState = apply_state;
       await page.reload();
       await session.waitForLoad();
       if (!mobile) {
@@ -273,10 +284,12 @@ async function checkSavedReports(
       await expect(explorer.getByTestId("mcp-server-row-kandev")).toContainText(
         "Configuration sent to the agent. The connection has not been verified.",
       );
+      await expectNeutralMCPEvidence(explorer.getByTestId("mcp-server-row-kandev"));
+      if (apply_state === "pending_idle") await captureNeutralMCPEvidence(page, mobile);
       await explorer.getByTestId("mcp-explorer-close").click();
       if (!mobile) await expect(trigger).toBeFocused();
-    } finally {
-      await page.unrouteAll({ behavior: "wait" });
     }
+  } finally {
+    await page.unroute(url, handler);
   }
 }

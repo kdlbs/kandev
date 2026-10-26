@@ -10,6 +10,8 @@ import type {
   ClarificationRequestMetadata,
 } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import { QuestionImages } from "../question-images";
+import { ClarificationChoiceImages } from "../clarification-choice-images";
 import { ClarificationMarkdown } from "../clarification-markdown";
 import { ClarificationInputOverlay } from "../clarification-input-overlay";
 import type {
@@ -125,6 +127,13 @@ export function ClarificationRequestMessage({
 
         {/* Content */}
         <div className="flex-1 min-w-0">
+          <QuestionImages
+            pendingId={metadata.pending_id}
+            questionId={metadata.question_id ?? question.id}
+            sessionId={comment.session_id}
+            images={question.images}
+            historical
+          />
           {/* Question */}
           {question.title && (
             <ClarificationMarkdown
@@ -142,6 +151,7 @@ export function ClarificationRequestMessage({
           </ClarificationMarkdown>
 
           {/* Answer - indented below question */}
+          <ClarificationChoiceImages metadata={metadata} sessionId={comment.session_id} />
           {isAnswered && (
             <div className="mt-1 ml-3 flex items-start gap-1.5 text-xs text-foreground/80">
               {getStatusIndicator()}

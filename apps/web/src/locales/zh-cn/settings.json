@@ -1064,5 +1064,20 @@
   "mcpUnsupportedVariables": "目前尚无法准备这些配置变量。请选择其他配置。",
   "mcpRequiredBadge": "必填",
   "mcpPlainInputsHelp": "请在此使用非机密值。凭据请使用下方的密钥引用。",
-  "mcpUnsupportedArguments": "此设置需要目前尚无法配置的命令参数。请选择其他配置。"
+  "mcpUnsupportedArguments": "此设置需要目前尚无法配置的命令参数。请选择其他配置。",
+  "mcpUsedIn": "使用位置",
+  "mcpUsedInTitle": "{{name}}：使用位置",
+  "mcpUsageProfiles": "配置文件",
+  "mcpUsageRepositories": "仓库",
+  "mcpUsageTasks": "任务",
+  "mcpUsageSessions": "会话",
+  "mcpUnnamedOwner": "未命名的所有者",
+  "mcpOwnerUnavailable": "此目标不可用。请返回目录或选择可访问的工作区。",
+  "mcpUsageStale": "无法刷新使用情况。这些条目可能已过时。请重试后再打开所有者。",
+  "mcpUsageEmpty": "没有您可查看的已保存选择。",
+  "mcpUsageLoadMore": "加载更多",
+  "mcpUsageDescription": "您有权访问的已保存选择。继承的使用情况和连接状态显示在会话中。",
+  "mcpManageCatalog": "管理工作区目录",
+  "mcpLegacyRecoveryDescription": "尚未确认此工作区的旧配置导入。现有的全局配置文件设置仍可能生效。工作区选择和全局旧设置分别保存。",
+  "mcpLegacyRecovery": "全局配置文件的旧配置"
 }

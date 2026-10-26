@@ -1,8 +1,13 @@
 import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, render, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { i18n } from "@/lib/i18n";
-import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type ClarificationRequestMetadata,
+  type Message,
+} from "@/lib/types/http";
 import { ClarificationPanelSection } from "./clarification-panel-section";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
 
@@ -11,7 +16,14 @@ vi.mock("@/lib/config", () => ({
 }));
 
 const mockUpdateMessage = vi.fn();
+const imageMocks = vi.hoisted(() => ({ fetch: vi.fn() }));
+vi.mock("@/lib/api/domains/question-image-api", () => ({
+  fetchQuestionImage: imageMocks.fetch,
+  questionImageErrorCode: () => "unavailable",
+}));
 vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ auth: { mode: "none", authenticated: true, user: null } }),
   useAppStoreApi: () => ({
     getState: () => ({ updateMessage: mockUpdateMessage }),
   }),
@@ -76,6 +88,7 @@ function renderSection(pending: boolean, messages: Message[], maxHeightVh = 50) 
 
 beforeEach(() => {
   fetchMock.mockReset();
+  imageMocks.fetch.mockReset();
   mockUpdateMessage.mockReset();
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
@@ -83,6 +96,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup();
+  vi.unstubAllGlobals();
   // Restoring the locale is load-bearing: changeLanguage mutates the shared
   // instance vitest.setup.ts initializes, so leaving it on pseudo would leak
   // into every test that runs after this file.
@@ -94,6 +108,74 @@ const OPTION_TESTID = "clarification-option";
 const CONTAINER_TESTID = "clarification-overlay-container";
 const QUESTION_COUNT_TESTID = "clarification-question-count";
 const SUBMITTING_STATUS_TESTID = "clarification-submitting-status";
+
+describe("ClarificationPanelSection — image lifecycle", () => {
+  it("cancels hidden question and choice reads while preserving the answer draft", async () => {
+    const images = [1, 2, 3, 4].map((id) => ({
+      id: `image${id}`,
+      path: `${id}.png`,
+      alt: `Preview ${id}`,
+    }));
+    const message = clarMessage({
+      pendingId: "images",
+      id: "m1",
+      questionId: "q1",
+      index: 0,
+      total: 1,
+    });
+    const metadata = message.metadata as ClarificationRequestMetadata;
+    metadata.question.images = images.slice(0, 2);
+    metadata.question.options = images.slice(2).map((image) => ({
+      option_id: image.id,
+      label: image.alt,
+      description: "",
+      images: [image],
+    }));
+    const pending: { signal: AbortSignal; resolve: (blob: Blob) => void }[] = [];
+    imageMocks.fetch.mockImplementation(
+      (_pending, _question, _image, signal: AbortSignal) =>
+        new Promise<Blob>((resolve) => pending.push({ signal, resolve })),
+    );
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:preview"),
+      revokeObjectURL: vi.fn(),
+    });
+    const { unmount, onResolved } = renderSection(true, [message]);
+    try {
+      await waitFor(() => expect(imageMocks.fetch).toHaveBeenCalledTimes(2));
+      fireEvent.change(screen.getByTestId("clarification-input"), {
+        target: { value: "Keep this answer draft." },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Collapse clarification" }));
+      expect(pending.every(({ signal }) => signal.aborted)).toBe(true);
+      await act(async () => pending.forEach(({ resolve }) => resolve(new Blob(["late"]))));
+      expect(imageMocks.fetch).toHaveBeenCalledTimes(2);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(onResolved).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand clarification" }));
+      expect((screen.getByTestId("clarification-input") as HTMLTextAreaElement).value).toBe(
+        "Keep this answer draft.",
+      );
+      await waitFor(() => expect(imageMocks.fetch).toHaveBeenCalledTimes(4));
+      await act(async () =>
+        pending.slice(2).forEach(({ resolve }) => resolve(new Blob(["fresh"]))),
+      );
+      await waitFor(() => expect(imageMocks.fetch).toHaveBeenCalledTimes(6));
+      await act(async () =>
+        pending.slice(4).forEach(({ resolve }) => resolve(new Blob(["choice"]))),
+      );
+      expect(screen.getAllByRole("img")).toHaveLength(4);
+      fireEvent.click(screen.getByRole("button", { name: "Collapse clarification" }));
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(4);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      await act(async () => pending.forEach(({ resolve }) => resolve(new Blob(["cleanup"]))));
+    }
+  });
+});
 
 describe("ClarificationPanelSection — collapse affordance", () => {
   it("keeps the expanded question controls in one header row", () => {

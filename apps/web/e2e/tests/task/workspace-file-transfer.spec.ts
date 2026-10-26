@@ -138,6 +138,8 @@ test.describe("Workspace file transfer", () => {
     await dialog.getByRole("button", { name: "Upload" }).click();
     await uploaded;
 
+    await expect(session.changesFileRow("taken-1.txt")).toBeVisible();
+    await session.clickTab("Files");
     // Keep both is the default, so the original survives beside the new copy.
     await expect(session.fileTreeNode("taken-1.txt")).toBeVisible();
     await expect(session.fileTreeNode("taken.txt")).toBeVisible();
