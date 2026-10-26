@@ -3,12 +3,17 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 var ErrSandboxProviderUnavailable = errors.New("plugins: sandbox provider is unavailable")
+
+// ErrSandboxHostUnsupported is a provider's typed refusal of the host. It wraps
+// ErrSandboxProviderUnavailable so callers that only test for that class behave as before.
+var ErrSandboxHostUnsupported = fmt.Errorf("%w: host is unsupported", ErrSandboxProviderUnavailable)
 
 // SetSandboxProvidersEnabled applies the restart-required feature gate at startup.
 func (s *Service) SetSandboxProvidersEnabled(enabled bool) {

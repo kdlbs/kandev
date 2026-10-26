@@ -44,13 +44,17 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 	if previous != nil {
 		restartVersion = previous.Version
 	}
-	return AttemptSnapshot{RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
+	return AttemptSnapshot{OwnershipScope: request.OwnershipScope, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
 		SessionID: request.SessionID, ExecutionID: request.ExecutionID, WorkDir: request.WorkDir, Resolved: resolved, Grants: grants, Ceiling: ceiling,
 		Launch: request.Launch.Clone(), Provider: request.Provider, CreatedAt: time.Now().UTC()}, nil
 }
 
+func validOwnershipScope(scope string) bool {
+	return scope == "" || scope == OwnershipKernelContainer || scope == OwnershipProcessTree
+}
+
 func validAttemptCapture(request CaptureRequest) bool {
-	return request.Launch != nil && request.Launch.Validate() == nil && request.Resolved != nil && request.Resolved.Revision != nil && request.ExecutionID != "" && len(request.ExecutionID) <= 128
+	return validOwnershipScope(request.OwnershipScope) && request.Launch != nil && request.Launch.Validate() == nil && request.Resolved != nil && request.Resolved.Revision != nil && request.ExecutionID != "" && len(request.ExecutionID) <= 128
 }
 
 func validAttemptProvider(provider AttemptProvider, resolved *Resolved, launch *contract.Launch) bool {

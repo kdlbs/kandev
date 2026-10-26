@@ -809,7 +809,7 @@ Wrapped ACP probes require an authenticated agentctl control connection. Agentct
 
 SSH native terminal passthrough does not yet carry wrapper settings. Kandev refuses a wrapped SSH terminal launch before starting the remote agent. Local native terminal wrapping and compatible remote ACP execution remain supported.
 
-Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Structured sandbox policies are experimental and disabled by default. Their provider installation checks do not prove that an agent is confined.
+Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Structured sandbox policies are experimental and disabled by default. Their provider installation checks do not prove that an agent is confined. On macOS (Apple silicon), a provider that supports the host launches the agent under Seatbelt and owns its process tree rather than a kernel container. Such sessions have no approval prompts or enforcement report, native terminals and utility agents are refused, and a host where the Seatbelt check fails is refused with `sandbox_host_unsupported`.
 
 When an operator enables structured policies, use an authenticated administrator account:
 

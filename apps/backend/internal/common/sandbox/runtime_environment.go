@@ -3,6 +3,7 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -14,6 +15,13 @@ type RuntimeDirectories struct {
 	Temp   string `json:"temp"`
 }
 
+// EffectiveEnvironmentValue reports whether an approved key's value reaches the
+// child. On darwin an empty value is treated as absent so credentials never
+// travel as blank strings.
+func EffectiveEnvironmentValue(value string) bool {
+	return value != "" || runtime.GOOS != hostDarwin
+}
+
 func IsolatedEnvironment(final map[string]string, allowed []string, directories RuntimeDirectories) ([]string, error) {
 	keys, err := canonicalEnvironmentKeys(allowed)
 	if err != nil {
@@ -22,7 +30,7 @@ func IsolatedEnvironment(final map[string]string, allowed []string, directories 
 	keys = append(keys, environmentPath, "LANG", "LC_ALL", "TERM", "COLORTERM", "TZ")
 	values := make(map[string]string, len(keys)+4)
 	for _, key := range keys {
-		if value, exists := final[key]; exists {
+		if value, exists := final[key]; exists && EffectiveEnvironmentValue(value) {
 			values[key] = value
 		}
 	}
@@ -31,6 +39,9 @@ func IsolatedEnvironment(final map[string]string, allowed []string, directories 
 			return nil, ErrInvalidPolicy
 		}
 		values[key] = dir
+	}
+	if runtime.GOOS == hostDarwin {
+		values["GIT_CONFIG_NOSYSTEM"] = "1"
 	}
 	result := make([]string, 0, len(values))
 	for key, value := range values {
@@ -54,3 +65,5 @@ func validRuntimeDirectory(dir string) bool {
 	info, err := os.Stat(dir)
 	return err == nil && info.IsDir() && info.Mode().Perm()&0077 == 0
 }
+
+const hostDarwin = "darwin"

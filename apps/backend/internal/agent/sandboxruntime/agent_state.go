@@ -25,11 +25,17 @@ func (p *Prepared) prepareAgentState(req PrepareRequest, resolved *policy.Resolv
 }
 
 func (p *Prepared) childDirectoryReferences() []*pluginsdk.SandboxRuntimeReference {
-	if p.agentState == nil {
-		return nil
+	switch {
+	case p.agentState != nil && p.reserved != nil:
+		dirs := p.agentState.Directories()
+		dirs.Temp = p.reserved.TempDir()
+		return childDirectoryReferences(dirs)
+	case p.agentState != nil:
+		return childDirectoryReferences(p.agentState.Directories())
+	case p.reserved != nil:
+		return []*pluginsdk.SandboxRuntimeReference{{Key: "sandbox.child.tmp", Value: p.reserved.TempDir()}}
 	}
-	dirs := p.agentState.Directories()
-	return childDirectoryReferences(dirs)
+	return nil
 }
 
 func childDirectoryReferences(dirs contract.RuntimeDirectories) []*pluginsdk.SandboxRuntimeReference {

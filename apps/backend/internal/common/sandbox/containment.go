@@ -4,12 +4,17 @@ import (
 	"context"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"os/exec"
+	"runtime"
 )
 
 // ConfigureContainment returns a lease which must remain open through Start.
-// Ordinary launches do not need kernel sandbox containment.
+// Ordinary launches do not need kernel sandbox containment. On darwin the
+// owned process group replaces the kernel container, so there is nothing to configure.
 func ConfigureContainment(cmd *exec.Cmd, launch *Launch) (func(), error) {
 	if launch == nil {
+		return func() {}, nil
+	}
+	if runtime.GOOS == hostDarwin {
 		return func() {}, nil
 	}
 	file, err := launch.Containment.Configure(cmd)

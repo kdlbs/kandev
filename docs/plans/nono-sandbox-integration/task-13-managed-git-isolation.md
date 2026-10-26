@@ -42,7 +42,7 @@ system_design:
   - ../../specs/agents/system-design/managed-git-repository-code-isolation.md
 ---
 
-# Task 11: Isolate managed Git from repository-supplied code
+# Task 13: Isolate managed Git from repository-supplied code
 
 ## Summary
 

@@ -42,4 +42,6 @@ type ExecutionSandboxSnapshot struct {
 	SelectionSource   string `json:"selection_source"`
 	CeilingRevisionID string `json:"ceiling_revision_id"`
 	CeilingDigest     string `json:"ceiling_digest"`
+	// OwnershipScope is read-only; an absent value means kernel_container.
+	OwnershipScope string `json:"ownership_scope,omitempty"`
 }

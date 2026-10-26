@@ -4,6 +4,7 @@ system: plugins
 created: 2026-10-22
 requirements:
   - REQ-PLUGINS-SANDBOX-001
+  - REQ-PLUGINS-SANDBOX-002
 ---
 
 # Sandbox provider capability system design
@@ -126,3 +127,13 @@ The optional `egress_proxy` capability supplies a core-owned CONNECT relay for o
 A provider can bind the reserved `sandbox.egress.endpoint` reference only into an existing empty JSON string in a private artifact. Core supplies the runtime address after compilation. The provider does not receive it in compilation requests or place it in public projections. Basic command wrapping does not use this capability.
 
 Pinned Nono 0.80.0 requires this capability whenever network grants exist. Its plain `allow_domain` input removes port suffixes. The provider uses its verified `network.upstream_proxy` setting to delegate exact destination enforcement to core. Its child remains restricted to Nono's local proxy. The callback listener uses a distinct port outside all granted network ports, and both direct and proxied callback access must fail in real-runtime tests.
+
+## Per-host declaration and darwin provider
+
+REQ-PLUGINS-SANDBOX-002 maps here. `DescribeSandboxProvider` already receives the host OS and architecture, so the per-host declaration is the description returned for that host. A host the provider does not support gets the typed error `host_unsupported`, encoded as gRPC `FailedPrecondition` with the exact message `host_unsupported`; `pluginsdk` exports a constructor and a matcher, and core maps a match to `sandbox_host_unsupported` when the core host is darwin (the match is evaluated in `invokeSandboxProvider`, which returns the typed sentinel `ErrSandboxHostUnsupported` (which wraps `ErrSandboxProviderUnavailable`) for a match while every other error stays the existing opaque `ErrSandboxProviderUnavailable`), while any other error, and any answer on a non-darwin core host, keeps its existing handling.
+
+No proto field is added. Evidence sources and limitations use the existing `evidence_schemas` and `limitations` fields.
+
+Core's rule splits in two. Provider-declared facts (evidence schemas, limitations, supported host) are compared as declared sets and core keeps no provider-ID branches for them. Host preparation that core owns (the isolated environment, per-attempt TMPDIR, process ownership by agentctl, the Seatbelt probe, the absence of an approval listener, and the report shape for a darwin attempt) is keyed by the host OS and recorded as the attempt's `ownership_scope`, because core owns the host. Linux keeps refusing a description without an approval wire; a darwin description without one is admitted and opens no channel. The refusal of a native terminal transport is core-owned and host-keyed.
+
+The Nono plugin returns a description for linux/amd64 and darwin/arm64 only. Each pair names its own packaged runtime artifact path and SHA-256 in `runtime_artifact`. Core verifies and copies it per attempt as defined above. No provider-specific executable name or host installation path is compiled into core, and the provider performs no install-root lookup. The darwin profile compiler follows [macOS host support](../../agents/system-design/sandbox-macos-support.md). The provider work lives in the dedicated Nono provider repository and is linked to the Kandev change in both directions; branch and fork details are in the plan.

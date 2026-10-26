@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"time"
 )
@@ -29,7 +30,12 @@ func (s *Service) CheckAvailability(ctx context.Context, request PreviewContext)
 	if preview.Resolved == nil {
 		return &Availability{Blocker: "sandbox_policy_not_selected"}, nil
 	}
-	if s.availabilityCheck == nil || s.availabilityCheck(ctx, preview.Resolved) != nil || ctx.Err() != nil {
+	if s.availabilityCheck == nil {
+		return &Availability{Blocker: "sandbox_runtime_unavailable"}, nil
+	}
+	if err = s.availabilityCheck(ctx, preview.Resolved); errors.Is(err, ErrHostUnsupported) {
+		return &Availability{Blocker: ErrHostUnsupported.Error()}, nil
+	} else if err != nil || ctx.Err() != nil {
 		return &Availability{Blocker: "sandbox_runtime_unavailable"}, nil
 	}
 	current, err := s.PreviewSelection(ctx, request)

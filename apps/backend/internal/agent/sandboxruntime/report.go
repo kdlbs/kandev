@@ -15,6 +15,9 @@ func (m *Manager) RefreshReport(ctx context.Context, orgID, attemptID string) (*
 	if err != nil {
 		return m.policies.ReadCapturedReport(ctx, orgID, attemptID)
 	}
+	if prepared.processTree() {
+		return nil, policy.ErrNotFound
+	}
 	prepared.mu.Lock()
 	defer prepared.mu.Unlock()
 	if prepared.closed {
@@ -24,6 +27,9 @@ func (m *Manager) RefreshReport(ctx context.Context, orgID, attemptID string) (*
 }
 
 func (p *Prepared) captureReport(ctx context.Context) (*policy.Report, error) {
+	if p.processTree() {
+		return nil, nil
+	}
 	previous, err := p.manager.policies.ReadCapturedReport(ctx, p.orgID, p.launch.AttemptID)
 	if err != nil && !errors.Is(err, policy.ErrNotFound) {
 		return nil, err

@@ -176,6 +176,7 @@ Remote sandbox execution, Windows Nono support, universal confinement against ho
 Out of scope for the guarded surface: the table is not applied to sessions without a task guard; own-task launch policy, REST and external MCP paths, and mixed-version agentctl keep their existing contracts.
 Installation, login, repository setup, user shells, and external MCP servers remain separate execution contracts.
 Nono runtime approval support outside the verified Linux capability path remains conditional on dedicated evidence.
+macOS support is specified in [its own requirements](sandbox-macos-support.md).
 
 ## Implementation plans
 

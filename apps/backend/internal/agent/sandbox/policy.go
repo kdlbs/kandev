@@ -16,6 +16,10 @@ var (
 	ErrConflict   = errors.New("sandbox policy revision changed")
 	ErrNotFound   = errors.New("sandbox policy was not found")
 	ErrIneligible = errors.New("sandbox policy is not eligible for this executor")
+	// ErrHostUnsupported and ErrTransportUnsupported are typed refusals whose
+	// text is the stable code that logs and the Settings blocker carry.
+	ErrHostUnsupported      = errors.New("sandbox_host_unsupported")
+	ErrTransportUnsupported = errors.New("sandbox_transport_unsupported")
 )
 
 type Source struct {

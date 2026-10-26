@@ -12,13 +12,16 @@ requirements:
   - REQ-AGENTS-SANDBOX-008
   - REQ-AGENTS-SANDBOX-009
   - REQ-AGENTS-SANDBOX-010
+  - REQ-AGENTS-SANDBOX-011
   - REQ-PLUGINS-SANDBOX-001
+  - REQ-PLUGINS-SANDBOX-002
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005
   - REQ-AGENTS-GITISOLATION-001
   - REQ-AGENTS-GITISOLATION-002
   - REQ-AGENTS-GITISOLATION-003
 system_design:
   - ../../specs/agents/system-design/sandbox-policies.md
+  - ../../specs/agents/system-design/sandbox-macos-support.md
   - ../../specs/plugins/system-design/sandbox-provider-capability.md
   - ../../specs/tasks/system-design/bootstrap-attempt-recovery.md
   - ../../specs/agents/system-design/managed-git-repository-code-isolation.md
@@ -96,7 +99,7 @@ New snapshot/projection types and tests are proposed deliverables. Provider meta
 | Nono native Pi terminal | Kandev outer PTY plus Nono supervisor | Input, resize, signals, resume | Refuse unsupported transport |
 | Nono Linux file approval | Verified webhook protocol plus isolated callback | Real grant/deny/deadline and forgery controls | Deny |
 | Command/network endpoint approval | Not initially advertised | Separate actual runtime evidence | Explicit unsupported denial |
-| macOS static policy | Conditional future activation | Actual Seatbelt acceptance | Unsupported until tested |
+| macOS static policy | Task 14, darwin/arm64 Local/Worktree ACP | Probe plus real Seatbelt canaries with controls | Unsupported until probe passes |
 | Remote/Windows sandbox | Excluded from v1 | No host-only inference | Unsupported |
 
 ## UI preview
@@ -150,6 +153,11 @@ Each criterion listed in work-order frontmatter needs a behavioral assertion, no
 | SANDBOX-008.1-2, .4, .8 | `execution_snapshot_test.go`: `TestExecutionSnapshot`, `TestExecutionEvidence`. `execution-status.test.ts`: stale/foreign events, reconnect, legacy unknown, redaction, current/next separation |
 | SANDBOX-008.3, .5-7 | `session-execution-indicator.test.tsx`, `session-execution-details.test.tsx`: truthful icons, protection scope, capability states, keyboard, touch and tab event isolation |
 | GITISOLATION-001.1-15, 002.1-9, 003.1-4 | Evidence is owned by the [managed Git plan](../managed-git-repository-code-isolation/plan.md): `subproc/git_policy_test.go`, hooks persistence and propagation tests, repository settings Playwright on desktop and mobile |
+| SANDBOX-011.1-2, .10 | `identity_test.go`, `sandbox_runtime_test.go`, `sandbox_availability_test.go`: probe outcomes (logged step, no exposed reason), no pending state, admission before `previousAttempt` and Prepare with no attempt and no previous-attempt change, `startSandboxInteractive` refusal, `prepareUtility` darwin refusal, provider `host_unsupported` sentinel wrapping `ErrSandboxProviderUnavailable` with darwin-only mapping, Linux non-regression |
+| SANDBOX-011.3-4, .9, .12-13 | `common/sandbox/darwin_environment_test.go`: fresh root per attempt, reserve/materialize split (Linux order unchanged, failed preparation removes the reserved root), TMPDIR/child tmp agreement, `GIT_CONFIG_NOSYSTEM`, no keychain grant, agent_state lock, transport refusal |
+| SANDBOX-011.5 | `sandboxruntime` darwin tests and the darwin group reader tests: wrapper-as-child bind, group scan empty / surviving member at the 5 s bound / read error, idempotent `Close`, restarted agentctl (`recovery_required` while supervisor live, stopped when exited and empty) |
+| SANDBOX-011.6-8, .14 | `agent/sandbox` `RecordApproval` refusal and no report row for a process-tree attempt (`captureReport`, `RefreshReport` and `Close` skip it; Linux unchanged), status tests; `session-execution-details.test.tsx` for darwin states and seven locales |
+| SANDBOX-011.11, PLUGINS-SANDBOX-002.1-5 | `plugins/sandbox_darwin_conformance_test.go` on a real Mac with controls, provider repository suite, `acceptance.md` record |
 | TASK-LAUNCH-FAILURE-RECOVERY-005.1-5 | `bootstrap_attempt_recovery_test.go`: `TestBootstrapAttempt`, pending-launch controls, same-session retry, sibling isolation, exact queue dispatch |
 
 ## E2E tests
@@ -178,11 +186,12 @@ No broad suite or generic review work order is added.
 - [ ] [Task 11: Enforce the MCP surface for guarded sessions](task-11-guarded-session-surface.md)
 - [ ] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
 - [ ] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
-- [ ] [Task 11: Authenticate ordinary-session MCP and relay the Git broker](task-11-session-token-broker-relay.md)
-- [ ] [Task 11: Isolate managed Git from repository-supplied code](task-11-managed-git-isolation.md)
+- [ ] [Task 12: Authenticate ordinary-session MCP and relay the Git broker](task-12-session-token-broker-relay.md)
+- [ ] [Task 13: Isolate managed Git from repository-supplied code](task-13-managed-git-isolation.md)
+- [x] [Task 14: Support sandbox policies and Nono on macOS](task-14-macos-support.md)
 
-Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09.
-Task 11 has no dependency on the others and may run at any point. Task IDs remain stable after adding Task 10 and Task 11. Dependency lists state hard prerequisites, not permission to delegate.
+Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09, 14.
+Tasks 11, 12 and 13 have no dependency on the others and may run at any point. Task IDs remain stable after adding Tasks 10 to 14. Dependency lists state hard prerequisites, not permission to delegate.
 The user retains model and implementation control in this primary session.
 
 ## Delivery
@@ -199,7 +208,7 @@ Use `gh pr create --draft --base main --body-file <prepared-file>` after authori
 Use the repository PR template. Identify #4538 as the merged prerequisite and distinguish host and plugin deliverables.
 Never commit or push to the former parent branch. Do not merge the follow-up PR.
 
-Task 11 is the one exception. It ships as a PR on `nova28/kandev` with base `sandbox/nono-plus`; the operator lifted the embargo for it. Push with `git push fork HEAD:refs/heads/<branch>` and open it with `gh pr create --repo nova28/kandev --base sandbox/nono-plus`. Never open a PR on `kdlbs/kandev`.
+Tasks 11 to 14 build on this plan's branch and ship together in one follow-up PR that identifies #4769 as its base.
 
 ## Verification results
 
@@ -218,7 +227,7 @@ It did not modify runtime source or publish a GitHub check.
 The STE check retains advisory passive-voice findings and does not claim formal dictionary compliance.
 The original nine implementation work orders remained pending at that checkpoint.
 
-Managed Git amendment on 2026-10-26: Task 11 adds an eleventh work order, tracked through the managed Git plan.
+Amendment on 2026-10-26: Tasks 11 to 14 add four work orders (guarded session surface, session token and broker relay, managed Git isolation tracked through the managed Git plan, macOS support).
 
 Execution UI amendment on 2026-10-23: ten work orders now remain pending.
 Amendment validation passed:

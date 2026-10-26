@@ -22,6 +22,7 @@ describe("sandbox diagnostic messages", () => {
       "agents:sandboxPolicyNotSelected",
     );
     expect(sandboxMessageKey("sandbox_operator_required")).toBe("agents:sandboxOperatorRequired");
+    expect(sandboxMessageKey("sandbox_host_unsupported")).toBe("agents:sandboxHostUnsupported");
     expect(sandboxMessageKey("secret=/private/key")).toBe(loadFailedKey);
     expect(sandboxMessageKey({ error: "secret" })).toBe(loadFailedKey);
   });

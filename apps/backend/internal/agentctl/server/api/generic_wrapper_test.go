@@ -87,9 +87,16 @@ func TestGenericWrapperCapabilityMatchesInstanceAndControl(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &identity))
 			require.Contains(t, identity.Capabilities, launchwrapper.Capability)
-			if runtime.GOOS == "linux" {
+			switch runtime.GOOS {
+			case "linux":
 				require.Contains(t, identity.Capabilities, sandbox.LaunchCapability)
-			} else {
+			case "darwin":
+				if seatbeltHostProbe(t.Context()) == nil {
+					require.Contains(t, identity.Capabilities, sandbox.LaunchCapability)
+				} else {
+					require.NotContains(t, identity.Capabilities, sandbox.LaunchCapability)
+				}
+			default:
 				require.NotContains(t, identity.Capabilities, sandbox.LaunchCapability)
 			}
 			require.Contains(t, identity.Capabilities, subproc.ManagedGitPolicyCapability)

@@ -43,7 +43,19 @@ func (s ExecutionSandboxSnapshot) valid() bool {
 	default:
 		return false
 	}
+	return validOwnershipScope(s.OwnershipScope) && s.validDigests()
+}
+
+func (s ExecutionSandboxSnapshot) validDigests() bool {
 	return snapshotDigest(s.PackageDigest) && snapshotDigest(s.RuntimeDigest) && snapshotDigest(s.PolicyDigest) && snapshotDigest(s.CeilingDigest)
+}
+
+func validOwnershipScope(scope string) bool {
+	switch scope {
+	case "", "kernel_container", "process_tree":
+		return true
+	}
+	return false
 }
 
 func snapshotDigest(value string) bool {

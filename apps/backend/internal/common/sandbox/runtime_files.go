@@ -33,32 +33,100 @@ type RuntimeFiles struct {
 	closed      bool
 }
 
+// MaterializeRuntime reserves a fresh per-attempt root and renders into it.
 func MaterializeRuntime(ctx context.Context, base string, executable []byte, digest string, artifacts []RuntimeArtifact, values map[string]string) (*RuntimeFiles, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !validRuntimeDirectory(base) || len(executable) == 0 || len(executable) > 128<<20 || runtimeDigest(executable) != digest {
+	reserved, err := ReserveRuntimeRoot(base)
+	if err != nil {
+		return nil, err
+	}
+	files, err := reserved.Materialize(ctx, executable, digest, artifacts, values)
+	if err != nil {
+		return nil, errors.Join(err, reserved.Close())
+	}
+	return files, nil
+}
+
+// ReservedRoot is a created per-attempt root that has not been rendered yet. It
+// owns the root's removal until Materialize hands the root to RuntimeFiles.
+type ReservedRoot struct {
+	mu        sync.Mutex
+	root      string
+	identity  os.FileInfo
+	committed bool
+	closed    bool
+}
+
+// ReserveRuntimeRoot creates the owner-only attempt root so that paths inside it
+// are known before the provider compiles a policy that names them.
+func ReserveRuntimeRoot(base string) (*ReservedRoot, error) {
+	if !validRuntimeDirectory(base) {
+		return nil, ErrInvalidPolicy
+	}
+	root, err := os.MkdirTemp(base, "attempt-")
+	if err != nil {
+		return nil, ErrInvalidPolicy
+	}
+	identity, err := os.Stat(root)
+	if err != nil {
+		_ = os.RemoveAll(root)
+		return nil, ErrInvalidPolicy
+	}
+	return &ReservedRoot{root: root, identity: identity}, nil
+}
+
+func (r *ReservedRoot) Root() string { return r.root }
+
+// TempDir is the child's private temporary directory inside the reserved root.
+func (r *ReservedRoot) TempDir() string { return filepath.Join(r.root, "tmp") }
+
+// Materialize renders the runtime into the reserved root and commits ownership of it.
+func (r *ReservedRoot) Materialize(ctx context.Context, executable []byte, digest string, artifacts []RuntimeArtifact, values map[string]string) (*RuntimeFiles, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.committed {
+		return nil, ErrInvalidPolicy
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(executable) == 0 || len(executable) > 128<<20 || runtimeDigest(executable) != digest {
 		return nil, ErrInvalidPolicy
 	}
 	rendered, err := renderRuntimeArtifacts(artifacts, values)
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.MkdirTemp(base, "attempt-")
-	if err != nil {
-		return nil, ErrInvalidPolicy
-	}
-	files := &RuntimeFiles{Root: root, ownedRoot: root, Executable: filepath.Join(root, "runtime"), Artifacts: map[string]string{}, Digests: map[string]string{}}
-	files.identity, err = os.Stat(root)
-	if err != nil {
-		_ = os.RemoveAll(root)
-		return nil, ErrInvalidPolicy
-	}
+	files := &RuntimeFiles{Root: r.root, ownedRoot: r.root, identity: r.identity, Executable: filepath.Join(r.root, "runtime"), Artifacts: map[string]string{}, Digests: map[string]string{}}
 	if err = files.write(ctx, executable, rendered); err != nil {
-		_ = files.Close()
-		return nil, err
+		return nil, errors.Join(err, files.Close())
 	}
+	r.committed = true
 	return files, nil
+}
+
+// Close removes a root that was never committed. It is idempotent.
+func (r *ReservedRoot) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.committed {
+		return nil
+	}
+	current, err := os.Lstat(r.root)
+	if errors.Is(err, os.ErrNotExist) {
+		r.closed = true
+		return nil
+	}
+	if err != nil || !os.SameFile(current, r.identity) || !current.IsDir() {
+		return ErrInvalidPolicy
+	}
+	if err = os.RemoveAll(r.root); err != nil {
+		return err
+	}
+	r.closed = true
+	return nil
 }
 
 func (f *RuntimeFiles) Close() error {

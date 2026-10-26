@@ -22,6 +22,18 @@ type sandboxResponse interface {
 	GetContext() *pluginsdk.SandboxResponseContext
 }
 
+// sandboxCallFailure maps a provider call outcome to the typed refusal, or nil
+// when the call succeeded within its deadline.
+func sandboxCallFailure(ctx context.Context, err error) error {
+	if pluginsdk.IsSandboxHostUnsupported(err) && ctx.Err() == nil {
+		return ErrSandboxHostUnsupported
+	}
+	if err != nil || ctx.Err() != nil {
+		return errors.Join(ErrSandboxProviderUnavailable, ctx.Err())
+	}
+	return nil
+}
+
 func invokeSandboxProvider[Q sandboxRequest, R sandboxResponse](
 	ctx context.Context, service *Service, binding SandboxProviderBinding, request Q, timeout time.Duration,
 	call func(*pluginsdk.RemotePlugin, context.Context, Q) (R, error),
@@ -57,8 +69,8 @@ func invokeSandboxProvider[Q sandboxRequest, R sandboxResponse](
 	deadline, _ := ctx.Deadline()
 	frozen.GetContext().DeadlineUnixMs = deadline.UnixMilli()
 	reply, err := call(remote, ctx, frozen)
-	if err != nil || ctx.Err() != nil {
-		return empty, errors.Join(ErrSandboxProviderUnavailable, ctx.Err())
+	if failure := sandboxCallFailure(ctx, err); failure != nil {
+		return empty, failure
 	}
 	if !validSandboxMessage(reply) ||
 		!validSandboxResponseContext(reply.GetContext(), frozen.GetContext()) {

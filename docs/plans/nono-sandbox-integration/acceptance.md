@@ -257,3 +257,49 @@ The isolated authenticated instance at `http://100.101.37.39:57397` uses the pac
 The failure exposed two generic integration defects. Child-state and approval-channel allocation rejected the valid empty organization scope used when organizations are disabled. Task-free discovery also tried to allocate a task MCP relay without a session. Regression tests reproduce both failures. Core now preserves organization separation, omits the MCP grant only from task-free runtime grants, and retains the saved policy intent. Task sessions still refuse a missing scoped MCP forwarder. No provider-specific core rule was added.
 
 `/tmp/kandev-nono-empty-org-channel-red.log` and `/tmp/kandev-nono-utility-mcp-red.log` record the failing cases. `/tmp/kandev-nono-discovery-regression.log` records passing race checks for the complete common sandbox, policy, and sandbox runtime packages, including the packaged provider. Specification catalog and lint pass (`/tmp/kandev-nono-discovery-spec.log`). These checks do not replace actual managed-agent acceptance. The retained test instance still runs the earlier build.
+
+
+## macOS (darwin/arm64) support (2026-10-26)
+
+Requirement REQ-AGENTS-SANDBOX-011 and REQ-PLUGINS-SANDBOX-002, work order `task-14-macos-support.md`. Host: macOS 27.0.1 (arm64), Nono 0.80.0 (Seatbelt). Provider branch: `nova28/kandev-plugin-nono` `feature/macos-support-for-sa-f5q`.
+
+### Conformance results (real run)
+
+Both suites ran against the real Seatbelt sandbox. Every canary has an unsandboxed control that must succeed within 10 seconds. Exit 0 is allowed, 10 is denied (EPERM/EACCES), 11 is an error. The Kandev suite is `TestSandboxDarwinConformance` in `apps/backend/internal/plugins` (AC-AGENTS-SANDBOX-011.11) and launches through the core launch path; it needs `KANDEV_SANDBOX_CONFORMANCE_PLUGIN` set to a packaged provider. The provider suite is `TestSandboxDarwinConformance` in the provider repository. Both print the identical table below. The negative path (missing variable or package) fails the Kandev suite rather than skipping.
+
+```
+other_home_directory             control=allowed sandbox=denied exit=10
+other_task_worktree              control=allowed sandbox=denied exit=10
+tmp_write                        control=allowed sandbox=denied exit=10
+ssh_listing                      control=allowed sandbox=denied exit=10
+ssh_fixture_listing              control=allowed sandbox=denied exit=10
+browser_data_listing             skipped (no browser data on the host)
+browser_data_fixture_listing     control=allowed sandbox=denied exit=10
+keychain_item                    control=allowed sandbox=denied exit=10
+write_outside_granted            control=allowed sandbox=denied exit=10
+write_inside_work                control=allowed sandbox=allowed exit=0
+direct_loopback_egress           control=allowed sandbox=denied exit=10
+arbitrary_loopback_port          control=allowed sandbox=denied exit=10
+mcp_relay_route                  control=allowed sandbox=allowed exit=0
+acp_stdio_round_trip             control=allowed sandbox=allowed non_json_lines=0
+acp_stdio_during_denial          control=allowed sandbox=allowed non_json_lines=0
+ownership                        sandbox=allowed child_group_equals_wrapper=true
+```
+
+`browser_data_listing` skipped because this host has no browser profile directory; the fixture variant under a marker-named root in the user's home covers the same denial and is denied.
+
+### Decisions
+
+- Option that removes Nono's default temp groups: profile `groups.exclude` with `system_write_macos`, which grants `/private/tmp`, `/tmp`, `/private/var/folders`, `/var/folders`, `/dev` and `$TMPDIR`. Also excluded: `user_caches_macos`, `user_tools`, `homebrew_macos`, `go_runtime_macos`, `dangerous_commands`, `dangerous_commands_macos`. `system_read_macos` is kept because executables cannot start without it; the required `deny_*` groups stay. A mutation run that removes only the `system_write_macos` exclusion turns `tmp_write` to `allowed`, and the suite fails, so the exclusion is the exact option.
+- `active_status_evidence: unsupported`. The darwin description declares no status runtime source, so execution status stays `unknown`; it is never reported `active` from this provider.
+- Seatbelt probe grants: reader `/bin/cat`; exec of `/bin/cat`; read of `/` (literal), `/usr/lib`, `/System`, `/private/var/db/dyld`, `/bin/cat` and the granted file. A denied read gives EPERM. The probe gates `sandbox-launch.v1`; an unsupported host is refused at admission with `sandbox_host_unsupported`.
+- Settings availability blocker precedence: host unsupported, then missing provider, then runtime unavailable, then policy errors. The first applicable blocker is shown.
+- Close while the supervisor is live: Close is refused with a conflict until the process group is empty; artifacts stay until then (`group_scan`).
+- Native terminals are refused with `sandbox_transport_unsupported`; utility preparation is refused on darwin.
+- Child directories: without `agent_state` only `sandbox.child.tmp` is bound; with `agent_state` all four directories are bound and tmp is separate from home.
+- Pinned darwin runtime: archive sha256 `ae824167b3d90531b830429ba92b7781379b1c2d79f9b11fdd88b0fd267e4e32`, binary sha256 `e95479a2ef64b19e3245a90a60024bb248e96e8ec234ffeb25e062ddd45b1417` (`runtime-lock.json`, `runtimeDigestDarwin`).
+- Not claimed: approvals, reports and kernel-container ownership on macOS. Attempts report `ownership_scope=process_tree`.
+
+### Package test receipts (macOS 27.0.1)
+
+`internal/agent/sandbox`, `sandboxruntime`, `common/sandbox`, `common/processidentity`, `task/models`, `pkg/pluginsdk`, and the web `i18n:check`, `i18n:ratchet` and typecheck gates pass. `TestManagedBranchAttachmentConsumers` failed once in the 741 s whole-`backendapp` run under load and passes in isolation on this tree and on the merge-base. `TestSandboxDarwinConformance` fails by design on a darwin host when `KANDEV_SANDBOX_CONFORMANCE_PLUGIN` is not set, and passes with the packaged provider (table above).

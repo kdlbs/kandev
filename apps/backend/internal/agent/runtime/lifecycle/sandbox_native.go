@@ -3,12 +3,17 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	goruntime "runtime"
 	"time"
 
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
 )
+
+// sandboxHostOS is the core host OS; tests replace it.
+var sandboxHostOS = goruntime.GOOS
 
 type sandboxNativeReceipt interface {
 	SandboxStartReceipt(string) (*contract.StartReceipt, error)
@@ -24,6 +29,9 @@ func (m *Manager) startSandboxInteractive(ctx context.Context, execution *AgentE
 			return nil, err
 		}
 		return runner.Start(ctx, request)
+	}
+	if sandboxHostOS == "darwin" {
+		return nil, policy.ErrTransportUnsupported
 	}
 	ownership, ok := runner.(sandboxNativeOwner)
 	if !ok {

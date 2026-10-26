@@ -45,7 +45,7 @@ system_design:
   - ../../specs/agents/system-design/sandbox-policies.md
 ---
 
-# Task 11: Authenticate ordinary-session MCP and relay the Git broker
+# Task 12: Authenticate ordinary-session MCP and relay the Git broker
 
 ## Relationship to the sandbox private route
 

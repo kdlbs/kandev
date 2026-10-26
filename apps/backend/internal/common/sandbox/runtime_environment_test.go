@@ -3,6 +3,7 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,7 +19,11 @@ func TestSandboxFinalEnvironmentKeepsOnlyApprovedValuesAndOwnedRoots(t *testing.
 	values := map[string]string{"PATH": "/bin", "LANG": "C.UTF-8", "HOME": "/real/home", "XDG_CONFIG_HOME": "/real/config", "OPENAI_API_KEY": "approved-fixture", "OTHER_API_KEY": "private-fixture", "KANDEV_TOKEN": "control-fixture", "LD_PRELOAD": "/malicious/library"}
 	env, err := IsolatedEnvironment(values, []string{"OPENAI_API_KEY"}, dirs)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"PATH=/bin", "LANG=C.UTF-8", "OPENAI_API_KEY=approved-fixture", "HOME=" + dirs.Home, "XDG_CONFIG_HOME=" + dirs.Config, "XDG_STATE_HOME=" + dirs.State, "TMPDIR=" + dirs.Temp}, env)
+	expected := []string{"PATH=/bin", "LANG=C.UTF-8", "OPENAI_API_KEY=approved-fixture", "HOME=" + dirs.Home, "XDG_CONFIG_HOME=" + dirs.Config, "XDG_STATE_HOME=" + dirs.State, "TMPDIR=" + dirs.Temp}
+	if runtime.GOOS == "darwin" {
+		expected = append(expected, "GIT_CONFIG_NOSYSTEM=1")
+	}
+	require.ElementsMatch(t, expected, env)
 	require.Equal(t, "/real/home", values["HOME"])
 	require.NotContains(t, strings.Join(env, "\n"), "private-fixture")
 	require.NotContains(t, strings.Join(env, "\n"), "control-fixture")

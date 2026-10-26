@@ -23,6 +23,11 @@ func (c *Client) requireSandbox(ctx context.Context, launch *sandbox.Launch) err
 	return c.checkLaunchCapability(ctx, sandbox.LaunchCapability, ErrSandboxLaunchUnsupported)
 }
 
+// SandboxLaunchSupported reports whether the agentctl behind this client advertises sandbox launch.
+func (c *Client) SandboxLaunchSupported(ctx context.Context) error {
+	return c.checkLaunchCapability(ctx, sandbox.LaunchCapability, ErrSandboxLaunchUnsupported)
+}
+
 // ConfigureAgentWithSandbox sends a captured sandbox and complete environment atomically.
 func (c *Client) ConfigureAgentWithSandbox(ctx context.Context, command string, args []string, env map[string]string, continueCommand string, continueArgs []string, launch *sandbox.Launch, wrapper launchwrapper.Spec) error {
 	return c.configureAgent(ctx, command, args, env, continueCommand, continueArgs, true, launch, wrapper)

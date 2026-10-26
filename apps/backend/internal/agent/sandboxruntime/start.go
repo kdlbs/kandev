@@ -5,6 +5,7 @@ import (
 	"time"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
 )
 
@@ -41,6 +42,9 @@ func (p *Prepared) canRemoveArtifacts() error {
 		}
 		return nil
 	}
+	if p.processTree() {
+		return p.supervisorGroupEnded()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	return contract.RetireDescendants(ctx, p.launch, p.owner)
@@ -50,9 +54,19 @@ func (p *Prepared) canRemoveArtifacts() error {
 func (p *Prepared) ValidateCommand(arguments []string, environment map[string]string) error {
 	approved := make(map[string]string, len(p.launch.EnvironmentKeys))
 	for _, key := range p.launch.EnvironmentKeys {
-		if value, ok := environment[key]; ok {
+		if value, ok := environment[key]; ok && contract.EffectiveEnvironmentValue(value) {
 			approved[key] = value
 		}
 	}
 	return contract.ValidateOverrides(arguments, approved, p.constraints)
+}
+
+// supervisorGroupEnded proves the supervisor exited and nothing remains in its
+// process group. It only reads process state; agentctl owns stopping.
+func (p *Prepared) supervisorGroupEnded() error {
+	state, err := processidentity.Inspect(p.owner.Supervisor)
+	if err != nil || state != processidentity.StateExited {
+		return policy.ErrConflict
+	}
+	return awaitGroupEnded(context.Background(), p.owner.Supervisor.PID)
 }

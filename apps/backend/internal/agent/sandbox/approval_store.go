@@ -16,6 +16,9 @@ func (s *Service) RecordApproval(ctx context.Context, orgID, attemptID string, o
 	if err != nil {
 		return nil, err
 	}
+	if attempt.Snapshot.Scope() == OwnershipProcessTree {
+		return nil, ErrIneligible
+	}
 	if err = s.validateApprovalCapture(attempt, operation, sourceDigest, deadline); err != nil {
 		return nil, err
 	}

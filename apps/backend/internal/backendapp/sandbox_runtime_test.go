@@ -54,7 +54,7 @@ func TestSandboxBackendFactoryCapturesLocalExecutionAndRestart(t *testing.T) {
 	listed, err := providers.ListSandboxProviders(ctx)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
-	configureSandboxProviderCatalog(policies, providers)
+	configureSandboxProviderCatalog(cfg, policies, providers)
 	catalog, err := policies.ListProviders(ctx)
 	require.NoError(t, err)
 	require.Len(t, catalog, 1)

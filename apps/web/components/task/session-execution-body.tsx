@@ -65,6 +65,12 @@ function CapturedLaunch({ snapshot }: { snapshot: ExecutionSnapshot }) {
               <dd>{t(`agents:sandboxSource_${sandbox.selection_source}`)}</dd>
             </div>
             <div>
+              <dt className="text-muted-foreground">{t("agents:executionOwnership")}</dt>
+              <dd>
+                {t(`agents:executionOwnership_${sandbox.ownership_scope ?? "kernel_container"}`)}
+              </dd>
+            </div>
+            <div>
               <dt className="text-muted-foreground">{t("agents:executionCapturedCeiling")}</dt>
               <dd className="break-all font-mono">{sandbox.ceiling_digest}</dd>
             </div>
@@ -99,6 +105,7 @@ function useExecutionDetails({ sessionId }: { sessionId: string }) {
 export function SessionExecutionBody({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
   const { status, snapshot, observation, policies } = useExecutionDetails({ sessionId });
+  const processTree = snapshot?.sandbox?.ownership_scope === "process_tree";
   return (
     <>
       <div className="space-y-2">
@@ -141,10 +148,18 @@ export function SessionExecutionBody({ sessionId }: { sessionId: string }) {
         <NextPolicy policies={policies} snapshot={snapshot} />
       </ExecutionDetailSection>
       <ExecutionDetailSection title={t("agents:executionApprovals")}>
-        <SandboxApprovals sessionId={sessionId} />
+        {processTree ? (
+          <p>{t("agents:executionApprovalsNotSupported")}</p>
+        ) : (
+          <SandboxApprovals sessionId={sessionId} />
+        )}
       </ExecutionDetailSection>
       <ExecutionDetailSection title={t("agents:executionDenials")}>
-        <SandboxDenialReport sessionId={sessionId} />
+        {processTree ? (
+          <p>{t("agents:executionDenialsMacosUnavailable")}</p>
+        ) : (
+          <SandboxDenialReport sessionId={sessionId} />
+        )}
       </ExecutionDetailSection>
     </>
   );

@@ -19,11 +19,14 @@ import (
 // can be correctly refused by a newer backend that requires one it lacks.
 const sandboxSupportedOS = "linux"
 
-var SurvivalCapabilities = executionCapabilities()
+// SurvivalCapabilities is complete before the listener starts: darwin refreshes
+// it once from the host probe, so absence of sandbox-launch.v1 is the only
+// unsupported signal.
+var SurvivalCapabilities = executionCapabilities(runtime.GOOS, false)
 
-func executionCapabilities() []string {
+func executionCapabilities(goos string, hostProbePassed bool) []string {
 	capabilities := []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, SessionMCPTokenCapability, subproc.ManagedGitPolicyCapability}
-	if runtime.GOOS == sandboxSupportedOS {
+	if goos == sandboxSupportedOS || (goos == "darwin" && hostProbePassed) {
 		capabilities = append(capabilities, sandbox.LaunchCapability)
 	}
 	return capabilities

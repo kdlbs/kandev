@@ -9,7 +9,7 @@ import (
 
 func validStoredAttempt(attempt *Attempt, orgID, executionID string, generation uint64) bool {
 	snapshot := attempt.Snapshot
-	if snapshot.SchemaVersion != 1 || snapshot.OrgID != orgID || snapshot.ExecutionID != executionID || attempt.Version < 1 || attempt.UpdatedAt.IsZero() {
+	if snapshot.SchemaVersion != 1 || !validOwnershipScope(snapshot.OwnershipScope) || snapshot.OrgID != orgID || snapshot.ExecutionID != executionID || attempt.Version < 1 || attempt.UpdatedAt.IsZero() {
 		return false
 	}
 	if !slices.Contains([]string{AttemptPrepared, AttemptStarting, AttemptRunning, AttemptStopped, AttemptFailed, AttemptRecoveryRequired}, attempt.State) {
