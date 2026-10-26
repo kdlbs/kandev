@@ -7,12 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/sessionmcp"
 )
 
 const passthroughInputWritten = "written"
@@ -137,6 +140,7 @@ func (o *PassthroughOwner) Start(ctx context.Context, req types.PassthroughStart
 	if err != nil {
 		return o.finishStart(req.OperationID, digest, err)
 	}
+	startRequest.Env = withCodexSessionToken(startRequest.Command, startRequest.Env, m.cfg.SessionMCP)
 	_, startErr := o.runner.Start(ctx, startRequest)
 	return o.finishStart(req.OperationID, digest, startErr)
 }
@@ -208,4 +212,23 @@ func (o *PassthroughOwner) Lookup(operationID string) (types.PassthroughSnapshot
 		return o.snapshotLocked(), result.err
 	}
 	return result.snapshot, result.err
+}
+
+// withCodexSessionToken returns env with the Codex token variable set when the
+// command carries the Codex token override and this instance holds a token.
+// The variable is overwritten if the caller supplied one.
+func withCodexSessionToken(command []string, env map[string]string, token *config.SessionMCPToken) map[string]string {
+	if !slices.Contains(command, sessionmcp.CodexTokenArg) {
+		return env
+	}
+	headers := token.Headers()
+	if len(headers) == 0 {
+		return env
+	}
+	out := make(map[string]string, len(env)+1)
+	for k, v := range env {
+		out[k] = v
+	}
+	out[sessionmcp.CodexTokenEnv] = headers["Authorization"]
+	return out
 }

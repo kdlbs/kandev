@@ -1,7 +1,9 @@
 package runtimeflags
 
 import (
+	"os"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -625,5 +627,54 @@ func TestAgentSurvivalAvailabilityMatchesPlatformScope(t *testing.T) {
 	}
 	if reasonCode != "" {
 		t.Fatalf("reasonCode = %q, want empty when available", reasonCode)
+	}
+}
+
+// TestDefinitionsIncludeSessionMCPTokenMetadata pins the registration of the
+// per-session MCP token flag: off in every profile, restart-required, mutable
+// and available wherever agentctl runs.
+func TestDefinitionsIncludeSessionMCPTokenMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.sessionMcpToken")
+	if !ok {
+		t.Fatal("features.sessionMcpToken definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_SESSION_MCP_TOKEN" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_SESSION_MCP_TOKEN", def.EnvVar)
+	}
+	if def.Label != "Per-session MCP token and Git broker relay" {
+		t.Fatalf("Label = %q", def.Label)
+	}
+	if def.Description != "Requires a per-session token on each agent's Kandev MCP routes and routes the Git credential broker through the session's own agentctl." {
+		t.Fatalf("Description = %q", def.Description)
+	}
+	if def.Stability != StabilityExperimental || def.RiskLevel != RiskHigh {
+		t.Fatalf("Stability/RiskLevel = %q/%q, want experimental/high", def.Stability, def.RiskLevel)
+	}
+	wantRisk := "Changes every launch, recovery and agent MCP configuration. Retained sessions relaunch on the first restart with it on. " +
+		"Agents whose MCP carrier is not verified (Cursor, Pi, custom TUI agents with a file strategy) and Kubernetes and SSH retained instances fail to launch. " +
+		"Update operator-pinned agentctl images first."
+	if def.RiskDescription != wantRisk {
+		t.Fatalf("RiskDescription = %q", def.RiskDescription)
+	}
+	if !def.RestartRequired || !def.Mutable {
+		t.Fatalf("RestartRequired/Mutable = %v/%v, want true/true", def.RestartRequired, def.Mutable)
+	}
+	if def.Available != nil {
+		t.Fatal("Available probe set; the flag has no platform exclusion")
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("profiles.FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["session_mcp_token"]; got != "false" {
+		t.Fatalf("profiles.yaml session_mcp_token default = %q, want false", got)
+	}
+	raw, err := os.ReadFile("../../../../profiles.yaml")
+	if err != nil {
+		t.Fatalf("read profiles.yaml: %v", err)
+	}
+	block := regexp.MustCompile(`(?m)^  KANDEV_FEATURES_SESSION_MCP_TOKEN:\n    prod: "false"\n    dev:  "false"\n    e2e:  "false"\n`)
+	if !block.Match(raw) {
+		t.Fatal("profiles.yaml must set KANDEV_FEATURES_SESSION_MCP_TOKEN to false in prod, dev and e2e")
 	}
 }

@@ -943,7 +943,7 @@ func (m *Manager) createExecutionWithMode(
 		return nil, err
 	}
 
-	runtimeInstance, err := inputs.runtime.CreateInstance(launchCtx, inputs.preparation.request)
+	runtimeInstance, err := m.createInstanceWithSessionMCP(launchCtx, inputs.runtime, inputs.preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}

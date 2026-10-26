@@ -239,7 +239,7 @@ func adoptSurvivingAgentctl(
 	secretStore secrets.SecretStore,
 ) (*agentctlLauncherResult, agentruntime.InheritedRecordScope) {
 	outcome := agentruntime.AttemptAdoptControlServer(ctx, store, secretStore, controlClientFactory(log),
-		cfg.ResolvedHomeDir(), agentruntime.RequiredSurvivalCapabilities,
+		cfg.ResolvedHomeDir(), sessionMCPPolicyFromConfig(cfg).RequiredCapabilities(),
 		cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
 	if !outcome.Adopted {
 		log.Info("control server adoption did not complete; spawning a fresh one",

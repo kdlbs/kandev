@@ -950,3 +950,31 @@ func TestRecordFreshControlServerPropagatesIdentityFailure(t *testing.T) {
 // AC-EXECUTORS-CONTROL-OWNERSHIP-004.7's "already absent counts as success"
 // carve-out for this stop too: a dial-level connection-refused error must
 // not be retried to exhaustion, and the immediate-repair step still runs.
+
+// With the flag on, a control server that predates the session MCP token
+// advertises only the survival capability; it is refused and replaced rather
+// than adopted.
+func TestAttemptAdoptControlServerWithoutSessionTokenCapabilityIsRefused(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "current-token")
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	record := validRecord()
+	record.CredentialSecretID = secretID
+	identity := validIdentity()
+	identity.Capabilities = []string{"agent-survival.v1"}
+	client := &fakeAdoptionControlClient{
+		heldCredential: "current-token",
+		identity:       identity,
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
+	}
+	store, factory := adoptionFixture(t, record, client)
+
+	outcome := AttemptAdoptControlServer(context.Background(), store, secretStore, factory,
+		testHomeDir, NewSessionMCPPolicy(true).RequiredCapabilities(), 0, -1, newAdoptionTestLogger(t))
+
+	if outcome.Adopted || outcome.Reason != AdoptionReasonCapabilityIncompatible || !client.shutdownCalled {
+		t.Fatalf("outcome = %+v shutdown=%v, want refused and stopped", outcome, client.shutdownCalled)
+	}
+}

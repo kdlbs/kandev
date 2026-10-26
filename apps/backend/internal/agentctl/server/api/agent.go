@@ -900,14 +900,16 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 // Any existing kandev server in the list is filtered out to avoid duplicates.
 func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.McpServer {
 	kandevMcpSse := types.McpServer{
-		Name: kandevMcpServerName,
-		Type: mcpTransportSSE,
-		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathSSE),
+		Name:    kandevMcpServerName,
+		Type:    mcpTransportSSE,
+		URL:     agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathSSE),
+		Headers: s.cfg.SessionMCP.Headers(),
 	}
 	kandevMcpHttp := types.McpServer{
-		Name: kandevMcpServerName,
-		Type: mcpTransportHTTP,
-		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathHTTP),
+		Name:    kandevMcpServerName,
+		Type:    mcpTransportHTTP,
+		URL:     agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathHTTP),
+		Headers: s.cfg.SessionMCP.Headers(),
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
 	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)
