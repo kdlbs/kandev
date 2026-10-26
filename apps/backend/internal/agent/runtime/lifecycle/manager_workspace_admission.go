@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agent/nomad"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -16,15 +17,87 @@ type workspaceAdmissionSnapshot struct {
 // a workspace-only execution. Terminal session state is intentionally not part
 // of this rule. Cleanup, ownership, archive, and binding changes are.
 func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID string, info *WorkspaceInfo) error {
-	if info == nil {
-		return fmt.Errorf("workspace info is required")
+	if err := m.ensureWorkspaceSessionAdmittedMode(ctx, taskID, info, false); err != nil {
+		return err
 	}
 	// Workspace-only creation must not replace a retained remote execution
 	// while its authenticated recovery owner is still pending.
 	if m.recoveryGuard != nil && m.pendingRemoteRecoveryForSession(info.SessionID) != nil {
-		if err := m.recoveryGuard.CheckLaunchAllowed(info.SessionID); err != nil {
-			return err
-		}
+		return m.recoveryGuard.CheckLaunchAllowed(info.SessionID)
+	}
+	return nil
+}
+
+// ensureWorkspaceSessionAdmittedForCreatedNomadRecovery is the only path that
+// may attach a workspace while its environment is still creating. It requires
+// the exact in-flight, guarded Nomad recovery entry and its validated original
+// operation; ordinary workspace callers continue to reject Creating.
+func (m *Manager) ensureWorkspaceSessionAdmittedForCreatedNomadRecovery(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	entry *remoteRecoveryRetry,
+) error {
+	state, err := m.createdNomadInFlightOwner(taskID, info, entry)
+	if err != nil {
+		return err
+	}
+	infoState, err := nomad.EnvironmentStateFromMetadata(info.Metadata)
+	if err != nil || infoState != state {
+		return fmt.Errorf("%w: pre-ACP Nomad workspace state changed", ErrSessionWorkspaceNotReady)
+	}
+	return m.ensureWorkspaceSessionAdmittedMode(ctx, taskID, info, true)
+}
+
+// createdNomadInFlightOwner proves the entry is the exact in-flight, guarded
+// owner of the workspace's original Nomad operation and returns that operation's
+// pinned inventory state.
+func (m *Manager) createdNomadInFlightOwner(taskID string, info *WorkspaceInfo, entry *remoteRecoveryRetry) (nomad.EnvironmentState, error) {
+	if !createdNomadRecoveryOwnerMatches(taskID, info, entry) {
+		return nomad.EnvironmentState{}, fmt.Errorf("%w: pre-ACP Nomad recovery owner is unavailable", ErrSessionWorkspaceNotReady)
+	}
+	if !m.createdNomadRecoveryEntryActive(entry) || !m.createdNomadRecoveryAttemptAllowed(entry) {
+		return nomad.EnvironmentState{}, fmt.Errorf("%w: pre-ACP Nomad recovery is not the active guarded owner", ErrSessionWorkspaceNotReady)
+	}
+	state, ok := createdNomadRecoveryState(entry.record)
+	if !ok || state.EnvironmentID != info.TaskEnvironmentID ||
+		state.Generation != info.ValidatedTaskEnvironmentGeneration ||
+		state.ExecutionID != info.AgentExecutionID {
+		return nomad.EnvironmentState{}, fmt.Errorf("%w: pre-ACP Nomad recovery identity changed", ErrSessionWorkspaceNotReady)
+	}
+	if !createdNomadRecoverySnapshotEligible(entry, state) {
+		return nomad.EnvironmentState{}, fmt.Errorf("%w: pre-ACP Nomad recovery snapshot is not eligible", ErrSessionWorkspaceNotReady)
+	}
+	return state, nil
+}
+
+func createdNomadRecoveryOwnerMatches(taskID string, info *WorkspaceInfo, entry *remoteRecoveryRetry) bool {
+	return info != nil && entry != nil && entry.record != nil &&
+		info.ExecutorType == string(models.ExecutorTypeNomad) &&
+		info.SessionID == entry.record.SessionID && info.TaskID == entry.record.TaskID && taskID == entry.record.TaskID &&
+		info.AgentExecutionID == entry.record.AgentExecutionID
+}
+
+func (m *Manager) createdNomadRecoveryEntryActive(entry *remoteRecoveryRetry) bool {
+	m.remoteRecoveryMu.Lock()
+	defer m.remoteRecoveryMu.Unlock()
+	return m.remoteRecoveryPending[entry.record.SessionID] == entry && entry.inProgress &&
+		entry.attemptDone != nil && !entry.stopRequested
+}
+
+func createdNomadRecoverySnapshotEligible(entry *remoteRecoveryRetry, state nomad.EnvironmentState) bool {
+	return entry.snapshot != nil && validateCreatedNomadRecoverySnapshot(entry.snapshot, entry.record, state) == nil &&
+		entry.snapshot.SessionState == models.TaskSessionStateCreated && !entry.snapshot.RecoverySourcePresent
+}
+
+func (m *Manager) ensureWorkspaceSessionAdmittedMode(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	allowCreatingNomad bool,
+) error {
+	if info == nil {
+		return fmt.Errorf("workspace info is required")
 	}
 	if info.TaskArchived || info.WorkspaceOwnerArchived {
 		return fmt.Errorf("%w: task workspace is archived", ErrSessionWorkspaceNotReady)
@@ -37,7 +110,7 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 	if err != nil {
 		return err
 	}
-	if err := validateWorkspaceAdmission(taskID, info, snapshot); err != nil {
+	if err := validateWorkspaceAdmission(taskID, info, snapshot, allowCreatingNomad); err != nil {
 		return err
 	}
 	if err := m.ensureWorkspaceTaskAdmission(ctx, snapshot.session); err != nil {
@@ -51,7 +124,7 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 	if err != nil {
 		return fmt.Errorf("reverify workspace admission: %w", err)
 	}
-	if err := validateWorkspaceAdmission(taskID, info, latest); err != nil {
+	if err := validateWorkspaceAdmission(taskID, info, latest, allowCreatingNomad); err != nil {
 		return fmt.Errorf("reverify workspace admission: %w", err)
 	}
 	if err := m.ensureWorkspaceTaskAdmission(ctx, latest.session); err != nil {
@@ -83,7 +156,7 @@ func (m *Manager) readWorkspaceAdmission(ctx context.Context, info *WorkspaceInf
 	return snapshot, nil
 }
 
-func validateWorkspaceAdmission(taskID string, info *WorkspaceInfo, snapshot *workspaceAdmissionSnapshot) error {
+func validateWorkspaceAdmission(taskID string, info *WorkspaceInfo, snapshot *workspaceAdmissionSnapshot, allowCreatingNomad bool) error {
 	if snapshot == nil || snapshot.session == nil {
 		return fmt.Errorf("verify workspace admission: session is unavailable")
 	}
@@ -94,7 +167,7 @@ func validateWorkspaceAdmission(taskID string, info *WorkspaceInfo, snapshot *wo
 	if info.TaskEnvironmentID == "" {
 		return validateUnboundWorkspaceSession(info, session)
 	}
-	return validateBoundWorkspaceEnvironment(info, session, snapshot.env)
+	return validateBoundWorkspaceEnvironment(info, session, snapshot.env, allowCreatingNomad)
 }
 
 func validateWorkspaceSessionIdentity(taskID string, info *WorkspaceInfo, session *models.TaskSession) error {
@@ -121,6 +194,7 @@ func validateBoundWorkspaceEnvironment(
 	info *WorkspaceInfo,
 	session *models.TaskSession,
 	env *models.TaskEnvironment,
+	allowCreatingNomad bool,
 ) error {
 	if err := validateWorkspaceEnvironmentBinding(info, session, env); err != nil {
 		return err
@@ -143,6 +217,10 @@ func validateBoundWorkspaceEnvironment(
 	if info.ValidatedTaskEnvironmentGeneration != 0 &&
 		env.OwnershipGeneration != info.ValidatedTaskEnvironmentGeneration {
 		return fmt.Errorf("%w: task environment ownership changed", ErrSessionWorkspaceNotReady)
+	}
+	if allowCreatingNomad && env.Status == models.TaskEnvironmentStatusCreating &&
+		env.ExecutorType == string(models.ExecutorTypeNomad) && info.ExecutorType == string(models.ExecutorTypeNomad) {
+		return nil
 	}
 	switch env.Status {
 	case "", models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
@@ -205,7 +283,13 @@ func (m *Manager) ensureWorkspaceCleanupInactive(ctx context.Context, taskID str
 }
 
 func (m *Manager) ensureCachedWorkspaceExecutionAdmitted(ctx context.Context, execution *AgentExecution) error {
-	if execution == nil || m.executorProfileReader == nil || execution.SessionID == "" {
+	if execution == nil || execution.SessionID == "" {
+		return nil
+	}
+	if err := m.rejectWorkspaceDuringCreatedNomadRecovery(execution.SessionID); err != nil {
+		return err
+	}
+	if m.executorProfileReader == nil {
 		return nil
 	}
 	info := &WorkspaceInfo{

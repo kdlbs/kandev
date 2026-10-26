@@ -40,3 +40,13 @@ func TestSessionRecoveryGuardErrorNilReceiverIsSafe(t *testing.T) {
 	require.Nil(t, err.Details())
 	require.Contains(t, err.Error(), "blocked by the recovery guard")
 }
+
+func TestSessionRecoveryGuardErrorDetailsCarryCode(t *testing.T) {
+	withCode := (&SessionRecoveryGuardError{SessionID: "s", Retryable: true, Code: "nomad_recovery_operator_action"}).Details()
+	if withCode["code"] != "nomad_recovery_operator_action" || withCode["retryable"] != true {
+		t.Fatalf("details = %v", withCode)
+	}
+	if _, ok := (&SessionRecoveryGuardError{SessionID: "s", Retryable: true}).Details()["code"]; ok {
+		t.Fatal("a guard without a code must not expose one")
+	}
+}

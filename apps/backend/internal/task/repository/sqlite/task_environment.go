@@ -360,22 +360,8 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 			return fmt.Errorf("finalize task environment: ready status requires repository inventory for repo-backed task (id=%s)", env.ID)
 		}
 	}
-	existing, err := listTaskEnvironmentReposTx(ctx, r, tx, env.ID)
-	if err != nil {
+	if err := r.replaceTaskEnvironmentReposTx(ctx, tx, env.ID, repos); err != nil {
 		return err
-	}
-	if err := lockEnvironmentPhysicalClaims(ctx, tx, existing, repos); err != nil {
-		return err
-	}
-
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), env.ID); err != nil {
-		return err
-	}
-	for _, repo := range repos {
-		repo.TaskEnvironmentID = env.ID
-		if err := r.insertTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
-			return err
-		}
 	}
 	env.UpdatedAt = time.Now().UTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -403,6 +389,34 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 	return tx.Commit()
 }
 
+// replaceTaskEnvironmentReposTx stores repos as the complete repository
+// inventory of environmentID: it refuses a physical claim held by another
+// environment, deletes the environment's existing rows and inserts repos.
+func (r *Repository) replaceTaskEnvironmentReposTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID string,
+	repos []*models.TaskEnvironmentRepo,
+) error {
+	existing, err := listTaskEnvironmentReposTx(ctx, r, tx, environmentID)
+	if err != nil {
+		return err
+	}
+	if err := lockEnvironmentPhysicalClaims(ctx, tx, existing, repos); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), environmentID); err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		repo.TaskEnvironmentID = environmentID
+		if err := r.insertTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // reelectTaskEnvironmentMaterializationSQL hands an environment to a new
 // materialization owner. The WHERE clause is the guard: the row must still be
 // in the state and claim the caller read, and must hold no workspace path,
@@ -410,7 +424,8 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 // changes hands. A Kubernetes inventory row that recorded runtime metadata
 // (PVC, Pod, executor identity) is retained physical evidence too, including
 // when its control credentials were never saved; only a bare claim row with
-// empty metadata stays re-electable. Stale container handles and secret
+// empty metadata stays re-electable. A retained Nomad executor row bound to
+// the environment is likewise live evidence: its metadata is never parsed. Stale container handles and secret
 // references are cleared so the new owner provisions fresh ones.
 const reelectTaskEnvironmentMaterializationSQL = `
 	UPDATE task_environments
@@ -430,6 +445,11 @@ const reelectTaskEnvironmentMaterializationSQL = `
 		SELECT 1 FROM task_environment_kubernetes k
 		WHERE k.environment_id = task_environments.id
 		  AND COALESCE(k.metadata, '') NOT IN ('', '{}')
+	  )
+	  AND NOT EXISTS (
+		SELECT 1 FROM executors_running er
+		JOIN task_sessions ts ON ts.id = er.session_id
+		WHERE er.runtime = 'nomad' AND ts.task_environment_id = task_environments.id
 	  )
 `
 
@@ -1111,6 +1131,9 @@ func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error
 	if err := r.ensureKubernetesInventoryAbsent(ctx, tx, id); err != nil {
 		return err
 	}
+	if err := r.ensureNomadInventoryAbsent(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, id); err != nil {
 		return err
 	}
@@ -1157,6 +1180,9 @@ func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID st
 	}
 	for _, environmentID := range environmentIDs {
 		if err := r.ensureKubernetesInventoryAbsent(ctx, tx, environmentID); err != nil {
+			return err
+		}
+		if err := r.ensureNomadInventoryAbsent(ctx, tx, environmentID); err != nil {
 			return err
 		}
 		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {

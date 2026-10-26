@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type workspaceMaterializerClientStub struct {
@@ -87,6 +88,24 @@ func TestRemoteWorkspaceProjectionFromLaunch_IncludesPrimaryWithoutPrepareScript
 	}
 	if len(projection) != 1 || projection[0].Destination != "one-main" || projection[0].RepositoryURL != "https://github.com/acme/one.git" {
 		t.Fatalf("projection=%+v; want the primary repository", projection)
+	}
+}
+
+func TestNomadLaunchProjectsSelectedPrimaryRepositoryIntoEnvironmentWorkspace(t *testing.T) {
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeNomad),
+		Repositories: []RepoLaunchSpec{{RepositoryURL: "https://example.invalid/team/project.git", RepoName: "project", BaseBranch: "main", CheckoutBranch: "feature/wo04"}},
+	}
+	projection, err := remoteWorkspaceProjectionFromLaunch(req, true)
+	if err != nil {
+		t.Fatalf("remoteWorkspaceProjectionFromLaunch(Nomad): %v", err)
+	}
+	if len(projection) != 1 || projection[0].Destination != "project-feature-wo04" || projection[0].RepositoryURL != "https://example.invalid/team/project.git" {
+		t.Fatalf("Nomad primary projection = %+v; want selected branch-scoped repository", projection)
+	}
+	key, err := launchRepositoryProjectionKey(req, req.Repositories[0], 0)
+	if err != nil || key != projection[0].Destination {
+		t.Fatalf("Nomad primary workspace key = %q, err=%v; want %q", key, err, projection[0].Destination)
 	}
 }
 

@@ -438,6 +438,45 @@ type IdentityInfo struct {
 	UnownedPeriodMS int64 `json:"unowned_period_ms"`
 }
 
+// RuntimeDrainRequest and RuntimeDrainReceipt are the agentctl seal-and-drain
+// wire types shared with the agentctl control server.
+type (
+	RuntimeDrainRequest = agentctltypes.RuntimeDrainRequest
+	RuntimeDrainReceipt = agentctltypes.RuntimeDrainReceipt
+)
+
+// SealAndDrainRuntime requests a bounded, authenticated seal-and-drain and
+// validates the response before treating it as evidence.
+func (c *ControlClient) SealAndDrainRuntime(ctx context.Context, drain RuntimeDrainRequest) (*RuntimeDrainReceipt, error) {
+	body, err := json.Marshal(drain)
+	if err != nil {
+		return nil, fmt.Errorf("marshal runtime drain request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/runtime/seal-and-drain", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("runtime seal-and-drain failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("runtime seal-and-drain rejected: status %d", resp.StatusCode)
+	}
+	var receipt RuntimeDrainReceipt
+	if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+		return nil, fmt.Errorf("decode runtime drain receipt: %w", err)
+	}
+	if receipt.RequestID != drain.RequestID || receipt.ServerIdentity != drain.ExpectedServerIdentity ||
+		!receipt.Sealed || !receipt.Drained || receipt.Scope != "managed_process_groups" ||
+		receipt.Version != "runtime-seal-drain.v1" || receipt.CompletedAt.IsZero() {
+		return nil, errors.New("runtime seal-and-drain returned incomplete or mismatched evidence")
+	}
+	return &receipt, nil
+}
+
 // ServerDetails carries the control-server values an adopting backend
 // records but that are withheld from the unauthenticated identity endpoint.
 type ServerDetails struct {

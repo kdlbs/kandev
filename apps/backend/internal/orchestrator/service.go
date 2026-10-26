@@ -26,6 +26,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	runtimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -3837,6 +3838,19 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := running.SessionID
 	if sessionID == "" {
+		return
+	}
+	// Nomad owns a remote allocation whose state cannot be inferred from the
+	// local session row or process liveness. In particular, a crash can leave a
+	// committed job running before the session has advanced beyond Created. Keep
+	// every canonical Nomad row for the runtime-specific recovery path to
+	// validate; malformed or incomplete metadata is unknown state, not proof
+	// that the remote environment is absent.
+	if running.Runtime == runtimekind.RuntimeNomad {
+		s.logger.Debug("preserving Nomad executor row for runtime-specific recovery",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", running.TaskID),
+			zap.String("execution_id", running.AgentExecutionID))
 		return
 	}
 

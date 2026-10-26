@@ -11,6 +11,10 @@ type SessionRecoveryGuardError struct {
 	Cause     error
 	SessionID string
 	Retryable bool
+	// Code is the stable recovery-guard code for a Created-session Nomad
+	// recovery ("nomad_recovery_starting" or "nomad_recovery_operator_action").
+	// Empty for every other guard.
+	Code string
 }
 
 func (e *SessionRecoveryGuardError) Error() string {
@@ -44,9 +48,13 @@ func (e *SessionRecoveryGuardError) Details() map[string]interface{} {
 	if e.Retryable {
 		kind = "session_recovery_in_progress"
 	}
-	return map[string]interface{}{
+	details := map[string]interface{}{
 		detailsKeyKind:   kind,
 		"retryable":      e.Retryable,
 		metaKeySessionID: e.SessionID,
 	}
+	if e.Code != "" {
+		details["code"] = e.Code
+	}
+	return details
 }

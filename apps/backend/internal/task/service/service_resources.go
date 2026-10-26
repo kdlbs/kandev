@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
+	agentnomad "github.com/kandev/kandev/internal/agent/nomad"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
@@ -1917,11 +1918,15 @@ func validateExecutorForType(executorType models.ExecutorType, config map[string
 	if err := validateExecutorConfig(config); err != nil {
 		return err
 	}
-	if executorType != models.ExecutorTypeKubernetes {
-		return nil
-	}
-	if _, err := agentkubernetes.ParseExecutorConfig(config); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	switch executorType {
+	case models.ExecutorTypeKubernetes:
+		if _, err := agentkubernetes.ParseExecutorConfig(config); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+		}
+	case models.ExecutorTypeNomad:
+		if _, err := agentnomad.ParseProfileConfig(config); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+		}
 	}
 	return nil
 }

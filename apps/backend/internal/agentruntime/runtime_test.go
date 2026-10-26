@@ -14,6 +14,7 @@ func TestRuntimeIsContainerized(t *testing.T) {
 		{RuntimeRemoteDocker, true},
 		{RuntimeSprites, true},
 		{RuntimeKubernetes, true},
+		{RuntimeNomad, false},
 		{Runtime(""), false},
 		{Runtime("unknown"), false},
 	}
@@ -40,6 +41,7 @@ func TestRuntimeString(t *testing.T) {
 		{RuntimeRemoteDocker, "remote_docker"},
 		{RuntimeSprites, "sprites"},
 		{RuntimeKubernetes, "k8s"},
+		{RuntimeNomad, "nomad"},
 		{Runtime(""), ""},
 	}
 

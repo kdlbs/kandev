@@ -568,6 +568,7 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
+	nomadDestroyer                  NomadEnvironmentDestroyer
 	wsGroupMembership               WorkspaceGroupMembershipReader
 	executorCapabilityProber        ExecutorCapabilityProber
 	checkoutCredentialPolicy        func(context.Context, string) (bool, error)
@@ -593,6 +594,7 @@ type Service struct {
 	repositorySelectionResolver    RepositorySelectionResolver
 	gitLabRepositoryOriginVerifier GitLabRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
+	repoCloneURLResolver           func(*models.Repository) string
 	blockers                       BlockerRepository
 	comments                       CommentRepository
 	taskStateActivity              TaskStateActivityLogger
@@ -1135,6 +1137,13 @@ func (s *Service) SetRepositorySelectionResolver(resolver RepositorySelectionRes
 // fall outside the allow-list and branch listing returns no results.
 type RepoCloneLocation interface {
 	ExpandedBasePath() (string, error)
+}
+
+// SetRepoCloneURLResolver wires the clone-locator derivation shared with the
+// launch and resume paths. Nomad workspace info uses it so Created-session
+// recovery reproduces the locator the original clone used.
+func (s *Service) SetRepoCloneURLResolver(resolve func(*models.Repository) string) {
+	s.repoCloneURLResolver = resolve
 }
 
 // SetRepoCloneLocation wires the cloner so its base path is treated as an

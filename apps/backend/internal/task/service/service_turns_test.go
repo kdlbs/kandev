@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/nomad"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -1470,6 +1471,123 @@ func TestGetWorkspaceInfoForSession_ExecutorInfo(t *testing.T) {
 	}
 	if info.AgentExecutionID != "agent-exec-abc123" {
 		t.Errorf("expected AgentExecutionID 'agent-exec-abc123', got %q", info.AgentExecutionID)
+	}
+}
+
+func TestGetWorkspaceInfoForSessionProjectsCreatingNomadEnvironmentIdentity(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	workspaceRoot := t.TempDir()
+	environmentID := "env-nomad-creating"
+	sessionID := "session-nomad-creating"
+	executorID := "executor-nomad-creating"
+	executionID := "execution-nomad-creating"
+	workspacePath, err := nomad.EnvironmentWorkspacePath(workspaceRoot, environmentID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: executorID, Name: "Nomad", Type: models.ExecutorTypeNomad, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: "task-123", OwnershipGeneration: 1,
+		ExecutorType: string(models.ExecutorTypeNomad), ExecutorID: executorID,
+		// The workspace path is only published after the environment is ready.
+		// During startup recovery the immutable path is available in the intent.
+		Status: models.TaskEnvironmentStatusCreating,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: "task-123", TaskEnvironmentID: environmentID,
+		ExecutorID: executorID, State: models.TaskSessionStateCreated,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nomadState := nomad.EnvironmentState{
+		Version: 1, Revision: 2, EnvironmentID: environmentID, Generation: 1,
+		OperationID: executionID, InstallationID: "install-test", ExecutionID: executionID,
+		InputDigest: strings.Repeat("a", 64), JobID: "kandev-test-job", Namespace: "default",
+		Region: "global", Datacenter: "dc1", NodeID: "node-test", Platform: "darwin/arm64",
+		SSHHost: "worker.test", SSHUser: "fixture", SSHPort: 22,
+		SSHHostFingerprint: "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK",
+		WorkspaceRoot:      workspaceRoot, WorkspacePath: workspacePath, AllocationRoot: filepath.Join(workspaceRoot, "allocations"),
+		AgentctlPath:           filepath.Join(workspaceRoot, "allocations", "agentctl"),
+		BootstrapPath:          filepath.Join(workspaceRoot, "allocations", "bootstrap.sh"),
+		NativeJobPolicyVersion: nomad.NativeJobPolicyVersion, NativeJobSpecSHA256: strings.Repeat("b", 64),
+		CPUMHz: 1000, MemoryMB: 1024, Phase: "intent",
+	}
+	metadata := map[string]interface{}{
+		lifecycle.MetadataKeyExecutorType:         string(agentruntime.RuntimeNomad),
+		lifecycle.MetadataKeyBootstrapNonceSecret: "$kandev-secret:bootstrap-ref",
+	}
+	if err := nomad.PutEnvironmentState(metadata, nomadState); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-nomad-creating", SessionID: sessionID, TaskID: "task-123",
+		ExecutorID: executorID, Runtime: agentruntime.RuntimeNomad, Status: models.ExecutorRunningStatusStarting,
+		AgentExecutionID: executionID, Metadata: metadata, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", sessionID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if info.TaskEnvironmentID != environmentID || info.ValidatedTaskEnvironmentID != environmentID ||
+		info.ValidatedTaskEnvironmentGeneration != 1 || info.EnvironmentOwnerTaskID != "task-123" ||
+		info.ValidatedExecutorType != string(agentruntime.RuntimeNomad) || info.OwnershipGeneration != 1 ||
+		info.ExecutorType != string(agentruntime.RuntimeNomad) ||
+		info.AgentExecutionID != executionID || info.WorkspacePath != workspacePath {
+		t.Fatalf("creating Nomad workspace identity projection is incomplete: env=%q validated_env=%q gen=%d owner=%q owner_gen=%d executor=%q execution=%q workspace=%q",
+			info.TaskEnvironmentID, info.ValidatedTaskEnvironmentID, info.ValidatedTaskEnvironmentGeneration,
+			info.EnvironmentOwnerTaskID, info.OwnershipGeneration, info.ExecutorType, info.AgentExecutionID, info.WorkspacePath)
+	}
+	if got := info.Metadata["executor_id"]; got != executorID {
+		t.Fatalf("creating Nomad workspace executor ID metadata = %v, want environment executor ID", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyExecutorType]; got != string(agentruntime.RuntimeNomad) {
+		t.Fatalf("creating Nomad workspace executor type metadata = %v, want environment executor type", got)
+	}
+	if got := info.Metadata[nomad.EnvironmentStateMetadataKey]; got == nil {
+		t.Fatal("creating Nomad workspace projection lost the retained state envelope")
+	}
+
+	// A state envelope for another generation must not supply the path even
+	// when it is otherwise a valid Nomad record.
+	otherGenerationPath, err := nomad.EnvironmentWorkspacePath(workspaceRoot, environmentID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nomadState.Generation = 2
+	nomadState.WorkspacePath = otherGenerationPath
+	otherGenerationMetadata := map[string]interface{}{
+		lifecycle.MetadataKeyExecutorType: string(agentruntime.RuntimeNomad),
+	}
+	if err := nomad.PutEnvironmentState(otherGenerationMetadata, nomadState); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-nomad-creating", SessionID: sessionID, TaskID: "task-123",
+		ExecutorID: executorID, Runtime: agentruntime.RuntimeNomad, Status: models.ExecutorRunningStatusStarting,
+		AgentExecutionID: executionID, Metadata: otherGenerationMetadata, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wrongGenerationInfo, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", sessionID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession with mismatched generation: %v", err)
+	}
+	if wrongGenerationInfo.WorkspacePath == otherGenerationPath {
+		t.Fatal("creating Nomad workspace projection accepted a path from another ownership generation")
 	}
 }
 

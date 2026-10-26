@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/nomad"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -90,6 +91,9 @@ func (m *Manager) ResolveSessionRuntime(ctx context.Context, sessionID string) (
 func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
+	}
+	if err := m.rejectWorkspaceDuringCreatedNomadRecovery(sessionID); err != nil {
+		return nil, err
 	}
 	// Per-user workspace scoping (opt-in auth): user-facing session surfaces
 	// funnel through here; internal callers pass a ctx without an identity
@@ -169,6 +173,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if info == nil {
 		return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
 	}
+	if err := m.rejectWorkspaceDuringCreatedNomadRecovery(info.SessionID); err != nil {
+		return nil, err
+	}
 	if info.TaskEnvironmentID == "" {
 		return nil, fmt.Errorf("task environment %s has no task_environment_id", taskEnvironmentID)
 	}
@@ -192,6 +199,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
 	// the same session.
 	value, err := m.doCoalescedExecution(ctx, info.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		if err := m.rejectWorkspaceDuringCreatedNomadRecovery(info.SessionID); err != nil {
+			return nil, err
+		}
 		if execution, exists := m.executionStore.GetBySessionID(info.SessionID); exists {
 			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
 				return nil, err
@@ -203,6 +213,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 				return nil, err
 			}
 			return execution, nil
+		}
+		if err := m.rejectWorkspaceDuringCreatedNomadRecovery(info.SessionID); err != nil {
+			return nil, err
 		}
 		// createExecution publishes AgentctlStarting before spawning the
 		// waitForAgentctlReady goroutine, so frontend gates flip out of
@@ -346,6 +359,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	}
 	if info == nil {
 		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+	if err := m.rejectWorkspaceDuringCreatedNomadRecovery(sessionID); err != nil {
+		return nil, err
 	}
 
 	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
@@ -840,7 +856,16 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 // createExecution creates workspace-only agentctl infrastructure.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
-	return m.createExecutionWithMode(ctx, taskID, info, false)
+	return m.createExecutionWithRecovery(ctx, taskID, info, false, nil)
+}
+
+func (m *Manager) createExecutionForCreatedNomadRecovery(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	entry *remoteRecoveryRetry,
+) (*AgentExecution, error) {
+	return m.createExecutionWithRecovery(ctx, taskID, info, false, entry)
 }
 
 // createAgentExecution creates infrastructure for a path that will start an
@@ -861,10 +886,20 @@ func (m *Manager) prepareExecutionCreation(
 	info *WorkspaceInfo,
 	agentLaunch bool,
 ) (*executionCreationInputs, error) {
+	return m.prepareExecutionCreationForRecovery(ctx, taskID, info, agentLaunch, nil)
+}
+
+func (m *Manager) prepareExecutionCreationForRecovery(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	agentLaunch bool,
+	recoveryEntry *remoteRecoveryRetry,
+) (*executionCreationInputs, error) {
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, ""); err != nil {
+	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, "", recoveryEntry); err != nil {
 		return nil, err
 	}
 	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
@@ -874,10 +909,21 @@ func (m *Manager) prepareExecutionCreation(
 	if err != nil {
 		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
-	executionID := uuid.New().String()
+	executionID, retainedNomad, err := retainedNomadExecutionIdentity(info)
+	if err != nil {
+		return nil, err
+	}
+	if !retainedNomad {
+		executionID = uuid.New().String()
+	}
 	preparation, err := m.prepareExecutionCreateRequest(ctx, taskID, info, executionID)
 	if err != nil {
 		return nil, err
+	}
+	if retainedNomad {
+		if err := validateRetainedNomadLaunchInputs(info, preparation.request, executionID); err != nil {
+			return nil, err
+		}
 	}
 	return &executionCreationInputs{
 		runtime:     rt,
@@ -886,11 +932,67 @@ func (m *Manager) prepareExecutionCreation(
 	}, nil
 }
 
+// validateRetainedNomadLaunchInputs proves a retained Nomad operation still
+// matches the current authorized launch inputs before it is continued.
+func validateRetainedNomadLaunchInputs(info *WorkspaceInfo, request *ExecutorCreateRequest, executionID string) error {
+	profile, err := nomadProfileFromMetadata(request.Metadata)
+	if err != nil {
+		return fmt.Errorf("validate retained Nomad launch profile: %w", err)
+	}
+	state, err := nomad.EnvironmentStateFromMetadata(request.Metadata)
+	if err != nil || !state.WorkspaceInputCaptured {
+		return errors.New("retained Nomad operation is missing captured original workspace input")
+	}
+	workspacePath, err := nomad.EnvironmentWorkspacePath(profile.WorkspaceRoot, info.TaskEnvironmentID, info.ValidatedTaskEnvironmentGeneration)
+	if err != nil {
+		return fmt.Errorf("derive retained Nomad environment workspace: %w", err)
+	}
+	digest, err := nomadLaunchDigest(profile, request, state.WorkspaceInputPath, workspacePath)
+	if err != nil {
+		return err
+	}
+	if state.InputDigest != digest || state.OperationID != executionID || state.ExecutionID != executionID ||
+		state.EnvironmentID != info.TaskEnvironmentID || state.Generation != info.ValidatedTaskEnvironmentGeneration {
+		return errors.New("retained Nomad operation no longer matches current authorized launch inputs")
+	}
+	if state.Phase == nomadPhaseReady {
+		request.RequireExistingAgentctlInstance = true
+	}
+	return nil
+}
+
+func retainedNomadExecutionIdentity(info *WorkspaceInfo) (string, bool, error) {
+	if info == nil || info.ExecutorType != string(models.ExecutorTypeNomad) || info.AgentExecutionID == "" {
+		return "", false, nil
+	}
+	state, err := nomad.EnvironmentStateFromMetadata(info.Metadata)
+	if err != nil {
+		return "", false, fmt.Errorf("retained Nomad operation state is missing or invalid: %w", err)
+	}
+	if state.ExecutionID != info.AgentExecutionID || state.OperationID != info.AgentExecutionID ||
+		state.EnvironmentID == "" || state.EnvironmentID != info.TaskEnvironmentID ||
+		state.Generation < 1 || state.Generation != info.ValidatedTaskEnvironmentGeneration ||
+		!createdNomadRecoveryPhaseEligible(state.Phase) {
+		return "", false, errors.New("retained Nomad operation owner, generation, or phase is not eligible for continuation")
+	}
+	return state.ExecutionID, true, nil
+}
+
 func (m *Manager) createExecutionWithMode(
 	ctx context.Context,
 	taskID string,
 	info *WorkspaceInfo,
 	agentLaunch bool,
+) (*AgentExecution, error) {
+	return m.createExecutionWithRecovery(ctx, taskID, info, agentLaunch, nil)
+}
+
+func (m *Manager) createExecutionWithRecovery(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	agentLaunch bool,
+	recoveryEntry *remoteRecoveryRetry,
 ) (*AgentExecution, error) {
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
@@ -907,19 +1009,12 @@ func (m *Manager) createExecutionWithMode(
 	operationCtx := ctx
 	if recoveryAdmission != nil {
 		operationCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
-		defer func() {
-			if releaseErr := recoveryAdmission.Release(ctx); releaseErr != nil {
-				m.logger.Warn("failed to release worktree recovery admission",
-					zap.String("task_id", taskID),
-					zap.String("session_id", info.SessionID),
-					zap.Error(releaseErr))
-			}
-		}()
+		defer m.releaseWorktreeRecoveryAdmission(ctx, recoveryAdmission, taskID, info.SessionID)
 	}
 	if err := validateWorkspaceInfoWithAdoption(ctx, info, false, m.worktreeMgr); err != nil {
 		return nil, fmt.Errorf("%w: repository workspace failed post-recovery validation", models.ErrWorkspaceReuseUnsafe)
 	}
-	inputs, err := m.prepareExecutionCreation(operationCtx, taskID, info, agentLaunch)
+	inputs, err := m.prepareExecutionCreationForRecovery(operationCtx, taskID, info, agentLaunch, recoveryEntry)
 	if err != nil {
 		return nil, err
 	}
@@ -958,7 +1053,7 @@ func (m *Manager) createExecutionWithMode(
 		inputs.preparation,
 	)
 
-	if err := m.ensureExecutionAdmission(operationCtx, taskID, info, agentLaunch, execution.ID); err != nil {
+	if err := m.ensureExecutionAdmission(operationCtx, taskID, info, agentLaunch, execution.ID, recoveryEntry); err != nil {
 		m.rollbackLaunchExecution(operationCtx, inputs.runtime, runtimeInstance, execution, "session ended during runtime creation")
 		return nil, err
 	}
@@ -971,7 +1066,17 @@ func (m *Manager) createExecutionWithMode(
 		inputs,
 		runtimeInstance,
 		execution,
+		recoveryEntry,
 	)
+}
+
+func (m *Manager) releaseWorktreeRecoveryAdmission(ctx context.Context, admission *worktree.RecoveryAdmission, taskID, sessionID string) {
+	if releaseErr := admission.Release(ctx); releaseErr != nil {
+		m.logger.Warn("failed to release worktree recovery admission",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(releaseErr))
+	}
 }
 
 func (m *Manager) registerAndPublishCreatedExecution(
@@ -982,6 +1087,7 @@ func (m *Manager) registerAndPublishCreatedExecution(
 	inputs *executionCreationInputs,
 	runtimeInstance *ExecutorInstance,
 	execution *AgentExecution,
+	recoveryEntry *remoteRecoveryRetry,
 ) (*AgentExecution, error) {
 	// Cleanup can stop and remove an execution as soon as it is registered.
 	// Keep the final admission, registration, persistence, and publication as
@@ -1021,7 +1127,7 @@ func (m *Manager) registerAndPublishCreatedExecution(
 		m.rollbackRegisteredLaunchAfterPersistFailure(inputs.runtime, runtimeInstance, execution)
 		return nil, errors.Join(fmt.Errorf("persist execution registration: %w", err), secretCleanupErr)
 	}
-	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, execution.ID); err != nil {
+	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, execution.ID, recoveryEntry); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		if errors.Is(err, errTaskCleanupActive) {
 			m.rollbackRegisteredLaunchForTaskCleanup(inputs.runtime, runtimeInstance, execution)
@@ -1046,11 +1152,16 @@ func (m *Manager) ensureExecutionAdmission(
 	info *WorkspaceInfo,
 	agentLaunch bool,
 	expectedExecutionID string,
+	recoveryEntry *remoteRecoveryRetry,
 ) error {
 	if agentLaunch {
 		return m.ensureLaunchSessionStillActive(ctx, info.SessionID, executionAdmissionAgent)
 	}
-	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
+	if recoveryEntry != nil {
+		if err := m.ensureWorkspaceSessionAdmittedForCreatedNomadRecovery(ctx, taskID, info, recoveryEntry); err != nil {
+			return err
+		}
+	} else if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
 		return err
 	}
 	return m.ensureWorkspaceRecoveryResolved(ctx, info.SessionID, expectedExecutionID)
@@ -1115,6 +1226,11 @@ func (m *Manager) prepareExecutionCreateRequest(
 	metadata := make(map[string]interface{}, len(info.Metadata)+1)
 	for key, value := range info.Metadata {
 		metadata[key] = value
+	}
+	if info.ExecutorType == string(models.ExecutorTypeNomad) {
+		if err := projectRetainedNomadGeneration(info, metadata); err != nil {
+			return nil, err
+		}
 	}
 	delete(metadata, managedGoCacheMetadataKey)
 	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
@@ -1213,7 +1329,32 @@ func (m *Manager) prepareExecutionCreateRequest(
 	}
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
+	m.wireNomadInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
+}
+
+// projectRetainedNomadGeneration reconstructs the launch-only generation
+// field from the canonical workspace projection. The typed retained state is
+// validated by the recovery owner before dispatch; this helper uses only the
+// provider's validated owner fields, which are also available while building
+// the initial request before the executor has checkpointed typed state.
+func projectRetainedNomadGeneration(info *WorkspaceInfo, metadata map[string]interface{}) error {
+	if info == nil || metadata == nil || info.ExecutorType != string(models.ExecutorTypeNomad) {
+		return errors.New("retained Nomad generation projection requires canonical workspace info")
+	}
+	generation := info.ValidatedTaskEnvironmentGeneration
+	if generation < 1 || info.TaskID == "" || info.TaskEnvironmentID == "" ||
+		info.ValidatedTaskEnvironmentID != info.TaskEnvironmentID ||
+		info.ValidatedExecutorType != string(models.ExecutorTypeNomad) ||
+		info.OwnershipGeneration != generation || info.EnvironmentOwnerTaskID != info.TaskID {
+		return errors.New("retained Nomad generation does not match the validated task environment owner")
+	}
+	canonical := fmt.Sprint(generation)
+	if existing := getMetadataString(metadata, "nomad_environment_generation"); existing != "" && existing != canonical {
+		return errors.New("retained Nomad generation metadata conflicts with the validated task environment owner")
+	}
+	metadata["nomad_environment_generation"] = canonical
+	return nil
 }
 
 func (m *Manager) resolveWorkspaceExecutionProfile(ctx context.Context, profileID string) *AgentProfileInfo {

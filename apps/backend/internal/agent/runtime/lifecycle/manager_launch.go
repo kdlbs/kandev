@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	nomadexecutor "github.com/kandev/kandev/internal/agent/nomad"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
@@ -194,6 +195,15 @@ var trustedExecutorConfigKeys = map[string]bool{
 	MetadataKeyKubernetesKubeContext:           true,
 	MetadataKeyKubernetesConfigNamespace:       true,
 	MetadataKeyKubernetesRequestTimeoutSeconds: true,
+	// Native Nomad connection and worker routing are authoritative profile
+	// values just like SSH. Task metadata may never pivot a submitted job or
+	// its SSH tunnel to a different control plane or worker.
+	nomadMetadataKeyAddress: true, nomadMetadataKeyRegion: true, nomadMetadataKeyDatacenter: true,
+	nomadMetadataKeyNodeID: true, nomadMetadataKeyPlatform: true, nomadMetadataKeySSHTarget: true,
+	nomadMetadataKeyWorkspaceRoot: true, nomadMetadataKeyAllocationRoot: true,
+	nomadMetadataKeyCPUMHz: true, nomadMetadataKeyMemoryMB: true, nomadMetadataKeyToken: true, nomadMetadataKeyLostAfter: true,
+	nomadMetadataKeyNodePool: true, nomadMetadataKeyPlacement: true, nomadMetadataKeyPinNodeID: true,
+	nomadMetadataKeyExcludeLoc: true, nomadMetadataKeyPreferLoc: true, nomadMetadataKeyMemoryMaxMB: true,
 }
 
 func isTrustedExecutorConfigKey(k string) bool { return trustedExecutorConfigKeys[k] }
@@ -265,6 +275,122 @@ func (m *Manager) applyAuthoritativeKubernetesProfileConfig(
 		return fmt.Errorf("load Kubernetes executor profile %q: canonicalize config: %w", profileID, err)
 	}
 	return nil
+}
+
+// applyAuthoritativeNomadProfileConfig uses only the persisted executor
+// profile for a fresh launch. A retained state snapshot remains authoritative
+// on resume so edits to a profile cannot pivot a running allocation.
+func (m *Manager) applyAuthoritativeNomadProfileConfig(
+	ctx context.Context,
+	req *LaunchRequest,
+	metadata map[string]interface{},
+) error {
+	if req == nil || req.ExecutorType != string(models.ExecutorTypeNomad) {
+		return nil
+	}
+	if req.PreviousExecutionID != "" {
+		if _, err := nomadexecutor.EnvironmentStateFromMetadata(metadata); err != nil {
+			return fmt.Errorf("resume Nomad executor: retained immutable state is unavailable: %w", err)
+		}
+		return nil
+	}
+	profileID, executorID, parsed, err := m.loadNomadLaunchProfile(ctx, metadata)
+	if err != nil {
+		return err
+	}
+	environment, err := m.authorizeNomadTaskEnvironment(ctx, req, profileID, executorID)
+	if err != nil {
+		return err
+	}
+	for key, value := range nomadCanonicalProfileMetadata(parsed) {
+		metadata[key] = value
+	}
+	metadata["executor_id"] = executorID
+	metadata["nomad_environment_generation"] = fmt.Sprint(environment.OwnershipGeneration)
+	return nil
+}
+
+// loadNomadLaunchProfile reads and parses the persisted executor profile
+// selected by the launch metadata.
+func (m *Manager) loadNomadLaunchProfile(
+	ctx context.Context,
+	metadata map[string]interface{},
+) (string, string, nomadexecutor.ProfileConfig, error) {
+	var parsed nomadexecutor.ProfileConfig
+	if m.executorProfileReader == nil {
+		return "", "", parsed, errors.New("load Nomad executor profile: profile reader is not configured")
+	}
+	profileID := strings.TrimSpace(getMetadataString(metadata, MetadataKeyExecutorProfileID))
+	if profileID == "" {
+		return "", "", parsed, errors.New("load Nomad executor profile: profile ID is missing")
+	}
+	profile, err := m.executorProfileReader.GetExecutorProfile(ctx, profileID)
+	if err != nil {
+		return "", "", parsed, fmt.Errorf("load Nomad executor profile %q: %w", profileID, err)
+	}
+	if profile == nil || profile.ID != profileID || strings.TrimSpace(profile.ExecutorID) == "" {
+		return "", "", parsed, fmt.Errorf("load Nomad executor profile %q: profile identity or executor is missing", profileID)
+	}
+	executorID := strings.TrimSpace(profile.ExecutorID)
+	if selectedExecutorID := strings.TrimSpace(getMetadataString(metadata, "executor_id")); selectedExecutorID != "" && selectedExecutorID != executorID {
+		return "", "", parsed, fmt.Errorf("load Nomad executor profile %q: profile belongs to a different executor", profileID)
+	}
+	parsed, err = nomadexecutor.ParseProfileConfig(profile.Config)
+	if err != nil {
+		return "", "", parsed, fmt.Errorf("load Nomad executor profile %q: invalid config: %w", profileID, err)
+	}
+	return profileID, executorID, parsed, nil
+}
+
+// authorizeNomadTaskEnvironment proves the task environment is owned by the
+// launching task and bound to the selected executor and profile.
+func (m *Manager) authorizeNomadTaskEnvironment(
+	ctx context.Context,
+	req *LaunchRequest,
+	profileID, executorID string,
+) (*models.TaskEnvironment, error) {
+	if strings.TrimSpace(req.TaskEnvironmentID) == "" {
+		return nil, errors.New("load Nomad executor profile: task environment identity is required")
+	}
+	environment, err := m.executorProfileReader.GetTaskEnvironment(ctx, req.TaskEnvironmentID)
+	if err != nil {
+		return nil, fmt.Errorf("load Nomad task environment %q: %w", req.TaskEnvironmentID, err)
+	}
+	if environment == nil || environment.ID != req.TaskEnvironmentID || environment.TaskID != req.TaskID ||
+		environment.OwnershipGeneration < 1 || environment.ExecutorType != string(models.ExecutorTypeNomad) ||
+		environment.ExecutorID != executorID || environment.ExecutorProfileID != profileID {
+		return nil, errors.New("load Nomad task environment: owner, generation, executor, or profile identity does not match")
+	}
+	return environment, nil
+}
+
+func nomadCanonicalProfileMetadata(parsed nomadexecutor.ProfileConfig) map[string]string {
+	if parsed.Mode == nomadexecutor.ModePool {
+		return nomadCanonicalPoolProfileMetadata(parsed)
+	}
+	return map[string]string{
+		nomadMetadataKeyAddress: parsed.Address, "namespace": parsed.Namespace, nomadMetadataKeyRegion: parsed.Region,
+		nomadMetadataKeyDatacenter: parsed.Datacenter, nomadMetadataKeyNodeID: parsed.NodeID, nomadMetadataKeyPlatform: parsed.Platform,
+		nomadMetadataKeySSHTarget: parsed.SSHUser + "@" + parsed.SSHHost, "ssh_port": fmt.Sprint(parsed.SSHPort),
+		"ssh_host_fingerprint": parsed.SSHHostFingerprint, nomadMetadataKeyWorkspaceRoot: parsed.WorkspaceRoot,
+		nomadMetadataKeyAllocationRoot: parsed.AllocationRoot, nomadMetadataKeyCPUMHz: fmt.Sprint(parsed.CPUMHz),
+		nomadMetadataKeyMemoryMB: fmt.Sprint(parsed.MemoryMB), nomadMetadataKeyToken: models.ExecutorProfileSecretReference(parsed.NomadTokenSecretID),
+		nomadMetadataKeyLostAfter: parsed.DisconnectLostAfter.String(),
+	}
+}
+
+func nomadCanonicalPoolProfileMetadata(parsed nomadexecutor.ProfileConfig) map[string]string {
+	return map[string]string{
+		nomadMetadataKeyAddress: parsed.Address, nomadMetadataKeyNamespace: parsed.Namespace, nomadMetadataKeyRegion: parsed.Region,
+		nomadMetadataKeyDatacenter: parsed.Datacenter, nomadMetadataKeyPlatform: parsed.Platform,
+		nomadMetadataKeyNodePool: parsed.NodePool, nomadMetadataKeyPlacement: parsed.Placement,
+		nomadMetadataKeyPinNodeID: parsed.PinNodeID, nomadMetadataKeyExcludeLoc: fmt.Sprint(parsed.ExcludeLocal),
+		nomadMetadataKeyPreferLoc: fmt.Sprint(parsed.PreferLocal), nomadMetadataKeySSHUser: parsed.SSHUser,
+		nomadMetadataKeyCPUMHz: fmt.Sprint(parsed.CPUMHz), nomadMetadataKeyMemoryMB: fmt.Sprint(parsed.MemoryMB),
+		nomadMetadataKeyMemoryMaxMB: fmt.Sprint(parsed.MemoryMaxMB),
+		nomadMetadataKeyToken:       models.ExecutorProfileSecretReference(parsed.NomadTokenSecretID),
+		nomadMetadataKeyLostAfter:   parsed.DisconnectLostAfter.String(),
+	}
 }
 
 func applyKubernetesProfileConfigToMetadata(
@@ -1373,6 +1499,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
+	if err := m.applyAuthoritativeNomadProfileConfig(ctx, reqWithWorktree, metadata); err != nil {
+		return nil, nil, nil, err
+	}
 	if err := m.applyAuthoritativeKubernetesProfileConfig(ctx, reqWithWorktree, metadata); err != nil {
 		return nil, nil, nil, err
 	}
@@ -1491,6 +1620,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
+	m.wireNomadInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
@@ -2221,13 +2351,17 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	// relying on the legacy primary-repository prepare script alone.
 	// Plugin environments have no prepare script, so the primary repository is
 	// materialized the same way.
-	pluginRemote := reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote)
+	includePrimaryRemoteRepository := reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) ||
+		reqWithWorktree.ExecutorType == string(models.ExecutorTypeNomad)
 	minimumRepos := 2
-	if pluginRemote {
+	if includePrimaryRemoteRepository {
 		minimumRepos = 1
 	}
 	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) >= minimumRepos && execInstance != nil && execInstance.Client != nil {
-		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree, pluginRemote)
+		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree, includePrimaryRemoteRepository)
+		if projectionErr == nil {
+			projection, projectionErr = provisionLocalPoolWorktrees(ctx, &reqWithWorktree, execInstance, projection)
+		}
 		if projectionErr == nil {
 			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
 		}

@@ -32,7 +32,8 @@ const workspaceMaterializationRollbackTimeout = 10 * time.Second
 // remoteWorkspaceProjectionFromLaunch returns the repositories agentctl must
 // materialize. Executors with a prepare script establish the first repository at
 // the workspace root themselves; includePrimary asks for it too, for executors
-// that have none.
+// that have none. Native Nomad allocations use an isolated per-environment
+// workspace and therefore materialize the selected primary repository too.
 func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest, includePrimary bool) ([]WorkspaceRepositoryMaterialization, error) {
 	if req == nil {
 		return nil, fmt.Errorf("launch request is required")
@@ -94,7 +95,7 @@ func usesRemoteWorkspaceMaterialization(req *LaunchRequest) bool {
 // checkout at the workspace root.
 func launchRepositoryProjectionKey(req *LaunchRequest, spec RepoLaunchSpec, index int) (string, error) {
 	if usesRemoteWorkspaceMaterialization(req) {
-		if req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0 {
+		if req.ExecutorType == string(models.ExecutorTypePluginRemote) || req.ExecutorType == string(models.ExecutorTypeNomad) || index > 0 {
 			return remoteWorkspaceRepositoryDestination(spec)
 		}
 		return "", nil

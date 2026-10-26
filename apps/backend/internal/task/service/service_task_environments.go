@@ -448,9 +448,16 @@ func (s *Service) teardownEnvironmentResourcesWithWorktrees(
 	if err := s.teardownKubernetesEnvironment(ctx, env); err != nil {
 		return err
 	}
+	nomadRetained, err := s.nomadEnvironmentRetained(ctx, env)
+	if err != nil {
+		return fmt.Errorf("read nomad environment inventory %s: %w", env.ID, err)
+	}
+	if err := s.teardownNomadEnvironment(ctx, env); err != nil {
+		return err
+	}
 
 	worktreeIDs := environmentWorktreeIDs(env)
-	if !environmentHasResources(env, includeWorktrees, worktreeIDs) {
+	if !environmentHasResources(env, includeWorktrees, worktreeIDs, nomadRetained) {
 		return nil
 	}
 	if s.envDestroyer == nil {
@@ -505,8 +512,8 @@ func (s *Service) teardownEnvironmentResourcesWithWorktrees(
 	return errors.Join(errs...)
 }
 
-func environmentHasResources(env *models.TaskEnvironment, includeWorktrees bool, worktreeIDs []string) bool {
-	return env.ContainerID != "" || env.SandboxID != "" || env.ExecutorType == string(models.ExecutorTypePluginRemote) ||
+func environmentHasResources(env *models.TaskEnvironment, includeWorktrees bool, worktreeIDs []string, nomadRetained bool) bool {
+	return nomadRetained || env.ContainerID != "" || env.SandboxID != "" || env.ExecutorType == string(models.ExecutorTypePluginRemote) ||
 		(includeWorktrees && len(worktreeIDs) > 0)
 }
 

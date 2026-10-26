@@ -460,6 +460,7 @@ func TestExecutorTypeRuntime(t *testing.T) {
 		{ExecutorTypeRemoteDocker, agentruntime.RuntimeRemoteDocker},
 		{ExecutorTypeSprites, agentruntime.RuntimeSprites},
 		{ExecutorTypeKubernetes, agentruntime.RuntimeKubernetes},
+		{ExecutorTypeNomad, agentruntime.RuntimeNomad},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.in), func(t *testing.T) {
@@ -499,5 +500,20 @@ func TestKubernetesRuntimeIsAlwaysResumable(t *testing.T) {
 
 	if !IsAlwaysResumableRuntime(agentruntime.RuntimeKubernetes) {
 		t.Fatal("IsAlwaysResumableRuntime(k8s) = false, want true")
+	}
+}
+
+func TestNomadExecutorIsRemoteHostModeAndAlwaysResumable(t *testing.T) {
+	if ExecutorTypeNomad.Runtime() != agentruntime.RuntimeNomad {
+		t.Fatalf("Nomad runtime = %q, want %q", ExecutorTypeNomad.Runtime(), agentruntime.RuntimeNomad)
+	}
+	if !IsRemoteExecutorType(ExecutorTypeNomad) {
+		t.Fatal("Nomad executor is not classified as remote")
+	}
+	if IsContainerizedExecutorType(ExecutorTypeNomad) {
+		t.Fatal("native Nomad executor was classified as containerized")
+	}
+	if !IsAlwaysResumableRuntime(agentruntime.RuntimeNomad) {
+		t.Fatal("Nomad runtime is not always resumable")
 	}
 }

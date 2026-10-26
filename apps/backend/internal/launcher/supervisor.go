@@ -185,7 +185,10 @@ func buildManifest(command string, args []string, cwd string, env []string, home
 
 func allowedSupervisorEnv(env []string) map[string]string {
 	allow := map[string]bool{
-		"KANDEV_HOME_DIR":              true,
+		"KANDEV_HOME_DIR": true,
+		// HOME is required by SSH identity and config resolution. Keep it in the
+		// private launch manifest so supervised restart uses the same user home.
+		"HOME":                         true,
 		"KANDEV_DATABASE_PATH":         true,
 		"KANDEV_SERVER_PORT":           true,
 		"KANDEV_DESKTOP_HEALTH_TOKEN":  true,

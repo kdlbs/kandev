@@ -32,6 +32,24 @@ func TestRegisterKubernetesBackendPreventsStandaloneFallback(t *testing.T) {
 	}
 }
 
+func TestRegisterNomadBackendPreventsStandaloneFallback(t *testing.T) {
+	t.Parallel()
+
+	registry := lifecycle.NewExecutorRegistry(newTestLogger())
+	registerNomadBackend(registry, nil, nil, newTestLogger())
+	manager := lifecycle.NewManager(nil, nil, registry, nil, nil, nil, lifecycle.ExecutorFallbackWarn, "", newTestLogger())
+	if !manager.RequiresCloneURL(string(models.ExecutorTypeNomad)) {
+		t.Fatal("Nomad executor resolved as missing/standalone instead of its registered remote backend")
+	}
+	backend, err := registry.GetBackend(executor.NameNomad)
+	if err != nil {
+		t.Fatalf("GetBackend(nomad) error = %v", err)
+	}
+	if _, err := backend.CreateInstance(context.Background(), &lifecycle.ExecutorCreateRequest{}); !errors.Is(err, lifecycle.ErrNomadExecutorNotReady) {
+		t.Fatalf("Nomad backend CreateInstance() error = %v, want fail-closed not-ready", err)
+	}
+}
+
 func TestRegisterKubernetesPreparerUsesRealLifecyclePreparer(t *testing.T) {
 	t.Parallel()
 

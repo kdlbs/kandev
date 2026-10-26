@@ -2,9 +2,13 @@ package lifecycle
 
 import (
 	"context"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/nomad"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -38,6 +42,95 @@ func TestStopTaskExecutionPersistsStoppedRuntimeAndResumeToken(t *testing.T) {
 	require.Equal(t, models.ExecutorRunningStatusStopped, running.Status)
 	require.Equal(t, "saved-conversation-token", running.ResumeToken)
 	require.True(t, running.Resumable)
+}
+
+func TestOrdinaryNomadStopRetainsTypedInventoryForEnvironmentRecovery(t *testing.T) {
+	ctx := context.Background()
+	instance := nomadStopTestInstance("execution-nomad-retained", "task-nomad-retained", "session-nomad-retained", "allocation-nomad-retained")
+	state, err := nomad.EnvironmentStateFromMetadata(instance.Metadata)
+	require.NoError(t, err)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	forward := &SSHPortForwarder{listener: ln, localPort: ln.Addr().(*net.TCPAddr).Port, closed: make(chan struct{})}
+	writer := &captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "session-nomad-retained", SessionID: "session-nomad-retained", TaskID: "task-nomad-retained",
+		AgentExecutionID: state.ExecutionID, Runtime: agentruntime.RuntimeNomad,
+		Status: models.ExecutorRunningStatusRunning, Metadata: instance.Metadata,
+	}}
+	manager := newTestManager(t)
+	manager.SetExecutorRunningWriter(writer)
+	backend := NewNomadExecutor(nil, nil, nil)
+	backend.sessions[state.ExecutionID] = &nomadAgentctlConnection{instance: instance, controlForwarder: forward}
+	manager.executorRegistry = NewExecutorRegistry(manager.logger)
+	manager.executorRegistry.Register(backend)
+	execution := &AgentExecution{
+		ID: state.ExecutionID, TaskID: "task-nomad-retained", SessionID: "session-nomad-retained",
+		TaskEnvironmentID: state.EnvironmentID, RuntimeName: agentruntime.RuntimeNomad,
+		Owner:  ExecutionOwner{Kind: ExecutionOwnerTask, TaskID: "task-nomad-retained", SessionID: "session-nomad-retained"},
+		Status: v1.AgentStatusReady, metadata: instance.Metadata,
+	}
+	require.NoError(t, manager.executionStore.Add(execution))
+
+	require.NoError(t, manager.StopAgentWithReason(ctx, execution.ID, "stopped via API", false))
+	require.Empty(t, backend.sessions, "ordinary stop must detach the local Nomad transport")
+	if _, err := net.DialTimeout("tcp", ln.Addr().String(), 10*time.Millisecond); err == nil {
+		t.Fatal("ordinary stop left the local SSH forwarding listener open")
+	}
+	require.Zero(t, writer.deleteCalls, "ordinary stop must not delete the environment's Nomad inventory")
+	require.NotNil(t, writer.running, "ordinary stop must persist terminal execution status")
+	require.Equal(t, models.ExecutorRunningStatusStopped, writer.running.Status)
+	retained, err := nomad.EnvironmentStateFromMetadata(writer.running.Metadata)
+	require.NoError(t, err)
+	require.Equal(t, state, retained, "ordinary stop must preserve exact allocation, server, workspace, and generation metadata")
+	require.Equal(t, "auth-secret-reference", getMetadataString(writer.running.Metadata, MetadataKeyAuthTokenSecret))
+	require.Equal(t, "nonce-secret-reference", getMetadataString(writer.running.Metadata, MetadataKeyBootstrapNonceSecret))
+}
+
+func TestNomadBackendShutdownRetainsInventoryAndClosesOnlyLocalTransport(t *testing.T) {
+	instance := nomadStopTestInstance("execution-nomad-shutdown", "task-nomad-shutdown", "session-nomad-shutdown", "allocation-nomad-shutdown")
+	state, err := nomad.EnvironmentStateFromMetadata(instance.Metadata)
+	require.NoError(t, err)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	forward := &SSHPortForwarder{listener: ln, localPort: ln.Addr().(*net.TCPAddr).Port, closed: make(chan struct{})}
+	backend := NewNomadExecutor(nil, nil, nil)
+	backend.sessions[state.ExecutionID] = &nomadAgentctlConnection{instance: instance, controlForwarder: forward}
+	prior := &models.ExecutorRunning{
+		ID: "session-nomad-shutdown", SessionID: "session-nomad-shutdown", TaskID: "task-nomad-shutdown",
+		AgentExecutionID: state.ExecutionID, Runtime: agentruntime.RuntimeNomad,
+		Status: models.ExecutorRunningStatusReady, Metadata: clonePluginExecutorMetadata(instance.Metadata),
+	}
+	writer := &captureExecutorRunningWriter{prior: prior}
+	manager := newTestManager(t)
+	manager.SetExecutorRunningWriter(writer)
+	manager.executorRegistry = NewExecutorRegistry(manager.logger)
+	manager.executorRegistry.Register(backend)
+	execution := &AgentExecution{
+		ID: state.ExecutionID, TaskID: "task-nomad-shutdown", SessionID: "session-nomad-shutdown",
+		TaskEnvironmentID: state.EnvironmentID, RuntimeName: agentruntime.RuntimeNomad,
+		Status: v1.AgentStatusReady, metadata: clonePluginExecutorMetadata(instance.Metadata),
+	}
+	require.NoError(t, manager.executionStore.Add(execution))
+
+	require.NoError(t, manager.StopAllAgents(context.Background()))
+	require.NotNil(t, writer.prior, "backend shutdown must retain the inventory row")
+	require.Zero(t, writer.deleteCalls)
+	require.Nil(t, writer.running, "graceful shutdown detach must not rewrite the execution row")
+	require.NotNil(t, manager.executionStore)
+	if _, err := net.DialTimeout("tcp", ln.Addr().String(), 10*time.Millisecond); err != nil {
+		t.Fatalf("shutdown detach closed transport before backend Close(): %v", err)
+	}
+	probe, err := net.DialTimeout("tcp", ln.Addr().String(), 10*time.Millisecond)
+	require.NoError(t, err)
+	_ = probe.Close()
+
+	require.NoError(t, manager.Stop())
+	if _, err := net.DialTimeout("tcp", ln.Addr().String(), 10*time.Millisecond); err == nil {
+		t.Fatal("backend shutdown did not close its local SSH transport")
+	}
+	retained, err := nomad.EnvironmentStateFromMetadata(writer.prior.Metadata)
+	require.NoError(t, err)
+	require.Equal(t, state, retained, "backend shutdown must leave Nomad allocation identity and fence metadata unchanged")
 }
 
 func TestSuspendIdlePreservesRuntimeOwnershipWithoutAgentStopped(t *testing.T) {

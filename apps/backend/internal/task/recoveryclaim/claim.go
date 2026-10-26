@@ -109,8 +109,10 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	if err := lockTask(ctx, db, tx, req.OwnerTaskID); err != nil {
 		return nil, err
 	}
-	if err := ensureCleanupBarrier(ctx, db, tx, req.OwnerTaskID, req.CleanupJobID); err != nil {
-		return nil, err
+	if !req.OperatorReadmission {
+		if err := ensureCleanupBarrier(ctx, db, tx, req.OwnerTaskID, req.CleanupJobID); err != nil {
+			return nil, err
+		}
 	}
 
 	ownerTaskID, generation, executorType, err := loadEnvironmentIdentity(ctx, db, tx, req.TaskEnvironmentID)

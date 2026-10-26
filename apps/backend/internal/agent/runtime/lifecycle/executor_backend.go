@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	agentnomad "github.com/kandev/kandev/internal/agent/nomad"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -379,6 +380,15 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
 
+	// Nomad profile snapshot. nomad_token is a Kandev vault reference only;
+	// resolved credential bytes are never part of launch metadata.
+	nomadMetadataKeyAddress: true, nomadMetadataKeyRegion: true, nomadMetadataKeyDatacenter: true,
+	nomadMetadataKeyNodeID: true, nomadMetadataKeyPlatform: true, nomadMetadataKeySSHTarget: true,
+	nomadMetadataKeyWorkspaceRoot: true, nomadMetadataKeyAllocationRoot: true,
+	nomadMetadataKeyCPUMHz: true, nomadMetadataKeyMemoryMB: true, nomadMetadataKeyToken: true, nomadMetadataKeyLostAfter: true,
+	nomadMetadataKeyNodePool: true, nomadMetadataKeyPlacement: true, nomadMetadataKeyPinNodeID: true,
+	nomadMetadataKeyExcludeLoc: true, nomadMetadataKeyPreferLoc: true, nomadMetadataKeyMemoryMaxMB: true,
+
 	// Kubernetes connection and exact resource inventory.
 	MetadataKeyKubernetesAuthMode:               true,
 	MetadataKeyKubernetesKubeconfigPath:         true,
@@ -410,6 +420,9 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesTemplateHash:           true,
 	MetadataKeyKubernetesProfileSnapshot:        true,
 	MetadataKeyKubernetesInventoryState:         true,
+	// Native Nomad allocation identity is retained for same-session recovery
+	// and cleanup, but must never flow into a sibling session's launch.
+	agentnomad.EnvironmentStateMetadataKey: true,
 
 	// Executor type marker
 	MetadataKeyExecutorType: true,
@@ -512,6 +525,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesTemplateHash:           true,
 	MetadataKeyKubernetesProfileSnapshot:        true,
 	MetadataKeyKubernetesInventoryState:         true,
+	agentnomad.EnvironmentStateMetadataKey:      true,
 }
 
 // ShouldPersistMetadataKey returns true if the given metadata key should
@@ -718,7 +732,10 @@ type ExecutorCreateRequest struct {
 	McpProfile            *mcpprofile.Context
 	AuthToken             string // Previously handshaken agentctl token for reconnects
 	BootstrapNonce        string // Stored nonce for re-handshake after container restart
-	AgentctlStartupConfig commonconfig.AgentctlStartupConfig
+	// RequireExistingAgentctlInstance makes recovery attach-only: a missing
+	// instance is unknown state and must not be recreated implicitly.
+	RequireExistingAgentctlInstance bool
+	AgentctlStartupConfig           commonconfig.AgentctlStartupConfig
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
@@ -729,6 +746,13 @@ type ExecutorCreateRequest struct {
 	// before a Kubernetes launch enters its next fallible phase. It is nil for
 	// runtimes and embedded tests that do not support provisional persistence.
 	CheckpointRuntimeInventory func(context.Context, map[string]interface{}) error
+	// PersistNomadRuntimeSecret stores one operation-bound bootstrap/auth value
+	// and attaches only its reference to launch metadata. Nomad must call this
+	// before dispatching the corresponding irreversible remote operation.
+	PersistNomadRuntimeSecret func(context.Context, string, string) error
+	// ListNomadInventory returns every retained typed Nomad state, including
+	// terminal rows. Nomad admission fails closed when it is nil or errors.
+	ListNomadInventory func(context.Context) ([]agentnomad.EnvironmentState, error)
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
@@ -778,6 +802,11 @@ type ExecutorInstance struct {
 	ContainerIP          string // Docker
 	StandaloneInstanceID string // Standalone
 	StandalonePort       int    // Standalone
+
+	// LocalWorktreeBranch is non-empty when the workspace lives on the Kandev
+	// host (a verified local pool node). Repositories with a local checkout are
+	// then provisioned as git worktrees on this per-environment branch.
+	LocalWorktreeBranch string
 
 	// Common fields
 	WorkspacePath   string

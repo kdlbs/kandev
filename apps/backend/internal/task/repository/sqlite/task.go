@@ -3766,6 +3766,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := r.validateTaskDeletionTx(ctx, tx, id, claim); err != nil {
 		return "", err
 	}
+	if err := r.ensureNomadInventoryAbsentForTask(ctx, tx, id); err != nil {
+		return "", err
+	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
 		return "", err

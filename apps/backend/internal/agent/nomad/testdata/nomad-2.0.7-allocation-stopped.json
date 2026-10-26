@@ -1,0 +1,571 @@
+{
+  "AllocModifyIndex": 386,
+  "AllocatedResources": {
+    "Shared": {
+      "DiskMB": 300,
+      "Networks": [
+        {
+          "DynamicPorts": [
+            {
+              "HostNetwork": "default",
+              "Label": "agentctl_control",
+              "Value": 23665
+            },
+            {
+              "HostNetwork": "default",
+              "Label": "agentctl_instance",
+              "Value": 22044
+            }
+          ],
+          "IP": "192.0.2.10",
+          "Mode": "host"
+        }
+      ],
+      "Ports": [
+        {
+          "HostIP": "192.0.2.10",
+          "Label": "agentctl_control",
+          "Value": 23665
+        },
+        {
+          "HostIP": "192.0.2.10",
+          "Label": "agentctl_instance",
+          "Value": 22044
+        }
+      ]
+    },
+    "TaskLifecycles": {
+      "agentctl": null
+    },
+    "Tasks": {
+      "agentctl": {
+        "Cpu": {
+          "CpuShares": 48,
+          "ReservedCores": null
+        },
+        "Devices": null,
+        "Memory": {
+          "MemoryMB": 1024,
+          "MemoryMaxMB": 0
+        },
+        "Networks": null
+      }
+    }
+  },
+  "ClientDescription": "All tasks have completed",
+  "ClientStatus": "complete",
+  "CreateIndex": 363,
+  "CreateTime": 1792866904384484000,
+  "DesiredDescription": "alloc not needed due to job update",
+  "DesiredStatus": "stop",
+  "EvalID": "bd099fc3-489e-5290-d531-655c408518da",
+  "ID": "fixture-allocation-id",
+  "Job": {
+    "Affinities": null,
+    "AllAtOnce": false,
+    "Constraints": [
+      {
+        "LTarget": "${node.unique.id}",
+        "Operand": "=",
+        "RTarget": "fixture-node-id"
+      }
+    ],
+    "ConsulNamespace": "",
+    "CreateIndex": 362,
+    "Datacenters": [
+      "dc1"
+    ],
+    "DispatchIdempotencyToken": "",
+    "Dispatched": false,
+    "ID": "fixture-job-id",
+    "JobModifyIndex": 362,
+    "Meta": {
+      "kandev.environment_id": "fixture-environment-id",
+      "kandev.generation": "1",
+      "kandev.input_digest": "b66fed2c495bd400f415bc3d6f216a249e05952acf58ea2fccc5477d3a99a28f",
+      "kandev.installation_id": "fixture-executor-profile-id",
+      "kandev.node_id": "fixture-node-id",
+      "kandev.operation_id": "45b6abe9-41d4-4f86-afc7-8b78c00cf5a1"
+    },
+    "ModifyIndex": 362,
+    "Multiregion": null,
+    "Name": "fixture-job-id",
+    "Namespace": "default",
+    "NodePool": "default",
+    "NomadTokenID": "",
+    "ParameterizedJob": null,
+    "ParentID": "",
+    "Payload": null,
+    "Periodic": null,
+    "Priority": 50,
+    "Region": "global",
+    "Spreads": null,
+    "Stable": false,
+    "Status": "pending",
+    "StatusDescription": "",
+    "Stop": false,
+    "SubmitTime": 1792866904371094000,
+    "TaskGroups": [
+      {
+        "Affinities": null,
+        "Constraints": null,
+        "Consul": null,
+        "Count": 1,
+        "Disconnect": {
+          "LostAfter": 0,
+          "Reconcile": "keep_original",
+          "Replace": false,
+          "StopOnClientAfter": null
+        },
+        "EphemeralDisk": {
+          "Migrate": false,
+          "SizeMB": 300,
+          "Sticky": false
+        },
+        "HasPerAllocVolumes": false,
+        "MaxClientDisconnect": null,
+        "MaxRunDuration": null,
+        "Meta": null,
+        "Migrate": null,
+        "Name": "agentctl",
+        "Networks": [
+          {
+            "DynamicPorts": [
+              {
+                "HostNetwork": "default",
+                "Label": "agentctl_control"
+              },
+              {
+                "HostNetwork": "default",
+                "Label": "agentctl_instance"
+              }
+            ],
+            "Mode": "host"
+          }
+        ],
+        "PreventRescheduleOnLost": false,
+        "ReschedulePolicy": {
+          "Attempts": 0,
+          "Delay": 5000000000,
+          "DelayFunction": "constant",
+          "Interval": 86400000000000,
+          "MaxDelay": 0,
+          "Unlimited": false
+        },
+        "RestartPolicy": {
+          "Attempts": 0,
+          "Delay": 0,
+          "Interval": 60000000000,
+          "Mode": "fail",
+          "RenderTemplates": false
+        },
+        "Scaling": null,
+        "Services": null,
+        "ShutdownDelay": null,
+        "Spreads": null,
+        "StopAfterClientDisconnect": null,
+        "Tasks": [
+          {
+            "Actions": null,
+            "Affinities": null,
+            "Artifacts": null,
+            "CSIPluginConfig": null,
+            "Config": {
+              "args": [
+                "/fixture-root/nomad/alloc/fixture-job-id/bootstrap-38a3404ca206bd622f90f95f465023280615152400d01653a19a94210cfba7b3.sh"
+              ],
+              "command": "/bin/sh"
+            },
+            "Constraints": null,
+            "Consul": null,
+            "DispatchPayload": null,
+            "Driver": "raw_exec",
+            "Env": {
+              "AGENTCTL_LISTEN_HOST": "127.0.0.1",
+              "KANDEV_AGENTCTL_PATH": "/fixture-root/runtime/agentctl",
+              "KANDEV_ALLOCATION_ROOT": "/fixture-root/nomad/alloc",
+              "KANDEV_BOOTSTRAP_ENV_FILE": "/fixture-root/nomad/alloc/fixture-job-id/bootstrap-38a3404ca206bd622f90f95f465023280615152400d01653a19a94210cfba7b3.sh.env",
+              "KANDEV_ENVIRONMENT_GENERATION": "1",
+              "KANDEV_ENVIRONMENT_ID": "fixture-environment-id",
+              "KANDEV_INPUT_DIGEST": "b66fed2c495bd400f415bc3d6f216a249e05952acf58ea2fccc5477d3a99a28f",
+              "KANDEV_INSTALLATION_ID": "fixture-executor-profile-id",
+              "KANDEV_NOMAD_JOB_ID": "fixture-job-id",
+              "KANDEV_NOMAD_NODE_ID": "${node.unique.id}",
+              "KANDEV_OPERATION_ID": "45b6abe9-41d4-4f86-afc7-8b78c00cf5a1",
+              "KANDEV_WORKER_STATE_ROOT": "/fixture-root/worker-state/fixture-node-id",
+              "KANDEV_WORKSPACE_ROOT": "/fixture-root/workspaces/environment/generation"
+            },
+            "Identities": null,
+            "Identity": {
+              "Audience": [
+                "nomadproject.io"
+              ],
+              "ChangeMode": "",
+              "ChangeSignal": "",
+              "Env": false,
+              "ExtraClaims": null,
+              "File": false,
+              "Filepath": "",
+              "Name": "default",
+              "ServiceName": "",
+              "TTL": 0
+            },
+            "KillSignal": "",
+            "KillTimeout": 45000000000,
+            "Kind": "",
+            "Leader": false,
+            "Lifecycle": null,
+            "LogConfig": {
+              "Disabled": false,
+              "MaxFileSizeMB": 10,
+              "MaxFiles": 10
+            },
+            "Meta": null,
+            "Name": "agentctl",
+            "Resources": {
+              "CPU": 48,
+              "Cores": 0,
+              "Devices": null,
+              "DiskMB": 0,
+              "IOPS": 0,
+              "MemoryMB": 1024,
+              "MemoryMaxMB": 0,
+              "NUMA": null,
+              "Networks": null,
+              "SecretsMB": 0
+            },
+            "RestartPolicy": {
+              "Attempts": 0,
+              "Delay": 0,
+              "Interval": 60000000000,
+              "Mode": "fail",
+              "RenderTemplates": false
+            },
+            "ScalingPolicies": null,
+            "Schedule": null,
+            "Secrets": null,
+            "Services": null,
+            "ShutdownDelay": 0,
+            "Templates": null,
+            "User": "",
+            "Vault": null,
+            "VolumeMounts": null
+          }
+        ],
+        "Update": null,
+        "Volumes": null
+      }
+    ],
+    "Type": "batch",
+    "UI": null,
+    "Update": {
+      "AutoPromote": false,
+      "AutoRevert": false,
+      "Canary": 0,
+      "HealthCheck": "",
+      "HealthyDeadline": 0,
+      "MaxParallel": 0,
+      "MinHealthyTime": 0,
+      "ProgressDeadline": 0,
+      "Stagger": 0
+    },
+    "VaultNamespace": "",
+    "Version": 0,
+    "VersionTag": null
+  },
+  "JobID": "fixture-job-id",
+  "Metrics": {
+    "AllocationTime": 34042,
+    "ClassExhausted": null,
+    "ClassFiltered": null,
+    "CoalescedFailures": 0,
+    "ConstraintFiltered": null,
+    "DimensionExhausted": null,
+    "NodePool": "default",
+    "NodesAvailable": {
+      "dc1": 1
+    },
+    "NodesEvaluated": 1,
+    "NodesExhausted": 0,
+    "NodesFiltered": 0,
+    "NodesInPool": 1,
+    "QuotaExhausted": null,
+    "ResourcesExhausted": null,
+    "ScoreMetaData": [
+      {
+        "NodeID": "fixture-node-id",
+        "NormScore": 0.5260211759806737,
+        "Scores": {
+          "binpack": 0.5260211759806737,
+          "job-anti-affinity": 0.0,
+          "node-affinity": 0.0,
+          "node-reschedule-penalty": 0.0
+        }
+      }
+    ],
+    "Scores": null
+  },
+  "ModifyIndex": 388,
+  "ModifyTime": 1792867900681165000,
+  "Name": "fixture-job-id.agentctl[0]",
+  "Namespace": "default",
+  "NetworkStatus": {
+    "Address": "",
+    "AddressIPv6": "",
+    "DNS": null,
+    "InterfaceName": ""
+  },
+  "NodeID": "fixture-node-id",
+  "NodeName": "worker-node.example",
+  "Resources": {
+    "CPU": 48,
+    "Cores": 0,
+    "Devices": null,
+    "DiskMB": 300,
+    "IOPS": 0,
+    "MemoryMB": 1024,
+    "MemoryMaxMB": 1024,
+    "NUMA": null,
+    "Networks": [
+      {
+        "DynamicPorts": [
+          {
+            "HostNetwork": "default",
+            "Label": "agentctl_control",
+            "Value": 23665
+          },
+          {
+            "HostNetwork": "default",
+            "Label": "agentctl_instance",
+            "Value": 22044
+          }
+        ],
+        "IP": "192.0.2.10",
+        "Mode": "host"
+      }
+    ],
+    "SecretsMB": 0
+  },
+  "SharedResources": {
+    "CPU": 0,
+    "Cores": 0,
+    "Devices": null,
+    "DiskMB": 300,
+    "IOPS": 0,
+    "MemoryMB": 0,
+    "MemoryMaxMB": 0,
+    "NUMA": null,
+    "Networks": [
+      {
+        "DynamicPorts": [
+          {
+            "HostNetwork": "default",
+            "Label": "agentctl_control",
+            "Value": 23665
+          },
+          {
+            "HostNetwork": "default",
+            "Label": "agentctl_instance",
+            "Value": 22044
+          }
+        ],
+        "IP": "192.0.2.10",
+        "Mode": "host"
+      }
+    ],
+    "SecretsMB": 0
+  },
+  "SigningKeyID": "a0eb37de-c0e5-4020-2b66-311dc715563b",
+  "TaskGroup": "agentctl",
+  "TaskResources": {
+    "agentctl": {
+      "CPU": 48,
+      "Cores": 0,
+      "Devices": null,
+      "DiskMB": 0,
+      "IOPS": 0,
+      "MemoryMB": 1024,
+      "MemoryMaxMB": 0,
+      "NUMA": null,
+      "Networks": null,
+      "SecretsMB": 0
+    }
+  },
+  "TaskStates": {
+    "agentctl": {
+      "Events": [
+        {
+          "Details": {},
+          "DiskLimit": 0,
+          "DisplayMessage": "Task received by client",
+          "DownloadError": "",
+          "DriverError": "",
+          "DriverMessage": "",
+          "ExitCode": 0,
+          "FailedSibling": "",
+          "FailsTask": false,
+          "GenericSource": "",
+          "KillError": "",
+          "KillReason": "",
+          "KillTimeout": 0,
+          "Message": "",
+          "RestartReason": "",
+          "SetupError": "",
+          "Signal": 0,
+          "StartDelay": 0,
+          "TaskSignal": "",
+          "TaskSignalReason": "",
+          "Time": 1792866904412326000,
+          "Type": "Received",
+          "ValidationError": "",
+          "VaultError": ""
+        },
+        {
+          "Details": {
+            "message": "Building Task Directory"
+          },
+          "DiskLimit": 0,
+          "DisplayMessage": "Building Task Directory",
+          "DownloadError": "",
+          "DriverError": "",
+          "DriverMessage": "",
+          "ExitCode": 0,
+          "FailedSibling": "",
+          "FailsTask": false,
+          "GenericSource": "",
+          "KillError": "",
+          "KillReason": "",
+          "KillTimeout": 0,
+          "Message": "Building Task Directory",
+          "RestartReason": "",
+          "SetupError": "",
+          "Signal": 0,
+          "StartDelay": 0,
+          "TaskSignal": "",
+          "TaskSignalReason": "",
+          "Time": 1792866904452236000,
+          "Type": "Task Setup",
+          "ValidationError": "",
+          "VaultError": ""
+        },
+        {
+          "Details": {},
+          "DiskLimit": 0,
+          "DisplayMessage": "Task started by client",
+          "DownloadError": "",
+          "DriverError": "",
+          "DriverMessage": "",
+          "ExitCode": 0,
+          "FailedSibling": "",
+          "FailsTask": false,
+          "GenericSource": "",
+          "KillError": "",
+          "KillReason": "",
+          "KillTimeout": 0,
+          "Message": "",
+          "RestartReason": "",
+          "SetupError": "",
+          "Signal": 0,
+          "StartDelay": 0,
+          "TaskSignal": "",
+          "TaskSignalReason": "",
+          "Time": 1792866904652109000,
+          "Type": "Started",
+          "ValidationError": "",
+          "VaultError": ""
+        },
+        {
+          "Details": {
+            "kill_timeout": "30s"
+          },
+          "DiskLimit": 0,
+          "DisplayMessage": "Sent interrupt. Waiting 30s before force killing",
+          "DownloadError": "",
+          "DriverError": "",
+          "DriverMessage": "",
+          "ExitCode": 0,
+          "FailedSibling": "",
+          "FailsTask": false,
+          "GenericSource": "",
+          "KillError": "",
+          "KillReason": "",
+          "KillTimeout": 30000000000,
+          "Message": "",
+          "RestartReason": "",
+          "SetupError": "",
+          "Signal": 0,
+          "StartDelay": 0,
+          "TaskSignal": "",
+          "TaskSignalReason": "",
+          "Time": 1792867900454980000,
+          "Type": "Killing",
+          "ValidationError": "",
+          "VaultError": ""
+        },
+        {
+          "Details": {
+            "exit_code": "0",
+            "oom_killed": "false",
+            "signal": "0"
+          },
+          "DiskLimit": 0,
+          "DisplayMessage": "Exit Code: 0",
+          "DownloadError": "",
+          "DriverError": "",
+          "DriverMessage": "",
+          "ExitCode": 0,
+          "FailedSibling": "",
+          "FailsTask": false,
+          "GenericSource": "",
+          "KillError": "",
+          "KillReason": "",
+          "KillTimeout": 0,
+          "Message": "",
+          "RestartReason": "",
+          "SetupError": "",
+          "Signal": 0,
+          "StartDelay": 0,
+          "TaskSignal": "",
+          "TaskSignalReason": "",
+          "Time": 1792867900464751000,
+          "Type": "Terminated",
+          "ValidationError": "",
+          "VaultError": ""
+        },
+        {
+          "Details": {},
+          "DiskLimit": 0,
+          "DisplayMessage": "Task successfully killed",
+          "DownloadError": "",
+          "DriverError": "",
+          "DriverMessage": "",
+          "ExitCode": 0,
+          "FailedSibling": "",
+          "FailsTask": false,
+          "GenericSource": "",
+          "KillError": "",
+          "KillReason": "",
+          "KillTimeout": 0,
+          "Message": "",
+          "RestartReason": "",
+          "SetupError": "",
+          "Signal": 0,
+          "StartDelay": 0,
+          "TaskSignal": "",
+          "TaskSignalReason": "",
+          "Time": 1792867900473000000,
+          "Type": "Killed",
+          "ValidationError": "",
+          "VaultError": ""
+        }
+      ],
+      "Failed": false,
+      "FinishedAt": "2026-10-24T18:51:40.48098Z",
+      "LastRestart": null,
+      "Paused": "",
+      "Restarts": 0,
+      "StartedAt": "2026-10-24T18:35:04.652135Z",
+      "State": "dead"
+    }
+  }
+}

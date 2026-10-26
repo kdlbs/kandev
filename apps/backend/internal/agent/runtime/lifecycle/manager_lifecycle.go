@@ -117,9 +117,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	startup.BeginStep(ctx, startup.StepSessionsRecovery)
 	standaloneRecords, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
 	pluginRecords, pluginListErr := m.ListLivePluginExecutorsRunning(ctx)
+	nomadRecords, nomadListErr := m.ListLiveNomadExecutorsRunning(ctx)
 	remoteRecords, remoteListErr := m.ListLiveRemoteExecutorsRunning(ctx)
 	if listErr == nil && pluginListErr != nil {
 		listErr = pluginListErr
+	}
+	if listErr == nil && nomadListErr != nil {
+		listErr = nomadListErr
 	}
 	if remoteListErr != nil {
 		m.logger.Warn("remote execution recovery inventory could not be read; remote owners remain untouched",
@@ -128,7 +132,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	records := append([]*models.ExecutorRunning(nil), standaloneRecords...)
 	remoteRecordsForRecovery := make([]*models.ExecutorRunning, 0, len(remoteRecords)+len(pluginRecords))
 	if listErr == nil && !deferRemote {
-		remoteRecordsForRecovery = m.initialRemoteRecoveryRecords(ctx, pluginRecords, remoteRecords)
+		remoteRecordsForRecovery = m.initialRemoteRecoveryRecords(ctx, pluginRecords, remoteRecords, nomadRecords)
 		records = append(records, remoteRecordsForRecovery...)
 	}
 
@@ -169,6 +173,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	guardInventory := append([]*models.ExecutorRunning(nil), records...)
 	guardInventory = append(guardInventory, remoteRecords...)
+	guardInventory = append(guardInventory, nomadRecords...)
 	guardedSessions := SessionsToGuard(ctx, sessionIDsFromExecutorRunning(guardInventory), passthroughLookup)
 	guardedSet := make(map[string]struct{}, len(guardedSessions))
 	for _, sessionID := range guardedSessions {
@@ -938,12 +943,26 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 		}(exec)
 	}
 
-	wg.Wait()
-	close(errCh)
-
+	// A stop can block on per-execution locks held by another stop, so the wait
+	// itself must honor the shutdown deadline.
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
+	select {
+	case <-done:
+	case <-ctx.Done():
+		errs = append(errs, fmt.Errorf("stop agents during shutdown: %w", ctx.Err()))
+	}
+	for drained := false; !drained; {
+		select {
+		case err := <-errCh:
+			errs = append(errs, err)
+		default:
+			drained = true
+		}
 	}
 	return errors.Join(errs...)
 }

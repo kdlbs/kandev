@@ -103,6 +103,7 @@ func provideLifecycleManager(
 	executorRegistry.Register(sshExec)
 	log.Info("SSH runtime registered")
 	registerKubernetesBackend(executorRegistry, agentctlResolver, log)
+	registerNomadBackend(executorRegistry, agentctlResolver, secretStores.credentials, log)
 
 	credsMgr := credentials.NewManager(log)
 	if secretStores.credentials != nil {
@@ -275,6 +276,10 @@ func registerKubernetesBackend(
 ) {
 	registry.Register(lifecycle.NewKubernetesExecutor(agentctlResolver, log))
 	log.Info("Kubernetes runtime registered (lazy initialization)")
+}
+
+func registerNomadBackend(registry *lifecycle.ExecutorRegistry, resolver *lifecycle.AgentctlResolver, secretStore secrets.SecretStore, log *logger.Logger) {
+	registry.Register(lifecycle.NewNomadExecutor(resolver, secretStore, log))
 }
 
 func registerKubernetesPreparer(registry *lifecycle.PreparerRegistry, log *logger.Logger) {

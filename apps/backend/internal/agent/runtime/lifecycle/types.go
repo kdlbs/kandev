@@ -1643,6 +1643,14 @@ type WorkspaceRepositorySpec struct {
 	BranchSlug              string
 	BranchIdentitySlug      string
 	WorkspaceRelativePath   string
+	// RepositoryURL is the credential-free clone locator, resolved by the same
+	// derivation the resume path uses. The workspace info provider fills it,
+	// with the fields below, only for Nomad environments, where Created-session
+	// recovery rebuilds the repository reconcile input from it.
+	RepositoryURL           string
+	CheckoutOptions         *models.RepositoryCheckoutOptions
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
 }
 
 // RouteOverride carries a fully resolved provider profile for one

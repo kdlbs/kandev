@@ -95,3 +95,12 @@ func (p *PortAllocator) MarkUnavailable(lease PortLease) {
 	delete(p.allocated, lease.Port)
 	delete(p.owners, lease.Owner)
 }
+
+// ClearUnavailable forgets every port MarkUnavailable blocked, so a later
+// allocation can probe them again.
+func (p *PortAllocator) ClearUnavailable() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.unavailable = make(map[int]struct{})
+}

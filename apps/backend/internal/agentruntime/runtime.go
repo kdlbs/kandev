@@ -20,6 +20,7 @@ const (
 	RuntimeSSH          Runtime = "ssh"
 	RuntimeKubernetes   Runtime = "k8s"
 	RuntimePluginRemote Runtime = "plugin_remote"
+	RuntimeNomad        Runtime = "nomad"
 )
 
 // IsContainerized reports whether the runtime hosts the agent

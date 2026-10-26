@@ -997,7 +997,7 @@ func (r *Repository) settleWorkspaceMaterializationClaim(
 	claimUpdatedAt time.Time,
 	sessionID string,
 ) (materializationClaimOutcome, error) {
-	abandoned, err := r.workspaceMaterializationAbandonedTx(ctx, tx, ownerID, claimUpdatedAt)
+	abandoned, err := r.workspaceMaterializationAbandonedTx(ctx, tx, environmentID, ownerID, claimUpdatedAt)
 	if err != nil || !abandoned {
 		return materializationClaimActive, err
 	}
@@ -1034,13 +1034,27 @@ func (r *Repository) settleWorkspaceMaterializationClaim(
 
 // workspaceMaterializationAbandonedTx reports whether a creating claim's owner
 // is gone: missing, terminal, or silent past the launch budget without a
-// running execution.
+// running execution. A retained Nomad executor row bound to the environment is
+// live evidence whatever the owner's state, so such a claim is never abandoned.
 func (r *Repository) workspaceMaterializationAbandonedTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	ownerID string,
+	environmentID, ownerID string,
 	claimUpdatedAt time.Time,
 ) (bool, error) {
+	var retainedNomad bool
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM executors_running er
+			JOIN task_sessions ts ON ts.id = er.session_id
+			WHERE er.runtime = 'nomad' AND ts.task_environment_id = ?
+		)
+	`), environmentID).Scan(&retainedNomad); err != nil {
+		return false, fmt.Errorf("load retained nomad executor evidence: %w", err)
+	}
+	if retainedNomad {
+		return false, nil
+	}
 	if ownerID == "" {
 		return true, nil
 	}

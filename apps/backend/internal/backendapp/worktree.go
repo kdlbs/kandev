@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -101,6 +102,9 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 				executors: taskSvc,
 			},
 		})
+	}
+	if lifecycleMgr != nil {
+		taskSvc.SetNomadEnvironmentDestroyer(lifecycleMgr)
 	}
 	taskSvc.SetSSHTaskDirReclaimer(newSSHTaskDirReclaimerAdapter(log))
 
@@ -288,4 +292,21 @@ func detectBranchRemote(ctx context.Context, dir, branch string) string {
 		return defaultGitRemote
 	}
 	return remote
+}
+
+// nomadEnvironmentPublisher adapts the task repository's fenced publication to
+// the lifecycle manager's narrow publisher interface.
+type nomadEnvironmentPublisher struct {
+	repo *taskrepo.Repository
+}
+
+func (p nomadEnvironmentPublisher) PublishRecoveredNomadEnvironmentReady(
+	ctx context.Context,
+	params lifecycle.NomadEnvironmentReadyPublication,
+) (bool, error) {
+	return p.repo.PublishRecoveredNomadEnvironmentReady(ctx, taskrepo.PublishRecoveredNomadEnvironmentReadyParams{
+		SessionID: params.SessionID, EnvironmentID: params.EnvironmentID, ExecutionID: params.ExecutionID,
+		OwnershipGeneration: params.OwnershipGeneration, ExpectedRevision: params.ExpectedRevision,
+		Repos: params.Repos,
+	})
 }

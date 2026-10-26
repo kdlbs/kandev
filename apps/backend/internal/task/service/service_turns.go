@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	nomadexecutor "github.com/kandev/kandev/internal/agent/nomad"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -1006,6 +1007,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		projectCreatingNomadWorkspacePath(info, taskEnv, running)
 		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
 			info.AgentProfileID = officeProfileID
 		}
@@ -1180,11 +1182,27 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	}
 	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
 	for index, projection := range projections {
-		info.WorkspaceRepositories = append(info.WorkspaceRepositories, s.workspaceRepositorySpec(
+		spec := s.workspaceRepositorySpec(
 			projection, branchPlans[index].IdentitySlug, worktreesByIdentity, worktreesByRepository, projectionCounts,
-		))
+		)
+		if info.ExecutorType == string(models.ExecutorTypeNomad) {
+			s.applyNomadRecoveryRepositoryFields(&spec, projection.repository, branchPlans[index].IdentitySlug)
+		}
+		info.WorkspaceRepositories = append(info.WorkspaceRepositories, spec)
 	}
 	return repositories, nil
+}
+
+// applyNomadRecoveryRepositoryFields fills what Created-session Nomad recovery
+// needs to rebuild the repository reconcile input and the environment rows: the
+// clone locator and the branch identity, even when no worktree row selected it.
+func (s *Service) applyNomadRecoveryRepositoryFields(spec *lifecycle.WorkspaceRepositorySpec, repository *models.Repository, identitySlug string) {
+	if s.repoCloneURLResolver != nil && repository != nil {
+		spec.RepositoryURL = s.repoCloneURLResolver(repository)
+	}
+	if spec.BranchIdentitySlug == "" {
+		spec.BranchIdentitySlug = identitySlug
+	}
 }
 
 func (s *Service) populateWorkspaceTaskMetadata(ctx context.Context, taskID string, info *lifecycle.WorkspaceInfo) error {
@@ -1444,6 +1462,19 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	info.TaskEnvironmentID = env.ID
 	info.EnvironmentOwnerTaskID = env.TaskID
 	info.OwnershipGeneration = env.OwnershipGeneration
+	if env.ExecutorID != "" {
+		// The task environment is the durable owner for remote runtimes. In
+		// particular, Nomad recovery validates this identity against the
+		// retained allocation before reattaching; session.ExecutorID may be
+		// stale or absent after a backend restart.
+		ensureWorkspaceMetadata(info)["executor_id"] = env.ExecutorID
+	}
+	if env.ExecutorType != "" {
+		// Runtime ownership is likewise authoritative on the environment row.
+		// Project it explicitly because an intent-phase executor inventory may
+		// not yet have persisted this marker when startup recovery begins.
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyExecutorType] = env.ExecutorType
+	}
 	effectiveLayout := EffectiveTaskEnvironmentWorkspaceLayout(env)
 	info.WorkspaceLayout = effectiveLayout
 	if info.ExecutorProfileID == "" {
@@ -1478,6 +1509,48 @@ func mergePersistentWorkspaceMetadata(info *lifecycle.WorkspaceInfo, metadata ma
 	for k, v := range filtered {
 		dst[k] = v
 	}
+}
+
+// projectCreatingNomadWorkspacePath exposes the immutable workspace selected
+// by a retained Nomad intent while its TaskEnvironment is still being created.
+// The environment row is only populated with WorkspacePath after successful
+// publication, so recovery must use the state that was checkpointed before
+// dispatch. This projection is deliberately limited to the exact owner and
+// generation represented by both durable records.
+func projectCreatingNomadWorkspacePath(
+	info *lifecycle.WorkspaceInfo,
+	env *models.TaskEnvironment,
+	running *models.ExecutorRunning,
+) {
+	if !creatingNomadProjectionEligible(info, env, running) {
+		return
+	}
+	state, err := nomadexecutor.EnvironmentStateFromMetadata(running.Metadata)
+	if err != nil || state.EnvironmentID != env.ID ||
+		state.Generation != env.OwnershipGeneration ||
+		state.ExecutionID != running.AgentExecutionID ||
+		nomadPhaseTerminal(state.Phase) {
+		return
+	}
+	info.WorkspacePath = state.WorkspacePath
+}
+
+func creatingNomadProjectionEligible(info *lifecycle.WorkspaceInfo, env *models.TaskEnvironment, running *models.ExecutorRunning) bool {
+	if info == nil || env == nil || running == nil {
+		return false
+	}
+	if env.ExecutorType != string(models.ExecutorTypeNomad) ||
+		env.Status != models.TaskEnvironmentStatusCreating ||
+		env.WorkspacePath != "" ||
+		running.Runtime != agentruntime.RuntimeNomad {
+		return false
+	}
+	return running.TaskID == env.TaskID && running.SessionID == info.SessionID &&
+		running.AgentExecutionID != "" && info.AgentExecutionID == running.AgentExecutionID
+}
+
+func nomadPhaseTerminal(phase string) bool {
+	return phase == "absent" || phase == "cleanup_pending" || phase == "quarantined"
 }
 
 func ensureWorkspaceMetadata(info *lifecycle.WorkspaceInfo) map[string]interface{} {

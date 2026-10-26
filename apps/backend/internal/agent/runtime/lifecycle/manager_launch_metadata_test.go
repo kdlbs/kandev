@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	nomadexecutor "github.com/kandev/kandev/internal/agent/nomad"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -62,6 +63,98 @@ func TestBuildLaunchMetadataExecutorConfigWinsForTrustedKeys(t *testing.T) {
 		"untrusted keys keep the caller's value when present")
 	require.Equal(t, "/srv/kandev", metadata[MetadataKeySSHWorkdirRoot],
 		"untrusted executor-config keys still fill in when the caller supplied nothing")
+}
+
+func TestApplyAuthoritativeNomadProfileConfigOverridesTaskRoutingValues(t *testing.T) {
+	reader := &fakeExecutorProfileReader{
+		env: &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", OwnershipGeneration: 4, ExecutorType: string(models.ExecutorTypeNomad), ExecutorID: "executor-uuid", ExecutorProfileID: "profile-nomad"},
+		profiles: map[string]*models.ExecutorProfile{
+			"profile-nomad": {
+				ID: "profile-nomad", ExecutorID: "executor-uuid",
+				Config: map[string]string{
+					"address": "https://nomad.internal:4646", "namespace": "default", "region": "global",
+					"datacenter": "dc1", "node_id": "node-b", "platform": "darwin/arm64",
+					"ssh_target": "runner@worker-b.example", "ssh_port": "22",
+					"ssh_host_fingerprint": "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK",
+					"workspace_root":       "/workspaces/env-1", "allocation_root": "/allocations/env-1",
+					"cpu_mhz": "1500", "memory_mb": "4096",
+					"nomad_token": models.ExecutorProfileSecretReference("secret-nomad"),
+				},
+			},
+		},
+	}
+	manager := &Manager{executorProfileReader: reader}
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeNomad),
+		TaskID:       "task-1", TaskEnvironmentID: "env-1",
+		Metadata: map[string]interface{}{MetadataKeyExecutorProfileID: "profile-nomad", "node_id": "attacker-node", "ssh_target": "root@other.internal"},
+	}
+	if err := manager.applyAuthoritativeNomadProfileConfig(context.Background(), req, req.Metadata); err != nil {
+		t.Fatal(err)
+	}
+	if req.Metadata["node_id"] != "node-b" || req.Metadata["ssh_target"] != "runner@worker-b.example" || req.Metadata["executor_id"] != "executor-uuid" || req.Metadata["nomad_environment_generation"] != "4" {
+		t.Fatalf("Nomad profile did not control execution routing: %#v", req.Metadata)
+	}
+	parsed, err := nomadexecutor.ParseProfileConfig(map[string]string{
+		"address": req.Metadata["address"].(string), "namespace": req.Metadata["namespace"].(string), "region": req.Metadata["region"].(string),
+		"datacenter": req.Metadata["datacenter"].(string), "node_id": req.Metadata["node_id"].(string), "platform": req.Metadata["platform"].(string),
+		"ssh_target": req.Metadata["ssh_target"].(string), "ssh_port": req.Metadata["ssh_port"].(string), "ssh_host_fingerprint": req.Metadata["ssh_host_fingerprint"].(string),
+		"workspace_root": req.Metadata["workspace_root"].(string), "allocation_root": req.Metadata["allocation_root"].(string), "cpu_mhz": req.Metadata["cpu_mhz"].(string),
+		"memory_mb": req.Metadata["memory_mb"].(string), "nomad_token": req.Metadata["nomad_token"].(string),
+	})
+	if err != nil || parsed.SSHUser != "runner" || parsed.NomadTokenSecretID != "secret-nomad" {
+		t.Fatalf("canonical Nomad profile = %+v, err=%v", parsed, err)
+	}
+}
+
+func TestApplyAuthoritativeNomadProfileConfigRejectsExecutorAssociationMismatch(t *testing.T) {
+	reader := &fakeExecutorProfileReader{
+		env: &models.TaskEnvironment{
+			ID: "env-1", TaskID: "task-1", OwnershipGeneration: 4,
+			ExecutorType: string(models.ExecutorTypeNomad), ExecutorID: "different-executor",
+			ExecutorProfileID: "profile-nomad",
+		},
+		profiles: map[string]*models.ExecutorProfile{
+			"profile-nomad": {ID: "profile-nomad", ExecutorID: "executor-uuid", Config: map[string]string{
+				"address": "http://127.0.0.1:4646", "node_id": "node-1", "ssh_target": "runner@127.0.0.1",
+				"ssh_host_fingerprint": "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK",
+				"workspace_root":       "/workspaces", "allocation_root": "/allocations", "cpu_mhz": "1000", "memory_mb": "2048",
+			}},
+		},
+	}
+	manager := &Manager{executorProfileReader: reader}
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeNomad), TaskID: "task-1", TaskEnvironmentID: "env-1",
+		Metadata: map[string]interface{}{MetadataKeyExecutorProfileID: "profile-nomad", "executor_id": "executor-uuid"},
+	}
+	if err := manager.applyAuthoritativeNomadProfileConfig(context.Background(), req, req.Metadata); err == nil {
+		t.Fatal("profile from another executor was accepted")
+	}
+}
+
+func TestBuildLaunchMetadataNomadProfileControlsWorkerAndControlPlane(t *testing.T) {
+	metadata := buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{
+			"address":              "https://attacker.example.test",
+			"node_id":              "untrusted-node",
+			"nomad_token":          "attacker-token",
+			"ssh_target":           "root@attacker.example.test",
+			"ssh_host_fingerprint": "SHA256:forged",
+		},
+		ExecutorConfig: map[string]string{
+			"address":              "https://nomad.example.test",
+			"node_id":              "approved-node",
+			"nomad_token":          "secret-ref:nomad-control",
+			"ssh_target":           "runner@worker.example.test",
+			"ssh_host_fingerprint": "SHA256:pinned-worker",
+		},
+	}, "", "", "")
+
+	require.Equal(t, "https://nomad.example.test", metadata["address"])
+	require.Equal(t, "approved-node", metadata["node_id"])
+	require.Equal(t, "secret-ref:nomad-control", metadata["nomad_token"])
+	require.Equal(t, "runner@worker.example.test", metadata["ssh_target"])
+	require.Equal(t, "SHA256:pinned-worker", metadata["ssh_host_fingerprint"])
 }
 
 func TestBuildLaunchMetadataUsesTrustedCausingRunID(t *testing.T) {

@@ -17,11 +17,13 @@ func (m *Manager) PrepareStartupRecovery(ctx context.Context) error {
 	local, localErr := m.ListLiveStandaloneExecutorsRunning(ctx)
 	remote, remoteErr := m.ListLiveRemoteExecutorsRunning(ctx)
 	plugins, pluginErr := m.ListLivePluginExecutorsRunning(ctx)
-	if err := errors.Join(localErr, remoteErr, pluginErr); err != nil {
+	nomad, nomadErr := m.ListLiveNomadExecutorsRunning(ctx)
+	if err := errors.Join(localErr, remoteErr, pluginErr, nomadErr); err != nil {
 		return err
 	}
 	records := append(append([]*models.ExecutorRunning(nil), local...), remote...)
 	records = append(records, plugins...)
+	records = append(records, nomad...)
 	lookup := m.passthroughLookup
 	if lookup == nil {
 		lookup = func(context.Context, string) (bool, bool) { return false, false }
@@ -29,7 +31,7 @@ func (m *Manager) PrepareStartupRecovery(ctx context.Context) error {
 	for _, id := range SessionsToGuard(ctx, sessionIDsFromExecutorRunning(records), lookup) {
 		m.recoveryGuard.AcquireOrObserve(id)
 	}
-	for _, record := range append(remote, plugins...) {
+	for _, record := range append(append(remote, plugins...), nomad...) {
 		if record != nil && !remoteRecoveryOwnerUnsupported(record) &&
 			(record.Runtime != agentruntime.RuntimePluginRemote || !isTerminalExecutorRunningStatus(record.Status)) {
 			m.queueRemoteRecovery(record, nil)
@@ -58,11 +60,12 @@ func (m *Manager) checkStartupRuntimeHealth(ctx context.Context, deferRemote boo
 
 }
 
-func (m *Manager) initialRemoteRecoveryRecords(ctx context.Context, pluginRecords, remoteRecords []*models.ExecutorRunning) []*models.ExecutorRunning {
-	remoteRecordsForRecovery := make([]*models.ExecutorRunning, 0, len(pluginRecords)+len(remoteRecords))
-	pluginTerminalRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
-	pluginLiveRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
-	for _, record := range pluginRecords {
+func (m *Manager) initialRemoteRecoveryRecords(ctx context.Context, pluginRecords, remoteRecords, nomadRecords []*models.ExecutorRunning) []*models.ExecutorRunning {
+	pluginAndNomadRecords := append(append([]*models.ExecutorRunning(nil), pluginRecords...), nomadRecords...)
+	remoteRecordsForRecovery := make([]*models.ExecutorRunning, 0, len(pluginAndNomadRecords)+len(remoteRecords))
+	pluginTerminalRecords := make([]*models.ExecutorRunning, 0, len(pluginAndNomadRecords))
+	pluginLiveRecords := make([]*models.ExecutorRunning, 0, len(pluginAndNomadRecords))
+	for _, record := range pluginAndNomadRecords {
 		if record == nil || remoteRecoveryOwnerUnsupported(record) {
 			continue
 		}

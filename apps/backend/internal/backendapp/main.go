@@ -778,6 +778,8 @@ func startAgentInfrastructure(
 	// terminal sees the same variables the agent subprocess and the repository
 	// setup script get.
 	lifecycleMgr.SetExecutorProfileReader(repos.Task)
+	lifecycleMgr.SetNomadEnvironmentReadyPublisher(nomadEnvironmentPublisher{repo: repos.Task})
+	services.Task.SetRepoCloneURLResolver(orchexecutor.RepositoryCloneURL)
 	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)

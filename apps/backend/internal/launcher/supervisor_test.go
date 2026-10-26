@@ -11,6 +11,7 @@ import (
 func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	env := []string{
 		"KANDEV_SERVER_PORT=1234",
+		"HOME=/private/fixture/home",
 		"KANDEV_DESKTOP_HEALTH_TOKEN=health-token",
 		"KANDEV_CONSOLE_LOG_LEVEL=warn",
 		"KANDEV_WEB_TITLE_PREFIX=Debug",
@@ -29,6 +30,9 @@ func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	}
 	if manifest.Env["KANDEV_SERVER_PORT"] != "1234" {
 		t.Fatalf("KANDEV_SERVER_PORT = %q", manifest.Env["KANDEV_SERVER_PORT"])
+	}
+	if manifest.Env["HOME"] != "/private/fixture/home" {
+		t.Fatalf("HOME = %q, want the fixture home used for SSH identity resolution", manifest.Env["HOME"])
 	}
 	if manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"] != "warn" {
 		t.Fatalf("KANDEV_CONSOLE_LOG_LEVEL = %q", manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"])

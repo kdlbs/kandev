@@ -1,0 +1,213 @@
+{
+  "Affinities": null,
+  "AllAtOnce": false,
+  "Constraints": [
+    {
+      "LTarget": "${node.unique.id}",
+      "Operand": "=",
+      "RTarget": "fixture-node-id"
+    }
+  ],
+  "ConsulNamespace": "",
+  "CreateIndex": 362,
+  "Datacenters": [
+    "dc1"
+  ],
+  "DispatchIdempotencyToken": "",
+  "Dispatched": false,
+  "ID": "fixture-job-id",
+  "JobModifyIndex": 385,
+  "Meta": {
+    "kandev.environment_id": "fixture-environment-id",
+    "kandev.generation": "1",
+    "kandev.input_digest": "b66fed2c495bd400f415bc3d6f216a249e05952acf58ea2fccc5477d3a99a28f",
+    "kandev.installation_id": "fixture-executor-profile-id",
+    "kandev.node_id": "fixture-node-id",
+    "kandev.operation_id": "45b6abe9-41d4-4f86-afc7-8b78c00cf5a1"
+  },
+  "ModifyIndex": 387,
+  "Multiregion": null,
+  "Name": "fixture-job-id",
+  "Namespace": "default",
+  "NodePool": "default",
+  "NomadTokenID": "",
+  "ParameterizedJob": null,
+  "ParentID": "",
+  "Payload": null,
+  "Periodic": null,
+  "Priority": 50,
+  "Region": "global",
+  "Spreads": null,
+  "Stable": false,
+  "Status": "dead",
+  "StatusDescription": "",
+  "Stop": true,
+  "SubmitTime": 1792867900384884000,
+  "TaskGroups": [
+    {
+      "Affinities": null,
+      "Constraints": null,
+      "Consul": null,
+      "Count": 1,
+      "Disconnect": {
+        "LostAfter": 0,
+        "Reconcile": "keep_original",
+        "Replace": false,
+        "StopOnClientAfter": null
+      },
+      "EphemeralDisk": {
+        "Migrate": false,
+        "SizeMB": 300,
+        "Sticky": false
+      },
+      "HasPerAllocVolumes": false,
+      "MaxClientDisconnect": null,
+      "MaxRunDuration": null,
+      "Meta": null,
+      "Migrate": null,
+      "Name": "agentctl",
+      "Networks": [
+        {
+          "DynamicPorts": [
+            {
+              "HostNetwork": "default",
+              "Label": "agentctl_control"
+            },
+            {
+              "HostNetwork": "default",
+              "Label": "agentctl_instance"
+            }
+          ],
+          "Mode": "host"
+        }
+      ],
+      "PreventRescheduleOnLost": false,
+      "ReschedulePolicy": {
+        "Attempts": 0,
+        "Delay": 5000000000,
+        "DelayFunction": "constant",
+        "Interval": 86400000000000,
+        "MaxDelay": 0,
+        "Unlimited": false
+      },
+      "RestartPolicy": {
+        "Attempts": 0,
+        "Delay": 0,
+        "Interval": 60000000000,
+        "Mode": "fail",
+        "RenderTemplates": false
+      },
+      "Scaling": null,
+      "Services": null,
+      "ShutdownDelay": null,
+      "Spreads": null,
+      "StopAfterClientDisconnect": null,
+      "Tasks": [
+        {
+          "Actions": null,
+          "Affinities": null,
+          "Artifacts": null,
+          "CSIPluginConfig": null,
+          "Config": {
+            "args": [
+              "/fixture-root/nomad/alloc/fixture-job-id/bootstrap-38a3404ca206bd622f90f95f465023280615152400d01653a19a94210cfba7b3.sh"
+            ],
+            "command": "/bin/sh"
+          },
+          "Constraints": null,
+          "Consul": null,
+          "DispatchPayload": null,
+          "Driver": "raw_exec",
+          "Env": {
+            "AGENTCTL_LISTEN_HOST": "127.0.0.1",
+            "KANDEV_AGENTCTL_PATH": "/fixture-root/runtime/agentctl",
+            "KANDEV_ALLOCATION_ROOT": "/fixture-root/nomad/alloc",
+            "KANDEV_BOOTSTRAP_ENV_FILE": "/fixture-root/nomad/alloc/fixture-job-id/bootstrap-38a3404ca206bd622f90f95f465023280615152400d01653a19a94210cfba7b3.sh.env",
+            "KANDEV_ENVIRONMENT_GENERATION": "1",
+            "KANDEV_ENVIRONMENT_ID": "fixture-environment-id",
+            "KANDEV_INPUT_DIGEST": "b66fed2c495bd400f415bc3d6f216a249e05952acf58ea2fccc5477d3a99a28f",
+            "KANDEV_INSTALLATION_ID": "fixture-executor-profile-id",
+            "KANDEV_NOMAD_JOB_ID": "fixture-job-id",
+            "KANDEV_NOMAD_NODE_ID": "${node.unique.id}",
+            "KANDEV_OPERATION_ID": "45b6abe9-41d4-4f86-afc7-8b78c00cf5a1",
+            "KANDEV_WORKER_STATE_ROOT": "/fixture-root/worker-state/fixture-node-id",
+            "KANDEV_WORKSPACE_ROOT": "/fixture-root/workspaces/environment/generation"
+          },
+          "Identities": null,
+          "Identity": {
+            "Audience": [
+              "nomadproject.io"
+            ],
+            "ChangeMode": "",
+            "ChangeSignal": "",
+            "Env": false,
+            "ExtraClaims": null,
+            "File": false,
+            "Filepath": "",
+            "Name": "default",
+            "ServiceName": "",
+            "TTL": 0
+          },
+          "KillSignal": "",
+          "KillTimeout": 45000000000,
+          "Kind": "",
+          "Leader": false,
+          "Lifecycle": null,
+          "LogConfig": {
+            "Disabled": false,
+            "MaxFileSizeMB": 10,
+            "MaxFiles": 10
+          },
+          "Meta": null,
+          "Name": "agentctl",
+          "Resources": {
+            "CPU": 48,
+            "Cores": 0,
+            "Devices": null,
+            "DiskMB": 0,
+            "IOPS": 0,
+            "MemoryMB": 1024,
+            "MemoryMaxMB": 0,
+            "NUMA": null,
+            "Networks": null,
+            "SecretsMB": 0
+          },
+          "RestartPolicy": {
+            "Attempts": 0,
+            "Delay": 0,
+            "Interval": 60000000000,
+            "Mode": "fail",
+            "RenderTemplates": false
+          },
+          "ScalingPolicies": null,
+          "Schedule": null,
+          "Secrets": null,
+          "Services": null,
+          "ShutdownDelay": 0,
+          "Templates": null,
+          "User": "",
+          "Vault": null,
+          "VolumeMounts": null
+        }
+      ],
+      "Update": null,
+      "Volumes": null
+    }
+  ],
+  "Type": "batch",
+  "UI": null,
+  "Update": {
+    "AutoPromote": false,
+    "AutoRevert": false,
+    "Canary": 0,
+    "HealthCheck": "",
+    "HealthyDeadline": 0,
+    "MaxParallel": 0,
+    "MinHealthyTime": 0,
+    "ProgressDeadline": 0,
+    "Stagger": 0
+  },
+  "VaultNamespace": "",
+  "Version": 1,
+  "VersionTag": null
+}

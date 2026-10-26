@@ -342,7 +342,12 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 // lifecycle directly. Errors that are not guard-related pass through
 // unchanged.
 func wrapSessionRecoveryGuardError(err error, sessionID string) error {
+	var nomadGuard *lifecycle.NomadRecoveryGuardError
 	switch {
+	case errors.As(err, &nomadGuard):
+		// Both codes stay Retryable: the non-retryable shape means "agent could
+		// not be stopped", which is not what operator_action reports.
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: true, Code: nomadGuard.Code}
 	case errors.Is(err, lifecycle.ErrSessionRecoveryGuarded):
 		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: true}
 	case errors.Is(err, lifecycle.ErrSessionUnstoppableAgent):

@@ -65,7 +65,9 @@ func TestMCPIdleUpdateCompletesWithCallbackAndQueuedStartupWriter(t *testing.T) 
 		execution.promptLifecycleMu.Lock()
 		close(writerRelease)
 		<-writerDone
-		<-done
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
 		return
 	}
 	<-callbackDone

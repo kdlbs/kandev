@@ -1369,6 +1369,7 @@ func (s *Service) executeTaskResourceCleanupJob(
 		taskEnvironmentCleanup{
 			env: cleanupEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
 			preserveBranches:       job.IsArchive(),
+			keepNomadInventory:     job.IsArchive(),
 			discardWorktreeChanges: snapshot.DiscardWorktreeChanges,
 			agentHistory:           snapshot.AgentHistory,
 		},

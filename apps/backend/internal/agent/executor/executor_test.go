@@ -16,6 +16,12 @@ func TestExecutorTypeToBackendMapsKubernetes(t *testing.T) {
 	}
 }
 
+func TestExecutorTypeToBackendMapsNomad(t *testing.T) {
+	if got := ExecutorTypeToBackend(models.ExecutorTypeNomad); got != NameNomad {
+		t.Fatalf("ExecutorTypeToBackend(nomad) = %q, want %q", got, NameNomad)
+	}
+}
+
 func TestExecutorTypeToBackendDoesNotFallBackForUnknownOrPluginRemote(t *testing.T) {
 	if got := ExecutorTypeToBackend(models.ExecutorType("unknown-provider")); got != NameUnknown {
 		t.Fatalf("unknown executor mapped to %q, want NameUnknown", got)

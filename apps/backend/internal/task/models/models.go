@@ -44,6 +44,12 @@ var ErrExecutorNotFound = errors.New("executor not found")
 // will produce its own events.
 var ErrExecutionRotated = errors.New("execution rotated; CAS write rejected")
 
+// ErrNomadRecoveryNotReady is returned when a recovered Nomad operation's
+// inventory has not yet reached the ready phase, so its environment cannot be
+// published. It is transient: the same operation can be published once the
+// inventory advances.
+var ErrNomadRecoveryNotReady = errors.New("nomad recovery inventory is not ready")
+
 // Status values for executors_running.status. The lifecycle manager mirrors
 // active execution state into this column; the orchestrator flips a row to
 // "prepared" when a prepare-only launch finishes with the agent process
@@ -2832,6 +2838,7 @@ const (
 	ExecutorTypeSprites      ExecutorType = "sprites"
 	ExecutorTypeSSH          ExecutorType = "ssh"
 	ExecutorTypeKubernetes   ExecutorType = "k8s"
+	ExecutorTypeNomad        ExecutorType = "nomad"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 	ExecutorTypePluginRemote ExecutorType = "plugin_remote"
 )
@@ -2841,7 +2848,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote, ExecutorTypePluginRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeNomad, ExecutorTypeMockRemote, ExecutorTypePluginRemote:
 		return true
 	default:
 		return false
@@ -2867,6 +2874,8 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSSH
 	case ExecutorTypeKubernetes:
 		return agentruntime.RuntimeKubernetes
+	case ExecutorTypeNomad:
+		return agentruntime.RuntimeNomad
 	case ExecutorTypePluginRemote:
 		return agentruntime.RuntimePluginRemote
 	default:
@@ -2886,7 +2895,7 @@ func IsContainerizedExecutorType(t ExecutorType) bool {
 // IsAlwaysResumableRuntime reports whether the given runtime represents
 // an executor that can always be resumed even without an explicit resume token.
 func IsAlwaysResumableRuntime(runtime agentruntime.Runtime) bool {
-	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH || runtime == agentruntime.RuntimeKubernetes
+	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH || runtime == agentruntime.RuntimeKubernetes || runtime == agentruntime.RuntimeNomad
 }
 
 const (
@@ -2937,6 +2946,9 @@ type ExecutorRunning struct {
 	ResumeToken                   string               `json:"resume_token,omitempty"`
 	LastMessageUUID               string               `json:"last_message_uuid,omitempty"`
 	AgentExecutionID              string               `json:"agent_execution_id,omitempty"`
+	// ExpectedNomadExecutorRevision fences one Nomad metadata checkpoint against
+	// the envelope revision read by the lifecycle owner. It is transient only.
+	ExpectedNomadExecutorRevision uint64 `json:"-" db:"-"`
 	// TransientAuthToken carries a decrypted agentctl token only between the
 	// lifecycle recovery inventory read and the matching remote runtime. It is
 	// excluded from JSON and database persistence.
@@ -3131,6 +3143,11 @@ type TaskEnvironmentRecoveryClaimRequest struct {
 	ExecutorType               string
 	AllowCurrentSessionRuntime bool
 	CleanupJobID               string
+	// OperatorReadmission admits the claim past the task cleanup barrier. It is
+	// only for the operator release of a retained Nomad row, which checkpoints a
+	// phase and starts nothing; exclusion against a running cleanup attempt
+	// remains the unique per-environment claim.
+	OperatorReadmission bool
 }
 
 // TaskEnvironmentRecoveryClaim is the durable authority held from recovery

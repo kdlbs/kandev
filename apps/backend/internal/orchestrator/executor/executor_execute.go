@@ -3681,6 +3681,11 @@ func (e *Executor) persistTaskEnvironment(
 			// in the same transaction as the ready transition. Otherwise a sibling
 			// can bind to a ready environment whose canonical rows are incomplete.
 			if finalizer, ok := e.repo.(taskEnvironmentMaterializationFinalizer); ok {
+				if err := processNomadPrePublishBarrier.await(ctx, e.logger.Zap(), req.ExecutorType, nomadBarrierMarker{
+					ExecutionID: resp.AgentExecutionID, EnvironmentID: existingEnv.ID, SessionID: session.ID,
+				}); err != nil {
+					return err
+				}
 				existingEnv.Status = models.TaskEnvironmentStatusReady
 				existingEnv.MaterializationSessionID = ""
 				if err := finalizer.FinalizeTaskEnvironmentMaterialization(ctx, existingEnv, repos, materializationSessionID); err != nil {

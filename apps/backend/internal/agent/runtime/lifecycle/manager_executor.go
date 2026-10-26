@@ -15,6 +15,7 @@ func (m *Manager) RegisterExecutorBackend(backend ExecutorBackend) {
 		return
 	}
 	m.executorRegistry.Register(backend)
+	m.bindNomadCleanup()
 }
 
 // getExecutorBackend returns the appropriate runtime for the given executor type.

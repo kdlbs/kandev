@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -40,6 +41,14 @@ type ControlServer struct {
 	credentials       *credentialState
 	shutdownRequested chan struct{}
 	shutdownOnce      sync.Once
+	shutdownGate      chan struct{}
+	shutdownStateMu   sync.Mutex
+	shutdownComplete  bool
+	runtimeDrainMu    sync.Mutex
+	runtimeDrainReq   *agentctltypes.RuntimeDrainRequest
+	runtimeDrainRun   bool
+	runtimeDrainDone  chan struct{}
+	runtimeDrainAck   *agentctltypes.RuntimeDrainReceipt
 	unownedPeriod     time.Duration
 	reaperStop        chan struct{}
 	reaperStopOnce    sync.Once
@@ -75,6 +84,7 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 		ownership:         newOwnershipState(),
 		credentials:       newCredentialState(cfg.AuthToken),
 		shutdownRequested: make(chan struct{}),
+		shutdownGate:      make(chan struct{}, 1),
 		unownedPeriod:     unownedPeriod,
 		reaperStop:        make(chan struct{}),
 	}
@@ -148,6 +158,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/ownership/rotate", m.handleCredentialRotate)
 	api.POST("/ownership/confirm", m.handleCredentialConfirm)
 	api.POST("/ownership/shutdown", m.handleOwnershipShutdown)
+	api.POST("/runtime/seal-and-drain", m.handleRuntimeSealAndDrain)
 }
 
 func (m *ControlServer) handleSubprocessAdmission(c *gin.Context) {

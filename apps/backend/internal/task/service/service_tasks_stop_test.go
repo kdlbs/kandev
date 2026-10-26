@@ -127,6 +127,34 @@ func TestPerformTaskCleanupReportsExecutorRowDeletionFailure(t *testing.T) {
 	}
 }
 
+func TestPerformTaskCleanupKeepsNomadInventoryRow(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	executors := &stubExecutors{runningBySession: &models.ExecutorRunning{SessionID: "session-nomad", Runtime: agentruntime.RuntimeNomad}}
+	svc.executors = executors
+	errs := svc.performTaskCleanup(
+		context.Background(), "task-nomad", []*models.TaskSession{{ID: "session-nomad"}}, nil, nil,
+		taskEnvironmentCleanup{keepNomadInventory: true}, nil,
+	)
+	if len(errs) != 0 {
+		t.Fatalf("cleanup errors = %v", errs)
+	}
+	if len(executors.deletedSessions) != 0 {
+		t.Fatalf("task cleanup deleted the Nomad inventory row for %v; its absent tombstone must outlive archive", executors.deletedSessions)
+	}
+}
+
+func TestPerformTaskCleanupDeletesNomadInventoryRowWhenTaskIsDeleted(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	executors := &stubExecutors{runningBySession: &models.ExecutorRunning{SessionID: "session-nomad", Runtime: agentruntime.RuntimeNomad}}
+	svc.executors = executors
+	errs := svc.performTaskCleanup(
+		context.Background(), "task-nomad", []*models.TaskSession{{ID: "session-nomad"}}, nil, nil, taskEnvironmentCleanup{}, nil,
+	)
+	if len(errs) != 0 || len(executors.deletedSessions) != 1 {
+		t.Fatalf("errs=%v deleted=%v, want the row deleted with its deleted owner", errs, executors.deletedSessions)
+	}
+}
+
 func TestBuildStopTargets_NonTerminalExecutorRow(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	svc.executors = &stubExecutors{
