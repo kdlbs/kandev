@@ -215,7 +215,7 @@ jobs:
           Rules:
           - Use read, glob, and grep to inspect the trusted workflow checkout and prepared context.
           - Read .pr-walkthrough/guidelines.md, .pr-walkthrough/walkthrough.patch, and .pr-walkthrough/head-context/manifest.json first.
-          - Use materialized files under .pr-walkthrough/head-context/head/files/ for exact PR-head excerpts.
+          - Map original paths to context_path in the manifest. Use those neutral filenames for exact PR-head excerpts.
           - Use the patch when the manifest records that a file was omitted.
           - Use edit only for .pr-walkthrough/draft.json. Never modify source files or skill files.
           - Use only the exact allowed Bash command to run the trusted renderer. Pass no arguments and no JSON on standard input.

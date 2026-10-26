@@ -76,7 +76,7 @@ historical Nix failure while retaining the 0.5-second timeout assertion.
 
 | Command | Result |
 | --- | --- |
-| `python3 .github/scripts/automatic-review-inputs_test.py` | 5 passed |
+| `python3 .github/scripts/automatic-review-inputs_test.py` | 6 passed |
 | `python3 .github/scripts/claude-code-review-workflow-contract_test.py` | 11 passed |
 | `python3 .github/scripts/claude-read-pr-file_test.py` | 9 passed |
 | `python3 .github/scripts/opencode-code-review-workflow-contract_test.py` | 4 passed |
@@ -91,7 +91,7 @@ historical Nix failure while retaining the 0.5-second timeout assertion.
 | `python3 .github/scripts/notify-release-contributors-workflow-contract_test.py` | 4 passed |
 | `python3 .github/scripts/lint-action-pinning_test.py` | 9 passed |
 | `python3 scripts/opencode-code-review.test.py` | 20 passed |
-| `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py` | 7 passed |
+| `python3 .agents/skills/pr-walkthrough/scripts/pr-walkthrough-context.test.py` | 8 passed |
 | `bash scripts/opencode-code-review.test.sh` | Passed |
 | `node --test scripts/notify-docs-workflow.test.mjs` | 3 passed |
 | `python3 .github/scripts/lint-action-pinning.py` | Passed |
@@ -99,7 +99,7 @@ historical Nix failure while retaining the 0.5-second timeout assertion.
 | `python3 scripts/lint-spec-files.py --all` | Passed |
 | `git diff --check` | Passed |
 
-The Python/Node suites contain 247 passing test cases in total. The shell
+The Python/Node suites contain 249 passing test cases in total. The shell
 contract also passed. The action-ref linter checked all 30 workflows.
 
 Zizmor 1.25.2 reports the expected 10 reviewed residual findings, exit 14:
@@ -111,3 +111,39 @@ adding or changing suppressions. See the [finding ledger](findings.md).
 No application UI or public operator contract changed. Screenshots and public
 documentation edits are not required. PR CI and bot-review evidence remain
 pending until the delivery workflow completes.
+
+## Adversarial review, 2026-10-26
+
+An independent session reviewed the initial implementation at `5b069a78953`.
+It reproduced one blocker with the real pinned OpenCode v1.19.3 CLI: reading
+prepared source automatically loaded nearby PR-owned instruction filenames.
+All six root/nested `AGENTS.md`, `CLAUDE.md`, and `CONTEXT.md` cases loaded
+instructions. Controls with neutral filenames did not load those instructions.
+
+The shared helper now writes neutral blob names and a version 2 manifest mapping.
+All automatic review and walkthrough prompts consume that mapping. The new
+context regression and all three automatic-review subcases failed before the
+fix. They pass after it. Coverage includes suffix collision names, exact bytes,
+omissions, budgets, deterministic output, and partial clones.
+
+The independent reviewer repeated the actual preparation pipeline with the
+modified helper and checksum-verified OpenCode binary. All 10 real CLI reads
+returned `metadata.loaded=[]` with no `system-reminder`. They covered ordinary
+source, root/nested instruction files, and suffix collision names. File bytes
+matched immutable Git blobs. Identical blobs shared a filename without losing
+their separate original-path entries. The reviewer found no remaining defect.
+The CLI probe used `debug agent github-pr-review --tool read` with the workflow
+agent definition, isolated HOME/XDG directories, and no provider credentials.
+
+Structural comparison found unchanged trigger sets, permissions, dependencies,
+environments, outputs, and matrices across the original seven changed workflows.
+All 217 existing release/image/docs step identities and conditions were unchanged.
+Actionlint 1.7.12 reported only the same unsupported `queue` key on base and head.
+Diagnostic copies with that existing key removed passed on both revisions.
+No repository configuration was changed for the linter.
+
+The initial head completed CI with 62 passed, 25 skipped, and one neutral check.
+Its mobile queue test failed the strict flake gate, passed local reproduction
+checks without retries, and passed one failed-job rerun without source changes.
+These CI results are historical after remediation. Fresh head CI and bot reviews
+are required after the fix is pushed. No live provider or publication was tested.

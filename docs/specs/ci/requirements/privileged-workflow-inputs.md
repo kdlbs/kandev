@@ -28,7 +28,8 @@ or adopting its instructions as the review policy.
 - **AC-CI-ACTIONS-SECURITY-001.1:** Automatic Claude fork review and both automatic
   OpenCode review paths shall use trusted instructions, configuration, and tools.
   Pull request files shall remain review data, including files that define agent
-  hooks, plugins, skills, or tools.
+  hooks, plugins, skills, or tools. Prepared review and walkthrough files shall
+  not become agent instructions through automatic filename discovery.
 - **AC-CI-ACTIONS-SECURITY-001.2:** Automatic review shall bind its diff and complete
   file reads to the event head. If the fetched head differs, preparation shall
   fail before model execution. Missing, unsafe, binary, or oversized files shall

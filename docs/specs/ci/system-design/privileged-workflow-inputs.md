@@ -39,15 +39,22 @@ Use fixed Git arguments and validated numeric PR/full-SHA values.
 
 Use the existing walkthrough history and bounded context implementations as
 patterns. Reuse `.agents/skills/pr-walkthrough/scripts/pr-walkthrough-context`
-for OpenCode's changed-file materialization without changing walkthrough behavior.
+for review and walkthrough changed-file materialization.
 Its inputs are the event base/head, and its output is beneath
 `.opencode-review/head-context`. The helper accepts regular Git blobs and
 enforces 512 KiB per file and 8 MiB total. Symlinks and gitlinks remain omitted.
-The manifest distinguishes omitted files from empty files.
+The manifest distinguishes omitted files from empty files. Its version 2 entries
+retain each original `path` and map materialized files through `context_path`,
+relative to the manifest directory. Store every blob under the flat neutral
+name `head/files/<Git-object-ID>.txt`. Identical blobs may share a physical file.
+Do not preserve original directories, instruction names, or configuration names
+in the prepared filesystem. Agents use the mapping for exact excerpts and keep
+the original path for findings. All workflow consumers use this shared layout.
 
 The runner never changes its working directory into prepared head data.
-Materialized configuration files are text for review. They are never copied
-to agent discovery locations. Context creation occurs before model credentials
+Materialized configuration and instruction files are text for review. Neutral
+names prevent automatic discovery of `AGENTS.md`, `CLAUDE.md`, and `CONTEXT.md`
+beside source files. Context creation occurs before model credentials
 are introduced. Existing read-only local tools can inspect trusted surrounding
 code. A missing file must not cause fallback to an untrusted checkout.
 

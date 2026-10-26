@@ -96,11 +96,17 @@ delegate them concurrently.
 ## Verification results
 
 [Validation evidence](validation.md) records the historical baseline and final
-implementation results. All 247 Python/Node test cases and the shell contract
+implementation results. All 249 Python/Node test cases and the shell contract
 passed. Action pinning covers 30 workflows. The final Zizmor scan has exactly 10
 reviewed residual findings: six trigger warnings, three CMD limitations, and one
 action-replacement suggestion. No new suppressions were added. All specification
 and diff checks passed. PR CI and automated reviews remain external delivery gates.
+
+The adversarial review found that reserved instruction filenames in prepared
+context bypassed the intended data boundary. Shared neutral blob filenames and
+manifest mapping now protect both automatic reviews and walkthrough generation.
+The finding, red/green regressions, and pinned-CLI evidence are recorded in
+[validation.md](validation.md).
 
 ## Risks
 

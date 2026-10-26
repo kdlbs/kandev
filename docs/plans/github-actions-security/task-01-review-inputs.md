@@ -27,6 +27,7 @@ data without loading PR-owned agent configuration or review instructions.
 - Claude fork review and both OpenCode automatic review paths.
 - Optional event-head binding in the existing Claude GET-only file helper.
 - Trusted history/context preparation and agent policies from the system design.
+- Shared neutral context filenames and manifest mapping for review and walkthrough agents.
 - Raw contracts, behavioral fixtures, CI registration, and ADR reconciliation.
 
 ## Out of scope
@@ -115,9 +116,15 @@ Claude helper tests, walkthrough context tests, and OpenCode posting tests.
 
 ## Results
 
-All listed targeted commands passed. Automatic review fixtures: 5 passed. Claude
+All listed targeted commands passed. Automatic review fixtures: 6 passed. Claude
 contracts: 11 passed. File reader: 9 passed. OpenCode contracts: 4 passed. Posting
-parser: 20 passed. Context helper: 7 passed. Walkthrough contracts: 30 passed.
+parser: 20 passed. Context helper: 8 passed. Walkthrough contracts: 30 passed.
 Action-pinning tests: 9 passed. The shell contract passed. Specification and diff
 checks passed. Zizmor retains the 10 reviewed residual findings, with no new
 suppressions. See [validation.md](validation.md).
+
+The adversarial review reproduced reserved-name instruction discovery with the
+real pinned CLI. Red regressions failed for all three automatic review paths.
+The shared helper now uses neutral blob names and a version 2 original-path
+mapping. All consumers read through that mapping. Tests retain exact bytes,
+omission reasons, limits, deterministic output, and partial-clone behavior.

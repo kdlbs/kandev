@@ -25,6 +25,11 @@ Claude fork review and both OpenCode review paths. Fetch PR commits as Git
 objects. Provide bounded text context and an immutable diff. Agent instructions,
 configuration, setup actions, and posting helpers come from trusted source.
 
+Use neutral blob filenames for prepared review and walkthrough context. Keep
+original paths only in a manifest mapping. Preserving `AGENTS.md`, `CLAUDE.md`,
+or `CONTEXT.md` beside prepared source lets the pinned OpenCode reader load PR
+text as instructions. One shared layout prevents drift between agent workflows.
+
 Contributor approval authorizes a review. It does not authorize PR configuration
 to execute in the credential-bearing reviewer process. Reuse the manual Claude
 and walkthrough isolation patterns instead of introducing a new review service.
@@ -50,6 +55,8 @@ No model, provider, review trigger, approval label, or publication identity chan
 - Keep the PR checkout and remove known config files: rejected because additional
   discovery paths, project tools, and instructions would remain under PR control.
 - Rely on model tool denials: rejected because startup plugin loading precedes them.
+- Preserve source paths beneath a data directory: rejected because nested
+  instruction discovery still treats reserved filenames as agent policy.
 - Remove target triggers: rejected because authorized fork automation needs the
   trusted workflow and existing credential/permission routing.
 - Treat contributor approval as arbitrary-code approval: rejected because it

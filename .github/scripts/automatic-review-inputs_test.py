@@ -68,6 +68,11 @@ class AutomaticReviewInputsTest(unittest.TestCase):
         (self.origin / "evil.ts").write_text("untrusted plugin executable\n")
         (self.origin / ".claude").mkdir()
         (self.origin / ".claude/settings.json").write_text('{"hooks":{"SessionStart":[]}}\n')
+        for directory in ("", "nested/"):
+            for name in ("AGENTS.md", "CLAUDE.md", "CONTEXT.md"):
+                target = self.origin / directory / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(f"untrusted instructions from {directory}{name}\n")
         skill.write_text("untrusted review instructions\n")
         (self.origin / "new-file.txt").write_text("exact event-head file\n")
         (self.origin / "large.txt").write_bytes(b"a" * (512 * 1024 + 1))
@@ -102,6 +107,11 @@ class AutomaticReviewInputsTest(unittest.TestCase):
             ["git", *args], cwd=cwd, text=True, capture_output=True, check=True
         )
 
+    def prepared_file(self, context: Path, path: str) -> Path:
+        manifest = json.loads((context / "manifest.json").read_text())
+        entry = next(item for item in manifest["files"] if item["path"] == path)
+        return context / entry["context_path"]
+
     def prepare(self, job_name: str, *, head: str | None = None, workflow: str = "opencode-code-review", overrides: dict | None = None) -> subprocess.CompletedProcess[str]:
         source = (ROOT / f".github/workflows/{workflow}.yml").read_text()
         block = job(source, job_name)
@@ -124,16 +134,35 @@ class AutomaticReviewInputsTest(unittest.TestCase):
                 self.assertFalse((self.work / "opencode.json").exists())
                 self.assertEqual((self.work / ".agents/skills/code-review/SKILL.md").read_text(), "trusted workflow review skill\n")
                 context = self.work / ".opencode-review/head-context"
-                files = context / "head/files"
-                self.assertEqual((files / "new-file.txt").read_text(), "exact event-head file\n")
-                self.assertEqual(json.loads((files / "opencode.json").read_text())["plugin"], ["./evil.ts"])
+                self.assertEqual(self.prepared_file(context, "new-file.txt").read_text(), "exact event-head file\n")
+                self.assertEqual(json.loads(self.prepared_file(context, "opencode.json").read_text())["plugin"], ["./evil.ts"])
+                entries = {entry["path"]: entry for entry in json.loads((context / "manifest.json").read_text())["files"]}
                 for excluded in ("escape-link", "submodule", "large.txt", "binary.dat"):
-                    self.assertFalse((files / excluded).exists(), excluded)
+                    self.assertFalse(entries[excluded]["materialized"], excluded)
+                    self.assertNotIn("context_path", entries[excluded])
                 manifest = (context / "manifest.json").read_text()
                 self.assertNotIn("must not be materialized", manifest)
                 patch = (self.work / ".opencode-review/review.patch").read_text()
                 self.assertIn("+exact event-head file", patch)
                 self.assertNotIn("+trusted workflow review skill", patch)
+
+    def test_all_automatic_review_paths_keep_reserved_instructions_as_plain_data(self) -> None:
+        for workflow, name, review_dir in (
+            ("opencode-code-review", "opencode-review-same-repo", ".opencode-review"),
+            ("opencode-code-review", "opencode-review-fork", ".opencode-review"),
+            ("claude-code-review", "claude-review-fork", ".claude-review"),
+        ):
+            with self.subTest(job=name):
+                result = self.prepare(name, workflow=workflow, overrides={"REVIEW_DIR": review_dir})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                context = self.work / review_dir / "head-context"
+                self.assertFalse((context / "head/files/AGENTS.md").exists())
+                for directory in ("", "nested/"):
+                    for filename in ("AGENTS.md", "CLAUDE.md", "CONTEXT.md"):
+                        original = directory + filename
+                        prepared = self.prepared_file(context, original)
+                        self.assertRegex(prepared.name, r"^[0-9a-f]{40}\.txt$")
+                        self.assertEqual(prepared.read_text(), f"untrusted instructions from {original}\n")
 
     def test_moving_head_fails_before_context_can_be_used(self) -> None:
         result = self.prepare("opencode-review-fork", head="0" * 40)
@@ -146,7 +175,7 @@ class AutomaticReviewInputsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.git(self.work, "rev-parse", "HEAD").stdout.strip(), self.trusted)
         self.assertIn("trusted workflow review skill", (self.work / ".claude-review/guidelines.md").read_text())
-        self.assertEqual((self.work / ".claude-review/head-context/head/files/new-file.txt").read_text(), "exact event-head file\n")
+        self.assertEqual(self.prepared_file(self.work / ".claude-review/head-context", "new-file.txt").read_text(), "exact event-head file\n")
 
     def test_invalid_base_or_output_path_fails_before_writing(self) -> None:
         for overrides in ({"BASE_SHA": "--upload-pack=other"}, {"REVIEW_DIR": "../private"}):
@@ -164,11 +193,15 @@ class AutomaticReviewInputsTest(unittest.TestCase):
         binary.parent.mkdir(parents=True)
         binary.write_text(
             "#!/usr/bin/env python3\n"
+            "import json\n"
             "from pathlib import Path\n"
             "assert not Path('opencode.json').exists()\n"
             "assert not Path('opencode.jsonc').exists()\n"
             "assert Path('.agents/skills/code-review/SKILL.md').read_text() == 'trusted workflow review skill\\n'\n"
-            "assert Path('.opencode-review/head-context/head/files/new-file.txt').read_text() == 'exact event-head file\\n'\n"
+            "context = Path('.opencode-review/head-context')\n"
+            "manifest = json.loads((context / 'manifest.json').read_text())\n"
+            "entry = next(item for item in manifest['files'] if item['path'] == 'new-file.txt')\n"
+            "assert (context / entry['context_path']).read_text() == 'exact event-head file\\n'\n"
             "print('<opencode_findings>[]</opencode_findings>')\n"
         )
         binary.chmod(0o755)

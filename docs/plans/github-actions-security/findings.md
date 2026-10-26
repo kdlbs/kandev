@@ -51,7 +51,7 @@ remain usable after edits. Every path in this table is under `.github/workflows/
 | F06 | cache-poisoning | High | `notify-docs.yml:82` (preview) | Harden: D1: cache restore in docs deployment job |
 | F07 | dangerous-triggers | High | `opencode-code-review.yml:5` (workflow trigger) | Remediate: R1: root OpenCode config can load PR plugin |
 | F08 | dangerous-triggers | High | `pr-walkthrough-reconcile.yml:5` (workflow trigger) | Retain: T1: workflow-SHA reconciliation helper, no PR execution |
-| F09 | dangerous-triggers | High | `pr-walkthrough.yml:6` (workflow trigger) | Retain: T2: workflow-SHA agent workspace and bounded head context |
+| F09 | dangerous-triggers | High | `pr-walkthrough.yml:6` (workflow trigger) | Remediate: T2/R3: reserved instruction names in bounded head context |
 | F10 | dangerous-triggers | High | `preview-env.yml:7` (workflow trigger) | Retain: T3: separate fork build, package, and trusted deploy jobs |
 | F11 | artipacked | Medium | `release.yml:120` (prepare) | Harden: C2: replace prepare-job persistence with push-scoped authentication |
 | F12 | artipacked | Medium | `release.yml:2096` (docker-amd64) | Harden: C1: build needs no Git write |
@@ -138,6 +138,27 @@ Required change: reuse the trusted-checkout/manual-helper pattern with event-hea
 binding. This corrects the repository boundary and instruction provenance.
 It is not a claim that a Claude credential-exfiltration exploit was reproduced.
 
+## R3: Prepared filenames can become agent instructions
+
+The adversarial review found an additional path in the initial implementation.
+The shared context helper preserved original directories and filenames beneath
+its data directory. The real pinned OpenCode v1.19.3 `read` tool automatically
+loaded nearby PR-owned `AGENTS.md`, `CLAUDE.md`, and `CONTEXT.md` files as
+instructions. All six root/nested cases reproduced this behavior. This affects
+automatic reviews and the existing walkthrough caller. The original T2
+disposition missed this discovery path.
+
+Evidence: pinned upstream [instruction discovery](https://github.com/anomalyco/opencode/blob/v1.19.3/packages/opencode/src/session/instruction.ts)
+and local CLI output that included the PR marker in a `system-reminder` with
+the reserved file listed in `metadata.loaded`. This proves instruction loading,
+not that a model followed the text. No provider request was made.
+
+The shared helper now stores every blob under a flat neutral object-ID filename.
+Manifest version 2 maps each original `path` to a `context_path`. All consumers
+use that mapping. Exact bytes, original review paths, size limits, omission
+reasons, and immutable head binding remain intact. Neutral names also avoid
+collisions with contributor files that already end in a proposed suffix.
+
 ## I1: High-severity release interpolation
 
 The four findings interpolate `github.repository` and `github.workflow_sha`
@@ -206,7 +227,9 @@ The existing walkthrough contract suite covers this reconciliation path.
 The history helper verifies the event head as a Git object. The bounded context
 helper omits symlinks/gitlinks and limits text bytes. The agent configuration
 comes from trusted workflow text. Publication and PR linking run separately.
-Existing walkthrough contract and context tests protect these boundaries.
+The adversarial review found R3 in its prepared filenames. Shared neutral
+filenames and manifest mapping now prevent reserved-name instruction discovery.
+Walkthrough contract and context tests protect these boundaries.
 
 **T3, preview:** an authorized fork runs source hooks only in its input-build
 job. Packaging uses a fresh job with a trusted executable and restricted
@@ -245,7 +268,7 @@ The proposed edits address eight credential findings, 21 interpolation findings,
 and the docs cache finding. The review fixes retain their required triggers,
 so all six trigger warnings remain visible after remediation. The expected
 residual set is F01, F03, F04, F05, F07, F08, F09, F10, F37, and F38.
-F03 and F07 may be marked remediated only after the new trust-boundary tests pass.
+F03, F07, and F09 require passing trust-boundary tests before being marked remediated.
 Do not label current R1/R2 code safe merely because other target triggers are intentional.
 
 No new suppression is planned. Existing 229 suppressed and 2 ignored findings
@@ -257,7 +280,7 @@ and explain new findings before declaring implementation complete.
 
 The implementation rechecked main and all 116 open PRs before editing workflows.
 The source baseline and overlap conclusions were unchanged. R1 and R2 are now
-addressed by workflow-SHA execution checkouts and immutable PR context. Five
+addressed by workflow-SHA execution checkouts and immutable PR context. Six
 fixture tests exercise hostile root configuration, instruction provenance,
 new files, omitted symlinks/gitlinks/binary/oversized files, head mismatches,
 invalid preparation inputs, and the model invocation from a trusted root.
@@ -277,7 +300,8 @@ No suppression directive or scanner configuration was added or changed. The six
 fewer suppressed findings result from removed flagged code, not new exemptions.
 
 Residual IDs are exactly F01, F03, F04, F05, F07, F08, F09, F10, F37, and F38.
-F03 and F07 retain their required triggers but their execution-input defects
-are fixed. T1-T4 retain their existing reviewed boundaries. N1/N2 retain the
+F03, F07, and F09 retain their required triggers, with the evidenced input
+defects fixed. T2 additionally uses neutral context filenames after the
+adversarial review. T1, T3, and T4 retain their reviewed boundaries. N1/N2 retain the
 intentional shell/action behavior. The release action moved to line 2964 in the
 implementation. The trigger and CMD finding locations are unchanged.
