@@ -358,3 +358,94 @@ func baseBranchTrackerKey(repoName, pathSlug string) string {
 	}
 	return key + "-" + pathSlug
 }
+
+// TaskGitHooks exposes the stored per-workspace-entry Git hooks opt-in for a
+// task. Wired as lifecycle.GitHooksProvider; a task without repositories (or an
+// empty task ID) yields an empty map.
+func (s *Service) TaskGitHooks(ctx context.Context, taskID string) (map[string]bool, error) {
+	if taskID == "" {
+		return map[string]bool{}, nil
+	}
+	return s.collectTaskGitHooks(ctx, taskID)
+}
+
+// collectTaskGitHooks builds the {workspace-entry key → run Git hooks} map from
+// stored repository records, over the same branch-identity computation and key
+// derivation as collectTaskBaseBranches. Rows without a base branch are kept.
+// A repository that cannot be read or keyed is off with a warning; the other
+// repositories keep their values. A key shared by several repositories is on
+// only when every repository deriving it opted in. Plugin remote tasks carry no
+// entries.
+func (s *Service) collectTaskGitHooks(ctx context.Context, taskID string) (map[string]bool, error) {
+	taskRepos, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task repositories: %w", err)
+	}
+	out := make(map[string]bool, len(taskRepos)+1)
+	if len(taskRepos) == 0 {
+		return out, nil
+	}
+	executorType, err := s.workspaceSourceExecutorType(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve executor type for task git hooks: %w", err)
+	}
+	if executorType == string(models.ExecutorTypePluginRemote) {
+		return out, nil
+	}
+	repos, inputs := s.loadGitHooksRepositories(ctx, taskID, taskRepos)
+	plans := worktree.BuildBranchIdentityPlans(inputs)
+	owners := make(map[string]int, len(taskRepos)+1)
+	optedIn := make(map[string]int, len(taskRepos)+1)
+	for i, tr := range taskRepos {
+		if repos[i] == nil {
+			continue
+		}
+		key, keyErr := taskRepositoryWorkspaceTrackerKey(executorType, i, repos[i], tr, plans[i].PathSlug)
+		if keyErr != nil {
+			s.logger.Warn("git hooks off: workspace entry key not derivable",
+				zap.String("task_id", taskID), zap.String("repository_id", tr.RepositoryID), zap.Error(keyErr))
+			continue
+		}
+		keys := []string{key}
+		if len(taskRepos) == 1 && key != "" {
+			keys = append(keys, "")
+		}
+		for _, k := range keys {
+			owners[k]++
+			if repos[i].RunGitHooks {
+				optedIn[k]++
+			}
+		}
+	}
+	for key, count := range optedIn {
+		if count == owners[key] {
+			out[key] = true
+		}
+	}
+	return out, nil
+}
+
+// loadGitHooksRepositories reads each task repository record and builds the
+// branch-identity inputs; an unreadable record leaves a nil entry (hooks off).
+func (s *Service) loadGitHooksRepositories(ctx context.Context, taskID string, taskRepos []*models.TaskRepository) ([]*models.Repository, []worktree.BranchIdentityInput) {
+	repos := make([]*models.Repository, len(taskRepos))
+	inputs := make([]worktree.BranchIdentityInput, len(taskRepos))
+	for i, tr := range taskRepos {
+		repo, repoErr := s.repoEntities.GetRepository(ctx, tr.RepositoryID)
+		if repoErr == nil && repo != nil && repo.Name != "" {
+			repos[i] = repo
+		} else {
+			s.logger.Warn("git hooks off: repository record unreadable",
+				zap.String("task_id", taskID), zap.String("repository_id", tr.RepositoryID))
+		}
+		defaultBranch := ""
+		if repos[i] != nil {
+			defaultBranch = repos[i].DefaultBranch
+		}
+		inputs[i] = worktree.BranchIdentityInput{
+			RepositoryID: tr.RepositoryID, BaseBranch: tr.BaseBranch, CheckoutBranch: tr.CheckoutBranch,
+			DefaultBranch: defaultBranch, PRNumber: taskRepositoryPRNumber(tr.Metadata), Position: tr.Position,
+		}
+	}
+	return repos, inputs
+}

@@ -1140,7 +1140,6 @@ func (m *Manager) prepareExecutionCreateRequest(
 			return nil, err
 		}
 	}
-	gitHooks := gitHooksFromWorkspaceRepositories(info.WorkspaceRepositories, info.ExecutorType)
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -1171,6 +1170,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if journalOwnerID == "" {
 		journalOwnerID = info.TaskEnvironmentID
 	}
+	m.seedExecutionGitHooks(ctx, taskID, info.ExecutorType, metadata)
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -1210,7 +1210,6 @@ func (m *Manager) prepareExecutionCreateRequest(
 			ManagedRuntimeSource:           managedRuntimeOptions.ManagedRuntimeSource,
 			NativeRuntimeVersion:           managedRuntimeOptions.NativeRuntimeVersion,
 			ComparisonTargets:              comparisonTargets,
-			GitHooks:                       gitHooks,
 		},
 		profileInfo: profileInfo,
 	}

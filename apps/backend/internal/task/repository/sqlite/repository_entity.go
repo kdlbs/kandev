@@ -180,7 +180,21 @@ func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext,
 		}
 		return fmt.Errorf("repository not found: %s", repository.ID)
 	}
+	r.refreshStoredRunGitHooks(ctx, exec, repository)
 	return nil
+}
+
+// refreshStoredRunGitHooks sets the model's run_git_hooks to the stored value
+// after a whole-record write, which never writes that column. An unreadable
+// value reports false (hooks off).
+func (r *Repository) refreshStoredRunGitHooks(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository) {
+	var stored bool
+	row := exec.QueryRowxContext(ctx, r.db.Rebind(`SELECT run_git_hooks FROM repositories WHERE id = ?`), repository.ID)
+	if err := row.Scan(&stored); err != nil {
+		repository.RunGitHooks = false
+		return
+	}
+	repository.RunGitHooks = stored
 }
 
 // UpdateRepositoryWithSecretBindings replaces bindings atomically with the

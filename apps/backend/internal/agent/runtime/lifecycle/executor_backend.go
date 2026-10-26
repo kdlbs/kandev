@@ -212,9 +212,8 @@ const (
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.
 	MetadataKeyBaseBranches = "base_branches"
-	// MetadataKeyGitHooks is reserved: the hooks decision travels only on the
-	// typed ExecutorCreateRequest.GitHooks field, so launch and resume strip
-	// any metadata value under this key.
+	// MetadataKeyGitHooks holds the map[string]bool Git hooks decision (workspace
+	// entry key to opt-in) set only by Manager.seedExecutionGitHooks.
 	MetadataKeyGitHooks                 = "git_hooks"
 	MetadataKeyRemoteContributions      = "remote_contributions"
 	MetadataKeyContributionDestinations = "contribution_destinations"
@@ -703,10 +702,7 @@ type ExecutorCreateRequest struct {
 	RemoteContributions      map[string]models.RemoteContribution
 	ContributionDestinations map[string]models.ContributionDestination
 	ComparisonTargets        map[string]models.ComparisonTarget
-	// GitHooks maps workspace entry key → repository opted into running Git
-	// hooks. Absent entries mean hooks off; the map is a launch-time snapshot.
-	GitHooks   map[string]bool
-	McpServers []McpServerConfig
+	McpServers               []McpServerConfig
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize. Resolved from the
 	// launching profile's OpenAI-compatible provider fields.

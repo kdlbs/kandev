@@ -318,20 +318,29 @@ func (c *ControlClient) SubprocessAdmission(ctx context.Context) (subproc.Snapsh
 	return snapshot, nil
 }
 
-// ErrManagedGitPolicyUnsupported refuses a launch on an agentctl build that
-// would run Git without the managed Git policy.
+// ErrManagedGitPolicyUnsupported reports an agentctl build that does not
+// advertise the managed Git policy capability.
 var ErrManagedGitPolicyUnsupported = errors.New("agentctl does not support the managed Git policy. Update the execution runtime before retrying")
+
+// ErrManagedGitPolicyUnverified reports that the capability could not be
+// checked (timeout, transport error, non-success status, or malformed body).
+var ErrManagedGitPolicyUnverified = errors.New("could not verify that agentctl supports the managed Git policy")
 
 const managedGitPolicyProbeTimeout = 5 * time.Second
 
 // requireManagedGitPolicy fails unless the peer advertises the managed Git
-// policy capability. A missing, malformed, or unreachable identity fails closed.
+// policy capability. A caller context that is cancelled or past its deadline
+// returns that context error; only the probe's own bound is a failed
+// verification.
 func (c *ControlClient) requireManagedGitPolicy(ctx context.Context) error {
 	probeCtx, cancel := context.WithTimeout(ctx, managedGitPolicyProbeTimeout)
 	defer cancel()
 	info, err := c.GetIdentity(probeCtx)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrManagedGitPolicyUnsupported, err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return fmt.Errorf("%w: %v", ErrManagedGitPolicyUnverified, err)
 	}
 	if !slices.Contains(info.Capabilities, subproc.ManagedGitPolicyCapability) {
 		return ErrManagedGitPolicyUnsupported

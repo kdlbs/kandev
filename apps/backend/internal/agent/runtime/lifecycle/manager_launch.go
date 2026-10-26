@@ -656,69 +656,6 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 	return out
 }
 
-// collectGitHooks builds the per-workspace-entry map of repositories that opted
-// into running their Git hooks. Only opted-in entries are present; agentctl
-// treats every absent entry as hooks off and never falls back to the root key.
-// A single repository is always addressed by the root key. Plugin remote
-// workspaces carry no map.
-func collectGitHooks(req *LaunchRequest) map[string]bool {
-	if req == nil {
-		return nil
-	}
-	return gitHooksForSpecs(req, req.RepoSpecs())
-}
-
-// gitHooksFromWorkspaceRepositories projects the repository records read for a
-// resume or recovery into the same map a fresh launch produces.
-func gitHooksFromWorkspaceRepositories(specs []WorkspaceRepositorySpec, executorType string) map[string]bool {
-	launchSpecs := make([]RepoLaunchSpec, 0, len(specs))
-	for _, spec := range specs {
-		launchSpecs = append(launchSpecs, RepoLaunchSpec{
-			RepoName: spec.RepoName, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch,
-			BranchSlug: spec.BranchSlug, RunGitHooks: spec.RunGitHooks,
-		})
-	}
-	return gitHooksForSpecs(&LaunchRequest{ExecutorType: executorType}, launchSpecs)
-}
-
-func gitHooksForSpecs(req *LaunchRequest, specs []RepoLaunchSpec) map[string]bool {
-	if req.ExecutorType == string(models.ExecutorTypePluginRemote) {
-		return nil
-	}
-	// A key is on only when every repository deriving it opted in: a key
-	// shared with a repository that did not opt in stays off.
-	owners := make(map[string]int, len(specs)+1)
-	optedIn := make(map[string]int, len(specs)+1)
-	for index, spec := range specs {
-		keys := make([]string, 0, 2)
-		if len(specs) == 1 {
-			keys = append(keys, "")
-		}
-		if key, ok := workspaceEntryKey(req, index, spec); ok {
-			keys = append(keys, key)
-		}
-		for _, key := range keys {
-			owners[key]++
-			if spec.RunGitHooks {
-				optedIn[key]++
-			}
-		}
-	}
-	out := make(map[string]bool, len(optedIn))
-	for key, count := range optedIn {
-		if count != owners[key] {
-			zap.L().Warn("git hooks opt-in not applied: workspace entry key is shared with a repository that did not opt in",
-				zap.String("key", key))
-			continue
-		}
-		out[key] = true
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func baseBranchMetadataKey(spec RepoLaunchSpec) string {
 	repoName := worktree.SanitizeRepoDirName(spec.RepoName)
 	if repoName == "" {
@@ -1512,6 +1449,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		env[providerKeyEnvVar] = providerKey
 	}
 
+	m.seedExecutionGitHooks(ctx, reqWithWorktree.TaskID, reqWithWorktree.ExecutorType, metadata)
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
 		IsPassthrough:                  reqWithWorktree.IsPassthrough,
@@ -1557,7 +1495,6 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
 		ComparisonTargets:              comparisonTargets,
-		GitHooks:                       collectGitHooks(reqWithWorktree),
 		ProviderGatewayAuth:            providerGatewayAuth,
 	}
 	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {

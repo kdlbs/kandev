@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	"github.com/kandev/kandev/internal/common/processidentity"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/secrets"
 	"go.uber.org/zap"
 )
@@ -230,6 +232,13 @@ func refusedAdoptionScope(outcome agentruntime.AdoptionOutcome) agentruntime.Inh
 // prior launch. Returns nil when adoption did not complete for any reason
 // (design 02's "Startup" steps 4-6): the caller then falls back to spawning
 // a fresh server exactly as it would with the capability disabled.
+// localAdoptionCapabilities is the set the backend's own surviving control
+// server must advertise: the survival set plus the managed Git policy, so a
+// server that predates the policy is stopped and replaced rather than adopted.
+func localAdoptionCapabilities() []string {
+	return append(slices.Clone(agentruntime.RequiredSurvivalCapabilities), subproc.ManagedGitPolicyCapability)
+}
+
 func adoptSurvivingAgentctl(
 	ctx context.Context,
 	lifetimeCtx context.Context,
@@ -239,7 +248,7 @@ func adoptSurvivingAgentctl(
 	secretStore secrets.SecretStore,
 ) (*agentctlLauncherResult, agentruntime.InheritedRecordScope) {
 	outcome := agentruntime.AttemptAdoptControlServer(ctx, store, secretStore, controlClientFactory(log),
-		cfg.ResolvedHomeDir(), agentruntime.RequiredSurvivalCapabilities,
+		cfg.ResolvedHomeDir(), localAdoptionCapabilities(),
 		cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
 	if !outcome.Adopted {
 		log.Info("control server adoption did not complete; spawning a fresh one",

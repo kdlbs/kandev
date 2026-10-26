@@ -303,5 +303,5 @@
   "cloneFailed": "无法克隆工作区，请重试。",
   "workspaceActionsNamed": "{{name}}的操作",
   "runGitHooks": "运行 Git 钩子",
-  "runGitHooksHelp": "仓库的 Git 钩子以 Kandev 的权限运行，任何能写入该仓库的人或智能体都可以修改它们。关闭时，用户全局和系统 Git 配置中的钩子也会被跳过。更改仅适用于之后创建的智能体实例，不影响正在运行的实例。开启后，Kandev 在此仓库中的 pull、fetch 和 push 将不再递归处理子模块。文件系统监视器、标准 Git LFS 和 git-crypt 以外的过滤器、文本转换器以及合并驱动仍然保持禁用。"
+  "runGitHooksHelp": "仓库的 Git 钩子以 Kandev 的权限运行，任何能写入该仓库的人或智能体都可以修改它们。关闭时，用户全局和系统 Git 配置中的钩子也会被跳过。更改仅适用于之后创建的智能体实例，不影响正在运行的实例(重置环境会启动新实例)。开启后，Kandev 在此仓库中的 pull、fetch 和 push 将不再递归处理子模块。文件系统监视器、标准 Git LFS 和 git-crypt 以外的过滤器、文本转换器以及合并驱动仍然保持禁用。"
 }

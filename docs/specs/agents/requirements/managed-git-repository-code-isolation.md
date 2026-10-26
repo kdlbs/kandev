@@ -1,0 +1,102 @@
+---
+status: draft
+system: agents
+created: 2026-10-25
+owners:
+  - kandev
+---
+
+# Managed Git repository-code isolation requirements
+
+## Overview
+
+Kandev runs Git in a task workspace: Changes-panel commits, push, pull, rebase, merge, reset, revert, branch switches, `git worktree add`, and background status and diff reads.
+These run in the backend and in agentctl, outside the agent's process, with Kandev's permissions.
+
+Git can execute code a repository supplies: hooks, a file-system monitor, content filters, text converters, external diff programs, merge drivers, and command-executing transports.
+A linked worktree shares its common Git directory with the source checkout and every other task, so anything written there is read by every later Git process.
+
+This capability makes managed Git run without repository-supplied code by default, and lets a repository's owner opt in to hooks.
+The [Agent Git permission boundary](git-operations-permission-boundary.md) explains shell versus Changes-panel permission.
+
+## Relationship to sandbox policies
+
+[Sandbox policies](sandbox-policies.md) confine the agent process, not managed Git. A hook, `core.fsmonitor` command, or filter that a sandboxed agent writes into the shared Git directory would later run unsandboxed with Kandev's permissions.
+This capability applies with or without a sandbox.
+
+## Terms
+
+- **Managed Git:** any Git process that the backend or agentctl starts directly, in any workspace, except a Git process started inside the agent's own process tree.
+- **Repository-supplied code:** a program that Git would start because of content or configuration stored in the repository or its Git directory: hooks, `core.fsmonitor`, content filter drivers, `diff.<name>.textconv`, external diff programs, merge drivers, and the `ext` transport.
+- **Hooks setting:** the per-repository boolean "run Git hooks". Default off.
+- **Hooks-enabled repository:** a repository whose hooks setting is on.
+- **Allowlisted filter:** a content filter driver named `lfs`, `git-crypt`, or `git-crypt-<key>` whose `clean`, `smudge`, and `process` commands each tokenize, as a shell word list, to a canonical form of that tool. The canonical forms are listed in the system design. The first word is the bare tool name or an absolute path that resolves, after symbolic links, to the same file as Kandev's own `PATH` lookup returns for that tool. A driver with an allowlisted name and any other command is not allowlisted.
+- **Filter-free command:** a managed Git command that can never apply a content filter or merge driver and can never start a hook: `rev-parse`, `config`, `for-each-ref`, `rev-list`, `merge-base`, `show-ref`, `ls-remote`, `branch --list` followed by patterns only, `var`, `version`, `ls-tree`, `commit-tree`, `cat-file` without `--filters`, and `worktree list` and `worktree prune`.
+- **Filter-reading command:** a managed Git command that can apply a filter or start a hook but writes no content: `symbolic-ref`, `remote`, `fetch`, `update-ref`, `write-tree`, `status`, `diff`, `diff-tree`, `diff-index`, `diff-files`, `log`, `show`, `format-patch`, `range-diff`, `ls-files`, `worktree remove`, and `push`.
+- **Content-writing command:** a managed Git command that can write blobs, index entries, or working-tree files through a content filter or merge driver: `add`, `commit`, `checkout`, `switch`, `restore`, `reset`, `merge`, `pull`, `rebase`, `cherry-pick`, `revert`, `stash`, `apply`, `am`, `worktree add`, `clone`, `checkout-index`, `read-tree`, `update-index`, and `hash-object`.
+- **Required filter:** a filter driver whose effective `required` value is true.
+
+## Requirements
+
+### REQ-AGENTS-GITISOLATION-001: Managed Git runs without repository-supplied code
+
+**Intent:** An agent or repository can write a hook, a configuration entry, or an attribute rule; Kandev's Git operations must not turn that content into program execution.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-GITISOLATION-001.1:** When managed Git runs any command in a repository whose hooks setting is off, including `commit`, `push`, `pull` (merge and rebase modes), `merge`, standalone `rebase`, `cherry-pick`, `stash`, `fetch`, `reset`, `revert`, a branch switch, and `worktree add`, the system shall run no hook, including hooks located through `core.hooksPath` in repository, user-global, or system configuration and hooks defined through `hook.<name>.command`, except the Kandev-owned Git LFS `pre-push` step defined in AC-AGENTS-GITISOLATION-001.7.
+- **AC-AGENTS-GITISOLATION-001.2:** When managed Git reads status, diff, or log data for any repository, including every background poll, the system shall not start a program named by `core.fsmonitor`, regardless of the hooks setting.
+- **AC-AGENTS-GITISOLATION-001.3:** When managed Git produces a diff, patch, numstat, or log with patch output, the system shall start no `diff.<name>.textconv` program and no external diff program (configuration or `GIT_EXTERNAL_DIFF`), regardless of the hooks setting. The system shall refuse a managed `blame` command and any managed command that carries `--textconv`, `--filters`, `--ext-diff`, or a later option that re-enables text conversion or external diff, naming the option as the cause. A Git-crypt-encrypted file therefore appears as a binary change; it is not decrypted for display.
+- **AC-AGENTS-GITISOLATION-001.4:** When managed Git runs any command, the system shall refuse the command-executing `ext` transport for every remote and URL, regardless of the hooks setting.
+- **AC-AGENTS-GITISOLATION-001.5:** When managed Git runs a command that can apply a content filter and the repository defines a filter driver that is not allowlisted, the system shall run no clean, smudge, or process command for that driver. If the driver is not required, or the command is not content-writing, the driver shall behave as if it were undefined: content passes through unmodified. If the driver is required and the command is content-writing, the system shall not start the command and shall return an error that names the filter and states that it is required but not permitted in managed Git.
+- **AC-AGENTS-GITISOLATION-001.6:** When managed Git runs a command that can invoke a merge driver and the repository defines one (a `merge.<name>` section with a `driver`, `name`, or `recursive` entry), the system shall start no program for that driver. A merge that invokes the driver for a file stops with a conflict and keeps the current branch's content for it, because Git treats an empty driver command as a failed driver; a merge that never invokes a driver (fast-forward, one-sided change) is unaffected. A test shall pin the `merge` conflict outcome against the test environment's Git version, so a Git release that changes it fails.
+- **AC-AGENTS-GITISOLATION-001.7:** When managed Git runs a command that applies an allowlisted filter, the system shall still run that filter's clean, smudge, and process commands so Git LFS and git-crypt content is stored and checked out. When managed Git runs `push` in a repository whose hooks setting is off and in which an allowlisted `lfs` filter is configured, the system shall set `core.hooksPath` to a Kandev-owned directory that contains exactly one executable `pre-push` file whose only action is to run the Git LFS `pre-push` command at the absolute path the allowlist matched, passing Git's hook arguments and leaving Git's hook input unchanged. Git LFS objects of the pushed refs are uploaded before any ref is sent, for any refspec, and a failed upload fails the push. A `push --dry-run` uploads nothing and runs no hook. For every other command in such a repository, and for `push` where no allowlisted `lfs` filter is configured, `core.hooksPath` is the null device.
+- **AC-AGENTS-GITISOLATION-001.8:** If the system cannot determine which filter or merge drivers the repository configures, or if a filter or merge driver name contains `=` (which a command-line configuration entry cannot express), it shall not start the managed Git command and shall return an error that names the policy determination, or the offending driver name, as the cause.
+- **AC-AGENTS-GITISOLATION-001.9:** The system shall apply AC-AGENTS-GITISOLATION-001.1 through 001.8 to every managed Git process however it is started, and no argument or environment value supplied by a caller shall weaken them. A managed command whose executable is not Git is not rewritten by the process starter; the helper shall apply the same policy to the Git command it runs after it enters that directory, and a policy failure shall make the helper exit non-zero with the error text in its output. A caller `-c`, `-cKEY=value`, or `--config-env` entry for a policy-owned key (matched case-insensitively) shall be dropped, and the managed value shall take effect.
+- **AC-AGENTS-GITISOLATION-001.10:** The system shall leave Git commands that the agent runs inside its own process tree unchanged: they continue to run hooks, filters, and configuration exactly as plain Git does, and no managed Git policy value appears in the environment or configuration that the agent process inherits.
+- **AC-AGENTS-GITISOLATION-001.11:** The system shall determine the filter and merge drivers of a command from the configuration that is effective for that command's final working directory, repository selection options, and environment, just before the command starts, including the caller's non-policy-owned `-c`, `-cKEY=value`, and `--config-env` entries, and shall bound the determination by a 5 second limit, a 1 MiB output limit, and a 256 character limit per driver name. Drivers added after that determination are outside this guarantee.
+- **AC-AGENTS-GITISOLATION-001.12:** When any agentctl instance is to be created (host-utility probe instances included) and agentctl does not advertise the `managed-git-policy.v1` capability on its identity endpoint, the system shall not create it and shall return an error that names the missing managed Git policy as the cause. If the capability cannot be verified (timeout, transport error, bad status or body), the error shall name the failed verification and its cause, not a missing policy; a caller context cancelled or past its deadline returns that context error.
+- **AC-AGENTS-GITISOLATION-001.13:** When managed Git runs a filter-reading or content-writing command, the system shall start at most one extra Git process to determine drivers and configuration-defined hooks, and shall start none for a filter-free command.
+- **AC-AGENTS-GITISOLATION-001.14:** The system shall keep the existing `protocol.allow`, `protocol.https.allow`, and `protocol.ssh.allow` submodule pins in force.
+- **AC-AGENTS-GITISOLATION-001.15:** The system shall classify every Git subcommand production code passes to a managed Git helper as filter-free, filter-reading, or content-writing, a build-time test shall fail when such a subcommand is on none of the three lists, and a subcommand that is on none of them at run time shall be treated as content-writing.
+
+### REQ-AGENTS-GITISOLATION-002: Per-repository hooks opt-in
+
+**Intent:** A user who relies on repository hooks can keep them running on Kandev commits for that repository only, without re-enabling other repository-supplied code.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-GITISOLATION-002.1:** The system shall store a boolean hooks setting on every repository. A repository created without the value, a repository that existed before this capability, and a repository payload that omits the field shall all have the setting off.
+- **AC-AGENTS-GITISOLATION-002.2:** When managed Git runs on an executor that carries the hooks setting (local, worktree, Docker, SSH, and Sprites executors) in a hooks-enabled repository, the system shall run hooks from the location plain Git would use for that repository (`core.hooksPath` when configured, else the Git directory's `hooks`), and a failing blocking hook shall fail the Git operation with the hook's output in the returned error, as plain Git does. Hooks run off, with an operator warning, when the stored value cannot be read, the repository has no ID, two repositories derive one key, or the value provider is unwired, errors, times out, or returns nil. A key the returned map lacks is off with no warning. The managed process's standard input is the null device; a hook receives the input Git supplies for its type (for example `pre-push`'s ref list) and stops when the command's context ends; no new timeout applies. Executors that do not carry the setting run with hooks off.
+- **AC-AGENTS-GITISOLATION-002.3:** While a repository is hooks-enabled, the system shall keep AC-AGENTS-GITISOLATION-001.2 through 001.8 in force for it. The hooks setting shall not change filter, text conversion, file-system monitor, merge driver, or transport behavior.
+- **AC-AGENTS-GITISOLATION-002.4:** When a task uses several repositories, the system shall apply each repository's own hooks setting to the managed Git processes run in that repository only. A workspace directory matching no known repository shall use the setting off. The lookup shall use the exact workspace-entry key, with no fallback to another entry. The keys follow the base-branch map's key rule but cover every repository of the task, with or without a base branch. The empty key shall hold the value of the repository whose checkout is the workspace root (the only repository of a single-repository task, or the first on a remote executor); a multi-repository task on a non-remote executor writes no empty key, so the workspace root uses hooks off. A later change to the base-branch map shall not change the hooks map.
+- **AC-AGENTS-GITISOLATION-002.5:** The system shall run no hook in a submodule, regardless of the parent repository's hooks setting: Kandev's own submodule commands shall never carry the hooks mark, and managed Git in a hooks-enabled repository shall not recurse into submodules (`submodule.recurse`, `fetch.recurseSubmodules`, and `push.recurseSubmodules` are policy-owned in hooks-enabled repositories).
+- **AC-AGENTS-GITISOLATION-002.6:** When the hooks setting of a repository changes, the system shall apply the new value to backend-run Git on the next command. For agentctl-run Git, the value shall be read once, at the start of the lifecycle Manager's call that creates the instance, so the new value, on or off, applies to every instance whose such call starts after the change and never to an instance that already exists, which keeps its creation-time value until its environment is reset.
+- **AC-AGENTS-GITISOLATION-002.9:** If the hooks setting of a repository is on and the repository is exported from a workspace, the system shall not include the setting in the export, and an imported repository shall have the setting off.
+- **AC-AGENTS-GITISOLATION-002.7:** The system shall accept a change to the hooks setting only from the authenticated repository settings API, and an explicit null shall leave it unchanged. A write that saves a whole repository record, or one that matches the stored record exactly, shall leave the setting unchanged, and its response and update event carry the stored value; workspace clone (AC-AGENTS-GITISOLATION-002.8) initializes a new repository and is not a change. The setting shall not be writable through any Kandev MCP tool (including `update_settings`, which shall reject a `run_git_hooks` key), any agentctl route that can turn a repository on after the instance is created, the repository WebSocket update action (which shall ignore the field), or the plugin host API, and a plugin that updates other repository fields shall leave the hooks setting unchanged.
+- **AC-AGENTS-GITISOLATION-002.8:** When a workspace is cloned, the system shall copy each repository's hooks setting, as stored at clone time, to the clone.
+
+### REQ-AGENTS-GITISOLATION-003: Settings control and public documentation
+
+**Intent:** The default change must be discoverable, and the opt-in understandable before it is turned on.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-GITISOLATION-003.1:** The repository card in Settings → Workspace → Repositories shall show a "Run Git hooks" switch, off by default, with help text that says repository hooks run with Kandev's permissions, that anyone or any agent who can write to the repository can change them, that hooks from user-global and system configuration are skipped too while the setting is off, that a change applies to agent instances created afterward, not running ones (Reset Environment starts a new one), that turning it on disables submodule recursion for Kandev's pull, fetch, and push in that repository, and that file-system monitors, filters other than standard Git LFS and git-crypt, text converters, and merge drivers stay disabled.
+- **AC-AGENTS-GITISOLATION-003.2:** The switch shall be operable on desktop and on a phone-width viewport, reachable by keyboard, and labelled for assistive technology, and its label and help text shall be available in every supported locale.
+- **AC-AGENTS-GITISOLATION-003.3:** When the user saves a changed switch value, the repository shall return the stored value; when the save fails, the card shall show the previously stored value and the save error, and the repository's other unsaved edits shall be retained. If the user changes the switch while a save is in flight, the newer local value shall be kept as an unsaved edit and the stale response shall not overwrite it; when two saves from different clients conflict, the later write at the server shall win.
+- **AC-AGENTS-GITISOLATION-003.4:** The public Git operations guide shall state that managed Git skips repository hooks by default, name the operations affected (Changes-panel commit, push, pull, merge, rebase, reset, worktrees), name the opt-in switch and its scope, and state that: hooks the agent runs in its shell are unaffected; user-global and system hooks are skipped; the opt-in disables submodule recursion for managed pull, fetch, and push in that repository; git-crypt files appear as binary changes; filters other than Git LFS and git-crypt are disabled, and a required one makes content-writing commands fail with a named error; Kubernetes and plugin-remote executors run with hooks off; a container or remote environment started before this change runs Git without this policy until reset, and an SSH, Sprites, or Kubernetes host refuses new agent sessions with the missing-policy error until agentctl there is upgraded and restarted or reset; a pre-change local agentctl is replaced at next start, interrupting its sessions; Kandev runs Git LFS's `pre-push` step on push when hooks are off.
+
+## Out of scope
+
+- **Agent-run Git:** hardening commands the agent runs in its own shell, and the sandbox around them.
+- **Other executors in the workspace:** setup and cleanup scripts, dev processes, terminals, language servers, and code-server are unchanged.
+- **Other configuration-defined commands:** `credential.helper`, `core.sshCommand`, `gpg.program` and `gpg.ssh.program`, `core.pager`, `core.editor`, `remote.<name>.receivepack` and `uploadpack`, and `url.<base>.insteadOf` rewrites.
+- **Per-hook or per-filter selection:** one boolean; the filter allowlist is fixed.
+- **In-product notice of a skipped hook:** no banner or toast; the guide explains it. Warning logs exist only for the AC-AGENTS-GITISOLATION-002.2 fail-safe cases.
+- **A global opt-in:** no install-wide switch.
+- **Filters and hooks in a submodule's own configuration:** a pre-existing `.git/modules/<name>` configuration is not enumerated. A submodule checkout that Kandev performs starts from a fresh clone configuration.
+- **Closing the window between driver determination and the command, and write protection of the shared Git directory** (`hooks`, `config`, `info`): no current specification protects that directory from agent writes ([sandbox policies](sandbox-policies.md) make no such claim).
+- **Git started by other tools:** the `git` that `gh`, `glab`, and `az` start for PR creation is not managed Git.
+- **Changing a running instance:** a runtime route that lowers hooks to off, delivery of a change to a running or retained agentctl instance, and a capability check when a retained remote or container instance is adopted.
+- **Docker reconnect errors:** surfacing the AC-AGENTS-GITISOLATION-001.12 error when a Docker or remote_docker reconnect is refused (card b7c9ed26-e1dd-46a8-bbde-a866fe811100).

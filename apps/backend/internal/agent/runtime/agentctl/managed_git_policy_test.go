@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/subproc"
 )
@@ -32,12 +33,13 @@ func TestCreateInstanceRefusesPeerWithoutManagedGitPolicy(t *testing.T) {
 	cases := []struct {
 		name     string
 		identity http.HandlerFunc
+		want     error
 	}{
 		{"capability absent", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"server_identity":"old","capabilities":["agent-survival.v1"]}`))
-		}},
-		{"identity route missing", func(w http.ResponseWriter, _ *http.Request) { http.NotFound(w, nil) }},
-		{"malformed identity", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{`)) }},
+		}, ErrManagedGitPolicyUnsupported},
+		{"identity route missing", func(w http.ResponseWriter, _ *http.Request) { http.NotFound(w, nil) }, ErrManagedGitPolicyUnverified},
+		{"malformed identity", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{`)) }, ErrManagedGitPolicyUnverified},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,8 +55,14 @@ func TestCreateInstanceRefusesPeerWithoutManagedGitPolicy(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			resp, err := newTestControlClient(t, srv).CreateInstance(context.Background(), &CreateInstanceRequest{WorkspacePath: "/w"})
-			if !errors.Is(err, ErrManagedGitPolicyUnsupported) || resp != nil {
-				t.Fatalf("CreateInstance = %+v, %v, want ErrManagedGitPolicyUnsupported", resp, err)
+			if !errors.Is(err, tc.want) || resp != nil {
+				t.Fatalf("CreateInstance = %+v, %v, want %v", resp, err, tc.want)
+			}
+			if tc.want == ErrManagedGitPolicyUnverified && errors.Is(err, ErrManagedGitPolicyUnsupported) {
+				t.Fatalf("a failed verification must not read as a missing capability: %v", err)
+			}
+			if errors.Is(err, ErrLaunchWrapperUnsupported) {
+				t.Fatalf("managed Git policy error must not be a launch-wrapper error: %v", err)
 			}
 			if created.Load() {
 				t.Fatal("instance creation was attempted on a peer without the managed Git policy")
@@ -79,5 +87,35 @@ func managedGitIdentityResponse(req *http.Request) *http.Response {
 		Header:     http.Header{"Content-Type": {"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(managedGitIdentityBody)),
 		Request:    req,
+	}
+}
+
+func TestCreateInstanceReturnsCallerContextErrorFromCapabilityCheck(t *testing.T) {
+	var created atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/identity" {
+			created.Store(true)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	t.Cleanup(cancelExpired)
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want error
+	}{"cancelled": {cancelled, context.Canceled}, "past deadline": {expired, context.DeadlineExceeded}} {
+		t.Run(name, func(t *testing.T) {
+			_, err := newTestControlClient(t, srv).CreateInstance(tc.ctx, &CreateInstanceRequest{WorkspacePath: "/w"})
+			if !errors.Is(err, tc.want) || errors.Is(err, ErrManagedGitPolicyUnverified) || errors.Is(err, ErrManagedGitPolicyUnsupported) {
+				t.Fatalf("CreateInstance error = %v, want the caller's %v", err, tc.want)
+			}
+		})
+	}
+	if created.Load() {
+		t.Fatal("instance creation was attempted after the caller context ended")
 	}
 }

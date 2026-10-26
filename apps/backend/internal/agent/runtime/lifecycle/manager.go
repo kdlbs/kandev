@@ -261,6 +261,9 @@ type Manager struct {
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
 
+	// gitHooksProvider supplies the stored Git hooks opt-in read at create time.
+	gitHooksProvider GitHooksProvider
+
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.
 	comparisonTargetProvider ComparisonTargetProvider

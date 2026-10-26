@@ -709,6 +709,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetGitHooksProvider(services.Task.TaskGitHooks)
 
 	// ============================================
 	// WORKTREE MANAGER

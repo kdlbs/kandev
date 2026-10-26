@@ -303,5 +303,5 @@
   "cloneFailed": "無法複製工作區，請重試。",
   "workspaceActionsNamed": "{{name}}的操作",
   "runGitHooks": "執行 Git 鈎子",
-  "runGitHooksHelp": "儲存庫的 Git 鈎子以 Kandev 的權限執行，任何能寫入該儲存庫的人或代理程式都可以修改它們。關閉時，用戶全局和系統 Git 設定中的鈎子也會被跳過。更改僅適用於之後建立的代理程式實例，不影響正在執行的實例。開啓後，Kandev 在此儲存庫中的 pull、fetch 和 push 將不再遞歸處理子模塊。檔案系統監視器、標準 Git LFS 和 git-crypt 以外的過濾器、文字轉換器以及合併驅動仍然保持停用。"
+  "runGitHooksHelp": "儲存庫的 Git 鈎子以 Kandev 的權限執行，任何能寫入該儲存庫的人或代理程式都可以修改它們。關閉時，用戶全局和系統 Git 設定中的鈎子也會被跳過。更改僅適用於之後建立的代理程式實例，不影響正在執行的實例(重置環境會啓動新實例)。開啓後，Kandev 在此儲存庫中的 pull、fetch 和 push 將不再遞歸處理子模塊。檔案系統監視器、標準 Git LFS 和 git-crypt 以外的過濾器、文字轉換器以及合併驅動仍然保持停用。"
 }
