@@ -528,6 +528,10 @@ func (s *Service) GetPRStatusesBatchForWorkspace(
 		}
 		refs[i].ExpectedHost = selected.String()
 	}
+	if err := requireExpectedGitHubHost(ctx, selected); err != nil {
+		return nil, err
+	}
+	ctx = withExpectedGitHubHost(ctx, selected.String())
 	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
 	if err != nil {
 		return nil, err

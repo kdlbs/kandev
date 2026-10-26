@@ -71,6 +71,7 @@ func (s *Service) syncWorkspaceWatchesBatched(
 			return nil, err
 		}
 	}
+	ctx = withExpectedGitHubHost(ctx, defaultAuthFlowHost(watches[0].GitHubHost))
 	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
 	if err != nil {
 		return nil, err

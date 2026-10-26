@@ -76,14 +76,18 @@ func (s *Service) resolveServiceClient(
 	if resolved == nil || resolved.Client == nil {
 		return nil, ErrGitHubNotConfigured
 	}
-	return &resolvedServiceClient{
+	client := &resolvedServiceClient{
 		Client:       resolved.Client,
 		Principal:    resolved.Principal,
 		CacheScope:   credentialCacheScope(resolved, purpose),
 		Capabilities: resolved.Capabilities,
 		RateTracker:  resolved.RateTracker,
 		credential:   resolved,
-	}, nil
+	}
+	if err := requireExpectedGitHubHost(ctx, client.host()); err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // cacheScopeForPurpose keeps cache invalidation tied to the same resolved

@@ -267,6 +267,7 @@ func (s *Service) CheckPRWatchForWorkspace(ctx context.Context, watch *PRWatch) 
 	if err := s.validatePRWatchHost(ctx, watch.WorkspaceID, watch); err != nil {
 		return nil, false, err
 	}
+	ctx = withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost))
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
 	if err != nil {
 		return nil, false, err
@@ -862,6 +863,7 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
 	}
+	ctx = withExpectedGitHubHost(ctx, host.String())
 	if err := s.validateTaskRepositoryID(ctx, taskID, repositoryID); err != nil {
 		return err
 	}
@@ -2019,7 +2021,8 @@ func (s *Service) areAllWatchesPermanentlyMissing(ctx context.Context, watches [
 		return false
 	}
 	for _, w := range watches {
-		resolved, err := s.resolveAutomationClient(ctx, w.WorkspaceID, w.Owner, w.Repo)
+		watchCtx := withExpectedGitHubHost(ctx, defaultAuthFlowHost(w.GitHubHost))
+		resolved, err := s.resolveAutomationClient(watchCtx, w.WorkspaceID, w.Owner, w.Repo)
 		if err != nil || !s.isRepoCachedAsMissingForScope(resolved.CacheScope, w.Owner, w.Repo) {
 			return false
 		}
@@ -2105,6 +2108,7 @@ func (s *Service) triggerPRDetectionWithOptions(
 	if err := s.validatePRWatchHost(ctx, watch.WorkspaceID, watch); err != nil {
 		return nil, err
 	}
+	ctx = withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost))
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
 	if err != nil {
 		return nil, err
@@ -2282,6 +2286,7 @@ func (s *Service) triggerPRStatusSyncWithOptions(
 	if err := s.validatePRWatchHost(ctx, watch.WorkspaceID, watch); err != nil {
 		return nil, err
 	}
+	ctx = withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost))
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
 	if err != nil {
 		return nil, err

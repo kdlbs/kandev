@@ -69,14 +69,26 @@ func TestEnterpriseCLIShimRouting(t *testing.T) {
 }
 
 // @covers AC-INTEGRATIONS-GITHUB-ENTERPRISE-004.2
-func TestEnterpriseCLIShimRejectsForeignTarget(t *testing.T) {
-	for _, args := range [][]string{
-		{"api", "user", "--hostname", "foreign.example"},
-		{"api", "https://api.other.ghe.com/user"},
-		{"pr", "view", "https://foreign.example/acme/repo/pull/1"},
-		{"pr", "list", "--repo", "foreign.example/acme/repo"},
+func TestEnterpriseCLIShimTargetScope(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		allowed bool
+	}{
+		{[]string{"api", "user", "--hostname", "foreign.example"}, false},
+		{[]string{"api", "https://api.other.ghe.com/user"}, false},
+		{[]string{"pr", "view", "https://foreign.example/acme/widgets/pull/1"}, false},
+		{[]string{"pr", "list", "--repo", "foreign.example/acme/widgets"}, false},
+		{[]string{"api", "repos/other/private"}, false},
+		{[]string{"api", "/repos/other/private"}, false},
+		{[]string{"--hostname=git.company.example", "api", "repos/other/private"}, false},
+		{[]string{"--hostname", "git.company.example", "api", "repos/other/private"}, false},
+		{[]string{"pr", "list", "--repo", "acme/widgets", "--repo", "other/private"}, false},
+		{[]string{"api", "repos/acme/widgets"}, true},
+		{[]string{"api", "/repos/acme/widgets"}, true},
+		{[]string{"--hostname", "git.company.example", "api", "repos/acme/widgets"}, true},
+		{[]string{"pr", "list", "--repo", "other/private", "--repo", "acme/widgets"}, true},
 	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			redeemed, launched := false, false
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				redeemed = true
@@ -86,15 +98,15 @@ func TestEnterpriseCLIShimRejectsForeignTarget(t *testing.T) {
 			env := githubCredentialTestEnv(server.URL)
 			env[githubauth.CredentialHostEnv] = "git.company.example"
 			env["PATH"] = "/shim:/usr/bin"
-			err := runGitHubCLIShim(context.Background(), args, strings.NewReader(""), io.Discard, io.Discard,
+			err := runGitHubCLIShim(context.Background(), tc.args, strings.NewReader(""), io.Discard, io.Discard,
 				lookupEnv(env), func() []string { return envMap(env) }, server.Client(), "/shim",
 				func(string, string) (string, error) { return "/usr/bin/gh", nil },
 				func(context.Context, string, []string, []string, io.Reader, io.Writer, io.Writer) error {
 					launched = true
 					return nil
 				})
-			if err == nil || redeemed || launched {
-				t.Fatalf("foreign target: err=%v redeemed=%v launched=%v", err, redeemed, launched)
+			if (err == nil) != tc.allowed || redeemed != tc.allowed || launched != tc.allowed {
+				t.Fatalf("target allowed=%v: err=%v redeemed=%v launched=%v", tc.allowed, err, redeemed, launched)
 			}
 		})
 	}

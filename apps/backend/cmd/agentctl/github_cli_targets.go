@@ -8,7 +8,11 @@ import (
 	"github.com/kandev/kandev/internal/githubhost"
 )
 
-const githubCLIHTTPS = "https"
+const (
+	githubCLIHTTPS          = "https"
+	githubCLIRepositoryFlag = "--repo"
+	githubCLIHostnameFlag   = "--hostname"
+)
 
 // Explicit CLI targets cannot widen the repository scope of a managed token.
 func validateGitHubCLITargets(args []string, getenv func(string) string, scope githubBrokerResolveRequest, host githubhost.Host) error {
@@ -32,11 +36,12 @@ func validateGitHubCLITargets(args []string, getenv func(string) string, scope g
 }
 
 func validateGitHubCLIHostArguments(args []string, scope githubBrokerResolveRequest, host githubhost.Host) error {
+	apiCommand := githubCLICommand(args) == "api"
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--hostname" || strings.HasPrefix(arg, "--hostname=") {
-			raw := strings.TrimPrefix(arg, "--hostname=")
-			if arg == "--hostname" {
+		if arg == githubCLIHostnameFlag || strings.HasPrefix(arg, githubCLIHostnameFlag+"=") {
+			raw := strings.TrimPrefix(arg, githubCLIHostnameFlag+"=")
+			if arg == githubCLIHostnameFlag {
 				i++
 				if i >= len(args) {
 					return fmt.Errorf("GitHub CLI hostname argument is empty")
@@ -49,12 +54,20 @@ func validateGitHubCLIHostArguments(args []string, scope githubBrokerResolveRequ
 			}
 			continue
 		}
-		if githubCLIContentFlag(arg) {
+		if githubCLIValueFlag(arg) {
 			i++
 			continue
 		}
-		if strings.Contains(arg, "://") && !strings.HasPrefix(arg, "-") {
-			if err := validateGitHubCLITargetURL(arg, scope, host); err != nil {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		target := arg
+		if apiCommand && !strings.Contains(target, "://") {
+			target = host.RESTURL() + "/" + strings.TrimLeft(target, "/")
+			target = strings.NewReplacer("{owner}", scope.Owner, "{repo}", scope.Repo).Replace(target)
+		}
+		if strings.Contains(target, "://") {
+			if err := validateGitHubCLITargetURL(target, scope, host); err != nil {
 				return err
 			}
 		}
@@ -62,9 +75,24 @@ func validateGitHubCLIHostArguments(args []string, scope githubBrokerResolveRequ
 	return nil
 }
 
-func githubCLIContentFlag(arg string) bool {
+func githubCLICommand(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if githubCLIValueFlag(args[i]) {
+			i++
+			continue
+		}
+		if !strings.HasPrefix(args[i], "-") {
+			return args[i]
+		}
+	}
+	return ""
+}
+
+func githubCLIValueFlag(arg string) bool {
 	switch arg {
-	case "--body", "--body-file", "--title", "--jq", "--template", "--header", "-H", "--field", "-F", "--raw-field", "-f":
+	case "--body", "-b", "--body-file", "--title", "-t", "--jq", "-q", "--template", "--header", "-H", "--field", "-F", "--raw-field", "-f", "--input":
+		return true
+	case githubCLIHostnameFlag, "--method", "-X", "--cache", "--preview", "-p", githubCLIRepositoryFlag, "-R":
 		return true
 	default:
 		return false

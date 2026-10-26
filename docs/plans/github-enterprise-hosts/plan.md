@@ -382,6 +382,38 @@ scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --project 
 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/integrations/mobile-github-enterprise-hosts.spec.ts e2e/tests/pr/mobile-pr-merge-permissions.spec.ts
 ```
 
+### Adversarial review follow-up (2026-10-26)
+
+A secondary GPT-6.1-Sol Max session reviewed the complete PR at `680f19cb`.
+It confirmed four defects with independent temporary probes. The primary
+session added permanent regressions and repaired each boundary:
+
+- Credential resolution now compares the request's captured host with the
+  returned credential before a provider operation can start.
+- Pasted issue and PR URLs retain their parsed host through credential
+  selection. PR watch checks, branch detection, status refresh, batch reads,
+  and missing-repository cache checks also retain the original resource host.
+  The follow-up audit reproduced the watch and batch defects separately.
+- Managed CLI validation checks relative API endpoints, including commands
+  with flags before `api`. Repository selection follows GitHub CLI's final
+  `--repo` value. Rejected targets fail before lease redemption or child launch.
+- Connection method controls are disabled during saving, like the other draft
+  fields. Dismissal and reopening still discard stale results. Shared desktop
+  and phone browser scenarios cover deferred failure, restored controls, and
+  successful retry without changing either overlay's composition.
+
+The reviewer also checked the repair diff. Its remaining flag-order finding
+was reproduced and fixed in the primary session. No source changes came from
+the reviewer. These repairs enforce the existing requirements; public setup
+instructions and supported host families are unchanged.
+
+Validation: all 13 connection-dialog tests pass. Frontend type checking,
+affected ESLint checks, translations, and the document catalog/specification
+checks pass. The full GitHub race suite passed in 402.255 seconds; the final
+host/watch/batch/task-link race run passed in 133.061 seconds. The complete
+agentctl race suite passed in 6.780 seconds after the flag-order fix. The rebuilt
+app passed four desktop and four phone Enterprise browser scenarios with
+retries disabled. Live GHES/GHE.com testing remains unverified.
 
 ## Risks
 

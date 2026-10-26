@@ -34,15 +34,22 @@ func (s *Service) selectedGitHubHost(ctx context.Context, workspaceID string) (g
 }
 
 func (s *Service) validateExpectedGitHubHost(ctx context.Context, workspaceID string) error {
+	if expected, _ := ctx.Value(expectedGitHubHostKey{}).(string); expected == "" {
+		return nil
+	}
+	selected, err := s.selectedGitHubHost(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	return requireExpectedGitHubHost(ctx, selected)
+}
+
+func requireExpectedGitHubHost(ctx context.Context, selected githubhost.Host) error {
 	expected, _ := ctx.Value(expectedGitHubHostKey{}).(string)
 	if expected == "" {
 		return nil
 	}
 	host, err := githubhost.Parse(expected)
-	if err != nil {
-		return err
-	}
-	selected, err := s.selectedGitHubHost(ctx, workspaceID)
 	if err != nil {
 		return err
 	}

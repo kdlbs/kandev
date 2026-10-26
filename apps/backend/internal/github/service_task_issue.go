@@ -102,6 +102,7 @@ func (s *Service) LinkTaskIssueForUser(
 	if err != nil {
 		return nil, err
 	}
+	ctx = withExpectedGitHubHost(ctx, host.String())
 	if err := s.validateIssueTaskRepository(ctx, store, taskID, owner, repo); err != nil {
 		return nil, err
 	}

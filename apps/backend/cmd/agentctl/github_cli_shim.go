@@ -180,25 +180,33 @@ func resolveGitHubCLIRepository(
 }
 
 func githubCLIRepositoryArgument(args []string) (string, bool, error) {
-	for index, arg := range args {
+	var repository string
+	found := false
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
 		if arg == "--" {
 			break
 		}
+		if githubCLIValueFlag(arg) && arg != "-R" && arg != githubCLIRepositoryFlag {
+			index++
+			continue
+		}
 		switch {
-		case arg == "-R" || arg == "--repo":
+		case arg == "-R" || arg == githubCLIRepositoryFlag:
 			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
 				return "", true, fmt.Errorf("GitHub CLI repository argument is empty")
 			}
-			return args[index+1], true, nil
-		case strings.HasPrefix(arg, "--repo="):
-			return strings.TrimPrefix(arg, "--repo="), true, nil
+			index++
+			repository, found = args[index], true
+		case strings.HasPrefix(arg, githubCLIRepositoryFlag+"="):
+			repository, found = strings.TrimPrefix(arg, githubCLIRepositoryFlag+"="), true
 		case strings.HasPrefix(arg, "-R="):
-			return strings.TrimPrefix(arg, "-R="), true, nil
+			repository, found = strings.TrimPrefix(arg, "-R="), true
 		case strings.HasPrefix(arg, "-R") && len(arg) > 2:
-			return strings.TrimPrefix(arg, "-R"), true, nil
+			repository, found = strings.TrimPrefix(arg, "-R"), true
 		}
 	}
-	return "", false, nil
+	return repository, found, nil
 }
 
 func parseGitHubCLIRepository(raw, defaultHost string) (*githubCLIRepository, error) {

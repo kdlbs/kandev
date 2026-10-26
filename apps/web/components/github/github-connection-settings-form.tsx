@@ -307,7 +307,7 @@ export function GitHubConnectionSettingsForm(
           )}
         >
           <div className="space-y-5">
-            <GitHubAuthMethodList value={method} onChange={onMethodChange} />
+            <GitHubAuthMethodList value={method} onChange={onMethodChange} disabled={saving} />
             {method !== "cli" && <ConnectionHostFields {...props} />}
             <ConnectionCredentialFields {...props} />
             {method === "cli" && <ConnectionHostFields {...props} />}

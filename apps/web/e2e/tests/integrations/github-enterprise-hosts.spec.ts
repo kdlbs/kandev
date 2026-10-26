@@ -1,5 +1,8 @@
 // @covers AC-INTEGRATIONS-GITHUB-ENTERPRISE-001.1, AC-INTEGRATIONS-GITHUB-ENTERPRISE-001.2, AC-INTEGRATIONS-GITHUB-ENTERPRISE-005.3
-import { exerciseEnterpriseAppAuthorization } from "./github-enterprise-hosts-helpers";
+import {
+  exerciseEnterpriseAppAuthorization,
+  exerciseEnterprisePendingSave,
+} from "./github-enterprise-hosts-helpers";
 import { test, expect } from "../../fixtures/test-base";
 import { GitHubAuthSettingsPage } from "../../pages/github-auth-settings-page";
 
@@ -10,6 +13,20 @@ test.beforeEach(async ({ apiClient }) => {
 });
 test.afterEach(async ({ apiClient }) => {
   await apiClient.mockGitHubReset();
+});
+
+test("locks the connection method during a pending save and permits retry after failure", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  await exerciseEnterprisePendingSave({
+    page: testPage,
+    apiClient,
+    workspaceId: seedData.workspaceId,
+    touch: false,
+    screenshotPath: testInfo.outputPath("enterprise-pending-save-desktop.png"),
+  });
 });
 
 test("saves the existing Enterprise CLI account selection and retains its host after reload", async ({

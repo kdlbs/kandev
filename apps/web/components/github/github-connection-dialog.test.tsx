@@ -229,6 +229,7 @@ describe("GitHubConnectionDialog stale save results", () => {
       target: { value: "ghp_pending" },
     });
     fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    expect(screen.getByRole("radio", { name: /^GitHub App/ })).toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
     fireEvent.change(screen.getByLabelText(personalAccessTokenLabel), {
