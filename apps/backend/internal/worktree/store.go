@@ -93,6 +93,8 @@ const worktreeSelectCols = `
 	ter.worktree_path,
 	ter.worktree_branch,
 	COALESCE(ter.branch_slug, ''),
+	COALESCE(ter.workspace_relative_path, ''),
+	ter.position,
 	COALESCE(s.base_branch, ''),
 	COALESCE(ter.worktree_branch_owner, 'unknown'),
 	COALESCE(ter.worktree_integration_ref, ''),
@@ -141,6 +143,8 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&wt.Path,
 		&wt.Branch,
 		&wt.BranchSlug,
+		&wt.WorkspaceRelativePath,
+		&wt.Position,
 		&baseBranch,
 		&wt.BranchOwner,
 		&wt.IntegrationRef,
@@ -281,13 +285,13 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 
 	_, err = tx.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_environment_repos (
-			id, task_environment_id, repository_id, branch_slug,
+			id, task_environment_id, repository_id, branch_slug, workspace_relative_path,
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
 			worktree_source_clone_path, worktree_source_common_dir,
 			worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
@@ -302,10 +306,10 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			updated_at = excluded.updated_at,
 			merged_at = excluded.merged_at,
 			deleted_at = excluded.deleted_at
-	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug,
+	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug, wt.WorkspaceRelativePath,
 		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA,
 		wt.SourceClonePath, wt.SourceCommonDir,
-		wt.BranchCompactedAt, 0,
+		wt.BranchCompactedAt, wt.Position,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 	if err != nil {
