@@ -161,8 +161,9 @@ migration-order regression proves the columns are absent after schema
 initialization and added by `runMigrations()`; it failed before and passed
 after this fix. The implicated broad-timeout test passed alone again after the
 migration change (2.103s). The Chromium durable-v1 E2E passed 1/1 after
-rebuilding backend and web assets. SQL guard, store conformance, changed-Go
-lint, documentation validation, spec lint, and `git diff --check` passed.
+rebuilding backend and web assets. SQL guard, store conformance (84.7s after
+the migration change), changed-Go lint, documentation validation, spec lint,
+and `git diff --check` passed.
 PostgreSQL migration and fallback subtests skipped because
 `KANDEV_TEST_POSTGRES_DSN` is not configured.
 
