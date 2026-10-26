@@ -166,8 +166,9 @@ Design-package checks on 2026-10-26:
 - `git diff --check` and the package-specific diff check: PASS.
 - `git status --short -- docs/plans/service-login-shell`: new package present.
 
-The work remains unstaged and uncommitted. Public documentation is now included
-in Task 02; native OS and installed-runtime evidence is still required.
+Task 01 is committed on the feature branch and under review in PR #4821. Public
+documentation is included in Task 02; native OS and installed-runtime evidence
+is still required.
 
 ## Risks
 

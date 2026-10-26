@@ -974,6 +974,9 @@ Before any update, finish or stop active sessions, create and export a database 
 For a macOS user service with login-shell initialization enabled, an ordinary
 reinstall without `--shell` and a supported Apply update preserve the saved
 selection. Use `kandev service install --shell=none` to return to direct startup.
+If the service was installed with a custom `--home-dir`, repeat its existing
+path in the reset command, for example:
+`kandev service install --home-dir /path/to/existing/kandev-home --shell=none`.
 See [Run as a service](run-as-a-service.md#optional-macos-login-initialization)
 for shell startup behavior and recovery.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.

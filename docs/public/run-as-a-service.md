@@ -200,10 +200,15 @@ The login shell's exported `PATH` and environment reach local tool discovery
 and subprocesses. Values explicitly configured by the service keep precedence.
 An omitted option leaves a new installation on direct startup. Reinstalling an
 existing managed LaunchAgent without `--shell` preserves its selection, and
-supported Apply updates carry it forward. To return to direct startup, run:
+supported Apply updates carry it forward. To return to direct startup, keep the
+service's existing data home. If it was installed with a custom `--home-dir`,
+repeat that exact path when resetting; omitting it can move the service to its
+default data home.
 
 ```bash
 kandev service install --shell=none
+# For a custom data home, repeat the installed path:
+kandev service install --home-dir /path/to/existing/kandev-home --shell=none
 ```
 
 After changing a startup file, use `kandev service restart` to load it again.

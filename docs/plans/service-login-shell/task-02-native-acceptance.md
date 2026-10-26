@@ -177,6 +177,10 @@ Post-review verification passed:
 - `node --test scripts/validate-public-docs.test.mjs` (63 passed)
 - `node scripts/validate-public-docs.mjs` (54 pages)
 - `git diff --check`
+- PR follow-up: the Git admission audit now distinguishes direct Git exec from
+  the non-Git login-shell process replacement; `go test ./internal/common/subproc`
+  passes. Reset examples in the service and operations guides preserve an
+  installed custom `--home-dir`; public-doc tests and page validation pass.
 
 The Darwin-tagged source and lifecycle tests also passed an isolated cross-target
 compile check with dependency stubs. This was compile-only and provides no
