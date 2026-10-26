@@ -54,12 +54,30 @@ func TestPostgresListUnstartedTasks(t *testing.T) {
 	seedPostgresRun(t, ctx, repo, "pg-unstarted-run", "pg-unstarted-queued-agent", "queued", now,
 		`{"task_id":"pg-unstarted-queued"}`)
 
+	for _, runCase := range []struct {
+		status string
+		age    time.Duration
+	}{
+		{status: "claimed", age: 90 * time.Minute},
+		{status: "finished", age: 45 * time.Minute},
+		{status: "failed", age: 30 * time.Minute},
+		{status: "cancelled", age: 15 * time.Minute},
+	} {
+		taskID := "pg-unstarted-" + runCase.status
+		createdAt := now.Add(-runCase.age)
+		seed(taskID, createdAt)
+		seedPostgresRun(t, ctx, repo, taskID+"-run", taskID+"-agent", runCase.status, createdAt.Add(time.Minute),
+			`{"task_id":"`+taskID+`"}`)
+	}
+
 	rows, err := repo.ListUnstartedTasks(ctx, 24, 10)
 	if err != nil {
 		t.Fatalf("ListUnstartedTasks: %v", err)
 	}
-	if got := unstartedIDs(rows); !equalIDs(got, []string{"pg-unstarted-fresh-a", "pg-unstarted-fresh-b"}) {
-		t.Fatalf("ListUnstartedTasks = %v, want the two fresh tasks oldest first", got)
+	if got := unstartedIDs(rows); !equalIDs(got, []string{
+		"pg-unstarted-fresh-a", "pg-unstarted-fresh-b", "pg-unstarted-failed", "pg-unstarted-cancelled",
+	}) {
+		t.Fatalf("ListUnstartedTasks = %v, want recoverable tasks oldest first", got)
 	}
 	if rows[0].AssigneeAgentProfileID != "pg-unstarted-fresh-a-agent" {
 		t.Errorf("assignee = %q, want runner agent", rows[0].AssigneeAgentProfileID)
@@ -69,16 +87,21 @@ func TestPostgresListUnstartedTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUnstartedTasks with exclusions: %v", err)
 	}
-	if got := unstartedIDs(rows); !equalIDs(got, []string{"pg-unstarted-fresh-b"}) {
-		t.Fatalf("ListUnstartedTasks(excluded) = %v, want only fresh-b", got)
+	if got := unstartedIDs(rows); !equalIDs(got, []string{
+		"pg-unstarted-fresh-b", "pg-unstarted-failed", "pg-unstarted-cancelled",
+	}) {
+		t.Fatalf("ListUnstartedTasks(excluded) = %v, want remaining recoverable tasks", got)
 	}
 
 	rows, err = repo.ListUnstartedTasks(ctx, 72, 10)
 	if err != nil {
 		t.Fatalf("ListUnstartedTasks wide window: %v", err)
 	}
-	if got := unstartedIDs(rows); !equalIDs(got, []string{"pg-unstarted-stale", "pg-unstarted-fresh-a", "pg-unstarted-fresh-b"}) {
-		t.Fatalf("ListUnstartedTasks(72h) = %v, want stale task included", got)
+	if got := unstartedIDs(rows); !equalIDs(got, []string{
+		"pg-unstarted-stale", "pg-unstarted-fresh-a", "pg-unstarted-fresh-b",
+		"pg-unstarted-failed", "pg-unstarted-cancelled",
+	}) {
+		t.Fatalf("ListUnstartedTasks(72h) = %v, want all recoverable tasks oldest first", got)
 	}
 }
 
