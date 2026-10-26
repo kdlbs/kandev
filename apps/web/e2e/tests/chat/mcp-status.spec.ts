@@ -5,16 +5,6 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
-const THIRD_PARTY_MCP_CONFIG = {
-  enabled: true,
-  servers: {
-    filesystem: {
-      type: "sse",
-      url: "https://mcp.example.test/sse",
-    },
-  },
-};
-
 async function openChat(
   testPage: Page,
   apiClient: ApiClient,
@@ -86,11 +76,35 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
   apiClient,
   seedData,
   prCapture,
+  backend,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "desktop-only MCP explorer");
-  await apiClient.updateAgentProfileMcpConfig(seedData.agentProfileId, THIRD_PARTY_MCP_CONFIG);
+  // Exercise a profile whose legacy configuration was migrated during startup.
+  await apiClient.updateAgentProfileMcpConfig(seedData.agentProfileId, {
+    enabled: true,
+    servers: {},
+  });
+  await backend.restart();
+  const previous = await apiClient.getMCPSelections(
+    "profile",
+    seedData.agentProfileId,
+    seedData.workspaceId,
+  );
+  expect(previous.legacy_import_status).toBe("complete");
+  const filesystem = await apiClient.createMCPServer(seedData.workspaceId, {
+    runtime_name: "filesystem",
+    display_name: "filesystem",
+    source: "custom",
+    execution_mode: "remote",
+    transport: "sse",
+    configuration: { url: "https://mcp.example.test/sse" },
+  });
 
   try {
+    await apiClient.replaceMCPSelections("profile", seedData.agentProfileId, seedData.workspaceId, [
+      ...previous.definition_ids,
+      filesystem.id,
+    ]);
     const session = await openChat(testPage, apiClient, seedData);
     await loadKandevCatalog(session);
     const trigger = testPage.getByTestId("mcp-status-trigger");
@@ -146,6 +160,13 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
       explorer.getByTestId("mcp-server-detail").getByText("Delivered, connection unverified"),
     ).toBeVisible();
   } finally {
+    await apiClient.replaceMCPSelections(
+      "profile",
+      seedData.agentProfileId,
+      seedData.workspaceId,
+      previous.definition_ids,
+    );
+    await apiClient.deleteMCPServer(seedData.workspaceId, filesystem.id, filesystem.revision);
     await apiClient.updateAgentProfileMcpConfig(seedData.agentProfileId, {
       enabled: false,
       servers: {},

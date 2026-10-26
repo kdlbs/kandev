@@ -284,3 +284,29 @@ The final full desktop files passed all nine tests with retries disabled. Log:
 `/tmp/youtrack-e2e-logs/kandev-run.e2e.sQMBV1VB.log`. Changed-file ESLint,
 specification validation, and whitespace checks passed. Fresh exact-head CI and
 review remain pending.
+
+
+## Migrated MCP fixture follow-up
+
+The failed-jobs-only rerun passed the unchanged runner-settings and cancellation
+shards. The MCP explorer delivery assertion failed again, so its fixture required
+a correction. Startup migration marks legacy profile configuration complete; the
+resolver then intentionally ignores later legacy JSON writes. The explorer test
+still configured its server through that legacy endpoint, making delivery depend
+on whether an earlier test had restarted the shared backend.
+
+Reproduced the identical assertion locally by migrating an empty legacy profile
+before applying the old fixture. RED log:
+`/tmp/youtrack-e2e-logs/kandev-run.e2e.AnPqtJyT.log`. The corrected fixture retains
+that startup migration and asserts its completion, then creates and selects a
+workspace MCP catalog definition through the current API. Cleanup restores the
+prior profile selection and deletes only the test-owned definition. All existing
+navigation, geometry, focus, tool-catalog, and delivery assertions remain. This
+changes only `apps/web/e2e/tests/chat/mcp-status.spec.ts`, not MCP runtime behavior.
+
+The corrected migrated-profile case passed three consecutive repetitions with
+retries disabled. Log: `/tmp/youtrack-e2e-logs/kandev-run.e2e.fdDgnVPr.log`.
+Changed-file ESLint and whitespace checks passed. The full MCP file passed all
+three tests with retries disabled, including mixed connection/customization and
+tablet geometry checks. Log: `/tmp/youtrack-e2e-logs/kandev-run.e2e.KkyxkfgH.log`.
+Fresh exact-head CI/review remain pending.

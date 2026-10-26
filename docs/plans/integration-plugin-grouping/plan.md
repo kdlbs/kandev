@@ -276,3 +276,13 @@ tests with retries disabled; the mobile failure cases also passed six stress
 repetitions. Details and exact commands are in Task 02. The product grouping
 proof remains valid because these changes do not alter production source. Fresh
 CI and review of the remediation commit remain external delivery gates.
+
+
+The isolated failed-jobs rerun cleared the runner-settings and cancellation
+shards. The repeated MCP explorer failure was reproduced locally: its legacy
+profile write no longer configures delivery after startup migration completes.
+The E2E fixture now exercises that migrated state and uses the current MCP
+catalog/selection API, retaining its delivery assertion and cleanup. The corrected
+case passed three repetitions without retries, and the full MCP file passed all
+three tests without retries. See Task 02 for RED/GREEN evidence.
+No production source changed. Fresh CI and review remain required.
