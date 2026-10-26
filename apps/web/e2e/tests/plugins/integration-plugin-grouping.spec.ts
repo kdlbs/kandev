@@ -2,6 +2,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
 import {
   INTEGRATION_LINK,
+  INTEGRATION_NODE,
   pinIntegration,
   setIntegrationVisibility,
 } from "../../helpers/integration-plugin-layout";
@@ -74,13 +75,27 @@ test("groups integration plugin navigation and preserves saved visibility", asyn
       expected_revision: legacy.revision,
       layout: {
         ...legacy,
-        nodes: legacy.nodes.filter((node) => node.destination_id !== "integrations"),
+        navigation_expanded: true,
+        nodes: [
+          ...legacy.nodes.filter((node) => node.destination_id !== "integrations"),
+          {
+            id: "integrations",
+            kind: "shortcuts",
+            visible: true,
+            name: "Saved links",
+            shortcuts: [
+              { id: "saved-integration", target: { kind: "destination", id: INTEGRATION_NODE } },
+            ],
+          },
+        ],
       },
     },
   });
   await page.reload();
-  await expect(link).toBeVisible();
-  await section.click({ button: "right" });
+  const legacySection = sidebar.getByTestId("sidebar-node-integrations-1");
+  const legacyLink = legacySection.getByTestId(INTEGRATION_LINK);
+  await expect(legacyLink).toBeVisible();
+  await legacySection.click({ button: "right" });
   const hiddenSave = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/user/settings") &&
@@ -93,9 +108,10 @@ test("groups integration plugin navigation and preserves saved visibility", asyn
             node.destination_id === "integrations" && !node.visible,
         ),
   );
-  await page.getByTestId("sidebar-visibility-integrations").click();
+  await page.getByTestId("sidebar-visibility-integrations-1").click();
   expect((await hiddenSave).status()).toBe(200);
-  await expect(section).toHaveCount(0);
+  await expect(legacySection).toHaveCount(0);
+  await expect(section.getByRole("link", { name: "E2E Integration", exact: true })).toBeVisible();
   await expect
     .poll(
       async () =>
@@ -106,7 +122,10 @@ test("groups integration plugin navigation and preserves saved visibility", asyn
     .toBe(false);
   await page.keyboard.press("Escape");
   await page.reload();
-  await sidebar.getByRole("link", { name: "Home", exact: true }).click({ button: "right" });
+  await sidebar
+    .getByTestId("sidebar-node-home")
+    .getByRole("link", { name: "Home", exact: true })
+    .click({ button: "right" });
   await expect(page.getByTestId("sidebar-customize-menu")).toBeVisible();
   const shownSave = page.waitForResponse(
     (response) =>
@@ -120,9 +139,14 @@ test("groups integration plugin navigation and preserves saved visibility", asyn
             node.destination_id === "integrations" && node.visible,
         ),
   );
-  await page.getByTestId("sidebar-visibility-integrations").click();
+  await page.getByTestId("sidebar-visibility-integrations-1").click();
   expect((await shownSave).status()).toBe(200);
-  await expect(link).toBeVisible();
+  await expect(legacyLink).toBeVisible();
+  const persisted = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace![
+    seedData.workspaceId
+  ];
+  expect(new Set(persisted.nodes.map((node) => node.id)).size).toBe(persisted.nodes.length);
+  expect(persisted.nodes.find((node) => node.id === "integrations")?.kind).toBe("shortcuts");
 
   await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
   await sidebar.getByRole("button", { name: "Integrations", exact: true }).click();

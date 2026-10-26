@@ -191,7 +191,7 @@ Completed on 2026-10-26 against base `6677802efa4fac6c2ecc909cb433477c90f7fb2d`.
 
 - Behavioral RED: the desktop layout test could not find YouTrack inside
   Integrations. Scoped-move and no-op-write tests also failed before correction.
-- The final Vitest command above passed: 16 suites, 111 tests. It includes direct menu, phone controls, and portaled-focus isolation.
+- The final Vitest command above passed: 16 suites, 112 tests. It includes direct menu, phone controls, and portaled-focus isolation.
 - Typecheck passed with an 8 GB Node heap. The default heap exhausted memory.
 - ESLint passed on all changed/new TS and TSX files with zero warnings.
 - i18n check and new-code ratchet passed. No new UI copy or locale keys.
@@ -249,3 +249,9 @@ Removed the redundant inner editor key and used `cn()` for the existing phone-ro
 The final follow-up incorporates base `e5c38184cf9c191075dc88c1ffad28c636858bf5` by rebasing the existing branch. Base and PR paths do not overlap, and the update applied without conflicts. The combined source passed 111 focused tests and typecheck. The fresh combined-source browser build passed 12 desktop/tablet cases and 11 phone cases with retries disabled. Logs: `/tmp/youtrack-e2e-logs/kandev-run.e2e.2rP49zaU.log` and `/tmp/youtrack-e2e-logs/kandev-run.e2e.zsiyyYKR.log`.
 
 The previous-head CI locale setup failure (`pseudo-coverage.spec.ts`, Office workspace org) passed three consecutive focused repetitions on the combined source, with retries disabled. Log: `/tmp/youtrack-e2e-logs/kandev-run.e2e.gLW8excu.log`. The failed CI artifact's retry trace also showed a successful pseudo-cookie request; the first attempt had no retained trace. No locale source change was made. Fresh exact-head CI is still required; this focused pass does not by itself classify the original failure as resolved.
+
+## Collision-safe legacy parent
+
+Claude's review at `a07ef4e6edb` raised a possible ID collision. Inspection confirmed that valid custom sections may use `integrations`. The materializer now follows the existing Coordinator suffix convention to choose the first unused node ID, preserving custom IDs and destination ownership. A behavioral regression failed with `duplicate_id` before the fix and passed afterward. It covers multiple occupied suffixes, stable repeated materialization, editable parent visibility, and unchanged custom sections.
+
+The desktop legacy-layout flow now seeds a custom section with that colliding ID and an explicit integration shortcut. It hides and restores the distinct Integrations parent through real settings writes and reload, checks unique persisted IDs, and keeps the custom shortcut visible. The fixture explicitly expands navigation so this case tests identity and persistence. The normal desktop, phone, and geometry cases remain covered separately. Final collision validation passed: 112 focused tests in 16 suites, typecheck, zero-warning changed-file ESLint, 12 desktop/tablet browser cases, and 11 phone cases. The browser cases used retries disabled and the same fresh frontend build. Logs: `/tmp/youtrack-e2e-logs/kandev-run.e2e.0VfWh9CF.log` and `/tmp/youtrack-e2e-logs/kandev-run.e2e.LLasneTS.log`.

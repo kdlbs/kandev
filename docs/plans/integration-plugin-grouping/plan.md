@@ -51,8 +51,9 @@ editing, collapsed desktop launcher, mobile disclosure, and targeted regression
 coverage. Preserve custom-group references and current Office plugin access.
 
 Out of scope: provider authentication, plugin releases, SDK changes, backend
-schema changes, new feature flags, footer regrouping, unrelated sidebar redesign,
-commits, pushes, and PR creation.
+schema changes, new feature flags, footer regrouping, unrelated sidebar redesign.
+
+The later user request also authorizes commit, push, PR creation, CI/review remediation, and merge after all gates pass.
 
 ## Technical approach
 
@@ -185,7 +186,7 @@ Design validation on 2026-10-25:
   change is exempt. A preflight including the planned sidebar runtime edit is
   covered by both work orders with no reference errors.
 
-Task 01 is complete: 111 focused tests in 16 suites, typecheck, ESLint, and i18n passed.
+Task 01 is complete: 112 focused tests in 16 suites, typecheck, ESLint, and i18n passed.
 Actual YouTrack desktop and touch-phone placement and activation passed.
 Task 02 is complete: 12 desktop (including tablet) and 11 phone E2E tests passed against the
 same fresh production build. Public documentation and checks passed. All work
@@ -254,3 +255,9 @@ Removed the redundant inner editor key and used `cn()` for the existing phone-ro
 The final follow-up incorporates base `e5c38184cf9c191075dc88c1ffad28c636858bf5` by rebasing the existing branch. Base and PR paths do not overlap, and the update applied without conflicts. The combined source passed 111 focused tests and typecheck. The fresh combined-source browser build passed 12 desktop/tablet cases and 11 phone cases with retries disabled. Logs: `/tmp/youtrack-e2e-logs/kandev-run.e2e.2rP49zaU.log` and `/tmp/youtrack-e2e-logs/kandev-run.e2e.zsiyyYKR.log`.
 
 The previous-head CI locale setup failure (`pseudo-coverage.spec.ts`, Office workspace org) passed three consecutive focused repetitions on the combined source, with retries disabled. Log: `/tmp/youtrack-e2e-logs/kandev-run.e2e.gLW8excu.log`. The failed CI artifact's retry trace also showed a successful pseudo-cookie request; the first attempt had no retained trace. No locale source change was made. Fresh exact-head CI is still required; this focused pass does not by itself classify the original failure as resolved.
+
+## Collision-safe legacy parent
+
+Claude's review at `a07ef4e6edb` raised a possible ID collision. Inspection confirmed that valid custom sections may use `integrations`. The materializer now follows the existing Coordinator suffix convention to choose the first unused node ID, preserving custom IDs and destination ownership. A behavioral regression failed with `duplicate_id` before the fix and passed afterward. It covers multiple occupied suffixes, stable repeated materialization, editable parent visibility, and unchanged custom sections.
+
+The desktop legacy-layout flow now seeds a custom section with that colliding ID and an explicit integration shortcut. It hides and restores the distinct Integrations parent through real settings writes and reload, checks unique persisted IDs, and keeps the custom shortcut visible. The fixture explicitly expands navigation so this case tests identity and persistence. The normal desktop, phone, and geometry cases remain covered separately. Final collision validation passed: 112 focused tests in 16 suites, typecheck, zero-warning changed-file ESLint, 12 desktop/tablet browser cases, and 11 phone cases. The browser cases used retries disabled and the same fresh frontend build. Logs: `/tmp/youtrack-e2e-logs/kandev-run.e2e.0VfWh9CF.log` and `/tmp/youtrack-e2e-logs/kandev-run.e2e.LLasneTS.log`.

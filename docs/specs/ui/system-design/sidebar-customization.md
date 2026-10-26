@@ -175,7 +175,7 @@ Portaled menu focus must not expand navigation or write geometry. Only DOM-conta
 
 Existing standalone plugin positions become sibling order inside Integrations.
 Hidden/folded parents suppress children without mutating child visibility.
-Showing the parent restores individually visible children. Materialize a missing Integrations parent at the end for display and explicit edits, without saving on read. Office mode retains its
+Showing the parent restores individually visible children. Materialize a missing Integrations parent at the end for display and explicit edits, without saving on read. Use an unused ID. Office mode retains its
 current standalone plugin access where that mode intentionally omits Integrations;
 an explicitly hidden parent in regular navigation is not an Office fallback.
 No database migration, SDK change, plugin release, or new ADR is needed.

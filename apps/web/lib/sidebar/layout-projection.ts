@@ -117,12 +117,12 @@ export function materializeSidebarPluginNodes(
     pluginEntries.some((entry) => entry.section === "integrations") &&
     !nodes.some((node) => node.destinationId === "integrations")
   ) {
-    nodes.push({
-      id: "integrations",
-      kind: "builtin",
-      visible: true,
-      destinationId: "integrations",
-    });
+    const usedIds = new Set(nodes.map((node) => node.id));
+    let id = "integrations";
+    for (let suffix = 1; usedIds.has(id); suffix += 1) {
+      id = `integrations-${suffix}`;
+    }
+    nodes.push({ id, kind: "builtin", visible: true, destinationId: "integrations" });
   }
 
   for (const entry of [...pluginEntries].reverse()) {

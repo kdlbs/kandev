@@ -6,7 +6,7 @@ import {
   sidebarEditorNodes,
   sidebarNodeSiblings,
 } from "./integration-plugin-layout";
-import { toggleNodeVisibility } from "./layout-operations";
+import { toggleNodeVisibility, validateSidebarLayout } from "./layout-operations";
 import { materializeSidebarPluginNodes, projectSidebarLayout } from "./layout-projection";
 import { defaultSidebarLayout, type SidebarLayoutNode } from "./layout-types";
 
@@ -84,7 +84,9 @@ describe("integration plugin hierarchy", () => {
     expect(integrationPluginDestinations(nodes, catalog).map((n) => n.id)).toEqual(["b", "a"]);
     expect(layout.nodes[2].visible).toBe(false);
   });
+});
 
+describe("legacy integration parents", () => {
   it("keeps the legacy integration anchor editable without rewriting the saved layout", () => {
     const saved = { ...defaultSidebarLayout(), nodes: [plugin("a")] };
     const catalog = [
@@ -101,6 +103,39 @@ describe("integration plugin hierarchy", () => {
     const hidden = toggleNodeVisibility(editable, "integrations", false);
     expect(hidden.nodes.find((node) => node.destinationId === "integrations")?.visible).toBe(false);
     expect(saved.nodes).toHaveLength(1);
+  });
+
+  // @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.12
+  it("preserves custom IDs when materializing a missing integration parent", () => {
+    const custom = ["integrations", "integrations-1"].map((id) => ({
+      id,
+      kind: "shortcuts" as const,
+      visible: true,
+      name: id,
+      shortcuts: [],
+    }));
+    const saved = { ...defaultSidebarLayout(), nodes: [...custom, plugin("a")] };
+    expect(validateSidebarLayout(saved).valid).toBe(true);
+    const catalog = [
+      {
+        target: { kind: "destination" as const, id: "a" },
+        label: "A",
+        section: "integrations" as const,
+        source: "plugin" as const,
+        available: true,
+      },
+    ];
+    const editable = materializeSidebarPluginNodes(saved, catalog);
+    expect(validateSidebarLayout(editable).valid).toBe(true);
+    const anchor = editable.nodes.find((node) => node.destinationId === "integrations")!;
+    expect(anchor.id).toBe("integrations-2");
+    const hidden = toggleNodeVisibility(editable, anchor.id, false);
+    expect(hidden.nodes.find((node) => node.id === anchor.id)?.visible).toBe(false);
+    expect(hidden.nodes.filter((node) => node.kind === "shortcuts")).toEqual(custom);
+    expect(materializeSidebarPluginNodes(editable, catalog).nodes.map((node) => node.id)).toEqual(
+      editable.nodes.map((node) => node.id),
+    );
+    expect(saved.nodes).toHaveLength(3);
   });
 
   it("supplies a display anchor for a legacy layout without saving it", () => {
