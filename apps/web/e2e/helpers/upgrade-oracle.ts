@@ -60,6 +60,7 @@ export async function captureUpgradeState(backend: UpgradeBackend, seed: Upgrade
     const records = [];
     for (const session of sessions.sort((a, b) => a.id.localeCompare(b.id))) {
       const { messages } = await api.listSessionMessages(session.id);
+      const { turns } = await api.listSessionTurns(session.id);
       const unique = new Set(messages.map((m) => m.id));
       if (unique.size !== messages.length)
         throw new Error(`duplicate message identities: ${session.id}`);
@@ -73,6 +74,7 @@ export async function captureUpgradeState(backend: UpgradeBackend, seed: Upgrade
           "started_at",
         ]),
         state: sessionState(session.state, kind === "interrupted"),
+        turnIds: turns.map((turn) => turn.id),
         messages: messages
           .filter(
             (m) => m.author_type === "user" || (m.author_type === "agent" && m.type === "message"),
@@ -146,16 +148,17 @@ export function saveUpgradeSnapshot(backend: UpgradeBackend, name: string, snaps
 
 export async function assertPassiveUpgradeReads(backend: UpgradeBackend, seed: UpgradeSeed) {
   const before = await captureUpgradeState(backend, seed);
-  const after = await captureUpgradeState(backend, seed);
-  assertPreserved(before, after);
-  for (const task of Object.values(seed.tasks)) {
+  for (const [kind, task] of Object.entries(seed.tasks)) {
     for (const session of (await backend.api.listTaskSessions(task.id)).sessions) {
       const status = await backend.api.wsRequest<{ is_agent_running: boolean }>(
         "task.session.status",
         { task_id: task.id, session_id: session.id },
       );
-      if (status.is_agent_running)
+      // Startup may restore the interrupted native conversation without a prompt.
+      // Other seeded sessions must stay detached until an explicit action.
+      if (status.is_agent_running && kind !== "interrupted")
         throw new Error(`passive history read launched execution: ${session.id}`);
     }
   }
+  assertPreserved(before, await captureUpgradeState(backend, seed));
 }
