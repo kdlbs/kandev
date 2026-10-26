@@ -47,10 +47,10 @@ This contract extends the existing lightweight question formatting to History. I
 - New option descriptions or answer summaries in History.
 - Markdown in permission text, custom answers, resolved shared context, or plugin-managed chat.
 
-## Proposed contract amendment
+## Contract amendment
 
 Issue [#4810](https://github.com/kdlbs/kandev/issues/4810) extends pending shared context formatting.
-The amendment is unimplemented and part of the draft package below. Existing question and History policies remain unchanged.
+The amendment is implemented in the context usability work package below. Existing question and History policies remain unchanged.
 
 ## Implementation plans
 

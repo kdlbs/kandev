@@ -142,11 +142,23 @@ describe("useResizableClarificationOverlay", () => {
 });
 
 describe("useResizableClarificationOverlay expansion availability", () => {
+  it("starts observing a panel mounted after the hook", () => {
+    const { result } = renderResizeHook();
+    const container = document.createElement("div");
+    setRect(container, 0, 700);
+
+    act(() => result.current.containerRef(container));
+
+    expect(ResizeObserverStub.instances.some((observer) => observer.observed.has(container))).toBe(
+      true,
+    );
+  });
+
   it("keeps Expand available after a partial manual drag", () => {
     const { result, rerender } = renderResizeHook();
     const container = document.createElement("div");
     setRect(container, 0, 300);
-    (result.current.containerRef as { current: HTMLDivElement | null }).current = container;
+    act(() => result.current.containerRef(container));
     rerender({ phone: false });
 
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
@@ -161,7 +173,7 @@ describe("useResizableClarificationOverlay expansion availability", () => {
     const { result, rerender } = renderResizeHook();
     const container = document.createElement("div");
     setRect(container, 0, 699);
-    (result.current.containerRef as { current: HTMLDivElement | null }).current = container;
+    act(() => result.current.containerRef(container));
     rerender({ phone: false });
 
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
@@ -172,7 +184,10 @@ describe("useResizableClarificationOverlay expansion availability", () => {
     expect(result.current.canExpand).toBe(false);
 
     setRect(container, 0, 697);
-    rerender({ phone: false });
+    const panelObserver = ResizeObserverStub.instances.find((observer) =>
+      observer.observed.has(container),
+    )!;
+    act(() => panelObserver.trigger());
     expect(result.current.canExpand).toBe(true);
   });
 
@@ -189,7 +204,7 @@ describe("useResizableClarificationOverlay expansion availability", () => {
     );
     const container = document.createElement("div");
     setRect(container, 0, 200);
-    (result.current.containerRef as { current: HTMLDivElement | null }).current = container;
+    act(() => result.current.containerRef(container));
     rerender();
 
     expect(result.current.maxHostHeight).toBe(300);
@@ -203,7 +218,7 @@ describe("useResizableClarificationOverlay resize bounds", () => {
     const { result } = renderResizeHook();
     const container = document.createElement("div");
     setRect(container, 0, 300);
-    (result.current.containerRef as { current: HTMLDivElement | null }).current = container;
+    act(() => result.current.containerRef(container));
 
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
     act(() => dispatchMouseMove(0));
@@ -221,7 +236,7 @@ describe("useResizableClarificationOverlay resize bounds", () => {
     const { result, rerender, allocation, reserved, observer } = renderResizeHook();
     const container = document.createElement("div");
     setRect(container, 0, 700);
-    (result.current.containerRef as { current: HTMLDivElement | null }).current = container;
+    act(() => result.current.containerRef(container));
     rerender({ phone: false });
     act(() => result.current.expandHeight());
     expect(result.current.height).toBe(700);

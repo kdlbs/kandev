@@ -128,3 +128,23 @@ it("retains phone and desktop sizes across responsive remounts by bundle", () =>
   rerender(page("task-return"));
   expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([null, null]));
 });
+
+it("bounds retained clarification sizes to the most recently used bundles", () => {
+  const page = (mount: string, bundle: string) => (
+    <ClarificationDraftProvider taskId={TASK_ID}>
+      <ResizeState key={mount} bundle={bundle} />
+    </ClarificationDraftProvider>
+  );
+  const { rerender } = render(page("bundle-0", "bundle-0"));
+  act(() => screen.getByRole("button", { name: "Set desktop size" }).click());
+
+  for (let index = 1; index <= 8; index += 1) {
+    rerender(page(`bundle-${index}`, `bundle-${index}`));
+    act(() => screen.getByRole("button", { name: "Set desktop size" }).click());
+  }
+
+  rerender(page("old-bundle", "bundle-0"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([null, null]));
+  rerender(page("recent-bundle", "bundle-8"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([810, null]));
+});

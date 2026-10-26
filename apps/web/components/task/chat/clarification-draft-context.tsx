@@ -20,6 +20,7 @@ type Draft = {
 };
 type ClarificationPanelSize = { desktop: number | null; phone: number | null };
 const EMPTY_PANEL_SIZE: ClarificationPanelSize = { desktop: null, phone: null };
+const MAX_CACHED_CLARIFICATION_SIZES = 8;
 const DraftContext = createContext<Map<string, Draft> | null>(null);
 const ResizeContext = createContext<Map<string, ClarificationPanelSize> | null>(null);
 
@@ -64,7 +65,13 @@ export function useClarificationResizeState(bundleKey: string | null) {
       setSizes((bundleKey ? cache?.get(bundleKey) : undefined) ?? EMPTY_PANEL_SIZE);
       return;
     }
-    if (cache && bundleKey) cache.set(bundleKey, sizes);
+    if (!cache || !bundleKey) return;
+    cache.delete(bundleKey);
+    if (sizes.desktop === null && sizes.phone === null) return;
+    cache.set(bundleKey, sizes);
+    while (cache.size > MAX_CACHED_CLARIFICATION_SIZES) {
+      cache.delete(cache.keys().next().value!);
+    }
   }, [bundleKey, cache, sizes]);
 
   const setDesktopHeight: Dispatch<SetStateAction<number | null>> = useCallback((value) => {

@@ -177,3 +177,7 @@ Fixed the four host-resizing review findings. Expand availability now compares t
 - `pnpm run typecheck` and focused ESLint with `--max-warnings 0`: passed.
 
 - Post-rebase verification (2026-10-26): the focused Vitest set passed (7 files, 101 tests); full web ESLint, typecheck, Vite production build, `i18n:check`, `i18n:ratchet`, public-doc validation, changed-file Go lint, backend tests for the changed packages, and `make -C apps/backend build` passed. Desktop clarification coverage passed 53 tests; mobile clarification and Threads coverage passed 20 tests with retries disabled. Desktop and phone PR captures were generated and visually inspected.
+
+- PR review fixup (2026-10-26): the panel ref now registers late mounts so its ResizeObserver measures the rendered height; cached resize preferences are limited to the eight most recent bundles; Expand and Reset retain 44px touch targets on coarse-pointer tablets; the Markdown requirement and design documents now identify the context usability package as implemented.
+- Review regression tests: hook and resize-state suites passed (2 files, 18 tests); clarification panel/header suite passed (1 file, 22 tests); coarse-pointer tablet E2E passed at 900px (1 test).
+- Fixup checks: web typecheck, focused ESLint, `i18n:check`, `i18n:ratchet`, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, `node scripts/validate-public-docs.mjs`, and `git diff --check` passed. The managed E2E run built the production Vite assets successfully.

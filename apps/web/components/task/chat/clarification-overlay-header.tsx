@@ -220,7 +220,7 @@ export function ClarificationHeaderActions({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0"
+            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0 [@media(pointer:coarse)]:min-h-11"
             onClick={onExpandPanel}
             disabled={!canExpandPanel}
             data-testid="clarification-panel-expand"
@@ -232,7 +232,7 @@ export function ClarificationHeaderActions({
             type="button"
             variant="ghost"
             size="sm"
-            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0"
+            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0 [@media(pointer:coarse)]:min-h-11"
             onClick={onResetPanel}
             disabled={!canResetPanel}
             data-testid="clarification-panel-reset"

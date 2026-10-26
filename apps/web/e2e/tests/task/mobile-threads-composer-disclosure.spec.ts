@@ -177,6 +177,37 @@ test("keeps required answers reachable above a short mobile viewport", async ({
   }
 });
 
+test("keeps clarification sizing controls touch-sized on a coarse-pointer tablet", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  const original = await captureThreadSettings(apiClient);
+  try {
+    const task = await seedSecondaryClarificationTask(
+      apiClient,
+      seedData,
+      "Tablet sizing controls",
+    );
+    await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
+    await testPage.setViewportSize({ width: 900, height: 1100 });
+    await testPage.goto(`/threads?taskId=${task.id}&sessionId=${task.clarificationSessionId}`);
+    const tile = testPage.getByTestId(`thread-column-${task.id}`);
+    await expect(tile.getByTestId("clarification-overlay-container")).toBeVisible();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+
+    for (const testId of ["clarification-panel-expand", "clarification-panel-reset"]) {
+      const control = tile.getByTestId(testId);
+      const box = await control.boundingBox();
+      if (!box) throw new Error(`${testId} is missing on the coarse-pointer tablet`);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+  } finally {
+    await apiClient.saveUserSettings(original);
+  }
+});
+
 // @covers AC-UI-THREADS-DECK-005.5, AC-UI-THREADS-DECK-005.8
 test("uses the Threads footer as the sole scroll owner when a short phone exhausts the question budget", async ({
   testPage,

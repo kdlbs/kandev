@@ -205,29 +205,27 @@ function useMeasuredHostHeight(
   return measurement;
 }
 
-function useMeasuredPanelHeight(containerRef: RefObject<HTMLDivElement | null>): number | null {
+function useMeasuredPanelHeight(element: HTMLDivElement | null): number | null {
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const measure = useCallback(() => {
-    const element = containerRef.current;
-    if (!element) return;
+    if (!element) {
+      setPanelHeight(null);
+      return;
+    }
     const next = element.getBoundingClientRect().height;
     if (!Number.isFinite(next)) return;
     setPanelHeight((current) =>
       current !== null && Math.abs(current - next) < 0.5 ? current : next,
     );
-  }, [containerRef]);
+  }, [element]);
 
   useLayoutEffect(() => {
     measure();
-  });
-
-  useLayoutEffect(() => {
-    const element = containerRef.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [containerRef, measure]);
+  }, [element, measure]);
 
   return panelHeight;
 }
@@ -348,8 +346,13 @@ export function useResizableClarificationOverlay({
   );
   const resolvedSizingState = useResolvedSizingState(sizingState);
   const { setDesktopHeight, setPhoneHeight } = resolvedSizingState;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const measuredPanelHeight = useMeasuredPanelHeight(containerRef);
+  const containerElementRef = useRef<HTMLDivElement>(null);
+  const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
+  const containerRef = useCallback((element: HTMLDivElement | null) => {
+    containerElementRef.current = element;
+    setContainerElement(element);
+  }, []);
+  const measuredPanelHeight = useMeasuredPanelHeight(containerElement);
 
   const { desiredHeight, setDesiredHeight } = activeSizingState(isPhone, resolvedSizingState);
   const initialCap = Math.round((viewportHeight * initialMaxHeightVh) / 100);
@@ -359,7 +362,7 @@ export function useResizableClarificationOverlay({
   const effectiveHeight = effectiveHeightFor(desiredHeight, hostHeight, initialCap);
   const renderedHeight =
     measuredPanelHeight ??
-    containerRef.current?.getBoundingClientRect().height ??
+    containerElement?.getBoundingClientRect().height ??
     effectiveHeight ??
     maxHeight;
 
@@ -372,7 +375,7 @@ export function useResizableClarificationOverlay({
     if (hostHeight !== null) setDesiredHeight(hostHeight);
   }, [hostHeight, setDesiredHeight]);
   const handleMouseDown = useResizeDrag(
-    containerRef,
+    containerElementRef,
     hostHeight,
     initialCap,
     minHeight,

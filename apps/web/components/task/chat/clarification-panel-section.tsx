@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type Ref, type RefObject } from "react";
 import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
@@ -161,7 +161,7 @@ type ClarificationPanelContentProps = {
   actionLabel: string;
   agentDisconnected: boolean;
   collapsed: boolean;
-  containerRef: RefObject<HTMLDivElement | null>;
+  containerRef: Ref<HTMLDivElement>;
   contentId: string;
   disclosure: ReturnType<typeof useComposerDisclosureContext>;
   height: number | null;

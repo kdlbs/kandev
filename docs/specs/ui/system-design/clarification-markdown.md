@@ -40,7 +40,7 @@ Keep unsupported code panels as text. Do not introduce the comment normalizer, r
 
 ## Pending context policy
 
-The draft [context usability package](../../../plans/clarification-context-usability/plan.md) implements AC-UI-CLARIFICATION-MARKDOWN-001.8.
+The [context usability package](../../../plans/clarification-context-usability/plan.md) implements AC-UI-CLARIFICATION-MARKDOWN-001.8.
 Add an explicit `context` variant alongside `block` and `inline`.
 Only this variant adds `table`, `thead`, `tbody`, `tr`, `th`, and `td` to the block allowlist.
 Wrap each table in a width-bounded horizontal scroll region. Use semantic table elements and existing tokens.
