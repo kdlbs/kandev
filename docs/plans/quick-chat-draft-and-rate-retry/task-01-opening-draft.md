@@ -130,4 +130,13 @@ sections of plan.md, existing source, and adjacent test patterns.
   4-CPU, 12-GB cap with retries disabled: shard 27 passed 139 tests and shard
   23 passed 133 tests. The original mobile prompt toggle failure did not recur
   in either exact shard replay.
+- Follow-up PR CI run flagged a flaky file-tree tab switch in shard 13 and a
+  mobile Stats retry test in shard 21. The file-tree test now waits for both
+  rename entries to reach Changes before returning to Files. The Stats test
+  now uses a 300-second Retry-After so its automatic recovery cannot remove
+  the manual retry control during the touch-target assertion. Archived shard
+  replays passed with retries disabled in the CI runtime image, four processes,
+  four CPUs, and 12 GB: shard 13 passed 155 tests; shard 21 passed 138 tests
+  with 8 skipped. After these test adjustments, the file-tree spec passed all
+  3 tests and the mobile Stats test passed, both with retries disabled.
 - The rendered structure matches UI-01; no layout changes were needed.

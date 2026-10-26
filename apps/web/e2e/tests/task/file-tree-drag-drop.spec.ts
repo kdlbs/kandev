@@ -191,6 +191,10 @@ test.describe("File tree drag and drop", () => {
     await renameResponse;
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible();
+    await expect(session.changesFileRow("movable.ts")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changesFileRow("target-dir/movable.ts")).toBeVisible({
+      timeout: 15_000,
+    });
     await session.clickTab("Files");
 
     // The completed move removes the source from the active Files tree.
