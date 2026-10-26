@@ -37,6 +37,7 @@ type KandevRowProps = {
   Icon: TablerIcon | ((p: IconProps) => ReactNode);
   title: string;
   summary?: ReactNode;
+  statusControl?: ReactNode;
   status: KandevStatus;
   hasExpandableContent: boolean;
   children?: ReactNode;
@@ -50,6 +51,7 @@ export function KandevRow({
   Icon,
   title,
   summary,
+  statusControl,
   status,
   hasExpandableContent,
   children,
@@ -73,7 +75,9 @@ export function KandevRow({
           )}
           {!isSuccess && (
             <span className="shrink-0">
-              {renderHeaderStatusIcon({ isAwaitingPermission, isRejected, status })}
+              {statusControl && !isAwaitingPermission && !isRejected
+                ? statusControl
+                : renderHeaderStatusIcon({ isAwaitingPermission, isRejected, status })}
             </span>
           )}
         </div>

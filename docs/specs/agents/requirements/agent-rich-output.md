@@ -60,6 +60,9 @@ is tracked in the [replacement plan](../../../plans/json-render-rich-output/plan
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.18:** On phones, rich output shall remain inline in the existing transcript, keep chart and text content within the viewport, wrap metric and legend content, and expose file actions and multi-series controls with touch targets of at least 44px. The transcript shall remain the primary vertical scroll owner.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.19:** Unrelated transcript updates shall not restart chart animation or reset file disclosure. Local legend filtering shall update only that chart and shall retain its data, axis formatting, and remaining presentation state.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.20:** Small textual comparisons shall continue to use Markdown tables. Explicit requests for charts, previews, KPIs, or metric presentations with available data shall route to the native rich-output tool instead of generating a separate application or executable artifact.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.21:** Failed rich-output calls shall retain a compact red cross without persistent inline error text. Hover or keyboard focus shall expose a short explanation. Click or keyboard activation shall open the retained error details in a popup. Missing details shall produce a localized fallback.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.22:** On phones or coarse-pointer devices, tapping the cross shall open error details in a dismissible bottom drawer. The trigger shall have a target of at least 44px. Long errors shall wrap and scroll within the surface without page overflow. Dismissal shall return focus to the trigger.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.23:** Error disclosure shall work live and after reload without changing tool status or issuing a tool call. A failed attempt followed by a successful call shall retain separate outcomes. Opening the error shall not change the successful card or its local state.
 
 ### REQ-AGENTS-AGENT-RICH-OUTPUT-002: Catalog composition
 
@@ -98,6 +101,7 @@ findings through the existing native catalog without user-supplied UI recipes.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-003.9:** All three additions shall remain inline in task and Office conversations, respect host theme and localization, use no agent-authored actions or styling, and preserve neighboring chart filters and file disclosures across unrelated updates or viewport changes.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-003.10:** Table and StatusList shall each count toward the shared four-content-element bound. Callout shall count toward the existing node, depth, and byte bounds as explanatory text. Inputs and combined CSV snapshots shall each remain within 64 KiB. Unknown properties, statuses, kinds, malformed cells, and missing, duplicate, unexpected or mismatched snapshots shall be rejected without silently repairing data.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-003.11:** Task and Office discovery shall expose component descriptions, limits, and valid inline-table, CSV-table, status-list and callout examples. Guidance shall explain when structured tables, check results and prominent findings are useful while retaining prose or Markdown for small textual answers. Users shall not need to supply tool names, schema fields or component names.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-003.14:** The short tool description shall list every accepted StatusList status: passed, failed, running, pending, and skipped. Discovery shall retain a valid StatusList example using passed. Unknown statuses shall remain invalid.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-003.12:** When rich-output arguments violate a component's declared shape, the error shall identify the offending element or field and its expected shape. For a recognized component and an unambiguously selected source form, the error shall not demand properties from other component or source forms, or label accepted properties as unknown. Missing or unknown component names and ambiguous source forms shall receive an explicit selection error or separately labelled alternatives rather than contradictory merged requirements.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-003.13:** Rejected rich-output calls shall retain strict validation and perform no workspace read or partial presentation. Feedback shall omit submitted property values and raw file content; schema-declared names, types, allowed values and bounded examples may explain a correction. A corrected valid call shall succeed through the same tool without a relaxed schema, new conversation or user-supplied UI recipe.
 
@@ -121,6 +125,8 @@ contracts rather than exposing a general-purpose UI library automatically.
   API, transcript virtualization, or a change to chart animation defaults.
 
 ## Implementation plans
+
+- [Rich-output failure disclosure](../../../plans/rich-output-failure-disclosure/plan.md)
 
 - [Copilot rich-output identity repair](../../../plans/copilot-rich-output-identity/plan.md)
 
