@@ -19,6 +19,9 @@ describe("hasKandevRenderer", () => {
     expect(hasKandevRenderer(kandevToolCall({ toolName: "kandev: show_rich_output_kandev" }))).toBe(
       true,
     );
+    expect(hasKandevRenderer(kandevToolCall({ toolName: "kandev-show_rich_output_kandev" }))).toBe(
+      true,
+    );
     expect(
       hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__propose_task_kandev" })),
     ).toBe(true);
@@ -33,6 +36,9 @@ describe("hasKandevRenderer", () => {
     expect(
       hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__never_heard_of_it_kandev" })),
     ).toBe(false);
+    expect(hasKandevRenderer(kandevToolCall({ toolName: "kandev-never_heard_of_it_kandev" }))).toBe(
+      false,
+    );
   });
 });
 
