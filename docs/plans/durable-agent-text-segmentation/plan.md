@@ -174,7 +174,13 @@ SQLite during core schema initialization. Available timeout output identifies
 `TestCompleteActiveClarificationBundlePersistsRecoverableDeliveryIntent` in
 the `newRepoForSessionTests` initialization path. The full goroutine stacks and
 lock/connection owners are unavailable because the original output was
-truncated and not saved. The exact test was run sequentially, with no concurrent
+truncated and not saved. A recovery audit searched all 2,534 available session
+records and task-specific `/tmp` artifacts; no broad-run stack was present. The
+only retained `/tmp/kandev-4788-base-test.log` and
+`/tmp/kandev-4788-implementation-test.log` files are 69-byte isolated comparison
+outputs (2.502s on base, 2.558s on the initial implementation). The blocked
+goroutine chain and lock/connection owners therefore cannot be named. The exact
+test was run sequentially, with no concurrent
 Go tests, using matching race, package, parallelism, and timeout settings. It
 passed on unchanged base `7fb28fc022d5320922608bf57cc9fd9351a8b8da` (2.841s)
 and implementation `8bafa71d33be8d20029699202605f136dae41bc3` (2.103s). The
