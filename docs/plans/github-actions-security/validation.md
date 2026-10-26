@@ -240,3 +240,21 @@ The corrected native gesture passed five mobile repetitions without retries on
 two CPUs. The final ordered CLI, watcher, and review sequence passed all 12
 cases without retries. Full web typecheck with the process-local 8 GiB heap, scoped ESLint,
 formatting, document validation, and diff checks passed again.
+
+CI run `40346258385` exposed two further synchronization defects. The approval
+test read persisted status after the optimistic picker displayed Done, before
+its PATCH completed. A controlled 500ms request delay reproduced the exact
+`in_review` assertion failure. The test now arms `waitForHttp` before clicking,
+requires a successful PATCH response, and keeps the original immediate backend
+Done assertion. The delayed case and all three approval-flow cases passed.
+The injected delay was removed.
+
+The oversized-message task switch tapped a row while its drawer was opening.
+The failed run tapped the second row shortly after visibility. A local probe
+measured taps at 250ms and 33ms of the 500ms drawer animation. The helper now
+uses the existing finite-animation wait before its real tap. Navigation,
+message storage, bounded preview, download bytes, queue behavior, and touch-size
+assertions remain unchanged. The probe was removed.
+All three repeated oversized-message cases passed with retries disabled on two
+CPUs. Full web typecheck with the process-local 8 GiB heap, scoped ESLint,
+formatting, document validation, and diff checks also passed.

@@ -1,4 +1,5 @@
 import { test, expect, moveTaskToTerminalStep } from "../../fixtures/office-fixture";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for the office task approval gate (in_review → done is
@@ -135,7 +136,13 @@ test.describe("Office task approval flow", () => {
     // Click status picker → Done. With every approver having an "approved"
     // decision, the backend allows the transition.
     await testPage.getByTestId("status-picker-trigger").click();
+    const markedDone = waitForHttp(
+      testPage,
+      "PATCH",
+      new RegExp(`/api/v1/office/tasks/${task.id}$`),
+    );
     await testPage.getByTestId("status-picker-option-done").click();
+    expect((await markedDone).ok()).toBe(true);
 
     await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/Done/i, {
       timeout: 10_000,
