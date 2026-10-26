@@ -415,13 +415,36 @@ func TestManagedGitArgsIsDeterministicAndNonGitCommandsPassThrough(t *testing.T)
 	}
 }
 
-func TestManagedGitFilterFreeCommandsDoNotEnumerate(t *testing.T) {
-	// A non-repository directory would make enumeration fail; filter-free
-	// commands never run it.
-	dir := t.TempDir()
-	vector, err := buildManagedGitVector(context.Background(), dir, os.Environ(), []string{"rev-parse", "--git-dir"})
-	if err != nil || strings.Contains(strings.Join(vector, " "), "filter.") {
-		t.Fatalf("unexpected vector %v err %v", vector, err)
+func TestManagedGitEnumerationProcessCount(t *testing.T) {
+	bin := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "calls.log")
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\necho call >> \"$KANDEV_CALL_LOG\"\n"), 0o700); err != nil {
+		t.Fatalf("write recording git: %v", err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + bin, "KANDEV_CALL_LOG=" + logPath}
+	cases := []struct {
+		args []string
+		want int
+	}{
+		{[]string{"rev-parse", "--git-dir"}, 0},
+		{[]string{"config", "--get", "user.name"}, 0},
+		{[]string{"for-each-ref"}, 0},
+		{[]string{"status", "--porcelain"}, 1},
+		{[]string{"commit", "-m", "x"}, 1},
+		{[]string{"push", "origin", "main"}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.args[0], func(t *testing.T) {
+			_ = os.Remove(logPath)
+			if _, err := buildManagedGitVector(context.Background(), t.TempDir(), env, tc.args); err != nil {
+				t.Fatalf("build vector: %v", err)
+			}
+			raw, _ := os.ReadFile(logPath)
+			if got := strings.Count(string(raw), "call"); got != tc.want {
+				t.Fatalf("%s started %d extra Git processes, want %d", tc.args[0], got, tc.want)
+			}
+		})
 	}
 }
 

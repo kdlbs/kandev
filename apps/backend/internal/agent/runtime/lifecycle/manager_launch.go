@@ -671,6 +671,9 @@ func collectGitHooks(req *LaunchRequest) map[string]bool {
 // gitHooksFromWorkspaceRepositories projects the repository records read for a
 // resume or recovery into the same map a fresh launch produces.
 func gitHooksFromWorkspaceRepositories(specs []WorkspaceRepositorySpec, executorType string) map[string]bool {
+	if !subproc.ManagedGitIsolation() {
+		return nil
+	}
 	launchSpecs := make([]RepoLaunchSpec, 0, len(specs))
 	for _, spec := range specs {
 		launchSpecs = append(launchSpecs, RepoLaunchSpec{

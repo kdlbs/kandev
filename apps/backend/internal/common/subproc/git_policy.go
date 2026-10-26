@@ -321,6 +321,16 @@ func ManagedGitArgs(ctx context.Context, env []string, gitArgs []string) ([]stri
 	return buildManagedGitVector(ctx, "", env, gitArgs)
 }
 
+// ManagedGitArgsIn is ManagedGitArgs for a command that runs in dir, for callers
+// that wrap the Git invocation in another executable and so cannot reach the
+// policy applied to a direct Git start.
+func ManagedGitArgsIn(ctx context.Context, dir string, env []string, gitArgs []string) ([]string, error) {
+	if !ManagedGitIsolation() {
+		return gitArgs, nil
+	}
+	return buildManagedGitVector(ctx, dir, env, gitArgs)
+}
+
 // ManagedGitEnv removes environment values that would run repository-selected
 // programs.
 func ManagedGitEnv(env []string) []string {

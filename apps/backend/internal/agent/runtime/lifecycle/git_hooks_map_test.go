@@ -143,3 +143,25 @@ func TestCollectGitHooksIsEmptyWithIsolationOff(t *testing.T) {
 	req := &LaunchRequest{RunGitHooks: true}
 	assert.Nil(t, collectGitHooks(req), "no git_hooks value may be derived with the mode off")
 }
+
+func TestPrepareExecutionCreateRequestSendsNoGitHooksWithIsolationOff(t *testing.T) {
+	previous := subproc.ManagedGitIsolation()
+	subproc.SetManagedGitIsolation(false)
+	t.Cleanup(func() { subproc.SetManagedGitIsolation(previous) })
+
+	mgr := newTestManager(t)
+	info := &WorkspaceInfo{
+		TaskID:        "task-1",
+		SessionID:     "session-2",
+		WorkspacePath: "/workspace",
+		AgentID:       "auggie",
+		ExecutorType:  string(models.ExecutorTypeLocalDocker),
+		WorkspaceRepositories: []WorkspaceRepositorySpec{
+			{RepoName: "app", BaseBranch: "main", RunGitHooks: true},
+		},
+	}
+
+	prepared, err := mgr.prepareExecutionCreateRequest(context.Background(), "task-1", info, "execution-2")
+	require.NoError(t, err)
+	assert.Nil(t, prepared.request.GitHooks, "a stored opt-in must not reach agentctl with the mode off")
+}

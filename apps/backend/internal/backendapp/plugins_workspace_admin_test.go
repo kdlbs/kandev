@@ -268,6 +268,22 @@ func TestPluginsWorkspaceAdminUsesValidatedVersionedDomainOperations(t *testing.
 	require.ErrorIs(t, err, repoerrors.ErrTaskVersionConflict)
 	require.NotEmpty(t, updatedRepository.ResourceVersion)
 
+	hooksOn := true
+	_, err = services.Task.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{RunGitHooks: &hooksOn})
+	require.NoError(t, err)
+	withHooks, err := services.Task.GetRepository(ctx, repo.ID)
+	require.NoError(t, err)
+	require.True(t, withHooks.RunGitHooks)
+	renamed := "Renamed Repository"
+	_, err = adapter.updateRepository(ctx, workspace.ID, &pluginsdk.WorkspaceRepositoryUpdate{
+		RepositoryID: repo.ID, ExpectedResourceVersion: withHooks.UpdatedAt.UTC().Format(time.RFC3339Nano), Name: &renamed,
+	})
+	require.NoError(t, err)
+	afterPlugin, err := services.Task.GetRepository(ctx, repo.ID)
+	require.NoError(t, err)
+	require.Equal(t, renamed, afterPlugin.Name)
+	require.True(t, afterPlugin.RunGitHooks, "the plugin update path must not change the Run Git hooks setting")
+
 	foreignWorkspace, err := services.Task.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{Name: "Foreign Workspace"})
 	require.NoError(t, err)
 	_, err = adapter.updateRepository(ctx, foreignWorkspace.ID, &pluginsdk.WorkspaceRepositoryUpdate{

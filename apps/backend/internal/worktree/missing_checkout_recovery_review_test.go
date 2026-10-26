@@ -650,3 +650,33 @@ func TestMissingCheckoutRecoveryExplicitNewBranchUsesClaimedPreflight(t *testing
 		t.Fatalf("authorized replacement checkout is unavailable at %q: %v", created.Path, err)
 	}
 }
+
+func TestPinnedWorkingDirectoryCommandRunsNoRepositoryHooks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the pinned working-directory strategy is POSIX only")
+	}
+	fixture := newMissingCheckoutFixture(t)
+	fixture.removeCheckout(t, false)
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := "#!/bin/sh\ntouch '" + marker + "'\n"
+	if err := os.WriteFile(filepath.Join(fixture.repositoryPath, ".git", "hooks", "post-checkout"), []byte(hook), 0o755); err != nil {
+		t.Fatalf("plant post-checkout hook: %v", err)
+	}
+	target := t.TempDir()
+	commonDir := filepath.Join(fixture.repositoryPath, ".git")
+	gitCmd := newGitCommand(context.Background(), "--git-dir="+commonDir, "worktree", "add", "--detach", "--", ".", fixture.branchHead)
+	gitCmd.Dir = fixture.repositoryPath
+	shell, err := pinnedWorkingDirectoryCommand(context.Background(), gitCmd, target, fixture.repositoryPath)
+	if err != nil {
+		t.Fatalf("build pinned command: %v", err)
+	}
+	if out, err := shell.CombinedOutput(); err != nil {
+		t.Fatalf("pinned git worktree add: %v: %s", err, out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the repository post-checkout hook ran through the pinned working-directory command")
+	}
+	if _, err := os.Stat(filepath.Join(target, ".git")); err != nil {
+		t.Fatalf("worktree was not created in the pinned directory: %v", err)
+	}
+}
