@@ -164,3 +164,18 @@ func containsAny(s string, subs ...string) bool {
 	}
 	return false
 }
+
+func TestMCPGuard_PathVariantsCannotBypass(t *testing.T) {
+	handler, _, served, _ := guardFixture(t, "secret-token")
+	for _, target := range []string{"/mcp/", "/sse/", "/message/", "/mcp/x", "/mcp%2f..", "/mcp%2Fx", "/message//y"} {
+		req := httptest.NewRequest(http.MethodPost, target, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without a token: status %d, want 401", target, rec.Code)
+		}
+	}
+	if served.Load() != 0 {
+		t.Fatalf("handler served %d refused requests", served.Load())
+	}
+}

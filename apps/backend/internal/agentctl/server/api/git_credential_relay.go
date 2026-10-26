@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -79,7 +80,7 @@ func (s *Server) handleGitCredentialRelay(c *gin.Context) {
 func (s *Server) forwardGitCredential(c *gin.Context, method, upstream string, body []byte) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), gitCredentialRelayTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, upstream, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, method, upstream, bytes.NewReader(body))
 	if err != nil {
 		relayError(c, http.StatusBadGateway, "upstream unavailable")
 		return
