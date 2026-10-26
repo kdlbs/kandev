@@ -17,3 +17,12 @@ func TestSQLiteStore_CreateWorktreePlacementOnPostgres(t *testing.T) {
 	require.NoError(t, err)
 	testCreateWorktreePlacement(t, store)
 }
+
+func TestSQLiteStore_CreateWorktreeReactivationPlacementOnPostgres(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	_, err := tasksqlite.NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	store, err := NewSQLiteStore(db, db)
+	require.NoError(t, err)
+	testCreateWorktreeReactivationPlacement(t, store)
+}

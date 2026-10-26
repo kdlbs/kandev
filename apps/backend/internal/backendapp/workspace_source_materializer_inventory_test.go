@@ -63,16 +63,28 @@ func TestWorkspaceSourceMaterializer_PersistedAttachmentPlacement(t *testing.T) 
 			require.Equal(t, root, result.WorkspacePath)
 			require.Empty(t, rescanner.rebindCalls)
 			rows := assertAttachmentInventory(t, repo, taskRoot, batch)
+			for _, row := range rows {
+				require.NoError(t, os.WriteFile(filepath.Join(row.WorktreePath, "retained.txt"), []byte(row.WorktreeID), 0o600))
+			}
 			require.NoError(t, repo.DB().Close())
 			reopened := openAttachmentInventoryRepo(t, dbPath)
 			require.Equal(t, rows, assertAttachmentInventory(t, reopened, taskRoot, batch))
 			fresh := newPersistingMaterializerWorktreeMgr(t, taskRoot, reopened)
-			for _, row := range rows {
-				wt, err := fresh.GetBySessionAndRepo(ctx, "session-1", row.RepositoryID, row.BranchSlug)
+			branches := &branchMaterializer{repo: reopened, worktreeMgr: fresh, logger: newTestLogger()}
+			for index, row := range rows {
+				materialized, err := branches.materializeUnfinalized(ctx, "task-1", batch.Sources[index].Repository.ID, nil)
 				require.NoError(t, err)
+				require.NotNil(t, materialized)
+				wt := materialized.worktree
 				require.Equal(t, row.WorktreeID, wt.ID)
 				require.Equal(t, row.WorktreePath, wt.Path)
+				require.Equal(t, row.WorkspaceRelativePath, wt.WorkspaceRelativePath)
+				require.Equal(t, row.Position, wt.Position)
+				content, err := os.ReadFile(filepath.Join(wt.Path, "retained.txt"))
+				require.NoError(t, err)
+				require.Equal(t, row.WorktreeID, string(content))
 			}
+			require.Equal(t, rows, assertAttachmentInventory(t, reopened, taskRoot, batch))
 		})
 	}
 }
@@ -104,11 +116,11 @@ func inventoryPlacementBatch(t *testing.T, repo *sqliterepo.Repository, prefix s
 	return batch
 }
 
-func assertAttachmentInventory(t *testing.T, repo *sqliterepo.Repository, taskRoot string, batch *models.WorkspaceSourceBatch) []*models.TaskEnvironmentRepo {
+func assertAttachmentInventory(t *testing.T, repo *sqliterepo.Repository, taskRoot string, batch *models.WorkspaceSourceBatch, additional ...*models.TaskEnvironmentRepo) []*models.TaskEnvironmentRepo {
 	t.Helper()
 	rows, err := repo.ListTaskEnvironmentRepos(context.Background(), "env-1")
 	require.NoError(t, err)
-	require.Len(t, rows, len(batch.Sources)+1)
+	require.Len(t, rows, len(batch.Sources)+1+len(additional))
 	result := make([]*models.TaskEnvironmentRepo, 0, len(batch.Sources))
 	for _, source := range batch.Sources {
 		tr := source.Repository
@@ -194,6 +206,93 @@ func TestWorkspaceSourceMaterializer_PersistedAttachmentRollbackAndRetry(t *test
 			require.Empty(t, scan.rebindCalls)
 		})
 	}
+}
+
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.2
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.4
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-003.6
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-003.7
+func TestWorkspaceSourceMaterializer_PersistedAttachmentChangedPlacementRetry(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, taskRoot, root, scan := inventoryRollbackFixture(t)
+	before, err := repo.ListTaskEnvironmentRepos(ctx, "env-1")
+	require.NoError(t, err)
+	sources, err := repo.ListTaskRepositories(ctx, "task-1")
+	require.NoError(t, err)
+	foreign := &models.TaskEnvironmentRepo{
+		ID: "foreign-inactive", TaskEnvironmentID: "env-1", RepositoryID: "repo-1",
+		BranchSlug: "foreign", WorkspaceRelativePath: "foreign/location", Position: 19, Status: "failed",
+	}
+	require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, foreign))
+	req := taskservice.AttachWorkspaceSourcesRequest{
+		TaskID: "task-1", RepositoryPlacement: taskservice.WorkspacePlacementCurrentRoot,
+		Sources: []taskservice.WorkspaceSourceInput{
+			{Kind: taskservice.WorkspaceSourceRepository, RepositoryID: "repo-2", BaseBranch: "main"},
+			{Kind: taskservice.WorkspaceSourceRepository, RepositoryID: "repo-3", BaseBranch: "main"},
+		},
+	}
+	configureInventoryFailure(t, repo, scan, "second session rescan")
+	oldPreview, err := svc.PreviewWorkspaceRepositoryPlacement(ctx, req.TaskID, req.Sources, req.RepositoryPlacement)
+	require.NoError(t, err)
+	req.PreviewRevision = oldPreview.Revision
+	_, err = svc.AttachWorkspaceSources(ctx, req)
+	require.ErrorContains(t, err, "rescan failed")
+	assertInventoryRollback(t, repo, before, sources, root, taskRoot, oldPreview)
+	require.Empty(t, scan.rebindCalls)
+
+	// Retry after manager reconstruction admits a new placement and repository order.
+	setInventoryServiceMaterializer(t, svc, repo, taskRoot, scan)
+	req.RepositoryPlacement = taskservice.WorkspacePlacementKandevDirectory
+	req.Sources[0], req.Sources[1] = req.Sources[1], req.Sources[0]
+	preview, err := svc.PreviewWorkspaceRepositoryPlacement(ctx, req.TaskID, req.Sources, req.RepositoryPlacement)
+	require.NoError(t, err)
+	req.PreviewRevision = preview.Revision
+	result, err := svc.AttachWorkspaceSources(ctx, req)
+	require.NoError(t, err)
+	require.True(t, result.Changed)
+	require.Len(t, result.Task.Repositories, 3)
+	batch := &models.WorkspaceSourceBatch{}
+	for _, tr := range result.Task.Repositories {
+		if tr.ID != "tr-primary" {
+			batch.Sources = append(batch.Sources, models.WorkspaceSource{Repository: tr})
+		}
+	}
+	require.Equal(t, "repo-3", batch.Sources[0].Repository.RepositoryID)
+	require.Equal(t, 1, batch.Sources[0].Repository.Position)
+	require.Equal(t, "repo-2", batch.Sources[1].Repository.RepositoryID)
+	require.Equal(t, 2, batch.Sources[1].Repository.Position)
+	calls := len(scan.rescanCalls)
+	retry, err := svc.AttachWorkspaceSources(ctx, req)
+	require.NoError(t, err)
+	require.False(t, retry.Changed)
+	require.Equal(t, calls, len(scan.rescanCalls))
+	require.Empty(t, scan.rebindCalls)
+	persisted, err := repo.ListTaskEnvironmentRepos(ctx, "env-1")
+	require.NoError(t, err)
+	var seq int
+	var databaseName, databasePath string
+	require.NoError(t, repo.DB().QueryRowContext(ctx, "PRAGMA database_list").Scan(&seq, &databaseName, &databasePath))
+	require.NoError(t, repo.DB().Close())
+	reopened := openAttachmentInventoryRepo(t, databasePath)
+	rows, err := reopened.ListTaskEnvironmentRepos(ctx, "env-1")
+	require.NoError(t, err)
+	require.Equal(t, persisted, rows)
+	assertAttachmentInventory(t, reopened, taskRoot, batch, foreign)
+	require.Len(t, rows, len(before)+len(batch.Sources)+1)
+	for _, prior := range append(before, foreign) {
+		require.Contains(t, rows, prior)
+	}
+	for _, source := range oldPreview.Sources {
+		require.NoDirExists(t, filepath.Join(taskRoot, filepath.FromSlash(source.WorkspaceRelativePath)))
+	}
+	content, err := os.ReadFile(filepath.Join(root, "keep.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "unrelated", string(content))
+	environment, err := reopened.GetTaskEnvironmentByTaskID(ctx, "task-1")
+	require.NoError(t, err)
+	require.Equal(t, root, environment.WorkspacePath)
+	require.Equal(t, string(req.RepositoryPlacement), environment.WorkspaceLayout)
+	require.Equal(t, "feature/initial", strings.TrimSpace(runGit(t, root, "branch", "--show-current")))
 }
 
 func inventoryRollbackFixture(t *testing.T) (*taskservice.Service, *sqliterepo.Repository, string, string, *failingWorkspaceRescanStub) {

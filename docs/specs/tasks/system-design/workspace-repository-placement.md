@@ -90,8 +90,15 @@ For a newly inserted slot, it must carry the attachment's recorded `WorkspaceRel
 `Position` together with physical identity. `branchMaterializer.prepareMaterializeRequest` passes
 these values through `worktree.CreateRequest` and `Manager.buildWorktreeRecord` to
 `SQLiteStore.CreateWorktree`. Placement metadata on `Worktree` is internal, not a new JSON contract.
-The store inserts both values in the existing identity-checked transaction. Its conflict update
-retains the slot's previously recorded placement; omitted creation metadata cannot reset it.
+The store inserts both values in the existing identity-checked transaction. On conflict, active
+and incompletely tombstoned slots retain their recorded placement, including when incoming
+creation metadata is omitted or different. Placement may change only when the old row has
+`status = deleted` and non-null `deleted_at`, and the incoming materialization has `status = active`
+and null `deleted_at`. Under that strict predicate, path and position are replaced together from
+the newly admitted creation inputs, including legitimate empty paths and zero positions, in the
+same transaction as physical identity and status. Row identity, session/environment validation,
+cleanup/recovery authority and physical-claim locking remain unchanged. This is reactivation of
+a fully deleted slot by a new materialization, not automatic repair during ordinary resume.
 
 `workspaceSourceInventoryRows` may skip an existing repository/branch key because a successful
 physical insert already published complete placement. It must not repair historical rows by
@@ -101,7 +108,10 @@ canonical slot for every requested repository/branch, including recorded path eq
 Batch failure retains the existing compensation sequence: restore runtime roots and exclusions,
 clean only newly created worktrees, and compensate new source associations. Existing inventory
 and physical identities remain unchanged. Inactive cleanup history follows the existing store
-policy; a successful retry has exactly one active slot at the selected location. The
+policy; a successful retry has exactly one active slot at the selected location. A new valid
+attachment after rollback may choose a different placement and order when it reactivates a fully
+deleted slot. After database reopen, actual materialization reuse must retain the existing physical
+ID/path and canonical placement/order; a persisted lookup alone is insufficient evidence. The
 [attachment inventory fix package](../../../plans/attached-worktree-inventory/plan.md) owns the
 real-store persistence, compensation, and retry regressions after manager reconstruction for
 AC-001.2/001.4/003.6/003.7. The independent live multi-session cache-eviction defect is deferred

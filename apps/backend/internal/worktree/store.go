@@ -293,6 +293,14 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			error_message, status, created_at, updated_at, merged_at, deleted_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
+			workspace_relative_path = CASE
+				WHEN task_environment_repos.status = 'deleted' AND task_environment_repos.deleted_at IS NOT NULL
+					AND excluded.status = 'active' AND excluded.deleted_at IS NULL
+				THEN excluded.workspace_relative_path ELSE task_environment_repos.workspace_relative_path END,
+			position = CASE
+				WHEN task_environment_repos.status = 'deleted' AND task_environment_repos.deleted_at IS NOT NULL
+					AND excluded.status = 'active' AND excluded.deleted_at IS NULL
+				THEN excluded.position ELSE task_environment_repos.position END,
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,

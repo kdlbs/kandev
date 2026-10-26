@@ -29,7 +29,8 @@ semantics without changing resume admission or repairing historical inventory.
 ## In scope
 
 Carry path/position through request, record, insert and readback as described in the
-[plan](plan.md#technical-approach). Preserve existing placement on conflict. Add the plan's named
+[plan](plan.md#technical-approach). Preserve live placement on conflict; allow strictly guarded
+reactivation of fully deleted slots. Add the plan's named
 SQLite/real-Git integration tests and shared store contract with an environment-gated PostgreSQL
 case. Use public service attachment in compensation/retry coverage; no nil-store substitute.
 
@@ -45,10 +46,12 @@ unproven dialog/send-error fixes, root expansion, and retained-checkout or lifec
    values across reopening and fresh-manager reuse. Same-repository branches remain distinct.
 2. A persistence or post-create batch failure retains all prior slots/resources and compensates
    new source rows, active inventory, filesystem/exclusion/runtime changes. Retry after manager reconstruction succeeds at
-   the same placement; a committed exact retry is a no-op without duplicate slots or restarts.
-3. Conflict writes preserve existing canonical path, position and row identity, including callers
-   omitting placement. Resume remains fail-closed; all listed targeted checks pass or document
-   the PostgreSQL skip without claiming runtime PostgreSQL coverage.
+   the same or a newly admitted different placement; a committed exact retry is a no-op without
+   duplicate slots or restarts.
+3. Conflict writes preserve active/partially deleted placement and row identity. Only a fully
+   deleted old row reactivated by incoming active/non-deleted materialization may replace path
+   and position together, including legitimate empty/zero inputs. Resume remains fail-closed;
+   corrective targeted checks pass or explicitly report the PostgreSQL skip.
 
 ## Files owned
 
@@ -76,7 +79,9 @@ executor reuse, migrations, shared fixtures, public docs and other spec pairs ar
 If meaningful regressions expose a required change outside these files, report the scope change
 to ROOT before expanding it.
 
-## TDD sequence
+## Original TDD sequence
+
+Completed for the initial implementation. The corrective sequence below is also completed.
 
 After explicit ROOT release, mark this work order `in_progress` and acquire the heavy lease.
 Independently author `TestWorkspaceSourceMaterializer_PersistedAttachmentPlacement` first,
@@ -90,7 +95,7 @@ add metadata repair to make old seeded corruption pass. Retain all command handl
 actual exits; join owned commands before returning the lease. Only then mark `done` and synchronize
 the plan. No delegation, new session, or model switch.
 
-## Verification
+## Original verification (completed; do not replay for correction)
 
 Run from the repository root. Use task-local toolchain PATH only; no trust/global environment
 changes. No dependency install is needed for these Go checks. Run heavy commands sequentially
@@ -129,9 +134,10 @@ bounds compilation as well as tests; retain the inner Go test deadlines. Keep te
 and canonical lint at its separate 3GiB default. The cache-compatible test flags are required on
 RED, focused GREEN and affected tests.
 
-Run the working-file documentation coverage preflight from the repository root. It reads actual
-added/modified paths and all five contract documents from the working tree. The design-only
-receipt used a prospective source trigger; implementation evidence must use actual paths.
+Run the documentation coverage preflight from the repository root. It reads the actual cumulative
+task diff from the reviewed base (published code plus working amendments) and all five contract
+documents from the working tree. The original design-only receipt used a prospective trigger;
+corrective evidence uses actual added/modified paths.
 
 ```bash
 node <<'NODE'
@@ -146,16 +152,77 @@ const docs = [
   'docs/specs/tasks/system-design/workspace-repository-placement.md',
 ];
 const result = validateCoverage({
-  changedFiles: execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], {encoding:'utf8'})
-    .split('\0').filter(Boolean).map(line => ({
-      filename: line.slice(3), status: /[?A]/.test(line.slice(0, 2)) ? 'added' : 'modified',
-    })),
+  changedFiles: (() => {
+    const entries = execFileSync('git', ['diff', '--name-status', '--no-renames', '-z',
+      'b4e9cf5ede3545ca6a8e58165e580ad7c4988afa'], {encoding:'utf8'}).split('\0').filter(Boolean);
+    const paths = [];
+    for (let i = 0; i < entries.length; i += 2) {
+      paths.push({filename: entries[i + 1], status: entries[i] === 'A' ? 'added' : 'modified'});
+    }
+    return paths;
+  })(),
   fileContents: Object.fromEntries(docs.map(p => [p, fs.readFileSync(p, 'utf8')])),
 });
 console.log(JSON.stringify(result));
 if (!result.ok || result.status !== 'covered') process.exitCode = 1;
 NODE
 ```
+
+## Corrective amendment and TDD (completed)
+
+The [combined design amendment](plan.md#corrective-amendment)
+covers strict deleted-slot reactivation and fresh-manager physical reuse. Existing requirements
+remain sufficient; no new requirement or ADR is needed.
+
+1. Mark Task 01 `in_progress`. Independently author
+   `TestWorkspaceSourceMaterializer_PersistedAttachmentChangedPlacementRetry` in the existing
+   integration file. Before source correction, induce post-create rescan failure, retain the two-session
+   rollback assertions, reconstruct manager, choose a different valid placement and reverse the
+   two added repository rows. Attach successfully, then assert canonical path/order against the
+   new durable associations after reopen, exact physical identity, slot cardinality, prior/foreign
+   inventory and preserved files. RED must fail on stale canonical path/order, not setup or compile.
+2. In `store.go`, use exactly the old-row predicate `status = deleted AND deleted_at IS NOT NULL`
+   together with incoming `status = active AND deleted_at IS NULL`. Under that predicate only,
+   replace both placement columns from incoming values atomically with physical tuple/status;
+   otherwise retain both old values. Keep row ID, transaction, cleanup/recovery and identity locks.
+   Empty/zero values are legitimate inputs, not omission markers. No historical repair or guard change.
+3. Extend existing store tests with SQLite/Postgres-gated reactivation and negative controls from
+   the plan. Strengthen the existing reopen integration test to invoke actual physical reuse via
+   branch materialization/real manager with identical admitted placement, asserting unchanged
+   worktree ID/path, canonical placement/order, cardinality and checkout file contents. No new files.
+4. Run the corrective commands below, record actual joins/results and update this same plan/order.
+
+## Corrective verification (completed)
+
+Run sequentially from repo root. Original broad suites/install above are historical receipts and
+are not required again for this correction.
+The existing external evidence root and task-local toolchain setup remain in effect.
+
+```bash
+export PATH="/home/jcfs/.local/share/mise/installs/pnpm/9.15.9:/home/jcfs/.local/share/mise/installs/go/1.26.0/bin:/home/jcfs/.local/share/mise/installs/node/24.21.0/bin:$PATH"
+export GOTOOLCHAIN=local
+task4797_evidence="/home/jcfs/.kandev/loop-evidence/1a588848-c703-480a-bc22-1eb3f18f8b10"
+
+# Corrective RED before changing store.go. Repeat for focused GREEN, with a fresh directory.
+KANDEV_RUN_QUIET_DIR="$(mktemp -d "$task4797_evidence/corrective-focused.XXXXXX")" bash scripts/run-quiet backend-test -- timeout --kill-after=10s 300s env GOMAXPROCS=2 GOMEMLIMIT=512MiB go -C apps/backend test -trimpath -race -tags fts5 -p 1 ./internal/backendapp -run '^TestWorkspaceSourceMaterializer_PersistedAttachmentChangedPlacementRetry$' -count=1 -timeout=180s
+
+# New correction, real reuse, existing placement/rollback and relevant creation controls.
+KANDEV_RUN_QUIET_DIR="$(mktemp -d "$task4797_evidence/corrective-targeted.XXXXXX")" bash scripts/run-quiet backend-test -- timeout --kill-after=10s 600s env GOMAXPROCS=2 GOMEMLIMIT=512MiB go -C apps/backend test -trimpath -race -tags fts5 -p 1 ./internal/backendapp ./internal/worktree -run '^(TestWorkspaceSourceMaterializer_(PersistedAttachment|Nested|ParentRoot)|TestWorkspaceSourceInventoryRows|TestSQLiteStore_CreateWorktree)' -count=1 -timeout=300s
+
+KANDEV_RUN_QUIET_DIR="$(mktemp -d "$task4797_evidence/corrective-sqlguard.XXXXXX")" bash scripts/run-quiet backend-test -- timeout --kill-after=10s 300s env GOMAXPROCS=2 GOMEMLIMIT=512MiB go -C apps/backend run -trimpath -race -tags fts5 -p 1 ./cmd/sqlguard ./internal
+KANDEV_RUN_QUIET_DIR="$(mktemp -d "$task4797_evidence/corrective-conformance.XXXXXX")" bash scripts/run-quiet backend-test -- timeout --kill-after=10s 600s env GOMAXPROCS=2 GOMEMLIMIT=512MiB go -C apps/backend test -trimpath -race -tags fts5 -p 1 ./internal/persistence/storeconformance -count=1 -timeout=300s
+KANDEV_RUN_QUIET_DIR="$(mktemp -d "$task4797_evidence/corrective-lint.XXXXXX")" bash scripts/run-quiet backend-lint -- timeout --kill-after=10s 600s bash scripts/lint-go-changed apps/backend/internal/worktree/store.go apps/backend/internal/backendapp/workspace_source_materializer_inventory_test.go apps/backend/internal/worktree/store_placement_test.go apps/backend/internal/worktree/store_placement_postgres_test.go
+
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+git status --short -- docs/plans/attached-worktree-inventory
+```
+
+Keep tests at 512MiB and canonical lint at its separate default3GiB after a capacity check. Run the
+actual cumulative-diff coverage preflight above as well. PostgreSQL still uses the existing DSN
+gate; no global database setup or cache teardown. Required SQL guard/conformance are retained
+because the correction changes SQL. All commands use fresh task-owned external quiet directories.
 
 ## Dependencies
 
@@ -164,7 +231,7 @@ operating checkpoints. PR #4722 and PR #4798 are overlap checks, not code depend
 
 ## Risks and impact
 
-Initial/recreate callers may omit placement, so the conflict clause must preserve it. Real-store
+Initial/recreate callers may omit placement, so live-slot conflicts must preserve it. Real-store
 cleanup can retain inactive history; prove exactly one active slot after retry and no surviving
 failed active attachment. No public wire/schema/UI change is intended. Public docs and mobile
 assessment are in the plan; no browser validation is required for this persistence-only change.
@@ -187,7 +254,30 @@ assessment are in the plan; no browser validation is required for this persisten
 
 ## Results
 
-Implementation checks completed on 2026-10-26, sequentially under the ROOT heavy lease:
+Corrective design checks passed: catalog validation, full specification lint, diff whitespace,
+and actual cumulative ten-path documentation coverage (`covered`, no errors).
+
+Corrective implementation checks completed sequentially on 2026-10-26:
+
+- Changed-placement/reordered public-service retry RED: exit 1 after reopening SQLite, expected
+  `kandev/kandev/repo-3-main` but stored `kandev/repo-3-main`. No producer edit preceded RED.
+  Focused GREEN: exit 0 after correcting strict deleted-slot reactivation.
+- Corrective targeted command: exit 0, backendapp 6.472s and worktree 2.351s. Includes actual
+  fresh-manager physical reuse, preserved files, ten-case store status matrix, existing rollback
+  controls, changed nonzero order and committed exact retry without extra rescans/rebinds.
+- Corrective SQL guard: exit 0. Race-enabled store conformance: exit 0, 51.910s.
+- Canonical scoped lint over the four changed corrective Go paths: exit 0, zero issues,
+  default 3GiB budget after checking available memory (15598304kB).
+- Placement-test seed SQL now uses dialect Rebind. PostgreSQL skipped at the unchanged DSN gate;
+  no local PostgreSQL runtime coverage is claimed.
+- Corrective fixture cardinality/layout/closed-service errors were corrected in owned tests;
+  their original failed receipts remain external and are not causal RED evidence.
+
+The [plan](plan.md#verification-results) records corrective receipt directories. All corrective
+commands actually joined and their owned process groups were absent. The following results
+cover the initial implementation.
+
+Initial implementation checks completed sequentially on 2026-10-26:
 
 - Focused regression RED: exit 1, all three placements exposed empty canonical paths after
   successful materialization; no production edits preceded it. Focused GREEN: exit 0.
