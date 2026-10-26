@@ -473,3 +473,22 @@ pnpm exec eslint components/github/github-connection-dialog.tsx components/githu
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 ```
+
+
+### Follow-up CI fixture correction
+
+The sidebar color-rule reload case observed its optimistic color before the last
+settings PATCH reached the server. The CI trace records that PATCH with status -1
+at navigation, and the reloaded task retained the previous red rule. Delaying the
+last PATCH by 500 ms reproduced the same red-versus-blue failure locally. Moving
+the existing persisted-settings assertion before navigation made all three delayed
+runs pass with retries disabled. The temporary latency probe was removed. The
+permanent change only reorders the existing assertion; product behavior is unchanged.
+The final test passed three repetitions without retries (43.9s), using
+`pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/task/sidebar-automatic-colors.spec.ts --grep "reorders overlapping rules through More" --repeat-each=3 --retries=0`
+after rebuilding the application for the prior reproduction.
+
+The mobile plugin diagnostic case also failed once with `Route is already handled`
+in its response mock. Its CI retry and three exact local repetitions passed. No
+plugin source or test change was made. The next head must confirm both browser
+checks through CI before this follow-up is complete.
