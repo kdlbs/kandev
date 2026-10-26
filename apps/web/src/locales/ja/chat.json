@@ -40,6 +40,8 @@
   "doubleClickToRename": "ダブルクリックで名前を変更",
   "editQueuedMessage": "キュー内のメッセージを編集",
   "expandClarification": "確認を展開",
+  "expandClarificationPanel": "利用可能なスペースまで拡大",
+  "resetClarificationPanel": "パネルのサイズをリセット",
   "expandMessage": "メッセージを展開",
   "failedToClearQueuedMessages": "キュー内のメッセージをクリアできませんでした。",
   "failedToDeleteQuickChat": "クイックチャットを削除できませんでした",

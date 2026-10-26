@@ -40,6 +40,8 @@
   "doubleClickToRename": "双击以重命名",
   "editQueuedMessage": "编辑排队中的消息",
   "expandClarification": "展开澄清",
+  "expandClarificationPanel": "展开到可用空间",
+  "resetClarificationPanel": "重置面板大小",
   "expandMessage": "展开消息",
   "failedToClearQueuedMessages": "清除排队中的消息失败。",
   "failedToDeleteQuickChat": "删除快速聊天失败",

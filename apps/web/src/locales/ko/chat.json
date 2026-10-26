@@ -39,6 +39,8 @@
   "doubleClickToRename": "두 번 클릭하여 이름 변경",
   "editQueuedMessage": "대기 중인 메시지 편집",
   "expandClarification": "확인 펼치기",
+  "expandClarificationPanel": "사용 가능한 공간까지 확장",
+  "resetClarificationPanel": "패널 크기 초기화",
   "expandMessage": "메시지 펼치기",
   "failedToClearQueuedMessages": "대기 중인 메시지를 지우지 못했습니다.",
   "failedToDeleteQuickChat": "빠른 채팅을 삭제하지 못했습니다",

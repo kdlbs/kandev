@@ -40,6 +40,8 @@
   "doubleClickToRename": "Double-click to rename",
   "editQueuedMessage": "Edit queued message",
   "expandClarification": "Expand clarification",
+  "expandClarificationPanel": "Expand to available space",
+  "resetClarificationPanel": "Reset panel size",
   "expandMessage": "Expand message",
   "failedToClearQueuedMessages": "Failed to clear queued messages.",
   "failedToDeleteQuickChat": "Failed to delete quick chat",

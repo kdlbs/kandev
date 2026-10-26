@@ -170,6 +170,9 @@ export function questionTargetGeometry(target: Locator) {
         box.left >= clip.left - 1 &&
         box.right <= clip.right + 1,
       hit: !!hit && element.contains(hit),
+      hitTag: hit?.tagName ?? null,
+      hitTestId: hit?.getAttribute("data-testid") ?? null,
+      hitText: hit?.textContent?.trim().slice(0, 80) ?? null,
       footerScrollTop: footer.scrollTop,
       innerScrollTop: inner.scrollTop,
     };
@@ -326,6 +329,7 @@ export async function answerLongThreadQuestion(
         "true",
       );
     }
+    await capture.screenshot("all-answers-selected");
     await activate(tile.getByTestId("clarification-submit"), "Enter", true);
   } finally {
     await attachQuestionRecord(info, `${input}-question-hit-targets`, records);

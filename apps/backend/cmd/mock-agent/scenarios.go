@@ -22,46 +22,47 @@ const (
 
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
-	"simple-message":            scenarioSimpleMessage,
-	"read-and-edit":             scenarioReadAndEdit,
-	"permission-flow":           scenarioPermissionFlow,
-	toolKeyError:                scenarioError,
-	"subagent":                  scenarioSubagent,
-	"all-tools":                 scenarioAllTools,
-	"multi-turn":                scenarioMultiTurn,
-	"diff-expansion-setup":      scenarioDiffExpansionSetup,
-	"diff-update-setup":         scenarioDiffUpdateSetup,
-	"diff-update-modify":        scenarioDiffUpdateModify,
-	"diff-update-streaming":     scenarioDiffUpdateStreaming,
-	"multi-file-setup":          scenarioMultiFileSetup,
-	"multi-file-modify":         scenarioMultiFileModify,
-	"untracked-file-setup":      scenarioUntrackedFileSetup,
-	"untracked-file-modify":     scenarioUntrackedFileModify,
-	"clarification":             scenarioClarification,
-	"clarification-no-other":    scenarioClarificationNoOther,
-	"clarification-markdown":    scenarioClarificationMarkdown,
-	"clarification-multi":       scenarioClarificationMulti,
-	"clarification-timeout":     scenarioClarificationTimeout,
-	"multi-permission":          scenarioMultiPermission,
-	"kandev-mcp-permission":     scenarioKandevMCPPermission,
-	"review-cumulative-setup":   scenarioReviewCumulativeSetup,
-	"walkthrough-setup":         scenarioWalkthroughSetup,
-	"walkthrough-basic":         scenarioWalkthroughBasic,
-	"walkthrough-reemit":        scenarioWalkthroughReemit,
-	"walkthrough-reemit-second": scenarioWalkthroughReemitSecond,
-	"symlink-file-setup":        scenarioSymlinkFileSetup,
-	"markdown-table":            scenarioMarkdownTable,
-	"empty-turn":                scenarioEmptyTurn,
-	"push-current-branch":       scenarioPushCurrentBranch,
-	"steer-fold-setup":          scenarioSteerFoldSetup,
-	"steer-defer-setup":         scenarioSteerDeferSetup,
-	"saved-prompt-delivery":     scenarioSavedPromptDelivery,
-	"response-retry":            scenarioResponseRetry,
-	"goal-active":               scenarioGoalActive,
-	"goal-complete":             scenarioGoalComplete,
-	"goal-clear":                scenarioGoalClear,
-	"goal-long":                 scenarioGoalLong,
-	"git-commit-permission":     scenarioGitCommitPermission,
+	"simple-message":                   scenarioSimpleMessage,
+	"read-and-edit":                    scenarioReadAndEdit,
+	"permission-flow":                  scenarioPermissionFlow,
+	toolKeyError:                       scenarioError,
+	"subagent":                         scenarioSubagent,
+	"all-tools":                        scenarioAllTools,
+	"multi-turn":                       scenarioMultiTurn,
+	"diff-expansion-setup":             scenarioDiffExpansionSetup,
+	"diff-update-setup":                scenarioDiffUpdateSetup,
+	"diff-update-modify":               scenarioDiffUpdateModify,
+	"diff-update-streaming":            scenarioDiffUpdateStreaming,
+	"multi-file-setup":                 scenarioMultiFileSetup,
+	"multi-file-modify":                scenarioMultiFileModify,
+	"untracked-file-setup":             scenarioUntrackedFileSetup,
+	"untracked-file-modify":            scenarioUntrackedFileModify,
+	"clarification":                    scenarioClarification,
+	"clarification-no-other":           scenarioClarificationNoOther,
+	"clarification-markdown":           scenarioClarificationMarkdown,
+	"clarification-context-paragraphs": scenarioClarificationContextParagraphs,
+	"clarification-multi":              scenarioClarificationMulti,
+	"clarification-timeout":            scenarioClarificationTimeout,
+	"multi-permission":                 scenarioMultiPermission,
+	"kandev-mcp-permission":            scenarioKandevMCPPermission,
+	"review-cumulative-setup":          scenarioReviewCumulativeSetup,
+	"walkthrough-setup":                scenarioWalkthroughSetup,
+	"walkthrough-basic":                scenarioWalkthroughBasic,
+	"walkthrough-reemit":               scenarioWalkthroughReemit,
+	"walkthrough-reemit-second":        scenarioWalkthroughReemitSecond,
+	"symlink-file-setup":               scenarioSymlinkFileSetup,
+	"markdown-table":                   scenarioMarkdownTable,
+	"empty-turn":                       scenarioEmptyTurn,
+	"push-current-branch":              scenarioPushCurrentBranch,
+	"steer-fold-setup":                 scenarioSteerFoldSetup,
+	"steer-defer-setup":                scenarioSteerDeferSetup,
+	"saved-prompt-delivery":            scenarioSavedPromptDelivery,
+	"response-retry":                   scenarioResponseRetry,
+	"goal-active":                      scenarioGoalActive,
+	"goal-complete":                    scenarioGoalComplete,
+	"goal-clear":                       scenarioGoalClear,
+	"goal-long":                        scenarioGoalLong,
+	"git-commit-permission":            scenarioGitCommitPermission,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -776,7 +777,12 @@ func clarificationNoOtherQuestionArgs() map[string]any {
 // for the lightweight Markdown supported by clarification question fields.
 func clarificationMarkdownQuestionArgs() map[string]any {
 	return map[string]any{
-		"context": "Keep `context` literal.\n\nNo Markdown rendering here.",
+		"context": "**Shared deployment context.** Compare recovery, ownership, and migration before choosing a storage mode.\n\n" +
+			"Read the [context guide](https://example.com/context).\n\n" +
+			"| Platform | Migration Window | Recovery Time | Owner | Region |\n" +
+			"| --- | --- | --- | --- | --- |\n" +
+			"| PostgreSQL | 4 hours | 20 minutes | Platform | eu-west |\n\n" +
+			strings.Repeat("Review migration effort, recovery time, and operational ownership with the deployment team. ", 18),
 		"questions": []map[string]any{
 			{
 				clarificationIDKey:    "markdown",
@@ -787,6 +793,29 @@ func clarificationMarkdownQuestionArgs() map[string]any {
 				clarificationOptionsKey: []map[string]any{
 					mockOption("`Postgres` [docs](https://example.com/postgres)", "Best for **production** workloads"),
 					mockOption("SQLite", "Best for *local* work"),
+				},
+			},
+		},
+	}
+}
+
+func clarificationContextParagraphsQuestionArgs() map[string]any {
+	return map[string]any{
+		"context_paragraphs": []string{
+			"**Shared deployment context.** The database must support safe migration and clear ownership.",
+			"Read the [context guide](https://example.com/context) before choosing.",
+			"| Platform | Migration Window | Recovery Time | Owner | Region |\n" +
+				"| --- | --- | --- | --- | --- |\n" +
+				"| PostgreSQL | 4 hours | 20 minutes | Platform | eu-west |",
+			strings.Repeat("Review migration effort, recovery time, and operational ownership with the deployment team. ", 18),
+		},
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "context-paragraphs",
+				clarificationPromptKey: "Which storage mode should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Managed relational storage"),
+					mockOption("SQLite", "Embedded local storage"),
 				},
 			},
 		},
@@ -871,6 +900,18 @@ func scenarioClarificationMarkdown(e *emitter) {
 		return
 	}
 
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+func scenarioClarificationContextParagraphs(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask a storage question with shared context paragraphs.")
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationContextParagraphsQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
 	fixedDelay(50)
 	e.text(fmt.Sprintf("You answered: %s", result))
 }
