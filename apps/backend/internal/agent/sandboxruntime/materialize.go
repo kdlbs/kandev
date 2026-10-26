@@ -29,23 +29,18 @@ func wirePolicy(resolved *policy.Resolved, grants contract.Grants) *pluginsdk.Sa
 }
 
 func (p *Prepared) materialize(ctx context.Context, binary *plugins.SandboxRuntimeBinary, compiled *pluginsdk.SandboxCompiledPolicy, grants contract.Grants) error {
-	wire := p.description.ApprovalWire
-	if wire == nil {
-		return policy.ErrIneligible
+	values := map[string]string{}
+	if !p.processTree() {
+		endpoint, err := p.openApprovalChannel()
+		if err != nil {
+			return err
+		}
+		values["sandbox.approval.endpoint"] = endpoint
 	}
-	ports := make([]int, 0, len(p.runtimeNetwork))
-	for _, grant := range p.runtimeNetwork {
-		ports = append(ports, int(grant.Port))
-	}
-	channel, err := p.manager.channels.Open(p.manager.ctx, p.orgID, p.request.AttemptId, ports, policy.ApprovalReplies{Allow: wire.AllowOnceBodyUtf8, Deny: wire.DenyBodyUtf8, Timeout: wire.TimeoutBodyUtf8})
-	if err != nil {
-		return err
-	}
-	p.channel = channel
-	values := map[string]string{"sandbox.approval.endpoint": channel.URL()}
 	for _, ref := range p.childDirectoryReferences() {
 		values[ref.Key] = ref.Value
 	}
+	var err error
 	if slices.Contains(compiled.RequiredCapabilities, "egress_proxy") {
 		p.egress, err = sandboxproxy.Open(p.manager.ctx, p.runtimeNetwork, p.protectedPorts...)
 		if err != nil {
@@ -61,7 +56,11 @@ func (p *Prepared) materialize(ctx context.Context, binary *plugins.SandboxRunti
 		}
 		artifacts = append(artifacts, value)
 	}
-	p.files, err = contract.MaterializeRuntime(ctx, p.manager.base, binary.Content, binary.Digest, artifacts, values)
+	if p.processTree() {
+		p.files, err = p.reserved.Materialize(ctx, binary.Content, binary.Digest, artifacts, values)
+	} else {
+		p.files, err = contract.MaterializeRuntime(ctx, p.manager.base, binary.Content, binary.Digest, artifacts, values)
+	}
 	if err != nil {
 		return err
 	}
@@ -71,14 +70,34 @@ func (p *Prepared) materialize(ctx context.Context, binary *plugins.SandboxRunti
 	}
 	p.launch = &contract.Launch{Version: 1, AttemptID: p.request.AttemptId, Generation: p.request.Generation, PolicyDigest: p.policy.Digest, PackageDigest: binary.PackageDigest, Root: p.files.Root, Prefix: prefix, Digests: p.files.Digests, EnvironmentKeys: grants.EnvironmentKeys}
 	p.launch.ChildHome = p.agentState.Directories().Home
-	p.launch.Containment, err = processcontainment.Create()
-	if err != nil {
-		return err
+	if !p.processTree() {
+		p.launch.Containment, err = processcontainment.Create()
+		if err != nil {
+			return err
+		}
 	}
 	if p.mcp != nil {
 		p.launch.MCPURL = p.mcp.URL()
 	}
 	return p.launch.Validate()
+}
+
+// openApprovalChannel opens the private approval listener a kernel-contained attempt reports through.
+func (p *Prepared) openApprovalChannel() (string, error) {
+	wire := p.description.ApprovalWire
+	if wire == nil {
+		return "", policy.ErrIneligible
+	}
+	ports := make([]int, 0, len(p.runtimeNetwork))
+	for _, grant := range p.runtimeNetwork {
+		ports = append(ports, int(grant.Port))
+	}
+	channel, err := p.manager.channels.Open(p.manager.ctx, p.orgID, p.request.AttemptId, ports, policy.ApprovalReplies{Allow: wire.AllowOnceBodyUtf8, Deny: wire.DenyBodyUtf8, Timeout: wire.TimeoutBodyUtf8})
+	if err != nil {
+		return "", err
+	}
+	p.channel = channel
+	return channel.URL(), nil
 }
 
 func materializedPrefix(arguments []*pluginsdk.SandboxArgument, files *contract.RuntimeFiles) ([]string, error) {
@@ -125,6 +144,9 @@ func (p *Prepared) discard() {
 	}
 	if p.files != nil {
 		_ = p.files.Close()
+	}
+	if p.reserved != nil {
+		_ = p.reserved.Close()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

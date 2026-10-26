@@ -15,6 +15,7 @@ import (
 // ReconcileAttempt never adopts a process whose private listeners belonged to
 // another backend. It releases an attempt only after proving its owned descendants ended.
 func (m *Manager) ReconcileAttempt(ctx context.Context, orgID, attemptID string) (*policy.Attempt, error) {
+	m.drainRecoveredGroup(ctx, orgID, attemptID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed || m.attempts[attemptID] != nil {
@@ -37,7 +38,7 @@ func (m *Manager) ReconcileAttempt(ctx context.Context, orgID, attemptID string)
 	if !neverDispatched && !recoveredSessionTerminated(attempt.Owner) {
 		return attempt, policy.ErrConflict
 	}
-	if err = releaseRecoveredContainment(ctx, attempt.Snapshot.Launch); err != nil {
+	if err = releaseRecovered(ctx, attempt); err != nil {
 		return attempt, err
 	}
 	if err = m.releaseRecoveredState(attempt); err != nil {
@@ -97,6 +98,31 @@ func (m *Manager) removeRecoveredFiles(launch *contract.Launch) error {
 		return policy.ErrConflict
 	}
 	return os.RemoveAll(launch.Root)
+}
+
+// drainRecoveredGroup waits, outside the manager lock, for a process-tree
+// attempt's group to empty so the locked pass needs only one read.
+func (m *Manager) drainRecoveredGroup(ctx context.Context, orgID, attemptID string) {
+	attempt, err := m.policies.ReadAttempt(ctx, orgID, attemptID)
+	if err != nil || attempt.Snapshot.Scope() != policy.OwnershipProcessTree || !recoveredSessionTerminated(attempt.Owner) {
+		return
+	}
+	_ = awaitGroupEnded(ctx, attempt.Owner.SupervisorPID)
+}
+
+// releaseRecovered proves a stopped attempt has no live process left.
+func releaseRecovered(ctx context.Context, attempt *policy.Attempt) error {
+	if attempt.Snapshot.Scope() != policy.OwnershipProcessTree {
+		return releaseRecoveredContainment(ctx, attempt.Snapshot.Launch)
+	}
+	if attempt.Owner == nil {
+		return nil
+	}
+	members, err := groupMembers(attempt.Owner.SupervisorPID)
+	if err != nil || len(members) > 0 {
+		return policy.ErrConflict
+	}
+	return nil
 }
 
 func releaseRecoveredContainment(ctx context.Context, launch *contract.Launch) error {

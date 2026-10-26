@@ -59,6 +59,9 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	gin.SetMode(gin.ReleaseMode)
 
 	csLogger := log.WithFields(zap.String("component", "control-server"))
+	probeSandboxHost(func(err error) {
+		csLogger.Warn("sandbox host probe failed; sandbox-launch.v1 is not advertised", zap.Error(err))
+	})
 	unownedPeriod, adjustments := ownershipperiod.Resolve(cfg.UnownedPeriod, cfg.IdleTimeout)
 	for _, reason := range adjustments {
 		csLogger.Warn(reason,

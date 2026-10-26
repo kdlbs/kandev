@@ -31,6 +31,8 @@ export type ExecutionSandboxSnapshot = {
   selection_source: string;
   ceiling_revision_id: string;
   ceiling_digest: string;
+  /** Read-only; an absent value means kernel_container. */
+  ownership_scope?: "kernel_container" | "process_tree";
 };
 
 export type ExecutionSnapshot = CommandComposition & {

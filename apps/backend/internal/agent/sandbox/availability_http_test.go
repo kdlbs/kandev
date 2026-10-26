@@ -57,3 +57,14 @@ func TestSandboxAvailabilitySanitizesProviderFailure(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	require.JSONEq(t, `{"available":false,"blocker":"sandbox_runtime_unavailable"}`, response.Body.String())
 }
+
+func TestSandboxAvailabilityNamesAnUnsupportedHostAsTheBlocker(t *testing.T) {
+	service, _, _ := policySelectionFixture(t)
+	service.SetAvailabilityCheck(func(context.Context, *Resolved) error {
+		return errors.Join(errors.New("private probe detail"), ErrHostUnsupported)
+	})
+	response := httptest.NewRecorder()
+	sandboxOperatorRouter(t, service).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/sandbox/availability", strings.NewReader(`{"executor_id":"executor"}`)))
+	require.Equal(t, http.StatusOK, response.Code)
+	require.JSONEq(t, `{"available":false,"blocker":"sandbox_host_unsupported"}`, response.Body.String())
+}

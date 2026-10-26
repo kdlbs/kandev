@@ -24,6 +24,8 @@ export function sandboxMessageKey(code: unknown) {
       return "agents:sandboxRevisionConflict";
     case "sandbox_runtime_unavailable":
       return "agents:sandboxRuntimeUnavailable";
+    case "sandbox_host_unsupported":
+      return "agents:sandboxHostUnsupported";
     case "sandbox_policy_not_selected":
       return "agents:sandboxPolicyNotSelected";
     case "sandbox_operator_required":

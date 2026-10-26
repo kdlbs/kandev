@@ -40,6 +40,7 @@ Policy storage, authority, plugin RPCs, and runtime wiring use a default-off fla
 | REQ-AGENTS-SANDBOX-006 | Operator surfaces, Acceptance |
 | REQ-AGENTS-SANDBOX-007 | Execution settings, Projection and evidence |
 | REQ-AGENTS-SANDBOX-008 | Execution details, Projection and evidence, Session indicator |
+| REQ-AGENTS-SANDBOX-009 | [macOS host support](sandbox-macos-support.md) |
 
 ## Core launch composition
 
@@ -353,7 +354,7 @@ All copy uses localization across the seven maintained locales.
 ## Compatibility and observability
 
 Initial support targets Linux Local/Worktree with verified Nono 0.80.0 and Pi ACP/native transports.
-Other agents require their own transport evidence. macOS static policy support remains gated on actual Seatbelt tests.
+Other agents require their own transport evidence. macOS: see [its design](sandbox-macos-support.md).
 Remote executors and Windows Nono remain unsupported. Host discovery cannot certify them.
 Agentctl must advertise proposed `sandbox-launch.v1` before receiving required sandbox envelopes.
 Old peers refuse required launches. Existing `launch-wrapper.v1` retains its meaning.

@@ -3,6 +3,7 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -31,6 +32,9 @@ func IsolatedEnvironment(final map[string]string, allowed []string, directories 
 			return nil, ErrInvalidPolicy
 		}
 		values[key] = dir
+	}
+	if runtime.GOOS == "darwin" {
+		values["GIT_CONFIG_NOSYSTEM"] = "1"
 	}
 	result := make([]string, 0, len(values))
 	for key, value := range values {

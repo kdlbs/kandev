@@ -59,6 +59,9 @@ func (f sandboxRuntimeFactory) prepareExecution(ctx context.Context, execution *
 	if err := f.validateExecutor(ctx, execution.SandboxSelection.ExecutorID); err != nil {
 		return nil, err
 	}
+	if err := admitSandboxHost(ctx, transport); err != nil {
+		return nil, err
+	}
 	protected, err := f.protectedPorts(transport)
 	if err != nil {
 		return nil, err

@@ -4,14 +4,18 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/agent/sandbox"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/plugins"
 )
 
-func configureSandboxProviderCatalog(policies *sandbox.Service, providers *plugins.Service) {
+func configureSandboxProviderCatalog(cfg *config.Config, policies *sandbox.Service, providers *plugins.Service) {
 	if providers == nil {
 		return
 	}
 	policies.SetAvailabilityCheck(func(ctx context.Context, resolved *sandbox.Resolved) error {
+		if err := checkManagedSandboxHost(ctx, cfg); err != nil {
+			return err
+		}
 		return checkSandboxInstallation(ctx, providers, resolved)
 	})
 	policies.SetProviderCatalog(func(ctx context.Context) ([]sandbox.ProviderView, error) {

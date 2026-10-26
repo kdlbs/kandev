@@ -133,7 +133,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	sandboxPolicies.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	sandboxPolicies.SetSessionAuthorizer(taskSvc.AuthorizeSessionAccess)
 	sandboxPolicies.SetTargetResolver(sandboxTargetResolver{tasks: taskSvc, profiles: repos.AgentSettings, workflows: workflowSvc}.resolve)
-	configureSandboxProviderCatalog(sandboxPolicies, pluginsSvc)
+	configureSandboxProviderCatalog(cfg, sandboxPolicies, pluginsSvc)
 	configureSandboxApprovalEvents(sandboxPolicies, repos.Task, eventBus, log)
 	services.Sandbox = sandboxPolicies
 	taskSvc.SetSandboxCreationAdmission(sandboxCreationAdmission{policies: sandboxPolicies, targets: sandboxTargetResolver{tasks: taskSvc, profiles: repos.AgentSettings, workflows: workflowSvc}}.admit)

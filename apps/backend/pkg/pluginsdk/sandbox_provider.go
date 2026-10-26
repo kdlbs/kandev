@@ -10,6 +10,26 @@ import (
 
 const MaxSandboxMessageBytes = 1 << 20
 
+// SandboxHostUnsupportedMessage is the exact status message of a provider
+// refusing a host it does not support.
+const SandboxHostUnsupportedMessage = "host_unsupported"
+
+// ErrSandboxHostUnsupported builds the typed refusal a provider returns from
+// DescribeSandboxProvider for a host OS or architecture it does not support.
+func ErrSandboxHostUnsupported() error {
+	return status.Error(codes.FailedPrecondition, SandboxHostUnsupportedMessage)
+}
+
+// IsSandboxHostUnsupported matches only the exact status code and message, so a
+// provider cannot mistake an unrelated precondition failure for a host refusal.
+func IsSandboxHostUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	st, ok := status.FromError(err)
+	return ok && st.Code() == codes.FailedPrecondition && st.Message() == SandboxHostUnsupportedMessage
+}
+
 const (
 	SandboxRuntimeReferenceKey = "sandbox.runtime"
 	SandboxArtifactProfile     = "profile"

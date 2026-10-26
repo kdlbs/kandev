@@ -144,6 +144,7 @@ Tasks retains launch failure, recovery, queue, and error-history ownership.
 Remote sandbox execution, Windows Nono support, universal confinement against host administrators, automatic learning, and automatic upgrades are excluded.
 Installation, login, repository setup, user shells, and external MCP servers remain separate execution contracts.
 Nono runtime approval support outside the verified Linux capability path remains conditional on dedicated evidence.
+macOS support is specified in [its own requirements](sandbox-macos-support.md).
 
 ## Implementation plans
 

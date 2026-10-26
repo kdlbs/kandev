@@ -92,6 +92,6 @@ func (r executionSnapshotRecorder) sandboxSnapshot(ctx context.Context, executio
 		PackageDigest: provider.PackageDigest, RuntimeVersion: provider.RuntimeVersion, RuntimeDigest: provider.RuntimeDigest,
 		RevisionID: resolved.Revision.ID, RevisionNumber: resolved.Revision.Number, PolicyName: resolved.Revision.Policy.Name,
 		PolicyDigest: resolved.Revision.Digest, SelectionSource: resolved.SelectionSource,
-		CeilingRevisionID: resolved.Ceiling.ID, CeilingDigest: resolved.Ceiling.Digest,
+		CeilingRevisionID: resolved.Ceiling.ID, CeilingDigest: resolved.Ceiling.Digest, OwnershipScope: stored.Scope(),
 	}, nil
 }

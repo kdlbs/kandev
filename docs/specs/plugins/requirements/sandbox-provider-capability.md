@@ -31,6 +31,17 @@ Production provider code belongs in a dedicated repository.
   Availability shall not assert active confinement. Unsupported evidence shall remain unknown.
   A second fixture provider shall use the same settings, details, and status contracts without host changes keyed to its identity.
 
+### REQ-PLUGINS-SANDBOX-002: Per-host capability declaration
+
+**Intent:** A provider states what it enforces on each host, so macOS support never inherits Linux claims.
+
+- **AC-PLUGINS-SANDBOX-002.1:** A provider shall answer `DescribeSandboxProvider` for the host OS and architecture that core supplies, and shall return the typed error `host_unsupported` for a host it does not support, which core shall treat, when the core host is darwin, as a refusal before launch with class `sandbox_host_unsupported`; on every other core host the answer keeps its existing handling and no class is added. The error is the gRPC status `FailedPrecondition` whose message is exactly `host_unsupported`; any other error is a provider failure, never a host refusal.
+  The Nono provider shall support linux/amd64 (unchanged) and darwin/arm64. Every other pair, including darwin/amd64 and linux/arm64, shall return `host_unsupported`.
+- **AC-PLUGINS-SANDBOX-002.2:** The description for a host shall declare its status-evidence schemas and limitations. Core shall treat anything undeclared as unsupported and shall not infer it from another host. Approval support on darwin is a core-owned, host-keyed rule (AC-AGENTS-SANDBOX-009.6) and is not provider-declared; no approval-kind field is added, and the existing approval wire and its Linux validation are unchanged. Process ownership is core-owned and is not provider-declared.
+- **AC-PLUGINS-SANDBOX-002.3:** On darwin the Nono provider shall declare no approval wire and shall compile neutral grants to a darwin profile that grants no system temporary directories and no keychain paths and configures no approval webhook; core does not read its denial report for a darwin attempt (AC-AGENTS-SANDBOX-009.7). For identical effective grants and identical per-attempt paths the compiled artifact bytes shall be identical, with grants emitted in sorted canonical path order. The compiled artifact is not claimed to be identical across attempts, because it contains per-attempt paths.
+- **AC-PLUGINS-SANDBOX-002.4:** The darwin runtime shall be a packaged artifact in the reviewed plugin package, identified by relative path and SHA-256 in the darwin host's description. Core verifies it against the package checksum entry and copies it into the attempt directory, exactly as for Linux. A mismatch shall refuse the host without fallback to another binary or a `PATH` lookup. The provider never downloads or locates a runtime.
+- **AC-PLUGINS-SANDBOX-002.5:** The darwin provider release shall build in the dedicated provider repository and include a darwin-gated test that runs the provider-compiled profile against the canaries of AC-AGENTS-SANDBOX-009.11 with their controls. It is the release gate for the artifact. The Kandev-side suite proves core integration through a real launch. A non-darwin run reports the test as skipped, never passed.
+
 ## Exclusions
 
 The remote executor provider interface does not own this capability.

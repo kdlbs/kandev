@@ -10,10 +10,13 @@ requirements:
   - REQ-AGENTS-SANDBOX-006
   - REQ-AGENTS-SANDBOX-007
   - REQ-AGENTS-SANDBOX-008
+  - REQ-AGENTS-SANDBOX-009
   - REQ-PLUGINS-SANDBOX-001
+  - REQ-PLUGINS-SANDBOX-002
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005
 system_design:
   - ../../specs/agents/system-design/sandbox-policies.md
+  - ../../specs/agents/system-design/sandbox-macos-support.md
   - ../../specs/plugins/system-design/sandbox-provider-capability.md
   - ../../specs/tasks/system-design/bootstrap-attempt-recovery.md
 legacy_specs: []
@@ -90,7 +93,7 @@ New snapshot/projection types and tests are proposed deliverables. Provider meta
 | Nono native Pi terminal | Kandev outer PTY plus Nono supervisor | Input, resize, signals, resume | Refuse unsupported transport |
 | Nono Linux file approval | Verified webhook protocol plus isolated callback | Real grant/deny/deadline and forgery controls | Deny |
 | Command/network endpoint approval | Not initially advertised | Separate actual runtime evidence | Explicit unsupported denial |
-| macOS static policy | Conditional future activation | Actual Seatbelt acceptance | Unsupported until tested |
+| macOS static policy | Task 11, darwin/arm64 Local/Worktree ACP | Probe plus real Seatbelt canaries with controls | Unsupported until probe passes |
 | Remote/Windows sandbox | Excluded from v1 | No host-only inference | Unsupported |
 
 ## UI preview
@@ -143,6 +146,11 @@ Each criterion listed in work-order frontmatter needs a behavioral assertion, no
 | SANDBOX-007.1-6 | `profile-execution-section.test.tsx`, `policy_test.go`: prefix preservation, plugins-disabled save, executor context, coexistence, source and ceiling |
 | SANDBOX-008.1-2, .4, .8 | `execution_snapshot_test.go`: `TestExecutionSnapshot`, `TestExecutionEvidence`. `execution-status.test.ts`: stale/foreign events, reconnect, legacy unknown, redaction, current/next separation |
 | SANDBOX-008.3, .5-7 | `session-execution-indicator.test.tsx`, `session-execution-details.test.tsx`: truthful icons, protection scope, capability states, keyboard, touch and tab event isolation |
+| SANDBOX-009.1-2, .10 | `identity_test.go`, `sandbox_runtime_test.go`, `sandbox_availability_test.go`: probe outcomes (logged step, no exposed reason), no pending state, admission before `previousAttempt` and Prepare with no attempt and no previous-attempt change, `startSandboxInteractive` refusal, `prepareUtility` darwin refusal, provider `host_unsupported` sentinel wrapping `ErrSandboxProviderUnavailable` with darwin-only mapping, Linux non-regression |
+| SANDBOX-009.3-4, .9, .12-13 | `common/sandbox/darwin_environment_test.go`: fresh root per attempt, reserve/materialize split (Linux order unchanged, failed preparation removes the reserved root), TMPDIR/child tmp agreement, `GIT_CONFIG_NOSYSTEM`, no keychain grant, agent_state lock, transport refusal |
+| SANDBOX-009.5 | `sandboxruntime` darwin tests and the darwin group reader tests: wrapper-as-child bind, group scan empty / surviving member at the 5 s bound / read error, idempotent `Close`, restarted agentctl (`recovery_required` while supervisor live, stopped when exited and empty) |
+| SANDBOX-009.6-8, .14 | `agent/sandbox` `RecordApproval` refusal and no report row for a process-tree attempt (`captureReport`, `RefreshReport` and `Close` skip it; Linux unchanged), status tests; `session-execution-details.test.tsx` for darwin states and seven locales |
+| SANDBOX-009.11, PLUGINS-SANDBOX-002.1-5 | `plugins/sandbox_darwin_conformance_test.go` on a real Mac with controls, provider repository suite, `acceptance.md` record |
 | TASK-LAUNCH-FAILURE-RECOVERY-005.1-5 | `bootstrap_attempt_recovery_test.go`: `TestBootstrapAttempt`, pending-launch controls, same-session retry, sibling isolation, exact queue dispatch |
 
 ## E2E tests
@@ -170,8 +178,9 @@ No broad suite or generic review work order is added.
 - [ ] [Task 10: Deliver Execution settings and session visibility](task-10-execution-surfaces.md)
 - [ ] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
 - [ ] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
+- [x] [Task 11: Support sandbox policies and Nono on macOS](task-11-macos-support.md)
 
-Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09.
+Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09, 11.
 Task IDs remain stable after adding Task 10. Dependency lists state hard prerequisites, not permission to delegate.
 The user retains model and implementation control in this primary session.
 

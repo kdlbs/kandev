@@ -14,6 +14,12 @@ const (
 	AttemptRecoveryRequired = "recovery_required"
 )
 
+// Ownership scopes name who can prove a sandboxed process tree is gone.
+const (
+	OwnershipKernelContainer = "kernel_container"
+	OwnershipProcessTree     = "process_tree"
+)
+
 // AttemptProvider freezes the installed package and runtime used at launch.
 type AttemptProvider struct {
 	PluginID       string `json:"plugin_id"`
@@ -35,6 +41,8 @@ type CaptureRequest struct {
 	WorkDir     string
 	Launch      *contract.Launch
 	Provider    AttemptProvider
+	// OwnershipScope is empty for kernel_container.
+	OwnershipScope string
 }
 
 // AttemptSnapshot is private launch evidence. It is never a public API projection.
@@ -42,6 +50,7 @@ type AttemptSnapshot struct {
 	RestartOf      string                       `json:"restart_of,omitempty"`
 	RestartVersion int64                        `json:"restart_version,omitempty"`
 	AgentProfileID string                       `json:"agent_profile_id"`
+	OwnershipScope string                       `json:"ownership_scope,omitempty"`
 	AgentState     *contract.AgentStateSnapshot `json:"agent_state,omitempty"`
 	SchemaVersion  int                          `json:"schema_version"`
 	OrgID          string                       `json:"org_id"`
@@ -56,6 +65,14 @@ type AttemptSnapshot struct {
 	Launch         *contract.Launch             `json:"launch"`
 	Provider       AttemptProvider              `json:"provider"`
 	CreatedAt      time.Time                    `json:"created_at"`
+}
+
+// Scope reads an absent ownership scope as kernel_container.
+func (s AttemptSnapshot) Scope() string {
+	if s.OwnershipScope == "" {
+		return OwnershipKernelContainer
+	}
+	return s.OwnershipScope
 }
 
 // AttemptOwner records core-verified process identities. It does not prove confinement.

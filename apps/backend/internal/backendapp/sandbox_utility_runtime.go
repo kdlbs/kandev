@@ -16,6 +16,9 @@ func (f sandboxRuntimeFactory) prepareUtility(ctx context.Context, probe *hostut
 	if f.runtime == nil || cfg == nil || transport == nil {
 		return nil, errSandboxRuntimeUnavailable
 	}
+	if sandboxHostOS == hostDarwin {
+		return nil, runtime.ErrSandboxLaunchUnsupported
+	}
 	selection, err := utilitySandboxSelection(probe)
 	if err != nil {
 		return nil, err

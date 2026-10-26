@@ -23,6 +23,9 @@ func (p *Prepared) BindOwner(ctx context.Context, agentctlIdentity string, owner
 	if err := p.persistSupervisor(ctx, agentctlIdentity, owner); err != nil {
 		return err
 	}
+	if p.processTree() {
+		return p.bindProcessTree(ctx, agentctlIdentity, owner)
+	}
 	identity, err := p.readIdentity(ctx, owner)
 	if err != nil {
 		return err
@@ -39,11 +42,21 @@ func (p *Prepared) BindOwner(ctx context.Context, agentctlIdentity string, owner
 	if err != nil || !contained {
 		return policy.ErrConflict
 	}
+	return p.transitionRunning(ctx, agentctlIdentity, owner, child, identity.ProviderSessionId)
+}
+
+// bindProcessTree owns the agentctl process group: the supervisor is the child,
+// and no provider evidence names it.
+func (p *Prepared) bindProcessTree(ctx context.Context, agentctlIdentity string, owner *contract.ProcessOwner) error {
+	return p.transitionRunning(ctx, agentctlIdentity, owner, owner.Supervisor, "")
+}
+
+func (p *Prepared) transitionRunning(ctx context.Context, agentctlIdentity string, owner *contract.ProcessOwner, child processidentity.Identity, providerSessionID string) error {
 	current, err := p.manager.policies.ReadAttempt(ctx, p.orgID, p.launch.AttemptID)
 	if err != nil {
 		return err
 	}
-	_, err = p.manager.policies.TransitionAttempt(ctx, p.orgID, current.ID, current.Version, policy.AttemptRunning, &policy.AttemptOwner{AgentctlIdentity: agentctlIdentity, SupervisorPID: owner.Supervisor.PID, SupervisorBirth: owner.Supervisor.BirthToken, ChildPID: child.PID, ChildBirth: child.BirthToken, ProviderSessionID: identity.ProviderSessionId})
+	_, err = p.manager.policies.TransitionAttempt(ctx, p.orgID, current.ID, current.Version, policy.AttemptRunning, &policy.AttemptOwner{AgentctlIdentity: agentctlIdentity, SupervisorPID: owner.Supervisor.PID, SupervisorBirth: owner.Supervisor.BirthToken, ChildPID: child.PID, ChildBirth: child.BirthToken, ProviderSessionID: providerSessionID})
 	return err
 }
 
@@ -75,7 +88,10 @@ func (p *Prepared) readIdentity(ctx context.Context, owner *contract.ProcessOwne
 }
 
 func (m *Manager) VerifyLive(ctx context.Context, attempt *policy.Attempt) error {
-	if attempt == nil || attempt.State != policy.AttemptRunning || attempt.Owner == nil || attempt.Owner.ChildPID <= 0 || attempt.Owner.ProviderSessionID == "" {
+	if attempt == nil || attempt.State != policy.AttemptRunning || attempt.Owner == nil || attempt.Owner.ChildPID <= 0 {
+		return policy.ErrConflict
+	}
+	if attempt.Snapshot.Scope() == policy.OwnershipKernelContainer && attempt.Owner.ProviderSessionID == "" {
 		return policy.ErrConflict
 	}
 	if err := m.policies.ValidateAttemptAuthority(ctx, attempt); err != nil {
@@ -103,6 +119,12 @@ func (p *Prepared) verifyProcesses(ctx context.Context, owner *policy.AttemptOwn
 	child, err := processidentity.Capture(owner.ChildPID)
 	if err != nil || child.BirthToken != owner.ChildBirth {
 		return policy.ErrConflict
+	}
+	if p.processTree() {
+		if owner.ChildPID != owner.SupervisorPID || child.GroupID != child.PID || child.SessionID != child.PID {
+			return policy.ErrConflict
+		}
+		return nil
 	}
 	owned, err := processidentity.IsDescendant(ctx, supervisor.Supervisor, child)
 	if err != nil || !owned {
@@ -138,7 +160,10 @@ func (p *Prepared) Close() error {
 	if p.closed {
 		return nil
 	}
-	channelErr := p.channel.Close()
+	var channelErr error
+	if p.channel != nil {
+		channelErr = p.channel.Close()
+	}
 	if p.mcp != nil {
 		channelErr = errors.Join(channelErr, p.mcp.Close())
 	}
@@ -154,8 +179,10 @@ func (p *Prepared) Close() error {
 	if err != nil {
 		return errors.Join(channelErr, err)
 	}
-	if err = p.launch.Containment.Remove(); err != nil {
-		return errors.Join(channelErr, err, p.markRecoveryRequired())
+	if p.launch.Containment != nil {
+		if err = p.launch.Containment.Remove(); err != nil {
+			return errors.Join(channelErr, err, p.markRecoveryRequired())
+		}
 	}
 	if attempt.State != policy.AttemptStopped && attempt.State != policy.AttemptFailed {
 		if _, err = p.manager.policies.TransitionAttempt(ctx, p.orgID, attempt.ID, attempt.Version, policy.AttemptStopped, nil); err != nil {
@@ -224,11 +251,26 @@ func (p *Prepared) validateOwner(owner *contract.ProcessOwner) error {
 	if owner.Supervisor.SessionID != owner.Supervisor.PID {
 		return policy.ErrIneligible
 	}
-	contained, err := p.launch.Containment.Contains(owner.Supervisor.PID)
-	if err != nil || !contained {
-		return policy.ErrConflict
+	if err := p.validateContainment(owner); err != nil {
+		return err
 	}
 	if p.owner != nil && *p.owner != *owner {
+		return policy.ErrConflict
+	}
+	return nil
+}
+
+// validateContainment checks the supervisor against the attempt's ownership
+// scope: its own process group for a process tree, the kernel container otherwise.
+func (p *Prepared) validateContainment(owner *contract.ProcessOwner) error {
+	if p.processTree() {
+		if owner.Supervisor.GroupID != owner.Supervisor.PID {
+			return policy.ErrIneligible
+		}
+		return nil
+	}
+	contained, err := p.launch.Containment.Contains(owner.Supervisor.PID)
+	if err != nil || !contained {
 		return policy.ErrConflict
 	}
 	return nil

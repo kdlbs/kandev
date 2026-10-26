@@ -134,3 +134,17 @@ The same-host/different-port callback probe disproved the earlier exact-port inf
 The dedicated provider now requires the generic `egress_proxy` capability for TCP grants. Core owns a per-attempt CONNECT relay that accepts only captured host/port pairs. The plugin binds its private `network.upstream_proxy` field to that relay. No allow-all rule, provider-specific path in core, or change to the pinned runtime is required. The pinned external-proxy path carries both CONNECT and ordinary HTTP forwarding through the upstream relay. Operator file approvals remain a separate private listener whose port cannot match any approved network port.
 
 The negative test remains the release gate: permitted destination succeeds, direct callback access fails, and a proxy tunnel to the callback fails even when another port on the same loopback host is permitted. The initial failing evidence is `/tmp/kandev-nono-runtime-private-boundary.log`. This finding invalidates earlier claims that Nono's plain host/port syntax alone enforces exact ports.
+
+## macOS 27 measured baseline
+
+Nono 0.80.0 on macOS 27, Apple Silicon, measured 2026-10-25 with a canary harness shaped like a Worktree launch (repository plus linked worktree, child started in the worktree). Only allowed or denied and exit codes were recorded.
+
+- Default posture blocks other home directories, other task worktrees, `~/.ssh`, browser and Safari data, and a planted keychain item, including for child processes. ACP `initialize` and `session/new` pass through stdio with zero non-JSON stdout lines. Child exit codes pass through. SIGTERM to Nono exits 143 and reaps the child.
+- Keychain login and keychain protection are mutually exclusive. Under Nono, Claude Code reports `loggedIn: false` and `session/new` slows from about 1.4 s to about 20 s on the logged-out path. `--bypass-protection` on the login keychain, which also needs a matching `--allow-file` grant, restores login but lets the child extract every keychain item. Credentials must therefore come through policy environment keys.
+- Nono's default macOS groups grant read-write on `/private/tmp` and `/private/var/folders`. The design excludes them and uses a per-attempt TMPDIR. The exact provider option that removes them is recorded by Build in the acceptance record.
+- git fails without read access to `~/.gitconfig`. A per-attempt `GIT_CONFIG_GLOBAL` replaces it.
+- Linked-worktree commits need write on the common directory's `objects`, `refs`, `logs`, and `worktrees/<self>`. Granting the whole common directory also exposes `hooks` and `config`. A granular grant worked and kept them read-only.
+- Nono's denial summary is unreliable on macOS: a real `~/.gitconfig` denial produced "No path denials were observed during this session".
+- Nono's dangerous-command list is a deprecated top-level check and is ignored.
+- File-capability approvals use seccomp notify and are Linux only. Only network and command approvals exist on macOS.
+- Startup overhead is about 150 to 320 ms per launch.

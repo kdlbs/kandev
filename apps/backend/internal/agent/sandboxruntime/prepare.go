@@ -27,7 +27,7 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 	if previous != nil && (previous.Snapshot.Provider.Version != binding.Version || previous.Snapshot.Provider.PackageDigest != binding.PackageDigest) {
 		return nil, policy.ErrIneligible
 	}
-	p := &Prepared{manager: m, orgID: req.Selection.OrgID, binding: binding, protectedPorts: slices.Clone(req.ProtectedPorts)}
+	p := &Prepared{manager: m, orgID: req.Selection.OrgID, binding: binding, protectedPorts: slices.Clone(req.ProtectedPorts), scope: hostOwnershipScope()}
 	p.selectionDigest, err = selectionDigest(resolved, binding)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 	if m.closed {
 		return nil, policy.ErrConflict
 	}
-	_, err = m.policies.CaptureAttempt(ctx, policy.CaptureRequest{RestartOf: req.RestartOf, Selection: req.Selection, Resolved: resolved, SessionID: req.SessionID, ExecutionID: req.ExecutionID, WorkDir: req.WorkDir, AgentState: p.agentState, Launch: p.launch, Provider: policy.AttemptProvider{PluginID: binding.PluginID, InstallationID: binding.InstallationID, Key: binding.ProviderKey, Version: binding.Version, PackageDigest: binding.PackageDigest, RuntimeVersion: p.description.RuntimeVersion, RuntimeDigest: binary.Digest}})
+	_, err = m.policies.CaptureAttempt(ctx, policy.CaptureRequest{OwnershipScope: p.scope, RestartOf: req.RestartOf, Selection: req.Selection, Resolved: resolved, SessionID: req.SessionID, ExecutionID: req.ExecutionID, WorkDir: req.WorkDir, AgentState: p.agentState, Launch: p.launch, Provider: policy.AttemptProvider{PluginID: binding.PluginID, InstallationID: binding.InstallationID, Key: binding.ProviderKey, Version: binding.Version, PackageDigest: binding.PackageDigest, RuntimeVersion: p.description.RuntimeVersion, RuntimeDigest: binary.Digest}})
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *po
 	facts := &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: "local"}
 	description, err := p.manager.providers.DescribeSandboxProvider(ctx, p.binding, &pluginsdk.DescribeSandboxProviderRequest{Context: p.request, Runtime: facts})
 	if err != nil {
-		return nil, nil, contract.Grants{}, err
+		return nil, nil, contract.Grants{}, HostRefusal(err)
 	}
 	p.description = description.Description
 	if !slices.Contains(p.description.SupportedTransports, "local") {
@@ -114,6 +114,11 @@ func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *po
 	facts.RuntimeVersion, facts.RuntimeDigest = p.description.RuntimeVersion, binary.Digest
 	if err = p.prepareAgentState(req, resolved); err != nil {
 		return nil, nil, contract.Grants{}, err
+	}
+	if p.processTree() {
+		if p.reserved, err = contract.ReserveRuntimeRoot(p.manager.base); err != nil {
+			return nil, nil, contract.Grants{}, err
+		}
 	}
 	grants, err := contract.ResolveAttemptGrants(resolved.Revision.Policy.Grants, req.WorkDir, p.agentState, []string{p.manager.base}, req.SessionID)
 	if err != nil {

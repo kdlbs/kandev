@@ -4,6 +4,7 @@ package sandboxruntime
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
@@ -13,6 +14,25 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
+
+// hostGOOS selects the ownership model; tests replace it.
+var hostGOOS = runtime.GOOS
+
+func hostOwnershipScope() string {
+	if hostGOOS == "darwin" {
+		return policy.OwnershipProcessTree
+	}
+	return ""
+}
+
+// HostRefusal maps a provider's host refusal to the stable host code, only when
+// the core host is darwin; on any other host the refusal stays a provider-unavailable error.
+func HostRefusal(err error) error {
+	if hostGOOS == "darwin" && errors.Is(err, plugins.ErrSandboxHostUnsupported) {
+		return policy.ErrHostUnsupported
+	}
+	return err
+}
 
 type PrepareRequest struct {
 	RestartOf                       string
@@ -48,6 +68,8 @@ type Prepared struct {
 	launch          *contract.Launch
 	agentState      *contract.AgentState
 	files           *contract.RuntimeFiles
+	scope           string
+	reserved        *contract.ReservedRoot
 	channel         *policy.ApprovalChannel
 	egress          *sandboxproxy.Proxy
 	mcp             *sandboxmcp.Relay
@@ -68,6 +90,8 @@ func NewManager(policies *policy.Service, providers *plugins.Service, base strin
 }
 
 func (p *Prepared) Launch() *contract.Launch { return p.launch.Clone() }
+
+func (p *Prepared) processTree() bool { return p.scope == policy.OwnershipProcessTree }
 
 func (m *Manager) Close() error {
 	m.mu.Lock()

@@ -67,6 +67,9 @@ func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
 // If mcpBackendClient is provided, the agent stream becomes bidirectional for MCP.
 func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
+	probeSandboxHost(func(err error) {
+		log.Warn("sandbox host probe failed; sandbox-launch.v1 is not advertised", zap.Error(err))
+	})
 
 	s := &Server{
 		cfg:              cfg,

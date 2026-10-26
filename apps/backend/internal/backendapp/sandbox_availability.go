@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/sandbox"
+	"github.com/kandev/kandev/internal/agent/sandboxruntime"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -23,7 +24,7 @@ func checkSandboxInstallation(ctx context.Context, providers *plugins.Service, r
 		Context: request, Runtime: &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: "local"},
 	})
 	if err != nil {
-		return err
+		return sandboxruntime.HostRefusal(err)
 	}
 	if !slices.Contains(described.Description.SupportedTransports, "local") {
 		return sandbox.ErrIneligible
