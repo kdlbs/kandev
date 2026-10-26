@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"path/filepath"
@@ -13,6 +14,41 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/testutil"
 )
+
+func TestAgentDeliverySegmentationColumnsAreAddedByRunMigrations(t *testing.T) {
+	for _, engine := range []string{"SQLite", "Postgres"} {
+		t.Run(engine, func(t *testing.T) {
+			repo := newRetentionTestRepo(t, engine)
+			for _, column := range agentDeliverySegmentationColumns {
+				query := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", column.table, column.column)
+				if dialect.IsPostgres(repo.db.DriverName()) {
+					query = fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS %s", column.table, column.column)
+				}
+				if _, err := repo.db.Exec(query); err != nil {
+					t.Fatalf("remove %s.%s to simulate pre-migration schema: %v", column.table, column.column, err)
+				}
+			}
+
+			if err := repo.initAgentDeliverySchema(); err != nil {
+				t.Fatalf("run schema initialization before migrations: %v", err)
+			}
+			for _, column := range agentDeliverySegmentationColumns {
+				if deliveryRetentionColumnNames(t, repo.db, column.table)[column.column] {
+					t.Fatalf("schema initialization added %s.%s before runMigrations", column.table, column.column)
+				}
+			}
+
+			if err := repo.runMigrations(context.Background()); err != nil {
+				t.Fatalf("run additive delivery segmentation migrations: %v", err)
+			}
+			for _, column := range agentDeliverySegmentationColumns {
+				if !deliveryRetentionColumnNames(t, repo.db, column.table)[column.column] {
+					t.Errorf("runMigrations did not add %s.%s", column.table, column.column)
+				}
+			}
+		})
+	}
+}
 
 func TestDeliveryRetentionSchemaUpgradePreservesPreRetentionEvidence(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {

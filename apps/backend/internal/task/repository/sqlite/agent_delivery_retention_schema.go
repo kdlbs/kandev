@@ -154,23 +154,6 @@ func (r *Repository) initAgentDeliveryRetentionSchema() error {
 			return err
 		}
 	}
-	for _, column := range agentDeliverySegmentationColumns {
-		exists, err := db.ColumnExistsContext(r.migrationContext(), r.db, column.table, column.column)
-		if err != nil {
-			return fmt.Errorf("check agent delivery segmentation column %s.%s: %w", column.table, column.column, err)
-		}
-		if exists {
-			continue
-		}
-		query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", column.table, column.column, column.definition)
-		if dialect.IsPostgres(r.db.DriverName()) {
-			query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s", column.table, column.column, column.definition)
-		}
-		if err := r.migrate.Apply("agent_delivery_segmentation.column."+column.table+"."+column.column, query); err != nil {
-			return err
-		}
-	}
-
 	if err := r.migrate.Apply("agent_delivery_cleanup_jobs.table", `
 		CREATE TABLE IF NOT EXISTS agent_delivery_cleanup_jobs (
 			session_id TEXT NOT NULL,
