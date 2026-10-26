@@ -470,6 +470,7 @@
       "stability": "stable",
       "docs": [
         "executors",
+        "automation-and-mcp",
         "remote-cloud-environment",
         "docker",
         "k8s"
@@ -479,6 +480,11 @@
         "apps/backend/internal/agent/kubernetes/config.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes.go",
         "apps/backend/internal/kubernetes/handlers.go",
+        "apps/backend/internal/mcp/server/config_handlers.go",
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/mcp/handlers/handlers.go",
+        "apps/backend/internal/task/service/executor_provider_catalog.go",
+        "apps/backend/internal/task/service/service_requests.go",
         "apps/web/app/settings/executors/page.tsx",
         "apps/web/app/settings/executors/k8s/[executorId]/page.tsx",
         "k8s/executor-rbac.yaml"
@@ -486,6 +492,11 @@
       "tests": [
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_test.go",
         "apps/backend/internal/kubernetes/handlers_test.go",
+        "apps/backend/internal/mcp/server/server_test.go",
+        "apps/backend/internal/mcp/server/task_executor_discovery_integration_test.go",
+        "apps/backend/internal/mcp/handlers/config_handlers_test.go",
+        "apps/backend/internal/mcp/handlers/handlers_test.go",
+        "apps/backend/internal/mcp/handlers/create_task_self_placement_inheritance_test.go",
         "apps/backend/internal/task/service/service_resources_kubernetes_test.go",
         "apps/web/components/settings/kubernetes-config.test.ts",
         "apps/web/e2e/tests/docker/docker-launch.spec.ts",

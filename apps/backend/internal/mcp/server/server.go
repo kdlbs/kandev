@@ -1390,10 +1390,11 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
 	)
+	s.registerListExecutorsTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_executor_profiles_kandev",
-			mcp.WithDescription("List all profiles for an executor. Use this to find available executor_profile_ids for create_task_kandev. Standard executor IDs: exec-local (standalone process), exec-worktree (git worktree), exec-local-docker (Docker container), exec-sprites (cloud)."),
-			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID (e.g. exec-local, exec-worktree, exec-local-docker, exec-sprites)")),
+			mcp.WithDescription("List profiles for the specified executor. Call list_executors_kandev first to discover visible executors and their profiles, including custom executor IDs. A returned profile ID can be selected with executor_profile_id in create_task_kandev."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID returned by list_executors_kandev")),
 		),
 		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
 	)

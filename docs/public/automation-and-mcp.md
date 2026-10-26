@@ -384,6 +384,21 @@ An active turn keeps its current MCP list. Existing task sessions save a desired
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
 
+### Discover executors and profiles
+
+Call `list_executors_kandev` without arguments to list the executors and
+profiles available to the task caller. The catalogue includes custom executor
+IDs. It filters foreign-owned executors and profiles, including foreign
+profiles on a shared executor. A visible executor can have no visible profiles.
+
+Use a returned profile ID as `executor_profile_id` in `create_task_kandev`.
+`list_executor_profiles_kandev(executor_id)` remains available when you need
+to look up profiles for one known executor. Discovery does not authorize a
+future launch: task creation and executor admission check current ownership.
+With authentication disabled, the existing single-user identity can see all
+resources. See [Private executors and profiles](executors.md#private-executors-and-profiles)
+for the ownership rules.
+
 ### Manage linked pull and merge requests
 
 Task MCP provides one shared contract for GitHub pull requests and GitLab merge
@@ -877,7 +892,7 @@ A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Board lookups and task lifecycle    | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors.                               |
+| Board lookups and task lifecycle    | List workspaces, workflows, workflow steps, tasks, agents, executors, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors.                               |
 | Coordination                        | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. See [Agent Communication](agent-communication.md) for delivery semantics, bidirectional reply patterns, and a worked example. |
 | User interaction                    | Ask a structured question when the current agent/session supports it.                                                                                                                                                                                              |
 | Plans                               | Create, get, update, and delete the current task plan; apply exact edits; list, read, and restore revisions.                                                                                                                                                        |
