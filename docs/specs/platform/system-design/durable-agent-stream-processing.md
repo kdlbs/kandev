@@ -71,18 +71,30 @@ tool call therefore share one canonical message ID. Keep base and resolved
 identity distinct: retries and reconnects derive only from the base, never
 from an already-resolved ID. Do not mutate caller-owned event payloads before
 the transaction commits. Reasoning messages and messages with a native protocol
-ID keep their existing identity rules. The projector persists the resolved
-canonical ID with the event's lifecycle metadata and returns the exact
-committed ID to the notification path. Store it in a dedicated inbox column as
-well as the reconstructable payload metadata, so payload pruning does not
-erase the ID needed by a duplicate projection result.
+ID keep their existing identity rules. The `canonical_message_id` inbox column
+is the authoritative committed projection ID. The projector persists it in the
+same transaction as the event's reconstructable payload metadata and returns
+that exact committed value to the notification path. `canonical_message_id` is
+projection-only metadata; transport identity and payload hash comparisons
+exclude it, and duplicate admission preserves the column value.
+
+Payload compaction changes the payload, pruning timestamp, hash, and byte count
+without changing `canonical_message_id`. For a projected row created before
+the column existed, an empty column may fall back to the exact ID in an
+unpruned stored payload. If that payload has already been pruned, duplicate
+projection returns an empty ID and suppresses notification. It does not infer
+an ID from incoming reconstructed metadata or the current segment boundary,
+rewrite a transcript row, or notify a row that cannot be identified. This
+fallback applies only while the inbox receipt still exists. Whole-row receipt
+retirement deletes the column with the receipt, advances `retired_sequence`,
+and retains the existing expired-replay rejection semantics.
 
 An unprojected retained event resolves its canonical ID from the SQL cursor in
 sequence order. Projection persists that resolved ID with the event and message
-effect before advancing the cursor. An already projected event returns its
-stored column value and is not rewritten. The inbox ID, boundary, and message
-effect commit atomically, so restart, duplicate delivery, and partial batch
-retries cannot advance them independently.
+effect before advancing the cursor, then exposes the result only after commit.
+An already projected event returns its stored column value and is not rewritten.
+The inbox ID, boundary, and message effect commit atomically, so restart,
+duplicate delivery, and partial batch retries cannot advance them independently.
 Add the boundary column as nullable for pre-existing streams. On their first
 projection after upgrade, initialize a NULL boundary once from the then-current
 projected sequence, or from the current sequence if that event is itself a

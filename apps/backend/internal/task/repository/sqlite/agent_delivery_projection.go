@@ -356,9 +356,9 @@ func (r *Repository) markCanonicalDeliveryBatchProjectedTx(
 			}
 			if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 				UPDATE agent_delivery_inbox
-				SET payload = ?, canonical_message_id = ?, projected_at = ?
+				SET payload = ?, payload_bytes = ?, canonical_message_id = ?, projected_at = ?
 				WHERE stream_id = ? AND sequence = ?`),
-				payload, item.agentEvent.CanonicalMessageID, now,
+				payload, len(payload), item.agentEvent.CanonicalMessageID, now,
 				item.stored.StreamID, item.stored.Sequence); err != nil {
 				return err
 			}

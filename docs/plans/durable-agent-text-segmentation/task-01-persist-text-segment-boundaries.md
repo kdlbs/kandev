@@ -1,7 +1,7 @@
 ---
 id: "01-persist-text-segment-boundaries"
 title: "Persist and project durable text segment boundaries"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -22,17 +22,20 @@ system_design:
 
 ## Summary
 
-Make top-level tool starts durable message boundaries for ID-less assistant text. Store the boundary with the SQL projected cursor, resolve and persist canonical message identity atomically, and preserve existing projected history and legacy behavior.
+Make top-level tool starts durable message boundaries for ID-less assistant text. Store the boundary with the SQL projected cursor, persist the authoritative committed canonical ID in the inbox atomically, and preserve existing projected history and legacy behavior.
 
 ## In scope
 
-- Add and migrate the SQL cursor boundary in SQLite and PostgreSQL.
+- Add and migrate the SQL cursor boundary and additive inbox canonical-ID column in SQLite and PostgreSQL.
 - Advance it only when a top-level tool call projects.
 - Resolve durable text segment IDs in canonical projection and return committed IDs to lifecycle notifications.
 - Add lifecycle, repository, migration, restart, duplicate, and browser regressions.
 - Resolve IDs from a stable base identity plus the committed boundary. Never re-hash an already-resolved ID or mutate caller-owned events before commit; duplicate projection returns the exact stored committed ID.
 - Update every top-level tool projection route, including normal projection, retained replay, and canonical shell-start projection. Persist boundaries with the projected cursor in event sequence order, including mixed batches. Nested tools and tool updates remain non-boundaries.
 - Initialize legacy cursor boundaries once without resetting valid values on reopen; cover nonzero projected cursors, pruned payloads, and owner/generation/cursor updates.
+- Treat `canonical_message_id` as the authoritative committed projection ID. Payload compaction preserves it; whole-row retirement deletes it with the receipt and keeps expired-replay rejection.
+- For old projected rows with an empty column, use a retained payload ID only when its payload is still available. A pruned payload yields no ID and no notification; do not infer one from incoming metadata or the current boundary.
+- Keep projection-only canonical IDs out of transport identity/hash checks, and ensure duplicate admission preserves the stored column.
 - Update plan results after implementation and synchronize the plan status.
 
 ## Out of scope
@@ -46,6 +49,7 @@ Make top-level tool starts durable message boundaries for ID-less assistant text
 
 - Text chunks before and after top-level tool starts project to separate assistant rows; multiple chunks within each segment coalesce. Nested tool calls and tool updates do not split rows.
 - Duplicate delivery, batching, partial projection, replay, reconnect, and backend or agentctl restart retain the same committed message IDs. Existing projected messages remain unchanged, and legacy delivery remains unchanged.
+- Projection results expose only committed IDs. When an old pruned receipt has no stored ID, duplicate projection leaves it unchanged and sends no notification. Payload pruning preserves the ID; whole-row expiration retains the existing typed replay rejection.
 - SQLite and PostgreSQL schema upgrades initialize existing cursors once, including nonzero projected cursors and pruned payloads, and preserve the projection transaction invariant.
 - Failure injection proves rollback leaves the stored base identity, boundary, message effect, and cursor unchanged; retry commits the same identity. A duplicate after a later boundary returns the original committed ID.
 
@@ -54,12 +58,11 @@ Make top-level tool starts durable message boundaries for ID-less assistant text
 Run from the repository root after implementation.
 
 ```bash
-(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/task/repository/sqlite -run 'TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity|TestCanonicalDeliveryTextSegments|TestCanonicalDeliveryTextSegment|TestCanonicalDeliverySegment' -count=1)
-(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/task/repository/sqlite ./internal/orchestrator -count=1)
-(cd apps/backend && go test -race ./internal/task/repository/sqlite -run '^TestCanonicalDeliverySegmentBoundaryMigration$' -count=1)
-(cd apps/backend && go test -race ./internal/task/repository/sqlite -run '^TestCanonicalDeliverySegmentBoundaryPostgres$' -v -count=1)
-(cd apps/backend && go run ./cmd/sqlguard ./internal)
-(cd apps/backend && go test -race ./internal/persistence/storeconformance -count=1)
+(cd apps/backend && go test -race -trimpath -p 1 -parallel 4 ./internal/agent/runtime/lifecycle -run 'TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity|TestCanonicalProjectionDoesNotNotifyWithoutCommittedMessageID|TestCanonicalProjectionBatchSkipsRowsWithoutCommittedMessageID' -count=1)
+(cd apps/backend && go test -race -trimpath -p 1 -parallel 4 ./internal/task/repository/sqlite -run 'TestCanonicalDeliveryTextSegments|TestCanonicalDeliveryTextSegment|TestCanonicalDeliverySegment|TestCanonicalDeliveryRetentionPruneRestartAndDuplicatePreserveCommittedID|TestCanonicalDeliveryPreUpgradePrunedReceiptDoesNotInventIdentity|TestDeliveryRetentionIntegration$|TestDeliveryRetentionSchemaUpgradePreservesPreRetentionEvidence' -count=1)
+(cd apps/backend && go test -race -trimpath -p 1 -parallel 4 -v ./internal/task/repository/sqlite -run '^(TestDeliveryRetentionSchemaUpgradePreservesPreRetentionEvidence|TestCanonicalDeliveryPreUpgradePrunedReceiptDoesNotInventIdentity)$/^Postgres$' -count=1)
+(cd apps/backend && go run -trimpath ./cmd/sqlguard ./internal)
+(cd apps/backend && go test -race -trimpath -p 1 -parallel 4 ./internal/persistence/storeconformance -count=1)
 (cd apps/web && pnpm e2e:run tests/chat/durable-agent-message-segments.spec.ts)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -108,26 +111,31 @@ None.
 
 ## Results
 
-Implementation is complete. SQLite stores the top-level tool boundary beside
-the projected cursor and commits it atomically with message effects. Canonical
-text IDs derive from a stable base and committed boundary, are persisted in
-the inbox for replay after pruning, and are returned exactly for duplicates.
-New and legacy SQLite/PostgreSQL schemas use additive columns; existing
-transcript rows remain untouched. Normal projection, retained replay, and
-canonical shell-start routes preserve ordered boundaries.
+The implementation changes are complete, but this work order remains in
+progress because broad SQLite and PostgreSQL verification are incomplete.
+SQLite stores the top-level tool boundary beside the projected cursor and
+commits it atomically with message effects. Canonical text IDs derive from a
+stable base and committed boundary. The inbox `canonical_message_id` column
+is the authoritative committed ID; payload compaction retains it, and
+duplicates return the exact stored value. New and legacy SQLite/PostgreSQL
+schemas use additive columns; existing transcript rows remain untouched.
+Normal projection, retained replay, and canonical shell-start routes preserve
+ordered boundaries.
 
 Verification results:
 
-- Focused race command passed for `TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity`,
-  text segmentation, rollback/retry, duplicate-after-later-boundary, reopen,
-  and boundary migration tests. Lifecycle passed in 1.4s; SQLite passed in
-  17.4s.
-- SQLite upgrade command `go test -race -p 1 -parallel 4 ./internal/task/repository/sqlite -run '^TestCanonicalDeliverySegmentBoundaryMigration$' -count=1` passed.
-- PostgreSQL command `go test -race -p 1 -parallel 4 ./internal/task/repository/sqlite -run '^TestCanonicalDeliverySegmentBoundaryPostgres$' -v -count=1` skipped because `KANDEV_TEST_POSTGRES_DSN` is unset. PostgreSQL migration behavior remains unverified locally.
-- The Chromium durable-v1 E2E passed 1/1 test. It ingested mock events through the durable stream, verified the durable-only disconnect, coalesced multiple text chunks on each side of a tool row, and rechecked transcript order and content after reload.
-- `go run ./cmd/sqlguard ./internal`, `go test -race ./internal/persistence/storeconformance -count=1`, changed-Go lint (0 issues), `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
-- Broad controlled race command `go test -race -p 1 -parallel 4 -timeout 20m ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/task/repository/sqlite ./internal/orchestrator -count=1` passed lifecycle (402s), agentctl (6.9s), and orchestrator (561s). SQLite reached its 20-minute package timeout during core schema initialization under shared-runner I/O contention; no assertion failure was reported. The earlier default-timeout broad run also timed out in lifecycle, SQLite, and orchestrator.
+- Change-aware race command `go test -race -trimpath -p 1 -parallel 4 ./internal/agent/runtime/lifecycle -run 'TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity|TestCanonicalProjection' -count=1` passed (1.26s).
+- Change-aware race command `go test -race -trimpath -p 1 -parallel 4 -v ./internal/task/repository/sqlite -run 'TestCanonicalDeliveryTextSegments|TestCanonicalDeliveryTextSegment|TestCanonicalDeliverySegment|TestCanonicalDeliveryRetentionPruneRestartAndDuplicatePreserveCommittedID|TestCanonicalDeliveryPreUpgradePrunedReceiptDoesNotInventIdentity|TestDeliveryRetentionIntegration$|TestDeliveryRetentionSchemaUpgradePreservesPreRetentionEvidence' -count=1` passed (26.0s). SQLite segmentation, rollback/retry, real payload pruning and reopen, empty-ID fallback, schema upgrade, and whole-row expiry cases passed. The PostgreSQL subtests reported `set KANDEV_TEST_POSTGRES_DSN to run Postgres tests` and skipped.
+- `pnpm e2e:run tests/chat/durable-agent-message-segments.spec.ts` passed 1/1 Chromium test (13.2s), after rebuilding backend and Vite assets. The test ingested through durable-v1, verified disconnect, text/tool/text order and multi-chunk coalescing, then reloaded and checked the transcript.
+- `go run -trimpath ./cmd/sqlguard ./internal` passed. `go test -race -trimpath -p 1 -parallel 4 ./internal/persistence/storeconformance -count=1` passed (65.9s). Changed-Go lint reported 0 issues. `python3 scripts/list-docs.py validate` validated 404 decisions and 1741 specifications; `python3 scripts/lint-spec-files.py --all` and `git diff --check` passed.
+- PostgreSQL schema-upgrade and fallback tests were attempted through the `Postgres` subtests and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset. PostgreSQL behavior remains unverified locally.
 
-The focused regression suite and durable-v1 browser test pass. The remaining
-verification limitations are the unavailable PostgreSQL DSN and the broad
-SQLite package timeout under shared-runner load.
+Broad SQLite diagnostic, recorded separately from the focused passes:
+
+- Default-timeout command `go test -race -p 1 -parallel 4 ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/task/repository/sqlite ./internal/orchestrator -count=1` timed out in lifecycle, SQLite, and orchestrator; agentctl passed. This command failed overall.
+- Controlled command `go test -race -p 1 -parallel 4 -timeout 20m ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/task/repository/sqlite ./internal/orchestrator -count=1` passed lifecycle (402.4s), agentctl (6.9s), and orchestrator (561.1s), but timed out in SQLite at 20m during core schema initialization. This command failed overall.
+- Available timeout output identifies `TestCompleteActiveClarificationBundlePersistsRecoverableDeliveryIntent` in the `newRepoForSessionTests` core schema initialization path. The full goroutine stacks and lock/connection owners are not available because the original output was truncated and not saved; the cause is unresolved.
+- The isolated comparison command `go test -race -p 1 -parallel 4 -timeout 20m ./internal/task/repository/sqlite -run '^TestCompleteActiveClarificationBundlePersistsRecoverableDeliveryIntent$' -count=1` passed on unchanged base `7fb28fc022d5320922608bf57cc9fd9351a8b8da` (2.502s) and implementation `bbd2073ac8dd5b6fa51bb9c75ca19ee3f40b6d1c` (2.558s) under matching settings, with no concurrent Go tests. It does not reproduce the test failure in isolation and does not establish the cause of the broad timeout.
+
+The work order remains `in_progress`: targeted paths pass, but full SQLite
+package verification and PostgreSQL verification are incomplete.

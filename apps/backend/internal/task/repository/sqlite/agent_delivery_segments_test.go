@@ -215,6 +215,7 @@ func TestCanonicalDeliveryTextSegmentRollbackRetryAndDuplicate(t *testing.T) {
 	_, err = repo.ProjectCanonicalAgentDeliveryEvent(ctx, textEvent, nil)
 	require.Error(t, err)
 	require.Equal(t, originalPayload, textEvent.Payload, "projection failure must not leak a tentative ID into the caller event")
+	require.Empty(t, textEvent.CanonicalMessageID, "projection failure must not leak a tentative ID into the caller event")
 	var storedPayload []byte
 	require.NoError(t, repo.db.Get(&storedPayload, "SELECT payload FROM agent_delivery_inbox WHERE stream_id = 'retry-segment-stream' AND sequence = 2"))
 	require.Equal(t, originalPayload, storedPayload)
@@ -257,6 +258,189 @@ func TestCanonicalDeliveryTextSegmentRollbackRetryAndDuplicate(t *testing.T) {
 	require.NoError(t, repo.db.Get(&committedContent, repo.db.Rebind(`
 		SELECT content FROM task_session_messages WHERE id = ?`), firstCommittedID))
 	require.Equal(t, "retry", committedContent, "a duplicate must not repeat the message effect")
+}
+
+func TestCanonicalDeliveryRetentionPruneRestartAndDuplicatePreserveCommittedID(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "delivery-segment-retention.db")
+	var database *sqlx.DB
+	openDatabase := func() *sqlx.DB {
+		raw, err := internaldb.OpenSQLite(databasePath)
+		require.NoError(t, err)
+		database = sqlx.NewDb(raw, "sqlite3")
+		return database
+	}
+	t.Cleanup(func() {
+		if database != nil {
+			_ = database.Close()
+		}
+	})
+
+	database = openDatabase()
+	repo, err := NewWithDB(database, database, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	seedAgentDeliveryTestSession(t, repo, "retained-segment-session", "retained-segment-incarnation")
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	repo.clockNow = func() time.Time { return now }
+	submission := &models.AgentDeliverySubmission{
+		ID: "prompt:retained-segment", SessionID: "retained-segment-session",
+		IncarnationID: "retained-segment-incarnation", HarnessGeneration: 1,
+		OwnerGeneration: 1, PayloadHash: "retained-segment-prompt-hash",
+		Payload: []byte("protected prompt"), State: models.DeliverySubmissionDispatching,
+	}
+	_, err = repo.PrepareAgentDeliverySubmission(ctx, submission)
+	require.NoError(t, err)
+	textEvent := canonicalTextSegmentEventFor(t, submission.SessionID, submission.IncarnationID, "retained-segment-stream", 1, "retained text")
+	textEvent.SubmissionID = submission.ID
+	textEvent.ReceivedAt = now
+	inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, textEvent, 1)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	projection, err := repo.ProjectCanonicalAgentDeliveryEvent(ctx, textEvent, completedRetentionEventEffect(textEvent))
+	require.NoError(t, err)
+	committedID := projection.CanonicalMessageID
+	require.NotEmpty(t, committedID)
+
+	now = now.Add(2 * time.Hour)
+	retention, err := repo.RunAgentDeliveryRetentionBatch(ctx, models.AgentDeliveryRetentionBatchOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, retention.EventPayloadsPruned)
+	require.Zero(t, retention.EventRowsRetired, "the dispatching submission keeps the receipt available for replay")
+	var compacted struct {
+		Payload       []byte     `db:"payload"`
+		PayloadPruned *time.Time `db:"payload_pruned_at"`
+		CanonicalID   string     `db:"canonical_message_id"`
+	}
+	require.NoError(t, database.Get(&compacted, database.Rebind(`
+		SELECT payload, payload_pruned_at, canonical_message_id FROM agent_delivery_inbox
+		WHERE stream_id = ? AND sequence = ?`), textEvent.StreamID, textEvent.Sequence))
+	require.Empty(t, compacted.Payload)
+	require.NotNil(t, compacted.PayloadPruned)
+	require.Equal(t, committedID, compacted.CanonicalID, "payload compaction preserves the authoritative committed ID")
+
+	require.NoError(t, database.Close(), "simulate backend shutdown after retention compaction")
+	database = openDatabase()
+	repo, err = NewWithDB(database, database, nil)
+	require.NoError(t, err, "reopen after payload compaction")
+	laterTool := canonicalToolBoundaryEventFor(t, submission.SessionID, submission.IncarnationID, textEvent.StreamID, 2)
+	laterTool.ReceivedAt = now
+	inserted, err = repo.ReceiveAgentDeliveryEvent(ctx, laterTool, 2)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	_, err = repo.ProjectAgentDeliveryEvent(ctx, laterTool, nil)
+	require.NoError(t, err)
+	requireSegmentBoundary(t, database, textEvent.StreamID, 2)
+
+	var reconstructed streams.AgentEvent
+	require.NoError(t, json.Unmarshal(textEvent.Payload, &reconstructed))
+	reconstructed.CanonicalMessageBaseID = "reconstructed-base-must-be-ignored"
+	reconstructed.CanonicalMessageID = "reconstructed-id-must-be-ignored"
+	duplicatePayload, err := json.Marshal(reconstructed)
+	require.NoError(t, err)
+	duplicate := *textEvent
+	duplicate.Payload = duplicatePayload
+	duplicate.CanonicalMessageID = "model-field-must-not-replace-stored-id"
+	inserted, err = repo.ReceiveAgentDeliveryEvent(ctx, &duplicate, 2)
+	require.NoError(t, err)
+	require.False(t, inserted, "duplicate admission must preserve the projected receipt")
+	duplicateProjection, err := repo.ProjectCanonicalAgentDeliveryEvent(ctx, &duplicate, nil)
+	require.NoError(t, err)
+	require.Equal(t, committedID, duplicateProjection.CanonicalMessageID,
+		"a duplicate after reopen and a later boundary returns the exact stored ID")
+	require.Equal(t, committedID, storedCanonicalMessageID(t, repo, textEvent.StreamID, textEvent.Sequence),
+		"duplicate admission and projection cannot replace the authoritative ID")
+	var content string
+	require.NoError(t, database.Get(&content, database.Rebind(`SELECT content FROM task_session_messages WHERE id = ?`), committedID))
+	require.Equal(t, "retained text", content, "replay must not repeat the message effect")
+}
+
+func TestCanonicalDeliveryPreUpgradePrunedReceiptDoesNotInventIdentity(t *testing.T) {
+	for _, engine := range []string{"SQLite", "Postgres"} {
+		t.Run(engine, func(t *testing.T) {
+			database := openDeliveryRetentionTestDB(t, engine)
+			seedPreRetentionDeliverySchema(t, database)
+			repo, err := NewWithDB(database, database, nil)
+			require.NoError(t, err, "upgrade the old receipt schema")
+			const sessionID = "legacy-pruned-session"
+			const incarnationID = "legacy-pruned-incarnation"
+			const streamID = "legacy-pruned-stream"
+			seedAgentDeliveryTestSession(t, repo, sessionID, incarnationID)
+			now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+			event := canonicalTextSegmentEventFor(t, sessionID, incarnationID, streamID, 1, "previously projected text")
+			event.ReceivedAt = now
+			inserted, err := repo.ReceiveAgentDeliveryEvent(t.Context(), event, 1)
+			require.NoError(t, err)
+			require.True(t, inserted)
+			_, err = database.Exec(database.Rebind(`
+				UPDATE agent_delivery_inbox
+				SET payload = ?, projected_at = ?, payload_pruned_at = ?, canonical_message_id = ''
+				WHERE stream_id = ? AND sequence = ?`), []byte{}, now, now, event.StreamID, event.Sequence)
+			require.NoError(t, err)
+			_, err = database.Exec(database.Rebind(`
+				UPDATE agent_delivery_cursors SET projected_sequence = ? WHERE stream_id = ?`), event.Sequence, event.StreamID)
+			require.NoError(t, err)
+
+			tool := canonicalToolBoundaryEventFor(t, sessionID, incarnationID, streamID, 2)
+			tool.ReceivedAt = now
+			inserted, err = repo.ReceiveAgentDeliveryEvent(t.Context(), tool, 2)
+			require.NoError(t, err)
+			require.True(t, inserted)
+			_, err = repo.ProjectAgentDeliveryEvent(t.Context(), tool, nil)
+			require.NoError(t, err)
+			requireSegmentBoundary(t, database, streamID, 2)
+
+			var reconstructed streams.AgentEvent
+			require.NoError(t, json.Unmarshal(event.Payload, &reconstructed))
+			reconstructed.CanonicalMessageBaseID = "incoming-base-must-not-be-used"
+			reconstructed.CanonicalMessageID = "incoming-id-must-not-be-used"
+			duplicatePayload, err := json.Marshal(reconstructed)
+			require.NoError(t, err)
+			duplicate := *event
+			duplicate.Payload = duplicatePayload
+			duplicate.CanonicalMessageID = "incoming-model-id-must-not-be-used"
+			inserted, err = repo.ReceiveAgentDeliveryEvent(t.Context(), &duplicate, 1)
+			require.NoError(t, err)
+			require.False(t, inserted)
+			result, err := repo.ProjectCanonicalAgentDeliveryEvent(t.Context(), &duplicate, nil)
+			require.NoError(t, err)
+			require.Empty(t, result.CanonicalMessageID,
+				"an old pruned receipt with no persisted ID cannot derive one from incoming metadata or a later boundary")
+			var retained struct {
+				Payload            []byte     `db:"payload"`
+				PayloadPrunedAt    *time.Time `db:"payload_pruned_at"`
+				CanonicalMessageID string     `db:"canonical_message_id"`
+				ProjectedAt        *time.Time `db:"projected_at"`
+			}
+			require.NoError(t, database.Get(&retained, database.Rebind(`
+				SELECT payload, payload_pruned_at, canonical_message_id, projected_at FROM agent_delivery_inbox
+				WHERE stream_id = ? AND sequence = ?`), event.StreamID, event.Sequence))
+			require.Empty(t, retained.Payload)
+			require.NotNil(t, retained.PayloadPrunedAt)
+			require.NotNil(t, retained.ProjectedAt)
+			require.Empty(t, retained.CanonicalMessageID)
+			var messageCount int
+			require.NoError(t, database.Get(&messageCount, database.Rebind(`
+				SELECT COUNT(*) FROM task_session_messages WHERE task_session_id = ? AND author_type = ?`),
+				event.SessionID, string(models.MessageAuthorAgent)))
+			require.Zero(t, messageCount, "fallback must not create or notify a transcript row whose ID was not retained")
+			cursor, err := repo.GetAgentDeliveryCursor(t.Context(), event.StreamID)
+			require.NoError(t, err)
+			require.EqualValues(t, 2, cursor.ProjectedSequence, "duplicate projection leaves the later committed cursor unchanged")
+
+			positiveControl := canonicalTextSegmentEventFor(t, sessionID, incarnationID, streamID, 3, "newly committed output")
+			positiveControl.ReceivedAt = now
+			inserted, err = repo.ReceiveAgentDeliveryEvent(t.Context(), positiveControl, 3)
+			require.NoError(t, err)
+			require.True(t, inserted)
+			positiveProjection, err := repo.ProjectCanonicalAgentDeliveryEvent(t.Context(), positiveControl, nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, positiveProjection.CanonicalMessageID)
+			require.NoError(t, database.Get(&messageCount, database.Rebind(`
+				SELECT COUNT(*) FROM task_session_messages WHERE task_session_id = ? AND author_type = ?`),
+				sessionID, string(models.MessageAuthorAgent)))
+			require.Equal(t, 1, messageCount, "a fresh committed event still creates its transcript row")
+		})
+	}
 }
 
 func TestCanonicalDeliveryTextSegmentBoundarySurvivesDatabaseReopen(t *testing.T) {

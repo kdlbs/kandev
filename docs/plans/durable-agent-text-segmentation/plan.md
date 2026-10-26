@@ -76,13 +76,14 @@ existing idempotent projection requirement.
   identity from the existing canonical ID plus the cursor boundary. Keep the
   identity unchanged when the boundary is zero. Do not apply the suffix to
   native `ProtocolMessageID` values or reasoning events.
-- Persist each resolved canonical ID in the inbox event's reconstructable
-  lifecycle metadata in the projection transaction. Derive it from a stable
-  base identity plus the committed boundary, never from an already-resolved
-  ID. Do not mutate caller-owned event payloads before commit. Return the
-  exact IDs committed by SQL, including from already-projected duplicate paths.
-  Keep the committed ID in a dedicated inbox column so payload pruning does
-  not erase duplicate identity.
+- Persist each resolved canonical ID in the authoritative
+  `agent_delivery_inbox.canonical_message_id` column and in reconstructable
+  payload metadata in the projection transaction. Derive it from a stable base
+  identity plus the committed boundary, never from an already-resolved ID. Do
+  not mutate caller-owned event payloads before commit. Return the exact IDs
+  committed by SQL, including from already-projected duplicate paths. Payload
+  compaction preserves the dedicated column; it is the only duplicate identity
+  source after pruning.
 - Keep tool starts as non-batchable barriers. Compatible text chunks following
   one committed boundary continue to batch and append to one row.
 - Keep the normal `ProjectAgentDeliveryEvent` event order and transaction
@@ -105,9 +106,16 @@ existing idempotent projection requirement.
   `ProjectAgentDeliveryEvent`, retained replay, and canonical shell-start
   projection. Any mixed batch must advance boundaries in event sequence order.
   Nested tool calls and tool updates do not advance the boundary.
-- Keep canonical identity out of transport event identity checks, as it is
-  backend-reconstructed lifecycle metadata. A duplicate remains the same
-  transport event even when its resolved canonical ID is read from SQL.
+- Keep canonical identity out of transport event identity and payload-hash
+  checks, as it is backend-reconstructed projection metadata. Duplicate
+  admission preserves the stored column value even when incoming canonical
+  metadata differs.
+- For an older projected row with an empty column, use the stored payload ID
+  only while that payload is retained. A pruned payload and empty column return
+  no ID; do not derive one from incoming metadata or the current boundary, and
+  do not notify or rewrite a transcript row without a committed ID. Whole-row
+  receipt retirement deletes the ID with the receipt and keeps existing
+  expired-replay rejection semantics.
 
 ### Compatibility matrix
 
@@ -124,7 +132,7 @@ existing idempotent projection requirement.
 | Acceptance criterion | Regression evidence |
 | --- | --- |
 | AC-PLATFORM-DURABLE-AGENT-SEGMENTATION-001.1 | `apps/backend/internal/task/repository/sqlite/agent_delivery_segments_test.go`: `TestCanonicalDeliveryTextSegmentsSplitAtTopLevelToolStarts`, `TestCanonicalDeliveryTextSegmentsRespectMixedBatchOrder`, `TestCanonicalDeliveryTextSegmentsIgnoreNestedToolsAndUpdates`, `TestCanonicalDeliveryTextSegmentsPreserveNativeAndReasoningIdentity`, and `TestCanonicalDeliveryTextSegmentsSplitAtCanonicalShellStart`. Lifecycle `TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity` verifies stable base, native protocol, and reasoning identity rules. |
-| AC-PLATFORM-DURABLE-AGENT-SEGMENTATION-001.2 | SQLite `TestCanonicalDeliveryTextSegmentRollbackRetryAndDuplicate` injects projection failure, retries, then duplicates after a later boundary with a pruned payload. `TestCanonicalDeliveryTextSegmentBoundarySurvivesDatabaseReopen` closes and reopens SQLite, replays the prior event, and continues the same segment. `TestCanonicalDeliverySegmentBoundaryMigration` covers nonzero projected cursor, pruned history, first-projection initialization, and reopen; PostgreSQL runs the same migration path in `TestCanonicalDeliverySegmentBoundaryPostgres` when `KANDEV_TEST_POSTGRES_DSN` is configured. The browser test `durable-agent-message-segments.spec.ts` disconnects a live durable-v1 stream, checks text/tool/text ordering and chunk coalescing, then reloads and checks again. |
+| AC-PLATFORM-DURABLE-AGENT-SEGMENTATION-001.2 | SQLite `TestCanonicalDeliveryTextSegmentRollbackRetryAndDuplicate` injects projection failure and verifies retry/duplicate identity. `TestCanonicalDeliveryRetentionPruneRestartAndDuplicatePreserveCommittedID` uses the retention worker to prune, closes and reopens SQLite, advances a later boundary, then verifies duplicate admission and projection return the exact stored ID. `TestCanonicalDeliveryPreUpgradePrunedReceiptDoesNotInventIdentity` verifies an empty migrated column and pruned payload do not infer an ID or create a transcript row. `TestCanonicalProjectionDoesNotNotifyWithoutCommittedMessageID` and `TestCanonicalProjectionBatchSkipsRowsWithoutCommittedMessageID` verify single and batch lifecycle routes suppress notifications without a committed ID. Upgrade coverage asserts the additive column in SQLite and PostgreSQL; PostgreSQL tests run when `KANDEV_TEST_POSTGRES_DSN` is configured. Whole-row expiry remains covered by `TestDeliveryRetentionIntegration`. The browser test `durable-agent-message-segments.spec.ts` disconnects a live durable-v1 stream, checks text/tool/text ordering and chunk coalescing, then reloads and checks again. |
 
 ## E2E tests
 
@@ -141,24 +149,32 @@ records feed the shared chat transcript on phone.
 
 ## Work orders
 
-- [x] [Task 01: Persist and project durable text segment boundaries](task-01-persist-text-segment-boundaries.md) (done)
+- [ ] [Task 01: Persist and project durable text segment boundaries](task-01-persist-text-segment-boundaries.md) (in progress; verification limitations remain)
 
 ## Verification results
 
-The final focused race suite passed for the lifecycle identity tests and SQLite
-segment, rollback/retry, duplicate, reopen, and migration regressions. The
-Chromium E2E passed against durable-v1 ingestion and verified text/tool/text
-ordering, chunk coalescing, reconnect, and reload. SQLite migration, SQL guard,
-store conformance, Go lint, documentation validation, spec lint, and
-`git diff --check` passed.
+Task 01 remains in progress while broad SQLite verification is unresolved.
+Change-aware lifecycle and SQLite race tests passed, including real retention
+pruning and reopen, duplicate replay after a later boundary, old pruned-receipt
+fallback, schema upgrade, rollback/retry, and whole-row expiry. The Chromium
+durable-v1 E2E passed 1/1 after rebuilding backend and web assets. SQL guard,
+store conformance, changed-Go lint, documentation validation, spec lint, and
+`git diff --check` passed. PostgreSQL migration and fallback subtests skipped
+because `KANDEV_TEST_POSTGRES_DSN` is not configured.
 
-The PostgreSQL migration test was run with `-v` and skipped because
-`KANDEV_TEST_POSTGRES_DSN` is not configured in this environment. A controlled
-broad race run passed lifecycle, agentctl, and orchestrator packages; the SQLite
-package reached its 20-minute timeout during core schema initialization under
-shared-runner I/O contention, without an assertion failure. The default-timeout
-broad run also timed out in lifecycle, SQLite, and orchestrator. The focused
-SQLite and E2E regressions passed independently.
+Both broad race attempts failed overall. The default-timeout run timed out in
+lifecycle, SQLite, and orchestrator while agentctl passed. The controlled
+`-timeout 20m` run passed lifecycle, agentctl, and orchestrator but timed out in
+SQLite during core schema initialization. Available timeout output identifies
+`TestCompleteActiveClarificationBundlePersistsRecoverableDeliveryIntent` in
+the `newRepoForSessionTests` initialization path. The full goroutine stacks and
+lock/connection owners are unavailable because the original output was
+truncated and not saved. The isolated comparison of that test passed on both
+the unchanged base and implementation under matching settings (2.502s and
+2.558s); this shows it does not reproduce in isolation but does not establish
+the cause of the broad timeout. The full package and PostgreSQL verification
+gaps remain open. See the [Task 01 results](task-01-persist-text-segment-boundaries.md#results)
+for exact commands and outcomes.
 
 ## Risks
 

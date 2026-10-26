@@ -26,6 +26,15 @@ func TestDeliveryRetentionSchemaUpgradePreservesPreRetentionEvidence(t *testing.
 			}
 			assertPreRetentionDeliveryEvidence(t, db)
 			assertDeliveryRetentionSchema(t, repo)
+			var canonicalMessageID string
+			if err := db.Get(&canonicalMessageID, db.Rebind(`
+				SELECT canonical_message_id FROM agent_delivery_inbox
+				WHERE stream_id = ? AND sequence = 1`), "stream-settling"); err != nil {
+				t.Fatalf("read additive canonical message ID: %v", err)
+			}
+			if canonicalMessageID != "" {
+				t.Fatalf("pre-migration receipt ID = %q, want empty default", canonicalMessageID)
+			}
 			if err := assertNullSegmentBoundary(db, "stream-settling"); err != nil {
 				t.Fatalf("pre-boundary cursor must remain uninitialized for lazy projection migration: %v", err)
 			}
