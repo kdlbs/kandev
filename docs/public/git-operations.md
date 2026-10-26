@@ -124,6 +124,24 @@ Credentials are resolved where `agentctl` runs. A host SSH agent, credential hel
 
 When the Worktree executor is selected, its filesystem separation is not a security sandbox. Host worktrees share the repository's Git object database and local refs, and agents can run arbitrary repository commands allowed by their executor.
 
+### Repository code in managed Git
+
+This isolation is controlled by the runtime flag `features.managedGitIsolation` (environment variable `KANDEV_FEATURES_MANAGED_GIT_ISOLATION`). It is **off by default in released builds**, so Kandev's managed Git behaves as it always has until you turn it on. To enable it, switch on **Managed Git repository-code isolation** in **Settings → System → Feature Toggles** (or set the environment variable to `true`) and restart Kandev. Agent environments created after the restart use the new mode; use **Reset Environment** to move an existing one. Turning the flag off and restarting restores the earlier behavior and keeps every stored **Run Git hooks** value.
+
+When you first enable it, hooks that ran before stop running for every repository until you turn on **Run Git hooks** for it. Kandev does not turn the setting on for existing repositories. While the flag is off, the **Run Git hooks** switch is shown disabled and has no effect.
+
+The rest of this section describes the behavior with the flag on. Kandev runs its own Git commands without repository-supplied code. This covers the backend and `agentctl`: worktree creation and recovery, status, diff, commit, push, pull, rebase, merge, and the Changes panel. Hooks, file-system monitors, text converters, external diff programs, merge drivers, filters other than standard Git LFS and git-crypt, and the `ext` transport are all disabled. Hooks from user-global and system Git configuration are skipped too. Git LFS and git-crypt filters keep working.
+
+This applies only to Kandev's own Git commands. Git commands that the agent runs in its shell are unchanged.
+
+To let Kandev run a repository's hooks, open **Settings → Workspace → Repositories**, expand the repository, and turn on **Run Git hooks**. The setting is off by default and is per repository.
+
+- Hooks run with Kandev's permissions. Anyone or any agent that can write to the repository can change them.
+- A change applies to agent instances created afterward, not to running ones.
+- Turning it on disables submodule recursion for Kandev's pull, fetch, and push in that repository.
+- Only hooks are re-enabled. File-system monitors, other filters, text converters, and merge drivers stay disabled.
+- Importing or cloning a workspace leaves the setting off.
+
 ## Managed worktree and branch lifecycle
 
 This section describes Kandev's Worktree executor and other executor paths that create managed Git workspaces. Local, Docker, remote Docker, SSH, and Sprites have executor-specific checkout, mount, and cleanup behavior; see [Executors](executors.md) before assuming these host paths or isolation properties apply.
@@ -677,6 +695,7 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 
 ## Troubleshooting
 
+- **A repository hook did not run in Kandev:** Kandev skips repository hooks by default. Turn on **Run Git hooks** for that repository, then start a new agent instance. Running instances keep the previous setting.
 - **No agent/client available:** launch or prepare the session and confirm its executor is healthy. Workspace Git actions can reconstruct runtime control after a backend restart, but still need a valid task environment.
 - **Remote/authentication error during worktree preparation:** test `git fetch origin` inside the same executor workspace. Verify the remote URL, SSH agent or key, known-hosts entry, token or credential-helper availability, DNS, and firewall access there. Do not paste command output containing tokens or authenticated URLs into a task or issue.
 - **Noninteractive Git authentication failure:** Kandev-owned Git commands finish with a bounded error when the selected executor credential source cannot authenticate. Repair the SSH, credential-helper, or eligible host GitHub access in that same executor and retry the operation. Kandev does not replace credentials or switch transports after the failure. Existing host bridge registration can recover on a later operation; when registration was skipped, launch, resume, or prepared-start re-evaluates it. See [Choose task Git credentials](integrations.md#choose-task-git-credentials) for the credential scope.
