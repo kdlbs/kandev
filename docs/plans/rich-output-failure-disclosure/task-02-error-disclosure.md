@@ -232,3 +232,10 @@ Follow-up verification passed:
 - `git diff --check` passed.
 - `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project chromium tests/chat/rich-output-errors.spec.ts` passed (1 test) and rebuilt the web app.
 - `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project mobile-chrome tests/chat/mobile-rich-output-errors.spec.ts` passed (2 tests) and rebuilt the web app.
+
+PR CI follow-up: shard 7 exposed a resize test that dragged the pointer 2,000px
+outside its 1,280px viewport; the clamp test now drags 800px, enough to exceed
+the 600px maximum while keeping the pointer visible. Shard 8 measured a 44px
+mobile target at 43.999938px, so its height checks now allow 0.01px of layout
+rounding. The resize test passed with retries disabled, and the full mobile
+diagnostic-bundle spec passed all three tests with retries disabled.
