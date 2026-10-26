@@ -116,7 +116,7 @@ Claude helper tests, walkthrough context tests, and OpenCode posting tests.
 
 ## Results
 
-All listed targeted commands passed. Automatic review fixtures: 6 passed. Claude
+The targeted tests and non-scanner checks passed. Automatic review fixtures: 6 passed. Claude
 contracts: 11 passed. File reader: 9 passed. OpenCode contracts: 4 passed. Posting
 parser: 20 passed. Context helper: 8 passed. Walkthrough contracts: 30 passed.
 Action-pinning tests: 9 passed. The shell contract passed. Specification and diff

@@ -112,7 +112,7 @@ release contracts, and ADR 0029 for workflow/application provenance.
 
 ## Results
 
-All listed targeted checks passed: release contracts 69, Discord contracts 4,
+The targeted tests and non-scanner checks passed: release contracts 69, Discord contracts 4,
 contributor contracts 4, and action-pinning tests 9. Stubbed command tests verify
 literal metadata arguments and branch/tag authentication including retry. The
 scanner has no remaining release interpolation or checkout-credential findings.

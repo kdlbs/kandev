@@ -70,9 +70,10 @@ as expected. All package files remain unstaged and uncommitted.
 
 ## Implementation verification, 2026-10-26
 
-All final commands below passed. The test-only timeout fixture now resolves the
-installed system sleep before adding its fast retry stub to PATH. This fixes the
-historical Nix failure while retaining the 0.5-second timeout assertion.
+The tests and non-scanner checks below passed. Zizmor returned the expected exit
+code 14 for the reviewed residual findings. The test-only timeout fixture now
+resolves the installed system sleep before adding its fast retry stub to PATH.
+This fixes the historical Nix failure while retaining the 0.5-second timeout assertion.
 
 
 | Command | Result |

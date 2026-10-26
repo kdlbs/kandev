@@ -117,7 +117,7 @@ contract suites, the finding ledger, and baseline validation evidence.
 
 ## Results
 
-All listed targeted checks passed: docs contracts 3, image contracts 3, E2E
+The targeted tests and non-scanner checks passed: docs contracts 3, image contracts 3, E2E
 workflow contracts 27, walkthrough contracts 30, preview contracts 7, revocation
 contracts 10, backend workflow contracts 25, and action-pinning tests 9. The Nix
 timeout-fixture failure was corrected by resolving system sleep before PATH
