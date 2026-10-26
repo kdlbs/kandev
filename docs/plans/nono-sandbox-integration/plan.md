@@ -168,7 +168,7 @@ No broad suite or generic review work order is added.
 - [ ] [Task 06: Connect verified approvals to operator decisions](task-06-approval-channel.md)
 - [ ] [Task 07: Permit only the current Kandev MCP route](task-07-mcp-connectivity.md)
 - [ ] [Task 10: Deliver Execution settings and session visibility](task-10-execution-surfaces.md)
-- [ ] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
+- [x] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
 - [ ] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
 
 Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09.

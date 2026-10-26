@@ -708,5 +708,10 @@
   "learningAddedAccess": "新增存取權限",
   "learningSource": "來源策略",
   "learningReviewSelected": "審查所選拒絕記錄",
-  "learningViewRevision": "檢視已建立的修訂"
+  "learningViewRevision": "檢視已建立的修訂",
+  "reportHideSelected": "隱藏所選拒絕記錄",
+  "reportShowHidden": "顯示隱藏的拒絕記錄",
+  "reportHideHelp": "隱藏僅影響目前檢視，不會授予存取權限或更改報告證據。",
+  "reportHidden_one": "此檢視中已隱藏 {{count}} 條拒絕記錄。",
+  "reportHidden_other": "此檢視中已隱藏 {{count}} 條拒絕記錄。"
 }

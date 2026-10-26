@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useSandboxReport } from "@/hooks/domains/session/use-sandbox-report";
+import { useSandboxDenialVisibility } from "@/hooks/domains/session/use-sandbox-denial-visibility";
 import { SandboxReportLearning } from "./sandbox-report-learning";
 import type { SandboxReport } from "@/lib/api/domains/sandbox-reports-api";
 
@@ -34,6 +35,7 @@ export function SandboxDenialReport({ sessionId }: { sessionId: string }) {
 
 function ReportContent({ report, sessionId }: { report: SandboxReport; sessionId: string }) {
   const { t } = useTranslation();
+  const visibility = useSandboxDenialVisibility(report);
   const { data } = report;
   return (
     <>
@@ -81,7 +83,12 @@ function ReportContent({ report, sessionId }: { report: SandboxReport; sessionId
           ))}
         </dl>
       </details>
-      <SandboxReportLearning key={report.digest} sessionId={sessionId} report={report} />
+      <SandboxReportLearning
+        key={report.digest}
+        sessionId={sessionId}
+        report={report}
+        visibility={visibility}
+      />
     </>
   );
 }

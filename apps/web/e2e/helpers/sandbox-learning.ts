@@ -4,6 +4,7 @@ import { reportFixture } from "./sandbox-reports";
 import { projectExecutionFixture } from "./execution-details";
 import { enableSandboxSettingsFixture } from "./execution-settings";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
+import { waitForFiniteAnimations } from "./pr-capture";
 
 function learningFixture(sessionId: string): SandboxLearningProposal {
   const report = reportFixture(sessionId);
@@ -50,6 +51,7 @@ export function sandboxLearningScenario() {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }, testInfo) => {
     const mobile = testInfo.project.name === "mobile-chrome";
     const task = await apiClient.createTask(seedData.workspaceId, "Sandbox policy learning", {
@@ -105,6 +107,10 @@ export function sandboxLearningScenario() {
       await testPage.setViewportSize({ width: 393, height: 851 });
     }
     await review.screenshot({ path: testInfo.outputPath("sandbox-learning.png") });
+    if (prCapture.capturing) await waitForFiniteAnimations(review);
+    await prCapture.screenshot(mobile ? "policy-learning-phone" : "policy-learning-desktop", {
+      caption: "Review exact added access and source digests before creating a policy revision.",
+    });
     await publish.click();
     await expect(
       review.getByText("Created policy revision: Reviewed access", { exact: true }),

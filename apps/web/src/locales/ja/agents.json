@@ -708,5 +708,10 @@
   "learningAddedAccess": "追加するアクセス権",
   "learningSource": "元のポリシー",
   "learningReviewSelected": "選択した拒否記録をレビュー",
-  "learningViewRevision": "作成したリビジョンを表示"
+  "learningViewRevision": "作成したリビジョンを表示",
+  "reportHideSelected": "選択した拒否記録を非表示",
+  "reportShowHidden": "非表示の拒否記録を表示",
+  "reportHideHelp": "非表示はこのビューにのみ適用されます。アクセス権限の付与やレポートの証拠の変更は行いません。",
+  "reportHidden_one": "このビューでは拒否記録を {{count}} 件非表示にしています。",
+  "reportHidden_other": "このビューでは拒否記録を {{count}} 件非表示にしています。"
 }

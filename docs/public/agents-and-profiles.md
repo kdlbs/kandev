@@ -927,6 +927,8 @@ Open **Execution details > Denials** to read captured denial evidence. Select **
 
 Operators can select denial records and choose **Review selected denials**. Enter a policy name and choose a workspace or installation scope. Select **Review changes** to inspect the added access and source policy. Select **Create revision** only after reviewing that diff. Creation preserves the source policy, report digest, selected records, and provider identity. Select the new revision separately in policy settings. The running task keeps its captured policy. Stale reports, revoked sources, changed ceilings, and additions outside the captured ceiling are rejected.
 
+To reduce repeated notices, select records and choose **Hide selected denials**. Matching operations and targets stay hidden during report refreshes in this view. Choose **Show hidden denials** to restore them. Closing the view clears the hidden list. Hiding preserves the report evidence and does not approve an operation or change a policy.
+
 
 
 </details>

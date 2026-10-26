@@ -708,5 +708,10 @@
   "learningAddedAccess": "추가할 접근 권한",
   "learningSource": "원본 정책",
   "learningReviewSelected": "선택한 거부 기록 검토",
-  "learningViewRevision": "생성한 리비전 보기"
+  "learningViewRevision": "생성한 리비전 보기",
+  "reportHideSelected": "선택한 거부 기록 숨기기",
+  "reportShowHidden": "숨긴 거부 기록 표시",
+  "reportHideHelp": "숨기기는 이 보기에만 적용됩니다. 접근 권한을 부여하거나 보고서 증거를 변경하지 않습니다.",
+  "reportHidden_one": "{{count}}개의 거부 기록이 이 보기에 숨겨져 있습니다.",
+  "reportHidden_other": "{{count}}개의 거부 기록이 이 보기에 숨겨져 있습니다."
 }

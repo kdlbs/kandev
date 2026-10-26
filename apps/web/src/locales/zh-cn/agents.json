@@ -708,5 +708,10 @@
   "learningAddedAccess": "新增访问权限",
   "learningSource": "来源策略",
   "learningReviewSelected": "审查所选拒绝记录",
-  "learningViewRevision": "查看已创建的修订"
+  "learningViewRevision": "查看已创建的修订",
+  "reportHideSelected": "隐藏所选拒绝记录",
+  "reportShowHidden": "显示隐藏的拒绝记录",
+  "reportHideHelp": "隐藏仅影响当前视图，不会授予访问权限或更改报告证据。",
+  "reportHidden_one": "此视图中已隐藏 {{count}} 条拒绝记录。",
+  "reportHidden_other": "此视图中已隐藏 {{count}} 条拒绝记录。"
 }

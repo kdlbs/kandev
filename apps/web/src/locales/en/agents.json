@@ -708,5 +708,10 @@
   "learningAddedAccess": "Added access",
   "learningSource": "Source policy",
   "learningReviewSelected": "Review selected denials",
-  "learningViewRevision": "View created revision"
+  "learningViewRevision": "View created revision",
+  "reportHideSelected": "Hide selected denials",
+  "reportShowHidden": "Show hidden denials",
+  "reportHideHelp": "Hiding affects this view only. It does not grant access or change report evidence.",
+  "reportHidden_one": "{{count}} denial is hidden in this view.",
+  "reportHidden_other": "{{count}} denials are hidden in this view."
 }

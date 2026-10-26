@@ -83,7 +83,7 @@ V1 permits exact path roots with read/write modes, logical `work_dir` and `agent
 A filesystem entry contains an absolute `path` or logical `reference`, never both. Compare logical roots by identity and access mode. Core resolves `work_dir` from its owned workspace and checks protected roots. Missing or unsafe directories refuse launch. Attempts store immutable intent and resolved grants.
 The optional `agent_state` grant binds to a core-owned child home, separate from supervisor state. Its identity includes organization, workspace, session, agent profile, provider installation, and provider key. Empty organization IDs identify installations with organizations disabled. Core retains agent files across attempts and locks against concurrent use. Store the allocation scope in the immutable attempt. Literal paths cannot bypass protected storage. Require the same logical grant in the executor ceiling. Refuse missing ownership scope, symlink substitution, or closed leases. Delete session state only after every owned process stops.
 
-Core supplies child home, config, state, and temporary directories as runtime references. These references carry paths, never credentials. The provider binds them into its child environment without changing the supervisor environment. No real home contents or operator credentials are copied. An absent state grant does not imply host-home access. Utility state is disposable and must have a distinct execution scope.
+Core supplies child home/config/state/temp paths as runtime references, without credentials. Providers bind the child environment separately from the supervisor. Never copy host home contents or operator credentials. No state grant means no host-home access. Utility state has a disposable execution scope.
 
 Canonicalize paths on the execution host. Reject symlink escapes, overlapping protected roots, and unresolved paths.
 Where the provider cannot enforce a nested exclusion, reject the policy instead of claiming subtraction from a broader grant.
@@ -220,7 +220,7 @@ Core validates it against the ceiling and presents added access, inherited sourc
 An operator can create a workspace-scoped or installation-scoped revision.
 Nono compiles immutable JSONC beneath the managed policy directory, outside agent-writable worktrees.
 Repository profiles are import inputs only. They never become live authority through an agent edit.
-Suppressions are presentation-only entries. A live approval never writes a policy.
+Suppressions hide matching denial kind, operation, and target in the current attempt view. Keep evidence unchanged and provide Show hidden denials. Closing the view clears these local entries. A live approval never writes a policy.
 Revision publication is atomic. Selection changes are separate authorized writes.
 Revoked revisions block new attempts. Explicitly stopping already-running attempts remains an operator action.
 

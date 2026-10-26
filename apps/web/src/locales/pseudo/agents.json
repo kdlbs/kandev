@@ -708,5 +708,10 @@
   "learningAddedAccess": "Àďďēď àććēśś",
   "learningSource": "Śōũŕćē ƥōĺĩćŷ",
   "learningReviewSelected": "Ŕēvĩēŵ śēĺēćţēď ďēńĩàĺś",
-  "learningViewRevision": "Vĩēŵ ćŕēàţēď ŕēvĩśĩōń"
+  "learningViewRevision": "Vĩēŵ ćŕēàţēď ŕēvĩśĩōń",
+  "reportHideSelected": "Ĥĩďē śēĺēćţēď ďēńĩàĺś",
+  "reportShowHidden": "Śĥōŵ ĥĩďďēń ďēńĩàĺś",
+  "reportHideHelp": "Ĥĩďĩńĝ àƒƒēćţś ţĥĩś vĩēŵ ōńĺŷ. Ĩţ ďōēś ńōţ ĝŕàńţ àććēśś ōŕ ćĥàńĝē ŕēƥōŕţ ēvĩďēńćē.",
+  "reportHidden_one": "{{count}} ďēńĩàĺ ĩś ĥĩďďēń ĩń ţĥĩś vĩēŵ.",
+  "reportHidden_other": "{{count}} ďēńĩàĺś àŕē ĥĩďďēń ĩń ţĥĩś vĩēŵ."
 }

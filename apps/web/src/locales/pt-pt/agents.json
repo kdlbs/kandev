@@ -708,5 +708,10 @@
   "learningAddedAccess": "Acesso adicional",
   "learningSource": "Política de origem",
   "learningReviewSelected": "Rever recusas selecionadas",
-  "learningViewRevision": "Ver revisão criada"
+  "learningViewRevision": "Ver revisão criada",
+  "reportHideSelected": "Ocultar operações negadas selecionadas",
+  "reportShowHidden": "Mostrar operações negadas ocultas",
+  "reportHideHelp": "A ocultação aplica-se apenas a esta vista. Não concede acesso nem altera as provas do relatório.",
+  "reportHidden_one": "Está oculta {{count}} operação negada nesta vista.",
+  "reportHidden_other": "Estão ocultas {{count}} operações negadas nesta vista."
 }

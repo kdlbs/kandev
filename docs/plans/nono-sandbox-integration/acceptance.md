@@ -257,3 +257,12 @@ The isolated authenticated instance at `http://100.101.37.39:57397` uses the pac
 The failure exposed two generic integration defects. Child-state and approval-channel allocation rejected the valid empty organization scope used when organizations are disabled. Task-free discovery also tried to allocate a task MCP relay without a session. Regression tests reproduce both failures. Core now preserves organization separation, omits the MCP grant only from task-free runtime grants, and retains the saved policy intent. Task sessions still refuse a missing scoped MCP forwarder. No provider-specific core rule was added.
 
 `/tmp/kandev-nono-empty-org-channel-red.log` and `/tmp/kandev-nono-utility-mcp-red.log` record the failing cases. `/tmp/kandev-nono-discovery-regression.log` records passing race checks for the complete common sandbox, policy, and sandbox runtime packages, including the packaged provider. Specification catalog and lint pass (`/tmp/kandev-nono-discovery-spec.log`). These checks do not replace actual managed-agent acceptance. The retained test instance still runs the earlier build.
+
+
+## Presentation-only denial visibility (2026-10-26)
+
+The requested test endpoint at :57397 is confirmed offline. Main :9998 remains reachable. No older retained instance was signalled. The host restarted during the initial browser check; that incomplete run is not passing evidence.
+
+`/tmp/kandev-nono-visibility-red.log` records the missing hiding behavior. `/tmp/kandev-nono-suppression-browser-red3.log` records the missing rendered control. After implementation, `/tmp/kandev-nono-suppression-unit.log` passes 18 report, learning, and visibility tests. Hiding matches denial kind, operation, and target in the current attempt view, preserves the source report, survives refreshes, and resets on close. Hidden rows cannot remain selected for learning. Hiding and restoring send no backend write.
+
+Final desktop and phone report/learning scenarios pass in `/tmp/kandev-nono-suppression-desktop-final.log` and `/tmp/kandev-nono-suppression-phone.log`. Checks cover keyboard focus, touch targets, long content, close/reopen reset, and phone widths 393, 700, and 767. Four screenshots were captured after finite animations completed and were inspected. Typecheck, scoped frontend lint, localization, specification validation, public-doc validation, and fresh builds pass. Actual managed-agent acceptance, restart review, and session-state cleanup remain open.

@@ -3,6 +3,7 @@ import { expect, test } from "../fixtures/test-base";
 import { projectExecutionFixture } from "./execution-details";
 import { enableSandboxSettingsFixture } from "./execution-settings";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
+import { waitForFiniteAnimations } from "./pr-capture";
 
 export function reportFixture(sessionId: string): SandboxReport {
   return {
@@ -61,6 +62,7 @@ export function sandboxReportsScenario() {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }, testInfo) => {
     const mobile = testInfo.project.name === "mobile-chrome";
     const task = await apiClient.createTask(seedData.workspaceId, "Sandbox reports", {
@@ -89,6 +91,11 @@ export function sandboxReportsScenario() {
     const dialog = testPage.getByRole("dialog", { name: "Execution details", exact: true });
     const section = dialog.getByTestId("sandbox-denial-report");
     const refresh = section.getByRole("button", { name: "Refresh report", exact: true });
+    const writes: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.url().includes("/api/v1/sandbox/") && request.method() !== "GET")
+        writes.push(request.url());
+    });
     await expect(section.getByText("Read denied", { exact: true })).toBeVisible();
     await expect(section.getByText(report.data.records![0].target, { exact: true })).toBeVisible();
     await expect(
@@ -97,17 +104,58 @@ export function sandboxReportsScenario() {
       }),
     ).toBeVisible();
     await expect(section.getByText("Reported classes: Filesystem", { exact: true })).toBeVisible();
+    await section.getByRole("checkbox").check();
+    const hide = section.getByRole("button", { name: "Hide selected denials", exact: true });
+    await hide.click();
+    const show = section.getByRole("button", { name: "Show hidden denials", exact: true });
+    await expect(show).toBeFocused();
+    await expect(
+      section.getByText(report.data.records![0].target, { exact: true }),
+    ).not.toBeAttached();
+    await expect(
+      section.getByRole("button", { name: "Review selected denials", exact: true }),
+    ).toBeDisabled();
+    if (prCapture.capturing) await waitForFiniteAnimations(dialog);
+    await prCapture.screenshot(mobile ? "hidden-denials-phone" : "hidden-denials-desktop", {
+      caption:
+        "Denial notices are hidden only in this view. Audit evidence and policy remain unchanged.",
+    });
+    report = {
+      ...report,
+      version: 2,
+      digest: "a".repeat(64),
+      data: { ...report.data, records: [{ ...report.data.records![0], id: "repeated" }] },
+    };
+    await refresh.click();
+    await expect(
+      section.getByText("1 denial is hidden in this view.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      section.getByText(report.data.records![0].target, { exact: true }),
+    ).not.toBeAttached();
+    await show.click();
+    await expect(section.getByRole("checkbox").first()).toBeFocused();
+    await expect(section.getByText(report.data.records![0].target, { exact: true })).toBeVisible();
+    expect(writes).toEqual([]);
     if (mobile) {
       for (const width of [393, 700, 767]) {
         await testPage.setViewportSize({ width, height: 851 });
         await refresh.scrollIntoViewIfNeeded();
         expect((await refresh.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        expect((await hide.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        expect((await show.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         await assertNoDocumentHorizontalOverflow(testPage, `report at ${width}`);
       }
       await testPage.setViewportSize({ width: 393, height: 851 });
     }
     await refresh.scrollIntoViewIfNeeded();
     await dialog.screenshot({ path: testInfo.outputPath("sandbox-report.png") });
+    await section.getByRole("checkbox").check();
+    await hide.click();
+    await dialog.getByRole("button", { name: mobile ? "Back" : "Close", exact: true }).click();
+    await execution.click();
+    await expect(section.getByText(report.data.records![0].target, { exact: true })).toBeVisible();
+    expect(writes).toEqual([]);
     const before = reads;
     failed = true;
     await refresh.click();
@@ -115,7 +163,12 @@ export function sandboxReportsScenario() {
     await expect(section.getByText(report.data.records![0].target, { exact: true })).toBeVisible();
     expect(reads).toBe(before + 1);
     failed = false;
-    report = { ...report, version: 2, data: { ...report.data, finalized: true, records: [] } };
+    report = {
+      ...report,
+      version: 3,
+      digest: "b".repeat(64),
+      data: { ...report.data, finalized: true, records: [] },
+    };
     await refresh.click();
     await expect(
       section.getByText("Final capture after process cleanup.", { exact: true }),
