@@ -235,7 +235,13 @@ Follow-up verification passed:
 
 PR CI follow-up: shard 7 exposed a resize test that dragged the pointer 2,000px
 outside its 1,280px viewport; the clamp test now drags 800px, enough to exceed
-the 600px maximum while keeping the pointer visible. Shard 8 measured a 44px
-mobile target at 43.999938px, so its height checks now allow 0.01px of layout
-rounding. The resize test passed with retries disabled, and the full mobile
-diagnostic-bundle spec passed all three tests with retries disabled.
+the 600px maximum while keeping the pointer visible. Shards 8 and 9 measured
+44px mobile targets at 43.999938px. The remaining direct height assertions now
+use the shared `expectTouchControl` helper's 0.01px layout-rounding tolerance.
+The mobile Quick Chat activity test was marked flaky by CI: its first attempt
+missed the quick action while the navigation drawer was opening, and its retry
+passed. The test now waits for finite drawer animations to finish before each
+quick action and verifies that the drawer closes. Its focused mobile run passed
+three repetitions with retries disabled. The resize test passed with retries
+disabled, and the full mobile diagnostic-bundle spec passed all three tests
+with retries disabled.
