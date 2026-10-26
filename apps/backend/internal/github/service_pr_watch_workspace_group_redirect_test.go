@@ -134,6 +134,122 @@ func TestAssociatePRWithTask_RedirectsWatchSourcedToWorkspaceGroupOwner(t *testi
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-PR-WATCH-RETIREMENT-001.2
+// @covers AC-INTEGRATIONS-GITHUB-PR-WATCH-RETIREMENT-001.4
+func TestPRWatchRetirement_EffectiveOwner(t *testing.T) {
+	_, service, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "member", false)
+	seedTask(t, store, "owner", false)
+	issues := newMultiTaskIssueStore()
+	issues.addTask(&taskmodels.Task{ID: "member", WorkspaceID: testWorkspaceID}, "repo-1")
+	issues.addTask(&taskmodels.Task{ID: "owner", WorkspaceID: testWorkspaceID}, "repo-1")
+	service.SetTaskIssueStore(issues)
+	service.SetWorkspaceGroupOwnerResolver(&fakeWorkspaceGroupOwnerResolver{ownerTaskID: "owner"})
+
+	retired := &PRWatch{
+		WorkspaceID: testWorkspaceID, SessionID: "old-session", TaskID: "owner", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", Branch: "finished",
+	}
+	if err := store.CreatePRWatch(ctx, retired); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeletePRWatch(ctx, retired.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.EnsurePRWatchForWorkspace(
+		ctx, testWorkspaceID, "new-session", "member", "repo-1", "acme", "widget", "finished",
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("EnsurePRWatchForWorkspace error = %v, want ErrPRWatchRetired", err)
+	}
+	if _, err := service.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, "new-session", "member", "repo-1", "acme", "widget", 42, "finished",
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("CreatePRWatchForWorkspace error = %v, want ErrPRWatchRetired", err)
+	}
+	if err := service.CheckPRWatchTargetAdmissionForWorkspace(
+		ctx, testWorkspaceID, "new-session", "member", "repo-1", "finished",
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("CheckPRWatchTargetAdmissionForWorkspace error = %v, want ErrPRWatchRetired", err)
+	}
+
+	if _, err := service.AssociatePRWithTaskForWorkspace(ctx, testWorkspaceID, "member", "repo-1", &PR{
+		Number: 42, RepoOwner: "acme", RepoName: "widget", HTMLURL: "https://github.com/acme/widget/pull/42",
+	}); err != nil {
+		t.Fatalf("explicit association: %v", err)
+	}
+	if _, err := service.EnsurePRWatchForWorkspace(
+		ctx, testWorkspaceID, "new-session", "member", "repo-1", "acme", "widget", "another-branch",
+	); err != nil {
+		t.Fatalf("distinct branch should remain eligible: %v", err)
+	}
+	active, err := store.ListActivePRWatches(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || active[0].Branch != "another-branch" || active[0].TaskID != "owner" {
+		t.Fatalf("active watches = %+v, want only owner watch for another-branch", active)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-WATCH-RETIREMENT-001.2
+func TestPRWatchRetirement_NumberedTargetBlocksBranchAndPushAdmission(t *testing.T) {
+	_, service, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-numbered-retired", false)
+	watch, err := service.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, "session-old", "task-numbered-retired", "repo-1", "acme", "widget", 42, "finished",
+	)
+	if err != nil {
+		t.Fatalf("create numbered watch: %v", err)
+	}
+	if err := service.DeletePRWatch(ctx, watch.ID); err != nil {
+		t.Fatalf("retire numbered watch: %v", err)
+	}
+	if err := store.CreatePRWatch(ctx, &PRWatch{
+		WorkspaceID: testWorkspaceID, TaskID: watch.TaskID, RepositoryID: watch.RepositoryID,
+		Owner: watch.Owner, Repo: watch.Repo, PRNumber: 43, Branch: watch.Branch,
+	}); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("direct store create for retired branch error = %v, want ErrPRWatchRetired", err)
+	}
+
+	if _, err := service.EnsurePRWatchForWorkspace(
+		ctx, testWorkspaceID, "session-new", watch.TaskID, watch.RepositoryID, watch.Owner, watch.Repo, watch.Branch,
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("ensure branch admission error = %v, want ErrPRWatchRetired", err)
+	}
+	if _, err := service.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, "session-new", watch.TaskID, watch.RepositoryID,
+		watch.Owner, watch.Repo, 0, watch.Branch,
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("searching create for retired branch error = %v, want ErrPRWatchRetired", err)
+	}
+	if _, err := service.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, "session-new", watch.TaskID, watch.RepositoryID,
+		watch.Owner, watch.Repo, 43, watch.Branch,
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("numbered create for retired branch error = %v, want ErrPRWatchRetired", err)
+	}
+	if _, err := service.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, "session-new", watch.TaskID, watch.RepositoryID,
+		watch.Owner, watch.Repo, 42, "another-branch",
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("create for retired PR identity error = %v, want ErrPRWatchRetired", err)
+	}
+	if err := service.CheckPRWatchTargetAdmissionForWorkspace(
+		ctx, testWorkspaceID, "session-new", watch.TaskID, watch.RepositoryID, watch.Branch,
+	); !errors.Is(err, ErrPRWatchRetired) {
+		t.Fatalf("push admission error = %v, want ErrPRWatchRetired", err)
+	}
+	if _, err := service.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, "session-new", watch.TaskID, watch.RepositoryID,
+		watch.Owner, watch.Repo, 43, "another-branch",
+	); err != nil {
+		t.Fatalf("unrelated PR and branch should remain eligible: %v", err)
+	}
+}
+
 // TestAssociatePRWithTask_FallsBackToObservingTask covers STEP 1b's
 // fail-safe requirement for resolveEffectiveAssociationTaskID: every way the
 // redirect can't be safely applied must leave the association under the

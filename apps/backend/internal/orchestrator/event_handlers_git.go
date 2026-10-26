@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -1269,7 +1270,7 @@ func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessi
 	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	if _, err := s.githubService.EnsurePRWatchForWorkspace(
 		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, newBranch,
-	); err != nil {
+	); err != nil && !errors.Is(err, github.ErrPRWatchRetired) {
 		s.logger.Error("failed to add PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
 			zap.Error(err))

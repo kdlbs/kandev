@@ -44,6 +44,9 @@ func (s *Service) findPRByBranchForWatch(ctx context.Context, watch *PRWatch) (*
 	if watch == nil {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	if err := s.checkPRWatchActive(ctx, watch); err != nil {
+		return nil, err
+	}
 	return s.findPRByBranchForWorkspace(ctx, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Branch, watch)
 }
 

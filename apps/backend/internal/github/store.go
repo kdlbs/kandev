@@ -120,6 +120,7 @@ const createTablesSQL = `
 		last_comment_at DATETIME,
 		last_check_status TEXT DEFAULT '',
 		last_review_state TEXT DEFAULT '',
+		retired_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -601,6 +602,9 @@ func (s *Store) applyIdempotentSchemaColumns() error {
 		return nil
 	}
 	if err := exec("github_pr_watches.last_review_state", `ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := exec("github_pr_watches.retired_at", `ALTER TABLE github_pr_watches ADD COLUMN retired_at DATETIME`); err != nil {
 		return err
 	}
 	if err := exec("github_task_prs.mergeable_state", `ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -1649,17 +1653,18 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 				last_comment_at DATETIME,
 				last_check_status TEXT DEFAULT '',
 				last_review_state TEXT DEFAULT '',
+				retired_at DATETIME,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL,
 				UNIQUE(session_id, repository_id, branch)
 			)`,
 			`INSERT INTO github_pr_watches_new (
 				id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
-				last_checked_at, last_comment_at, last_check_status, last_review_state,
+				last_checked_at, last_comment_at, last_check_status, last_review_state, retired_at,
 				created_at, updated_at
 			) SELECT
 				id, COALESCE(workspace_id, ''), session_id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, branch,
-				last_checked_at, last_comment_at, last_check_status, last_review_state,
+				last_checked_at, last_comment_at, last_check_status, last_review_state, retired_at,
 				created_at, updated_at
 			FROM github_pr_watches`,
 		); err != nil {
@@ -2050,9 +2055,18 @@ func dedupPRWatchesForTaskOwnership(all []*PRWatch) (toDelete map[string]bool, s
 // discovered row when present), merges the group's watermarks onto it, and
 // marks every other member of the group for deletion.
 func mergePRWatchGroup(group []*PRWatch, toDelete map[string]bool, survivors map[string]*PRWatch) {
-	candidates := discoveredWatches(group)
+	retired := make([]*PRWatch, 0, len(group))
+	for _, watch := range group {
+		if watch.RetiredAt != nil {
+			retired = append(retired, watch)
+		}
+	}
+	candidates := retired
 	if len(candidates) == 0 {
-		candidates = group
+		candidates = discoveredWatches(group)
+		if len(candidates) == 0 {
+			candidates = group
+		}
 	}
 	survivor := pickPRWatchSurvivor(candidates)
 	mergePRWatchWatermarks(survivor, group)
@@ -2078,9 +2092,9 @@ func applyPRWatchDedup(tx *sqlx.Tx, toDelete map[string]bool, survivors map[stri
 		}
 		if _, err := tx.Exec(tx.Rebind(`
 			UPDATE github_pr_watches
-			SET last_checked_at = ?, last_comment_at = ?, last_check_status = ?, last_review_state = ?
+			SET last_checked_at = ?, last_comment_at = ?, last_check_status = ?, last_review_state = ?, retired_at = ?
 			WHERE id = ?`),
-			w.LastCheckedAt, w.LastCommentAt, w.LastCheckStatus, w.LastReviewState, id); err != nil {
+			w.LastCheckedAt, w.LastCommentAt, w.LastCheckStatus, w.LastReviewState, w.RetiredAt, id); err != nil {
 			return fmt.Errorf("merge PR watch watermark %s: %w", id, err)
 		}
 	}
@@ -2107,16 +2121,17 @@ func rebuildPRWatchesTableForTaskOwnership(tx *sqlx.Tx) error {
 			last_comment_at DATETIME,
 			last_check_status TEXT DEFAULT '',
 			last_review_state TEXT DEFAULT '',
+			retired_at DATETIME,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL
 		)`,
 		`INSERT INTO github_pr_watches_new (
 			id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
-			last_checked_at, last_comment_at, last_check_status, last_review_state, created_at, updated_at
+			last_checked_at, last_comment_at, last_check_status, last_review_state, retired_at, created_at, updated_at
 		) SELECT
 			id, COALESCE(workspace_id, ''), COALESCE(session_id, ''), task_id, COALESCE(repository_id, ''),
 			owner, repo, pr_number, branch,
-			last_checked_at, last_comment_at, last_check_status, last_review_state, created_at, updated_at
+			last_checked_at, last_comment_at, last_check_status, last_review_state, retired_at, created_at, updated_at
 		FROM github_pr_watches`,
 		`DROP TABLE github_pr_watches`,
 		`ALTER TABLE github_pr_watches_new RENAME TO github_pr_watches`,
@@ -2174,6 +2189,10 @@ func pickPRWatchSurvivor(group []*PRWatch) *PRWatch {
 // a duplicate that happened to poll more recently isn't silently discarded.
 func mergePRWatchWatermarks(survivor *PRWatch, group []*PRWatch) {
 	for _, w := range group {
+		if w.RetiredAt != nil && (survivor.RetiredAt == nil || w.RetiredAt.Before(*survivor.RetiredAt)) {
+			retiredAt := *w.RetiredAt
+			survivor.RetiredAt = &retiredAt
+		}
 		if w.LastCommentAt != nil && (survivor.LastCommentAt == nil || w.LastCommentAt.After(*survivor.LastCommentAt)) {
 			survivor.LastCommentAt = w.LastCommentAt
 		}
@@ -2196,11 +2215,53 @@ func (s *Store) CreatePRWatch(ctx context.Context, w *PRWatch) error {
 	now := time.Now().UTC()
 	w.CreatedAt = now
 	w.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockPRWatchIdentity(ctx, tx, s.db.DriverName(), w); err != nil {
+		return err
+	}
+	var retiredBranch bool
+	if err := tx.GetContext(ctx, &retiredBranch, tx.Rebind(`
+		SELECT EXISTS(SELECT 1 FROM github_pr_watches
+		WHERE task_id = ? AND repository_id = ? AND branch = ? AND retired_at IS NOT NULL)`),
+		w.TaskID, w.RepositoryID, w.Branch); err != nil {
+		return err
+	}
+	if retiredBranch {
+		return ErrPRWatchRetired
+	}
+	if w.PRNumber != 0 {
+		prWatch, err := getPRWatchByTaskRepoPRNumberTx(ctx, tx, w.TaskID, w.RepositoryID, w.PRNumber)
+		if err != nil {
+			return err
+		}
+		if prWatch != nil && prWatch.RetiredAt != nil {
+			return ErrPRWatchRetired
+		}
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO github_pr_watches (github_host, id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch, last_check_status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		w.GitHubHost, w.ID, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, w.Owner, w.Repo, w.PRNumber, w.Branch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt)
-	return err
+		w.GitHubHost, w.ID, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, w.Owner, w.Repo, w.PRNumber, w.Branch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func getPRWatchByTaskRepoPRNumberTx(
+	ctx context.Context, tx *sqlx.Tx, taskID, repositoryID string, prNumber int,
+) (*PRWatch, error) {
+	var watch PRWatch
+	err := tx.GetContext(ctx, &watch, tx.Rebind(`
+		SELECT * FROM github_pr_watches WHERE task_id = ? AND repository_id = ? AND pr_number = ?
+		LIMIT 1`), taskID, repositoryID, prNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &watch, err
 }
 
 // GetPRWatchBySession returns the first PR watch for a session. For
@@ -2298,6 +2359,16 @@ func (s *Store) GetPRWatchByTaskRepoBranchAny(ctx context.Context, taskID, repos
 	return &w, err
 }
 
+// HasRetiredPRWatchByTaskRepoBranch reports whether an explicit retirement reserves this branch.
+func (s *Store) HasRetiredPRWatchByTaskRepoBranch(ctx context.Context, taskID, repositoryID, branch string) (bool, error) {
+	var retired bool
+	err := s.ro.GetContext(ctx, &retired, s.ro.Rebind(`
+		SELECT EXISTS(SELECT 1 FROM github_pr_watches
+			WHERE task_id = ? AND repository_id = ? AND branch = ? AND retired_at IS NOT NULL)`),
+		taskID, repositoryID, branch)
+	return retired, err
+}
+
 // GetPRWatchByTaskRepoPRNumber returns the canonical discovered watch for a
 // (task, repository, pr_number) triple, or nil. Task-owned counterpart to
 // GetPRWatchByTaskRepoBranch for watches that have already found their PR.
@@ -2319,6 +2390,15 @@ func (s *Store) GetPRWatchByTaskRepoPRNumber(ctx context.Context, taskID, reposi
 func (s *Store) ListPRWatchesBySession(ctx context.Context, sessionID string) ([]*PRWatch, error) {
 	var watches []*PRWatch
 	err := s.ro.SelectContext(ctx, &watches,
+		s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE session_id = ? AND retired_at IS NULL ORDER BY created_at ASC`), sessionID)
+	return watches, err
+}
+
+// ListPRWatchesBySessionIncludingRetired returns all watch lifetimes for a
+// session. Polling paths should use ListPRWatchesBySession instead.
+func (s *Store) ListPRWatchesBySessionIncludingRetired(ctx context.Context, sessionID string) ([]*PRWatch, error) {
+	var watches []*PRWatch
+	err := s.ro.SelectContext(ctx, &watches,
 		s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE session_id = ? ORDER BY created_at ASC`), sessionID)
 	return watches, err
 }
@@ -2328,7 +2408,7 @@ func (s *Store) ListPRWatchesBySession(ctx context.Context, sessionID string) ([
 // ListPRWatchesByTask when every repo's watch is needed.
 func (s *Store) GetPRWatchByTask(ctx context.Context, taskID string) (*PRWatch, error) {
 	var w PRWatch
-	err := s.ro.GetContext(ctx, &w, s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE task_id = ? ORDER BY updated_at DESC LIMIT 1`), taskID)
+	err := s.ro.GetContext(ctx, &w, s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE task_id = ? AND retired_at IS NULL ORDER BY updated_at DESC LIMIT 1`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -2338,6 +2418,15 @@ func (s *Store) GetPRWatchByTask(ctx context.Context, taskID string) (*PRWatch, 
 // ListPRWatchesByTask returns every PR watch for a task (one per repo in
 // multi-repo workspaces).
 func (s *Store) ListPRWatchesByTask(ctx context.Context, taskID string) ([]*PRWatch, error) {
+	var watches []*PRWatch
+	err := s.ro.SelectContext(ctx, &watches,
+		s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE task_id = ? AND retired_at IS NULL ORDER BY created_at ASC`), taskID)
+	return watches, err
+}
+
+// ListPRWatchesByTaskIncludingRetired returns active and retired lifetimes for
+// authorization, cleanup, and identity-exclusion checks.
+func (s *Store) ListPRWatchesByTaskIncludingRetired(ctx context.Context, taskID string) ([]*PRWatch, error) {
 	var watches []*PRWatch
 	err := s.ro.SelectContext(ctx, &watches,
 		s.ro.Rebind(`SELECT * FROM github_pr_watches WHERE task_id = ? ORDER BY created_at ASC`), taskID)
@@ -2353,7 +2442,7 @@ func (s *Store) ListActivePRWatches(ctx context.Context) ([]*PRWatch, error) {
 	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`
 		SELECT w.* FROM github_pr_watches w
 		INNER JOIN tasks t ON t.id = w.task_id
-		WHERE t.archived_at IS NULL
+		WHERE t.archived_at IS NULL AND w.retired_at IS NULL
 		ORDER BY w.created_at`))
 	return watches, err
 }
@@ -2378,7 +2467,7 @@ func (s *Store) PRWatchCardinality(ctx context.Context) (PRWatchCardinality, err
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN w.pr_number = 0 THEN 1 ELSE 0 END), 0)
 		FROM github_pr_watches w
 		INNER JOIN tasks t ON t.id = w.task_id
-		WHERE t.archived_at IS NULL`
+		WHERE t.archived_at IS NULL AND w.retired_at IS NULL`
 	if err := s.ro.QueryRowContext(ctx, activeQuery).Scan(&out.Active, &out.Searching); err != nil {
 		return PRWatchCardinality{}, fmt.Errorf("count active PR watches: %w", err)
 	}
@@ -2386,11 +2475,11 @@ func (s *Store) PRWatchCardinality(ctx context.Context) (PRWatchCardinality, err
 	duplicateQueries := []string{
 		`SELECT COALESCE(SUM(group_count - 1), 0) FROM (
 			SELECT COUNT(*) AS group_count FROM github_pr_watches
-			WHERE pr_number = 0 GROUP BY task_id, repository_id, branch HAVING COUNT(*) > 1
+			WHERE pr_number = 0 AND retired_at IS NULL GROUP BY task_id, repository_id, branch HAVING COUNT(*) > 1
 		) duplicate_groups`,
 		`SELECT COALESCE(SUM(group_count - 1), 0) FROM (
 			SELECT COUNT(*) AS group_count FROM github_pr_watches
-			WHERE pr_number <> 0 GROUP BY task_id, repository_id, pr_number HAVING COUNT(*) > 1
+			WHERE pr_number <> 0 AND retired_at IS NULL GROUP BY task_id, repository_id, pr_number HAVING COUNT(*) > 1
 		) duplicate_groups`,
 	}
 	for _, query := range duplicateQueries {
@@ -2421,18 +2510,68 @@ func (s *Store) ListActivePRWatchesForWorkspace(ctx context.Context, workspaceID
 	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`
 		SELECT w.* FROM github_pr_watches w
 		INNER JOIN tasks t ON t.id = w.task_id
-		WHERE w.workspace_id = ? AND t.archived_at IS NULL
+		WHERE w.workspace_id = ? AND t.archived_at IS NULL AND w.retired_at IS NULL
 		ORDER BY w.created_at`), workspaceID)
+	return watches, err
+}
+
+// ListPRWatchesForWorkspace lists current watches for an authorized workspace.
+// includeRetired is reserved for the explicit retirement inventory API.
+func (s *Store) ListPRWatchesForWorkspace(ctx context.Context, workspaceID string, includeRetired bool) ([]*PRWatch, error) {
+	query := `SELECT w.* FROM github_pr_watches w INNER JOIN tasks t ON t.id = w.task_id WHERE w.workspace_id = ?`
+	if !includeRetired {
+		query += ` AND t.archived_at IS NULL AND w.retired_at IS NULL`
+	}
+	query += ` ORDER BY w.created_at`
+	var watches []*PRWatch
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(query), workspaceID)
 	return watches, err
 }
 
 // UpdatePRWatchTimestamps updates the last checked timestamps and status fields.
 func (s *Store) UpdatePRWatchTimestamps(ctx context.Context, id string, checkedAt time.Time, commentAt *time.Time, checkStatus, reviewState string) error {
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockPRWatchID(ctx, tx, s.db.DriverName(), id); err != nil {
+		return err
+	}
+	watch, err := getPRWatchInTransaction(ctx, tx, id)
+	if err != nil || watch == nil {
+		return commitPRWatchTransaction(tx, err)
+	}
+	if err := lockPRWatchIdentity(ctx, tx, s.db.DriverName(), watch); err != nil {
+		return err
+	}
+	if watch.RetiredAt != nil {
+		return commitPRWatchTransaction(tx, nil)
+	}
+	if err := updatePRWatchTimestampsTx(ctx, tx, id, checkedAt, commentAt, checkStatus, reviewState); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updatePRWatchTimestampsTx(
+	ctx context.Context, tx *sqlx.Tx, id string, checkedAt time.Time, commentAt *time.Time,
+	checkStatus, reviewState string,
+) error {
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE github_pr_watches SET last_checked_at = ?, last_comment_at = ?, last_check_status = ?, last_review_state = ?, updated_at = ?
-		WHERE id = ?`),
+		WHERE id = ? AND retired_at IS NULL`),
 		checkedAt, commentAt, checkStatus, reviewState, time.Now().UTC(), id)
 	return err
+}
+
+// IsPRWatchActive reports whether the supplied lifetime can receive work.
+func (s *Store) IsPRWatchActive(ctx context.Context, id string) (bool, error) {
+	var active bool
+	err := s.ro.GetContext(ctx, &active, s.ro.Rebind(
+		`SELECT EXISTS(SELECT 1 FROM github_pr_watches WHERE id = ? AND retired_at IS NULL)`,
+	), id)
+	return active, err
 }
 
 // DeletePRWatch deletes a PR watch by ID.
@@ -2465,39 +2604,42 @@ func (s *Store) DeletePRWatchesByTaskID(ctx context.Context, taskID string) (int
 func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error {
 	if prNumber == 0 {
 		_, err := s.db.ExecContext(ctx,
-			s.db.Rebind(`UPDATE github_pr_watches SET pr_number = 0, updated_at = ? WHERE id = ?`),
+			s.db.Rebind(`UPDATE github_pr_watches SET pr_number = 0, updated_at = ? WHERE id = ? AND retired_at IS NULL`),
 			time.Now().UTC(), id)
 		return err
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var taskID, repositoryID string
-	err = tx.QueryRowContext(ctx,
-		s.db.Rebind(`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`), id).
-		Scan(&taskID, &repositoryID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return tx.Commit()
+	if err := lockPRWatchID(ctx, tx, s.db.DriverName(), id); err != nil {
+		return err
 	}
-	if err != nil {
+	watch, err := getPRWatchInTransaction(ctx, tx, id)
+	if err != nil || watch == nil || watch.RetiredAt != nil {
+		return commitPRWatchTransaction(tx, err)
+	}
+	if err := lockPRWatchIdentity(ctx, tx, s.db.DriverName(), watch); err != nil {
 		return err
 	}
 
-	var probe int // existence probe only; value unused
+	var targetRetired bool
 	err = tx.QueryRowContext(ctx,
-		s.db.Rebind(`SELECT 1 FROM github_pr_watches
-		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND id <> ?`,
+		s.db.Rebind(`SELECT retired_at IS NOT NULL FROM github_pr_watches
+			 WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND id <> ?`,
 		),
-		taskID, repositoryID, prNumber, id).Scan(&probe)
+		watch.TaskID, watch.RepositoryID, prNumber, id).Scan(&targetRetired)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
-		if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
+		if targetRetired {
+			return tx.Commit()
+		}
+		if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ? AND retired_at IS NULL`), id); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -2508,7 +2650,7 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		s.db.Rebind(`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ?`),
+		s.db.Rebind(`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ? AND retired_at IS NULL`),
 		prNumber, time.Now().UTC(), id); err != nil {
 		return recoverPRWatchDiscoveredUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, tx.Commit)
 	}
@@ -2523,7 +2665,7 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 // canonical parent repository.
 func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
-		`UPDATE github_pr_watches SET owner = ?, repo = ?, updated_at = ? WHERE id = ?`),
+		`UPDATE github_pr_watches SET owner = ?, repo = ?, updated_at = ? WHERE id = ? AND retired_at IS NULL`),
 		owner, repo, time.Now().UTC(), id)
 	return err
 }
@@ -2534,80 +2676,54 @@ func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo str
 // for a PR on the new branch without leaving an inconsistent intermediate
 // state.
 func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
-	// SQLite's deferred transactions let two sessions both probe an empty
-	// destination before either writer acquires the lock. BEGIN IMMEDIATE
-	// serializes the probe and the coalescing update as one operation.
-	var tx prWatchTx
-	var commit func() error
-	var rollback func()
-	if dialect.IsPostgres(s.db.DriverName()) {
-		pgTx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		tx = pgTx
-		commit = pgTx.Commit
-		rollback = func() { _ = pgTx.Rollback() }
-	} else {
-		conn, err := s.db.Conn(ctx)
-		if err != nil {
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-			_ = conn.Close()
-			return err
-		}
-		tx = conn
-		commit = func() error {
-			_, err := conn.ExecContext(ctx, "COMMIT")
-			return err
-		}
-		rollback = func() {
-			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
-			_ = conn.Close()
-		}
-	}
-	defer rollback()
-
-	var taskID, repositoryID string
-	err := tx.QueryRowContext(ctx, s.db.Rebind(
-		`SELECT task_id, repository_id FROM github_pr_watches WHERE id = ?`), id).
-		Scan(&taskID, &repositoryID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return commit()
-	}
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
-
-	var probe int
-	err = tx.QueryRowContext(ctx, s.db.Rebind(
-		`SELECT 1 FROM github_pr_watches
+	defer func() { _ = tx.Rollback() }()
+	if err := lockPRWatchID(ctx, tx, s.db.DriverName(), id); err != nil {
+		return err
+	}
+	watch, err := getPRWatchInTransaction(ctx, tx, id)
+	if err != nil || watch == nil || watch.RetiredAt != nil {
+		return commitPRWatchTransaction(tx, err)
+	}
+	target := *watch
+	target.Branch = branch
+	target.PRNumber = 0
+	if err := lockPRWatchIdentities(ctx, tx, s.db.DriverName(), watch, &target); err != nil {
+		return err
+	}
+	var targetRetired bool
+	err = tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT retired_at IS NOT NULL FROM github_pr_watches
 			 WHERE task_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
-	), taskID, repositoryID, branch, id).Scan(&probe)
+	), watch.TaskID, watch.RepositoryID, branch, id).Scan(&targetRetired)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
-		if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
+		if targetRetired {
+			return tx.Commit()
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM github_pr_watches WHERE id = ? AND retired_at IS NULL`), id); err != nil {
 			return err
 		}
-		return commit()
+		return tx.Commit()
 	}
-
 	const savepoint = "reset_pr_watch_update"
-	if _, err := tx.ExecContext(ctx, s.db.Rebind("SAVEPOINT "+savepoint)); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind("SAVEPOINT "+savepoint)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, s.db.Rebind(
-		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ? AND retired_at IS NULL`,
 	), branch, time.Now().UTC(), id); err != nil {
-		return recoverPRWatchUniqueUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, commit)
+		return recoverPRWatchUniqueUpdate(ctx, tx, tx.Rebind, savepoint, id, err, tx.Commit)
 	}
-	if _, err := tx.ExecContext(ctx, s.db.Rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind("RELEASE SAVEPOINT "+savepoint)); err != nil {
 		return err
 	}
-	return commit()
+	return tx.Commit()
 }
 
 const prWatchSearchingIndexName = "idx_github_pr_watches_searching"
@@ -2652,7 +2768,7 @@ func recoverPRWatchUniqueUpdate(
 	if !isPRWatchUniqueViolation(updateErr) {
 		return updateErr
 	}
-	if _, err := tx.ExecContext(ctx, rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
+	if _, err := tx.ExecContext(ctx, rebind(`DELETE FROM github_pr_watches WHERE id = ? AND retired_at IS NULL`), id); err != nil {
 		return err
 	}
 	return commit()
@@ -2677,7 +2793,7 @@ func recoverPRWatchDiscoveredUpdate(
 	if !isPRWatchDiscoveredUniqueViolation(updateErr) {
 		return updateErr
 	}
-	if _, err := tx.ExecContext(ctx, rebind(`DELETE FROM github_pr_watches WHERE id = ?`), id); err != nil {
+	if _, err := tx.ExecContext(ctx, rebind(`DELETE FROM github_pr_watches WHERE id = ? AND retired_at IS NULL`), id); err != nil {
 		return err
 	}
 	return commit()
@@ -2699,30 +2815,34 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var taskID, repositoryID string
-	var prNumber int
-	err = tx.QueryRowContext(ctx,
-		s.db.Rebind(`SELECT task_id, repository_id, pr_number FROM github_pr_watches WHERE id = ?`), id).
-		Scan(&taskID, &repositoryID, &prNumber)
-	if errors.Is(err, sql.ErrNoRows) {
-		return tx.Commit()
-	}
-	if err != nil {
+	if err := lockPRWatchID(ctx, tx, s.db.DriverName(), id); err != nil {
 		return err
 	}
-	if prNumber != 0 {
+	watch, err := getPRWatchInTransaction(ctx, tx, id)
+	if err != nil || watch == nil || watch.RetiredAt != nil {
+		return commitPRWatchTransaction(tx, err)
+	}
+	if watch.PRNumber != 0 {
 		return tx.Commit()
 	}
+	target := *watch
+	target.Branch = branch
+	if err := lockPRWatchIdentities(ctx, tx, s.db.DriverName(), watch, &target); err != nil {
+		return err
+	}
 
-	var probe int // existence probe only; value unused
+	var targetRetired bool
 	err = tx.QueryRowContext(ctx,
-		s.db.Rebind(`SELECT 1 FROM github_pr_watches
+		tx.Rebind(`SELECT retired_at IS NOT NULL FROM github_pr_watches
 			 WHERE task_id = ? AND repository_id = ? AND branch = ? AND id <> ?`),
-		taskID, repositoryID, branch, id).Scan(&probe)
+		watch.TaskID, watch.RepositoryID, branch, id).Scan(&targetRetired)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
+		if targetRetired {
+			return tx.Commit()
+		}
 		return dropSourceAndCommit(ctx, tx, id)
 	}
 
@@ -2730,8 +2850,8 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 	if _, err := tx.ExecContext(ctx, s.db.Rebind("SAVEPOINT "+savepoint)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, s.db.Rebind(
-		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`,
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0 AND retired_at IS NULL`,
 	), branch, time.Now().UTC(), id); err != nil {
 		return recoverPRWatchUniqueUpdate(ctx, tx, s.db.Rebind, savepoint, id, err, tx.Commit)
 	}
@@ -2908,6 +3028,36 @@ func (s *Store) GetTaskPRByID(ctx context.Context, associationID string) (*TaskP
 	var tp TaskPR
 	err := s.ro.GetContext(ctx, &tp,
 		s.ro.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs WHERE id = ? LIMIT 1`), associationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err == nil {
+		err = hydrateTaskPRWorkflowAttention(&tp)
+	}
+	return &tp, err
+}
+
+func getTaskPRByIDTx(ctx context.Context, tx *sqlx.Tx, associationID string) (*TaskPR, error) {
+	var tp TaskPR
+	err := tx.GetContext(ctx, &tp,
+		tx.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs WHERE id = ? LIMIT 1`), associationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err == nil {
+		err = hydrateTaskPRWorkflowAttention(&tp)
+	}
+	return &tp, err
+}
+
+func getTaskPRByRepoAndNumberTx(
+	ctx context.Context, tx *sqlx.Tx, taskID, repositoryID string, prNumber int,
+) (*TaskPR, error) {
+	var tp TaskPR
+	err := tx.GetContext(ctx, &tp, tx.Rebind(
+		`SELECT `+taskPRColumns+` FROM github_task_prs
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? LIMIT 1`),
+		taskID, repositoryID, prNumber)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -3282,10 +3432,22 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR, status *PRStatus)
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.ReplaceTaskPRTx(ctx, tx, tp, status); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return tp, nil
+}
 
+// ReplaceTaskPRTx applies the association upsert inside a caller-owned
+// transaction. It is used when a watch result and its task association share
+// the retirement admission boundary.
+func (s *Store) ReplaceTaskPRTx(ctx context.Context, tx *sqlx.Tx, tp *TaskPR, status *PRStatus) error {
 	outgoing, err := replaceTaskPROutgoingRow(ctx, tx, tp)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt =
 		resolveTaskPROutcomeFields(outgoing, status)
@@ -3315,23 +3477,20 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR, status *PRStatus)
 			`DELETE FROM github_task_prs
 			 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`),
 			tp.TaskID, tp.RepositoryID, tp.PRNumber); err != nil {
-			return nil, err
+			return err
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(
 			`DELETE FROM github_task_prs
 			 WHERE task_id = ? AND repository_id = '' AND pr_number = ?`),
 			tp.TaskID, tp.PRNumber); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if err := insertTaskPR(ctx, tx, tp); err != nil {
-		return nil, err
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return tp, nil
+	return nil
 }
 
 // replaceTaskPROutgoingRow reads, inside tx, the row ReplaceTaskPR is about
@@ -3379,13 +3538,21 @@ func replaceTaskPROutgoingRow(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) (*Ta
 // actually lands first wins atomically and the second's differing timestamp
 // is silently discarded instead of overwriting it (AC-16/AC-17).
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
-	tp.UpdatedAt = time.Now().UTC()
-	removalAfter := dialect.DurationMs(s.db.DriverName(), "?", "merge_queue_last_removed_at")
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.UpdateTaskPRTx(ctx, tx, tp); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateTaskPRTx writes a reconciled TaskPR inside a caller-owned transaction.
+func (s *Store) UpdateTaskPRTx(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) error {
+	tp.UpdatedAt = time.Now().UTC()
+	removalAfter := dialect.DurationMs(s.db.DriverName(), "?", "merge_queue_last_removed_at")
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?, has_merge_conflicts = ?,
 			head_sha = ?, merge_queue_state = ?, merge_queue_position = ?, merge_queue_entry_id = ?, merge_queue_entry_head_sha = ?, merge_queue_estimated_time_to_merge_seconds = ?,
@@ -3422,7 +3589,7 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 		tp.MergeQueueLastRemovalID, tp.MergeQueueLastRemovedAt); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // --- Task CI automation operations ---

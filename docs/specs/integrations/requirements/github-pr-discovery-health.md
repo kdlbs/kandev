@@ -15,6 +15,12 @@ Reported quota is not proof that a PR request succeeded.
 Integrations owns this contract because it owns GitHub discovery, credentials,
 and provider status. Task and UI systems consume its results.
 
+## Retirement boundary
+
+The discovery and polling criteria apply to eligible watches.
+[Explicit watch retirement](github-pr-watch-retirement.md) suspends that eligibility until authorized resumption.
+Idle discovery and explicit refresh do not override retirement.
+
 ## Requirements
 
 ### REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-001: Discover task pull requests
