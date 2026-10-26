@@ -123,7 +123,8 @@ Verification passed:
 - PR fixup: the phone regression for long unbroken metadata failed before the
   wrapping change and passed after it. The unavailable-capture case now reloads
   persisted history before checking its baseline card. The final mobile suite
-  passed all 4 cases, and the desktop suite passed all 6 cases.
+  passed all 4 cases, and the desktop changed-files plus scroll suite passed all
+  7 cases.
 - Unknown-file icon comparisons now require both rendered fallback icons.
 - After the fixup, the focused card test passed 7 cases; web typecheck, focused
   ESLint, the E2E web build, and `git diff --check` passed.
