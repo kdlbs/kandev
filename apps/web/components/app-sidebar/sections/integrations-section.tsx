@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import { useAppDestinations } from "@/hooks/use-app-destinations";
-import type { DestinationIcon } from "@/lib/navigation/types";
+import type { ResolvedDestination, DestinationIcon } from "@/lib/navigation/types";
 import { cn } from "@/lib/utils";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
@@ -18,9 +18,14 @@ import {
 } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
 
+import { SidebarDraggableNavigation } from "../sidebar-draggable-navigation";
+import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
+
 type IntegrationsSectionProps = {
   collapsed: boolean;
   includePluginItems?: boolean;
+  pluginDestinations?: ResolvedDestination[];
+  catalog?: ShortcutCatalogEntry[];
 };
 
 type IntegrationRowProps = {
@@ -92,6 +97,8 @@ function IntegrationRow({ href, label, icon: Icon, active, testId }: Integration
 export function IntegrationsSection({
   collapsed,
   includePluginItems = true,
+  pluginDestinations,
+  catalog,
 }: IntegrationsSectionProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
@@ -101,9 +108,9 @@ export function IntegrationsSection({
   // this section (`registerNavItem({ section: "integrations" })`) both come from
   // the navigation manifest, already in render order.
   const destinations = useAppDestinations("sidebar", "integrations");
-  const visibleDestinations = includePluginItems
-    ? destinations
-    : destinations.filter((destination) => destination.source !== "plugin");
+  const firstParty = destinations.filter((destination) => destination.source !== "plugin");
+  let visibleDestinations = includePluginItems ? destinations : firstParty;
+  if (pluginDestinations) visibleDestinations = [...firstParty, ...pluginDestinations];
   const firstPartyDestinations = visibleDestinations.filter(
     (destination) => destination.source !== "plugin",
   );
@@ -131,18 +138,40 @@ export function IntegrationsSection({
       headerActionVisibility="always"
       presentation="navigation"
     >
-      {visibleDestinations.map((destination) => (
-        <IntegrationRow
-          key={destination.id}
-          href={destination.href}
-          label={destination.label}
-          icon={destination.icon}
-          active={pathname === destination.href || pathname.startsWith(`${destination.href}/`)}
-          {...(destination.source === "plugin"
-            ? { testId: `plugin-nav-item-${destination.pluginItemId ?? destination.id}` }
-            : {})}
+      {visibleDestinations
+        .filter((destination) => !catalog || destination.source !== "plugin")
+        .map((destination) => (
+          <IntegrationRow
+            key={destination.id}
+            href={destination.href}
+            label={destination.label}
+            icon={destination.icon}
+            active={pathname === destination.href || pathname.startsWith(`${destination.href}/`)}
+            {...(destination.source === "plugin"
+              ? { testId: `plugin-nav-item-${destination.pluginItemId ?? destination.id}` }
+              : {})}
+          />
+        ))}
+      {catalog && (
+        <SidebarDraggableNavigation
+          catalog={catalog}
+          disabled={collapsed}
+          rows={(pluginDestinations ?? []).map((destination) => ({
+            id: destination.id,
+            content: (
+              <IntegrationRow
+                href={destination.href}
+                label={destination.label}
+                icon={destination.icon}
+                active={
+                  pathname === destination.href || pathname.startsWith(`${destination.href}/`)
+                }
+                testId={`plugin-nav-item-${destination.pluginItemId ?? destination.id}`}
+              />
+            ),
+          }))}
         />
-      ))}
+      )}
       {workspaceId && (
         <IntegrationRow
           href={workspaceSettingsHref(workspaceId, "integrations")}

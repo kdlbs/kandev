@@ -1,0 +1,212 @@
+---
+created: 2026-10-25
+status: implemented
+requirements:
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-001
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-002
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-004
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-005
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-006
+system_design:
+  - ../../specs/ui/system-design/sidebar-customization.md
+legacy_specs: []
+---
+
+# Restore integration plugin grouping
+
+## Overview
+
+Restore plugin integration links inside Integrations while retaining personal
+visibility and sibling order. First implement the shared projection, navigation,
+and editing behavior with focused tests. Then prove the user flows with desktop
+and phone E2E and update user documentation.
+
+UI owns the reusable layout composition contract. The existing plugin API owns
+registration section values and destination identities. This repair adds explicit
+customization acceptance criteria where the prior requirements were incomplete.
+It reconciles the previous phone design's standalone-plugin instruction with the
+plugin API's documented grouping. It does not change the plugin API.
+
+## Root cause and reproduction
+
+`useHasSavedSidebarLayout` returns true for any active workspace.
+`materializeSidebarPluginNodes` inserts integration plugin nodes after the
+Integrations node. `SidebarLayoutNavigation` excludes plugins from that section
+and renders the flat nodes independently. Phone saved navigation does likewise.
+`layout-projection.test.ts` currently expects a separate Slack node after
+Integrations, so the existing test does not catch the rendered grouping defect.
+
+Install the existing E2E fixture, whose `e2e-integration` registration targets
+`integrations`. Open a regular workspace with default or saved layout. Its link
+appears outside the group. No user customization or YouTrack-specific state is
+needed. Source tracing established this path during planning. A subsequent isolated
+browser run installed the actual YouTrack v0.2.0 release and reproduced the defect.
+See [reproduction evidence](reproduction.md).
+
+## Scope
+
+In scope: original integration-plugin grouping, old/default/reset layouts,
+individual visibility, sibling order, Settings preview, direct/keyboard/phone
+editing, collapsed desktop launcher, mobile disclosure, and targeted regression
+coverage. Preserve custom-group references and current Office plugin access.
+
+Out of scope: provider authentication, plugin releases, SDK changes, backend
+schema changes, new feature flags, footer regrouping, unrelated sidebar redesign,
+commits, pushes, and PR creation.
+
+## Technical approach
+
+Keep flat version-1 saved nodes and existing CAS writes. Add a small pure helper,
+proposed as `lib/sidebar/integration-plugin-layout.ts`, to derive hierarchy and
+legal sibling moves from projected nodes and current catalog metadata. Retain the
+full flat nodes for editing and serialization. Never infer ownership from a label
+or raw plugin item ID. Use the owner's destination ID.
+
+Remove grouped nodes only from the top-level render list. Supply their ordered,
+visible destinations to the existing desktop/mobile integration sections.
+Preserve manifest defaults for callers without layout input. Apply availability,
+parent visibility, and phone omission filters before rendering. A custom shortcut
+is an independent reference and must not be removed by this operation.
+
+All editing entry points use the same sibling/top-level scope. Preserve unrelated
+node order and unavailable nodes. Scope nested pointer/keyboard handlers so a child
+move cannot also move the parent. Keep explicit no-op/invalid moves write-free.
+Restore defaults continues through the existing reset flow and creates no second
+settings source. Existing global positions of integration links become relative
+order inside Integrations. No read or viewport change writes that interpretation.
+
+Preserve Office's standalone plugin access when that mode omits the group.
+In regular mode, a hidden group hides its children. For a missing legacy group,
+use a display-only canonical anchor rather than dropping links. Settings preview
+and runtime navigation must agree for both conditions.
+
+The current navigation ADR and ADR 0041 remain authoritative. A new ADR is not
+needed because this repair restores grouping within their existing boundaries.
+The linked completed sidebar-customization, mobile-saved-navigation,
+sidebar-presentation-preferences, and flagged-sidebar-entries packages remain
+historical evidence. This package owns the correction and its new results.
+
+## UI preview
+
+These labelled tables replace ASCII sketches to respect the session's explicit
+preview-format instruction. Hierarchy and control order are requirements;
+provider names illustrate available entries, not a hardcoded provider list.
+
+### UI-01: Desktop sidebar, expanded Integrations
+
+| State | Top-level entries | Integrations children, in order |
+| --- | --- | --- |
+| Before (source-confirmed) | Integrations, YouTrack | GitHub, GitLab, Integration settings |
+| After | Integrations | GitHub, GitLab, YouTrack, Integration settings |
+| Folded | Integrations | Hidden until expanded |
+| YouTrack hidden | Integrations | GitHub, GitLab, Integration settings |
+
+The existing rail launcher exposes the same child list when the sidebar is
+collapsed. The existing navigation region owns scrolling. Header fast actions
+keep their current first-party-only policy. No new icon, motion, or sizing rule.
+
+### UI-02: Phone app menu, Integrations disclosure
+
+| State | Menu row | Disclosure contents |
+| --- | --- | --- |
+| Initial | Integrations, collapsed | None visible |
+| Expanded | Integrations, expanded | Provider rows, YouTrack, Integration settings |
+| Activation | Tap YouTrack | Open its registered route and close navigation |
+
+Reuse AppNavSheet and MobileIntegrationsSection. Rows retain 44px touch targets,
+one drawer scroller, safe-area clearance, and existing focus-return behavior.
+No top-level duplicate appears. Settings remains reachable without any providers.
+
+### UI-03: Customization and Settings preview
+
+| Level | Entry | Allowed actions |
+| --- | --- | --- |
+| Top level | Integrations | Visibility, move among top-level entries |
+| Child | YouTrack | Visibility, move among integration-plugin siblings |
+| Child | Another integration plugin | Visibility, move among integration-plugin siblings |
+| Separate custom group | Explicit YouTrack shortcut | Existing shortcut actions |
+
+Settings preview uses UI-01 grouping. Phone customization keeps its existing
+inset drawer and explicit move controls. A hidden parent does not erase the
+child's checked state. Controls do not offer cross-group detachment.
+
+UI-01 through UI-03 cover AC-UI-SIDEBAR-CUSTOMIZATION-001.10 through 001.12,
+004.2, 005.2 through 005.4, and 006.7.
+
+## Tests
+
+Task 01 uses these regression cases:
+
+- `integration-plugin-layout.test.ts`: groups visible integrations under their
+  parent without mutating flat settings (001.10, 001.12). Include two integration
+  plugins, a hidden plugin, unavailable registration, main/footer plugins, and
+  an explicit custom shortcut in one mixed-state case.
+- `integration-plugin-layout.test.ts`: sibling moves preserve unrelated node
+  order, hidden choices, revisions, and geometry; invalid moves are no-ops
+  (001.11, 001.12, 006.5).
+- `sidebar-layout-navigation.test.tsx` (new): renders the registered integration
+  once inside Integrations for default and saved layouts (001.10). This is the
+  initial RED gate using the real projection and registry, not a mocked final list.
+- `app-nav-sheet.test.tsx` and `mobile-integrations-section.test.tsx`: matching
+  grouping, omission, folding, route activation, and setup behavior (001.10,
+  001.11, 005.2 through 005.4).
+- Settings/editor and direct-navigation tests: preview hierarchy, sibling moves,
+  parent moves, child context targets, and no accidental parent drag (004.2,
+  006.4, 006.5, 006.7). Existing save/reset tests retain their CAS coverage.
+
+## E2E tests
+
+Task 02 adds `plugins/integration-plugin-grouping.spec.ts` (chromium) and
+`plugins/mobile-integration-plugin-grouping.spec.ts` (mobile-chrome). Reuse the
+packaged fixture's `e2e-integration` registration and real settings persistence.
+Verify ancestry and uniqueness, collapse, navigation, visibility and reload,
+parent hide/show, explicit custom-group shortcut independence, and reset.
+Use unit/component coverage for two-plugin ordering and unavailable entries.
+The desktop flow includes the collapsed rail launcher. The phone flow measures
+44px targets, containment, no horizontal overflow, and menu closure on activation.
+Capture both rendered states for comparison with UI-01 and UI-02.
+
+## Work orders
+
+- [x] [Task 01: Restore grouping and scoped customization](task-01-restore-grouping.md)
+- [x] [Task 02: Prove desktop and phone behavior](task-02-prove-navigation.md)
+
+Execution is sequential. Task 02 depends on Task 01. No delegation is authorized.
+
+## Verification results
+
+Design validation on 2026-10-25:
+
+- `python3 scripts/list-docs.py validate`: passed (384 decisions, 1616 specifications).
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
+- `git diff --check`: passed.
+- Local `.github/scripts/pr-docs.cjs` `validateCoverage`: the actual docs-only
+  change is exempt. A preflight including the planned sidebar runtime edit is
+  covered by both work orders with no reference errors.
+
+Task 01 is complete: 95 focused tests, typecheck, ESLint, and i18n passed.
+Actual YouTrack desktop and touch-phone placement and activation passed.
+Task 02 is complete: 11 desktop and 11 phone E2E tests passed against the
+same fresh production build. Public documentation and checks passed. All work
+orders are done. PR CI/review and merge remain external delivery gates.
+
+Final local E2E logs: `/tmp/kandev-run.e2e.MSPoa0sK.log` (phone) and
+`/tmp/kandev-run.e2e.lXHOuXfD.log` (desktop). Updated base catalog validation:
+403 decisions and 1738 specifications. Public docs: 63 validator tests, 48 pages.
+Actual plugin captures were inspected after finite UI animations settled.
+Pre-fix browser reproduction with actual YouTrack v0.2.0: confirmed on 2026-10-25,
+including reload. See [evidence](reproduction.md).
+Each work order contains exact implementation commands and owns its results.
+
+## Risks
+
+- Turning plugin inclusion back on without removing standalone rendering creates
+  duplicates and ignores saved visibility. Test ancestry and count together.
+- Flat global indexes can cause child moves to affect unrelated tools. Route
+  all move entry points through the shared scope helper.
+- A hidden parent differs from a mode-suppressed parent. Preserve Office access
+  explicitly without allowing hidden regular-workspace children to escape.
+- New labels require all shipped locales. Reuse current strings where possible.
+- Existing integration-plugin global placement intentionally becomes grouped
+  placement. Stored identities and individual choices remain recoverable.

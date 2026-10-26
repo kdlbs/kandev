@@ -147,7 +147,19 @@ vi.mock("@/components/system-health/health-indicator", () => ({
 }));
 
 vi.mock("@/components/integrations/integrations-menu", () => ({
-  MobileIntegrationsSection: () => <div data-testid="mobile-integrations-section" />,
+  MobileIntegrationsSection: ({
+    pluginDestinations = [],
+  }: {
+    pluginDestinations?: { id: string; label: string; href: string }[];
+  }) => (
+    <div data-testid="mobile-integrations-section">
+      {pluginDestinations.map((item) => (
+        <a key={item.id} href={item.href}>
+          {item.label}
+        </a>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock("./mobile-coordinators-section", () => ({
@@ -550,3 +562,23 @@ describe("AppNavSections theme toggle", () => {
 vi.mock("@/components/navigation/mobile-task-search-action", () => ({
   MobileTaskSearchAction: () => null,
 }));
+
+describe("integration plugin grouping", () => {
+  afterEach(cleanup);
+  // @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.10
+  it("places an original integration plugin inside the integration section once", () => {
+    navRegistrations = [
+      {
+        pluginId: "youtrack",
+        id: "issues",
+        label: "YouTrack",
+        path: "/youtrack",
+        section: "integrations",
+      },
+    ];
+    render(<SectionsHost />);
+    const links = screen.getAllByRole("link", { name: "YouTrack" });
+    expect(links).toHaveLength(1);
+    expect(links[0].closest('[data-testid="mobile-integrations-section"]')).not.toBeNull();
+  });
+});

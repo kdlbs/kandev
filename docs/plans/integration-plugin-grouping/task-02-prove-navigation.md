@@ -1,0 +1,193 @@
+---
+id: "02-prove-navigation"
+title: "Prove desktop and phone behavior"
+status: done
+wave: 2
+depends_on: ["01-restore-grouping"]
+plan: "plan.md"
+requirements:
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-001
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-002
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-004
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-005
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-006
+system_design:
+  - ../../specs/ui/system-design/sidebar-customization.md
+acceptance_criteria:
+  - AC-UI-SIDEBAR-CUSTOMIZATION-001.10
+  - AC-UI-SIDEBAR-CUSTOMIZATION-001.11
+  - AC-UI-SIDEBAR-CUSTOMIZATION-001.12
+  - AC-UI-SIDEBAR-CUSTOMIZATION-002.1
+  - AC-UI-SIDEBAR-CUSTOMIZATION-004.2
+  - AC-UI-SIDEBAR-CUSTOMIZATION-005.2
+  - AC-UI-SIDEBAR-CUSTOMIZATION-005.3
+  - AC-UI-SIDEBAR-CUSTOMIZATION-005.4
+  - AC-UI-SIDEBAR-CUSTOMIZATION-006.4
+  - AC-UI-SIDEBAR-CUSTOMIZATION-006.5
+  - AC-UI-SIDEBAR-CUSTOMIZATION-006.7
+---
+
+# Task 02: Prove desktop and phone behavior
+
+## Summary
+
+Verify grouped integration navigation with the installed fixture and real saved
+settings. Explain the corrected customization behavior in the public guide.
+
+## In scope
+
+Desktop/phone browser regressions, rendered captures, focused regressions for
+existing customization, public guide clarification, and final package results.
+Use the existing `e2e-integration` fixture. No YouTrack credentials are required.
+
+## Out of scope
+
+Broad E2E suites, live-user mutation, new plugin packages, commits, and publishing.
+
+## Acceptance
+
+1. Desktop and phone tests prove ancestry, uniqueness, route activation, collapse,
+   individual visibility after reload, parent hide/show, reset, and custom-shortcut
+   independence. Desktop rail access remains functional.
+2. Phone controls measure at least 44px and fit the drawer. Selecting the link
+   closes navigation and reaches the fixture route. Captures match UI-01/UI-02.
+3. Public guidance describes grouping and sibling moves. Record exact command
+   results and update both work orders and plan without marking unrun checks passed.
+
+## UI preview
+
+These labelled tables replace ASCII sketches to respect the session's explicit
+preview-format instruction. Hierarchy and control order are requirements;
+provider names illustrate available entries, not a hardcoded provider list.
+
+### UI-01: Desktop sidebar, expanded Integrations
+
+| State | Top-level entries | Integrations children, in order |
+| --- | --- | --- |
+| Before (source-confirmed) | Integrations, YouTrack | GitHub, GitLab, Integration settings |
+| After | Integrations | GitHub, GitLab, YouTrack, Integration settings |
+| Folded | Integrations | Hidden until expanded |
+| YouTrack hidden | Integrations | GitHub, GitLab, Integration settings |
+
+The existing rail launcher exposes the same child list when the sidebar is
+collapsed. The existing navigation region owns scrolling. Header fast actions
+keep their current first-party-only policy. No new icon, motion, or sizing rule.
+
+### UI-02: Phone app menu, Integrations disclosure
+
+| State | Menu row | Disclosure contents |
+| --- | --- | --- |
+| Initial | Integrations, collapsed | None visible |
+| Expanded | Integrations, expanded | Provider rows, YouTrack, Integration settings |
+| Activation | Tap YouTrack | Open its registered route and close navigation |
+
+Reuse AppNavSheet and MobileIntegrationsSection. Rows retain 44px touch targets,
+one drawer scroller, safe-area clearance, and existing focus-return behavior.
+No top-level duplicate appears. Settings remains reachable without any providers.
+
+### UI-03: Customization and Settings preview
+
+| Level | Entry | Allowed actions |
+| --- | --- | --- |
+| Top level | Integrations | Visibility, move among top-level entries |
+| Child | YouTrack | Visibility, move among integration-plugin siblings |
+| Child | Another integration plugin | Visibility, move among integration-plugin siblings |
+| Separate custom group | Explicit YouTrack shortcut | Existing shortcut actions |
+
+Settings preview uses UI-01 grouping. Phone customization keeps its existing
+inset drawer and explicit move controls. A hidden parent does not erase the
+child's checked state. Controls do not offer cross-group detachment.
+
+UI-01 through UI-03 cover AC-UI-SIDEBAR-CUSTOMIZATION-001.10 through 001.12,
+004.2, 005.2 through 005.4, and 006.7.
+
+Full context: [plan previews](plan.md#ui-preview).
+
+## Test setup
+
+Use `e2e/fixtures/test-base`, `helpers/api-client.ts`, and the installation flow
+in `tests/plugins/mobile-plugin-nav.spec.ts`. The fixture bundle already registers
+`e2e-integration` in Integrations. Wait for registration readiness before asserting
+placement. Use real settings reads/writes, not a mocked final navigation array.
+Clean up only the fixture installed by the test. Scope locators to the active
+sidebar or phone drawer, and separate original links from intentional custom pins.
+
+Task 01 supplies the behavioral RED gate. These tests prove integration against a
+fresh managed build. Compare screenshots with the plan and inspect phone sizing.
+
+## Verification
+
+From repository root, after Task 01 checks pass. Run mobile first to build current assets, then desktop sequentially against that build.
+
+```bash
+(cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/plugins/integration-plugin-grouping.spec.ts tests/settings/sidebar-customization.spec.ts tests/settings/sidebar-direct-customization.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/plugins/mobile-integration-plugin-grouping.spec.ts tests/settings/mobile-sidebar-customization.spec.ts tests/settings/mobile-sidebar-direct-customization.spec.ts)
+(cd apps/web && pnpm exec eslint e2e/tests/plugins/integration-plugin-grouping.spec.ts e2e/tests/plugins/mobile-integration-plugin-grouping.spec.ts)
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+The two plugin grouping specs are new files owned by this work order. Confirm test
+project discovery. Managed runs rebuild frontend/backend and package fixtures.
+Do not overlap these suites or override worker limits. Record the lint result with the browser results.
+
+## Files likely touched
+
+- `apps/web/e2e/tests/plugins/integration-plugin-grouping.spec.ts` (new).
+- `apps/web/e2e/tests/plugins/mobile-integration-plugin-grouping.spec.ts` (new).
+- Existing four settings suites in Verification only if fixture or old assertions
+  need reconciliation. Their original flows remain covered.
+- `docs/public/use-kandev.md`: Customize the sidebar (how-to guidance).
+- This package's plan/work orders and their results sections.
+
+## Dependencies
+
+Task 01.
+
+## Risks
+
+Plugin readiness and responsive hidden mounts can produce false duplicate counts.
+Use active surface scope and real registration readiness. Do not alter the
+fixture's main/footer registrations to make this narrow scenario pass.
+
+## Parallelism
+
+`sequential`
+
+## Inputs
+
+- [Requirements](../../specs/ui/requirements/sidebar-customization.md).
+- [Design](../../specs/ui/system-design/sidebar-customization.md#integration-plugin-grouping).
+- Existing mobile plugin navigation and sidebar customization E2E patterns.
+- Public docs README and `/docs-maintainer` guidance.
+
+## Results
+
+Completed on 2026-10-26:
+
+- Mobile managed E2E command above: 11 passed, including the new grouped-plugin
+  flow and existing customization suites. Fresh frontend/backend/fixture build.
+  Log: `/tmp/kandev-run.e2e.MSPoa0sK.log`.
+- Desktop managed E2E command above reused that production build: 11 passed.
+  Includes the new visibility, custom-pin independence, reset, route activation,
+  and collapsed-rail regression. Log: `/tmp/kandev-run.e2e.lXHOuXfD.log`.
+- Changed/new TS and TSX ESLint, typecheck, and i18n checks passed.
+- Public-doc validator: 48 pages. Validator tests: 63 passed.
+- Specification catalog and lint passed; whitespace checks passed.
+- Actual YouTrack v0.2.0 was installed through the UI on a separate fresh
+  instance. Desktop and touch-phone grouping, uniqueness, reload, route
+  activation, 44px phone sizing, and menu dismissal passed.
+- Inspected fresh desktop and phone captures against UI-01/UI-02. Screenshots
+  are retained as ignored PR assets and published through native attachments.
+
+Local managed runs removed inherited `KANDEV_INTERNAL_*` launcher configuration
+and supplied existing Nix Chromium library paths. These were runner environment
+adjustments, not application or test-harness changes. The final desktop test
+corrects a selector that previously omitted a shortcut-count suffix.
+
+PR CI and review remain an external delivery gate until their exact-head checks
+are terminal and findings are addressed. No delegation was used.
+
