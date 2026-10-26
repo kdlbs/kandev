@@ -209,6 +209,9 @@ export function executionDetailsScenario() {
     const dialog = testPage.getByRole("dialog", { name: "Execution details", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/Agent process group\. Only agentctl stops it/)).toBeVisible();
+    await expect(
+      dialog.getByText(/A process that leaves the group cannot be tracked or stopped/),
+    ).toBeVisible();
     await expect(dialog.getByText(/Approvals are not supported on macOS/)).toBeVisible();
     await expect(dialog.getByText(/Filesystem denials are unavailable on macOS/)).toBeVisible();
     await expect(dialog.getByText("Kernel container", { exact: true })).not.toBeAttached();

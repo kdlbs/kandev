@@ -550,7 +550,7 @@
   "executionDenialsUnavailable": "Os relatórios de recusa não estão disponíveis. Isto não significa que nenhuma operação tenha sido recusada.",
   "executionOwnership": "Propriedade do processo",
   "executionOwnership_kernel_container": "Contentor do kernel",
-  "executionOwnership_process_tree": "Grupo de processos do agente. Apenas o agentctl o termina; não existe contentor do kernel.",
+  "executionOwnership_process_tree": "Grupo de processos do agente. Apenas o agentctl o termina; não existe contentor do kernel. Um processo que sai do grupo não pode ser acompanhado nem terminado.",
   "executionApprovalsNotSupported": "As aprovações não são suportadas no macOS. Uma operação recusada continua recusada.",
   "executionDenialsMacosUnavailable": "As recusas do sistema de ficheiros não estão disponíveis no macOS. Isto não significa que nenhuma operação tenha sido recusada.",
   "executionPreviewUnavailable": "As predefinições atuais não estão disponíveis para este utilizador ou contexto de execução.",

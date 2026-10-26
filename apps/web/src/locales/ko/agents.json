@@ -550,7 +550,7 @@
   "executionDenialsUnavailable": "거부 보고서를 사용할 수 없습니다. 거부된 작업이 없다는 의미는 아닙니다.",
   "executionOwnership": "프로세스 소유권",
   "executionOwnership_kernel_container": "커널 컨테이너",
-  "executionOwnership_process_tree": "에이전트 프로세스 그룹입니다. agentctl만 중지할 수 있으며 커널 컨테이너는 없습니다.",
+  "executionOwnership_process_tree": "에이전트 프로세스 그룹입니다. agentctl만 중지할 수 있으며 커널 컨테이너는 없습니다. 그룹을 벗어난 프로세스는 추적하거나 중지할 수 없습니다.",
   "executionApprovalsNotSupported": "macOS에서는 승인이 지원되지 않습니다. 거부된 작업은 계속 거부됩니다.",
   "executionDenialsMacosUnavailable": "macOS에서는 파일 시스템 거부 정보를 사용할 수 없습니다. 거부된 작업이 없다는 의미는 아닙니다.",
   "executionPreviewUnavailable": "이 사용자 또는 실행 컨텍스트에서는 현재 기본값을 사용할 수 없습니다.",

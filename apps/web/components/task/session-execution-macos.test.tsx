@@ -91,6 +91,9 @@ it("states the process-group owner, unsupported approvals and unavailable denial
   expect(
     within(dialog).getByText(/Only agentctl stops it; there is no kernel container/),
   ).toBeTruthy();
+  expect(
+    within(dialog).getByText(/A process that leaves the group cannot be tracked or stopped/),
+  ).toBeTruthy();
   expect(within(dialog).getByText(/Approvals are not supported on macOS/)).toBeTruthy();
   expect(within(dialog).getByText(/Filesystem denials are unavailable on macOS/)).toBeTruthy();
   expect(within(dialog).queryByTestId("sandbox-denial-report")).toBeNull();

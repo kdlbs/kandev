@@ -46,6 +46,9 @@ func newSandboxRuntime(cfg *config.Config, policies *policy.Service, providers *
 	if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
 		return nil, errSandboxRuntimeUnavailable
 	}
+	if err = refuseDeniedStateRoot(sandboxHostOS, canonical); err != nil {
+		return nil, err
+	}
 	manager := sandboxruntime.NewManager(policies, providers, base)
 	policies.SetReportRefresher(manager.RefreshReport)
 	policies.SetLearningCompiler(manager.CompileLearning)

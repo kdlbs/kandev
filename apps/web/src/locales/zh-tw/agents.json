@@ -550,7 +550,7 @@
   "executionDenialsUnavailable": "拒絕報告不可用。這並不意味著沒有操作被拒絕。",
   "executionOwnership": "處理程序歸屬",
   "executionOwnership_kernel_container": "核心容器",
-  "executionOwnership_process_tree": "代理處理程序組。只有 agentctl 能停止它，不存在核心容器。",
+  "executionOwnership_process_tree": "代理處理程序組。只有 agentctl 能停止它，不存在核心容器。離開該處理程序組的處理程序無法被跟蹤或停止。",
   "executionApprovalsNotSupported": "macOS 不支援審批。被拒絕的操作仍然被拒絕。",
   "executionDenialsMacosUnavailable": "macOS 上無法擷取檔案系統拒絕報告。這並不意味著沒有操作被拒絕。",
   "executionPreviewUnavailable": "目前預設值對該檢視者或執行上下文不可用。",

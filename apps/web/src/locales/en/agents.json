@@ -550,7 +550,7 @@
   "executionDenialsUnavailable": "Denial reports are unavailable. This does not mean that no operations were denied.",
   "executionOwnership": "Process ownership",
   "executionOwnership_kernel_container": "Kernel container",
-  "executionOwnership_process_tree": "Agent process group. Only agentctl stops it; there is no kernel container.",
+  "executionOwnership_process_tree": "Agent process group. Only agentctl stops it; there is no kernel container. A process that leaves the group cannot be tracked or stopped.",
   "executionApprovalsNotSupported": "Approvals are not supported on macOS. A denied operation stays denied.",
   "executionDenialsMacosUnavailable": "Filesystem denials are unavailable on macOS. This does not mean that no operations were denied.",
   "executionPreviewUnavailable": "Current defaults are unavailable for this viewer or execution context.",

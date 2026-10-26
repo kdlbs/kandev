@@ -550,7 +550,7 @@
   "executionDenialsUnavailable": "拒否レポートは利用できません。操作が拒否されなかったことを意味するものではありません。",
   "executionOwnership": "プロセスの所有",
   "executionOwnership_kernel_container": "カーネルコンテナ",
-  "executionOwnership_process_tree": "エージェントのプロセスグループです。停止できるのは agentctl のみで、カーネルコンテナはありません。",
+  "executionOwnership_process_tree": "エージェントのプロセスグループです。停止できるのは agentctl のみで、カーネルコンテナはありません。グループを離れたプロセスは追跡も停止もできません。",
   "executionApprovalsNotSupported": "macOS では承認はサポートされていません。拒否された操作は拒否されたままです。",
   "executionDenialsMacosUnavailable": "macOS ではファイルシステムの拒否情報を利用できません。操作が拒否されなかったことを意味するものではありません。",
   "executionPreviewUnavailable": "この閲覧者または実行コンテキストでは、現在の既定値を利用できません。",

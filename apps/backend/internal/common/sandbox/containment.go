@@ -14,7 +14,7 @@ func ConfigureContainment(cmd *exec.Cmd, launch *Launch) (func(), error) {
 	if launch == nil {
 		return func() {}, nil
 	}
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == hostDarwin {
 		return func() {}, nil
 	}
 	file, err := launch.Containment.Configure(cmd)

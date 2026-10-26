@@ -54,7 +54,7 @@ func (p *Prepared) canRemoveArtifacts() error {
 func (p *Prepared) ValidateCommand(arguments []string, environment map[string]string) error {
 	approved := make(map[string]string, len(p.launch.EnvironmentKeys))
 	for _, key := range p.launch.EnvironmentKeys {
-		if value, ok := environment[key]; ok {
+		if value, ok := environment[key]; ok && contract.EffectiveEnvironmentValue(value) {
 			approved[key] = value
 		}
 	}
