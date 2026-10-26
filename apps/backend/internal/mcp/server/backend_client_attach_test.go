@@ -271,3 +271,24 @@ func TestFailEncodeClaimsOnlyIfPending(t *testing.T) {
 	require.EqualError(t, <-errCh, "encode failed")
 	client.FailRequest(request.ID, errors.New("again")) // already gone: no panic, no block
 }
+
+func TestCancelAfterBindReturnsAndDiscardsLaterOutcomes(t *testing.T) {
+	client, att := newWaitingClient(t)
+	att.set(func(s *AttachmentSnapshot) { s.Attached, s.Ready, s.Epoch = true, true, 1 })
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := requestAsync(client, ctx)
+	request := <-client.GetRequestChannel()
+	require.NoError(t, client.BindRequestToStream(request.ID, "s1"))
+	cancel()
+	require.ErrorIs(t, <-errCh, context.Canceled)
+
+	client.pendingMu.Lock()
+	remaining := len(client.pending)
+	client.pendingMu.Unlock()
+	require.Zero(t, remaining)
+
+	response, err := ws.NewResponse(request.ID, request.Action, nil)
+	require.NoError(t, err)
+	client.HandleResponse(response)
+	client.FailStreamRequests("s1", ErrKandevCallOutcomeUnknown)
+}

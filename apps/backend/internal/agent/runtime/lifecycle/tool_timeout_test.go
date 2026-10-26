@@ -75,3 +75,13 @@ func TestToolTimeoutNoFloorForHarnessWithoutKey(t *testing.T) {
 		t.Errorf("env = %v err = %v", env, err)
 	}
 }
+
+func TestToolTimeoutHugeConfiguredValueDoesNotOverflow(t *testing.T) {
+	env := map[string]string{"MCP_TOOL_TIMEOUT": "9999999999999"}
+	if err := applyToolTimeoutFloor(env, claudeForTimeout(), budgetMeta("15")); err != nil {
+		t.Fatalf("a very large timeout must pass the floor: %v", err)
+	}
+	if env["MCP_TOOL_TIMEOUT"] != "9999999999999" {
+		t.Errorf("configured value rewritten to %q", env["MCP_TOOL_TIMEOUT"])
+	}
+}

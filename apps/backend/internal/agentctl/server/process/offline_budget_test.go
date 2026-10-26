@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 )
 
 func withShortStableWindow(t *testing.T, d time.Duration) {
@@ -252,5 +254,61 @@ func TestStampTerminalAttachedIsNotDetached(t *testing.T) {
 	m.AttachStream("s1")
 	if m.stampTerminal("sub-1").detached {
 		t.Fatal("stamp reports detached while attached")
+	}
+}
+
+func TestOfflineBudgetDeadlineElapsedBetweenTimerAndDecisionStillDecidesAtDetach(t *testing.T) {
+	withShortStableWindow(t, time.Hour)
+	m := &Manager{}
+	m.StartOfflineBudget(time.Hour)
+	m.attach.mu.Lock()
+	m.attach.budget.deadline = time.Now().Add(-time.Second)
+	m.attach.mu.Unlock()
+	// The timer saw no stream and released the mutex; a stream then attached
+	// and detached before the decision ran, so its generation is stale.
+	m.AttachStream("s1")
+	m.DetachStream("s1")
+	if !exhausted(m) {
+		t.Fatal("budget never exhausted: the overdue deadline was dropped with the stale decision")
+	}
+}
+
+func TestStopOfflineBudgetStopsTimersAndDisablesDecisions(t *testing.T) {
+	withShortStableWindow(t, 10*time.Millisecond)
+	m := &Manager{}
+	m.StartOfflineBudget(30 * time.Millisecond)
+	m.AttachStream("s1")
+	m.StopOfflineBudget()
+	m.StopOfflineBudget() // idempotent
+	m.attach.mu.Lock()
+	b := &m.attach.budget
+	armed := b.budgetTimer != nil || b.stableTimer != nil
+	enabled := b.enabled
+	m.attach.mu.Unlock()
+	if armed || enabled {
+		t.Fatalf("timers armed=%v enabled=%v after StopOfflineBudget", armed, enabled)
+	}
+	m.DetachStream("s1")
+	time.Sleep(80 * time.Millisecond)
+	if exhausted(m) {
+		t.Fatal("budget decided after StopOfflineBudget")
+	}
+}
+
+func TestOfflineBudgetCancelCancelsPendingPermissions(t *testing.T) {
+	a := &cancelRecordingAdapter{stubAdapter: newStubAdapter()}
+	m := &Manager{adapter: a, logger: newTestLogger(t), pendingPermissions: map[string]*PendingPermission{}}
+	respCh := make(chan *adapter.PermissionResponse, 1)
+	m.pendingPermissions["p1"] = &PendingPermission{ID: "p1", RequestID: "r1", ResponseCh: respCh, State: "pending"}
+	m.setBudgetInFlight("sub-1")
+	m.StartOfflineBudget(30 * time.Millisecond)
+	eventually(t, "issued cancel", func() bool { return recordState(m) == budgetCancelIssued })
+	select {
+	case resp := <-respCh:
+		if resp == nil || !resp.Cancelled {
+			t.Fatalf("permission response = %+v, want cancelled", resp)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending permission was not cancelled after the budget cancel")
 	}
 }

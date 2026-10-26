@@ -68,6 +68,24 @@ func (m *Manager) StartOfflineBudget(budget time.Duration) {
 	m.restartClockLocked(time.Now())
 }
 
+// StopOfflineBudget disables the budget and stops its timers. It is
+// idempotent and is called when the instance is torn down.
+func (m *Manager) StopOfflineBudget() {
+	t := &m.attach
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	b := &t.budget
+	b.enabled = false
+	if b.budgetTimer != nil {
+		b.budgetTimer.Stop()
+		b.budgetTimer = nil
+	}
+	if b.stableTimer != nil {
+		b.stableTimer.Stop()
+		b.stableTimer = nil
+	}
+}
+
 func (m *Manager) restartClockLocked(now time.Time) {
 	b := &m.attach.budget
 	b.detachedSince = now
@@ -96,7 +114,7 @@ func (m *Manager) onStable(gen uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	b := &t.budget
-	if b.gen != gen || len(t.streams) == 0 {
+	if !b.enabled || b.gen != gen || len(t.streams) == 0 {
 		return
 	}
 	b.stable = true
@@ -125,7 +143,7 @@ func (m *Manager) lastStreamEndedLocked() func() {
 		m.restartClockLocked(time.Now())
 		return nil
 	}
-	if b.deadlinePassed {
+	if b.deadlinePassed || !time.Now().Before(b.deadline) {
 		gen := b.gen
 		return func() { m.decideBudget(gen) }
 	}
