@@ -650,6 +650,41 @@ retry a failed connection immediately, and it does not move, reconfigure, or
 otherwise repair a host that has become unreachable or changed address;
 fixing the host or the connection settings remains an operator action.
 
+## Nomad worker pool
+
+A Nomad profile that names neither `node_id` nor `ssh_target` is a pool profile. Kandev registers a job that names no node and lets Nomad place it on any eligible node in the profile's node pool (default `kandev`). Pool profiles take `node_pool`, `placement` (`spread`, the default, or `binpack`), `pin_node_id`, `exclude_local`, `prefer_local`, `ssh_user`, `cpu_mhz`, `memory_mb` and `memory_max_mb`. `binpack` needs the node pool or cluster scheduler algorithm to be `binpack`, and `memory_max_mb` above `memory_mb` needs memory oversubscription enabled; Kandev checks both before it registers a job. It also refuses when no ready, eligible node in the pool has `cpu_mhz` and `memory_mb` free after the client's `reserved` resources, naming each node's total and reserved figures. Nomad on Apple Silicon fingerprints only a few dozen MHz of CPU; there, set `cpu_total_compute` in the client configuration and size `reserved` relative to it (`NOMAD_CPU_TOTAL_MHZ=4000 nomad-pool-onboard local ...` prints both).
+
+A node is usable only when it publishes the Kandev node contract as Nomad client metadata: `kandev.attach` (`ssh` or `local`), `kandev.state_root`, and for `ssh` nodes `kandev.ssh_host`, `kandev.ssh_port` and `kandev.ssh_host_key_sha256`. A `local` node is the machine Kandev runs on. It must also publish `kandev.host_identity_sha256`, the sha256 of the token in `<kandev home>/data/nomad-host-identity`, reserve CPU and memory for Kandev, and keep its state root outside the Kandev home. A local node that fails any check is refused and never reached over SSH.
+
+Workspaces differ by node. On an `ssh` node agentctl makes a fresh checkout of each repository under the node's state root. On a `local` node (the Kandev host) Kandev adds a git worktree of its own checkout for each repository that has one, on the branch `kandev/pool/<environment-id>`; repositories without a local checkout still get a fresh checkout. Proven cleanup removes the worktree, deletes that branch and prunes the source repository. If any of those steps fails, the workspace and the branch stay in place and the node remains quarantined.
+
+Trust boundary: a node that can register in the pool's node pool, or whose `kandev.*` metadata can be edited (`node:write`), is trusted with file operations on the machine that runs it. A node that advertises `kandev.attach=local` and the Kandev host's identity digest is treated as the Kandev host: Kandev then runs commands and writes the staged files, workspace and cleanup under its advertised `kandev.state_root` on its own host. Restrict who can register nodes in the pool and who can write node metadata to the people who already administer the Kandev host.
+
+`scripts/nomad-pool-onboard` prints the client block for a node. It creates the local token when needed and never edits Nomad configuration:
+
+```bash
+scripts/nomad-pool-onboard ssh /srv/kandev 10.0.0.12 22 SHA256:<fingerprint from ssh-keygen -lf>
+scripts/nomad-pool-onboard local "$HOME/kandev-worker-state"
+```
+
+Before the first launch, check the two cluster prerequisites. Memory oversubscription must be enabled when `memory_max_mb` is above `memory_mb` (`nomad operator scheduler set-config -memory-oversubscription=true`). A `binpack` profile needs the node pool or cluster scheduler algorithm set to `binpack`; `spread` needs no algorithm change. Kandev refuses the launch with a message naming the missing prerequisite.
+
+Paste the block into the node's Nomad client configuration, add `node_pool` to the client stanza, create the pool with `nomad node pool apply`, and restart the client. If the metadata changes between launch and recovery, Kandev refuses to reattach to that environment.
+
+## Nomad worker quarantine and readmission
+
+Archiving, deleting or resetting a task that owns a Nomad environment runs proven cleanup: the runtime is sealed and drained, a receipt is stored, the job is stopped without purging, allocations are confirmed terminal on the original node, and the worker fence is released. Plain session stop only detaches the transport.
+
+If any step cannot be proven (drain failure or timeout, lost reply, changed runtime, lost node, unexpected allocation), Kandev keeps the environment as `cleanup_pending`, marks the node ineligible and records a quarantine marker. Nothing is re-enabled automatically, and task or environment deletion is refused while the record is retained.
+
+To readmit a quarantined worker, do all three steps yourself:
+
+1. Verify outside Kandev that no process from the environment remains (for example after a controlled reboot with a changed boot id), stop the job without purge, and remove the worker fence only after checking that it names this environment.
+2. Call `POST /api/v1/executors/nomad/readmit` with `node_id`, `environment_id`, `generation`, `job_id` and an `attestation` object (`process_tree_absent`, `job_stopped_purge_false`, `fence_removed`, all `true`, plus `operator`). Kandev keeps the record and marks it `operator_released`. It never changes node eligibility or the marker. It works while the archive cleanup is still retrying; a `409` with a busy message means another cleanup attempt holds the environment, so retry shortly.
+3. Delete the `kandev/quarantine/<node-id>` Nomad variable and re-enable the node with `nomad node eligibility -enable`.
+
+For a pool environment, a retained cleanup also keeps its staged job directory `<state_root>/pool/allocations/<job-id>` on the node (the bootstrap script, its environment file, the ready marker and an agentctl copy). Once step 1 has verified the runtime is absent, delete that directory too.
+
 ## Lifecycle and cleanup
 
 The task environment reports `creating`, `ready`, `stopped`, or `failed`; individual execution records have finer states. Stop is deliberately not synonymous with destroy for resumable Docker, Kubernetes, and Sprites environments.
