@@ -88,12 +88,31 @@ export async function completeQuickChatOpening(
   if (options.verifyReload) {
     await page.reload();
     await page.waitForLoadState("networkidle");
+    if (!(await dialog.isVisible().catch(() => false))) {
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await page.keyboard.press(`${modifier}+Shift+q`);
+    }
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    const sessionTab = dialog.locator(
+      `[data-tab-reference="conversation:${started.session_id}"] [data-testid="quick-chat-tab"]`,
+    );
+    await expect(sessionTab).toBeVisible({ timeout: 15_000 });
+    await sessionTab.click();
     await expect
       .poll(async () => {
         const { messages } = await apiClient.listSessionMessages(started.session_id);
-        return messages.filter((message) => message.author_type === "user").length;
+        return messages
+          .filter((message) => message.author_type === "user")
+          .map((message) => message.content);
       })
-      .toBe(1);
+      .toEqual([prompt]);
+    await expect(
+      dialog
+        .getByTestId("quick-chat-messages")
+        .getByTestId("user-message-bubble")
+        .filter({ hasText: prompt }),
+    ).toBeVisible();
+    await expect(dialog.locator(".tiptap.ProseMirror:visible").last()).toBeEmpty();
   }
 
   return started;

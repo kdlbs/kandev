@@ -69,7 +69,7 @@ Run from the repository root. The managed E2E runner rebuilds the application.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run components/task/chat/tiptap-helpers.test.ts components/task/chat/chat-input-draft-ownership.test.tsx components/task/chat/use-chat-input-state-accepted-payload.test.ts components/quick-chat/use-quick-chat-initial-prompt.test.ts)
+(cd apps/web && pnpm exec vitest run components/task/chat/tiptap-helpers.test.ts components/task/chat/chat-input-draft-ownership.test.tsx components/task/chat/chat-input-draft-multiline-restoration.test.tsx components/task/chat/use-chat-input-state-accepted-payload.test.ts components/quick-chat/use-quick-chat-initial-prompt.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/quick-chat-opening-composer.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-quick-chat-opening-composer.spec.ts)
@@ -112,4 +112,22 @@ sections of plan.md, existing source, and adjacent test patterns.
 - Green: desktop Quick Chat opening E2E passed (2 tests); phone E2E passed (1
   test). Both verified exact multiline delivery, empty composer, and one user
   message after reload. The managed runner rebuilt the production app.
+- Review follow-up: after reload, the shared helper reopens the accepted Quick
+  Chat tab and verifies the exact saved user message and empty composer. From
+  `apps/web`, `pnpm e2e:run --project chromium
+  tests/chat/quick-chat-opening-composer.spec.ts` passed (2 tests), and
+  `pnpm e2e:run --project mobile-chrome
+  tests/chat/mobile-quick-chat-opening-composer.spec.ts` passed (1 test). The
+  updated focused Vitest command in Verification passed 5 files and 75 tests;
+  `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  and `pnpm exec eslint
+  e2e/tests/chat/quick-chat-opening-composer-helpers.ts` also passed.
+- PR CI follow-up: CI replay exposed two file-tree tests that expected Changes
+  to auto-activate in a Files/Changes/Todos layout, where the layout guard
+  intentionally blocks automatic activation. The tests now select Changes
+  explicitly before checking its panel. The file-tree spec passed 3 tests with
+  retries disabled. The duration-aware CI shards passed under a 4-process,
+  4-CPU, 12-GB cap with retries disabled: shard 27 passed 139 tests and shard
+  23 passed 133 tests. The original mobile prompt toggle failure did not recur
+  in either exact shard replay.
 - The rendered structure matches UI-01; no layout changes were needed.
