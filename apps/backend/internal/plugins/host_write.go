@@ -226,6 +226,7 @@ type exactTaskWriter interface {
 
 type exactTaskCreateWriter interface {
 	CreateTaskExact(ctx context.Context, in ExactTaskCreateInput) (*taskmodels.Task, bool, error)
+	FindTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, bool, error)
 }
 
 type exactTaskMoveWriter interface {
@@ -303,6 +304,9 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if err != nil {
 		return nil, err
 	}
+	if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
+		return nil, err
+	}
 	created, err := r.host.taskWriter.CreateTask(ctx, prepared)
 	if err != nil {
 		return nil, err
@@ -333,9 +337,6 @@ func (r taskReader) prepareCreate(ctx context.Context, in pluginsdk.CreateTaskIn
 	}
 	launch, err := taskLaunchInput(in.Launch)
 	if err != nil {
-		return TaskCreateInput{}, TaskLaunchInput{}, err
-	}
-	if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
 		return TaskCreateInput{}, TaskLaunchInput{}, err
 	}
 	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)

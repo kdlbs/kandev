@@ -18,13 +18,16 @@ system_design:
 ## Summary
 
 Store a plugin task's launch agent and executor profiles in the task metadata,
-and validate them whenever a plugin gives them, so a task started later by a
-workflow step launches with them.
+and validate them before new task creation. A later workflow start uses the
+saved agent profile only when workflow profile policy selects no profile.
+Exact-create retries resolve a committed task before they check whether its
+profiles still exist.
 
 ## In scope
 
 - `backendapp/services.go` and `adapters_plugin_writer_test.go`.
-- `plugins/host_write.go` and `host_write_launch_test.go`.
+- `plugins/host_write.go`, `host_exact_tasks.go`, and their tests.
+- `task/service/external_id.go` and `permissions_external_id_test.go`.
 - The requirement and system design updates.
 
 ## Out of scope
@@ -33,5 +36,21 @@ workflow step launches with them.
 
 ## Acceptance
 
-`go test ./internal/plugins ./internal/backendapp` passes, and the metadata
-tests fail when `pluginTaskMetadata` stops writing either profile.
+New tasks reject missing profiles before creation. Exact-create retries return
+an already committed task when a saved agent or executor profile has since
+been removed. Metadata tests fail when `pluginTaskMetadata` stops writing either
+profile.
+
+## Verification
+
+- Before this fixup, the PR author reported `go test ./internal/plugins`
+  passing.
+- Before this fixup, the PR author reported `go test ./internal/backendapp` passing with
+  `TestManagedAttachmentCompatibilityConsumers` skipped after it exceeded a
+  15-minute timeout. This does not establish that the full package suite passed.
+- Fixup passed from `apps/backend`: `go test ./internal/plugins -run '^(TestExactTaskCreateRecoversDomainCommit|TestExactTaskCreateRejectsUnknownLaunchProfilesForNewTasks|TestPluginHost_Tasks_CreateOnly)' -count=1`.
+- Fixup passed from `apps/backend`: `go test ./internal/backendapp -run '^TestPluginsTaskWriter_FindTaskByExternalID$' -count=1`.
+- Fixup passed from `apps/backend`: `go test ./internal/task/service -run '^TestFindTaskByExternalIDForCreateUsesCreateAuthorization$' -count=1`.
+- Fixup: `bash scripts/lint-go-changed` on the seven changed Go files reported
+  0 issues.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.

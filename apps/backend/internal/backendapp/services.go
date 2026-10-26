@@ -1873,6 +1873,7 @@ type pluginTaskWriteService interface {
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	FindTaskByExternalIDForCreate(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, bool, error)
 	UpdateTaskExact(ctx context.Context, id string, req taskservice.ExactTaskUpdateRequest) (*taskservice.ExactTaskUpdateResult, error)
 	MoveTaskWithOptions(ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error)
 }
@@ -1884,6 +1885,17 @@ type pluginsTaskWriterAdapter struct {
 func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.TaskCreateInput) (*taskmodels.Task, error) {
 	created, _, err := a.createTask(ctx, in, "")
 	return created, err
+}
+
+func (a pluginsTaskWriterAdapter) FindTaskByExternalID(ctx context.Context, workspaceID, rawExternalID string) (*taskmodels.Task, bool, error) {
+	task, found, err := a.svc.FindTaskByExternalIDForCreate(ctx, workspaceID, rawExternalID)
+	if errors.Is(err, taskservice.ErrExternalIDInvalid) {
+		return nil, false, status.Error(codes.InvalidArgument, "external_id is required and must be valid")
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return task, found, nil
 }
 
 func (a pluginsTaskWriterAdapter) CreateTaskExact(ctx context.Context, in plugins.ExactTaskCreateInput) (*taskmodels.Task, bool, error) {

@@ -25,6 +25,10 @@ type fakePluginTaskWriteService struct {
 	getTaskResult *taskmodels.Task
 	getTaskErr    error
 	lastGetTaskID string
+	externalTask  *taskmodels.Task
+	externalErr   error
+	externalWS    string
+	externalID    string
 	claimResult   *taskmodels.TaskManagementClaim
 	claimErr      error
 
@@ -87,6 +91,18 @@ func (f *fakePluginTaskWriteService) GetTask(_ context.Context, id string) (*tas
 	return &taskmodels.Task{
 		ID: id, WorkspaceID: "ws-1", UpdatedAt: time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC),
 	}, nil
+}
+
+func (f *fakePluginTaskWriteService) FindTaskByExternalIDForCreate(_ context.Context, workspaceID, externalID string) (*taskmodels.Task, bool, error) {
+	f.externalWS = workspaceID
+	f.externalID = externalID
+	if f.externalErr != nil {
+		return nil, false, f.externalErr
+	}
+	if f.externalTask != nil {
+		return f.externalTask, true, nil
+	}
+	return nil, false, nil
 }
 
 func (f *fakePluginTaskWriteService) GetTaskManagementClaim(context.Context, string) (*taskmodels.TaskManagementClaim, error) {
@@ -213,6 +229,26 @@ func TestPluginsTaskWriter_CreateMapsSourceToMetadata(t *testing.T) {
 	require.Equal(t, "parent-1", svc.lastCreate.ParentID)
 	require.Equal(t, "plugin:acme", svc.lastCreate.Metadata["source"], "provenance is stamped into task metadata")
 	require.Equal(t, "critical", svc.lastCreate.Priority)
+}
+
+func TestPluginsTaskWriter_FindTaskByExternalID(t *testing.T) {
+	svc := &fakePluginTaskWriteService{externalTask: &taskmodels.Task{ID: "task-existing", WorkspaceID: "ws-1"}}
+	task, found, err := (pluginsTaskWriterAdapter{svc: svc}).FindTaskByExternalID(
+		context.Background(), "ws-1", "  issue:42  ",
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "task-existing", task.ID)
+	require.Equal(t, "ws-1", svc.externalWS)
+	require.Equal(t, "  issue:42  ", svc.externalID)
+
+	svc.externalTask = nil
+	task, found, err = (pluginsTaskWriterAdapter{svc: svc}).FindTaskByExternalID(
+		context.Background(), "ws-1", "issue:missing",
+	)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Nil(t, task)
 }
 
 func TestPluginsTaskWriter_CreateWithoutSourceOmitsMetadata(t *testing.T) {

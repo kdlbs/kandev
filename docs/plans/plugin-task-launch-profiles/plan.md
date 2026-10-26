@@ -32,8 +32,9 @@ into the metadata; a plugin cannot, because its metadata is namespaced.
 
 - `pluginTaskMetadata` in `backendapp/services.go` stores non-empty launch
   profiles under `agent_profile_id` / `executor_profile_id`.
-- `prepareCreate` in `plugins/host_write.go` validates launch profiles whenever
-  they are given.
+- `prepareCreate` parses launch options; create paths validate profiles before
+  new task creation. Exact creates first resolve an existing task by external
+  ID so a retry can recover a committed task after profile removal.
 - Requirement AC-PLUGINS-PLUGINS-001.15 and the `Host.Tasks().Create` paragraph
   of the system design.
 
@@ -46,7 +47,18 @@ the step prompt and the task description, as it does for native watchers.
 
 ## Verification
 
-- `go test ./internal/plugins` and `go test ./internal/backendapp` pass.
+- Before this fixup, the PR author reported `go test ./internal/plugins`
+  passing.
+- Before this fixup, the PR author reported `go test ./internal/backendapp` passing with
+  `TestManagedAttachmentCompatibilityConsumers` skipped after it exceeded a
+  15-minute timeout. This does not establish that the full package suite passed.
+- Fixup passed from `apps/backend`: `go test ./internal/plugins -run '^(TestExactTaskCreateRecoversDomainCommit|TestExactTaskCreateRejectsUnknownLaunchProfilesForNewTasks|TestPluginHost_Tasks_CreateOnly)' -count=1`.
+- Fixup passed from `apps/backend`: `go test ./internal/backendapp -run '^TestPluginsTaskWriter_FindTaskByExternalID$' -count=1`.
+- Fixup passed from `apps/backend`: `go test ./internal/task/service -run '^TestFindTaskByExternalIDForCreateUsesCreateAuthorization$' -count=1`.
+- Fixup: `bash scripts/lint-go-changed` on the seven changed Go files reported
+  0 issues.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 - The new tests cover storing both profiles, storing only the ones given, the
   writer receiving them without a start, and rejecting unknown profiles without
-  a start.
+  a start. The fixup adds exact-create retry coverage for removal of either
+  profile after the domain task commits but before the command receipt completes.
