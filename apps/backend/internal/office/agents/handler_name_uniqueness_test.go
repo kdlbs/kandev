@@ -111,6 +111,70 @@ func TestAgentNameUniqueness_HTTPCreate(t *testing.T) {
 	}
 }
 
+// @covers AC-OFFICE-AGENT-NAMES-001.1, AC-OFFICE-AGENT-NAMES-001.2
+func TestAgentNameUniqueness_HTTPCEOPrecedence(t *testing.T) {
+	tests := []struct {
+		name          string
+		method        string
+		requestedName string
+		wantConflict  bool
+	}{
+		{name: "duplicate_ceo_post", method: http.MethodPost, requestedName: nameAlpha, wantConflict: true},
+		{name: "duplicate_ceo_promotion_patch", method: http.MethodPatch, requestedName: nameAlpha, wantConflict: true},
+		{name: "distinct_ceo_post", method: http.MethodPost, requestedName: "Gamma"},
+		{name: "distinct_ceo_promotion_patch", method: http.MethodPatch, requestedName: "Gamma"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo := newTestAgentService(t)
+			ceo := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+				WorkspaceID: nameWorkspaceA, Name: nameAlpha, Role: models.AgentRoleCEO,
+			})
+			route, wantCount := "/workspaces/"+nameWorkspaceA+"/agents", 1
+			var worker *models.AgentInstance
+			if tt.method == http.MethodPatch {
+				worker = createNameTestAgent(t, svc, nameWorkspaceA, nameBeta)
+				route, wantCount = "/agents/"+worker.ID, 2
+			}
+			before := nameExport(t, svc, nameWorkspaceA)
+			rec := nameHTTP(t, svc, tt.method, route, map[string]string{
+				"name": tt.requestedName, "role": string(models.AgentRoleCEO), "icon": nameSavedIcon,
+			})
+			if tt.wantConflict {
+				assertNameHTTPResponse(t, rec, http.StatusBadRequest, "agent_name_already_exists")
+			} else {
+				assertNameHTTPCEOGuard(t, rec)
+			}
+			assertNameAgentUnchanged(t, svc, ceo)
+			if worker != nil {
+				assertNameAgentUnchanged(t, svc, worker)
+			}
+			rows, err := repo.ListAgentInstances(context.Background(), nameWorkspaceA)
+			if err != nil || len(rows) != wantCount {
+				t.Errorf("agents after CEO request = %d, err=%v; want %d", len(rows), err, wantCount)
+			}
+			if after := nameExport(t, svc, nameWorkspaceA); !reflect.DeepEqual(before, after) {
+				t.Errorf("manifest changed after rejected CEO request: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+}
+
+func assertNameHTTPCEOGuard(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	var response struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode CEO guard response: %v", err)
+	}
+	if rec.Code < http.StatusBadRequest || response.Error != ErrAgentCEOAlreadyExists.Error() ||
+		response.Code == "agent_name_already_exists" {
+		t.Errorf("distinct-name CEO request bypassed CEO guard: status=%d response=%+v", rec.Code, response)
+	}
+}
+
 func nameHTTP(t *testing.T, svc *AgentService, method, route string, body map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

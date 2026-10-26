@@ -19,8 +19,8 @@ HTTP, and persistence/export regression slice. The Office
 and [identity design](../../specs/office/system-design/agents-01.md#workspace-agent-name-admission)
 own the behavior.
 
-The reviewed design package is implemented. The single sequential work order
-and its targeted verification are complete.
+The reviewed slice and the accepted CEO name-error precedence remediation are
+implemented and locally verified. The single sequential work order is complete.
 
 ## Scope
 
@@ -102,6 +102,7 @@ affected-package runs below.
 | Registered PATCH returns 400; both rows/timestamps and co-submitted fields survive unchanged; manifest retains both configs and revision | `TestAgentNameUniqueness_HTTPExport/reject_occupied_name` in `apps/backend/internal/office/agents/handler_name_uniqueness_test.go` | `AC-OFFICE-AGENT-NAMES-001.1`, `.2`, `.6` |
 | Accepted self-name, omitted-name, unused-name and cross-workspace PATCHes persist and export | `TestAgentNameUniqueness_HTTPExport` control subtests in the same file | `AC-OFFICE-AGENT-NAMES-001.3`, `.4`, `.5` |
 | Duplicate POST returns 400 with the same stable code and no insertion | `TestAgentNameUniqueness_HTTPCreate` in the same file | `AC-OFFICE-AGENT-NAMES-001.1`, `.2` |
+| Duplicate-CEO POST and colliding-name promotion PATCH report name conflicts; distinct-name controls retain the CEO guard; all preserve storage/export | `TestAgentNameUniqueness_HTTPCEOPrecedence` in the same file | `AC-OFFICE-AGENT-NAMES-001.1`, `.2`, `.6` |
 
 The primary collision fixture starts from valid exportable state. Assert the
 conflict independently of export, then reread both rows and assert the
@@ -170,6 +171,32 @@ Implementation verification on 2026-10-26:
 
 The requirement and design files retain their broader draft lifecycle status;
 this completed delivery covers only `REQ-OFFICE-AGENT-NAMES-001`.
+
+### CEO name-precedence remediation
+
+The existing name-conflict acceptance criterion also applies to a requested CEO
+role. The initial validators check CEO capacity before name admission, so
+duplicate-CEO POST and Worker-to-CEO rename PATCH requests report the CEO-count
+error as HTTP 500. This accepted correction stays within the existing contract.
+
+Independent `TestAgentNameUniqueness_HTTPCEOPrecedence` cases cover both
+registered requests and distinct-name CEO controls, including row and export
+preservation. The targeted command in the work order failed on the two intended
+HTTP 500/name-code assertions before production changes; distinct-name controls
+passed. Only then were the existing name checks moved before CEO validation in
+both validators, retaining all existing guards and the exact predicate.
+
+Post-correction verification on 2026-10-26:
+
+- Full name-regression selection: exit 0, race enabled, Go result 1.451s.
+- Affected agents package: exit 0, race enabled, Go result 2.168s.
+- Changed-Go lint: exit 0, `0 issues`, canonical 3GiB default.
+- Catalog/specification checks passed; all 24 local links and frontmatter file
+  references resolve; delivery coverage is `covered` without errors; diff check
+  passed.
+
+No dependency reinstall or broader suite is part of this remediation. Earlier
+verification results remain the historical initial-slice evidence.
 
 ## Risks
 

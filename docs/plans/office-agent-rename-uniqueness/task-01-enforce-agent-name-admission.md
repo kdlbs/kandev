@@ -289,3 +289,42 @@ Storage, exporter, concurrency behavior, frontend, and public docs are unchanged
 The broader requirement/design files remain draft as required by this work
 order; the narrow delivery is complete. Hosted CI and review are external
 delivery gates and are not claimed by these local results.
+
+### CEO name-precedence remediation
+
+The accepted name-conflict ordering finding is implemented and verified.
+Independent `TestAgentNameUniqueness_HTTPCEOPrecedence` cases cover duplicate-CEO
+POST and unparented Worker-to-CEO rename PATCH requests. Both must return the
+existing name-conflict HTTP 400/code before CEO-count rejection. Distinct-name
+controls must retain the current CEO guard. Every case compares original saved
+identities, row count, and real manifest contents/revision after rejection.
+
+The targeted RED command, before changing production, is:
+
+```bash
+(cd apps/backend && timeout --kill-after=10s 10m env GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -trimpath -race -tags=fts5 -p=1 -count=1 -timeout=8m ./internal/office/agents -run '^TestAgentNameUniqueness_HTTPCEOPrecedence$')
+```
+
+After expected behavioral RED, put existing name admission before CEO-count
+rejection in both validators. Preserve required name/role validation, CEO
+reporting-root validation, the distinct-name CEO guard, and the exact repository
+predicate. Run the original full name-regression selection, affected package,
+changed-Go lint, and documentation commands from Verification afterward.
+Remediation results on 2026-10-26:
+
+- The targeted CEO command compiled and failed with exit 1 before production
+  changes. Both colliding-name requests returned HTTP 500 with the CEO-count
+  error instead of HTTP 400/name-conflict code. Both distinct-name controls
+  passed and all persisted-row/manifest preservation checks passed.
+- The minimal correction moved the existing name checks before CEO validation
+  in both validators; it added no new predicate or persistence behavior.
+- Original full name-regression selection: exit 0, race enabled, Go result
+  1.451s.
+- Affected agents package once after the correction: exit 0, race enabled, Go
+  result 2.168s.
+- Changed-Go lint: exit 0, `0 issues`; canonical 3GiB default.
+- Catalog/specification checks passed. All 24 local links and frontmatter paths
+  resolve; delivery coverage is `covered` without errors; diff check passed.
+
+No dependency reinstall or broad suite was run. The earlier successful results
+remain the initial-slice history. The existing requirement is unchanged.

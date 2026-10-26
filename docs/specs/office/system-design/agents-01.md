@@ -53,8 +53,11 @@ on this path. Persistence occurs only after service validation.
 
 `AgentService.validateAgentCreate` already invokes `validateAgentNameUnique`.
 `validateAgentUpdate` invokes the same helper with the current
-`agent.Name`, `agent.WorkspaceID`, and `agent.ID`, before its optional
-`validateReportsTo` return. This ensures a supplied reporting relationship
+`agent.Name`, `agent.WorkspaceID`, and `agent.ID`. Both validators admit names
+after required name/role checks and before CEO-specific checks, so duplicate
+CEO names receive the same name-conflict response. Distinct names still pass
+through the existing CEO-count and reporting-root guards. Name admission also
+precedes the optional `validateReportsTo` return, so a reporting relationship
 cannot bypass name admission. A conflict returns before
 `Repository.UpdateAgentInstance`, so a rejected PATCH saves none of its fields.
 

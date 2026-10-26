@@ -849,6 +849,9 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 	if !validRoles[agent.Role] {
 		return ErrAgentRoleInvalid
 	}
+	if err := s.validateAgentNameUnique(ctx, agent.Name, agent.WorkspaceID, ""); err != nil {
+		return err
+	}
 	if agent.Role == models.AgentRoleCEO {
 		if agent.ReportsTo != "" {
 			return ErrAgentCEOReportsTo
@@ -856,9 +859,6 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 		if s.countAgentsByRoleInWorkspace(ctx, models.AgentRoleCEO, agent.WorkspaceID, "") > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
-	}
-	if err := s.validateAgentNameUnique(ctx, agent.Name, agent.WorkspaceID, ""); err != nil {
-		return err
 	}
 	if agent.ReportsTo != "" {
 		return s.validateReportsTo(ctx, agent)
@@ -874,6 +874,9 @@ func (s *AgentService) validateAgentUpdate(ctx context.Context, agent *models.Ag
 	if !validRoles[agent.Role] {
 		return ErrAgentRoleInvalid
 	}
+	if err := s.validateAgentNameUnique(ctx, agent.Name, agent.WorkspaceID, agent.ID); err != nil {
+		return err
+	}
 	if agent.Role == models.AgentRoleCEO {
 		if agent.ReportsTo != "" {
 			return ErrAgentCEOReportsTo
@@ -881,9 +884,6 @@ func (s *AgentService) validateAgentUpdate(ctx context.Context, agent *models.Ag
 		if s.countAgentsByRoleInWorkspace(ctx, models.AgentRoleCEO, agent.WorkspaceID, agent.ID) > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
-	}
-	if err := s.validateAgentNameUnique(ctx, agent.Name, agent.WorkspaceID, agent.ID); err != nil {
-		return err
 	}
 	if agent.ReportsTo != "" {
 		return s.validateReportsTo(ctx, agent)
