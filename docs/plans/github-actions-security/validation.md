@@ -101,7 +101,7 @@ This fixes the historical Nix failure while retaining the 0.5-second timeout ass
 | `python3 scripts/lint-spec-files.py --all` | Passed |
 | `git diff --check` | Passed |
 
-The Python/Node suites contain 249 passing test cases in total. The shell
+The listed Python/Node workflow and helper suites contain 249 passing cases. The shell
 contract also passed. The action-ref linter checked all 30 workflows.
 
 Zizmor 1.25.2 reports the expected 10 reviewed residual findings, exit 14:
@@ -149,3 +149,45 @@ Its mobile queue test failed the strict flake gate, passed local reproduction
 checks without retries, and passed one failed-job rerun without source changes.
 These CI results are historical after remediation. Fresh head CI and bot reviews
 are required after the fix is pushed. No live provider or publication was tested.
+
+## Delivery CI fixture corrections
+
+CI run `40317924466` at `9e2d3fe6bd7` reported three flaky mobile tests and a
+failed aggregate gate. Each case passed its retry, but the strict flake gate
+correctly rejected the run. Local investigation identified test synchronization
+and cleanup defects. No production UI change or timeout increase is required.
+
+- The transcript test captured a temporary post-submit clamp as its baseline.
+  A two-CPU run recorded the original offset `4988`, the captured offset `4959`,
+  and the restored offset `4988` before the reply. Capture the owned position
+  before submission. The original failure and one of three instrumented repeats
+  reproduced the same 29px assertion error.
+- The breadcrumb test measured the loading placeholder after its final folder
+  tap. A controlled 500ms final-listing delay reproduced the old assertion failure.
+  Wait for the disabled current-directory breadcrumb before measuring. Retain
+  every containment, trailing-edge, overflow, visibility, and touch assertion.
+- The MCP clarity helper removed its route while a GET callback was still active.
+  The failed blob report places that callback across the helper's final assertion.
+  Playwright continues an active request when its last handler is removed, so
+  the callback's later fulfillment fails. Drain this helper's completion barriers
+  before removing its exact handler. Preserve other routes and propagate errors.
+
+The original baseline and current main contained the same MCP clarity helper.
+The CI fixes preserve the existing transcript, directory-selection, and MCP
+contracts. Product requirements, public docs, and screenshots need no change.
+Main `b4e9cf5ede3` was integrated locally with normal hooks before final checks.
+
+Both scroll and breadcrumb corrections passed three repetitions on two CPUs
+with retries disabled. A fresh managed build against the combined source passed
+all three exact failed cases before the final MCP cleanup change. After that
+change, the full affected suites passed: 16 mobile and 9 desktop browser cases,
+on two CPUs with retries disabled. The independent reviewer found no remaining
+defect in the three corrections. The diagnostic route delays and console logs were removed.
+
+The full web typecheck passed with process-local
+`NODE_OPTIONS=--max-old-space-size=8192` on two CPUs. Its first attempt exceeded
+Node's default heap. Scoped ESLint passed for the three changed E2E files.
+The 249 workflow/helper cases, shell contract, action pinning, document checks,
+and diff checks passed again after main integration. Zizmor returned the expected
+exit code 14 with the same 10 reviewed residual findings. Local PR-documentation
+coverage validation returned `covered` with no errors.

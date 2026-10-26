@@ -108,6 +108,11 @@ manifest mapping now protect both automatic reviews and walkthrough generation.
 The finding, red/green regressions, and pinned-CLI evidence are recorded in
 [validation.md](validation.md).
 
+Delivery CI also exposed three pre-existing E2E fixture defects. The fixup
+corrects the disabled-scroll baseline, final-directory readiness, and scoped
+MCP route cleanup. Product rendering and assertions remain unchanged. Detailed
+causal evidence and verification are recorded in the validation file.
+
 ## Risks
 
 - The pinned Claude action changes sensitive configuration during preparation.
