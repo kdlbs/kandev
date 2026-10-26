@@ -1,6 +1,6 @@
 ---
 created: 2026-10-26
-status: in_progress
+status: done
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-SEGMENTATION-001
@@ -149,11 +149,12 @@ records feed the shared chat transcript on phone.
 
 ## Work orders
 
-- [ ] [Task 01: Persist and project durable text segment boundaries](task-01-persist-text-segment-boundaries.md) (in progress; verification limitations remain)
+- [x] [Task 01: Persist and project durable text segment boundaries](task-01-persist-text-segment-boundaries.md) (in progress; verification limitations remain)
 
 ## Verification results
 
-Task 01 remains in progress while broad SQLite verification is unresolved.
+Task 01 implementation is complete. The parent takeover verification below
+records full SQLite CI coverage and the remaining CI corrections.
 Change-aware lifecycle and SQLite race tests passed, including real retention
 pruning and reopen, duplicate replay after a later boundary, old pruned-receipt
 fallback, schema upgrade, rollback/retry, and whole-row expiry. The
@@ -199,3 +200,37 @@ commands and outcomes.
   necessary so notification cannot refer to a different row.
 - Both SQL dialects and schema-upgrade fixtures must preserve the same cursor
   checkpoint behavior.
+
+
+## Parent takeover verification (2026-10-26)
+
+The parent session owns PR #4819 from head `e9a20fbcb650` onward.
+Backend CI run `40385254227` passed all three complete SQLite repository
+cohorts and all four ordinary backend shards on that head. The earlier local
+SQLite timeout remains historical evidence with an unknown cause. Complete
+repository CI coverage now supplements those local attempts.
+
+The PostgreSQL CI cohort exposed two migration-regression queries that used
+SQLite placeholders without `Rebind`. Both queries now use the database dialect.
+The failure reproduced locally before correction with SQLSTATE 42601.
+A disposable local PostgreSQL 16 instance then ran the segment and migration
+regressions, including previously skipped PostgreSQL cases:
+
+```bash
+(cd apps/backend && go test -trimpath -race -parallel 4 ./internal/task/repository/sqlite -run 'TestCanonicalDelivery(TextSegments|TextSegment|Segment)|TestAgentDeliverySegmentationColumnsAreAddedByRunMigrations|TestAgentDeliveryRetentionMigratesPreRetentionSchema' -count=1 -timeout 5m)
+```
+
+With `KANDEV_TEST_POSTGRES_DSN` set to the local instance, this passed in 15.068s.
+The DSN is runtime-only and contains no production credentials.
+
+The Windows native CI job also stalled in the supervised-descriptor test while
+closing a synchronous pipe reader with its writer still open. The fixture now
+releases the writer first, matching supervised child exit. Cleanup uses the
+same order so a failed assertion cannot hang cleanup. No launcher behavior changes.
+
+```bash
+(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/agentctl/launcher -run 'TestPipeOutput' -count=1 -timeout 2m)
+```
+
+This passed locally in 3.174s. The Windows rerun remains a CI check.
+The PR will be marked ready after pushing these corrections, as the user requested.

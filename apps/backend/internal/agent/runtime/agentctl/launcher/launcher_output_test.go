@@ -261,8 +261,8 @@ func TestPipeOutputEOFAndClosure(t *testing.T) {
 		require.NoError(t, err)
 		readerDone := make(chan struct{})
 		t.Cleanup(func() {
-			_ = reader.Close()
 			_ = writer.Close()
+			_ = reader.Close()
 			waitForPipeOutputTests(t, readerDone)
 		})
 		go func() {
@@ -270,6 +270,9 @@ func TestPipeOutputEOFAndClosure(t *testing.T) {
 			close(readerDone)
 		}()
 
+		// The supervised child releases its writer before launcher cleanup.
+		// Windows synchronous pipes cannot close a reader blocked on a live writer.
+		require.NoError(t, writer.Close())
 		require.NoError(t, reader.Close())
 		waitForPipeOutputTests(t, readerDone)
 		require.Empty(t, observed.All())

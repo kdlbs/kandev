@@ -533,7 +533,7 @@ func runCanonicalDeliverySegmentBoundaryMigrationTest(t *testing.T, engine strin
 		Metadata  string    `db:"metadata"`
 		UpdatedAt time.Time `db:"updated_at"`
 	}
-	require.NoError(t, database.Get(&historicalBefore, "SELECT id, content, metadata, updated_at FROM task_session_messages WHERE id = ?", legacyMessage.ID))
+	require.NoError(t, database.Get(&historicalBefore, database.Rebind("SELECT id, content, metadata, updated_at FROM task_session_messages WHERE id = ?"), legacyMessage.ID))
 	textEvent := canonicalTextSegmentEventFor(t, "segment-upgrade-session", "segment-upgrade-incarnation", "segment-upgrade-text-first", 6, "after upgrade")
 	textEvent.HarnessGeneration = 3
 	_, err = repo.ReceiveAgentDeliveryEvent(ctx, textEvent, textEvent.Sequence)
@@ -549,7 +549,7 @@ func runCanonicalDeliverySegmentBoundaryMigrationTest(t *testing.T, engine strin
 		Metadata  string    `db:"metadata"`
 		UpdatedAt time.Time `db:"updated_at"`
 	}
-	require.NoError(t, database.Get(&historicalAfter, "SELECT id, content, metadata, updated_at FROM task_session_messages WHERE id = ?", legacyMessage.ID))
+	require.NoError(t, database.Get(&historicalAfter, database.Rebind("SELECT id, content, metadata, updated_at FROM task_session_messages WHERE id = ?"), legacyMessage.ID))
 	require.Equal(t, historicalBefore, historicalAfter, "upgrade projection must preserve existing transcript history")
 
 	repo, err = NewWithDB(database, database, nil)

@@ -1,7 +1,7 @@
 ---
 id: "01-persist-text-segment-boundaries"
 title: "Persist and project durable text segment boundaries"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -141,5 +141,40 @@ Broad SQLite diagnostic, recorded separately from the focused passes:
 - A recovery audit searched all 2,534 available session records and task-specific `/tmp` artifacts; no broad-run stack was present. The only retained `/tmp/kandev-4788-base-test.log` and `/tmp/kandev-4788-implementation-test.log` files are 69-byte outputs from the earlier isolated comparison (2.502s on base, 2.558s on the initial implementation). The blocked goroutine chain and lock/connection owners therefore cannot be named.
 - The isolated comparison command `go test -race -p 1 -parallel 4 -timeout 20m ./internal/task/repository/sqlite -run '^TestCompleteActiveClarificationBundlePersistsRecoverableDeliveryIntent$' -count=1` passed sequentially with no concurrent Go tests on unchanged base `7fb28fc022d5320922608bf57cc9fd9351a8b8da` (2.841s) and implementation `8bafa71d33be8d20029699202605f136dae41bc3` (2.103s), using matching race, package, parallelism, and timeout settings. This exact test passes in isolation on both revisions; it does not reproduce or explain the broad SQLite timeout. Earlier comparisons on pre-migration-path implementation revisions also passed (2.502s base, 2.558s and 2.170s implementation).
 
-The work order remains `in_progress`: targeted paths pass, but full SQLite
-package verification and PostgreSQL verification are incomplete.
+The earlier incomplete verification is superseded by the parent takeover
+evidence below: complete SQLite CI cohorts passed, and PostgreSQL cases now
+execute locally with the corrected portable queries.
+
+
+## Parent takeover verification (2026-10-26)
+
+The parent session owns PR #4819 from head `e9a20fbcb650` onward.
+Backend CI run `40385254227` passed all three complete SQLite repository
+cohorts and all four ordinary backend shards on that head. The earlier local
+SQLite timeout remains historical evidence with an unknown cause. Complete
+repository CI coverage now supplements those local attempts.
+
+The PostgreSQL CI cohort exposed two migration-regression queries that used
+SQLite placeholders without `Rebind`. Both queries now use the database dialect.
+The failure reproduced locally before correction with SQLSTATE 42601.
+A disposable local PostgreSQL 16 instance then ran the segment and migration
+regressions, including previously skipped PostgreSQL cases:
+
+```bash
+(cd apps/backend && go test -trimpath -race -parallel 4 ./internal/task/repository/sqlite -run 'TestCanonicalDelivery(TextSegments|TextSegment|Segment)|TestAgentDeliverySegmentationColumnsAreAddedByRunMigrations|TestAgentDeliveryRetentionMigratesPreRetentionSchema' -count=1 -timeout 5m)
+```
+
+With `KANDEV_TEST_POSTGRES_DSN` set to the local instance, this passed in 15.068s.
+The DSN is runtime-only and contains no production credentials.
+
+The Windows native CI job also stalled in the supervised-descriptor test while
+closing a synchronous pipe reader with its writer still open. The fixture now
+releases the writer first, matching supervised child exit. Cleanup uses the
+same order so a failed assertion cannot hang cleanup. No launcher behavior changes.
+
+```bash
+(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/agentctl/launcher -run 'TestPipeOutput' -count=1 -timeout 2m)
+```
+
+This passed locally in 3.174s. The Windows rerun remains a CI check.
+The PR will be marked ready after pushing these corrections, as the user requested.
