@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 type terminalBrokerProcessClient struct {
@@ -151,5 +153,38 @@ func TestBrokerReachabilityViaAgentctlUsesExecutorProcessResult(t *testing.T) {
 	err := runBrokerReachabilityViaAgentctl(context.Background(), unreachable, "session-1", env)
 	if !errors.Is(err, ErrGitHubCredentialBrokerUnreachable) {
 		t.Fatalf("unreachable agentctl preflight error = %v", err)
+	}
+}
+
+func TestBrokerProbeLimitsFollowTheRelayAnswer(t *testing.T) {
+	const direct = "http://backend.example:8080/api/v1/git/credentials/resolve"
+	const relay = "http://127.0.0.1:9001/git-credentials/resolve"
+	cases := []struct {
+		name     string
+		url      string
+		wantMax  string
+		wantWait time.Duration
+	}{
+		{"direct broker keeps the existing limits", direct, "", 15 * time.Second},
+		{"loopback relay gets more time than its 15s forward", relay, "20", 25 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := map[string]string{githubauth.CredentialBrokerURLEnv: tc.url, githubauth.CredentialLeaseEnv: "lease"}
+			if got := probeWait(env); got != tc.wantWait {
+				t.Fatalf("wait = %s, want %s", got, tc.wantWait)
+			}
+			var seen map[string]string
+			err := runBrokerReachabilityPreflight(context.Background(), env, func(_ context.Context, _ string, probeEnv map[string]string) ([]byte, error) {
+				seen = probeEnv
+				return nil, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if seen[brokerProbeMaxTimeEnv] != tc.wantMax {
+				t.Fatalf("%s = %q, want %q", brokerProbeMaxTimeEnv, seen[brokerProbeMaxTimeEnv], tc.wantMax)
+			}
+		})
 	}
 }

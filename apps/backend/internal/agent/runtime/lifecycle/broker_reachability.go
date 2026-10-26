@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/githubauth"
 )
@@ -22,11 +24,35 @@ const brokerReachabilityScript = `if ! command -v curl >/dev/null 2>&1; then
   echo "curl is required to reach the Kandev Git credential broker" >&2
   exit 69
 fi
-broker_status=$(curl -sS --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "$KANDEV_GITHUB_CREDENTIAL_BROKER_URL") || exit 69
+broker_status=$(curl -sS --connect-timeout 5 --max-time "${KANDEV_BROKER_PROBE_MAX_TIME:-10}" -o /dev/null -w '%{http_code}' "$KANDEV_GITHUB_CREDENTIAL_BROKER_URL") || exit 69
 if [ "$broker_status" != "204" ]; then
   echo "Kandev Git credential broker readiness returned HTTP $broker_status" >&2
   exit 69
 fi`
+
+// brokerProbeMaxTimeEnv overrides the probe's curl limit. It is set only for
+// the loopback relay, whose upstream forward alone may take 15 seconds.
+const brokerProbeMaxTimeEnv = "KANDEV_BROKER_PROBE_MAX_TIME"
+
+const (
+	defaultProbeWait     = 15 * time.Second
+	relayProbeCurlLimit  = 20 * time.Second
+	relayProbeWaitLimit  = 25 * time.Second
+	loopbackRelayURLHead = "http://127.0.0.1:"
+)
+
+// isBrokerRelayURL reports whether rawURL is an instance's loopback Git
+// credential relay, which the probe must give more time than a direct broker.
+func isBrokerRelayURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, loopbackRelayURLHead) && strings.HasSuffix(rawURL, agentctlconfig.BrokerRelayPath)
+}
+
+func probeWait(env map[string]string) time.Duration {
+	if isBrokerRelayURL(env[githubauth.CredentialBrokerURLEnv]) {
+		return relayProbeWaitLimit
+	}
+	return defaultProbeWait
+}
 
 type brokerCommandRunner func(context.Context, string, map[string]string) ([]byte, error)
 
@@ -40,6 +66,9 @@ func runBrokerReachabilityPreflight(
 	}
 	probeEnv := map[string]string{
 		githubauth.CredentialBrokerURLEnv: env[githubauth.CredentialBrokerURLEnv],
+	}
+	if isBrokerRelayURL(probeEnv[githubauth.CredentialBrokerURLEnv]) {
+		probeEnv[brokerProbeMaxTimeEnv] = strconv.Itoa(int(relayProbeCurlLimit / time.Second))
 	}
 	output, err := run(ctx, brokerReachabilityScript, probeEnv)
 	if err != nil {
@@ -74,7 +103,7 @@ func runBrokerReachabilityViaAgentctl(
 		if err != nil {
 			return nil, err
 		}
-		return waitAgentctlProcess(ctx, client, process, 15*time.Second)
+		return waitAgentctlProcess(ctx, client, process, probeWait(probeEnv))
 	})
 }
 
