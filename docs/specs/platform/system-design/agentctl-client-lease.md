@@ -16,6 +16,8 @@ owners:
 | -------- | ----------------------- |
 | .1, .3   | `lifecycle.AgentExecution.AgentctlURL` in `agent/runtime/lifecycle/types.go` |
 | .2       | `lifecycle.Manager.restoreRecoveredFailedExecution` in `manager_interaction.go` |
+| .4       | `lifecycle.StreamManager.replayRecoveredDelivery` and `fetchRecoveredReplayPage` in `durable_delivery_stream.go` |
+| .5       | `lifecycle.Manager.cancelAgentExecution`, `escalateStuckCancel` and `settleCancelledSubmission` in `manager_interaction.go` |
 
 ## Lock order
 
@@ -53,6 +55,30 @@ client, and the next prompt fails because the agentctl client is unavailable.
 That prompt failure is accepted in place of the deadlock that holding the
 lease across the store lock caused.
 
+Two long-lived callers held the lease across lifecycle callbacks and waits, so
+any nested acquire under them re-entered the lease. `retainPromptFailureRuntime`
+(`retainedPromptFailureExecutionEligible`) acquires it while a replayed
+completion event runs the lifecycle callback chain, and `escalateStuckCancel`
+acquired it again under `cancelAgentExecution`'s lease. With a terminal stop
+queued, the nested read blocks while the goroutine can hold the execution
+store lock.
+
+- Replay pins the client only inside `fetchRecoveredReplayPage` for the
+  `ReplayDelivery` request and requires it to still be the replay's client.
+  Ownership checks, projection, acknowledgement scheduling and the lifecycle
+  callbacks run unpinned.
+- `cancelAgentExecution` releases the lease right after the cancel request.
+  `escalateStuckCancel` no longer accepts a client; it pins the current client
+  inside `settleCancelledSubmission` for the settle request only, after the
+  wait and the readiness persistence.
+
+Accepted races: a terminal stop can close the client while replay processes a
+page, so the page's client calls fail and the replay returns that error as it
+would for any stop; the next recovery restarts from the persisted cursor. A
+stop or replacement between the cancel request and the escalation settle makes
+the settle use the current client, or skip it when none is set, instead of the
+client that sent the cancel.
+
 ## Verification
 
 Lifecycle unit tests hold a read lease, queue a writer, and require
@@ -65,3 +91,9 @@ pending detach and clears after detach finishes. A recovery-consumer test
 checks lease availability before readiness persistence, with separate status
 error, stopped-process, cancellation, and missing-client cases. No agent process
 is started.
+
+Further lifecycle tests assert, with the real replay and escalation code, that
+the lease is free while the lifecycle callback runs, while the escalation
+waits for the prompt to finish (a queued writer proceeds), and during the
+readiness persistence reached from `cancelAgentExecution` and
+`escalateStuckCancel`.
