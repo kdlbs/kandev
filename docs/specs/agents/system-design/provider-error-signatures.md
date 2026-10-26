@@ -3,6 +3,7 @@ status: current
 system: agents
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
+  - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
 ---
 
 # Provider Error Signature Classification System Design
@@ -68,3 +69,20 @@ provider-neutral rules, or the phase default.
 
 The existing `agent failure classified for provider routing` log records the
 rule ID. Rule IDs are unchanged.
+
+
+## Codex terminal throttling
+
+`REQ-AGENTS-CODEX-RATE-SIGNATURE-001` adds a bounded, line-anchored catalogue
+signature in `routingerr/rules.go`. Match the complete observed 429 wording,
+with established optional error labels. Keep quota rules ahead of the new rule.
+Do not match a bare 429 or an arbitrary occurrence of "retry limit".
+
+Use a distinct stable rule ID and sanitized fixture. Cover direct and prefixed
+messages, prose collisions, other statuses, other providers, and quota precedence.
+The screenshot establishes the displayed text, not a captured ACP envelope.
+Do not fabricate recorded protocol provenance or expose raw error Data.
+
+Interactive policy belongs to Platform. Office and dynamic routing consume the
+new classification through their existing policies, without a new retry policy.
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).

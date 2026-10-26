@@ -16,6 +16,8 @@ type CompleteQuickChatOpeningOptions = {
   submit: (button: Locator) => Promise<void>;
   prepare?: () => Promise<void>;
   expectedAttachmentName?: string;
+  expectExactPrompt?: boolean;
+  verifyReload?: boolean;
 };
 
 export async function completeQuickChatOpening(
@@ -55,6 +57,13 @@ export async function completeQuickChatOpening(
     )
     .toBe(1);
 
+  if (options.expectExactPrompt) {
+    const { messages } = await apiClient.listSessionMessages(started.session_id);
+    expect(messages.filter((message) => message.author_type === "user")).toEqual([
+      expect.objectContaining({ content: prompt }),
+    ]);
+  }
+
   if (options.expectedAttachmentName) {
     const { messages } = await apiClient.listSessionMessages(started.session_id);
     const message = messages.find(
@@ -75,6 +84,18 @@ export async function completeQuickChatOpening(
       .filter({ hasText: prompt }),
   ).toBeVisible({ timeout: 15_000 });
   await expect(dialog.locator(".tiptap.ProseMirror:visible").last()).toBeEmpty();
+
+  if (options.verifyReload) {
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(started.session_id);
+        return messages.filter((message) => message.author_type === "user").length;
+      })
+      .toBe(1);
+  }
+
   return started;
 }
 

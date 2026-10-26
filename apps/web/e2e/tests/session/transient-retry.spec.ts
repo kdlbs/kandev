@@ -4,6 +4,12 @@ import { pollUntil } from "../../helpers/poll-until";
 import { seedIdleSession } from "../../helpers/session";
 import { listTransientRetryNotices } from "../../helpers/transient-retry";
 import { SessionPage } from "../../pages/session-page";
+import {
+  openQuickChatSetup,
+  prepareMockCodexProfile,
+  selectAgentIfNeeded,
+} from "../chat/quick-chat-helpers";
+import { completeQuickChatOpening } from "../chat/quick-chat-opening-composer-helpers";
 
 type SessionMessage = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
 
@@ -31,6 +37,119 @@ async function waitForRetryNotice(
 }
 
 test.describe("transient provider error (529 Overloaded) retry", () => {
+  test("Quick Chat opening prompt recovers from a Codex 429 after reload", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await prepareMockCodexProfile(apiClient, backend);
+    const dialog = await openQuickChatSetup(testPage);
+    await selectAgentIfNeeded(dialog, testPage, "Mock Codex");
+    const prompt = "/codex-rate-limit:2";
+    const started = await completeQuickChatOpening(testPage, dialog, apiClient, prompt, {
+      submit: (button) => button.click(),
+      expectExactPrompt: true,
+    });
+
+    const firstNotice = await waitForRetryNotice(apiClient, started.session_id, 1);
+    const activeNotices = await listTransientRetryNotices(apiClient, started.session_id);
+    expect(activeNotices).toHaveLength(1);
+    expect(activeNotices[0]).toMatchObject({ id: firstNotice.id, attempt: 1 });
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(started.task_id);
+        return sessions.find((session) => session.id === started.session_id)?.state;
+      })
+      .toBe("WAITING_FOR_INPUT");
+    await expect(testPage.getByTestId("transient-retry-card")).toBeVisible();
+    await expect(dialog.locator(".tiptap.ProseMirror:visible").last()).toBeEmpty();
+
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listSessionMessages(started.session_id)).messages.filter(
+            (message) => message.author_type === "user" && message.content === prompt,
+          ).length,
+      )
+      .toBe(1);
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(started.session_id);
+          return messages.some(
+            (message) =>
+              message.author_type === "agent" &&
+              message.content.includes("Codex rate limit cleared after 2 transient failure(s)"),
+          );
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    const finalMessages = (await apiClient.listSessionMessages(started.session_id)).messages;
+    expect(finalMessages.filter((message) => message.author_type === "user")).toEqual([
+      expect.objectContaining({ content: prompt }),
+    ]);
+    expect(await listTransientRetryNotices(apiClient, started.session_id)).toHaveLength(0);
+  });
+
+  test("Cancel stops the retry for a Codex 429 Quick Chat opening prompt", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await prepareMockCodexProfile(apiClient, backend);
+    const dialog = await openQuickChatSetup(testPage);
+    await selectAgentIfNeeded(dialog, testPage, "Mock Codex");
+    const prompt = "/codex-rate-limit:9";
+    const started = await completeQuickChatOpening(testPage, dialog, apiClient, prompt, {
+      submit: (button) => button.click(),
+      expectExactPrompt: true,
+    });
+
+    const firstNotice = await waitForRetryNotice(apiClient, started.session_id, 1);
+    expect(await listTransientRetryNotices(apiClient, started.session_id)).toEqual([
+      expect.objectContaining({ id: firstNotice.id, attempt: 1 }),
+    ]);
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(started.task_id);
+        return sessions.find((session) => session.id === started.session_id)?.state;
+      })
+      .toBe("WAITING_FOR_INPUT");
+    await expect(testPage.getByTestId("transient-retry-card")).toBeVisible();
+    await expect(dialog.locator(".tiptap.ProseMirror:visible").last()).toBeEmpty();
+    await testPage.getByTestId("recovery-cancel-retry-button").click();
+
+    await expect
+      .poll(async () => (await listTransientRetryNotices(apiClient, started.session_id)).length)
+      .toBe(0);
+    await expect(
+      testPage.getByText("Automatic retry was cancelled. You can send another message.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(dialog.locator(".tiptap.ProseMirror:visible").last()).toBeEditable();
+    const beforeReload = (await apiClient.listSessionMessages(started.session_id)).messages;
+    expect(beforeReload.filter((message) => message.author_type === "user")).toEqual([
+      expect.objectContaining({ content: prompt }),
+    ]);
+
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    const afterReload = (await apiClient.listSessionMessages(started.session_id)).messages;
+    expect(afterReload.filter((message) => message.author_type === "user")).toEqual([
+      expect.objectContaining({ content: prompt }),
+    ]);
+    expect(await listTransientRetryNotices(apiClient, started.session_id)).toHaveLength(0);
+  });
+
   test("shows the yellow retrying card, not the red error banner", async ({
     testPage,
     apiClient,

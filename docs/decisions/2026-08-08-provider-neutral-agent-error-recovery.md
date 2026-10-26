@@ -295,3 +295,12 @@ described here.
   only warranted after a short same-route budget or clear long-horizon evidence.
 - **Treat inactivity as a transient provider error.** Rejected because quiet
   tools and long-running model work are valid; inactivity remains advisory.
+
+
+## Interactive throttle eligibility refinement (2026-10-26)
+
+The [rate-throttle requirement](../specs/platform/requirements/interactive-rate-throttle-retry.md#req-platform-rate-throttle-retry-001-bounded-interactive-throttle-recovery)
+extends interactive short-retry eligibility to high-confidence rate throttles
+without reset metadata. It refines the table's "confirmed short throttle" rule.
+Office's validated-delay rule, effect fences, and separate retry ownership remain
+unchanged. The implementation package records this change before deployment.
