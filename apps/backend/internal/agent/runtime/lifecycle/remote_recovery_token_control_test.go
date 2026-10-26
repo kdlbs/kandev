@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 )
 
@@ -82,5 +83,21 @@ func TestRemoteDockerTokenControlReachesTheControlServer(t *testing.T) {
 		seen[0] != "DELETE /api/v1/instances/exec-1 fp=observed auth=Bearer ctl-token" ||
 		seen[1] != "POST /api/v1/instances/exec-1/mcp-token/revoke fp= auth=Bearer ctl-token" {
 		t.Fatalf("control requests = %q", seen)
+	}
+}
+
+// The control handle must carry the credential recovery authenticated with,
+// which differs from the stored one after a handshake.
+func TestRecoveredRemoteDockerInstanceControlUsesTheAuthenticatedToken(t *testing.T) {
+	r := &RemoteDockerExecutor{}
+	req := &ExecutorCreateRequest{InstanceID: "exec-1", AuthToken: "stale"}
+	ri := buildRemoteDockerRecoveredInstance(r, req, "container-1", staticEndpoint{}, &agentctl.InstanceInfo{}, "fresh", nil)
+
+	control, ok := ri.tokenControl.(remoteDockerTokenControl)
+	if !ok {
+		t.Fatalf("tokenControl = %T, want remoteDockerTokenControl", ri.tokenControl)
+	}
+	if control.authToken != "fresh" || ri.AuthToken != "fresh" {
+		t.Fatalf("control token %q, instance token %q; want both %q", control.authToken, ri.AuthToken, "fresh")
 	}
 }

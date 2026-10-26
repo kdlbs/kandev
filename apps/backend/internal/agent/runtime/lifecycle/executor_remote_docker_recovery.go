@@ -273,7 +273,7 @@ func buildRemoteDockerRecoveredInstance(
 		WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
 		ProviderSessionID:    info.ProviderSessionID, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
 		tokenControl: remoteDockerTokenControl{
-			logger: r.logger, endpoints: endpoints, containerID: containerID, authToken: req.AuthToken,
+			logger: r.logger, endpoints: endpoints, containerID: containerID, authToken: token,
 		},
 	}
 }

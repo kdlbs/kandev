@@ -250,7 +250,11 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 	for key, value := range getPassthroughMCPEnv(execution) {
 		env[key] = value
 	}
-	return m.brokerRelayEnv(execution.ExecutorType, env, passthroughMCPConfigPort(execution)), nil
+	relayPort := passthroughMCPConfigPort(execution)
+	if execution.noBrokerRelay {
+		relayPort = 0
+	}
+	return m.brokerRelayEnv(execution.ExecutorType, env, relayPort), nil
 }
 
 // startPassthroughShell starts the shell session for a passthrough execution.

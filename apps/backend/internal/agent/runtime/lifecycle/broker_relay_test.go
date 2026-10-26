@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kandev/kandev/internal/githubauth"
@@ -44,5 +45,29 @@ func TestWithBrokerRelayURL(t *testing.T) {
 	}
 	if out := withBrokerRelayURL(string(models.ExecutorTypeLocal), env, 0); out[githubauth.CredentialBrokerURLEnv] != testBrokerURL {
 		t.Fatalf("no port env rewritten: %#v", out)
+	}
+}
+
+// An instance created without an upstream has no relay route, so a passthrough
+// started on it keeps the operator broker URL even with the policy enabled.
+func TestPassthroughEnvKeepsBrokerURLWhenInstanceHasNoRelay(t *testing.T) {
+	build := func(noRelay bool) string {
+		mgr := &Manager{logger: newTestLogger(), sessionMCPPolicy: NewSessionMCPPolicy(true)}
+		execution := &AgentExecution{
+			ID: "exec-1", TaskID: "task-1", SessionID: "session-1", AgentProfileID: "profile-1",
+			ExecutorType: string(models.ExecutorTypeLocal), standalonePort: 4321, noBrokerRelay: noRelay,
+		}
+		execution.setRuntimeEnvironment(map[string]string{githubauth.CredentialBrokerURLEnv: testBrokerURL})
+		env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+		if err != nil {
+			t.Fatalf("buildPassthroughEnv: %v", err)
+		}
+		return env[githubauth.CredentialBrokerURLEnv]
+	}
+	if got := build(true); got != testBrokerURL {
+		t.Fatalf("no-relay instance broker URL = %q, want %q", got, testBrokerURL)
+	}
+	if got := build(false); got == testBrokerURL || got == "" {
+		t.Fatalf("relay instance broker URL = %q, want the instance relay", got)
 	}
 }
