@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
@@ -6,13 +9,15 @@ test.describe("durable agent text segments", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
 
+    const releaseMarker = join(backend.tmpDir, `segment-boundary-${randomUUID()}.release`);
     const script = [
       'e2e:message("Segment before one. ")',
       'e2e:message("Segment before two.")',
-      "e2e:delay(3000)",
+      `e2e:await_file(${JSON.stringify(releaseMarker)})`,
       'e2e:tool_use("Segment boundary tool", {"command":"segment-boundary"})',
       'e2e:tool_result("Segment boundary complete")',
       'e2e:message("Segment after one. ")',
@@ -44,9 +49,15 @@ test.describe("durable agent text segments", () => {
     const activeSession = listed.sessions.find((candidate) => candidate.is_primary);
     if (!activeSession) throw new Error("created task has no primary session");
 
-    // This test-only control rejects legacy sessions and proves durable-v1 is active.
-    const disconnected = await apiClient.disconnectSessionAgentUpdatesStream(activeSession.id);
-    expect(disconnected.disconnected).toBe(true);
+    try {
+      const { messages } = await apiClient.listSessionMessages(activeSession.id);
+      expect(messages.some((message) => message.type === "tool_call")).toBe(false);
+      // This control rejects legacy sessions and proves durable-v1 is active.
+      const disconnected = await apiClient.disconnectSessionAgentUpdatesStream(activeSession.id);
+      expect(disconnected.disconnected).toBe(true);
+    } finally {
+      await writeFile(releaseMarker, "release");
+    }
 
     const expected = [
       { type: "message", content: "Segment before one. Segment before two." },
@@ -76,6 +87,9 @@ test.describe("durable agent text segments", () => {
         .toEqual(expected);
 
       const rows = await readOutputRows();
+      for (const row of rows) {
+        await expect(testPage.locator(`#msg-${row.id}`)).toBeVisible();
+      }
       const rowOrder = await testPage.evaluate(
         (ids) => {
           const elements = ids.map((id) => document.getElementById(`msg-${id}`));
@@ -89,17 +103,12 @@ test.describe("durable agent text segments", () => {
         rows.map((message) => message.id),
       );
       expect(rowOrder).toBe(true);
-      await expect(testPage.locator(`#msg-${rows[0].id}`)).toBeVisible();
-      await expect(testPage.locator(`#msg-${rows[1].id}`)).toBeVisible();
-      await expect(testPage.locator(`#msg-${rows[2].id}`)).toBeVisible();
     };
 
+    await assertTranscript();
     await expect(
       session.chat.getByText("Segment after one. Segment after two.", { exact: true }),
-    ).toBeVisible({
-      timeout: 60_000,
-    });
-    await assertTranscript();
+    ).toBeVisible();
 
     await testPage.reload();
     await session.waitForLoad();

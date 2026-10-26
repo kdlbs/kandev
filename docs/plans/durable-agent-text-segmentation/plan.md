@@ -149,7 +149,7 @@ records feed the shared chat transcript on phone.
 
 ## Work orders
 
-- [x] [Task 01: Persist and project durable text segment boundaries](task-01-persist-text-segment-boundaries.md) (in progress; verification limitations remain)
+- [x] [Task 01: Persist and project durable text segment boundaries](task-01-persist-text-segment-boundaries.md)
 
 ## Verification results
 
@@ -165,8 +165,8 @@ migration change (2.103s). The Chromium durable-v1 E2E passed 1/1 after
 rebuilding backend and web assets. SQL guard, store conformance (84.7s after
 the migration change), changed-Go lint, documentation validation, spec lint,
 and `git diff --check` passed.
-PostgreSQL migration and fallback subtests skipped because
-`KANDEV_TEST_POSTGRES_DSN` is not configured.
+The child initially skipped PostgreSQL migration and fallback subtests. The
+parent takeover section records their later execution against PostgreSQL 16.
 
 Both broad race attempts failed overall. The default-timeout run timed out in
 lifecycle, SQLite, and orchestrator while agentctl passed. The controlled
@@ -186,7 +186,8 @@ Go tests, using matching race, package, parallelism, and timeout settings. It
 passed on unchanged base `7fb28fc022d5320922608bf57cc9fd9351a8b8da` (2.841s)
 and implementation `8bafa71d33be8d20029699202605f136dae41bc3` (2.103s). The
 isolated test does not reproduce or explain the broad timeout.
-The full package and PostgreSQL verification gaps remain open. See the
+The parent takeover section supersedes those earlier gaps with complete SQLite
+CI cohorts and focused PostgreSQL verification. See the
 [Task 01 results](task-01-persist-text-segment-boundaries.md#results) for exact
 commands and outcomes.
 
@@ -234,3 +235,14 @@ same order so a failed assertion cannot hang cleanup. No launcher behavior chang
 
 This passed locally in 3.174s. The Windows rerun remains a CI check.
 The PR will be marked ready after pushing these corrections, as the user requested.
+
+
+## Post-hold PR fixup (2026-10-26)
+
+After the requested 15-minute hold, the current-head CodeRabbit review identified
+an E2E scheduling gap and stale plan wording. The browser fixture now blocks
+its tool on an `e2e:await_file` marker. It asserts no tool row exists before the
+forced disconnect, then releases the marker after the disconnect call. Backend
+transcript polling precedes rendered-row waits and chronological DOM checks.
+The updated managed Chromium test rebuilt production assets and passed 1/1
+in 10.9s. Targeted ESLint passed. No product behavior changed in this fixup.

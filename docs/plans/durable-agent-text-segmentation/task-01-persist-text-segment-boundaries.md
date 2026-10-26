@@ -178,3 +178,14 @@ same order so a failed assertion cannot hang cleanup. No launcher behavior chang
 
 This passed locally in 3.174s. The Windows rerun remains a CI check.
 The PR will be marked ready after pushing these corrections, as the user requested.
+
+
+## Post-hold PR fixup (2026-10-26)
+
+After the requested 15-minute hold, the current-head CodeRabbit review identified
+an E2E scheduling gap and stale plan wording. The browser fixture now blocks
+its tool on an `e2e:await_file` marker. It asserts no tool row exists before the
+forced disconnect, then releases the marker after the disconnect call. Backend
+transcript polling precedes rendered-row waits and chronological DOM checks.
+The updated managed Chromium test rebuilt production assets and passed 1/1
+in 10.9s. Targeted ESLint passed. No product behavior changed in this fixup.
