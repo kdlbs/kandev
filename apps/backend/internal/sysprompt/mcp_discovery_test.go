@@ -69,3 +69,11 @@ func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 		len([]byte(ordinary)), len([]byte(canvas)), recordedOrdinaryPromptBytesBeforeCompaction,
 		recordedOrdinaryPromptBytesBeforeCompaction-len([]byte(ordinary)))
 }
+
+func TestKandevContext_TellsAgentsCallsMayWaitAndNotToPoll(t *testing.T) {
+	context := FormatKandevContext("task", "session", false)
+
+	assert.Contains(t, context, "Kandev calls may wait while Kandev is unreachable.")
+	assert.Contains(t, context, `After "outcome unknown", check state before retrying.`)
+	assert.Contains(t, context, "do not poll")
+}

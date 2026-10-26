@@ -55,7 +55,8 @@ func applyToolTimeoutFloor(env map[string]string, agentConfig agents.Agent, meta
 	if parseErr != nil || n <= 0 || strings.ContainsAny(strings.TrimSpace(value), "+-") {
 		return fmt.Errorf("%w: %s with an offline budget of %d minutes", ErrToolTimeoutInvalid, key, minutes)
 	}
-	if time.Duration(n)*unit < budget+toolTimeoutMinimumHeadroom {
+	minimum := budget + toolTimeoutMinimumHeadroom
+	if n < int64((minimum+unit-1)/unit) {
 		return fmt.Errorf("%w: %s=%s with an offline budget of %d minutes", ErrToolTimeoutBelowOfflineBudget, key, value, minutes)
 	}
 	return nil

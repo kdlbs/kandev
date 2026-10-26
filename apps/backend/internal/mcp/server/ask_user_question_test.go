@@ -586,5 +586,5 @@ func TestStampTransportRequestID_PreservesExistingMeta(t *testing.T) {
 // cannot catch a default-value regression because it overrides the interval.
 func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
 	assert.Greater(t, toolKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
-	assert.LessOrEqual(t, toolKeepAliveInterval, 60*time.Second)
+	assert.LessOrEqual(t, toolKeepAliveInterval, 20*time.Second)
 }
