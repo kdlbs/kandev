@@ -53,7 +53,6 @@ function DraggableRow({
       onPointerDown={(event) => {
         if ((event.target as Element).closest("[data-sidebar-node-id]") !== event.currentTarget)
           return;
-        event.stopPropagation();
         listeners?.onPointerDown?.(event);
       }}
       data-sidebar-node-id={id}

@@ -120,7 +120,7 @@ From repository root. Install once if this worktree lacks dependencies.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run lib/sidebar/integration-plugin-layout.test.ts lib/sidebar/layout-projection.test.ts lib/sidebar/layout-operations.test.ts lib/sidebar/immediate-writer.test.ts components/app-sidebar/sidebar-layout-navigation.test.tsx components/app-sidebar/sidebar-customize-menu.test.tsx components/navigation/mobile-sidebar-customization.test.tsx components/app-sidebar/sidebar-draggable-navigation.test.tsx components/app-sidebar/sections/integrations-section.test.tsx components/navigation/app-nav-sheet.test.tsx components/integrations/mobile-integrations-section.test.tsx components/settings/sidebar-layout-editor.test.tsx components/settings/sidebar-layout-editor-dnd.test.ts components/settings/sidebar-layout-editor-save.test.ts)
+(cd apps/web && pnpm exec vitest run lib/sidebar/integration-plugin-layout.test.ts lib/sidebar/layout-projection.test.ts lib/sidebar/layout-operations.test.ts lib/sidebar/immediate-writer.test.ts components/app-sidebar/sidebar-layout-navigation.test.tsx components/app-sidebar/sidebar-customize-menu.test.tsx components/navigation/mobile-sidebar-customization.test.tsx components/app-sidebar/sidebar-draggable-navigation.test.tsx components/app-sidebar/sections/integrations-section.test.tsx components/navigation/app-nav-sheet.test.tsx components/integrations/mobile-integrations-section.test.tsx components/settings/sidebar-layout-editor.test.tsx components/settings/sidebar-layout-editor-dnd.test.ts components/settings/sidebar-layout-editor-save.test.ts components/app-sidebar/sidebar-navigation-split.test.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -154,7 +154,7 @@ All paths below are under `apps/web/`, except the final guidance file.
   and `.test.ts` as needed for shared scoped moves.
 - `components/app-sidebar/sidebar-layout-navigation.tsx` and new `.test.tsx`,
   `sidebar-customize-menu.tsx` and its `.test.tsx`, `sidebar-draggable-navigation.tsx` and `.test.tsx`,
-  `sections/integrations-section.tsx` and `.test.tsx`.
+  `sections/integrations-section.tsx` and `.test.tsx`, `sidebar-navigation-split.tsx` and `.test.tsx`.
 - `components/navigation/mobile-sidebar-layout-navigation.tsx`,
   `mobile-sidebar-customization.tsx` and new `.test.tsx`, `app-nav-sheet.test.tsx`.
 - `components/integrations/integrations-menu.tsx`,
@@ -191,7 +191,7 @@ Completed on 2026-10-26 against base `6677802efa4fac6c2ecc909cb433477c90f7fb2d`.
 
 - Behavioral RED: the desktop layout test could not find YouTrack inside
   Integrations. Scoped-move and no-op-write tests also failed before correction.
-- The exact Vitest command above passed: 14 suites, 95 tests. It includes direct menu and phone controls.
+- The final Vitest command above passed: 15 suites, 108 tests. It includes direct menu, phone controls, and portaled-focus isolation.
 - Typecheck passed with an 8 GB Node heap. The default heap exhausted memory.
 - ESLint passed on all changed/new TS and TSX files with zero warnings.
 - i18n check and new-code ratchet passed. No new UI copy or locale keys.
@@ -205,3 +205,35 @@ The grouping and movement helpers serve both navigation and customization.
 Flat saved nodes and existing wire/CAS contracts are preserved. The source-level
 regression uses the actual registry and projection with minimal boundary mocks.
 
+
+## Review remediation
+
+Review found two layout cases: an inferred Integrations parent was
+absent from explicit edit state, and wider listing menus received the phone-only
+collapsed disclosure. The parent now materializes for both rendering and editing
+without writing on read. The shared resource component passes the phone
+presentation choice through instead of applying it to every consumer.
+Regression tests reproduce both defects before correction. The desktop browser
+flow additionally edits a layout that originally lacks the parent, and a new
+coarse-pointer tablet flow opens the listing menu with expanded plugin links.
+Fresh published-plugin screenshots passed on desktop, phone, and tablet. The touch/pen pointer handler now preserves propagation to the context-menu trigger. The Office singleton check passes without a code change because builtin eligibility removes its Integrations parent. The shared draft materialization also supplies the legacy parent to Settings, so its controls remain editable. Focused validation passed: 108 tests in 15 suites, typecheck, changed-file ESLint, i18n, docs, and specification checks. Final browser regression passed: 12 desktop tests, including legacy-parent editing and tablet navigation, plus 11 phone tests owned by Task 02.
+
+### UI-04: Tablet listing menu, expanded Integrations
+
+| Level | Content | Behavior |
+| --- | --- | --- |
+| Heading | Integrations | Expanded, without a phone disclosure toggle |
+| Link | YouTrack | Visible on opening the menu, opens its registered route |
+| Link | Integration settings | Retains the existing setup destination |
+
+Reuse the wider menu surface and its scroller. Touch controls keep their existing
+44px sizing. This view preserves the wider-consumer contract in the frontend
+guide. See [combined plan](plan.md#ui-04-tablet-listing-menu-expanded-integrations).
+
+Final review-validation logs, 2026-10-26:
+
+- Desktop/tablet: `/tmp/youtrack-e2e-logs/kandev-run.e2e.r9Mj2pnK.log`, 12 passed, retries disabled.
+- Phone: `/tmp/youtrack-e2e-logs/kandev-run.e2e.xj4A8ZlJ.log`, 11 passed, retries disabled.
+- Focused reproductions of four initial CI failures: `/tmp/youtrack-e2e-logs/kandev-run.e2e.a5BE0TWh.log`, 4 passed, retries disabled. These unchanged tests cover Jira auth health, cancellation across task switches, jump-to-latest, and the Quick Chat goal disclosure. Fresh PR CI remains required.
+
+The final source also excludes portaled menu focus from sidebar expansion, with a behavioral regression and a positive control for clipped-row focus. The final browser runs above include the legacy-parent hide, save, reload, and restore flow. Fresh published YouTrack captures cover desktop, phone, and tablet.

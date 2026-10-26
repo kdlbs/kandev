@@ -65,7 +65,87 @@ test("groups integration plugin navigation and preserves saved visibility", asyn
   await page.reload();
   await expect(link).toBeVisible();
   await expect(pinned).toHaveCount(0);
+  const legacy = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace![
+    seedData.workspaceId
+  ];
+  await apiClient.saveUserSettings({
+    sidebar_layout_state: {
+      workspace_id: seedData.workspaceId,
+      expected_revision: legacy.revision,
+      layout: {
+        ...legacy,
+        nodes: legacy.nodes.filter((node) => node.destination_id !== "integrations"),
+      },
+    },
+  });
+  await page.reload();
+  await expect(link).toBeVisible();
+  await section.click({ button: "right" });
+  const hiddenSave = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/user/settings") &&
+      response.request().method() === "PATCH" &&
+      response
+        .request()
+        .postDataJSON()
+        ?.sidebar_layout_state?.layout?.nodes.some(
+          (node: { destination_id?: string; visible: boolean }) =>
+            node.destination_id === "integrations" && !node.visible,
+        ),
+  );
+  await page.getByTestId("sidebar-visibility-integrations").click();
+  expect((await hiddenSave).status()).toBe(200);
+  await expect(section).toHaveCount(0);
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace![
+          seedData.workspaceId
+        ].nodes.find((node) => node.destination_id === "integrations")?.visible,
+    )
+    .toBe(false);
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await sidebar.getByRole("link", { name: "Home", exact: true }).click({ button: "right" });
+  await expect(page.getByTestId("sidebar-customize-menu")).toBeVisible();
+  const shownSave = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/user/settings") &&
+      response.request().method() === "PATCH" &&
+      response
+        .request()
+        .postDataJSON()
+        ?.sidebar_layout_state?.layout?.nodes.some(
+          (node: { destination_id?: string; visible: boolean }) =>
+            node.destination_id === "integrations" && node.visible,
+        ),
+  );
+  await page.getByTestId("sidebar-visibility-integrations").click();
+  expect((await shownSave).status()).toBe(200);
+  await expect(link).toBeVisible();
+
   await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
   await sidebar.getByRole("button", { name: "Integrations", exact: true }).click();
   await expect(page.getByTestId(INTEGRATION_LINK)).toBeVisible();
+});
+
+// @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.10
+// Regression for the wider consumer of the same integration projection.
+test("tablet listing menus keep integration plugin links expanded", async ({
+  tabletTestPage: page,
+}) => {
+  test.setTimeout(120_000);
+  await installFixturePlugin(page);
+  await page.goto("/tasks");
+  await page.getByRole("button", { name: "Open menu", exact: true }).click();
+  const menu = page.getByRole("dialog", { name: "Menu", exact: true });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Integrations", exact: true })).toHaveCount(0);
+  const link = menu.getByTestId(INTEGRATION_LINK);
+  await link.scrollIntoViewIfNeeded();
+  await expect(link).toBeVisible();
+  await expect(menu.getByTestId(INTEGRATION_LINK)).toHaveCount(1);
+  await link.click();
+  await expect(page).toHaveURL(/\/plugins\/e2e-hello$/);
+  await expect(menu).toBeHidden();
 });

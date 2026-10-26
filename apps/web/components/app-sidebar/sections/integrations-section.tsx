@@ -10,6 +10,7 @@ import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import { useAppDestinations } from "@/hooks/use-app-destinations";
 import type { ResolvedDestination, DestinationIcon } from "@/lib/navigation/types";
 import { cn } from "@/lib/utils";
+import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   APP_SIDEBAR_SECTION_IDS,
@@ -17,9 +18,7 @@ import {
   SIDEBAR_ITEM_INACTIVE,
 } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
-
 import { SidebarDraggableNavigation } from "../sidebar-draggable-navigation";
-import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 
 type IntegrationsSectionProps = {
   collapsed: boolean;
@@ -118,6 +117,20 @@ export function IntegrationsSection({
   const shortcutCapacity = isFinePointer
     ? FINE_POINTER_HEADER_CAPACITY
     : COARSE_POINTER_HEADER_CAPACITY;
+  const renderRow = (destination: ResolvedDestination) => (
+    <IntegrationRow
+      key={destination.id}
+      href={destination.href}
+      label={destination.label}
+      icon={destination.icon}
+      active={pathname === destination.href || pathname.startsWith(`${destination.href}/`)}
+      testId={
+        destination.source === "plugin"
+          ? `plugin-nav-item-${destination.pluginItemId ?? destination.id}`
+          : undefined
+      }
+    />
+  );
   if (!workspaceId && visibleDestinations.length === 0) return null;
 
   return (
@@ -140,35 +153,14 @@ export function IntegrationsSection({
     >
       {visibleDestinations
         .filter((destination) => !catalog || destination.source !== "plugin")
-        .map((destination) => (
-          <IntegrationRow
-            key={destination.id}
-            href={destination.href}
-            label={destination.label}
-            icon={destination.icon}
-            active={pathname === destination.href || pathname.startsWith(`${destination.href}/`)}
-            {...(destination.source === "plugin"
-              ? { testId: `plugin-nav-item-${destination.pluginItemId ?? destination.id}` }
-              : {})}
-          />
-        ))}
+        .map(renderRow)}
       {catalog && (
         <SidebarDraggableNavigation
           catalog={catalog}
           disabled={collapsed}
           rows={(pluginDestinations ?? []).map((destination) => ({
             id: destination.id,
-            content: (
-              <IntegrationRow
-                href={destination.href}
-                label={destination.label}
-                icon={destination.icon}
-                active={
-                  pathname === destination.href || pathname.startsWith(`${destination.href}/`)
-                }
-                testId={`plugin-nav-item-${destination.pluginItemId ?? destination.id}`}
-              />
-            ),
+            content: renderRow(destination),
           }))}
         />
       )}

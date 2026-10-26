@@ -265,7 +265,7 @@ function SavedMobileAutomationRows({
   );
 }
 
-function MobilePhoneResource(props: MobileLayoutNodeProps) {
+function MobileResource(props: MobileLayoutNodeProps) {
   const { node, workspaceId, canvasEntries, catalog, omitDestinations, onNavigate } = props;
   switch (node.destinationId) {
     case "automations":
@@ -290,7 +290,7 @@ function MobilePhoneResource(props: MobileLayoutNodeProps) {
         <MobileIntegrationsSection
           onNavigate={onNavigate}
           showSetup
-          collapsible
+          collapsible={!!props.homeCoversListings}
           pluginDestinations={props.integrationPlugins}
           omitDestinations={omitDestinations}
         />
@@ -342,7 +342,7 @@ function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
     );
   if (node.destinationId === "coordinators")
     return <MobileCoordinatorsSection onNavigate={onNavigate} />;
-  if (homeCoversListings) return <MobilePhoneResource {...props} />;
+  if (homeCoversListings) return <MobileResource {...props} />;
 
   const entries = catalog.catalog.filter((entry) => {
     if (node.destinationId === "automations") return entry.target.kind === "automation";
@@ -362,7 +362,7 @@ function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
 
 function MobileBuiltinNode(props: MobileLayoutNodeProps) {
   if (props.node.destinationId === "integrations")
-    return props.omitSections.has("integrations") ? null : <MobilePhoneResource {...props} />;
+    return props.omitSections.has("integrations") ? null : <MobileResource {...props} />;
   return <MobileBuiltinNodeContent {...props} />;
 }
 

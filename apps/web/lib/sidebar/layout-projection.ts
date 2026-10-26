@@ -1,4 +1,3 @@
-import { isIntegrationPlugin } from "./integration-plugin-layout";
 import { IconQuestionMark } from "@tabler/icons-react";
 import type { DestinationIcon } from "@/lib/navigation/types";
 import {
@@ -113,6 +112,18 @@ export function materializeSidebarPluginNodes(
       ? { ...node, pluginSection: entry.section }
       : node;
   });
+
+  if (
+    pluginEntries.some((entry) => entry.section === "integrations") &&
+    !nodes.some((node) => node.destinationId === "integrations")
+  ) {
+    nodes.push({
+      id: "integrations",
+      kind: "builtin",
+      visible: true,
+      destinationId: "integrations",
+    });
+  }
 
   for (const entry of [...pluginEntries].reverse()) {
     if (nodes.some((node) => node.id === entry.target.id)) continue;
@@ -232,21 +243,7 @@ export function projectSidebarLayout(
 ): SidebarLayoutProjection {
   const byTarget = new Map(catalog.map((entry) => [catalogEntryKey(entry), entry]));
   const builtinContext = options.builtinContext ?? defaultBuiltinLayoutContext();
-  const materialized = materializeSidebarPluginNodes(layout, catalog).nodes;
-  const hasIntegrationAnchor = materialized.some((node) => node.destinationId === "integrations");
-  const displayNodes =
-    !hasIntegrationAnchor && materialized.some(isIntegrationPlugin)
-      ? [
-          ...materialized,
-          {
-            id: "integrations",
-            kind: "builtin" as const,
-            visible: true,
-            destinationId: "integrations",
-          },
-        ]
-      : materialized;
-  const nodes = displayNodes.map((node) =>
+  const nodes = materializeSidebarPluginNodes(layout, catalog).nodes.map((node) =>
     projectNode(
       node,
       byTarget,

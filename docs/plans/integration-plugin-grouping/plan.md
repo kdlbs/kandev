@@ -77,7 +77,7 @@ order inside Integrations. No read or viewport change writes that interpretation
 
 Preserve Office's standalone plugin access when that mode omits the group.
 In regular mode, a hidden group hides its children. For a missing legacy group,
-use a display-only canonical anchor rather than dropping links. Settings preview
+materialize the canonical anchor for display and explicit edits without saving on read. Settings preview
 and runtime navigation must agree for both conditions.
 
 The current navigation ADR and ADR 0041 remain authoritative. A new ADR is not
@@ -185,15 +185,15 @@ Design validation on 2026-10-25:
   change is exempt. A preflight including the planned sidebar runtime edit is
   covered by both work orders with no reference errors.
 
-Task 01 is complete: 95 focused tests, typecheck, ESLint, and i18n passed.
+Task 01 is complete: 108 focused tests in 15 suites, typecheck, ESLint, and i18n passed.
 Actual YouTrack desktop and touch-phone placement and activation passed.
-Task 02 is complete: 11 desktop and 11 phone E2E tests passed against the
+Task 02 is complete: 12 desktop (including tablet) and 11 phone E2E tests passed against the
 same fresh production build. Public documentation and checks passed. All work
 orders are done. PR CI/review and merge remain external delivery gates.
 
 Final local E2E logs: `/tmp/kandev-run.e2e.MSPoa0sK.log` (phone) and
 `/tmp/kandev-run.e2e.lXHOuXfD.log` (desktop). Updated base catalog validation:
-403 decisions and 1738 specifications. Public docs: 63 validator tests, 48 pages.
+403 decisions and 1738 specifications. Public docs: 63 validator tests passed; 54 pages validated.
 Actual plugin captures were inspected after finite UI animations settled.
 Pre-fix browser reproduction with actual YouTrack v0.2.0: confirmed on 2026-10-25,
 including reload. See [evidence](reproduction.md).
@@ -210,3 +210,35 @@ Each work order contains exact implementation commands and owns its results.
 - New labels require all shipped locales. Reuse current strings where possible.
 - Existing integration-plugin global placement intentionally becomes grouped
   placement. Stored identities and individual choices remain recoverable.
+
+## Review remediation
+
+Review found two layout cases: an inferred Integrations parent was
+absent from explicit edit state, and wider listing menus received the phone-only
+collapsed disclosure. The parent now materializes for both rendering and editing
+without writing on read. The shared resource component passes the phone
+presentation choice through instead of applying it to every consumer.
+Regression tests reproduce both defects before correction. The desktop browser
+flow additionally edits a layout that originally lacks the parent, and a new
+coarse-pointer tablet flow opens the listing menu with expanded plugin links.
+Fresh published-plugin screenshots passed on desktop, phone, and tablet. The touch/pen pointer handler now preserves propagation to the context-menu trigger. Portaled-menu focus no longer invokes sidebar expansion or starts competing layout writes. The Office singleton check passes without a code change because builtin eligibility removes its Integrations parent. The shared draft materialization also supplies the legacy parent to Settings, so its controls remain editable. Focused validation passed: 108 tests in 15 suites, typecheck, changed-file ESLint, i18n, docs, and specification checks. Final browser regression passed: 12 desktop tests (including tablet navigation) and 11 phone tests against the same fresh production build.
+
+### UI-04: Tablet listing menu, expanded Integrations
+
+| Level | Content | Behavior |
+| --- | --- | --- |
+| Heading | Integrations | Expanded, without a phone disclosure toggle |
+| Link | YouTrack | Visible on opening the menu, opens its registered route |
+| Link | Integration settings | Retains the existing setup destination |
+
+Reuse the wider menu surface and its scroller. Touch controls keep their existing
+44px sizing. This view preserves the wider-consumer contract in the frontend
+guide. See [combined plan](plan.md#ui-04-tablet-listing-menu-expanded-integrations).
+
+Final review-validation logs, 2026-10-26:
+
+- Desktop/tablet: `/tmp/youtrack-e2e-logs/kandev-run.e2e.r9Mj2pnK.log`, 12 passed, retries disabled.
+- Phone: `/tmp/youtrack-e2e-logs/kandev-run.e2e.xj4A8ZlJ.log`, 11 passed, retries disabled.
+- Focused reproductions of four initial CI failures: `/tmp/youtrack-e2e-logs/kandev-run.e2e.a5BE0TWh.log`, 4 passed, retries disabled. These unchanged tests cover Jira auth health, cancellation across task switches, jump-to-latest, and the Quick Chat goal disclosure. Fresh PR CI remains required.
+
+The final source also excludes portaled menu focus from sidebar expansion, with a behavioral regression and a positive control for clipped-row focus. The final browser runs above include the legacy-parent hide, save, reload, and restore flow. Fresh published YouTrack captures cover desktop, phone, and tablet.

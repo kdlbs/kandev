@@ -6,7 +6,8 @@ import {
   sidebarEditorNodes,
   sidebarNodeSiblings,
 } from "./integration-plugin-layout";
-import { projectSidebarLayout } from "./layout-projection";
+import { toggleNodeVisibility } from "./layout-operations";
+import { materializeSidebarPluginNodes, projectSidebarLayout } from "./layout-projection";
 import { defaultSidebarLayout, type SidebarLayoutNode } from "./layout-types";
 
 const plugin = (id: string, section = "integrations", visible = true): SidebarLayoutNode => ({
@@ -82,6 +83,24 @@ describe("integration plugin hierarchy", () => {
     const { nodes } = projectSidebarLayout(layout, catalog);
     expect(integrationPluginDestinations(nodes, catalog).map((n) => n.id)).toEqual(["b", "a"]);
     expect(layout.nodes[2].visible).toBe(false);
+  });
+
+  it("keeps the legacy integration anchor editable without rewriting the saved layout", () => {
+    const saved = { ...defaultSidebarLayout(), nodes: [plugin("a")] };
+    const catalog = [
+      {
+        target: { kind: "destination" as const, id: "a" },
+        label: "A",
+        section: "integrations" as const,
+        source: "plugin" as const,
+        href: "/a",
+        available: true,
+      },
+    ];
+    const editable = materializeSidebarPluginNodes(saved, catalog);
+    const hidden = toggleNodeVisibility(editable, "integrations", false);
+    expect(hidden.nodes.find((node) => node.destinationId === "integrations")?.visible).toBe(false);
+    expect(saved.nodes).toHaveLength(1);
   });
 
   it("supplies a display anchor for a legacy layout without saving it", () => {

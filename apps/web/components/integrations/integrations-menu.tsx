@@ -18,7 +18,6 @@ import { useAppStore } from "@/components/state-provider";
 import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-
 import type { ResolvedDestination } from "@/lib/navigation/types";
 
 type MobileIntegrationsSectionProps = {

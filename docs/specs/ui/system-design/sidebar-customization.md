@@ -158,13 +158,11 @@ Settings preview, and customization. Integration children render under Integrati
 Main/unknown and footer placements retain their current handling. Explicit
 shortcut references never enter this regrouping.
 
-`SidebarLayoutNavigation` supplies the ordered visible plugin destinations to
-`IntegrationsSection`. Combine built-in providers, these children, and the
-existing settings row exactly once. Replace the blanket plugin exclusion with
-this explicit input. Legacy consumers retain manifest defaults. Phone saved
-navigation passes the same children to `MobileIntegrationsSection`; wider sheet
-consumers apply the same grouping while retaining their presentation. Preserve
-omit-section/destination rules and first-party header shortcut policy.
+`SidebarLayoutNavigation` passes ordered plugin destinations into
+`IntegrationsSection`; built-ins precede plugins and settings follows them.
+Legacy callers retain manifest defaults. Phone and wider saved menus pass the
+same destinations into `MobileIntegrationsSection`, preserving omission rules
+and first-party-only header shortcuts.
 
 Settings, its draft preview, direct menus, and phone customization show plugin
 visibility choices under Integrations. Child moves operate among integration
@@ -173,17 +171,18 @@ must not start a parent drag; reuse existing sensors with explicit scope guards.
 Keyboard and phone move controls use the same pure movement operation. Boundary,
 cross-group, cancelled, and unchanged moves do not save. Preserve unrelated and
 unavailable nodes in full replacement payloads through the existing CAS writer.
+Portaled menu focus must not expand navigation or write geometry. Only DOM-contained focus can reveal clipped rows.
 
 Existing standalone plugin positions become sibling order inside Integrations.
 Hidden/folded parents suppress children without mutating child visibility.
-Showing the parent restores individually visible children. Missing legacy
-Integrations nodes use a display-only canonical anchor. Office mode retains its
+Showing the parent restores individually visible children. Materialization supplies a missing Integrations node for display and editing,
+without saving on read. Office mode retains its
 current standalone plugin access where that mode intentionally omits Integrations;
 an explicitly hidden parent in regular navigation is not an Office fallback.
 No database migration, SDK change, plugin release, or new ADR is needed.
 
-Reuse the desktop disclosure/rail launcher and phone app drawer. The phone
-starts collapsed and expands labelled 44px links within its existing scroller.
+Reuse the desktop disclosure/rail launcher and phone app drawer. Only phone app navigation starts collapsed; wider menus retain expanded links.
+Phone links retain 44px targets and the existing scroller.
 Settings preview matches navigation. Plugin reload restores saved choices.
 
 ## Inbox layout entries

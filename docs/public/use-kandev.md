@@ -158,7 +158,7 @@ choice while a feature is unavailable and restores it when the feature is enable
 setting belongs to your account and workspace, so it follows you across clients without changing
 another user's layout.
 
-Integration plugins, such as YouTrack, appear inside **Integrations** on desktop and phone.
+In regular workspaces, integration plugins, such as YouTrack, appear inside **Integrations** on desktop and phone.
 Their visibility controls remain individual, and their move controls reorder them within that section.
 Hiding Integrations hides its original plugin links without changing each link's visibility choice.
 Explicit shortcuts in custom sections remain independent.

@@ -92,3 +92,19 @@ it("moves a nested integration once without moving its parent", () => {
     "home",
   ]);
 });
+
+// Touch and pen long-press events must reach the outer customization trigger.
+it.each(["touch", "pen"])("forwards %s pointer input through a draggable row", (pointerType) => {
+  const onPointerDown = vi.fn();
+  render(
+    <div onPointerDown={onPointerDown}>
+      <SidebarDraggableNavigation rows={rows} catalog={[]} />
+    </div>,
+  );
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Home" }), {
+    pointerType,
+    button: 0,
+    isPrimary: true,
+  });
+  expect(onPointerDown).toHaveBeenCalledOnce();
+});

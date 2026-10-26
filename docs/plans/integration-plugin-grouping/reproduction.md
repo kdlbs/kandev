@@ -67,3 +67,9 @@ title. This placement repair does not change plugin route rendering or authentic
 a YouTrack server connection. Navigation placement and route activation succeeded.
 Desktop and phone screenshots are published with the PR; pre-fix and post-fix
 captures are kept separate from tracked source.
+
+The review pass repeated installation on another fresh isolated instance. Desktop
+and phone checks passed again. A touch-enabled 900x900 tablet context opened the
+listing menu: Integrations was already expanded, contained one YouTrack link,
+and opening `/youtrack` closed the menu. All three final captures were inspected
+and attached to PR #4790.
