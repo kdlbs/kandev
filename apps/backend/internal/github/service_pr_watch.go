@@ -144,7 +144,7 @@ func (s *Service) getExistingCanonicalPRWatch(
 	if byBranch != nil {
 		return byBranch, nil
 	}
-	return s.store.GetPRWatchByTaskRepoBranchAny(ctx, taskID, repositoryID, branch)
+	return nil, nil
 }
 
 // GetPRWatch returns one PR watch after authorizing its stored workspace.

@@ -157,3 +157,27 @@ Addressed the three review findings. Branch admission now checks a numbered watc
 - `make -C apps/backend build`: passed. Darwin packaging emitted the expected warning that no codesign/rcodesign binary is installed.
 - `git diff --check`: passed.
 - `bash scripts/lint-go-changed apps/backend/internal/github/controller.go apps/backend/internal/github/errors.go apps/backend/internal/github/handlers.go apps/backend/internal/github/models.go apps/backend/internal/github/poller.go apps/backend/internal/github/poller_test.go apps/backend/internal/github/pr_watch_retirement_integration_test.go apps/backend/internal/github/service_automation_auth.go apps/backend/internal/github/service.go apps/backend/internal/github/service_pr_unwatched.go apps/backend/internal/github/service_pr_watch_batched.go apps/backend/internal/github/service_pr_watch_fallback_test.go apps/backend/internal/github/service_pr_watch.go apps/backend/internal/github/service_pr_watch_multi_branch_test.go apps/backend/internal/github/service_pr_watch_result_events_test.go apps/backend/internal/github/service_pr_watch_result_feedback_test.go apps/backend/internal/github/service_pr_watch_result.go apps/backend/internal/github/service_pr_watch_retirement.go apps/backend/internal/github/service_pr_watch_workspace_group_redirect_test.go apps/backend/internal/github/service_task_events.go apps/backend/internal/github/store.go apps/backend/internal/github/store_pr_watch_migration_test.go apps/backend/internal/github/store_pr_watch_retirement.go apps/backend/internal/github/store_pr_watch_retirement_postgres_test.go apps/backend/internal/github/store_pr_watch_retirement_test.go apps/backend/internal/github/store_task_pr_ownership.go apps/backend/internal/github/store_watch_reset_test.go apps/backend/internal/orchestrator/event_handlers_git.go apps/backend/internal/orchestrator/event_handlers_github.go apps/backend/internal/orchestrator/event_handlers_github_test.go`: 0 issues.
+
+## PR review follow-up results
+
+Completed 2026-10-26. Regressions reproduced all three findings before their
+fixes, then passed after implementation:
+
+- Different numbered PRs on the same task/repository/branch keep distinct
+  watches, and push discovery associates the second PR with its own watch.
+- A terminal result keeps an existing searching watch and removes the
+  redundant numbered watch in the same transaction, preserving the final
+  TaskPR state.
+- Discovery reconciles the comparison target after committing the TaskPR row,
+  including fork-backed PRs with a replacement base branch.
+
+Validation passed:
+
+- `go test -trimpath -tags fts5 ./internal/github -run '^(TestCreatePRWatch_DoesNotReuseDifferentPROnSameBranch|TestTerminalPRWatchResultPreservesSearchingSibling|TestDiscoveredPRReconcilesComparisonTargetAfterCommit)$' -count=1`.
+- `go test -timeout=5m -trimpath -tags fts5 ./internal/github -count=1` (115.154s).
+- `go test -timeout=2m -trimpath -tags fts5 ./internal/orchestrator -run '^(TestDetectPushAndAssociatePR|TestEnsureSessionPRWatch_MultiRepo|TestListTasksNeedingPRWatch)$' -count=1`.
+- `go test -timeout=90s -race -trimpath -tags fts5 ./internal/github -run '^(TestCreatePRWatch_DoesNotReuseDifferentPROnSameBranch|TestTerminalPRWatchResultPreservesSearchingSibling|TestDiscoveredPRReconcilesComparisonTargetAfterCommit)$' -count=1`.
+- `bash scripts/lint-go-changed apps/backend/internal/github/service_pr_watch.go apps/backend/internal/github/service_pr_watch_result.go apps/backend/internal/github/service_pr_watch_review_findings_test.go`: 0 issues.
+- `make -C apps/backend build` passed with the expected Darwin codesign-tool warnings.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and the PR documentation coverage preflight passed.
+- `git diff --check` passed.

@@ -117,7 +117,7 @@ func (s *Service) applyPRWatchStatusResultTx(
 		return err
 	}
 	if terminal && !holdTerminal {
-		if err := resetTerminalPRWatchTx(ctx, tx, current.ID); err != nil {
+		if err := resetTerminalPRWatchTx(ctx, tx, current); err != nil {
 			return err
 		}
 	}
@@ -168,10 +168,26 @@ func (s *Service) syncTaskPRFromWatchResultTx(
 	return err
 }
 
-func resetTerminalPRWatchTx(ctx context.Context, tx *sqlx.Tx, watchID string) error {
+func resetTerminalPRWatchTx(ctx context.Context, tx *sqlx.Tx, watch *PRWatch) error {
+	var searchingID string
+	err := tx.GetContext(ctx, &searchingID, tx.Rebind(`
+		SELECT id FROM github_pr_watches
+		WHERE task_id = ? AND repository_id = ? AND branch = ? AND pr_number = 0
+			AND retired_at IS NULL AND id <> ?
+		LIMIT 1`), watch.TaskID, watch.RepositoryID, watch.Branch, watch.ID)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("find searching PR watch: %w", err)
+	}
+	if err == nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(
+			`DELETE FROM github_pr_watches WHERE id = ? AND retired_at IS NULL`), watch.ID); err != nil {
+			return fmt.Errorf("remove redundant terminal PR watch: %w", err)
+		}
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE github_pr_watches SET pr_number = 0, last_check_status = '', last_review_state = '', updated_at = ?
-		WHERE id = ? AND retired_at IS NULL`), time.Now().UTC(), watchID); err != nil {
+		WHERE id = ? AND retired_at IS NULL`), time.Now().UTC(), watch.ID); err != nil {
 		return fmt.Errorf("reset terminal PR watch: %w", err)
 	}
 	return nil
@@ -208,6 +224,7 @@ func (s *Service) applyPRWatchDiscoveryResult(
 	}
 	if application.applied && accepted {
 		s.publishPRWatchResultEvents(ctx, application.events)
+		s.reconcileComparisonTarget(ctx, effectiveTaskID, pr)
 	}
 	if application.promoted {
 		watch.Owner, watch.Repo, watch.PRNumber = application.owner, application.repo, pr.Number
