@@ -22,7 +22,7 @@ Tasks owns the immutable interval and transcript anchor.
 Runtime provides ordered executor access; agentctl owns Git capture; user settings owns policy resolution.
 Frontend consumers reuse the existing diff renderer and responsive workbench.
 
-The [source inventory](../../../plans/turn-changed-files/plan.md#source-inventory) distinguishes existing and proposed contracts; mutable Git status and event subscribers cannot establish interval ordering.
+Mutable Git status and event subscribers cannot establish interval ordering.
 
 ## Requirement mapping
 
@@ -344,16 +344,12 @@ Eligible pending/failure rows use the same anchor. Chat uses `isTurnChangeCardVi
 Existing unread, bottom-follow, and reader-position claims remain authoritative.
 Capture updates invalidate only the affected row and preserve the reader's viewport anchor.
 
-The shared tree groups exact paths under checkout roots and aggregates known counts plus binary/unknown markers.
-Folders start collapsed; root files stay visible; status icons have accessible labels.
-Full paths appear on focus/hover, with touch disclosure on phones.
-Open diff, folder toggles, and expand-all remain independent actions.
+The tree groups paths by checkout. Folders start collapsed. Preserve known counts, binary/unknown markers, accessible labels, full-path disclosure, and independent navigation.
 
-Store expansion and selected entry by session/change-set ID in existing UI persistence conventions.
-Namespace user-private state; prune it when its owning session is removed.
-Do not store patch contents in localStorage or mutate the live Git cache.
-Use nested semantic disclosure buttons, or a tree with complete roving-focus behavior.
-Do not add `role=tree` without its keyboard contract.
+AC-TASKS-TURN-CHANGES-005.10 through 005.12 use `FileIcon` and `LineStat` in `TurnChangedFilesCard`, with Changes colors for textual kinds. Unknown/binary counts retain labels. Historical rows never gain live Git controls.
+Add non-collapsing 16px space outside the card border at both transcript anchors. Preserve scroll ownership and phone targets.
+
+Persist user-private expansion/selection by session/change-set; prune on session removal. Never persist patches in localStorage or mutate live Git state. Use semantic disclosure buttons unless full tree keyboard support exists.
 
 Availability projection:
 
@@ -455,3 +451,5 @@ No source-only latency claims are acceptable.
 - [Prompt completion ownership](../../platform/system-design/prompt-completion-ownership.md)
 - [Git diff metadata](../../platform/system-design/git-diff-file-metadata.md)
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
+
+[Presentation plan](../../../plans/turn-changed-files-presentation/plan.md).

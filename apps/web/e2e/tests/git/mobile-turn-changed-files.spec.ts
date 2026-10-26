@@ -5,6 +5,7 @@ import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import {
   assertHistoricalSelectorStyle,
   assertLatestTurnCardInView,
+  assertTurnCardMessageGap,
   enableTurnChangedFiles,
   openFirstTurnChangesDiff,
   readTurnChangeHistory,
@@ -38,8 +39,9 @@ test.describe("mobile historical turn changed files", () => {
       ).toBeVisible();
       await session.waitForChatIdle();
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(2);
+      const firstCard = session.activeChat().getByTestId("turn-changed-files-card").first();
+      await assertTurnCardMessageGap(firstCard);
       if (prCapture.capturing) {
-        const firstCard = session.activeChat().getByTestId("turn-changed-files-card").first();
         await firstCard.scrollIntoViewIfNeeded();
         await waitForFiniteAnimations(firstCard);
         await prCapture.screenshot("turn-changed-files-card-mobile", {
@@ -47,11 +49,18 @@ test.describe("mobile historical turn changed files", () => {
         });
       }
 
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
+      const reloadedCards = session.activeChat().getByTestId("turn-changed-files-card");
+      await expect(reloadedCards).toHaveCount(2);
+      await assertTurnCardMessageGap(reloadedCards.first());
+
       const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
       git.stageFile("untracked_test.txt");
       git.commit("retain later turn contents");
 
-      const firstCard = await openFirstTurnChangesDiff(session);
+      await openFirstTurnChangesDiff(session);
       const drawer = testPage.getByTestId("mobile-diff-sheet");
       await expect(drawer).toBeVisible();
       if (prCapture.capturing) await waitForFiniteAnimations(drawer);
@@ -111,14 +120,28 @@ test("keeps renamed file paths readable in the phone diff", async ({
 }) => {
   const restorePreference = await enableTurnChangedFiles(apiClient);
   try {
-    const { routeRenamedTurnFile, assertCardTouchTargets, assertTurnFileDisclosure } =
-      await import("./turn-changed-files-qa-helpers");
+    const {
+      routeRenamedTurnFile,
+      assertCardResponsiveContainment,
+      assertCardTouchTargets,
+      assertTurnFileDisclosure,
+    } = await import("./turn-changed-files-qa-helpers");
     await routeRenamedTurnFile(testPage);
     const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
     resetTurnQaFile(seedData.repositoryPath);
     const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);
-    await assertCardTouchTargets(testPage);
+    const card = testPage.getByTestId("turn-changed-files-card");
+    const expandAll = card.getByRole("button", { name: "Expand all", exact: true });
+    await expect(expandAll).toBeVisible();
+    await expandAll.tap();
+    await expect(card.locator("[data-turn-file-change-id]")).toHaveCount(1);
+    for (const width of [390, 767, 768]) {
+      await testPage.setViewportSize({ width, height: 844 });
+      await assertCardResponsiveContainment(testPage, card);
+      if (width === 390) await assertCardTouchTargets(testPage);
+    }
+    await testPage.setViewportSize({ width: 390, height: 844 });
     await assertTurnFileDisclosure(testPage, true);
     await testPage.screenshot({ path: test.info().outputPath("renamed-path-phone.png") });
   } finally {
