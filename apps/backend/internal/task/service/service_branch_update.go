@@ -373,9 +373,8 @@ func (s *Service) TaskGitHooks(ctx context.Context, taskID string) (map[string]b
 // stored repository records, over the same branch-identity computation and key
 // derivation as collectTaskBaseBranches. Rows without a base branch are kept.
 // A repository that cannot be read or keyed is off with a warning; the other
-// repositories keep their values. A key shared by several repositories is on
-// only when every repository deriving it opted in. Plugin remote tasks carry no
-// entries.
+// repositories keep their values. A key derived by several repositories is
+// ambiguous and is off with a warning. Plugin remote tasks carry no entries.
 func (s *Service) collectTaskGitHooks(ctx context.Context, taskID string) (map[string]bool, error) {
 	taskRepos, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
 	if err != nil {
@@ -394,8 +393,7 @@ func (s *Service) collectTaskGitHooks(ctx context.Context, taskID string) (map[s
 	}
 	repos, inputs := s.loadGitHooksRepositories(ctx, taskID, taskRepos)
 	plans := worktree.BuildBranchIdentityPlans(inputs)
-	owners := make(map[string]int, len(taskRepos)+1)
-	optedIn := make(map[string]int, len(taskRepos)+1)
+	entries := make([]gitHooksEntry, 0, len(taskRepos)+1)
 	for i, tr := range taskRepos {
 		if repos[i] == nil {
 			continue
@@ -406,23 +404,44 @@ func (s *Service) collectTaskGitHooks(ctx context.Context, taskID string) (map[s
 				zap.String("task_id", taskID), zap.String("repository_id", tr.RepositoryID), zap.Error(keyErr))
 			continue
 		}
-		keys := []string{key}
+		entries = append(entries, gitHooksEntry{key: key, enabled: repos[i].RunGitHooks})
 		if len(taskRepos) == 1 && key != "" {
-			keys = append(keys, "")
+			entries = append(entries, gitHooksEntry{key: "", enabled: repos[i].RunGitHooks})
 		}
-		for _, k := range keys {
-			owners[k]++
-			if repos[i].RunGitHooks {
-				optedIn[k]++
+	}
+	return foldGitHooksEntries(entries, func(key string) {
+		s.logger.Warn("git hooks off: workspace entry key derived by several repositories",
+			zap.String("task_id", taskID), zap.String("key", key))
+	}), nil
+}
+
+// gitHooksEntry is one repository's hooks setting under a derived workspace key.
+type gitHooksEntry struct {
+	key     string
+	enabled bool
+}
+
+// foldGitHooksEntries builds the key-to-enabled map. A key held by more than one
+// entry is ambiguous: it is left off and reported through onCollision.
+func foldGitHooksEntries(entries []gitHooksEntry, onCollision func(key string)) map[string]bool {
+	owners := make(map[string]int, len(entries))
+	for _, e := range entries {
+		owners[e.key]++
+	}
+	out := make(map[string]bool, len(entries))
+	warned := make(map[string]bool)
+	for _, e := range entries {
+		switch {
+		case owners[e.key] > 1:
+			if !warned[e.key] {
+				warned[e.key] = true
+				onCollision(e.key)
 			}
+		case e.enabled:
+			out[e.key] = true
 		}
 	}
-	for key, count := range optedIn {
-		if count == owners[key] {
-			out[key] = true
-		}
-	}
-	return out, nil
+	return out
 }
 
 // loadGitHooksRepositories reads each task repository record and builds the

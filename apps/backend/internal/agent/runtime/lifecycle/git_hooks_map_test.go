@@ -111,3 +111,23 @@ func TestRequestBuildersCopyTheSeededGitHooks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"app": true}, config.GitHooks)
 }
+
+func TestExecutorRequestBuildersCarrySeededGitHooksToTheWire(t *testing.T) {
+	newReq := func() *ExecutorCreateRequest {
+		return &ExecutorCreateRequest{
+			InstanceID: "instance-wire", WorkspacePath: "/workspace",
+			Metadata: map[string]interface{}{MetadataKeyGitHooks: map[string]bool{"": true}},
+		}
+	}
+	want := map[string]bool{"": true}
+
+	standalone := buildStandaloneCreateInstanceRequest(newReq(), nil, "", false, false, false, false, nil)
+	assert.Equal(t, want, standalone.GitHooks, "standalone")
+	assert.Equal(t, want, buildSSHCreateInstanceRequest(newReq(), "/workspace", "agentctl").GitHooks, "ssh")
+	assert.Equal(t, want, agentctlInstanceRequest(newReq(), "/workspace").GitHooks, "sprites")
+
+	unseeded := &ExecutorCreateRequest{InstanceID: "instance-none", Metadata: map[string]interface{}{}}
+	assert.Nil(t, buildStandaloneCreateInstanceRequest(unseeded, nil, "", false, false, false, false, nil).GitHooks)
+	assert.Nil(t, buildSSHCreateInstanceRequest(unseeded, "/workspace", "agentctl").GitHooks)
+	assert.Nil(t, agentctlInstanceRequest(unseeded, "/workspace").GitHooks)
+}

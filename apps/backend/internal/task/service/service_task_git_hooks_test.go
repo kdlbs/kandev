@@ -96,3 +96,42 @@ func TestTaskGitHooksPluginRemoteCarriesNoEntries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, hooks)
 }
+
+func TestFoldGitHooksEntriesSharedKeyIsOffAndWarnsOnce(t *testing.T) {
+	var warned []string
+	got := foldGitHooksEntries([]gitHooksEntry{
+		{key: "dup", enabled: true},
+		{key: "dup", enabled: true},
+		{key: "mixed", enabled: true},
+		{key: "mixed", enabled: false},
+		{key: "solo", enabled: true},
+		{key: "off", enabled: false},
+	}, func(key string) { warned = append(warned, key) })
+
+	assert.Equal(t, map[string]bool{"solo": true}, got)
+	assert.ElementsMatch(t, []string{"dup", "mixed"}, warned)
+}
+
+func TestFoldGitHooksEntriesEmptyIsNonNilAndSilent(t *testing.T) {
+	got := foldGitHooksEntries(nil, func(string) { t.Fatal("unexpected warning") })
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
+}
+
+func TestTaskGitHooksUnreadableRepositoryIsOffOthersKeepValue(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	taskID := seedGitHooksTask(t, svc, repo, map[string]bool{"front": true, "back": true},
+		[]TaskRepositoryInput{
+			{RepositoryID: "front", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			{RepositoryID: "back", BaseBranch: "main", CheckoutBranch: "feature/b"},
+		})
+	require.NoError(t, repo.DeleteRepository(context.Background(), "back"))
+
+	hooks, err := svc.TaskGitHooks(context.Background(), taskID)
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+	for key, on := range hooks {
+		assert.True(t, on)
+		assert.Contains(t, key, "front")
+	}
+}

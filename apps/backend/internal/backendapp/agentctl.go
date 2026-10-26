@@ -228,10 +228,6 @@ func refusedAdoptionScope(outcome agentruntime.AdoptionOutcome) agentruntime.Inh
 	return agentruntime.InheritedRecordScopeForeignServer
 }
 
-// adoptSurvivingAgentctl attempts to adopt a control server recorded by a
-// prior launch. Returns nil when adoption did not complete for any reason
-// (design 02's "Startup" steps 4-6): the caller then falls back to spawning
-// a fresh server exactly as it would with the capability disabled.
 // localAdoptionCapabilities is the set the backend's own surviving control
 // server must advertise: the survival set plus the managed Git policy, so a
 // server that predates the policy is stopped and replaced rather than adopted.
@@ -239,6 +235,10 @@ func localAdoptionCapabilities() []string {
 	return append(slices.Clone(agentruntime.RequiredSurvivalCapabilities), subproc.ManagedGitPolicyCapability)
 }
 
+// adoptSurvivingAgentctl attempts to adopt a control server recorded by a
+// prior launch. Returns nil when adoption did not complete for any reason
+// (design 02's "Startup" steps 4-6): the caller then falls back to spawning
+// a fresh server exactly as it would with the capability disabled.
 func adoptSurvivingAgentctl(
 	ctx context.Context,
 	lifetimeCtx context.Context,

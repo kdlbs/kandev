@@ -18,8 +18,10 @@ import (
 // the argument vector (never the process environment), so the agent process
 // and anything it spawns inherit nothing from it.
 
+// enumerationTimeout bounds one driver enumeration; tests shorten it.
+var enumerationTimeout = 5 * time.Second
+
 const (
-	enumerationTimeout   = 5 * time.Second
 	enumerationMaxOutput = 1 << 20
 	maxDriverNameLength  = 256
 
