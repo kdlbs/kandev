@@ -119,6 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -451,8 +452,8 @@ jobs:
           # below is a clean -u origin "$BRANCH" rather than a non-fast-forward
           # rejection. Closing the corresponding stale PR (if any) happens
           # automatically when GitHub sees the head branch deleted.
-          git push origin --delete "$BRANCH" 2>/dev/null || true
-          git push -u origin "$BRANCH"
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin --delete "$BRANCH" 2>/dev/null || true
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -u origin "$BRANCH"
 
           HEAD_SHA="$(git rev-parse HEAD)"
           PR_URL="$(gh pr create \
@@ -609,6 +610,7 @@ jobs:
       - name: Create and push signed release tag
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
         run: |
@@ -620,10 +622,10 @@ jobs:
 
           # Tag push: retry once for transient network blips. If both attempts
           # fail, main already has the bumped commit but no tag exists.
-          git push origin "$TAG" || {
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin "$TAG" || {
             echo "Tag push failed; retrying in 5s..." >&2
             sleep 5
-            git push origin "$TAG" || {
+            git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin "$TAG" || {
               echo "ERROR: Tag push failed twice after PR merge succeeded." >&2
               echo "  Release merge commit: $MERGE_COMMIT" >&2
               echo "  Recover only with the configured release signing identity:" >&2
@@ -1515,7 +1517,7 @@ jobs:
           helper="$RUNNER_TEMP/verify-desktop-assets.sh"
           gh api \
             --header "Accept: application/vnd.github.raw+json" \
-            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            "repos/${GITHUB_REPOSITORY}/contents/scripts/release/verify-desktop-assets.sh?ref=${GITHUB_WORKFLOW_SHA}" \
             > "$helper"
           echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
 
@@ -1533,7 +1535,7 @@ jobs:
           else
             encoded_helper="$RUNNER_TEMP/collect-macos-desktop-diagnostics.sh.b64"
             gh api \
-              "repos/${{ github.repository }}/contents/.github/scripts/collect-macos-desktop-diagnostics.sh?ref=${{ github.workflow_sha }}" \
+              "repos/${GITHUB_REPOSITORY}/contents/.github/scripts/collect-macos-desktop-diagnostics.sh?ref=${GITHUB_WORKFLOW_SHA}" \
               --jq .content > "$encoded_helper"
             HELPER="$helper" ENCODED_HELPER="$encoded_helper" python3 - <<'PY'
           import base64
@@ -1730,7 +1732,7 @@ jobs:
           helper="$RUNNER_TEMP/updater-signing-ready.sh"
           gh api \
             --header "Accept: application/vnd.github.raw+json" \
-            "repos/${{ github.repository }}/contents/scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}" \
+            "repos/${GITHUB_REPOSITORY}/contents/scripts/release/updater-signing-ready.sh?ref=${GITHUB_WORKFLOW_SHA}" \
             > "$helper"
           if ! bash "$helper" "${{ matrix.platform }}"; then
             echo "::error::Updater signing prerequisites failed for ${{ matrix.platform }}." >&2
@@ -2095,6 +2097,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -2284,7 +2287,7 @@ jobs:
           helper="$RUNNER_TEMP/verify-desktop-assets.sh"
           gh api \
             --header "Accept: application/vnd.github.raw+json" \
-            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            "repos/${GITHUB_REPOSITORY}/contents/scripts/release/verify-desktop-assets.sh?ref=${GITHUB_WORKFLOW_SHA}" \
             > "$helper"
           echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
 
@@ -2572,6 +2575,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -2594,6 +2598,7 @@ jobs:
       - name: Build and push (universal amd64 staging tag)
         id: build
         env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
         run: |
           set -euo pipefail
@@ -2609,7 +2614,7 @@ jobs:
             --file Dockerfile.universal \
             --platform linux/amd64 \
             --push \
-            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}" \
+            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${RELEASE_TAG}" \
             --tag "$STAGING_IMAGE" \
             "${label_args[@]}" \
             --provenance=false \
@@ -2669,6 +2674,7 @@ jobs:
       - name: Build and push (universal arm64 staging tag)
         id: build
         env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
         run: |
           set -euo pipefail
@@ -2684,7 +2690,7 @@ jobs:
             --file Dockerfile.universal \
             --platform linux/arm64 \
             --push \
-            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}" \
+            --build-arg BASE_IMAGE="ghcr.io/kdlbs/kandev:${RELEASE_TAG}" \
             --tag "$STAGING_IMAGE" \
             "${label_args[@]}" \
             --provenance=false \
@@ -2769,12 +2775,15 @@ jobs:
       # images referenced by digest, not tag, so this is pinned to the bytes
       # the previous jobs pushed.
       - name: Promote staging to final tags
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           bash scripts/release/retry-ghcr-command.sh \
             docker buildx imagetools create \
-            --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.version }}-universal" \
-            --tag "ghcr.io/kdlbs/kandev:${{ needs.prepare.outputs.tag }}-universal" \
+            --tag "ghcr.io/kdlbs/kandev:${RELEASE_VERSION}-universal" \
+            --tag "ghcr.io/kdlbs/kandev:${RELEASE_TAG}-universal" \
             --tag "ghcr.io/kdlbs/kandev:universal" \
             "$AMD64_REF" "$ARM64_REF"
 
@@ -2810,6 +2819,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
@@ -2926,16 +2936,18 @@ jobs:
 
       - name: Generate and verify updater manifest
         env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           RUSTUP_TOOLCHAIN: 1.88.0
         run: |
           set -euo pipefail
-          pub_date="$(git show -s --format=%cI '${{ needs.prepare.outputs.tag }}^{commit}')"
+          pub_date="$(git show -s --format=%cI "${RELEASE_TAG}^{commit}")"
           node scripts/release/updater-manifest.mjs generate \
             --assets-dir dist/release-assets \
             --output dist/release-assets/latest.json \
-            --version "${{ needs.prepare.outputs.version }}" \
-            --tag "${{ needs.prepare.outputs.tag }}" \
-            --repository "${{ github.repository }}" \
+            --version "${RELEASE_VERSION}" \
+            --tag "${RELEASE_TAG}" \
+            --repository "${GITHUB_REPOSITORY}" \
             --notes-file RELEASE_NOTES.md \
             --pub-date "$pub_date" \
             --allow-unsigned
@@ -2943,9 +2955,9 @@ jobs:
             node scripts/release/updater-manifest.mjs verify \
               --assets-dir dist/release-assets \
               --manifest dist/release-assets/latest.json \
-              --version "${{ needs.prepare.outputs.version }}" \
-              --tag "${{ needs.prepare.outputs.tag }}" \
-              --repository "${{ github.repository }}"
+              --version "${RELEASE_VERSION}" \
+              --tag "${RELEASE_TAG}" \
+              --repository "${GITHUB_REPOSITORY}"
           fi
 
       - name: Publish release
@@ -3025,6 +3037,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.ref }}
 
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
@@ -3043,12 +3056,14 @@ jobs:
 
       - name: Publish npm packages
         env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/release/publish-npm.sh \
-            --version "${{ needs.prepare.outputs.version }}" \
+            --version "${RELEASE_VERSION}" \
             --dist-tag latest \
-            --release-tag "${{ needs.prepare.outputs.tag }}"
+            --release-tag "${RELEASE_TAG}"
 
   publish-npm-nightly:
     name: Publish npm nightly packages
@@ -3093,6 +3108,7 @@ jobs:
 
       - name: Publish npm nightly packages
         env:
+          NIGHTLY_VERSION: ${{ needs.nightly-prepare.outputs.version }}
           NIGHTLY_BASELINE: ${{ needs.nightly-prepare.outputs.stable_version }}
           NIGHTLY_AT_START: ${{ needs.nightly-prepare.outputs.nightly_version_at_start }}
           NIGHTLY_TAGS_AT_START: ${{ needs.nightly-prepare.outputs.nightly_tags_at_start }}
@@ -3101,7 +3117,7 @@ jobs:
             --stable-at-start "$NIGHTLY_BASELINE" \
             --nightly-at-start "$NIGHTLY_AT_START" \
             --tags-at-start "$NIGHTLY_TAGS_AT_START" \
-            --version "${{ needs.nightly-prepare.outputs.version }}" \
+            --version "${NIGHTLY_VERSION}" \
             --assets-dir dist/nightly-assets
 
   update-homebrew-tap:
@@ -3120,16 +3136,19 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.ref }}
 
       - name: Update Homebrew tap formula
         env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
           bash scripts/release/update-homebrew-tap.sh \
-            "${{ needs.prepare.outputs.version }}" \
-            "${{ needs.prepare.outputs.tag }}"
+            "${RELEASE_VERSION}" \
+            "${RELEASE_TAG}"
 
   update-scoop-bucket:
     name: Update Scoop bucket
@@ -3166,12 +3185,14 @@ jobs:
 
       - name: Update Scoop bucket
         env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
         run: |
           bash scripts/release/update-scoop-bucket.sh \
-            "${{ needs.prepare.outputs.version }}" \
-            "${{ needs.prepare.outputs.tag }}"
+            "${RELEASE_VERSION}" \
+            "${RELEASE_TAG}"
 
   notify-contributors:
     name: Notify release contributors

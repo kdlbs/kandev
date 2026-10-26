@@ -225,8 +225,9 @@ trigger.
   use contributor-controlled workflow, skill, setup, or link helpers.
 - Walkthrough generation receives the existing model credential but no R2
   credentials or pull request write permission.
-- The review workflows retain their existing read-only agent policies and
-  advisory posting boundaries.
+- The review workflows use the [privileged input design](privileged-workflow-inputs.md)
+  for trusted execution checkouts and immutable PR data. They retain read-only
+  agent policies and advisory posting boundaries.
 - The preview workflow builds contributor input in a tokenless job. A separate
   tokenless package job runs only the trusted preview command from
   `github.workflow_sha` with a restricted environment.
