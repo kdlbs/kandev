@@ -20,8 +20,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpurl"
 	"github.com/kandev/kandev/internal/common/netutil"
-	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )

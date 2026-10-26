@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"strings"
 	"time"
 
@@ -359,6 +360,9 @@ const (
 	// the only durable evidence that survives session-directory loss, so it
 	// must be cleared by every replacement/reset path rather than merged.
 	MetadataKeySSHLaunchReceipt = sshlaunch.MetadataKey
+	// MetadataKeyOfflineBudgetMinutes carries the profile's offline budget.
+	// It is an authoritative profile key: task-supplied metadata cannot set it.
+	MetadataKeyOfflineBudgetMinutes = offlinebudget.Key
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -402,6 +406,7 @@ var persistentMetadataKeys = map[string]bool{
 
 	// Remote Docker adopted agentctl identity.
 	MetadataKeyRemoteDockerAgentctlInstanceID: true,
+	MetadataKeyOfflineBudgetMinutes:           true,
 
 	// Kubernetes connection and exact resource inventory.
 	MetadataKeyKubernetesAuthMode:               true,
