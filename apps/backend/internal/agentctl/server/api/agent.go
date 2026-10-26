@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -231,8 +232,8 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	// (AC-EXECUTORS-SURVIVAL-001.5/.6): the permission-request notification
 	// site reads it to decide whether to auto-cancel on a five-second
 	// timeout (attached) or park (detached) when its channel is full.
-	s.procMgr.MarkAttached()
-	defer s.procMgr.MarkDetached()
+	s.procMgr.AttachStream(streamID)
+	defer s.procMgr.DetachStream(streamID)
 
 	ctx, cancel := context.WithCancel(ownedCtx)
 	defer cancel()
@@ -285,7 +286,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	go s.runAgentStreamWriterWithJournalReplay(ctx, conn, streamID, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg)
 	wg.Wait()
 	if s.mcpBackendClient != nil {
-		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
+		s.mcpBackendClient.FailStreamRequests(streamID, mcpserver.ErrKandevCallOutcomeUnknown)
 	}
 }
 
@@ -407,6 +408,7 @@ func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *webso
 }
 
 func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error) {
+	s.markStreamWriterReady(streamID)
 	for {
 		select {
 		case <-ctx.Done():
@@ -431,7 +433,7 @@ func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.C
 				mcpRequestCh = nil
 				continue
 			}
-			if !s.writeAgentStreamMCPRequest(mcpReq, streamID, writeMessage) {
+			if !s.writeAgentStreamMCPRequest(ctx, mcpReq, streamID, writeMessage) {
 				return
 			}
 		}
@@ -446,6 +448,7 @@ type durableAgentStreamWriter struct {
 	mcpRequestCh     <-chan *ws.Message
 	wakeups          <-chan struct{}
 	writeMessage     func([]byte) error
+	ready            bool
 }
 
 // run treats the journal as truth. The bounded wake remains buffered while a
@@ -458,12 +461,16 @@ func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draini
 	}
 	for ctx.Err() == nil {
 		if !draining {
+			if !w.ready {
+				w.ready = true
+				w.server.markStreamWriterReady(w.streamID)
+			}
 			if !w.waitForInput(ctx, &draining) {
 				return
 			}
 			continue
 		}
-		if !w.serviceMCP() || !w.serviceUpdate() {
+		if !w.serviceMCP(ctx) || !w.serviceUpdate() {
 			return
 		}
 		next, caughtUp, err := w.drainPage(ctx, deliveryJournal, after)
@@ -501,13 +508,13 @@ func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *b
 			w.mcpRequestCh = nil
 			return true
 		}
-		return w.server.writeAgentStreamMCPRequest(mcpReq, w.streamID, w.writeMessage)
+		return w.server.writeAgentStreamMCPRequest(ctx, mcpReq, w.streamID, w.writeMessage)
 	}
 	return true
 }
 
-func (w *durableAgentStreamWriter) serviceMCP() bool {
-	if w.mcpRequestCh == nil {
+func (w *durableAgentStreamWriter) serviceMCP(ctx context.Context) bool {
+	if w.mcpRequestCh == nil || !w.ready {
 		return true
 	}
 	select {
@@ -516,7 +523,7 @@ func (w *durableAgentStreamWriter) serviceMCP() bool {
 			w.mcpRequestCh = nil
 			return true
 		}
-		return w.server.writeAgentStreamMCPRequest(mcpReq, w.streamID, w.writeMessage)
+		return w.server.writeAgentStreamMCPRequest(ctx, mcpReq, w.streamID, w.writeMessage)
 	default:
 		return true
 	}
@@ -646,24 +653,48 @@ func (s *Server) writeAgentStreamNotification(notification adapter.AgentEvent, w
 	return true
 }
 
-func (s *Server) writeAgentStreamMCPRequest(mcpReq *ws.Message, streamID string, writeMessage func([]byte) error) bool {
+func (s *Server) markStreamWriterReady(streamID string) {
+	if s.procMgr != nil {
+		s.procMgr.MarkWriterReady(streamID)
+	}
+}
+
+// writeAgentStreamMCPRequest binds a Kandev call to this stream and writes it.
+// It returns false when the writer must stop. A call that cannot be written
+// because the stream already ended is returned to waiting; a bound call whose
+// write fails is failed with an unknown outcome together with every other
+// call bound to this stream.
+func (s *Server) writeAgentStreamMCPRequest(ctx context.Context, mcpReq *ws.Message, streamID string, writeMessage func([]byte) error) bool {
+	client := s.mcpBackendClient
+	if ctx.Err() != nil {
+		if client != nil {
+			client.FailRequestNotSent(mcpReq.ID)
+		}
+		return false
+	}
 	data, err := json.Marshal(mcpReq)
 	if err != nil {
 		s.logger.Error("failed to marshal MCP request", zap.Error(err))
+		if client != nil {
+			client.FailRequest(mcpReq.ID, fmt.Errorf("failed to encode MCP request: %w", err))
+		}
 		return true
+	}
+	if client != nil {
+		if err := client.BindRequestToStream(mcpReq.ID, streamID); err != nil {
+			return true
+		}
 	}
 	if err := writeMessage(data); err != nil {
 		s.logger.Warn("failed to write MCP request",
 			zap.String("request_id", mcpReq.ID),
 			zap.String("action", mcpReq.Action),
+			zap.String("reason", "outcome_unknown"),
 			zap.Error(err))
-		if s.mcpBackendClient != nil {
-			s.mcpBackendClient.FailRequest(mcpReq.ID, fmt.Errorf("failed to write MCP request to agent stream: %w", err))
+		if client != nil {
+			client.FailStreamRequests(streamID, mcpserver.ErrKandevCallOutcomeUnknown)
 		}
 		return false
-	}
-	if s.mcpBackendClient != nil {
-		s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID)
 	}
 	return true
 }

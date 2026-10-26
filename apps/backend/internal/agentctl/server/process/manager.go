@@ -307,9 +307,9 @@ type Manager struct {
 	stopChSnapshot atomic.Value // chan struct{}
 	shutdownIntent atomic.Pointer[atomic.Bool]
 	doneCh         chan struct{}
-	// attachedCount is the live count of backend event-stream connections
-	// (see attachment.go). Zero value correctly starts an instance detached.
-	attachedCount atomic.Int32
+	// attach tracks the live backend event-stream connections (see
+	// attachment.go). Zero value correctly starts an instance detached.
+	attach attachTracker
 	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
 	turnOutcomeMu         sync.RWMutex
 	turnOutcomeRecorder   TurnOutcomeRecorder
