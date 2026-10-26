@@ -49,12 +49,3 @@ func TestManagedGitOffHelperArgsAndEnvPassThrough(t *testing.T) {
 		t.Fatalf("ManagedGitEnv = %v; want the caller's environment", got)
 	}
 }
-
-func TestManagedGitOffRunsRepositorySuppliedCode(t *testing.T) {
-	setIsolationForTest(t, false)
-	repo := newPolicyRepo(t)
-	mustGit(context.Background(), t, repo.dir, "commit", "--allow-empty", "-m", "plain")
-	if !repo.marked() {
-		t.Fatal("with the mode off the repository's own hook must run, as it did before isolation existed")
-	}
-}

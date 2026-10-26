@@ -140,7 +140,7 @@ To let Kandev run a repository's hooks, open **Settings → Workspace → Reposi
 - A change applies to agent instances created afterward, not to running ones.
 - Turning it on disables submodule recursion for Kandev's pull, fetch, and push in that repository.
 - Only hooks are re-enabled. File-system monitors, other filters, text converters, and merge drivers stay disabled.
-- Importing or cloning a workspace leaves the setting off.
+- Importing a workspace leaves the setting off. Cloning a workspace preserves each repository's setting.
 
 ## Managed worktree and branch lifecycle
 

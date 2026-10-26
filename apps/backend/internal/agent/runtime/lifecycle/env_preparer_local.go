@@ -191,6 +191,7 @@ func prepareLocalCheckoutStep(ctx context.Context, req *EnvPrepareRequest, works
 		step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
 	}
 	reportProgress(onProgress, step, stepIdx, totalSteps)
+	ctx = subproc.WithGitHooks(ctx, req.RunGitHooks)
 	output, err := checkoutBranch(ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env), req.RemoteSyncHandled)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)

@@ -2,7 +2,6 @@ package subproc
 
 import (
 	"os/exec"
-	"runtime"
 	"strings"
 )
 
@@ -86,14 +85,14 @@ func environmentAssignmentKey(entry string) (string, bool) {
 }
 
 func normalizeEnvironmentKey(key string) string {
-	if runtime.GOOS == "windows" {
+	if onWindows() {
 		return strings.ToUpper(key)
 	}
 	return key
 }
 
 func environmentKeysEqual(left, right string) bool {
-	if runtime.GOOS == "windows" {
+	if onWindows() {
 		return strings.EqualFold(left, right)
 	}
 	return left == right

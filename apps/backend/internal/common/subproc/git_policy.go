@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -783,15 +784,38 @@ func sameFileOnPath(tool, pathValue, wantReal string) bool {
 		if dir == "" {
 			dir = "."
 		}
-		candidate := filepath.Join(dir, tool)
-		info, err := os.Stat(candidate)
-		if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
-			continue
+		for _, name := range executableNames(tool) {
+			candidate := filepath.Join(dir, name)
+			info, err := os.Stat(candidate)
+			if err != nil || info.IsDir() || (!onWindows() && info.Mode().Perm()&0o111 == 0) {
+				continue
+			}
+			real, err := filepath.EvalSymlinks(candidate)
+			return err == nil && real == wantReal
 		}
-		real, err := filepath.EvalSymlinks(candidate)
-		return err == nil && real == wantReal
 	}
 	return false
+}
+
+// executableNames lists the file names a PATH lookup of tool tries: the bare
+// name, plus the PATHEXT variants on Windows, where installs ship git-lfs.exe.
+func onWindows() bool { return runtime.GOOS == "windows" }
+
+func executableNames(tool string) []string {
+	names := []string{tool}
+	if !onWindows() {
+		return names
+	}
+	exts := os.Getenv("PATHEXT")
+	if exts == "" {
+		exts = ".COM;.EXE;.BAT;.CMD"
+	}
+	for _, ext := range strings.Split(exts, ";") {
+		if ext != "" {
+			names = append(names, tool+strings.ToLower(ext))
+		}
+	}
+	return names
 }
 
 const filterCommandMeta = "$`;&|<>()*?[]{}~#!\n"
