@@ -383,6 +383,7 @@ func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) boo
 }
 
 const sessionIDPayloadKey = "session_id"
+
 const taskIDPayloadKey = "task_id"
 const newStatePayloadKey = "new_state"
 const sessionUpdatedAtPayloadKey = "updated_at"
@@ -2606,6 +2607,9 @@ func registerMCPAndDebugRoutes(
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
+	if p.services.Sandbox != nil {
+		mcpHandlers.SetGuardSource(p.services.Sandbox)
+	}
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
@@ -2714,6 +2718,9 @@ func registerMCPAndDebugRoutes(
 	)
 	if p.services != nil && p.services.Coordinator != nil {
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
+	if p.services != nil && p.services.Sandbox != nil {
+		mcpScopeResolver.SetGuardSource(p.services.Sandbox)
 	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {

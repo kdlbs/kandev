@@ -218,7 +218,7 @@ func validPolicyIdentity(policy Policy) bool {
 
 func (s *Service) validateSources(ctx context.Context, policy Policy) error {
 	for _, source := range policy.Sources {
-		if source.Kind != "policy_revision" {
+		if source.Kind != sourceKindPolicyRevision {
 			return contract.ErrInvalidPolicy
 		}
 		revision, err := s.GetRevision(ctx, source.ID)

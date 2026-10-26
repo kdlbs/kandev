@@ -3684,6 +3684,11 @@ type autoApprovalDecision struct {
 // request, so the caller keeps the provider waiting until that durable claim
 // succeeds.
 func (m *Manager) nonCoordinatorAutoApproval(req *adapter.PermissionRequest) (*adapter.PermissionOption, *adapter.PermissionResponse) {
+	if m.guardedSession() {
+		if resolved, response := m.guardedKandevApproval(req); resolved {
+			return nil, response
+		}
+	}
 	if m.cfg.AutoApprovePermissions {
 		if decision, approved := m.autoApprovePermission(req); approved {
 			return &decision.option, nil

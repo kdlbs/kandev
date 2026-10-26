@@ -301,6 +301,7 @@ type AgentProfileVerifier interface {
 type Handlers struct {
 	automationCreator      AutomationCreator
 	taskSvc                *service.Service
+	guardSource            mcpscope.GuardSource
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService
 	sessionCanceller       SessionCanceller
@@ -458,6 +459,12 @@ func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) 
 // out of the counted population.
 func (h *Handlers) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
 	h.sessionCeilingReleaser = releaser
+}
+
+// SetGuardSource wires the task-guard lookup the guarded-session surface uses
+// to require that a child it acts on is itself guarded.
+func (h *Handlers) SetGuardSource(src mcpscope.GuardSource) {
+	h.guardSource = src
 }
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
@@ -730,7 +737,7 @@ func (h *Handlers) handleListWorkspaces(ctx context.Context, msg *ws.Message) (*
 		h.logger.Error("failed to list workspaces", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workspaces", nil)
 	}
-	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && (principal.IsAutomation() || principal.IsGuarded()) {
 		filtered := make([]*models.Workspace, 0, 1)
 		for _, workspace := range workspaces {
 			if workspace != nil && workspace.ID == principal.WorkspaceID {
@@ -2904,7 +2911,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return errResp, nil
 	}
 
-	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
+	prompt := req.Prompt
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); !ok || !principal.IsGuarded() {
+		prompt = h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
+	}
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
 	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
 	if req.ReplyToQuestionID != "" {

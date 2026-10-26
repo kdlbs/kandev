@@ -144,3 +144,44 @@ func isAllowPermissionKind(kind streams.PermissionOptionKind) bool {
 		return false
 	}
 }
+
+// guardedSession reports whether this instance runs under a sandbox launch. A
+// guarded session never receives the blanket or generic injected-server
+// approval for Kandev tools.
+func (m *Manager) guardedSession() bool {
+	return m.cfg != nil && (m.cfg.Sandbox != nil || m.cfg.SandboxRequired)
+}
+
+// guardedKandevApproval decides a permission request of a guarded session that
+// resolves to the injected Kandev server: only tools the classification table
+// lists as read or self are approved, matched by the whole bare name after the
+// `_kandev` suffix, never by prefix. Every other tool of that server takes the
+// normal prompt without standing approvals. resolved reports that the request targeted
+// that server, so neither the blanket flag nor the generic injected-server
+// approval applies to it.
+func (m *Manager) guardedKandevApproval(req *adapter.PermissionRequest) (resolved bool, response *adapter.PermissionResponse) {
+	server, tool, option, ok := m.resolveInjectedKandevPermission(req)
+	if !ok || server != injectedKandevMCPServerName {
+		return false, nil
+	}
+	name, hasSuffix := strings.CutSuffix(tool, "_"+injectedKandevMCPServerName)
+	entry, listed := profile.GuardedToolByName(name)
+	if !hasSuffix || !listed || (entry.Class != profile.ClassRead && entry.Class != profile.ClassSelf) {
+		dropStandingApprovals(req)
+		return true, nil
+	}
+	m.logger.Info("auto-approving guarded Kandev MCP permission",
+		zap.String("reason", "guarded_tool_class"),
+		zap.String("tool", tool),
+		zap.String("class", string(entry.Class)),
+		zap.String("option_kind", string(option.Kind)))
+	return true, &adapter.PermissionResponse{OptionID: option.OptionID}
+}
+
+// dropStandingApprovals removes allow_always options from a prompt a person
+// will answer, so approving one guarded Kandev call never approves later ones.
+func dropStandingApprovals(req *adapter.PermissionRequest) {
+	req.Options = slices.DeleteFunc(req.Options, func(option adapter.PermissionOption) bool {
+		return normalizePermissionOptionKind(option.Kind) == streams.PermissionOptionKindAllowAlways
+	})
+}

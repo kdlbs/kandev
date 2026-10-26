@@ -141,3 +141,23 @@ func (m *Manager) cleanupSandboxMCPClaimLocked(execution *AgentExecution, claim 
 	}
 	_ = directory.Remove(name)
 }
+
+func sandboxMCPFileRoot(execution *AgentExecution, path string) (string, string) {
+	execution.sandboxMu.Lock()
+	defer execution.sandboxMu.Unlock()
+	home := execution.sandboxConfigHome
+	if execution.sandboxAttempt != nil {
+		home = execution.sandboxAttempt.Launch().ChildHome
+		execution.sandboxConfigHome = home
+	}
+	for _, root := range []string{home, execution.WorkspacePath} {
+		if !filepath.IsAbs(root) || !filepath.IsAbs(path) {
+			continue
+		}
+		relative, err := filepath.Rel(root, path)
+		if err == nil && filepath.IsLocal(relative) && relative != "." {
+			return root, relative
+		}
+	}
+	return "", ""
+}

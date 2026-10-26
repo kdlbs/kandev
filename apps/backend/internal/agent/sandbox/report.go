@@ -7,6 +7,11 @@ import (
 const reportIntegrityComplete = "complete"
 const reportIntegrityUnverified = "unverified"
 
+const (
+	reportStatusAvailable    = "available"
+	sourceKindPolicyRevision = "policy_revision"
+)
+
 // ReportSource identifies bounded input bytes without exposing private paths.
 type ReportSource struct {
 	ID         string `json:"id"`

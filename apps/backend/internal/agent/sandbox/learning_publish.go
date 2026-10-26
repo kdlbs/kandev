@@ -48,8 +48,8 @@ func (s *Service) PublishLearning(ctx context.Context, id, digest string) (*Revi
 	revision := &Revision{ID: uuid.NewString(), Number: 1, SchemaVersion: 1, Digest: hex.EncodeToString(hash[:]), Policy: candidate,
 		OperatorID: identity.UserID, OrgID: identity.OrgID, CreatedAt: time.Now().UTC(), LearningProposalID: proposal.ID, Learning: &LearningProvenance{
 			ProposalDigest: proposal.Digest, ReportDigest: proposal.ReportDigest, Sources: proposal.ReportSources, Integrity: proposal.ReportIntegrity, Complete: proposal.ReportComplete,
-			Base:     Source{Kind: "policy_revision", ID: proposal.BaseRevisionID, Digest: proposal.BaseDigest},
-			Ceiling:  Source{Kind: "policy_revision", ID: proposal.CeilingRevisionID, Digest: proposal.CeilingDigest},
+			Base:     Source{Kind: sourceKindPolicyRevision, ID: proposal.BaseRevisionID, Digest: proposal.BaseDigest},
+			Ceiling:  Source{Kind: sourceKindPolicyRevision, ID: proposal.CeilingRevisionID, Digest: proposal.CeilingDigest},
 			Provider: proposal.Provider, Records: proposal.SelectedRecords}}
 	raw, err = json.Marshal(revision)
 	if err != nil {
