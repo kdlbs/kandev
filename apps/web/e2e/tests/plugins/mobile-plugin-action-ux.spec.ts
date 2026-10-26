@@ -306,8 +306,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     await expect(statusAction).toBeVisible();
     const statusActionBox = await statusAction.boundingBox();
     expect(statusActionBox).not.toBeNull();
-    expect(statusActionBox!.height).toBeGreaterThanOrEqual(44);
-    expect(statusActionBox!.width).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(statusActionBox!.height);
+    expectTouchDimension(statusActionBox!.width);
     await statusAction.focus();
     await testPage.keyboard.press("Enter");
 

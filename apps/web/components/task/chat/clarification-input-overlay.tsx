@@ -187,6 +187,12 @@ function ClarificationCard(props: CardProps) {
           )}
         </div>
       )}
+      <ClarificationMarkdown
+        variant="block"
+        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      >
+        {question.prompt}
+      </ClarificationMarkdown>
       <QuestionImages
         pendingId={metadata.pending_id}
         questionId={meta.questionId}
@@ -195,12 +201,6 @@ function ClarificationCard(props: CardProps) {
         enabled={props.previewsEnabled}
         onInspectionChange={props.onInspectionChange}
       />
-      <ClarificationMarkdown
-        variant="block"
-        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-      >
-        {question.prompt}
-      </ClarificationMarkdown>
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}
