@@ -239,7 +239,7 @@ func runGitFetchRaceFixture() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
-	if err == nil && len(os.Args) > 1 && os.Args[1] == "fetch" {
+	if subcommand := stripLeadingGitConfig(os.Args[1:]); err == nil && len(subcommand) > 0 && subcommand[0] == "fetch" {
 		if err := os.WriteFile(filepath.Join(worktree, "race-after-fetch.txt"), []byte("created during fetch\n"), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "fixture: git-fetch-race: write worktree change: %v\n", err)
 			os.Exit(1)
@@ -257,7 +257,8 @@ func runGitFetchRaceFixture() {
 
 func runContributionHistoryGitShim(mode string) {
 	args := os.Args[1:]
-	if len(args) >= 2 && args[0] == "reflog" && args[1] == "show" && mode == contributionHistoryGitShimTimeout {
+	subcommand := stripLeadingGitConfig(args)
+	if len(subcommand) >= 2 && subcommand[0] == "reflog" && subcommand[1] == "show" && mode == contributionHistoryGitShimTimeout {
 		time.Sleep(time.Hour)
 		os.Exit(0)
 	}
@@ -327,4 +328,13 @@ func fixtureEnvSlice(spec string) []string {
 // InstanceConfig.AgentArgs.
 func fixtureArgs() []string {
 	return []string{os.Args[0]}
+}
+
+// stripLeadingGitConfig drops the managed policy's leading "-c key=value" pairs
+// so a shim can switch on the subcommand.
+func stripLeadingGitConfig(args []string) []string {
+	for len(args) >= 2 && args[0] == "-c" {
+		args = args[2:]
+	}
+	return args
 }

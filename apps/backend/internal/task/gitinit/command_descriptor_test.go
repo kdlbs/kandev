@@ -4,6 +4,7 @@ package gitinit
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,4 +84,26 @@ func TestRunHelperRejectsNonDirectoryDescriptor(t *testing.T) {
 	if !strings.Contains(string(output), "enter inherited directory") {
 		t.Fatalf("helper output = %q, want inherited directory error", output)
 	}
+}
+
+func TestCommandContextHelperArgumentFollowsMode(t *testing.T) {
+	for _, tc := range []struct {
+		enabled bool
+		want    string
+	}{{false, helperArgument}, {true, helperIsolatedArgument}} {
+		subproc.SetManagedGitIsolation(tc.enabled)
+		directory, err := os.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		command, err := CommandContext(context.Background(), directory.Name(), directory)
+		_ = directory.Close()
+		if err != nil {
+			t.Skipf("no Git available: %v", err)
+		}
+		if len(command.Args) < 2 || command.Args[1] != tc.want {
+			t.Fatalf("mode %v: helper argument = %v, want %s", tc.enabled, command.Args, tc.want)
+		}
+	}
+	subproc.SetManagedGitIsolation(true)
 }

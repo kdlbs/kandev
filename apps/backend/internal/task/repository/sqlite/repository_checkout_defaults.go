@@ -12,17 +12,20 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// updatedAtAssignment is the shared SET clause that stamps a row as modified.
+const updatedAtAssignment = "updated_at = ?"
+
 func repositoryUpdateQuery(row *models.Repository, intent models.RepositoryCheckoutIntent) (string, []any) {
 	assignments := []string{
 		"name = ?", "source_type = ?", "local_path = ?", "provider = ?", "provider_repo_id = ?",
 		"provider_host = ?", "provider_scope = ?", "provider_owner = ?", "provider_name = ?", "remote_url = ?",
 		"worktree_branch_prefix = ?", "worktree_branch_template = ?", "setup_script = ?", "cleanup_script = ?",
-		"dev_script = ?", "copy_files = ?", "updated_at = ?",
+		"dev_script = ?", "copy_files = ?", "run_git_hooks = ?", updatedAtAssignment,
 	}
 	args := []any{row.Name, row.SourceType, row.LocalPath, row.Provider, row.ProviderRepoID,
 		row.ProviderHost, row.ProviderScope, row.ProviderOwner, row.ProviderName, row.RemoteURL,
 		row.WorktreeBranchPrefix, row.WorktreeBranchTemplate, row.SetupScript, row.CleanupScript,
-		row.DevScript, row.CopyFiles, row.UpdatedAt}
+		row.DevScript, row.CopyFiles, dialect.BoolToInt(row.RunGitHooks), row.UpdatedAt}
 	if intent.DefaultBranch != nil {
 		assignments = append(assignments, "default_branch = ?")
 		args = append(args, *intent.DefaultBranch)

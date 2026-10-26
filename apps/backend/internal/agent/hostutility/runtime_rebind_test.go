@@ -38,6 +38,9 @@ func TestHostUtilityRuntimeRebind(t *testing.T) {
 			t.Errorf("old server Authorization = %q", got)
 		}
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/identity":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(managedGitIdentityJSON))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
 			oldCreates.Add(1)
 			w.WriteHeader(http.StatusCreated)
@@ -61,6 +64,9 @@ func TestHostUtilityRuntimeRebind(t *testing.T) {
 			t.Errorf("successor server Authorization = %q", got)
 		}
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/identity":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(managedGitIdentityJSON))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/instances":
 			newCreates.Add(1)
 			w.WriteHeader(http.StatusCreated)

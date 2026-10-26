@@ -9,18 +9,19 @@ import (
 
 const (
 	helperArgument            = "__git-init-open-directory"
+	helperIsolatedArgument    = "__git-init-open-directory-isolated"
 	helperEnvironmentVariable = "KANDEV_INTERNAL_GIT_INIT_HELPER"
 )
 
 func runHelper(args []string) (int, bool) {
-	if len(args) == 0 || args[0] != helperArgument {
+	if len(args) == 0 || (args[0] != helperArgument && args[0] != helperIsolatedArgument) {
 		return 0, false
 	}
 	if len(args) < 3 {
 		fmt.Fprintln(os.Stderr, "git init helper requires Git arguments")
 		return 2, true
 	}
-	return runInheritedDirectory(args[1], args[2:]), true
+	return runInheritedDirectory(args[1], args[2:], args[0] == helperIsolatedArgument), true
 }
 
 func withHelperEnvironment(environment []string) []string {

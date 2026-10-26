@@ -1143,6 +1143,7 @@ func (s *Service) createRepository(
 		WorktreeBranchPrefix:   prefix,
 		WorktreeBranchTemplate: template,
 		PullBeforeWorktree:     pullBeforeWorktree,
+		RunGitHooks:            req.RunGitHooks != nil && *req.RunGitHooks,
 		SetupScript:            req.SetupScript,
 		CleanupScript:          req.CleanupScript,
 		DevScript:              req.DevScript,
@@ -1590,6 +1591,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	}
 	if req.PullBeforeWorktree != nil {
 		repository.PullBeforeWorktree = *req.PullBeforeWorktree
+	}
+	if req.RunGitHooks != nil {
+		repository.RunGitHooks = *req.RunGitHooks
 	}
 	if req.SetupScript != nil {
 		repository.SetupScript = *req.SetupScript

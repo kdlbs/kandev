@@ -147,6 +147,7 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		RemoteContributions:            req.RemoteContributions,
 		ContributionDestinations:       req.ContributionDestinations,
 		ComparisonTargets:              req.ComparisonTargets,
+		GitHooks:                       req.GitHooks,
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
 		ProviderGatewayAuth:            req.ProviderGatewayAuth,
 		Metadata:                       req.Metadata,

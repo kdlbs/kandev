@@ -182,7 +182,7 @@ func TestWindowsManagedGitJobCleanup(t *testing.T) {
 	dir := t.TempDir()
 	started := filepath.Join(dir, "started")
 	gitCommand := filepath.Join(dir, "git.cmd")
-	if err := os.WriteFile(gitCommand, []byte("@echo off\r\nif \"%1\"==\"hold\" (\r\n  echo started>\"%GIT_TEST_STARTED%\"\r\n  cmd.exe /c \"ping.exe 127.0.0.1 -n 100 >nul\"\r\n) else (\r\n  echo quick\r\n)\r\n"), 0o700); err != nil {
+	if err := os.WriteFile(gitCommand, []byte("@echo off\r\necho %* | findstr /C:\"for-each-ref\" >nul\r\nif not errorlevel 1 (\r\n  echo started>\"%GIT_TEST_STARTED%\"\r\n  cmd.exe /c \"ping.exe 127.0.0.1 -n 100 >nul\"\r\n) else (\r\n  echo quick\r\n)\r\n"), 0o700); err != nil {
 		t.Fatalf("write Git fixture: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -192,7 +192,7 @@ func TestWindowsManagedGitJobCleanup(t *testing.T) {
 	result := make(chan error, 1)
 	go func() {
 		_, runErr, execErr := RunGitOutputAfterAcquire(ctx, GitLifecycle, 5*time.Second, func(execCtx context.Context) *exec.Cmd {
-			return NewGitCommand(execCtx, "hold")
+			return NewGitCommand(execCtx, "for-each-ref")
 		})
 		if runErr != nil {
 			result <- runErr

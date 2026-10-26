@@ -65,8 +65,8 @@ func (r *Repository) copyCloneRepositories(ctx context.Context, tx *sqlx.Tx, sou
 	for _, id := range ids {
 		mapped[id] = uuid.NewString()
 		_, err := tx.ExecContext(ctx, tx.Rebind(`
-			INSERT INTO repositories (id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner, provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at)
-			SELECT ?, ?, name, source_type, CASE WHEN source_type = 'local' THEN local_path ELSE '' END, provider, provider_repo_id, provider_host, provider_scope, provider_owner, provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, ?, ?
+			INSERT INTO repositories (id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_scope, provider_owner, provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, run_git_hooks, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at)
+			SELECT ?, ?, name, source_type, CASE WHEN source_type = 'local' THEN local_path ELSE '' END, provider, provider_repo_id, provider_host, provider_scope, provider_owner, provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, run_git_hooks, setup_script, cleanup_script, dev_script, copy_files, ?, ?
 			FROM repositories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`), mapped[id], targetID, now, now, id, sourceID)
 		if err != nil {
 			return nil, err

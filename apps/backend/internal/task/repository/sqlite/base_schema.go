@@ -760,6 +760,7 @@ func (r *Repository) initTaskSchema() error {
 		worktree_branch_prefix TEXT DEFAULT 'feature/',
 		worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}',
 		pull_before_worktree INTEGER NOT NULL DEFAULT 1,
+		run_git_hooks INTEGER NOT NULL DEFAULT 0,
 		setup_script TEXT DEFAULT '',
 		cleanup_script TEXT DEFAULT '',
 		dev_script TEXT DEFAULT '',

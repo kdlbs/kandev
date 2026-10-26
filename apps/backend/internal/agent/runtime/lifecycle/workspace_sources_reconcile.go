@@ -213,7 +213,7 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 			PRNumber: spec.PRNumber, QualifiedPRBase: spec.QualifiedPRBase,
 			ComparisonTarget: spec.ComparisonTarget,
 			WorktreeID:       spec.WorktreeID, WorktreeBranchPrefix: spec.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: spec.WorktreeBranchTemplate, PullBeforeWorktree: spec.PullBeforeWorktree,
+			WorktreeBranchTemplate: spec.WorktreeBranchTemplate, PullBeforeWorktree: spec.PullBeforeWorktree, RunGitHooks: spec.RunGitHooks,
 			RemoteSyncHandled: spec.RemoteSyncHandled,
 			BranchSlug:        spec.BranchSlug, BranchIdentitySlug: spec.BranchIdentitySlug,
 			WorkspaceRelativePath: spec.WorkspaceRelativePath,

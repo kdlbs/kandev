@@ -68,7 +68,7 @@ func recordGitCommands(t *testing.T) func() []string {
 	}
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "git.log")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + logPath + "\nexec " + realGit + " \"$@\"\n"
+	script := "#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nif [ \"$1 $2\" = 'config --null' ]; then exec " + realGit + " \"$@\"; fi\nprintf '%s\\n' \"$*\" >> " + logPath + "\nexec " + realGit + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +629,7 @@ func TestGitOperatorPushReportsMismatchAfterBaselinePublication(t *testing.T) {
 	// Move HEAD immediately after the baseline push, which is the window the
 	// second verification exists to close.
 	shimDir := t.TempDir()
-	script := "#!/bin/sh\n" +
+	script := "#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\n" +
 		"case \"$1 $2\" in\n" +
 		"  'push --force-with-lease=refs/heads/main:')\n" +
 		"    " + realGit + " \"$@\"; rc=$?\n" +
@@ -688,7 +688,7 @@ func TestGitOperatorPushReportsPlainMismatchAtSecondVerification(t *testing.T) {
 	// answering the first one.
 	shimDir := t.TempDir()
 	counterPath := filepath.Join(shimDir, "count")
-	script := "#!/bin/sh\n" +
+	script := "#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\n" +
 		"if [ \"$1 $2\" = 'symbolic-ref HEAD' ]; then\n" +
 		"  n=$(cat " + counterPath + " 2>/dev/null || echo 0)\n" +
 		"  n=$((n+1))\n" +
@@ -751,7 +751,7 @@ func TestGitOperatorPushReportsPlainMismatchWhenBaselineWasAlreadyPublished(t *t
 	// Move HEAD right after the remote-ref probe that decides the baseline is
 	// already published, which is before this request issues any push.
 	shimDir := t.TempDir()
-	script := "#!/bin/sh\n" +
+	script := "#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\n" +
 		"if [ \"$1 $2\" = 'ls-remote --refs' ]; then\n" +
 		"  " + realGit + " \"$@\"; rc=$?\n" +
 		"  " + realGit + " -C " + repoDir + " symbolic-ref HEAD refs/heads/switched\n" +
@@ -809,7 +809,7 @@ func TestGitOperatorPushUsesExpectedBranchNotARaceableRereadForNoTargetRefspec(t
 	// move it back before the push runs, so only a re-read would observe the
 	// switch.
 	shimDir := t.TempDir()
-	script := "#!/bin/sh\n" +
+	script := "#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\n" +
 		"if [ \"$1 $2 $3\" = 'rev-parse --abbrev-ref HEAD' ]; then\n" +
 		"  " + realGit + " -C " + repoDir + " checkout feature/other >/dev/null 2>&1\n" +
 		"  " + realGit + " \"$@\"; rc=$?\n" +

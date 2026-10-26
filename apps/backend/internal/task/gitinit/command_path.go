@@ -26,7 +26,7 @@ func CommitCommandContext(ctx context.Context, targetPath string, _ *os.File, ar
 	return command, nil
 }
 
-func runInheritedDirectory(string, []string) int {
+func runInheritedDirectory(string, []string, bool) int {
 	fmt.Fprintln(os.Stderr, "git init helper is unsupported on this platform")
 	return 2
 }

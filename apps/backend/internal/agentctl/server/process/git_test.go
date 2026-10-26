@@ -393,7 +393,7 @@ func TestGitOperatorCreatePR_UsesAzureCLIForAzureRepos(t *testing.T) {
 
 	scriptDir := t.TempDir()
 	azArgsPath := filepath.Join(scriptDir, "az-args.txt")
-	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"remote\" ] && [ \"$2\" = \"get-url\" ] && [ \"$3\" = \"origin\" ]; then\n  printf '%s\\n' 'git@ssh.dev.azure.com:v3/acme/platform/widgets'\n  exit 0\nfi\nexec %q \"$@\"\n", "%s", realGit))
+	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nif [ \"$1\" = \"remote\" ] && [ \"$2\" = \"get-url\" ] && [ \"$3\" = \"origin\" ]; then\n  printf '%s\\n' 'git@ssh.dev.azure.com:v3/acme/platform/widgets'\n  exit 0\nfi\nexec %q \"$@\"\n", "%s", realGit))
 	writeExecutable(t, filepath.Join(scriptDir, "az"), fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "extension" ] && [ "$2" = "show" ]; then
   exit 0
@@ -465,7 +465,7 @@ func writeGitRemoteWrapper(t *testing.T, scriptDir, originURL string) {
 	writeExecutable(
 		t,
 		filepath.Join(scriptDir, "git"),
-		fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"remote\" ] && [ \"$2\" = \"get-url\" ] && [ \"$3\" = \"origin\" ]; then\n  printf '%%s\\n' %q\n  exit 0\nfi\nexec %q \"$@\"\n", originURL, realGit),
+		fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nif [ \"$1\" = \"remote\" ] && [ \"$2\" = \"get-url\" ] && [ \"$3\" = \"origin\" ]; then\n  printf '%%s\\n' %q\n  exit 0\nfi\nexec %q \"$@\"\n", originURL, realGit),
 	)
 }
 

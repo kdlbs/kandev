@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/gitbase"
 	"github.com/kandev/kandev/internal/common/gitref"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
@@ -105,6 +106,7 @@ func classifyRemoteDefaultError(output string, runErr error) error {
 // then by WorktreeID if provided (for session resumption).
 // Only creates a new worktree if none exists for the session.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, error) {
+	ctx = subproc.WithGitHooks(ctx, req.RunGitHooks)
 	var scopeErr error
 	ctx, scopeErr = withCheckoutOptions(ctx, req)
 	if scopeErr != nil {

@@ -332,6 +332,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		WorktreeBranchTemplate:     req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       req.WorktreeBranchTicket,
 		PullBeforeWorktree:         req.PullBeforeWorktree,
+		RunGitHooks:                req.RunGitHooks,
 		RemoteSyncHandled:          req.RemoteSyncHandled,
 		RefreshRepository:          req.RefreshRepository,
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
@@ -632,6 +633,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate
 	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
 	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
+	subReq.RunGitHooks = spec.RunGitHooks
 	subReq.RemoteSyncHandled = spec.RemoteSyncHandled
 	subReq.RefreshRepository = spec.RefreshRepository
 	subReq.RefreshRepositoryWithState = spec.RefreshRepositoryWithState

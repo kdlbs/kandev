@@ -136,6 +136,16 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Managed Git repository-code isolation: Kandev-managed Git runs no hooks,
+  # file-system monitor, filter, text converter or merge driver that a
+  # repository supplies, unless the repository opts in to "Run Git hooks".
+  # Off in prod because hooks stop running for repositories that have not
+  # opted in; off in dev/e2e too, tests enable it through the environment.
+  KANDEV_FEATURES_MANAGED_GIT_ISOLATION:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Workspace coordinators: a per-workspace copilot conversation that
   # proposes ordinary, unstarted tasks for a human to approve. Off in
   # prod/dev until the feature is user-ready; on in e2e so tests exercise it.

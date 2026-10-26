@@ -127,6 +127,7 @@ func TestInspectRemoteRefStateParsesStdoutWhenGitWritesDiagnostics(t *testing.T)
 		t.Fatalf("find git: %v", err)
 	}
 	shim := "#!/bin/sh\n" +
+		"while [ \"$1\" = \"-c\" ]; do shift 2; done\n" +
 		"if [ \"$1\" = \"ls-remote\" ]; then\n" +
 		"  printf '0123456789012345678901234567890123456789 refs/heads/main\\n'\n" +
 		"  printf 'warning: using a redirected remote\\n' >&2\n" +
