@@ -1,8 +1,8 @@
 # Validation evidence
 
-Source baseline: `6677802efa4fac6c2ecc909cb433477c90f7fb2d`, 2026-10-25.
-These results validate the investigation and document package. They do not
-claim that pending workflow remediation is implemented.
+Historical investigation baseline: `6677802efa4fac6c2ecc909cb433477c90f7fb2d`,
+2026-10-25. The first three sections record checks before workflow remediation.
+The later implementation and adversarial-review sections record the updated results.
 
 ## Existing workflow and helper tests
 
@@ -40,13 +40,14 @@ The release recheck used:
 PATH=/nix/store/xf4hkkqv4xlcikiwisd8fdry6v9ncgzs-gnupg-2.4.9/bin:$PATH python3 .github/scripts/release-workflow-contract_test.py
 ```
 
-## Scanner
+## Historical baseline scan
 
 Zizmor was absent from PATH. The official v1.25.2 Linux binary was downloaded to
 `/tmp/kandev-security-tools`. Both the text command and `--format json` scan ran
 against `.github/workflows`. The text scan exited 14 with the 40 unsuppressed
-findings recorded in [findings.md](findings.md). The final scan reproduced the
-same counts and exit code after the document-only edits.
+findings recorded in [findings.md](findings.md). A repeat baseline scan reproduced
+the same counts and exit code after the investigation's document-only edits.
+The post-remediation result is 10 unsuppressed findings, as recorded below.
 
 The scanner binary and raw reports are temporary session artifacts. The complete
 source/rule/severity/disposition inventory is durable in the finding ledger.
