@@ -915,6 +915,8 @@ Choose preview context when a profile or workflow can use different agents or ex
 
 A sandboxed session retains its captured working directory. Attach repository sources before starting it, or start a new session in the changed workspace.
 
+Deleting a sandboxed session removes its private agent state after owned processes stop. It preserves the task workspace and other sessions. Task deletion uses its retryable cleanup job. Archive and retained-workspace operations keep session state. If ownership or runtime cleanup is unavailable, cleanup reports a failure and preserves the state. Restore runtime availability and retry.
+
 An unavailable provider or incompatible stored policy remains selected until an operator repairs it. Kandev does not silently remove the policy to start an unconfined agent. The same configuration actions are available on phones.
 
 Open **Execution details** from the session tab or its action menu. On a phone, use the labelled **Execution** control. The view separates the captured launch from current defaults for the next launch. Command previews omit private arguments and environment values. An active shield requires fresh evidence for that exact attempt. A wrapper name, installed provider, or old observation cannot establish active protection.

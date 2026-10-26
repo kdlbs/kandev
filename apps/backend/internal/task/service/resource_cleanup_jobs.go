@@ -1318,6 +1318,9 @@ func (s *Service) executeTaskResourceCleanupJob(
 		return err
 	}
 	if len(failedStops) == 0 {
+		if err := s.cleanupTaskSandboxSessions(ctx, job, cleanupSessionIDs(snapshot.Sessions, targets)); err != nil {
+			return err
+		}
 		if err := s.captureArchiveTaskDirectory(ctx, job, snapshot); err != nil {
 			return err
 		}

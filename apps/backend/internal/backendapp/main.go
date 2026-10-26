@@ -871,6 +871,14 @@ func startAgentInfrastructure(
 		return false
 	}
 	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
+	if services.Sandbox != nil {
+		cleanup := sandboxSessionCleanup{policies: services.Sandbox}
+		if services.SandboxRuntime != nil {
+			cleanup.remove = services.SandboxRuntime.CleanupSessionState
+		}
+		orchestratorSvc.SetSessionSandboxCleanup(cleanup.cleanup)
+		services.Task.SetSessionSandboxCleanup(cleanup.cleanup)
+	}
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
 	// These queries distinguish successfully re-tracked executions from remote
 	// owners whose guarded retry is still pending during startup reconciliation.

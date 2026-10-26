@@ -43,6 +43,7 @@ func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
 		return nil
 	})
 	selection.WorkspaceID, selection.AgentProfileID = "workspace", "agent-profile"
+	selection.TaskID = "sandbox-task"
 	policies.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
 		if workspaceID != "workspace" {
 			return policy.ErrAuthority
@@ -125,6 +126,8 @@ func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
 	result(true)
 	send("state", "")
 	result(true)
+	require.Error(t, manager.CleanupSessionState(ctx, selection.TaskID, "approval-session"))
+	require.FileExists(t, filepath.Join(prepared.Launch().ChildHome, "conversation"))
 	send("env", "UNAPPROVED_SECRET")
 	result(false)
 	for _, decision := range []string{"allow_once", "deny"} {
@@ -200,6 +203,8 @@ func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
 	after, err := policies.GetRevision(ctx, revision.ID)
 	require.NoError(t, err)
 	require.Equal(t, revision.Digest, after.Digest, "allow once must not publish or expand policy")
+	require.NoError(t, manager.CleanupSessionState(ctx, selection.TaskID, "approval-session"))
+	require.NoDirExists(t, filepath.Dir(restarted.Launch().ChildHome))
 }
 
 func buildApprovalChild(t *testing.T, ctx context.Context) string {

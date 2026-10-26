@@ -5882,6 +5882,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.quiesceSessionExecutionBeforeDeletion(ctx, taskID, sessionID); err != nil {
 		return err
 	}
+	if s.sessionSandboxCleanup != nil {
+		if err := s.sessionSandboxCleanup(ctx, taskID, sessionID); err != nil {
+			return fmt.Errorf("failed to clean sandbox session state: %w", err)
+		}
+	}
 	// Deletion ends the session incarnation even when no execution remains.
 	// Retire the retry loop before removing the row so a buffered provider
 	// failure cannot recreate notice state for a deleted session ID.

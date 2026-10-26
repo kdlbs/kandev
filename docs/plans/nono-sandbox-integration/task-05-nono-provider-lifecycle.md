@@ -100,6 +100,12 @@ Repository creation/attachment occurs only after the design checkpoint. Nested P
 
 ## Results
 
+### Remaining session-state cleanup slice
+
+Core must inventory the frozen attempts for the exact task/session in bounded pages, validate captured state scopes, and reconcile terminated attempts before deleting an allocation. A live retained attempt, uncertain owner, open state lease, substituted marker, or foreign path must preserve the allocation and return a failure. Removal is idempotent and must preserve sibling state and task workspaces.
+
+Wire cleanup after the session deletion path quiesces its execution and before it removes the session row. Wire durable task-deletion jobs after successful runtime stops, using their captured session inventory. Archive and retained-workspace jobs preserve session state. Task cleanup failures remain retryable through the existing job. Keep frozen attempt records as ownership evidence. When sandbox runtime cleanup is unavailable, captured sandbox attempts must block cleanup rather than silently skip it. The disabled/default path must not dispatch a provider or change files.
+
 Implementation is authorized by the later user request. Runtime contract work has started while Task 04 remains open for final environment enforcement.
 
 The dedicated local plugin repository was created from official template commit `805d2018773bf3c6f594f5c4f9e1b2d07e71bc48` and attached to the existing task. Its worktree is `../kandev-plugin-nono-main`, on branch `feature/integrate-nono-sandb-w4a`. No hosted repository or release has been created. The template SDK pin still needs to be replaced with the tested host implementation commit before delivery.
@@ -160,3 +166,6 @@ Persistent ACP and native terminal failed-spawn receipts now have focused compon
 The backend utility factory now creates a separate execution-scoped attempt for each selected profile probe. Its packaged-provider test verifies captured working directories, distinct identities, cleanup, and rejection of stale or missing selection fingerprints. Admission clears prior caller data and resolves current server policy. The discovery fingerprint includes policy revisions, binding versions, and the live provider installation. Provider loss blocks cache access.
 
 The host utility suite passes under the race detector after adding regressions for policy changes during capability and model-option probes. The host rechecks policy before publishing either result. Main runtime activation and full product acceptance remain pending.
+
+
+Session-state deletion is implemented (2026-10-26). Core inventories attempt history in 64-record pages, validates frozen task/session and child-state scope, and removes only captured allocations after stop proof. The owner marker, canonical root, and exclusive lease guard removal. Direct session deletion performs cleanup after runtime stop and before row deletion. Durable task cleanup uses captured session inventory and retries failures. Failed runtime stops, archive jobs, and retained-workspace jobs preserve state. Disabled/unavailable runtime cleanup blocks captured history without provider dispatch. SQLite/PostgreSQL inventory race tests, common filesystem tests, session/task deletion race tests, and the actual packaged Nono approval/MCP/restart-state/cleanup test pass. Full production-agent acceptance and explicit restart review remain open.
