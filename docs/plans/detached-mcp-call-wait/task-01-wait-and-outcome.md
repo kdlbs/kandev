@@ -1,7 +1,7 @@
 ---
 id: "01-wait-and-outcome"
 title: "Wait for attach and report unknown outcomes"
-status: todo
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

@@ -1,6 +1,6 @@
 ---
 created: 2026-10-26
-status: draft
+status: implemented
 requirements:
   - REQ-PLATFORM-DETACHED-MCP-WAIT-001
   - REQ-PLATFORM-DETACHED-MCP-WAIT-002
@@ -24,10 +24,10 @@ journal and reattachment work that landed in #3598 and #4380. It links both.
 
 ## Work orders
 
-- [ ] [Task 01: Wait for attach and report unknown outcomes](task-01-wait-and-outcome.md)
-- [ ] [Task 02: Offline budget tracker and configuration](task-02-offline-budget.md) (after 01)
-- [ ] [Task 03: Keepalive, harness floor, and agent guidance](task-03-keepalive-floor-guidance.md)
-- [ ] [Task 04: Record detached episodes in the conversation](task-04-replay-notices.md) (after 02)
+- [x] [Task 01: Wait for attach and report unknown outcomes](task-01-wait-and-outcome.md)
+- [x] [Task 02: Offline budget tracker and configuration](task-02-offline-budget.md) (after 01)
+- [x] [Task 03: Keepalive, harness floor, and agent guidance](task-03-keepalive-floor-guidance.md)
+- [x] [Task 04: Record detached episodes in the conversation](task-04-replay-notices.md) (after 02)
 
 ## Dependency order
 
@@ -51,3 +51,13 @@ and `apps/web` message rendering with seven locale catalogs.
 - Codex has no measured tool-timeout floor; follow-up outside this PR.
 - The notice's detach-interval proof depends on the projected cursor; if it is
   unprovable, no notice is written (silence over a wrong notice).
+
+## Results
+
+All four work orders shipped in kdlbs/kandev#4809. Validation: `go test -trimpath`
+over `internal/mcp/server`, `internal/agentctl/server/{instance,process}`,
+`internal/sysprompt`, `internal/agent/runtime/lifecycle`; `scripts/lint-go-changed`
+clean; web typecheck, i18n checks and Playwright `detached-episode` (desktop and
+mobile) green. Known gaps carried as follow-ups: the offline budget does not
+cancel a turn on adapters whose `Prompt` returns before the turn ends (Codex
+app-server), and a failed notice write is not retried.

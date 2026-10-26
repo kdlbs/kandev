@@ -1,7 +1,7 @@
 ---
 id: "03-keepalive-floor-guidance"
 title: "Keepalive, harness floor, and agent guidance"
-status: todo
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
