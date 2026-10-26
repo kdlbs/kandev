@@ -181,3 +181,18 @@ Validation passed:
 - `make -C apps/backend build` passed with the expected Darwin codesign-tool warnings.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and the PR documentation coverage preflight passed.
 - `git diff --check` passed.
+
+## Additional PR fixup result
+
+Addressed CodeRabbit's legacy-watch resume finding. `validateTaskRepositoryID`
+accepts an empty repository ID for legacy watches, so resume eligibility now
+allows that stored identity through while continuing to validate task existence,
+workspace ownership, archive state, and repository membership for non-empty
+IDs. Added an HTTP regression that retires and resumes a legacy watch with an
+empty repository ID.
+
+- The new regression failed before the fix with HTTP 409, then passed after it.
+- `go test -timeout=5m -trimpath -tags fts5 ./internal/github -count=1`: passed.
+- `go test -timeout=90s -race -trimpath -tags fts5 ./internal/github -run '^TestPRWatchRetirement_HTTPResumeLegacyEmptyRepositoryID$' -count=1`: passed.
+- `make -C apps/backend build`: passed; Darwin packaging emitted the expected missing codesign-tool warnings.
+- `bash scripts/lint-go-changed apps/backend/internal/github/service_pr_watch_retirement.go apps/backend/internal/github/store_pr_watch_retirement_test.go`: 0 issues.

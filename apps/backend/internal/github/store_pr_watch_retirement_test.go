@@ -569,6 +569,38 @@ func TestPRWatchRetirement_HTTPResumeAndScope(t *testing.T) {
 	require.NotContains(t, active.Body.String(), watch.ID)
 }
 
+func TestPRWatchRetirement_HTTPResumeLegacyEmptyRepositoryID(t *testing.T) {
+	service, store := setupWatchServiceTest(t)
+	storeTask := &taskmodels.Task{ID: "task-resume-legacy", WorkspaceID: "ws-1"}
+	service.SetTaskIssueStore(&fakeTaskIssueStore{task: storeTask})
+	if _, err := store.db.Exec("INSERT INTO tasks (id, workspace_id) VALUES (?, ?)", storeTask.ID, storeTask.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	watch := &PRWatch{
+		WorkspaceID: "ws-1", TaskID: storeTask.ID, Owner: "acme", Repo: "widget",
+		Branch: "legacy-feature", PRNumber: 42,
+	}
+	require.NoError(t, store.CreatePRWatch(context.Background(), watch))
+
+	router := gin.New()
+	useControllerTestWorkspace(router)
+	NewController(service, newControllerTestLogger()).RegisterHTTPRoutes(router)
+	client := controllerTestClient{router: router}
+	deleted := client.do(http.MethodDelete, "/api/v1/github/watches/pr/"+watch.ID+"?workspace_id=ws-1")
+	require.Equal(t, http.StatusOK, deleted.Code, deleted.Body.String())
+
+	resumed := client.do(http.MethodPost, "/api/v1/github/watches/pr/"+watch.ID+"/resume?workspace_id=ws-1", nil)
+	require.Equal(t, http.StatusOK, resumed.Code, resumed.Body.String())
+	var response struct {
+		Watch PRWatch `json:"watch"`
+	}
+	require.NoError(t, json.Unmarshal(resumed.Body.Bytes(), &response))
+	require.NotEmpty(t, response.Watch.ID)
+	require.NotEqual(t, watch.ID, response.Watch.ID)
+	require.Empty(t, response.Watch.RepositoryID)
+	require.Nil(t, response.Watch.RetiredAt)
+}
+
 // @covers AC-INTEGRATIONS-GITHUB-PR-WATCH-RETIREMENT-001.1
 func TestPRWatchRetirement_WSDelete(t *testing.T) {
 	service, store := setupWatchServiceTest(t)

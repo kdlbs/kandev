@@ -108,7 +108,7 @@ func (s *Service) ResumePRWatch(ctx context.Context, id, workspaceID string) (*P
 }
 
 func (s *Service) validatePRWatchResumeTarget(ctx context.Context, watch *PRWatch) error {
-	if watch == nil || watch.TaskID == "" || watch.RepositoryID == "" || watch.Owner == "" || watch.Repo == "" {
+	if watch == nil || watch.TaskID == "" || watch.Owner == "" || watch.Repo == "" {
 		return ErrPRWatchTargetIneligible
 	}
 	taskStore := s.getTaskIssueStore()
