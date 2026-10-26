@@ -3009,6 +3009,7 @@ export class ApiClient {
       started_at: string;
       updated_at: string;
       completed_at?: string | null;
+      archived_at?: string | null;
       task_environment_id?: string;
       workspace_path?: string;
       worktree_path?: string;

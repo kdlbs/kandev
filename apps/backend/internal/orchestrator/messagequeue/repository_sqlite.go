@@ -36,6 +36,7 @@ type sqliteRepository struct {
 	tasksTablePresent           bool
 	taskSessionsTablePresent    bool
 	taskSessionsTaskIDPresent   bool
+	taskSessionsArchivedPresent bool
 	queuedMessagesTaskIDPresent bool
 	taskStepTransitionsPresent  bool
 }
@@ -79,6 +80,10 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 		r.taskSessionsTaskIDPresent, err = internaldb.ColumnExists(writer, "task_sessions", "task_id")
 		if err != nil {
 			return nil, fmt.Errorf("messagequeue: resolve task session task id column: %w", err)
+		}
+		r.taskSessionsArchivedPresent, err = internaldb.ColumnExists(writer, "task_sessions", "archived_at")
+		if err != nil {
+			return nil, fmt.Errorf("messagequeue: resolve task session archive column: %w", err)
 		}
 	}
 	r.queuedMessagesTaskIDPresent, err = internaldb.ColumnExists(writer, "queued_messages", "task_id")
@@ -424,7 +429,19 @@ func (r *sqliteRepository) taskManagementFenceIsStaleTx(
 // guardSessionTx verifies that the owning task session still exists. The
 // session lock acquired before this call already rejects active transfers.
 func (r *sqliteRepository) guardSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
-	return r.guardSessionOwnerTx(ctx, tx, sessionID, taskID)
+	if err := r.guardSessionOwnerTx(ctx, tx, sessionID, taskID); err != nil {
+		return err
+	}
+	var recovered bool
+	if err := tx.GetContext(ctx, &recovered, r.db.Rebind(`
+		SELECT EXISTS (SELECT 1 FROM queue_recovery_receipts WHERE source_session_id = ?)
+	`), sessionID); err != nil {
+		return fmt.Errorf("guard recovered queue source: %w", err)
+	}
+	if recovered {
+		return ErrQueueRecoveryConflict
+	}
+	return nil
 }
 
 func (r *sqliteRepository) guardSessionOwnerTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
@@ -432,6 +449,9 @@ func (r *sqliteRepository) guardSessionOwnerTx(ctx context.Context, tx *sqlx.Tx,
 		return nil
 	}
 	query := `SELECT EXISTS (SELECT 1 FROM task_sessions WHERE id = ?`
+	if r.taskSessionsArchivedPresent {
+		query += ` AND archived_at IS NULL`
+	}
 	args := []interface{}{sessionID}
 	if taskID != "" {
 		query += ` AND task_id = ?`
@@ -675,6 +695,28 @@ func (r *sqliteRepository) initSchema() error {
 	-- serializes writes at the DB level anyway; Postgres enforces the row lock.
 	CREATE TABLE IF NOT EXISTS queue_session_locks (
 		session_id TEXT PRIMARY KEY
+	);
+	CREATE TABLE IF NOT EXISTS queue_recovery_receipts (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		source_session_id TEXT NOT NULL UNIQUE,
+		destination_session_id TEXT NOT NULL,
+		entry_count INTEGER NOT NULL,
+		snapshot_sha256 TEXT NOT NULL,
+		snapshot_json TEXT NOT NULL,
+		snapshot_redacted INTEGER NOT NULL DEFAULT 0,
+		redacted_at TIMESTAMP,
+		occurred_at TIMESTAMP NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS queue_recovery_cleanup_events (
+		receipt_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		source_session_id TEXT NOT NULL,
+		destination_session_id TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		occurred_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS queue_session_state (
@@ -1994,19 +2036,6 @@ func deleteTaskRecoveryRowsTx(
 	return nil
 }
 
-// PurgeTaskInTransaction lets the task repository make archive/delete and
-// durable queue invalidation one SQLite transaction. It is backend-internal:
-// user queue handlers must keep using ownership-checked deletion methods.
-//
-// taskSessions is the task's authoritative session set, discovered by the
-// caller from its own task_sessions schema. The queue repository never reaches
-// across schemas because a failed cross-schema query would abort the caller's
-// transaction on PostgreSQL. Standalone purges discover sessions from visible
-// queue rows and durable recovery records.
-// caller from its own task_sessions schema — the queue repository never
-// reaches across schemas, and a failed cross-schema query would abort the
-// caller's transaction on PostgreSQL. The standalone PurgeTask passes nil and
-// locks only the sessions that currently hold queue rows.
 // DeleteSessionInTransaction removes queue state only when the authoritative
 // task-session row still matches identity. The caller must lock the task row first.
 func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, identity QueueSessionIdentity) error {
@@ -2031,12 +2060,36 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if incarnationID != identity.SessionIncarnationID {
 		return ErrSessionIdentityMismatch
 	}
+	for _, table := range []string{"queued_messages", "queue_dispatch_claims", "queue_send_now_claims", "pending_moves"} {
+		present, err := internaldb.TableExists(tx, table)
+		if err != nil {
+			return fmt.Errorf("check deleted session %s: %w", table, err)
+		}
+		if !present {
+			continue
+		}
+		var pending int
+		query := `SELECT COUNT(*) FROM ` + table + ` WHERE session_id = ?`
+		if err := tx.GetContext(ctx, &pending, db.Rebind(query), identity.SessionID); err != nil {
+			return fmt.Errorf("count deleted session %s: %w", table, err)
+		}
+		if pending > 0 {
+			return fmt.Errorf("%w: session %s has %d pending %s records; inspect and dispose or recover them first", ErrSessionQueueNotEmpty, identity.SessionID, pending, table)
+		}
+	}
 	if _, err := PurgeSessionInTransaction(ctx, tx, db, identity.SessionID); err != nil {
 		return fmt.Errorf("delete queue session state: %w", err)
 	}
 	return nil
 }
 
+// PurgeTaskInTransaction lets the task repository make archive/delete and
+// durable queue invalidation one transaction. It is backend-internal; user
+// queue handlers keep using ownership-checked deletion methods. taskSessions
+// is the task's authoritative session set, discovered by the caller from its
+// own task_sessions schema; the queue repository avoids cross-schema queries
+// that would abort a PostgreSQL transaction. Standalone purges discover sessions
+// from visible queue rows and recovery records.
 func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string, taskSessions []string) (int, error) {
 	// Task lifecycle operations can run before the optional queue repository has
 	// been initialized. PostgreSQL aborts a transaction on a missing-table
@@ -2138,6 +2191,9 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 		ON CONFLICT(task_id) DO UPDATE SET generation = lifecycle_queue_generations.generation + 1
 	`), taskID); err != nil {
 		return 0, fmt.Errorf("advance lifecycle queue generation: %w", err)
+	}
+	if err := redactRecoveryReceiptsTx(ctx, tx, db, taskID, "", "task_purged"); err != nil {
+		return 0, err
 	}
 	return int(removed), nil
 }
@@ -2632,6 +2688,91 @@ func (r *sqliteRepository) ListDurableDeliveryEntries(ctx context.Context) ([]Qu
 		return nil, fmt.Errorf("list durable delivery queued rows: %w", err)
 	}
 	return out, nil
+}
+
+// DisposeExact removes only unchanged exact entries in one locked transaction.
+func (r *sqliteRepository) DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin exact queue disposition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	ordered, byID, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]*QueuedMessage, 0, len(ordered))
+	for _, stored := range ordered {
+		visible = append(visible, stored.message)
+	}
+	result := &QueueDispositionResult{
+		BeforeCount: visibleQueueCount(visible),
+		Outcomes:    make([]QueueDispositionOutcome, 0, len(claims)),
+	}
+	for _, claim := range claims {
+		stored, found := byID[claim.ID]
+		status, disposeErr := r.disposeExactStoredClaim(ctx, tx, sessionID, claim, stored, found)
+		if disposeErr != nil {
+			return nil, disposeErr
+		}
+		result.Outcomes = append(result.Outcomes, QueueDispositionOutcome{ID: claim.ID, Status: status})
+	}
+	remaining, _, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	visible = visible[:0]
+	for _, stored := range remaining {
+		visible = append(visible, stored.message)
+	}
+	result.AfterCount = visibleQueueCount(visible)
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *sqliteRepository) disposeExactStoredClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	claim QueueEntryClaim,
+	stored storedQueueEntry,
+	found bool,
+) (QueueDispositionStatus, error) {
+	if !found {
+		return QueueDispositionNotFound, nil
+	}
+	if stored.message.IsReservedInFlight() || queueSnapshotClaim(stored.message) != claim.Claim {
+		return QueueDispositionChanged, nil
+	}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, claim.ID)
+	if err != nil {
+		return "", err
+	}
+	if blocked {
+		return QueueDispositionChanged, nil
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), claim.ID, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("dispose exact queue entry: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if affected == 1 {
+		return QueueDispositionRemoved, nil
+	}
+	return QueueDispositionChanged, nil
 }
 
 // CountBySession returns the number of entries for a session.
@@ -3521,6 +3662,9 @@ func (r *sqliteRepository) AcknowledgeReserved(ctx context.Context, msg *QueuedM
 	if affected != 1 {
 		return ErrLifecycleReservationChanged
 	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, msg.SessionID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -3564,6 +3708,9 @@ func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entry
 	}
 	if affected != 1 {
 		return ErrEntryNotFound
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -3627,6 +3774,9 @@ func (r *sqliteRepository) AcknowledgeByIDForSession(
 	}
 	if affected == 0 {
 		return ErrEntryNotFound
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, identity.SessionID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -4215,6 +4365,9 @@ func (r *sqliteRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 		if err := r.deleteExactSendNowClaimTx(ctx, tx, sessionID, claim.ClaimID); err != nil {
 			return err
 		}
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -5532,6 +5685,9 @@ func (r *sqliteRepository) deleteByID(ctx context.Context, identity *QueueSessio
 	if err != nil {
 		return nil, err
 	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -5651,6 +5807,9 @@ func (r *sqliteRepository) deleteAllBySession(ctx context.Context, identity *Que
 		return nil, err
 	}
 	if err := r.deletePendingQueueDispatchesBySessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

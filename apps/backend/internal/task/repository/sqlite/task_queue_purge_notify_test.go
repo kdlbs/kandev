@@ -177,9 +177,8 @@ func TestDeleteTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	}
 }
 
-func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
-	// Session delete used to leave queued_messages rows behind; CountPendingByTask
-	// then kept the sidebar badge inflated. Cascade purge must clear them.
+func TestDeleteTaskSessionRejectsQueuedMessages(t *testing.T) {
+	// A pending message must remain visible and recoverable after deletion is rejected.
 	repo := newRepoForArchiveTests(t, "task-session-queue-purge")
 	ctx := context.Background()
 
@@ -213,24 +212,24 @@ func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
 		t.Fatalf("QueueMessage keep: %v", err)
 	}
 
-	if err := deleteTaskSessionForTest(t, repo, ctx, "session-drop"); err != nil {
-		t.Fatalf("DeleteTaskSession: %v", err)
+	if err := deleteTaskSessionForTest(t, repo, ctx, "session-drop"); err == nil {
+		t.Fatal("DeleteTaskSession removed a session with queued messages")
 	}
-	if got := queue.GetStatus(ctx, "session-drop").Count; got != 0 {
-		t.Fatalf("session-drop queue count = %d, want 0", got)
+	if got := queue.GetStatus(ctx, "session-drop").Count; got != 1 {
+		t.Fatalf("session-drop queue count = %d, want 1", got)
 	}
-	if got, err := queue.CountPendingByTask(ctx, "task-session-queue-purge"); err != nil || got != 1 {
-		t.Fatalf("pending after session delete = %d err=%v, want 1 (kept session)", got, err)
+	if got, err := queue.CountPendingByTask(ctx, "task-session-queue-purge"); err != nil || got != 2 {
+		t.Fatalf("pending after rejected session delete = %d err=%v, want 2", got, err)
 	}
-	if override, err := mqRepo.GetAutoMergeOverride(ctx, dropIdentity); !errors.Is(err, messagequeue.ErrSessionIdentityMismatch) || override != nil {
-		t.Fatalf("deleted session override = %+v err=%v, want identity mismatch", override, err)
+	if override, err := mqRepo.GetAutoMergeOverride(ctx, dropIdentity); err != nil || override == nil || override.Enabled {
+		t.Fatalf("retained session override = %+v err=%v, want disabled", override, err)
 	}
-	if move, ok := queue.GetPendingMove(ctx, dropIdentity.SessionID); ok || move != nil {
-		t.Fatalf("deleted session pending move = %+v exists=%t, want absent", move, ok)
+	if move, ok := queue.GetPendingMove(ctx, dropIdentity.SessionID); !ok || move == nil {
+		t.Fatalf("retained session pending move = %+v exists=%t, want present", move, ok)
 	}
 }
 
-func TestDeleteTaskSessionPurgesDurableQueueClaimsInTransaction(t *testing.T) {
+func TestDeleteTaskSessionPreservesDurableQueueClaimsInTransaction(t *testing.T) {
 	repo := newRepoForArchiveTests(t, "task-session-recovery-purge")
 	ctx := context.Background()
 	const sessionID = "session-recovery-purge"
@@ -260,8 +259,8 @@ func TestDeleteTaskSessionPurgesDurableQueueClaimsInTransaction(t *testing.T) {
 		t.Fatalf("claim Send Now entry: %v", err)
 	}
 
-	if err := deleteTaskSessionByID(ctx, repo, sessionID); err != nil {
-		t.Fatalf("DeleteTaskSession: %v", err)
+	if err := deleteTaskSessionByID(ctx, repo, sessionID); err == nil {
+		t.Fatal("DeleteTaskSession removed a session with undispositioned queue claims")
 	}
 	dispatches, err := mqRepo.(interface {
 		ListPendingQueueDispatches(context.Context) ([]messagequeue.PendingQueueDispatch, error)
@@ -275,8 +274,10 @@ func TestDeleteTaskSessionPurgesDurableQueueClaimsInTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list Send Now claims: %v", err)
 	}
-	if len(dispatches) != 0 || len(sendNowClaims) != 0 {
-		t.Fatalf("durable claims after session delete: dispatches=%#v send_now=%#v", dispatches, sendNowClaims)
+	if len(dispatches) != 1 || dispatches[0].Message.ID != dispatchEntry.ID ||
+		len(sendNowClaims) != 1 || len(sendNowClaims[0].Claim.Sources) != 1 ||
+		sendNowClaims[0].Claim.Sources[0].ID != sendNowEntry.ID {
+		t.Fatalf("durable claims after rejected session delete: dispatches=%#v send_now=%#v", dispatches, sendNowClaims)
 	}
 }
 
@@ -333,7 +334,7 @@ func TestDeleteTaskSessionNotifiesQueueSessionPurge(t *testing.T) {
 	}
 }
 
-func TestDeleteTaskSessionPurgesPendingMove(t *testing.T) {
+func TestDeleteTaskSessionPreservesPendingMove(t *testing.T) {
 	repo := newRepoForArchiveTests(t, "task-session-pending-move")
 	ctx := context.Background()
 	seedLiveSessionForQueue(t, repo, "session-drop", "task-session-pending-move")
@@ -348,40 +349,15 @@ func TestDeleteTaskSessionPurgesPendingMove(t *testing.T) {
 		t.Fatalf("SetPendingMove: %v", err)
 	}
 
-	if err := deleteTaskSessionByID(ctx, repo, "session-drop"); err != nil {
-		t.Fatalf("DeleteTaskSession: %v", err)
+	if err := deleteTaskSessionByID(ctx, repo, "session-drop"); err == nil {
+		t.Fatal("DeleteTaskSession removed a session with a pending lifecycle move")
 	}
 	move, err := mqRepo.GetPendingMove(ctx, "session-drop")
 	if err != nil {
 		t.Fatalf("GetPendingMove: %v", err)
 	}
-	if move != nil {
-		t.Fatalf("pending move after session delete = %#v, want nil", move)
-	}
-
-	err = mqRepo.Insert(ctx, &messagequeue.QueuedMessage{
-		SessionID: "session-drop",
-		TaskID:    "task-session-pending-move",
-		Content:   "must reject deleted session",
-		QueuedBy:  "user",
-	}, 0)
-	if !errors.Is(err, messagequeue.ErrTaskInactive) {
-		t.Fatalf("queue admission after session delete error = %v, want ErrTaskInactive", err)
-	}
-	if err := mqRepo.SetPendingMove(ctx, "session-drop", &messagequeue.PendingMove{
-		TaskID: "task-session-pending-move",
-	}); !errors.Is(err, messagequeue.ErrTaskInactive) {
-		t.Fatalf("pending move after session delete error = %v, want ErrTaskInactive", err)
-	}
-	err = mqRepo.ReplaceSession(ctx, "session-drop", []messagequeue.QueuedMessage{{
-		ID:        "restored-after-delete",
-		SessionID: "session-drop",
-		TaskID:    "task-session-pending-move",
-		Content:   "must not restore",
-		QueuedBy:  "user",
-	}}, nil)
-	if !errors.Is(err, messagequeue.ErrTaskInactive) {
-		t.Fatalf("session restore after delete error = %v, want ErrTaskInactive", err)
+	if move == nil || move.TaskID != "task-session-pending-move" {
+		t.Fatalf("pending move after rejected session delete = %#v, want preserved move", move)
 	}
 }
 

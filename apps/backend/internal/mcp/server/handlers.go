@@ -637,6 +637,75 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) getMessageQueueCensusHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError("message queue identity is unavailable in this session"), nil
+		}
+		payload := map[string]interface{}{mcpKeyTaskID: s.taskID, "session_id": s.sessionID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetMessageQueueCensus, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultStructured(result, string(data)), nil
+	}
+}
+
+func (s *Server) disposeMessageQueueEntriesHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError("message queue identity is unavailable in this session"), nil
+		}
+		arguments, ok := req.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("entries is required"), nil
+		}
+		entries, ok := arguments["entries"]
+		if !ok {
+			return mcp.NewToolResultError("entries is required"), nil
+		}
+		payload := map[string]interface{}{
+			mcpKeyTaskID: s.taskID,
+			"session_id": s.sessionID,
+			"entries":    entries,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPDisposeMessageQueueEntries, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultStructured(result, string(data)), nil
+	}
+}
+
+func (s *Server) recoverSessionQueueHandler() server.ToolHandlerFunc {
+	return s.terminalSessionTargetHandler(ws.ActionMCPRecoverSessionQueue, "session recovery")
+}
+
+func (s *Server) closeTaskSessionHandler() server.ToolHandlerFunc {
+	return s.terminalSessionTargetHandler(ws.ActionMCPCloseTaskSession, "session cleanup")
+}
+
+func (s *Server) terminalSessionTargetHandler(action, operation string) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError(operation + " identity is unavailable in this session"), nil
+		}
+		targetSessionID, err := req.RequireString("target_session_id")
+		if err != nil {
+			return mcp.NewToolResultError("target_session_id is required"), nil
+		}
+		payload := map[string]interface{}{mcpKeyTaskID: s.taskID, "caller_session_id": s.sessionID, "target_session_id": targetSessionID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultStructured(result, string(data)), nil
+	}
+}
+
 // spawnSessionHandler spawns an additional agent session on an existing task.
 // task_id defaults to the server's own task; sender identity is injected so
 // the spawned session can identify and reply to its spawner.

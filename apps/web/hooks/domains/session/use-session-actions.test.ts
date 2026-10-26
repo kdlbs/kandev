@@ -11,7 +11,9 @@ const mockToast = vi.fn().mockReturnValue("toast-1");
 const mockUpdateToast = vi.fn();
 const mockRequest = vi.fn();
 const mockDeleteTask = vi.hoisted(() => vi.fn());
+const mockListTaskSessions = vi.hoisted(() => vi.fn());
 const mockRemoveTaskSession = vi.fn();
+const mockUpsertTaskSession = vi.fn();
 const mockRemoveQuickChatSession = vi.fn();
 const mockSetActiveSession = vi.fn((taskId: string, sessionId: string) => {
   mockState.tasks = {
@@ -42,6 +44,7 @@ function resetSessionActionMocks() {
   mockToast.mockReturnValue("toast-1");
   mockRequest.mockResolvedValue(undefined);
   mockDeleteTask.mockResolvedValue(undefined);
+  mockListTaskSessions.mockResolvedValue({ sessions: [] });
   mockState = {
     tasks: { activeTaskId: "t1", activeSessionId: null },
     taskRemoval: { navigationRevision: 0 },
@@ -66,10 +69,13 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
   deleteTaskAfterUserAction: mockDeleteTask,
 }));
 
+vi.mock("@/lib/api", () => ({ listTaskSessions: mockListTaskSessions }));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       removeTaskSession: mockRemoveTaskSession,
+      upsertTaskSessionFromEvent: mockUpsertTaskSession,
       removeQuickChatSession: mockRemoveQuickChatSession,
     }),
   useAppStoreApi: () => mockStoreApi,
@@ -145,6 +151,21 @@ describe("useSessionActions", () => {
       title: "Deleting session successful",
       variant: "success",
     });
+  });
+
+  it("keeps an archived session available after cleanup", async () => {
+    const retained = {
+      id: "s1",
+      task_id: "t1",
+      state: "COMPLETED",
+      archived_at: "2026-10-25T00:00:00Z",
+    };
+    mockListTaskSessions.mockResolvedValueOnce({ sessions: [retained] });
+    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+
+    expect(await result.current.remove()).toBe(true);
+    expect(mockUpsertTaskSession).toHaveBeenCalledWith("t1", retained);
+    expect(mockRemoveTaskSession).not.toHaveBeenCalled();
   });
 
   it("remove deletes the backing task for a Quick Chat session", async () => {

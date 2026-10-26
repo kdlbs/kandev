@@ -128,17 +128,21 @@ export function DeleteSessionPopover({
 /** Keeps restart visible while pending and disables competing actions for the same target. */
 function SessionLifecycleMenuItems({
   sessionState,
+  isPrimary,
+  isArchived,
   actions,
   onDelete,
 }: {
   sessionState: TaskSessionState | null;
+  isPrimary: boolean;
+  isArchived: boolean;
   actions: SessionTabMenuActions;
   onDelete: (event: Event) => void;
 }) {
   const { t } = useTranslation();
   return (
     <>
-      {sessionState && isStoppable(sessionState) && (
+      {!isArchived && sessionState && isStoppable(sessionState) && (
         <ContextMenuItem
           className="cursor-pointer"
           onSelect={actions.handleStop}
@@ -147,7 +151,7 @@ function SessionLifecycleMenuItems({
           {t("task:stop")}
         </ContextMenuItem>
       )}
-      {(actions.isRestarting || (sessionState && isStoppable(sessionState))) && (
+      {!isArchived && (actions.isRestarting || (sessionState && isStoppable(sessionState))) && (
         <ContextMenuItem
           className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onSelect={actions.handleRestart}
@@ -156,7 +160,7 @@ function SessionLifecycleMenuItems({
           {t("task:restartSession")}
         </ContextMenuItem>
       )}
-      {sessionState && isResumable(sessionState) && (
+      {!isArchived && sessionState && isResumable(sessionState) && (
         <ContextMenuItem
           className="cursor-pointer"
           onSelect={actions.handleResume}
@@ -165,7 +169,7 @@ function SessionLifecycleMenuItems({
           {t("task:resume")}
         </ContextMenuItem>
       )}
-      {sessionState && isDeletable(sessionState) && (
+      {!isArchived && !isPrimary && sessionState && isDeletable(sessionState) && (
         <ContextMenuItem
           className="cursor-pointer text-destructive"
           disabled={actions.isRestarting}
@@ -186,6 +190,7 @@ function SessionLifecycleMenuItems({
 export function SessionContextMenuItems({
   sessionState,
   isPrimary,
+  isArchived = false,
   canShare,
   taskId,
   sessionId,
@@ -197,6 +202,7 @@ export function SessionContextMenuItems({
 }: {
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
+  isArchived?: boolean;
   canShare: boolean;
   taskId: string | null;
   sessionId: string | undefined;
@@ -229,13 +235,15 @@ export function SessionContextMenuItems({
       <ContextMenuItem
         className="cursor-pointer"
         onSelect={actions.handleSetPrimary}
-        disabled={isPrimary || !sessionState || !isStoppable(sessionState)}
+        disabled={isArchived || isPrimary || !sessionState || !isStoppable(sessionState)}
       >
         {t("task:setAsPrimary")}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <SessionLifecycleMenuItems
         sessionState={sessionState}
+        isPrimary={isPrimary}
+        isArchived={isArchived}
         actions={actions}
         onDelete={onDelete}
       />

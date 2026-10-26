@@ -2027,6 +2027,7 @@ func (s *Service) publishTaskSessionStateChanged(
 		"downstream_acp_session_id": session.DownstreamACPSessionID,
 		"is_passthrough":            session.IsPassthrough,
 		"is_primary":                session.IsPrimary,
+		"archived_at":               session.ArchivedAt,
 		// Carry activity only while the durable session is RUNNING. Every other
 		// state gets an explicit null so partial client-store merges clear a
 		// previously-live busy signal during settlement or teardown.

@@ -216,6 +216,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateSessionsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
+	// Legacy session rebuilds above copy explicit columns, so add archive state afterwards.
+	if err := r.migrate.Apply("task_sessions.archived_at", `ALTER TABLE task_sessions ADD COLUMN archived_at TIMESTAMP`); err != nil {
+		return err
+	}
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
 	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.materialization_session_id", `ALTER TABLE task_environments ADD COLUMN materialization_session_id TEXT DEFAULT ''`)

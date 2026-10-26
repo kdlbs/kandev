@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileSessionsPicker } from "./mobile-sessions-section";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { repositoryId, type Repository, type TaskSession } from "@/lib/types/http";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 const mocks = vi.hoisted(() => ({
   activeSessionId: "session-a" as string | null,
@@ -122,6 +123,7 @@ function repository(id: string, name: string): Repository {
 afterEach(cleanup);
 
 beforeEach(() => {
+  useDockviewStore.getState().setSessionHistoryVisible(TASK_ID, false);
   mocks.activeSessionId = SESSION_A;
   mocks.sessions = [
     session(SESSION_A, "profile-a", START_TIME),
@@ -223,6 +225,7 @@ describe("MobileSessionsPicker activity precedence", () => {
     ];
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
+    fireEvent.click(screen.getByTestId("mobile-session-history-toggle"));
 
     const bg = screen.getByTestId(SESSION_BG_STATE_TESTID);
     const gen = screen.getByTestId("mobile-session-state-session-gen");
@@ -368,6 +371,7 @@ describe("MobileSessionsPicker pending lifecycle", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
+    fireEvent.click(screen.getByTestId("mobile-session-history-toggle"));
     expect(screen.getByTestId("mobile-session-state-session-a").textContent).toMatch(/starting/i);
     expect(screen.getByTestId("mobile-session-state-session-done").textContent).toMatch(
       /completed/i,
@@ -409,19 +413,28 @@ describe("MobileSessionsPicker pending lifecycle", () => {
   });
 });
 
+function setUpDeleteSessionScenario() {
+  mocks.activeSessionId = "session-b";
+  mocks.sessions = [
+    session(SESSION_A, "profile-a", START_TIME),
+    session("session-b", "profile-b", SECOND_TIME, { state: "COMPLETED" }),
+  ];
+}
+
 describe("MobileSessionsPicker session delete confirmation", () => {
+  beforeEach(setUpDeleteSessionScenario);
   it("uses the same modal for the named delete step and restores the picker on Back", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
-      render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+      render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
       fireEvent.click(screen.getByTestId(PILL_TESTID));
       const picker = screen.getByRole("dialog", { name: "Sessions" });
-      const row = screen.getByTestId(`mobile-session-row-${SESSION_A}`);
+      const row = screen.getByTestId(SESSION_B_ROW);
       fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }));
       fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(await screen.findByRole("dialog", { name: "Delete session?" })).toBe(picker);
       expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
-      expect(screen.getByRole("group").textContent).toContain("Alpha");
+      expect(screen.getByRole("group").textContent).toContain("Beta");
       expect(screen.queryByRole("button", { name: SESSION_ACTIONS_LABEL })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Back" }));
       expect(screen.getByRole("dialog", { name: "Sessions" })).toBe(picker);
@@ -438,45 +451,52 @@ describe("MobileSessionsPicker session delete confirmation", () => {
   });
 
   it("morphs the target row into local touch-sized confirmation actions", () => {
-    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
-    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
     // Open the picker sheet, then the session's actions menu.
     fireEvent.click(screen.getByTestId(PILL_TESTID));
-    const dotsButton = screen.getByRole("button", { name: SESSION_ACTIONS_LABEL });
+    const dotsButton = within(screen.getByTestId(SESSION_B_ROW)).getByRole("button", {
+      name: SESSION_ACTIONS_LABEL,
+    });
     fireEvent.pointerDown(dotsButton);
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     const confirmation = screen.getByRole("group", { name: /delete session/i });
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(confirmation.textContent).toContain("permanently delete the conversation history");
+    expect(confirmation.textContent).toContain("removes the session from active views");
     expect(confirmation.textContent).toContain("task workspace and its files are kept");
-    expect(confirmation.textContent).toContain("only session for this task");
+    expect(confirmation.textContent).not.toContain("only session for this task");
     const confirm = within(confirmation).getByTestId("mobile-session-delete-confirm");
     expect(confirm.className).toContain("h-11");
     expect(confirm.className).toContain("min-w-11");
   });
 
   it("cancels locally without deleting the session", () => {
-    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
-    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
     fireEvent.click(screen.getByTestId(PILL_TESTID));
-    fireEvent.pointerDown(screen.getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+    fireEvent.pointerDown(
+      within(screen.getByTestId(SESSION_B_ROW)).getByRole("button", {
+        name: SESSION_ACTIONS_LABEL,
+      }),
+    );
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(mocks.removeSession).not.toHaveBeenCalled();
-    expect(screen.getByTestId(`mobile-session-row-${SESSION_A}`)).toBeTruthy();
+    expect(screen.getByTestId(`mobile-session-row-session-b`)).toBeTruthy();
     expect(screen.queryByRole("group", { name: /delete session/i })).toBeNull();
   });
 
   it("resets pending confirmation when the picker closes externally", async () => {
-    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
-    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
     fireEvent.click(screen.getByTestId(PILL_TESTID));
-    fireEvent.pointerDown(screen.getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+    fireEvent.pointerDown(
+      within(screen.getByTestId(SESSION_B_ROW)).getByRole("button", {
+        name: SESSION_ACTIONS_LABEL,
+      }),
+    );
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(screen.getByRole("group", { name: /delete session/i })).toBeTruthy();
     const picker = screen.getByRole("dialog", { name: "Sessions" });
@@ -498,11 +518,14 @@ describe("MobileSessionsPicker session delete confirmation", () => {
   });
 
   it("dispatches deletion once after local confirmation", async () => {
-    mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
-    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
     fireEvent.click(screen.getByTestId(PILL_TESTID));
-    fireEvent.pointerDown(screen.getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+    fireEvent.pointerDown(
+      within(screen.getByTestId(SESSION_B_ROW)).getByRole("button", {
+        name: SESSION_ACTIONS_LABEL,
+      }),
+    );
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     fireEvent.click(screen.getByTestId("mobile-session-delete-confirm"));
 

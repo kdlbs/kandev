@@ -263,6 +263,13 @@ type MessageQueuer interface {
 	RemoveEntryForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, entryID string) (*messagequeue.QueueRemovalResult, error)
 }
 
+// CoordinatorQueueManager is the narrow, content-free self-session queue
+// management boundary used by the guarded census and exact disposition tools.
+type CoordinatorQueueManager interface {
+	Census(ctx context.Context, sessionID string) (*messagequeue.QueueCensus, error)
+	DisposeExact(ctx context.Context, sessionID string, claims []messagequeue.QueueEntryClaim) (*messagequeue.QueueDispositionResult, error)
+}
+
 // messageMetadataQueuer is an optional extension implemented by the
 // production queue service. Keeping metadata out of MessageQueuer preserves
 // compatibility with lightweight test and alternate queue implementations.
@@ -317,6 +324,7 @@ type Handlers struct {
 	titleBranchRenamer     TaskTitleBranchRenamer
 	stopTaskGetter         func(context.Context, string) (*models.Task, error)
 	messageQueue           MessageQueuer
+	queueManager           CoordinatorQueueManager
 	promptResolver         PromptReferenceResolver
 	promptReader           PromptReader
 	promptWriter           PromptWriter
@@ -430,6 +438,9 @@ func NewHandlers(
 		sessionLauncher:    sessionLauncher,
 		messageQueue:       messageQueue,
 		logger:             log.WithFields(zap.String("component", "mcp-handlers")),
+	}
+	if manager, ok := messageQueue.(CoordinatorQueueManager); ok {
+		h.queueManager = manager
 	}
 	if taskSvc != nil {
 		h.stopTaskGetter = taskSvc.GetTask
@@ -580,6 +591,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
+	d.RegisterFunc(ws.ActionMCPGetMessageQueueCensus, h.handleGetMessageQueueCensus)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
 	if h.coordinatorSvc != nil {
@@ -615,6 +627,9 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPDisposeMessageQueueEntries, h.handleDisposeMessageQueueEntries)
+	d.RegisterFunc(ws.ActionMCPRecoverSessionQueue, h.handleRecoverSessionQueue)
+	d.RegisterFunc(ws.ActionMCPCloseTaskSession, h.handleCloseTaskSession)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 
@@ -2911,6 +2926,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		senderMeta[models.MetaKeyParentQuestionID] = req.ReplyToQuestionID
 		senderMeta[models.MetaKeyParentQuestionResponse] = req.Prompt
 	}
+	applyScheduledRoutineWakeMetadata(ctx, prompt, senderTask, req.SenderSessionID, senderMeta)
 
 	// Interrupt intent is explicit, never inferred: a parent/child
 	// relationship alone no longer drives interruption (see
@@ -4084,9 +4100,26 @@ func (h *Handlers) queueTaskMessageForIdentity(
 		(session.QueueIncarnationID != "" && identity.SessionIncarnationID != session.QueueIncarnationID) {
 		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
 	}
-	queued, err := queue.QueueMessageWithMetadataForSession(
-		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
-	)
+	var queued *messagequeue.QueuedMessage
+	var err error
+	routineWake, _ := metadata[messagequeue.MetadataRoutineWake].(bool)
+	coalesceKey, _ := metadata[messagequeue.MetadataCoalesceKey].(string)
+	if routineWake && coalesceKey != "" {
+		var replaced bool
+		queued, replaced, err = queue.QueueMessageWithCoalesceKeyForSession(
+			ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata, coalesceKey, true,
+		)
+		if err == nil && replaced {
+			h.logger.Info("coalesced identical pending routine wake",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("entry_id", queued.ID))
+		}
+	} else {
+		queued, err = queue.QueueMessageWithMetadataForSession(
+			ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
+		)
+	}
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status, statusErr := queue.Snapshot(ctx, identity)

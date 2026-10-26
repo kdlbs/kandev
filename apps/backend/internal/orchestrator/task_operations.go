@@ -3886,6 +3886,9 @@ func (s *Service) loadResumeSessionCandidate(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	if session.ArchivedAt != nil {
+		return nil, ErrSessionNotPromptable
+	}
 	// A claim still "starting" behind a live, prompt-ready runtime is an
 	// unfinished activation write, so this admission attempt retries the durable
 	// completion for the current generation before the pending-route guard can
@@ -5764,8 +5767,9 @@ func (s *Service) StopSessionSynchronously(ctx context.Context, sessionID string
 	return nil
 }
 
-// deleteSessionAndPublishRemoval commits a session deletion before publishing
-// the terminal event consumed by ordered conversation subscribers.
+// deleteSessionAndPublishRemoval publishes a terminal event only when the
+// committed cleanup removed the session row. Archived rows retain conversation
+// history and must remain available to ordered subscribers.
 func (s *Service) deleteSessionAndPublishRemoval(ctx context.Context, taskID, sessionID string) error {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -5773,6 +5777,18 @@ func (s *Service) deleteSessionAndPublishRemoval(ctx context.Context, taskID, se
 	}
 	if err := s.deleteSessionAndCleanAttachments(ctx, session); err != nil {
 		return err
+	}
+	current, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err == nil {
+		if current == nil || current.ArchivedAt == nil {
+			return fmt.Errorf("session cleanup left an unarchived row: %s", sessionID)
+		}
+		s.publishTaskSessionStateChanged(ctx, taskID, sessionID,
+			session.State, current.State, current.ErrorMessage, &current.UpdatedAt, current)
+		return nil
+	}
+	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		return fmt.Errorf("verify session cleanup disposition: %w", err)
 	}
 	if s.eventBus != nil {
 		if err := s.eventBus.Publish(ctx, events.SessionRemoved, bus.NewEvent(
@@ -5808,10 +5824,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("session not found: %w", err)
 	}
 
-	// Prevent deleting active sessions
-	switch session.State {
-	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-		return fmt.Errorf("cannot delete session in %s state — stop it first", session.State)
+	if session.IsPrimary {
+		return errors.New("cannot delete the current primary session")
+	}
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		return fmt.Errorf("cannot delete session in %s state; stop it first", session.State)
 	}
 
 	taskID := session.TaskID
@@ -7995,6 +8012,9 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if session.ArchivedAt != nil {
+		return nil, ErrSessionNotPromptable
 	}
 	if promptErr := s.checkSessionPromptable(taskID, sessionID, session.State); promptErr != nil {
 		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {

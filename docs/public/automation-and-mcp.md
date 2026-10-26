@@ -978,8 +978,64 @@ A backend hosted in Docker uses its server filesystem for Local/Worktree tasks.
 That is different from a task using a Docker executor, which retains executor-side
 repository materialization. This recovery does not change remote executor routes.
 
+### Inspect and dispose of exact queued messages
 
-The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
+Task-mode and automation Coordinator sessions can inspect their own current
+session queue with `get_message_queue_census_kandev`. The response is FIFO and
+content-free. Each entry includes an immutable ID, opaque claim, safe sender
+provenance, content hash and size, queued time, and optional routine identity.
+It never returns the message body.
+
+Use this sequence when stale pending work must be removed:
+
+1. Call `get_message_queue_census_kandev`.
+2. Choose only the exact entries to remove from their safe metadata.
+3. Call `dispose_message_queue_entries_kandev` with each selected `id` and
+   `claim` unchanged.
+4. Record the response's `before_count`, `after_count`, and per-entry outcome.
+
+An outcome of `removed` means this call removed the unchanged row. `changed`
+means the row was edited, replaced, reordered, or reserved after the census;
+inspect again before deciding. `not_found` means another consumer or normal
+delivery already removed it. Retrying is safe, and a new or changed row is
+never selected by an old claim.
+
+### Recover and close a terminal helper session (task mode)
+
+These tools are available to task sessions, not automation Coordinator sessions.
+
+From a task's current primary session, use `recover_session_queue_kandev` with
+`target_session_id` to move a terminal non-primary session's unread FIFO into
+the primary queue. The response includes the original ordered message bodies,
+IDs, positions, safe provenance, hashes, and a durable receipt. A retry after a
+lost response returns the same receipt and snapshot without moving messages a
+second time. Recovered reserved rows become pending again. An unresolved
+dispatch, Send Now claim, or lifecycle move blocks recovery until it is resolved.
+
+After the source queue is empty, `close_task_session_kandev` closes that exact
+terminal helper. It rejects the current primary, live execution, pending queue
+work, and cross-task targets. The result contains a cleanup receipt: `deleted`
+for a disposable session or `archived` when transcript or attachment evidence
+must remain. Archived sessions can be viewed through **Show session history**.
+Neither tool accepts a task or workspace override from the caller. Recovery
+snapshots are redacted after the destination queue is dispositioned or the task
+is archived; retain the returned readback if it is needed for an audit.
+
+The tools have no task, session, workspace, body, force, sender-filter, or
+clear-all argument. The local MCP server binds them to the calling task and
+session, and the backend verifies that binding against the task workspace. If
+the tools are unavailable, preserve the queue and wait for normal FIFO delivery
+or use the authenticated queue UI. Do not use database edits as a fallback.
+
+### Scheduled wakes and other task-mode tools
+
+Trusted scheduled automation messages use the same durable queue with an
+additional guard: identical pending wakes from the same automation and trigger
+with the same complete expanded payload retain one FIFO entry. Different
+payloads and messages from peers, users, webhooks, or provider events remain
+separate.
+
+For workspace source attachment described above, the HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 

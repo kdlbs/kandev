@@ -1311,6 +1311,8 @@ func (s *Server) registerAutomationTools() {
 	s.registerConfigWorkflowTools()
 	s.registerConfigExecutorTools()
 	s.mcpServer.DeleteTools(
+		"recover_session_queue_kandev",
+		"close_task_session_kandev",
 		"delete_task_kandev",
 		"update_task_state_kandev",
 		"create_workflow_kandev",
@@ -1459,6 +1461,63 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
+	)
+	censusTool := mcp.NewToolWithRawSchema(
+		"get_message_queue_census_kandev",
+		"Inspect the calling session's pending FIFO queue without reading message bodies. Returns ordered immutable entry IDs, opaque claims, safe provenance, content hashes and sizes, capacity, and the before count. Use the returned id and claim unchanged with dispose_message_queue_entries_kandev.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	censusTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	censusTool.Annotations.DestructiveHint = mcp.ToBoolPtr(false)
+	censusTool.Annotations.IdempotentHint = mcp.ToBoolPtr(true)
+	censusTool.Annotations.OpenWorldHint = mcp.ToBoolPtr(false)
+	s.mcpServer.AddTool(
+		censusTool,
+		s.wrapHandler("get_message_queue_census_kandev", s.getMessageQueueCensusHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("dispose_message_queue_entries_kandev",
+			mcp.WithDescription("Remove exact unchanged entries from the calling session's FIFO queue. First call get_message_queue_census_kandev, select entries, and pass each returned id and opaque claim unchanged. Results are per entry: removed, changed, or not_found, with atomic before/after counts. There is no clear-all, body, force, task, or session control."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithArray("entries", mcp.Required(), mcp.MinItems(1),
+				mcp.Description("Exact census claims to dispose"),
+				mcp.Items(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":    map[string]any{"type": "string", "minLength": 1},
+						"claim": map[string]any{"type": "string", "minLength": 1},
+					},
+					"required":             []string{"id", "claim"},
+					"additionalProperties": false,
+				}),
+			),
+		),
+		s.wrapHandler("dispose_message_queue_entries_kandev", s.disposeMessageQueueEntriesHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("recover_session_queue_kandev",
+			mcp.WithDescription("Recover the exact queued FIFO from a terminal non-primary session on this task into the calling current primary session. Returns original bodies, hashes, provenance and a replayable receipt. Recovery rejects unresolved dispatch, Send Now and lifecycle claims."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("target_session_id", mcp.Required(), mcp.Description("Terminal non-primary source session on the calling task")),
+		),
+		s.wrapHandler("recover_session_queue_kandev", s.recoverSessionQueueHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("close_task_session_kandev",
+			mcp.WithDescription("Close a terminal non-primary session on this task after its unread queue and in-flight work are resolved. Disposable sessions are deleted; sessions with retained evidence are archived. Returns a durable cleanup receipt."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("target_session_id", mcp.Required(), mcp.Description("Terminal non-primary session on the calling task")),
+		),
+		s.wrapHandler("close_task_session_kandev", s.closeTaskSessionHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",

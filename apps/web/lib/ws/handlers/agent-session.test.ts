@@ -814,6 +814,34 @@ describe("session.state_changed name propagation", () => {
     const call = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls.at(-1);
     expect(call?.[1]).not.toHaveProperty("name");
   });
+
+  it("carries archive timestamps and their later clearing", () => {
+    store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "COMPLETED", started_at: "" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "COMPLETED",
+        archived_at: "2026-10-25T00:00:00Z",
+      }),
+    );
+    expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenLastCalledWith(
+      "t-1",
+      expect.objectContaining({ id: "s-1", archived_at: "2026-10-25T00:00:00Z" }),
+    );
+    handler(
+      makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "COMPLETED", archived_at: null }),
+    );
+    expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenLastCalledWith(
+      "t-1",
+      expect.objectContaining({ id: "s-1", archived_at: null }),
+    );
+  });
 });
 
 describe("session.state_changed context window provenance", () => {

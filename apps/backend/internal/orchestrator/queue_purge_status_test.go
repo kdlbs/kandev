@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -60,7 +62,7 @@ func TestArchiveTaskPublishesQueueStatusWithTaskID(t *testing.T) {
 	}
 }
 
-func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
+func TestDeleteSessionPreservesQueuedPrompts(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-session-queue", "session-keep", models.TaskSessionStateIdle)
@@ -74,6 +76,12 @@ func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
 
 	manager := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
 	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
 	eventBus := bus.NewMemoryEventBus(testLogger())
 	svc.eventBus = eventBus
@@ -111,22 +119,25 @@ func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
 		t.Fatalf("pending before delete = %d err=%v, want 2", got, err)
 	}
 
-	if err := svc.DeleteSession(ctx, "session-drop"); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
+	if err := svc.DeleteSession(ctx, "session-drop"); err == nil {
+		t.Fatal("DeleteSession removed a session with unread messages")
 	}
 
-	if _, ok, autoRun := svc.messageQueue.ReserveQueuedWithAutoRun(ctx, "session-drop"); !autoRun || ok {
-		t.Fatalf("deleted session retained reserved queue entry: auto_run=%v ok=%v", autoRun, ok)
+	if _, err := repo.GetTaskSession(ctx, "session-drop"); err != nil {
+		t.Fatalf("session removed after rejected delete: %v", err)
 	}
-	if got := svc.messageQueue.GetStatus(ctx, "session-drop").Count; got != 0 {
-		t.Fatalf("session-drop queue count = %d, want 0", got)
+	if got := svc.messageQueue.GetStatus(ctx, "session-drop").Count; got != 1 {
+		t.Fatalf("session-drop visible queue count = %d, want 1", got)
 	}
-	if got, err := svc.messageQueue.CountPendingByTask(ctx, "task-session-queue"); err != nil || got != 1 {
-		t.Fatalf("pending after delete = %d err=%v, want 1 (kept session only)", got, err)
+	stored, err := queueRepo.ListBySession(ctx, "session-drop")
+	if err != nil || len(stored) != 2 {
+		t.Fatalf("durable session queue after rejected delete = %#v, err=%v", stored, err)
 	}
-	// MemoryEventBus.Publish is synchronous, so the subscriber already ran.
-	if saw.Load() == 0 {
-		t.Fatal("expected message.queue.status_changed with task_id after session delete")
+	if got, err := svc.messageQueue.CountPendingByTask(ctx, "task-session-queue"); err != nil || got != 2 {
+		t.Fatalf("pending after rejected delete = %d err=%v, want 2", got, err)
+	}
+	if saw.Load() != 0 {
+		t.Fatal("rejected deletion published queue status change")
 	}
 }
 

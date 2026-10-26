@@ -118,6 +118,15 @@ const DeliveryReservationTTL = 30 * time.Second
 // never mixes prompts issued by different agents.
 const MetadataSenderTaskID = "sender_task_id"
 
+// MetadataRoutineWake marks a message emitted by a trusted scheduled
+// automation run. Only these entries may use routine-wake coalescing.
+const MetadataRoutineWake = "routine_wake"
+
+// MetadataRoutineIdentity identifies the stable automation and trigger that
+// emitted a scheduled wake. The complete payload digest remains embedded in
+// MetadataCoalesceKey so materially different wakes never collide.
+const MetadataRoutineIdentity = "routine_identity"
+
 // MetadataDeferredMoveID identifies the hand-off prompt created for one
 // deferred workflow move. The orchestrator uses it to remove only stale move
 // prompts after a replay.
@@ -158,6 +167,9 @@ var (
 	// ErrSessionIdentityMismatch means the supplied immutable session identity
 	// no longer names the authoritative task-session row.
 	ErrSessionIdentityMismatch = errors.New("queue session identity mismatch")
+	// ErrSessionQueueNotEmpty keeps session deletion retryable after its
+	// unread or in-flight queue state has been resolved.
+	ErrSessionQueueNotEmpty = errors.New("session queue is not empty")
 	// ErrWorkflowEntryMismatch means a workflow prompt was admitted after its
 	// captured task-step entry had been superseded.
 	ErrWorkflowEntryMismatch = errors.New("queue workflow entry identity mismatch")

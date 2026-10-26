@@ -2437,6 +2437,7 @@ type TaskSession struct {
 	Metadata               map[string]interface{} `json:"metadata,omitempty"`
 	StartedAt              time.Time              `json:"started_at"`
 	CompletedAt            *time.Time             `json:"completed_at,omitempty"`
+	ArchivedAt             *time.Time             `json:"archived_at,omitempty"`
 	UpdatedAt              time.Time              `json:"updated_at"`
 
 	// Environment reference
@@ -2472,6 +2473,16 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+}
+
+type TaskSessionCleanupReceipt struct {
+	TaskID           string    `db:"task_id" json:"task_id"`
+	WorkspaceID      string    `db:"workspace_id" json:"workspace_id"`
+	SessionID        string    `db:"session_id" json:"session_id"`
+	Disposition      string    `db:"disposition" json:"disposition"`
+	QueueBeforeCount int       `db:"queue_before_count" json:"queue_before_count"`
+	EvidenceRetained bool      `db:"evidence_retained" json:"evidence_retained"`
+	OccurredAt       time.Time `db:"occurred_at" json:"occurred_at"`
 }
 
 // WorkspaceRecoveryErrorObservation is the session and environment identity
@@ -2582,6 +2593,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	}
 	if s.CompletedAt != nil {
 		result["completed_at"] = s.CompletedAt
+	}
+	if s.ArchivedAt != nil {
+		result["archived_at"] = s.ArchivedAt
 	}
 	if s.Metadata != nil {
 		result["metadata"] = s.Metadata

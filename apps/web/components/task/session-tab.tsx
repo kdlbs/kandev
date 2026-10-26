@@ -51,6 +51,9 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!sessionId) return null;
     return state.taskSessions.items[sessionId]?.state ?? null;
   }) as TaskSessionState | null;
+  const isArchived = useAppStore((state) =>
+    sessionId ? !!state.taskSessions.items[sessionId]?.archived_at : false,
+  );
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const sessionName = useAppStore((state) => {
     if (!sessionId) return null;
@@ -90,6 +93,7 @@ function useSessionTabState(sessionId: string | undefined) {
   });
   return {
     isPrimary,
+    isArchived,
     sessionState,
     taskId,
     tabTitle,
@@ -204,11 +208,14 @@ function SessionTabTriggerContent({
   sessionId,
   isPrimary,
   showMultiSessionBadges,
+  sessionCount,
   sessionNumber,
   agentName,
   sessionState,
   isActive,
-  showDeleteOnClose,
+  isArchived,
+  visibleSessionCount,
+  isRestarting,
   isDeleting,
   closeBehavior,
   onCloseTab,
@@ -217,15 +224,25 @@ function SessionTabTriggerContent({
   sessionId: string | undefined;
   isPrimary: boolean;
   showMultiSessionBadges: boolean;
+  sessionCount: number;
   sessionNumber: number | null;
   agentName: string | null;
   sessionState: TaskSessionState | null;
   isActive: boolean;
-  showDeleteOnClose: boolean;
+  isArchived: boolean;
+  visibleSessionCount: number;
+  isRestarting: boolean;
   isDeleting: boolean;
   closeBehavior: "delete_session" | "hide_panel";
   onCloseTab: () => void;
 }) {
+  const showDeleteOnClose = shouldShowSessionTabCloseAction(closeBehavior, sessionState, {
+    sessionCount,
+    visibleSessionCount,
+    isRestarting,
+    isPrimary,
+    isArchived,
+  });
   return (
     <div className="flex items-center">
       {isPrimary && showMultiSessionBadges && (
@@ -326,11 +343,14 @@ function SessionTabBody({
   sessionId: string | undefined;
   isPrimary: boolean;
   showMultiSessionBadges: boolean;
+  sessionCount: number;
   sessionNumber: number | null;
   agentName: string | null;
   sessionState: TaskSessionState | null;
   isActive: boolean;
-  showDeleteOnClose: boolean;
+  isArchived: boolean;
+  visibleSessionCount: number;
+  isRestarting: boolean;
   isDeleting: boolean;
   closeBehavior: "delete_session" | "hide_panel";
   onCloseTab: () => void;
@@ -420,6 +440,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
   const {
     isPrimary,
+    isArchived,
     sessionState,
     taskId,
     tabTitle,
@@ -442,11 +463,6 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
 
   const showMultiSessionBadges = sessionCount > 1;
   const agentTabCloseBehavior = useAppStore((state) => state.userSettings.agentTabCloseBehavior);
-  const showDeleteOnClose = shouldShowSessionTabCloseAction(agentTabCloseBehavior, sessionState, {
-    sessionCount,
-    visibleSessionCount: actions.visibleSessionCount,
-    isRestarting: actions.isRestarting,
-  });
   const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
   const { handleCloseTab, handleMenuDelete: openMenuDelete, isDeletingFromTab } = deleteState;
   const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =
@@ -477,11 +493,14 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             sessionId={sessionId}
             isPrimary={isPrimary}
             showMultiSessionBadges={showMultiSessionBadges}
+            sessionCount={sessionCount}
             sessionNumber={sessionNumber}
             agentName={agentName}
             sessionState={sessionState}
             isActive={isActive}
-            showDeleteOnClose={showDeleteOnClose}
+            isArchived={isArchived}
+            visibleSessionCount={actions.visibleSessionCount}
+            isRestarting={actions.isRestarting}
             isDeleting={isDeletingFromTab}
             closeBehavior={agentTabCloseBehavior}
             onCloseTab={
@@ -492,6 +511,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         <SessionContextMenuItems
           sessionState={sessionState}
           isPrimary={isPrimary}
+          isArchived={isArchived}
           canShare={canShare}
           taskId={taskId}
           sessionId={sessionId}

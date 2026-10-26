@@ -18,9 +18,7 @@ func TestDeliveryRetentionRetirementFairJobs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := repo.DeleteTaskSession(ctx, session); err != nil {
-				t.Fatal(err)
-			}
+			retireRetentionSessionForTest(t, repo, session)
 			now := repo.nowUTC()
 			_, err = repo.db.Exec(repo.db.Rebind(`INSERT INTO agent_delivery_cleanup_jobs
 				(session_id, incarnation_id, retired_at, phase, created_at, updated_at)
