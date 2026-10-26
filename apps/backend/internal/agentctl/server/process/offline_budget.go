@@ -8,11 +8,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// DefaultOfflineBudget is the longest an instance may go without a stable
-// backend attachment before its running turn is cancelled.
 // stopReasonCancelled is the stop reason of a cancelled turn.
 const stopReasonCancelled = "cancelled"
 
+// DefaultOfflineBudget is the longest an instance may go without a stable
+// backend attachment before its running turn is cancelled.
 const DefaultOfflineBudget = 15 * time.Minute
 
 // stableAttachmentWindow is how long an attachment must hold before it
