@@ -258,3 +258,17 @@ assertions remain unchanged. The probe was removed.
 All three repeated oversized-message cases passed with retries disabled on two
 CPUs. Full web typecheck with the process-local 8 GiB heap, scoped ESLint,
 formatting, document validation, and diff checks also passed.
+
+That CI run finished with 64 passed checks, 19 skipped checks, and 3 failures
+(the two shards and their aggregate). All 118 blob reports and the retry
+summary agree: 4261 first-attempt passes, 2 retry passes, and 40 skipped browser
+cases. No other failure was found. CodeRabbit reviewed that head with no
+actionable comments.
+
+Current main `7fb28fc022d` was integrated with normal hooks. Its Copilot change
+has no overlapping files and does not change the workflow/helper verification
+inputs. A fresh managed build passed the oversized-message case, and all three
+approval-flow cases passed with retries disabled on two CPUs. The first office
+attempt hit an occupied port before setup; a checked explicit test-port offset
+resolved that infrastructure collision. Full web typecheck passed again with
+the process-local 8 GiB heap. Fresh-head CI remains the external delivery gate.
