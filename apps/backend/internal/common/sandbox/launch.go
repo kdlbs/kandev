@@ -105,7 +105,7 @@ func (l *Launch) Clone() *Launch {
 }
 
 func (l *Launch) validatePrefix() error {
-	if len(l.Prefix) == 0 || len(l.Prefix) > 128 || l.Prefix[0] != filepath.Join(l.Root, "runtime") {
+	if len(l.Prefix) == 0 || len(l.Prefix) > 128 || l.Prefix[0] != filepath.Join(l.Root, runtimeBinaryName) {
 		return ErrInvalidPolicy
 	}
 	for _, arg := range l.Prefix {

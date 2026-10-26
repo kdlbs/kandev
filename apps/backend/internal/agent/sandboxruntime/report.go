@@ -54,7 +54,7 @@ func (p *Prepared) captureReport(ctx context.Context) (*policy.Report, error) {
 }
 
 func unavailableReport(previous *policy.Report) policy.ReportData {
-	data := policy.ReportData{Integrity: "unverified"}
+	data := policy.ReportData{Integrity: integrityUnverified}
 	if previous != nil {
 		data = previous.Data
 	}

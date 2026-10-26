@@ -99,7 +99,7 @@ func (r *ReservedRoot) Materialize(ctx context.Context, executable []byte, diges
 	if err != nil {
 		return nil, err
 	}
-	files := &RuntimeFiles{Root: r.root, ownedRoot: r.root, identity: r.identity, Executable: filepath.Join(r.root, "runtime"), Artifacts: map[string]string{}, Digests: map[string]string{}}
+	files := &RuntimeFiles{Root: r.root, ownedRoot: r.root, identity: r.identity, Executable: filepath.Join(r.root, runtimeBinaryName), Artifacts: map[string]string{}, Digests: map[string]string{}}
 	if err = files.write(ctx, executable, rendered); err != nil {
 		return nil, errors.Join(err, files.Close())
 	}
@@ -181,7 +181,7 @@ func validRuntimeArtifactName(name string) bool {
 	first, _, _ := strings.Cut(name, "/")
 	return name != "" && name != "." && name != ".." && len(name) <= 255 && path.Clean(name) == name && !path.IsAbs(name) && !strings.HasPrefix(name, "../") &&
 		!strings.ContainsAny(name, "\\:") && !strings.ContainsFunc(name, unicode.IsControl) && utf8.ValidString(name) &&
-		!slices.Contains([]string{"runtime", "home", "config", "state", "tmp"}, first)
+		!slices.Contains([]string{runtimeBinaryName, "home", "config", "state", "tmp"}, first)
 }
 
 func (f *RuntimeFiles) write(ctx context.Context, executable []byte, artifacts map[string][]byte) error {
@@ -194,7 +194,7 @@ func (f *RuntimeFiles) write(ctx context.Context, executable []byte, artifacts m
 	if err := writeRuntimeFile(f.Executable, executable, 0500); err != nil {
 		return err
 	}
-	f.Digests["runtime"] = runtimeDigest(executable)
+	f.Digests[runtimeBinaryName] = runtimeDigest(executable)
 	for name, content := range artifacts {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -230,3 +230,6 @@ func runtimeDigest(content []byte) string {
 	digest := sha256.Sum256(content)
 	return hex.EncodeToString(digest[:])
 }
+
+// runtimeBinaryName is the launch-root entry and digest key of the runtime executable.
+const runtimeBinaryName = "runtime"

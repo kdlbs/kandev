@@ -9,7 +9,7 @@ import (
 )
 
 func verifyRuntimeFiles(rootPath string, digests map[string]string) error {
-	if len(digests) == 0 || len(digests) > 33 || !validLaunchDigest(digests["runtime"]) {
+	if len(digests) == 0 || len(digests) > 33 || !validLaunchDigest(digests[runtimeBinaryName]) {
 		return ErrInvalidPolicy
 	}
 	root, err := os.OpenRoot(rootPath)
@@ -18,7 +18,7 @@ func verifyRuntimeFiles(rootPath string, digests map[string]string) error {
 	}
 	defer func() { _ = root.Close() }()
 	for name, digest := range digests {
-		if !validLaunchDigest(digest) || (name != "runtime" && !validRuntimeArtifactName(name)) {
+		if !validLaunchDigest(digest) || (name != runtimeBinaryName && !validRuntimeArtifactName(name)) {
 			return ErrInvalidPolicy
 		}
 		if err := verifyRuntimeFile(root, rootPath, name, digest); err != nil {
@@ -39,7 +39,7 @@ func verifyRuntimeFile(root *os.Root, rootPath, name, digest string) error {
 		return ErrInvalidPolicy
 	}
 	limit := int64(maxArtifactBytes)
-	if name == "runtime" {
+	if name == runtimeBinaryName {
 		limit = 128 << 20
 		if info.Mode().Perm()&0100 == 0 {
 			return ErrInvalidPolicy
