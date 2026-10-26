@@ -38,7 +38,7 @@ export function GitHubPATForm({
       {githubOrigin(githubHost) && (
         <a
           data-testid="github-token-settings-link"
-          className="text-xs text-primary underline underline-offset-4"
+          className="cursor-pointer text-xs text-primary underline underline-offset-4"
           href={`${githubOrigin(githubHost)}/settings/tokens/new`}
           target="_blank"
           rel="noreferrer"
