@@ -251,7 +251,7 @@ in 10.9s. Targeted ESLint passed. No product behavior changed in this fixup.
 
 Backend CI run `40401492531` passed at head `6d3eb21a9624`, including
 PostgreSQL, Windows native execution, and all three SQLite cohorts.
-E2E run `40401492777` exposed three fixture failures on that head:
+E2E run `40401492777` first exposed three fixture failures on that head:
 
 - The mobile sidebar recovery fixture now supplies `Retry-After` so automatic
   retry cannot replace the manual retry control. It verifies retained task rows
@@ -267,3 +267,9 @@ runs. The watcher and repository-set/filter sequence passed all seven checks.
 Two more runs each of the watcher and phone filter tests passed four checks.
 Targeted ESLint, Prettier, and diff checks passed. These changes affect test
 fixtures only.
+
+The final shard exposed a fourth fixture race: touch-target geometry was
+measured during the navigation drawer animation. The test now waits for finite
+animations before measuring. The original 44px minimum remains unchanged.
+The three-spec sequence passed all ten checks with retries disabled, two CPUs,
+and 4 GiB of memory. See the work order for diagnostic limits and results.

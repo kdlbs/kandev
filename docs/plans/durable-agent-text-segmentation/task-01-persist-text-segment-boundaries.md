@@ -194,7 +194,7 @@ in 10.9s. Targeted ESLint passed. No product behavior changed in this fixup.
 
 Backend CI run `40401492531` passed at head `6d3eb21a9624`, including
 PostgreSQL, Windows native execution, and all three SQLite cohorts.
-E2E run `40401492777` exposed three fixture failures on that head:
+E2E run `40401492777` first exposed three fixture failures on that head:
 
 - The mobile sidebar recovery fixture now supplies `Retry-After` so automatic
   retry cannot replace the manual retry control. It verifies retained task rows
@@ -210,3 +210,22 @@ runs. The watcher and repository-set/filter sequence passed all seven checks.
 Two more runs each of the watcher and phone filter tests passed four checks.
 Targeted ESLint, Prettier, and diff checks passed. These changes affect test
 fixtures only.
+
+The final shard exposed a fourth fixture race in `mobile-quick-terminal.spec.ts`:
+a launcher measured 43.999969px during navigation drawer entry. The test now
+waits for finite drawer animations before measuring touch targets. The strict
+44px minimum remains unchanged.
+
+Five isolated runs and the ten-test preceding sequence passed before this
+correction, so they did not reproduce the exact CI failure. A temporary geometry
+probe observed 44.000030px while the drawer transform was running and exactly
+44px after it settled. This supports the animation measurement diagnosis; the
+probe was removed. After correction, the same three-spec sequence passed all
+ten checks in 56.8s with retries disabled, one worker, two CPUs, and 4 GiB of
+memory in the CI runtime image. Targeted ESLint and Prettier checks passed.
+
+The complete old-head blob audit covered 118 reports: four failed attempts,
+four retry attempts, 4,266 passed attempts, and 40 skipped attempts, with no
+parse errors. These are attempt counts, not distinct-test verdicts. All four
+leaf failures are covered by the fixture corrections above. The old-head
+workflow rollup was still queued after the bounded wait.
