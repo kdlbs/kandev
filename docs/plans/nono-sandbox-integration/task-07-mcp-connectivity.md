@@ -94,3 +94,10 @@ The authenticated agentctl control route checks the retained process owner, atte
 ### Native MCP artifacts
 
 Generated native config now uses the explicitly granted child home. Core does not fall back to private host configuration when that grant is absent. Linux writes use directory-rooted operations, bounded regular-file reads, and atomic replacement. Focused regressions verify permitted writes, outside-path refusal, parent and leaf symlink refusal, malformed-merge refusal, and cleanup after directory replacement. Existing passthrough MCP tests and sandbox lifecycle tests pass under the race detector. These are transport checks, not actual Pi chat or terminal acceptance.
+
+
+### Managed Pi configuration repair (2026-10-26)
+
+Actual Pi ACP 0.0.34 discovery and sandboxed file work passed. The first same-session MCP call failed: the adapter stores ACP MCP settings without forwarding them, and Pi 1.3.0 skips project MCP configuration without project trust. This is an agent configuration defect, separate from Nono network enforcement.
+
+The existing Pi strategy now emits the native `type` discriminator and writes sandbox MCP configuration into the captured isolated child home. Private `PI_CODING_AGENT_DIR` overrides are supported. Missing state, shared directory overrides, and unsupported native SSE fail closed. Ordinary launches retain project configuration. Core does not copy credentials or grant project trust. The focused regression failed before the repair. Protocol and native materialization checks, private path variants, and existing MCP artifact safety tests pass under the race detector. Actual managed-agent verification remains pending.

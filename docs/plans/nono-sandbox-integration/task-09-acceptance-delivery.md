@@ -1,7 +1,7 @@
 ---
 id: "09-acceptance-delivery"
 title: "Prove real Nono acceptance and prepare the follow-up PR"
-status: pending
+status: in_progress
 wave: 10
 depends_on:
   - "02-bootstrap-recovery"
@@ -130,3 +130,8 @@ Missing disposable login, unsupported kernel, or missing platform evidence block
 ## Results
 
 Pending. No production implementation is authorized during the design turn.
+
+
+## Current acceptance run (2026-10-26)
+
+The primary session is running a fresh authenticated verification instance on loopback with source commit `ae48d78209253e0529260727a430c2fd566de788`, the dedicated packaged provider, pinned Pi ACP 0.0.34, Pi CLI 1.3.0, and Node 24.19.0. It uses a copy of this task's stopped test credential file, not the main or older retained instance login. Main Tailscale :9998 and the stopped user-test endpoint are preserved. A temporary harness copy initially dereferenced CLI entry symlinks; restoring only the owned copies made the direct version check pass. That setup fault is not product or sandbox evidence. Actual profile-scoped probes and managed-agent journeys remain in progress.

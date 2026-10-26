@@ -238,6 +238,12 @@ After installation, select **Rescan**. Kandev detects Pi when `pi` is on the
 check. The `pi-acp` adapter is not the interactive terminal CLI, and managed
 ACP runtime selection does not replace the passthrough command.
 
+With a sandbox policy, Pi MCP configuration uses the isolated agent state.
+This requires Pi with native MCP support (verified with Pi 1.3.0). It does not
+grant project trust. If you set `PI_CODING_AGENT_DIR`, select a location within
+the isolated child home, such as `~/.pi/agent`. A shared directory is refused.
+Authenticate the isolated agent separately. Kandev does not copy host credentials.
+
 1. Select **Rescan** after installing or updating a CLI.
 2. If the card offers an install action, review the command before running it. Installation runs on the Kandev host.
 3. If the card reports that login is required, open its login terminal or authenticate the CLI as the same operating-system user that runs Kandev.

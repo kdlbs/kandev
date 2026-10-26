@@ -110,7 +110,7 @@ The provider contract declares override variables and arguments that conflict wi
 Core enforces these declarations without matching provider IDs or embedding a Nono flag list.
 The Nono plugin must reject overrides such as `--allow-net`, `--sandbox-policy external`, and `NONO_ALLOW_NET`.
 Freeze the provider environment and configuration search roots before process creation.
-Approved provider credentials remain a separate explicit grant. Canonical `environment_keys` grants contain exact uppercase variable names, no values or patterns. Deduplicate and sort keys, require every key to fit the executor ceiling, and preserve them in the immutable revision. Core rejects configuration roots, loader injection, interpreter startup hooks, and Kandev control keys. The provider rejects its own override keys. Filter the final environment to approved keys and the fixed runtime baseline. Do not copy credentials from retained test instances.
+Provider credentials need explicit grants. `environment_keys` contains sorted, unique uppercase names, never values or patterns. Each key must fit the executor ceiling and immutable revision. Core rejects configuration roots, loader/startup injection, and Kandev control keys. Providers reject their override keys. Child environments use approved keys plus the fixed baseline. Never copy retained-instance credentials.
 
 Plugins are trusted installed host code. The extension permission does not isolate a malicious plugin from host files.
 An unsandboxed same-user host process and the host administrator remain outside this confinement claim.
@@ -182,7 +182,8 @@ A late click cannot grant. A delivered response is not proof that the child rece
 Core supplies logical endpoint descriptors after actual runtime allocation.
 Each descriptor binds service kind, task/session, attempt, scheme, address, port or socket, allowed methods, path, and expiration.
 Policies select the logical service `kandev_mcp`, not an arbitrary URL string.
-Existing `mcpconfig` strategies and passthrough artifacts supply the actual MCP transport.
+Existing `mcpconfig` strategies supply the MCP transport.
+Pi MCP uses isolated child state without project trust. `PI_CODING_AGENT_DIR` must stay inside that home. Refuse missing state. Never copy credentials or change project trust.
 A provider translates approved descriptors into explicit routes. It cannot invent destinations.
 
 For HTTP MCP, expose an operation-owned MCP-only relay that validates method, route, and session authentication.

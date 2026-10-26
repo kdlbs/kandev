@@ -3,15 +3,67 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSandboxMCPPiUsesPrivateAgentConfigWithoutProjectTrust(t *testing.T) {
+	for _, mode := range []string{"default", "private override", "shared override", "missing state", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			manager := newTestManager(t)
+			home, work, shared := t.TempDir(), t.TempDir(), t.TempDir()
+			attempt := &startSandboxFixture{launch: &contract.Launch{AttemptID: "attempt", ChildHome: home, MCPURL: "http://127.0.0.1:45679/mcp"}}
+			execution := &AgentExecution{ID: "execution", SessionID: "session", TaskID: "task", WorkspacePath: work, standalonePort: 45678, SandboxSelection: &policy.SelectionContext{ExecutorID: "local"}, sandboxAttempt: attempt}
+			configDir := filepath.Join(home, ".pi", "agent")
+			switch mode {
+			case "private override":
+				configDir = filepath.Join(home, "custom-pi")
+				execution.setRuntimeEnvironment(map[string]string{"PI_CODING_AGENT_DIR": configDir})
+			case "shared override":
+				execution.setRuntimeEnvironment(map[string]string{"PI_CODING_AGENT_DIR": shared})
+			case "missing state":
+				attempt.launch.ChildHome = ""
+			}
+			agent, ok := manager.registry.Get("pi-acp")
+			require.True(t, ok)
+			var err error
+			if mode == "native" {
+				_, err = manager.applyPassthroughMCP(t.Context(), execution, agents.NewPiACP().PassthroughConfig(), agent, nil)
+			} else {
+				err = manager.materializeRuntimeProjectMCP(t.Context(), execution, agent, nil, "local")
+			}
+			if mode == "shared override" || mode == "missing state" {
+				require.Error(t, err)
+				require.NoFileExists(t, filepath.Join(shared, "mcp.json"))
+			} else {
+				require.NoError(t, err)
+				content, readErr := os.ReadFile(filepath.Join(configDir, "mcp.json"))
+				require.NoError(t, readErr)
+				var payload struct {
+					Servers map[string]struct {
+						Type string `json:"type"`
+						URL  string `json:"url"`
+					} `json:"mcpServers"`
+				}
+				require.NoError(t, json.Unmarshal(content, &payload))
+				require.Equal(t, "streamable-http", payload.Servers["kandev"].Type)
+				require.Equal(t, attempt.launch.MCPURL, payload.Servers["kandev"].URL)
+				manager.cleanupPassthroughMCPConfig(execution)
+				require.NoFileExists(t, filepath.Join(configDir, "mcp.json"))
+			}
+			require.NoFileExists(t, filepath.Join(work, ".pi", "mcp.json"))
+			require.NoFileExists(t, filepath.Join(home, ".pi", "agent", "trust.json"))
+		})
+	}
+}
 
 func TestSandboxNativeMCPFilesUseGrantedChildState(t *testing.T) {
 	manager := newTestManager(t)

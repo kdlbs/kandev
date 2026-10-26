@@ -8,11 +8,12 @@ import (
 )
 
 func sandboxMCPPaths(execution *AgentExecution) mcpconfig.PassthroughPaths {
-	paths := mcpconfig.PassthroughPaths{WorkspaceDir: execution.WorkspacePath}
+	paths := mcpconfig.PassthroughPaths{WorkspaceDir: execution.WorkspacePath, Isolated: true, Environment: execution.RuntimeEnvironment()}
 	execution.sandboxMu.Lock()
 	defer execution.sandboxMu.Unlock()
 	if execution.sandboxAttempt != nil {
 		launch := execution.sandboxAttempt.Launch()
+		paths.IsolatedHomeDir = launch.ChildHome
 		execution.sandboxConfigHome = launch.ChildHome
 		if launch.ChildHome != "" {
 			paths.TempConfigPath = filepath.Join(launch.ChildHome, ".config", "kandev-mcp-"+safePassthroughMCPConfigName(launch.AttemptID)+".json")

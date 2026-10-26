@@ -2,6 +2,7 @@ package mcpconfig
 
 import (
 	"encoding/json"
+	"fmt"
 	"path"
 	"path/filepath"
 
@@ -21,6 +22,11 @@ type PassthroughPaths struct {
 	// strategies that write a project-local config file (Cursor). Empty when
 	// unavailable.
 	WorkspaceDir string
+	// Isolated requires configuration inside the captured child home, rather
+	// than a shared user directory or a project trust decision.
+	Isolated        bool
+	IsolatedHomeDir string
+	Environment     map[string]string
 }
 
 func (p PassthroughPaths) projectPath(parts ...string) string {
@@ -343,10 +349,8 @@ func (CursorStrategy) Describe() string {
 
 const piStreamableHTTPTransport = "streamable-http"
 
-// PiStrategy writes a project-local .pi/mcp.json into the workspace. Pi's MCP
-// extensions read this project override and merge it with global/user MCP files.
-// When the file already exists, kandev's servers are merged into mcpServers and
-// other Pi settings are preserved.
+// PiStrategy uses private user-level configuration for isolated launches.
+// Ordinary launches retain project-local configuration and Pi's project trust.
 type PiStrategy struct{}
 
 type piMCPFile struct {
@@ -354,6 +358,7 @@ type piMCPFile struct {
 }
 
 type piServerEntry struct {
+	Type      string            `json:"type,omitempty"`
 	Transport string            `json:"transport,omitempty"`
 	Command   string            `json:"command,omitempty"`
 	Args      []string          `json:"args,omitempty"`
@@ -364,8 +369,12 @@ type piServerEntry struct {
 }
 
 func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths PassthroughPaths) (PassthroughArtifacts, error) {
-	if len(servers) == 0 || paths.WorkspaceDir == "" {
+	if len(servers) == 0 {
 		return PassthroughArtifacts{}, nil
+	}
+	configPath, err := piMCPConfigPath(paths)
+	if err != nil || configPath == "" {
+		return PassthroughArtifacts{}, err
 	}
 	entries := make(map[string]piServerEntry, len(servers))
 	for _, srv := range servers {
@@ -373,9 +382,15 @@ func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passthrou
 			continue
 		}
 		if isStdioServer(srv) {
-			entries[srv.Name] = piServerEntry{Transport: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env, Lifecycle: "eager"}
+			entries[srv.Name] = piServerEntry{Type: string(ServerTypeStdio), Transport: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env, Lifecycle: "eager"}
 		} else {
-			entries[srv.Name] = piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers, Lifecycle: "eager"}
+			entry := piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers, Lifecycle: "eager"}
+			if srv.Type != string(ServerTypeSSE) {
+				entry.Type = piStreamableHTTPTransport
+			} else if paths.Isolated {
+				return PassthroughArtifacts{}, fmt.Errorf("pi native MCP does not support SSE")
+			}
+			entries[srv.Name] = entry
 		}
 	}
 	if len(entries) == 0 {
@@ -387,7 +402,7 @@ func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passthrou
 	}
 	return PassthroughArtifacts{
 		Files: []PassthroughConfigFile{{
-			Path:     paths.projectPath(".pi", "mcp.json"),
+			Path:     configPath,
 			Content:  content,
 			MergeKey: "mcpServers",
 		}},
