@@ -671,6 +671,16 @@ Before the first launch, check the two cluster prerequisites. Memory oversubscri
 
 Paste the block into the node's Nomad client configuration, add `node_pool` to the client stanza, create the pool with `nomad node pool apply`, and restart the client. If the metadata changes between launch and recovery, Kandev refuses to reattach to that environment.
 
+### Worker-owned agent launch policy
+
+A worker administrator can set `KANDEV_NODE_LAUNCH_WRAPPER_FILE` in the Nomad client service environment. It names an absolute, canonical path to a root-owned JSON file and must reach the worker's agentctl process. The file and its parent directories must not be replaceable by the agent user; group/world-writable files are refused. Root-owned sticky temporary ancestors are permitted. This setting is independent of optional agent-profile wrappers: the node wrapper surrounds them for agent sessions, interactive launches and utility inference.
+
+The JSON uses the version 1 wrapper envelope: `{"version":1,"source":"profile","argv":["/absolute/path/to/approved-wrapper","--workspace","{{kandev.work_dir}}","--allocation","{{kandev.alloc_dir}}","--"]}`. The `source` field retains the existing envelope spelling. The executable must be absolute. References are separate argv entries; `{{kandev.alloc_dir}}` resolves from agentctl's own `NOMAD_ALLOC_DIR`, and a missing allocation directory refuses launch.
+
+Use matching backend/bootstrap and agentctl builds. When the worker environment specifies a policy, the Nomad bootstrap preserves its policy/allocation identity across the private environment overlay and passes `agentctl --require-node-policy`. A missing or invalid required policy aborts startup, and an older agentctl rejects the flag. An older backend/bootstrap does not provide this compatibility check. Existing running allocations are not retrofitted. If the node variable is absent, existing launch behavior is unchanged; this is not scheduler capability admission.
+
+Kandev supplies the launch boundary, not a nono policy or installation. Administrators must install the wrapper, define workspace/Git/scratch, credential and network grants, and verify their native clients and cleanup. Control-plane APIs, other processes under the same OS account, and hard resource isolation remain separate trust boundaries.
+
 ## Nomad worker quarantine and readmission
 
 Archiving, deleting or resetting a task that owns a Nomad environment runs proven cleanup: the runtime is sealed and drained, a receipt is stored, the job is stopped without purging, allocations are confirmed terminal on the original node, and the worker fence is released. Plain session stop only detaches the transport.

@@ -2,6 +2,7 @@ package process
 
 import (
 	"errors"
+	"os"
 	"slices"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -27,13 +28,17 @@ func (m *Manager) prepareSessionArgs(args []string) ([]string, error) {
 		return nil, errors.New("launch wrapper configuration is missing. Session recovery is required")
 	}
 	if !m.cfg.LaunchWrapper.IsZero() {
-		return launchwrapper.Prepare(m.cfg.LaunchWrapper, args, launchwrapper.Context{WorkDir: m.cfg.WorkDir, Env: m.cfg.AgentEnv})
+		prepared, err := launchwrapper.Prepare(m.cfg.LaunchWrapper, args, launchwrapper.Context{WorkDir: m.cfg.WorkDir, Env: m.cfg.AgentEnv})
+		if err != nil {
+			return nil, err
+		}
+		return launchwrapper.PrepareNode(prepared, launchwrapper.Context{WorkDir: m.cfg.WorkDir, Env: m.cfg.AgentEnv})
 	}
 	prepared := slices.Clone(args)
 	if err := managedruntime.PrepareNPMProjectPrefix(prepared); err != nil {
 		return nil, errors.New("managed npm project prefix could not be prepared")
 	}
-	return prepared, nil
+	return launchwrapper.PrepareNode(prepared, launchwrapper.Context{WorkDir: m.cfg.WorkDir, Env: m.cfg.AgentEnv})
 }
 
 func (m *Manager) prepareOneShotArgs() error {
@@ -41,10 +46,7 @@ func (m *Manager) prepareOneShotArgs() error {
 		return nil
 	}
 	oneShot := m.adapterCfg.OneShotConfig
-	initial, continuation := oneShot.InitialArgs, oneShot.ContinueArgs
-	if !m.cfg.LaunchWrapper.IsZero() {
-		initial, continuation = m.cfg.AgentArgs, m.cfg.ContinueArgs
-	}
+	initial, continuation := m.oneShotBaseArgs()
 	preparedInitial, err := m.prepareSessionArgs(initial)
 	if err != nil {
 		return err
@@ -72,4 +74,11 @@ func (m *Manager) LaunchWrapperSnapshot() (launchwrapper.Spec, error) {
 	}
 	spec.Argv = slices.Clone(spec.Argv)
 	return spec, nil
+}
+
+func (m *Manager) oneShotBaseArgs() ([]string, []string) {
+	if !m.cfg.LaunchWrapper.IsZero() || os.Getenv(launchwrapper.NodePolicyEnv) != "" {
+		return m.cfg.AgentArgs, m.cfg.ContinueArgs
+	}
+	return m.adapterCfg.OneShotConfig.InitialArgs, m.adapterCfg.OneShotConfig.ContinueArgs
 }

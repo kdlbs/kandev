@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -191,7 +192,11 @@ func (e *CodexAppServerInferenceExecutor) start(
 	if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
 		return nil, nil, nil, fmt.Errorf("prepare managed npm project prefix: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, command, args...)
+	argv, err := launchwrapper.PrepareNode(append([]string{command}, args...), launchwrapper.Context{WorkDir: cfg.WorkDir, Env: sanitizeEnvForAgent(cfg)})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = cfg.WorkDir
 	cmd.Env = sanitizeEnvForAgent(cfg)
 	configureACPCommand(cmd, e.logger)

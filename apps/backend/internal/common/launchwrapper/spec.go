@@ -11,6 +11,7 @@ const (
 	Version         = 1
 	SourceProfile   = "profile"
 	Capability      = "launch-wrapper.v1"
+	AllocDir        = "{{kandev.alloc_dir}}"
 	WorkDir         = "{{kandev.work_dir}}"
 	ManagedNPMDir   = "{{kandev.managed_npm_dir}}"
 	referencePrefix = "{{kandev."
@@ -44,7 +45,7 @@ func ValidateTokens(argv []string) error {
 		if i == 0 {
 			return ErrInvalid
 		}
-		if arg == WorkDir || arg == ManagedNPMDir || escapedReference(arg) != "" {
+		if arg == WorkDir || arg == AllocDir || arg == ManagedNPMDir || escapedReference(arg) != "" {
 			continue
 		}
 		return ErrInvalid

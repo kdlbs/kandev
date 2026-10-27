@@ -17,20 +17,24 @@ func prepareACPLaunch(cfg *InferenceConfigDTO, admitted string, args, env []stri
 	inner := append(slices.Clone(args), cfg.CLIFlags...)
 	inner[0] = admitted
 	if !cfg.LaunchWrapper.IsZero() {
-		return launchwrapper.Prepare(cfg.LaunchWrapper, inner, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
+		prepared, err := launchwrapper.Prepare(cfg.LaunchWrapper, inner, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
+		if err != nil {
+			return nil, err
+		}
+		return launchwrapper.PrepareNode(prepared, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
 	}
 	if err := managedruntime.PrepareNPMProjectPrefix(inner); err != nil {
 		return nil, err
 	}
 	if len(cfg.CommandPrefix) == 0 {
-		return inner, nil
+		return launchwrapper.PrepareNode(inner, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
 	}
 	prefix := slices.Clone(cfg.CommandPrefix)
 	prefix[0] = resolveACPCommandPrefix(prefix[0])
 	if prefix[0] == "" {
 		return nil, errors.New("profile command prefix is unsupported")
 	}
-	return append(prefix, inner...), nil
+	return launchwrapper.PrepareNode(append(prefix, inner...), launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
 }
 
 func utilityStartError(cfg *InferenceConfigDTO, err error) string {

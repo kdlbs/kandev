@@ -57,6 +57,8 @@ set -eu
 agentctl_path=$KANDEV_AGENTCTL_PATH
 workspace_root=$KANDEV_WORKSPACE_ROOT
 bootstrap_env_file=$KANDEV_BOOTSTRAP_ENV_FILE
+node_launch_policy=${KANDEV_NODE_LAUNCH_WRAPPER_FILE:-}
+node_allocation=${NOMAD_ALLOC_DIR:-}
 control_port=$NOMAD_PORT_agentctl_control
 instance_port=$NOMAD_PORT_agentctl_instance
 umask 077
@@ -78,6 +80,11 @@ export AGENTCTL_INSTANCE_PORT_BASE="$instance_port"
 export AGENTCTL_INSTANCE_PORT_MAX="$instance_port"
 export AGENTCTL_LISTEN_HOST=127.0.0.1
 export KANDEV_ACP_IDLE_TIMEOUT=0
+if [ -n "$node_launch_policy" ]; then
+  export KANDEV_NODE_LAUNCH_WRAPPER_FILE="$node_launch_policy"
+  export NOMAD_ALLOC_DIR="${node_allocation:?missing worker allocation directory}"
+  exec "$agentctl_path" --require-node-policy --workdir "$workspace_root"
+fi
 exec "$agentctl_path" --workdir "$workspace_root"
 `, shellQuote(state.JobID), shellQuote(state.NodeID), shellQuote(fenceParent), shellQuote(fence), shellQuote(owner), shellQuote(fence), shellQuote(fence), scratch), nil
 }

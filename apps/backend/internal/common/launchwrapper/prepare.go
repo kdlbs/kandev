@@ -60,6 +60,20 @@ func resolveReferences(tokens []string, workDir string) ([]string, error) {
 	npmDir := ""
 	for i := 1; i < len(prefix); i++ {
 		switch prefix[i] {
+		case AllocDir:
+			allocation := os.Getenv("NOMAD_ALLOC_DIR")
+			if !filepath.IsAbs(allocation) {
+				return nil, ErrContext
+			}
+			resolved, err := filepath.EvalSymlinks(allocation)
+			if err != nil {
+				return nil, ErrContext
+			}
+			info, err := os.Stat(resolved)
+			if err != nil || !info.IsDir() {
+				return nil, ErrContext
+			}
+			prefix[i] = resolved
 		case WorkDir:
 			prefix[i] = workDir
 		case ManagedNPMDir:

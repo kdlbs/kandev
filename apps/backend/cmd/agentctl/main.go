@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -39,10 +40,11 @@ import (
 
 // Command-line flags
 var (
-	protocolFlag     = flag.String("protocol", "", "Protocol for agent communication (acp, codex, mcp)")
-	agentCommandFlag = flag.String("agent-command", "", "Command to run the agent")
-	workDirFlag      = flag.String("workdir", "", "Working directory for the agent")
-	portFlag         = flag.Int("port", 0, "HTTP server port")
+	requireNodePolicyFlag = flag.Bool("require-node-policy", false, "Require an administrator-owned worker launch policy")
+	protocolFlag          = flag.String("protocol", "", "Protocol for agent communication (acp, codex, mcp)")
+	agentCommandFlag      = flag.String("agent-command", "", "Command to run the agent")
+	workDirFlag           = flag.String("workdir", "", "Working directory for the agent")
+	portFlag              = flag.Int("port", 0, "HTTP server port")
 )
 
 func main() {
@@ -69,6 +71,12 @@ func runMain() int {
 	defer cleanupGitHubCLIShim()
 
 	flag.Parse()
+	if *requireNodePolicyFlag {
+		if err := launchwrapper.ValidateNodePolicy(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
 
 	// Load configuration. Managed launches receive a validated, resolved child
 	// contract from the backend. Direct invocations retain legacy environment

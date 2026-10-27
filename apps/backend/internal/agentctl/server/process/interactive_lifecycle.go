@@ -266,6 +266,10 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 			return err
 		}
 	}
+	args, err := launchwrapper.PrepareNode(args, launchwrapper.Context{WorkDir: proc.startDir, Env: env})
+	if err != nil {
+		return err
+	}
 	cmd := exec.Command(args[0], args[1:]...)
 	if proc.startDir != "" {
 		cmd.Dir = proc.startDir
