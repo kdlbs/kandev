@@ -293,3 +293,12 @@ without recording prompts or downstream error text.
 After the lifecycle wait and bounded diagnostics, the constrained three-test
 canvas sequence passed nine cases without retries. The plugin package suite,
 changed-Go lint, frontend typecheck, and E2E sleep checks passed.
+
+The next CI run exposed two additional flaky tests. The scroll fixture now
+waits for each submitted prompt's own persisted turn to finish before seeding
+history; the failure screenshot showed an agent still running after the old
+idle check. The exact failure did not reproduce in eight constrained baseline
+runs. The revised helper passed eight mobile cases and two desktop cases
+without retries. The mobile canvas marketplace now uses the existing
+precision-aware 44-pixel touch-control assertion; it passed five retry-free
+runs after CI measured a target at 43.99994 pixels.
