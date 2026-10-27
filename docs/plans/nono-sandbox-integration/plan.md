@@ -233,3 +233,7 @@ A successful replacement conversation cannot close the original recovery accepta
 ## Current implementation checkpoint (2026-10-27)
 
 Tasks 01 through 08 and 10 are complete for the supported Linux amd64 Local/Worktree matrix. Task 09 records real managed acceptance and draft-PR delivery. Earlier pending statements above are historical checkpoints. The runtime feature remains off in shipped profiles. Nono supplies no accepted current-policy attestation, so actual status remains unknown. Both PRs remain drafts. The user test endpoint remains stopped.
+
+## Implementation walkthrough
+
+The [host and Nono walkthrough](walkthrough.md) explains ownership, the six provider RPCs, policy selection, approvals, MCP connectivity, restart, cleanup, evidence limits, and future adapters. It records the inspected commits and links directly to both implementations.
