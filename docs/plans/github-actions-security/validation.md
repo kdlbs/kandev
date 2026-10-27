@@ -441,3 +441,38 @@ desktop companion passed three repetitions under the same limits. Scoped ESLint,
 formatting, document checks, and diff checks passed. No production UI or recovery
 behavior changed; public guides and screenshots remain current. Fresh CI after
 the next push remains the delivery gate.
+
+
+## Current-main integration after delivery CI
+
+Head `7c12c83d9143824c6e9a33fc4a696182cd66411b` finished with 86 passing,
+13 skipped, and two failed checks (one E2E leaf and its aggregate). All 118
+Playwright reports were inspected: 4,281 passed attempts, 40 skipped attempts,
+and one failed Azure attempt followed by a passing retry. No other test retried.
+The Azure failure seeded saved views before the configuration POST completed;
+the store correctly returns not-configured when that configuration row is absent.
+
+Main `d27d8e59302f983a424b7147a37b405ffaa81d99` already contains the causal
+configuration-response wait and a delayed-save regression stimulus. Integration
+retains that fix and this PR's independent late-assignment selection regression.
+The two mobile test conflicts preserve main's screenshot/scroll coverage and
+clock-driven automatic Stats retry coverage, together with this PR's scoped
+Retry locator, canonical touch measurement, and enabled manual-retry gate.
+The recovery and privileged-workflow security changes remain intact.
+
+A fresh managed build of this merged tree passed the full Azure desktop spec
+three times with retries disabled. The resolved sidebar and Stats mobile specs
+passed all nine repetitions. Each browser run used two CPUs. The targeted
+executor, queued-prompt, native-resume lifecycle, and SQLite terminal-proof tests
+also passed under the Go race detector, including the newly integrated
+interrupted-settlement recovery cases. Scoped ESLint, formatting, catalog/spec
+checks, and diff checks passed. The security context helper SHA-256 remains
+`8cb3ddc50e47ff21fe15d0484d3f76fdbca1d57fc12a785872bc5479f9aa5bb8`.
+
+
+The branch was then rebased onto the same main revision at the user's request.
+The rebased source and test trees are byte-identical to the validated merged
+tree. Main leaves `E2E_FAIL_ON_FLAKY` unset; the Playwright CI configuration
+fails on retry passes only when that variable equals `1`. No diagnostic probe
+or additional workflow-test change is retained. New-head CI will rerun after
+pushing the rebased history.

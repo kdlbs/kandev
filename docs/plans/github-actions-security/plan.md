@@ -137,6 +137,9 @@ transition. Canvas measurement uses the same settled-animation and 44px helper
 as other mobile controls. Validation records the deterministic regressions.
 The mobile Stats fixture keeps its simulated outage active until manual Retry,
 so initial foreground recovery cannot consume the error state under test.
+The next main integration also retains the upstream Azure configuration-save
+response wait and automatic Stats retry coverage while preserving the scoped
+mobile Retry control assertions.
 
 ## Risks
 
