@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activateChangesPanel,
   applyChangesPanelAutoFocusState,
+  clearPendingChangesFocusForPanelSelection,
   markInactiveChangesIncreases,
   migrateEnvironmentKeys,
   selectChangesMarkerByEnvironment,
@@ -623,6 +624,43 @@ describe("migrateEnvironmentKeys", () => {
       envB: { count: 1, fingerprint: "b1" },
     });
   });
+});
+
+describe("clearPendingChangesFocusForPanelSelection", () => {
+  it("cancels pending auto-focus when the user activates another panel", () => {
+    const pendingEnvKeys = new Set(["envA"]);
+
+    clearPendingChangesFocusForPanelSelection({
+      activePanelId: "files",
+      activeEnvKey: "envA",
+      pendingEnvKeys,
+      isRestoringLayout: false,
+      isMaximized: false,
+    });
+
+    expect([...pendingEnvKeys]).toEqual([]);
+  });
+
+  it.each([
+    ["Changes", "changes", false, false],
+    ["layout restore", "files", true, false],
+    ["maximized layout", "files", false, true],
+  ] as const)(
+    "preserves pending focus for %s",
+    (_name, activePanelId, isRestoringLayout, isMaximized) => {
+      const pendingEnvKeys = new Set(["envA"]);
+
+      clearPendingChangesFocusForPanelSelection({
+        activePanelId,
+        activeEnvKey: "envA",
+        pendingEnvKeys,
+        isRestoringLayout,
+        isMaximized,
+      });
+
+      expect([...pendingEnvKeys]).toEqual(["envA"]);
+    },
+  );
 });
 
 describe("shouldClearPendingChangesFocus", () => {

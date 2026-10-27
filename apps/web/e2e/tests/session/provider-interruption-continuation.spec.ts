@@ -197,7 +197,12 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       fixture.sessionId,
       (message) => message.author_type === "user" && message.content === "continue",
     );
-    await expect(session.activeChat().getByText("continue", { exact: true })).toBeVisible();
+    await expect(
+      session
+        .activeChat()
+        .getByTestId("user-message-bubble")
+        .getByText("continue", { exact: true }),
+    ).toBeVisible();
     await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,

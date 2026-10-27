@@ -17,6 +17,40 @@ import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { autoActivateChangesPanel } from "./changes-panel-focus";
 import { useTranslation } from "react-i18next";
 
+function useUserSelectedAnotherTab(api: IDockviewPanelHeaderProps["api"]) {
+  const userSelectedAnotherTabRef = useRef(false);
+
+  useEffect(() => {
+    const groupElement = api.group.element;
+    const recordTabSelection = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return;
+      const selectedTab = target.closest(".dv-tab");
+      if (!selectedTab || !groupElement.contains(selectedTab)) return;
+
+      const changesTab = groupElement
+        .querySelector('[data-testid="dockview-tab-changes"]')
+        ?.closest(".dv-tab");
+      userSelectedAnotherTabRef.current = selectedTab !== changesTab;
+    };
+    const handlePointerDown = (event: PointerEvent) => recordTabSelection(event.target);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!["Enter", " ", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+      }
+      recordTabSelection(event.target);
+    };
+
+    groupElement.addEventListener("pointerdown", handlePointerDown, true);
+    groupElement.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      groupElement.removeEventListener("pointerdown", handlePointerDown, true);
+      groupElement.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [api]);
+
+  return userSelectedAnotherTabRef;
+}
+
 /**
  * Custom tab component for the Changes panel.
  * Provides auto-activation, flash animation on new changes,
@@ -39,6 +73,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   const prevTotalRef = useRef(totalCount);
   const seenCountRef = useRef(api.isActive ? totalCount : 0);
   const activeSessionRef = useRef(activeSessionId);
+  const userSelectedAnotherTabRef = useUserSelectedAnotherTab(api);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Armed once both sources of the displayed count have settled. Until then,
   // any 0→N transition is treated as an initial load, not a real new change.
@@ -62,6 +97,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
   useEffect(() => {
     if (activeSessionRef.current !== activeSessionId) {
       activeSessionRef.current = activeSessionId;
+      userSelectedAnotherTabRef.current = false;
       prevTotalRef.current = totalCount;
       seenCountRef.current = api.isActive ? totalCount : 0;
       initializedRef.current = false;
@@ -83,7 +119,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     // and its initial count must not steal focus from the user's selected tab.
     if (!initializedRef.current) {
       if (gitStatusLoaded && commitsLoaded) initializedRef.current = true;
-    } else if (increased) {
+    } else if (increased && !userSelectedAnotherTabRef.current) {
       // The product behavior is to surface every new git update unless the
       // changes panel shares a group with agent session panels.
       autoActivateChangesPanel();
