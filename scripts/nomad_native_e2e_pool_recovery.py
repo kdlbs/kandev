@@ -3,8 +3,9 @@
 * pool-pre-ready-recovery crashes the headless backend at the pre-publish barrier of a pool launch, restarts it and
   asserts the same execution reaches a ready environment with an unchanged continuation digest.
 * pool-backend-restart restarts the backend while a session runs on the ssh node and asserts recovery attached the
-  existing instance (same job, allocation, agentctl and fence) and that the Kandev API is reachable again through the
-  reverse tunnel the agentctl uses.
+  existing instance (same job, allocation, agentctl and fence). When the launch recorded a reverse API tunnel
+  (ssh_runtime_api_local_url in the runtime metadata) it also asserts the Kandev API is reachable again through it;
+  a native Nomad launch opens none, so those steps are skipped and the report carries tunnel null.
 * pool-idle-outage configures the backend with a 1m agentctl idle timeout, stops it for longer than that and asserts
   the retained instance stayed alive throughout and is re-attached after the restart. The running agentctl must carry
   KANDEV_ACP_IDLE_TIMEOUT=0 in its process environment (read on the node); when that cannot be observed the evidence
@@ -35,11 +36,12 @@ IDLE_TIMEOUT_SECONDS = 60
 # The janitor tick defaults to 1m, so a reap needs at most idle timeout plus two ticks; the window leaves a margin.
 OUTAGE_SECONDS = 180
 RUNTIME_API_PORT_KEY = "ssh_runtime_api_remote_port"
+# Recorded only when the launch opened a reverse API tunnel; a native Nomad launch opens none.
+RUNTIME_API_URL_KEY = "ssh_runtime_api_local_url"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-_LOOPBACK_URL = re.compile(r"https?://127\.0\.0\.1:([0-9]{1,5})\b")
 LIMITATIONS = [
     "the continuation digest is the durable input_digest of the environment state, with native_job_spec_sha256 recorded beside it",
-    "the Kandev API call through the tunnel is made from the ssh node to the loopback URL the agentctl is given; the inert agent makes no API call itself",
+    "the tunnel steps run only when the launch recorded a reverse API tunnel; a native Nomad launch opens none, so the agent-to-Kandev path after a restart is not exercised",
     "the Go side forces the idle timeout of a Nomad-managed agentctl to 0, so the 1m setting is observable only as the instance surviving",
 ]
 SURVIVAL_ONLY_LIMITATION = "the agentctl idle timeout could not be read from its process environment, so this run proves survival only"
@@ -72,13 +74,6 @@ def valid_port(value: Any) -> int:
     if not isinstance(value, (str, int)) or isinstance(value, bool) or not re.fullmatch(r"[0-9]{1,5}", str(value)) or not 1 <= int(value) <= 65535:
         raise PreflightError("the reverse tunnel port is not a valid port number")
     return int(value)
-
-
-def port_from_url(text: str) -> int:
-    match = _LOOPBACK_URL.search(text or "")
-    if match is None:
-        raise PreflightError("the agentctl Kandev API URL is not a loopback URL with a port")
-    return valid_port(match.group(1))
 
 
 def digests_from_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -223,23 +218,25 @@ class RecoveryScenario(pool.TwoNodeScenario):
         return problems
 
     # -- reverse tunnel -------------------------------------------------------------------------------
-    def tunnel_port(self, env: dict[str, Any]) -> int:
+    def runtime_metadata(self, env: dict[str, Any]) -> Any:
         def read(db: Any) -> list[Any]:
             return db.execute("SELECT metadata FROM executors_running WHERE session_id = ?", (env["session_id"],)).fetchall()
 
         rows = self.ops.read_db(self.r.database, read)
         try:
-            recorded = find_key(json.loads(rows[0][0]), RUNTIME_API_PORT_KEY) if len(rows) == 1 else None
+            return json.loads(rows[0][0]) if len(rows) == 1 else None
         except (TypeError, ValueError, IndexError):
-            recorded = None
-        if recorded is not None:
-            return valid_port(recorded)
-        leader = next((item for item in self.tree(env) if item["depth"] == 0 and item["role"] == "agentctl"), None)
-        if leader is not None:
-            code, out = self.r.ssh(f"tr '\\0' '\\n' < /proc/{int(leader['pid'])}/environ | sed -n 's/^KANDEV_API_URL=//p'")
-            if code == 0 and out.strip():
-                return port_from_url(out)
-        raise PreflightError("the reverse tunnel port could not be determined from the durable state or the agentctl environment")
+            return None
+
+    def has_tunnel(self, env: dict[str, Any]) -> bool:
+        """True when the launch recorded a reverse API tunnel; native Nomad launches open none."""
+        return _is_ssh(env) and find_key(self.runtime_metadata(env), RUNTIME_API_URL_KEY) is not None
+
+    def tunnel_port(self, env: dict[str, Any]) -> int:
+        recorded = find_key(self.runtime_metadata(env), RUNTIME_API_PORT_KEY)
+        if recorded is None:
+            raise PreflightError("the reverse tunnel port is not recorded in the durable runtime metadata")
+        return valid_port(recorded)
 
     def tunnel_status(self, env: dict[str, Any], port: int) -> int | None:
         """HTTP status of a Kandev API read made from the node over the tunnel, or None when nothing answers."""
@@ -395,15 +392,16 @@ def drive_pool_backend_restart(runner: fx.Runner, cfg: dict[str, Any], ops: fx.O
         task, env, layout = _running_instance(runner, cfg, step, scn)
         if not _is_ssh(env):
             raise PreflightError(f"the environment was placed on a {env.get('attach')} node; this scenario needs the ssh node")
-        port = step("determine-tunnel-port", lambda: scn.tunnel_port(env))
-        tunnel_before = step("assert-tunnel-before-restart", lambda: scn.assert_tunnel(env, port))
+        tunnel = step("detect-reverse-tunnel", lambda: scn.has_tunnel(env))
+        port = step("determine-tunnel-port", lambda: scn.tunnel_port(env)) if tunnel else None
+        tunnel_before = step("assert-tunnel-before-restart", lambda: scn.assert_tunnel(env, port)) if tunnel else None
         before = step("snapshot-before-restart", lambda: scn.snapshot(env, task))
         old = step("stop-backend", scn.stop_backend)
-        down = step("assert-tunnel-went-down", lambda: scn.await_tunnel_down(env, port))
+        down = step("assert-tunnel-went-down", lambda: scn.await_tunnel_down(env, port)) if tunnel else None
         new = step("restart-backend", lambda: runner.start_backend(None))
         if new["pid"] == old["pid"]:
             raise PreflightError("restarted backend reused the stopped process identity")
-        tunnel_after = step("await-tunnel-after-recovery", lambda: scn.await_tunnel(env))
+        tunnel_after = step("await-tunnel-after-recovery", lambda: scn.await_tunnel(env)) if tunnel else None
         after = step("snapshot-after-recovery", lambda: scn.snapshot(env, task))
         step("assert-instance-attached", lambda: compare_instance(before, after, "backend restart recovery"))
         _finish_cleanup(scn, step, guard, env, task, layout)
@@ -419,7 +417,7 @@ def drive_pool_backend_restart(runner: fx.Runner, cfg: dict[str, Any], ops: fx.O
         backend_pids={"before": old["pid"], "after": new["pid"]},
         attached_existing_instance={"job_id": after["nomad"]["job_id"], "job_recreated": False, "allocation_id": after["nomad"]["allocation_id"],
                                     "agentctl_unchanged": True, "fence_unchanged": True, "new_jobs": []},
-        tunnel={"before": tunnel_before, "after": tunnel_after, "went_down_with_backend": down})
+        tunnel={"before": tunnel_before, "after": tunnel_after, "went_down_with_backend": down} if tunnel else None)
 
 
 # -- pool-idle-outage ------------------------------------------------------------------------------------------
@@ -433,7 +431,7 @@ def drive_pool_idle_outage(runner: fx.Runner, cfg: dict[str, Any], ops: fx.Ops, 
         _prelude(runner, step, scn)
         step("configure-agentctl-idle-timeout", scn.apply_idle_override)
         task, env, layout = _running_instance(runner, cfg, step, scn)
-        port = step("determine-tunnel-port", lambda: scn.tunnel_port(env)) if _is_ssh(env) else None
+        tunnel_expected = step("detect-reverse-tunnel", lambda: scn.has_tunnel(env))
         before = step("snapshot-before-outage", lambda: scn.snapshot(env, task))
         idle = step("assert-agentctl-idle-timeout-disabled", lambda: scn.assert_idle_timeout_disabled(env))
         old = step("stop-backend", scn.stop_backend)
@@ -441,7 +439,7 @@ def drive_pool_idle_outage(runner: fx.Runner, cfg: dict[str, Any], ops: fx.Ops, 
         new = step("restart-backend", lambda: runner.start_backend(None))
         if new["pid"] == old["pid"]:
             raise PreflightError("restarted backend reused the stopped process identity")
-        tunnel = step("await-tunnel-after-recovery", lambda: scn.await_tunnel(env)) if port is not None else None
+        tunnel = step("await-tunnel-after-recovery", lambda: scn.await_tunnel(env)) if tunnel_expected else None
         after = step("snapshot-after-recovery", lambda: scn.snapshot(env, task))
         step("assert-instance-recovered", lambda: compare_instance(before, after, "idle outage recovery"))
         _finish_cleanup(scn, step, guard, env, task, layout)

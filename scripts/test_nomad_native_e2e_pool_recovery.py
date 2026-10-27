@@ -33,7 +33,11 @@ class Sim:
         self.inst = {"job_id": JOB, "job_create_index": 5, "job_definition_index": 6, "allocation_id": "al1", "execution_id": "exec-1",
                      "agentctl": (100, "t0"), "fence": "fence-1", "input_digest": DIGEST, "spec": SPEC, "alive": True}
         self.tunnel_up, self.tunnel_calls, self.outage_ticks = False, 0, 0
-        self.metadata = {} if flags.get("no_tunnel_port") else {"ssh_runtime_api_remote_port": "40123", "nomad_environment_state": {}}
+        self.metadata = {"nomad_environment_state": {}}
+        if not flags.get("native_no_tunnel"):
+            self.metadata["ssh_runtime_api_local_url"] = "http://127.0.0.1:8080"
+            if not flags.get("no_tunnel_port"):
+                self.metadata["ssh_runtime_api_remote_port"] = "40123"
         self.state = {"port": 9999, "task_id": "t1", "session_id": "s1", "expected_repo_count": 1, "manifest_env": {"A": "b"},
                       "nomad": {"address": "https://127.0.0.1:4646", "namespace": "kandev", "region": "global", "node_id": SSH}}
         self.evidence = SimpleNamespace(data={"status": "running", "steps": []}, secrets=[], scrub=lambda text: text)
@@ -111,7 +115,7 @@ class Sim:
             value = self.flags.get("idle_env", "0")
             return (0, f"{value}\n") if value is not None else (1, "")
         if "/proc/" in command:
-            return (0, "http://127.0.0.1:40555\n") if self.flags.get("environ_port") else (1, "")
+            raise AssertionError("the runner must not read /proc/<pid>/environ on the ssh node for the tunnel")
         return 0, ""
 
     def tree(self):
@@ -266,12 +270,6 @@ class HelperTest(unittest.TestCase):
     def test_find_key_searches_nested_objects_and_lists(self):
         self.assertEqual(rec.find_key({"a": [{"b": {"k": "7"}}]}, "k"), "7")
         self.assertIsNone(rec.find_key({"a": 1}, "k"))
-
-    def test_port_from_url_accepts_loopback_urls_only(self):
-        self.assertEqual(rec.port_from_url("http://127.0.0.1:40555"), 40555)
-        for bad in ("", "http://example.invalid:80", "http://127.0.0.1", "http://127.0.0.1:99999"):
-            with self.assertRaises(PreflightError):
-                rec.port_from_url(bad)
 
     def test_valid_port(self):
         self.assertEqual(rec.valid_port("40123"), 40123)
@@ -462,9 +460,14 @@ class BackendRestartTest(DriveBase):
         self.assert_fails(rec.drive_pool_backend_restart, "tunnel port", no_tunnel_port=True)
         self.assertEqual(self.sim.stops, 0)
 
-    def test_tunnel_port_falls_back_to_the_agentctl_environment(self):
-        report = self.run_it(no_tunnel_port=True, environ_port=True)
-        self.assertEqual(report["tunnel"]["before"]["port"], 40555)
+    def test_native_launch_without_a_reverse_tunnel_skips_the_tunnel_steps(self):
+        report = self.run_it(native_no_tunnel=True)
+        self.assertIsNone(report["tunnel"])
+        self.assertEqual(self.sim.tunnel_calls, 0)
+        self.assertEqual(report["attached_existing_instance"]["job_recreated"], False)
+        self.assertEqual(report["attached_existing_instance"]["agentctl_unchanged"], True)
+        self.assertNotIn("determine-tunnel-port", self.steps())
+        self.assertIn("assert-instance-attached", self.steps())
 
     def test_backend_that_will_not_stop_fails(self):
         self.assert_fails(rec.drive_pool_backend_restart, "did not stop", stop_fails=True)
@@ -559,6 +562,11 @@ class IdleOutageTest(DriveBase):
 
     def test_ssh_node_tunnel_must_return_after_recovery(self):
         self.assert_fails(rec.drive_pool_idle_outage, "tunnel", tunnel_stays_down=True)
+
+    def test_ssh_native_launch_without_a_reverse_tunnel_skips_the_tunnel(self):
+        report = self.run_it(native_no_tunnel=True)
+        self.assertIsNone(report["tunnel"])
+        self.assertEqual(self.sim.tunnel_calls, 0)
 
     def test_local_node_has_no_tunnel_to_check(self):
         report = self.run_it(landed_local=True)
