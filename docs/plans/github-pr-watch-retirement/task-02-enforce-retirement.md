@@ -273,3 +273,23 @@ the scroll owner's frozen-position contract, instead of a potentially clamped
 position after prompt submission. The previous assertion passed eight local
 runs, so the exact CI timing was not reproduced; the revised assertion also
 passed eight retry-free runs.
+
+The current-main merge preserved both versions' seeded-profile ownership check
+in a shared helper. Its unit tests cover a profile-less first agent and
+ambiguous ownership; the mobile profile deletion and duplication specs passed
+five tests without retries. The merged GitHub backend package suite and web
+typecheck passed.
+
+The completed CI run at `9aa75eff` had one flaky canvas message test among
+4,280 executed tests. Its HTTP 500 response did not expose the underlying
+error. The exact failure did not reproduce in six isolated runs or three
+replays of its three-test predecessor sequence under two CPUs and 4 GB.
+The canvas test now waits for the task move's lifecycle marker to clear before
+exercising its separate message action. Move completion changes the task
+version asynchronously and can race message admission, although the generic
+CI response does not prove that was the observed cause. Bounded server logs
+now record the failure phase and gRPC code for internal canvas message errors
+without recording prompts or downstream error text.
+After the lifecycle wait and bounded diagnostics, the constrained three-test
+canvas sequence passed nine cases without retries. The plugin package suite,
+changed-Go lint, frontend typecheck, and E2E sleep checks passed.
