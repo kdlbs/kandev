@@ -90,7 +90,7 @@ export GOMEMLIMIT=512MiB
 (cd apps/web && pnpm exec vitest run components/task/chat/messages/tool-file-reference-opening.test.tsx)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/chat-tool-file-opening.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome tests/task/mobile-chat-tool-file-opening.spec.ts -- --retries=0)
-(cd apps/web && pnpm exec eslint --max-warnings 0 components/task/chat/messages/file-path-button.tsx components/task/chat/messages/tool-file-reference-opening.test.tsx e2e/helpers/tool-file-opening.ts e2e/tests/task/chat-tool-file-opening.spec.ts e2e/tests/task/mobile-chat-tool-file-opening.spec.ts -- --retries=0)
+(cd apps/web && pnpm exec eslint --max-warnings 0 components/task/chat/messages/file-path-button.tsx components/task/chat/messages/tool-file-reference-opening.test.tsx e2e/helpers/tool-file-opening.ts e2e/tests/task/chat-tool-file-opening.spec.ts e2e/tests/task/mobile-chat-tool-file-opening.spec.ts)
 (cd apps/web && pnpm run typecheck)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all

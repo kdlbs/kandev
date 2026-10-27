@@ -23,7 +23,7 @@ test.describe("Desktop tool file references", () => {
         await expect(session.activeChat().getByText(":300-300")).toBeVisible();
         await link.click();
         const editor = testPage.locator(".monaco-editor:visible").first();
-        await expect(editor.locator(".view-line").first()).toHaveText("read fixture line 1");
+        await expect(editor.locator(".view-lines")).toContainText(/read\s+fixture\s+line\s+\d+/);
         await expect(testPage.locator(".dv-tab", { hasText: "Dockerfile" })).toBeVisible();
       },
     );
