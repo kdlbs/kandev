@@ -247,6 +247,31 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("for attempt in 1 2; do", self.generation)
         self.assertNotIn("opencode_status", self.generation)
 
+    # @covers AC-UI-PR-WALKTHROUGH-001.15
+    def test_generation_is_best_effort_and_warns_instead_of_failing(self) -> None:
+        run_step = self.generation.split("- name: Run OpenCode walkthrough", 1)[1].split(
+            "- name:", 1
+        )[0]
+        self.assertIn("continue-on-error: true", run_step)
+        self.assertIn("--print-logs", run_step)
+
+        self.assertIn("generated: ${{ steps.report.outputs.generated }}", self.generation)
+        report_step = self.generation.split(
+            "- name: Report walkthrough generation outcome", 1
+        )[1]
+        self.assertIn('echo "generated=true" >> "$GITHUB_OUTPUT"', report_step)
+        self.assertIn('echo "generated=false" >> "$GITHUB_OUTPUT"', report_step)
+        self.assertIn("GENERATE_OUTCOME: ${{ steps.generate.outcome }}", report_step)
+        self.assertIn("::warning title=PR walkthrough skipped::", report_step)
+        self.assertIn("## PR walkthrough skipped", report_step)
+        self.assertIn("best effort", report_step)
+
+        self.assertIn(
+            "needs.pr-walkthrough-generate.outputs.generated == 'true'",
+            self.publication,
+        )
+        self.assertIn("if-no-files-found: warn", self.generation)
+
     def test_generation_budgets_preparation_and_generation_time(self) -> None:
         self.assertIn("timeout-minutes: 25", self.generation)
         budgets = (
@@ -350,7 +375,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("- name: Stage walkthrough artifact\n        if: always()", self.generation)
         self.assertIn("path: pr-walkthrough-artifact/", self.generation)
-        self.assertIn("if-no-files-found: error", self.generation)
+        self.assertIn("if-no-files-found: warn", self.generation)
 
     def test_walkthrough_runs_are_serialized_for_the_entire_pr_pipeline(self) -> None:
         workflow_header = self.workflow.split("jobs:", 1)[0]

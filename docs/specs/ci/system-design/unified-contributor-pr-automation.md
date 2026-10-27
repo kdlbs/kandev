@@ -113,6 +113,11 @@ The walkthrough keeps the existing provider-neutral contract:
 4. Validate the public response and exact HTML bytes.
 5. Add or replace the owned callout in the pull request body in the link job.
 
+Generation is advisory. When it produces no verified output pair, the
+generation job emits a warning and steps 2 to 5 do not run; the pull request
+check stays successful. [The walkthrough design](../../ui/system-design/pr-walkthrough.md#generation-diagnostics)
+owns the policy and diagnostics.
+
 The walkthrough link, reconciliation, and short preview-description jobs use
 one per-pull-request description-write concurrency group. Long-running preview
 deployment and cleanup jobs do not hold that lock. Each description writer
@@ -265,3 +270,4 @@ trigger.
 - [Use the workflow SHA for trusted PR walkthrough inputs](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md)
 - [Host PR walkthrough HTML in Cloudflare R2](../../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md)
 - [Isolate ineligible PR walkthrough triggers](../../../decisions/2026-09-22-pr-walkthrough-eligibility-concurrency.md)
+- [Treat PR walkthrough generation as best effort](../../../decisions/2026-10-27-advisory-pr-walkthrough-generation.md)
