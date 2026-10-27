@@ -94,5 +94,5 @@ comparison command/names are recorded in
 The contribution remains a draft. TLS/scoped-ACL mode has not run live; fix 7 has Go tests
 only; native post-restart reattachment has not proved an actual agent-to-Kandev tool call.
 [Remaining fixture instructions](../../evidence/nomad-e2e-coverage/remaining-fixtures.md)
-describe the supported commands and the missing harness extensions. Actual Tank/Neo pool
+describe the supported commands and the missing harness extensions. Actual deployment pool
 evaluation remains a separate approved window.

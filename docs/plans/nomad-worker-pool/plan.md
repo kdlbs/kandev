@@ -86,7 +86,7 @@ their Results sections. The 2026-10-28 closeout records 14 operator-reported def
 scenario passes and current local verification in
 [`docs/evidence/nomad-e2e-coverage/`](../../evidence/nomad-e2e-coverage/README.md).
 TLS/scoped-ACL live mode, live SFTP upload cancellation, and an actual native agent-to-Kandev
-tool call after restart remain unproven. Completion does not certify the Tank/Neo pool or
+tool call after restart remain unproven. Completion does not certify the deployment pool or
 authorize production rollout.
 
 Execute 01 -> 02 -> 03 after native executor work orders 01-07 are done.

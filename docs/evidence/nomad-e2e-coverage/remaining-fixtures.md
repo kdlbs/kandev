@@ -1,7 +1,7 @@
 # Remaining disposable-fixture proof
 
 These are operator instructions for a separately approved laptop or isolated VM window.
-They were not run during closeout. Do not run them from Tank or against the actual Tank/Neo
+They were not run during closeout. Do not run them from a production host or against the actual deployment
 pool. No production service, shared workflow profile, or production credential is needed.
 The current default-mode results do not prove any of the three cases below.
 

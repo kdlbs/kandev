@@ -132,13 +132,13 @@ The latest code/runner round adds no schema, SQL dialect or event-bus subscriber
 - The [14 default-mode laptop results](README.md) are operator-reported; raw live JSON is
   not committed. No `--require-real` invocation ran during closeout.
 - TLS/scoped-ACL fixture mode has not run live. Its policy has not been diffed against
-  FleetFoundry's deployment policy; macOS OpenSSL compatibility remains unverified.
+  the deployment policy; macOS OpenSSL compatibility remains unverified.
 - SFTP cancellation fix 7 has Go tests only.
 - Native post-restart instance reattachment has not proved an actual agent-to-Kandev tool call.
 - [remaining-fixtures.md](remaining-fixtures.md) gives the supported disposable-fixture
   commands/configuration and identifies the two required harness extensions.
-- No live Kandev, FleetFoundry, TeamClaude, Nomad or collector service, and no shared workflow
-  profile, was changed or restarted. Actual Tank/Neo pool evaluation remains separately approved.
+- No live application, Nomad or collector service, and no shared workflow
+  profile, was changed or restarted. Actual deployment pool evaluation remains separately approved.
 - Testing and Review must use an available Codex session. Their configured Sonnet routing
   cannot be changed with the exposed task tools. The external task plan and
   `/private/tmp/ff-nomad-closeout-result.md` carry the exact coordinator routing requirement.
