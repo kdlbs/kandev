@@ -131,4 +131,12 @@ Verification passed:
 - `python3 scripts/list-docs.py validate`: 403 decisions and 1,740 specifications validated.
 - `python3 scripts/lint-spec-files.py --all` and `git diff --check`.
 - Current PR fixup: the Chromium changed-files E2E rebuilt the backend and web assets and passed all 6 cases, including the narrow fine-pointer phone case. Mobile agent-profile deletion passed 3 cases; the targeted Chromium restart, branch-selector, and session-recency cases passed 3 cases with retries disabled. Focused ESLint and `git diff --check` passed.
-- PR CI follow-up: profile-order cleanup skips the invalid empty-order API request; the mobile profile-order E2E passed 1 case with retries disabled. The c18ad90 workflow is still incomplete, with three flaky shards reported and other jobs queued.
+- Profile-order cleanup skips the API write when the original order is empty; its mobile E2E passed 1 case with retries disabled.
+- PR CI run 40482001180 completed on merge SHA `3663a7ca` with four flaky E2E
+  failures across shards 6, 13, and 16. All passed on retry, but
+  `E2E_FAIL_ON_FLAKY=1` failed the shards and aggregate. Follow-up now waits for
+  conversation indexing, mock prompt acceptance before cancellation, and
+  runtime replacement before sibling startup; the branch-policy tooltip check
+  uses keyboard focus. Retries-disabled local E2E passed 1 branch-policy case
+  and 3 mobile cases. Focused ESLint, web typecheck, Prettier, and
+  `git diff --check` passed.
