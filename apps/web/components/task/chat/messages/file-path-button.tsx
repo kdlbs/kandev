@@ -17,17 +17,12 @@ type FilePathButtonProps = {
  * - Empty paths or just whitespace
  * - Single dot "." (current directory)
  * - Paths ending with "/" (directories)
- * - Paths without a file extension in the last segment (likely directories)
  */
 function isOpenableFilePath(path: string): boolean {
   if (!path || !path.trim()) return false;
   const trimmed = path.trim();
   if (trimmed === ".") return false;
   if (trimmed.endsWith("/")) return false;
-  // Get the last segment of the path
-  const lastSegment = trimmed.split("/").pop() || "";
-  // If last segment has no extension and doesn't start with a dot (hidden file), it's likely a directory
-  if (!lastSegment.includes(".")) return false;
   return true;
 }
 
