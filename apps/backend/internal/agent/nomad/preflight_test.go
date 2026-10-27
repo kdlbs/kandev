@@ -68,6 +68,8 @@ func TestPreflightPoolRefusals(t *testing.T) {
 		{"missing pool", preflightServer(t, ``, enabled, http.StatusNotFound), poolPreflightProfile(PlacementSpread, 2048), "not readable"},
 		{"wrong pool", preflightServer(t, `{"Name":"other"}`, enabled, 0), poolPreflightProfile(PlacementSpread, 2048), "was not returned"},
 		{"oversubscription off", preflightServer(t, `{"Name":"kandev"}`, disabled, 0), poolPreflightProfile(PlacementSpread, 2048), "oversubscription"},
+		{"spread on binpack cluster", preflightServer(t, `{"Name":"kandev"}`, `{"SchedulerConfig":{"SchedulerAlgorithm":"binpack","MemoryOversubscriptionEnabled":true}}`, 0), poolPreflightProfile(PlacementSpread, 2048), "spread scheduler"},
+		{"spread on binpack node pool", preflightServer(t, `{"Name":"kandev","SchedulerConfiguration":{"SchedulerAlgorithm":"binpack"}}`, enabled, 0), poolPreflightProfile(PlacementSpread, 2048), "spread scheduler"},
 		{"binpack on spread cluster", preflightServer(t, `{"Name":"kandev"}`, enabled, 0), poolPreflightProfile(PlacementBinpack, 2048), "binpack scheduler"},
 	}
 	for _, tc := range cases {
@@ -132,3 +134,11 @@ func TestPreflightPoolCapacityAcceptsOneFitNodeAmongMisfits(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func TestPreflightPoolSpreadOverrideOnNodePool(t *testing.T) {
+	c := preflightServer(t, `{"Name":"kandev","SchedulerConfiguration":{"SchedulerAlgorithm":"spread"}}`,
+		`{"SchedulerConfig":{"SchedulerAlgorithm":"binpack","MemoryOversubscriptionEnabled":true}}`, 0)
+	if err := c.PreflightPool(context.Background(), poolPreflightProfile(PlacementSpread, 2048)); err != nil {
+		t.Fatalf("node pool spread override must pass: %v", err)
+	}
+}

@@ -23,12 +23,15 @@ type schedulerConfigResponse struct {
 	} `json:"SchedulerConfig"`
 }
 
-const schedulerAlgorithmBinpack = "binpack"
+const (
+	schedulerAlgorithmBinpack = "binpack"
+	schedulerAlgorithmSpread  = "spread"
+)
 
 // PreflightPool proves the cluster can honour a pool profile before a job is
 // registered: the node pool exists, memory oversubscription is on (the job asks
 // for a small reservation with a larger ceiling), and the binpack placement
-// mode is backed by a binpack scheduler. Errors never include credentials.
+// mode is backed by the matching scheduler algorithm. Errors never include credentials.
 func (c *Client) PreflightPool(ctx context.Context, profile ProfileConfig) error {
 	if profile.Mode != ModePool {
 		return errors.New("pool preflight requires a pool profile")
@@ -47,16 +50,35 @@ func (c *Client) PreflightPool(ctx context.Context, profile ProfileConfig) error
 	if profile.MemoryMaxMB > profile.MemoryMB && !scheduler.SchedulerConfig.MemoryOversubscriptionEnabled {
 		return errors.New("pool preflight: memory oversubscription is disabled in the Nomad scheduler configuration; enable it with `nomad operator scheduler set-config -memory-oversubscription=true` or set memory_max_mb equal to memory_mb")
 	}
-	if profile.Placement == PlacementBinpack {
-		algorithm := scheduler.SchedulerConfig.SchedulerAlgorithm
-		if pool.SchedulerConfiguration != nil && pool.SchedulerConfiguration.SchedulerAlgorithm != "" {
-			algorithm = pool.SchedulerConfiguration.SchedulerAlgorithm
-		}
+	if err := checkPlacementAlgorithm(profile, effectiveSchedulerAlgorithm(&pool, &scheduler)); err != nil {
+		return err
+	}
+	return c.preflightPoolCapacity(ctx, profile)
+}
+
+// effectiveSchedulerAlgorithm is the node pool's scheduler algorithm when set,
+// else the cluster's.
+func effectiveSchedulerAlgorithm(pool *nodePoolRecord, scheduler *schedulerConfigResponse) string {
+	if pool.SchedulerConfiguration != nil && pool.SchedulerConfiguration.SchedulerAlgorithm != "" {
+		return pool.SchedulerConfiguration.SchedulerAlgorithm
+	}
+	return scheduler.SchedulerConfig.SchedulerAlgorithm
+}
+
+// checkPlacementAlgorithm refuses a placement mode the effective scheduler
+// algorithm cannot honour: Nomad only spreads or packs as its algorithm says.
+func checkPlacementAlgorithm(profile ProfileConfig, algorithm string) error {
+	switch profile.Placement {
+	case PlacementBinpack:
 		if algorithm != schedulerAlgorithmBinpack {
 			return fmt.Errorf("pool preflight: placement %q needs a binpack scheduler for node pool %q; set the node pool or cluster scheduler algorithm to binpack, or use placement spread", PlacementBinpack, profile.NodePool)
 		}
+	case PlacementSpread:
+		if algorithm != schedulerAlgorithmSpread {
+			return fmt.Errorf("pool preflight: placement %q needs a spread scheduler for node pool %q; set the node pool or cluster scheduler algorithm to spread (`nomad operator scheduler set-config -scheduler-algorithm=spread`), or use placement binpack", PlacementSpread, profile.NodePool)
+		}
 	}
-	return c.preflightPoolCapacity(ctx, profile)
+	return nil
 }
 
 // preflightPoolCapacity refuses a profile no eligible pool node can ever hold.

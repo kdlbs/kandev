@@ -853,3 +853,10 @@ func TestListenHost(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadEnvZeroIdleTimeoutDisablesReaper(t *testing.T) {
+	t.Setenv("KANDEV_ACP_IDLE_TIMEOUT", "0")
+	if got := Load().IdleTimeout; got != 0 {
+		t.Fatalf("IdleTimeout = %s, want 0 (reaper disabled)", got)
+	}
+}

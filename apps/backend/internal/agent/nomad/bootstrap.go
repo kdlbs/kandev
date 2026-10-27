@@ -77,6 +77,7 @@ export AGENTCTL_PORT="$control_port"
 export AGENTCTL_INSTANCE_PORT_BASE="$instance_port"
 export AGENTCTL_INSTANCE_PORT_MAX="$instance_port"
 export AGENTCTL_LISTEN_HOST=127.0.0.1
+export KANDEV_ACP_IDLE_TIMEOUT=0
 exec "$agentctl_path" --workdir "$workspace_root"
 `, shellQuote(state.JobID), shellQuote(state.NodeID), shellQuote(fenceParent), shellQuote(fence), shellQuote(owner), shellQuote(fence), shellQuote(fence), scratch), nil
 }
