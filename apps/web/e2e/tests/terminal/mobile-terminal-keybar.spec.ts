@@ -397,17 +397,23 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const { frames } = attachShellInputCapture(testPage);
     await seedTaskWithSession(testPage, apiClient, seedData, "Keybar arrow up");
     await switchToTerminalPanel(testPage);
 
     const keybar = new MobileTerminalKeybarPage(testPage);
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
     await waitForShellReady(testPage);
+    await focusTerminalForTyping(testPage);
+    await testPage.keyboard.type("echo HISTORY_PROBE_782");
+    await testPage.keyboard.press("Enter");
+    const lines = async () =>
+      (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim());
+    await expect.poll(lines).toContain("HISTORY_PROBE_782");
 
     await keybar.tap("up");
-
-    await expectFrame(frames, "\x1b[A");
+    await testPage.keyboard.type("_SUFFIX");
+    await testPage.keyboard.press("Enter");
+    await expect.poll(lines).toContain("HISTORY_PROBE_782_SUFFIX");
   });
 
   test("user taps Esc — sends \\x1b (vim-style insert-mode exit)", async ({
