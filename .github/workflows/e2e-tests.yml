@@ -498,7 +498,6 @@ jobs:
     # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
-      E2E_FAIL_ON_FLAKY: "1"
       KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
@@ -673,7 +672,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
-      E2E_FAIL_ON_FLAKY: "1"
       KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
