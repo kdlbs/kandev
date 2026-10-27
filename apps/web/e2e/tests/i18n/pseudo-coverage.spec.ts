@@ -2,6 +2,7 @@ import { type Page } from "@playwright/test";
 
 import pseudoSettings from "../../../src/locales/pseudo/settings.json";
 import { test, expect } from "../../fixtures/test-base";
+import { installRuntimeUpdateFixture } from "../settings/agent-runtime-update-helpers";
 
 /**
  * Pseudo-locale coverage oracle.
@@ -843,6 +844,24 @@ async function findUnlocalizedCopy(
 }
 
 test.describe("i18n pseudo-locale coverage", () => {
+  test("localizes a Kandev update notification received from the backend", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+    const screen = SCREENS.find((item) => item.url === "/settings/preferences/appearance");
+    if (!screen) throw new Error("The appearance screen is missing");
+    await activatePseudo(testPage, screen.url);
+    await waitForScreen(testPage, screen);
+    await runtime.emit("system.update_available", {
+      version: "v1.2.3",
+      occurrence_id: "pseudo-update-v1.2.3",
+      title: "Kandev update available",
+      body: "Kandev v1.2.3 is available. Open Settings > System > Updates to review it.",
+    });
+    const toast = testPage
+      .getByTestId("toast-message")
+      .filter({ hasText: "Ķàńďēv ũƥďàţē àvàĩĺàƀĺē" });
+    await expect(toast).toContainText("Ķàńďēv v1.2.3 ĩś àvàĩĺàƀĺē");
+  });
+
   for (const name of ["Untranslated action", "elete"]) {
     test(`distinguishes stored secret name ${name} from untranslated action labels`, async ({
       testPage,
