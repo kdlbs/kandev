@@ -28,6 +28,83 @@ async function cachedSessionState(
 }
 
 test.describe("deleted task client state", () => {
+  // @covers AC-UI-DELETED-TASK-CLIENT-STATE-001.4
+  test("stops Git read recovery after the task is deleted", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Deleted Git reads",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length)
+      .toBeGreaterThan(0);
+    const sessionId = (await apiClient.listTaskSessions(task.id)).sessions[0].id;
+    let gitReads = 0;
+    let deleted = false;
+    await testPage.routeWebSocket(/\/ws$/, (socket) => {
+      const server = socket.connectToServer();
+      socket.onMessage((message) => {
+        if (typeof message !== "string") return server.send(message);
+        for (const part of message.split("\n").filter(Boolean)) {
+          const frame = JSON.parse(part) as {
+            id?: string;
+            type?: string;
+            action?: string;
+            payload?: { session_id?: string };
+          };
+          if (
+            frame.type === "request" &&
+            frame.payload?.session_id === sessionId &&
+            (frame.action === "session.git.commits" || frame.action === "session.cumulative_diff")
+          ) {
+            gitReads++;
+            socket.send(
+              JSON.stringify({
+                ...frame,
+                type: "error",
+                payload: { code: "UNAVAILABLE", message: "temporary" },
+              }),
+            );
+          } else server.send(part);
+        }
+      });
+      server.onMessage((message) => {
+        if (typeof message === "string") {
+          for (const part of message.split("\n").filter(Boolean)) {
+            const frame = JSON.parse(part) as { action?: string; payload?: { task_id?: string } };
+            if (frame.action === "task.deleted" && frame.payload?.task_id === task.id)
+              deleted = true;
+          }
+        }
+        socket.send(message);
+      });
+    });
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+    await expect.poll(() => gitReads, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    const initialReads = gitReads;
+    await expect.poll(() => gitReads, { timeout: 15_000 }).toBeGreaterThan(initialReads);
+    await apiClient.deleteTask(task.id);
+    await expect.poll(() => deleted).toBe(true);
+    const readsAfterDeletion = gitReads;
+    const deadline = Date.now() + 6500;
+    await expect.poll(() => Date.now(), { timeout: 10_000 }).toBeGreaterThan(deadline);
+    expect(gitReads).toBe(readsAfterDeletion);
+  });
+
   // @covers AC-UI-DELETED-TASK-CLIENT-STATE-001.1
   // @covers AC-UI-DELETED-TASK-CLIENT-STATE-001.2
   test("drops the deleted task's transcript and keeps other tasks", async ({
