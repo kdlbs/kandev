@@ -266,3 +266,10 @@ animations and allows one pixel for rendering precision at the 80vh bound.
 The focused test passed five retry-free runs; the exact rounding was not
 reproduced locally. After resolving the current-main merge, the selected
 desktop and mobile E2E suites each passed ten tests without retries.
+
+A later mobile transcript test observed a 29-pixel difference after disabling
+auto-scroll. The assertion now records the position at disable time, matching
+the scroll owner's frozen-position contract, instead of a potentially clamped
+position after prompt submission. The previous assertion passed eight local
+runs, so the exact CI timing was not reproduced; the revised assertion also
+passed eight retry-free runs.

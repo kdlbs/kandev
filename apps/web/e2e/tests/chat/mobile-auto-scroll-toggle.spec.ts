@@ -445,6 +445,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
 
     // Capture the owned reading position before submission can temporarily clamp it.
     const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
