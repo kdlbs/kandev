@@ -261,6 +261,9 @@ func isManualRecoveryPromptError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, ErrSessionRecoveryRequired) {
+		return true
+	}
 	message := strings.ToLower(err.Error())
 	// Codex renders the notice with a typographic apostrophe; normalize it so
 	// both forms are recognized.
@@ -3912,7 +3915,14 @@ func (s *Service) loadResumeSessionCandidate(
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
 	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if resumeRequiresExecutorRecord(session, running, err, options, allowCompletedResume) {
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("load executor inventory for resume: %w", err)
+	}
+	bootstrapRecovery, err := s.admitBootstrapRecovery(ctx, session, running)
+	if err != nil {
+		return nil, err
+	}
+	if !bootstrapRecovery && resumeRequiresExecutorRecord(session, running, options, allowCompletedResume) {
 		// Cancelled/failed and explicit completed resumes can outlive cleanup of
 		// the executor record. Other sessions require that record.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
@@ -3923,11 +3933,10 @@ func (s *Service) loadResumeSessionCandidate(
 func resumeRequiresExecutorRecord(
 	session *models.TaskSession,
 	running *models.ExecutorRunning,
-	lookupErr error,
 	options executor.ResumeOptions,
 	allowCompletedResume bool,
 ) bool {
-	return (lookupErr != nil || running == nil) &&
+	return running == nil &&
 		session.State != models.TaskSessionStateCancelled &&
 		session.State != models.TaskSessionStateFailed &&
 		!models.HasInterruptedRecoveryPending(session.Metadata) &&
@@ -7669,10 +7678,10 @@ func (s *Service) finishPromptExecutorDispatch(
 				context.WithoutCancel(ctx), sessionID, "backend_delivery_completion_failed", delivery,
 			)
 			return &PromptResult{
-					StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID,
-				}, &acceptedPromptDispatchError{
-					err: errors.Join(completionErr, recoveryErr),
-				}
+				StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID,
+			}, &acceptedPromptDispatchError{
+				err: errors.Join(completionErr, recoveryErr),
+			}
 		}
 	}
 	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID}, nil

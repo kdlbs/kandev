@@ -290,6 +290,11 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	}
 
 	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
+	if s.sandboxCreationAdmission != nil {
+		if err := s.sandboxCreationAdmission(ctx, prepared.task, req); err != nil {
+			return CreateTaskResult{}, err
+		}
+	}
 	if err := s.createTaskWithCapacity(ctx, prepared.task); err != nil {
 		if found, ok, lookupErr := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil

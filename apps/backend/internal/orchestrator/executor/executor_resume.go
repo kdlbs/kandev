@@ -84,6 +84,7 @@ type repoInfo struct {
 	WorktreeBranchPrefix       string
 	WorktreeBranchTemplate     string
 	PullBeforeWorktree         bool
+	RunGitHooks                bool
 	RemoteSyncHandled          bool
 	RefreshRepository          func(context.Context) error
 	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
@@ -256,6 +257,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		info.WorktreeBranchTemplate = tr.BranchPolicyBranchTemplate
 	}
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
+	info.RunGitHooks = repo.RunGitHooks
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
 	}
@@ -2248,6 +2250,7 @@ func applyResumeRepositoryFlags(req *LaunchAgentRequest, repositories []*repoInf
 	}
 	first := repositories[0]
 	req.PullBeforeWorktree = first.PullBeforeWorktree
+	req.RunGitHooks = first.RunGitHooks
 	req.RemoteSyncHandled = first.RemoteSyncHandled
 	req.RefreshRepository = first.RefreshRepository
 	req.RefreshRepositoryWithState = first.RefreshRepositoryWithState
@@ -2490,7 +2493,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			isRecoverableCancelledResumeSession(session) ||
 			session.State == models.TaskSessionStateCompleted ||
 			(session.State == models.TaskSessionStateFailed &&
-				req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored)
+				(req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored || isExplicitBootstrapResume(req, session)))
 		if startAgent && noAutoPromptState {
 			if req.ForceContextContinuation {
 				return nil
@@ -2552,6 +2555,15 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 	}
 
 	return running
+}
+
+func isExplicitBootstrapResume(req *LaunchAgentRequest, session *models.TaskSession) bool {
+	const recoveryActionResume = "resume"
+	if req.RecoveryAction != recoveryActionResume {
+		return false
+	}
+	failure, found := models.LoadLastAgentError(session.Metadata)
+	return found && failure.Phase == models.LaunchErrorPhaseBootstrap
 }
 
 // persistedSessionResumeToken returns the provider conversation identity that
@@ -2874,6 +2886,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 		req.WorktreeBranchTemplate = primaryTaskRepo.BranchPolicyBranchTemplate
 	}
 	req.PullBeforeWorktree = repository.PullBeforeWorktree
+	req.RunGitHooks = repository.RunGitHooks
 	// Worktree manager requires TaskDirName and RepoName. Mirror the
 	// initial-launch path (applyRepositoryConfig) so resumes of single-repo
 	// tasks don't fail with ErrTaskDirRequired. Prefer a persisted

@@ -61,9 +61,9 @@ func (s *Service) DisableWithResult(id string) (DisableResult, error) {
 		return result, err
 	}
 	result.RemoteResourcesMayRemain = len(rec.ExecutorProviders) > 0
-	if len(rec.ExecutorProviders) > 0 {
-		s.closeExecutorProviderAdmission(id)
-		defer s.reopenExecutorProviderAdmissionIfActive(id)
+	if hasBoundedProviderCalls(&rec.Manifest) {
+		s.closeProviderAdmission(id)
+		defer s.reopenProviderAdmissionIfActive(id)
 	}
 	dispatchLock := s.dispatchLocks.lockFor(id)
 	dispatchLock.Lock()
@@ -275,13 +275,13 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 	}
 	s.mu.Unlock()
 	if status != StatusActive {
-		s.closeExecutorProviderAdmission(id)
+		s.closeProviderAdmission(id)
 		if err := s.cancelAutomationDeliveries(id); err != nil {
 			return err
 		}
 		s.revokeGitCredentialProviderLeases(updated.RepositoryProviders)
 	} else {
-		s.openExecutorProviderAdmission(id)
+		s.openProviderAdmission(id)
 	}
 	return nil
 }

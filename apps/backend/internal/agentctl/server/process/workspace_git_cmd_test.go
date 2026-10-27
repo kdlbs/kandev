@@ -177,7 +177,7 @@ func installFastGitShim(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	shim := filepath.Join(dir, "git")
-	if err := os.WriteFile(shim, []byte("#!/bin/sh\nprintf ok\n"), 0o755); err != nil {
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nif [ \"$1\" = config ]; then exit 1; fi\nprintf ok\n"), 0o755); err != nil {
 		t.Fatalf("write fast git shim: %v", err)
 	}
 	return dir

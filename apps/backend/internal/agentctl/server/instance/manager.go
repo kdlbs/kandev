@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"sync"
@@ -32,6 +33,50 @@ const instanceHTTPShutdownGrace = 250 * time.Millisecond
 // Callers get a clear refusal instead of an instance that the shutdown sequence
 // has already walked past and will never stop.
 var ErrManagerShuttingDown = errors.New("instance manager is shutting down")
+
+// ErrInstanceExists and ErrInstanceCleaningUp report a create whose instance
+// ID is live or still being torn down. Neither changes the existing instance.
+var (
+	ErrInstanceExists     = errors.New("instance already exists")
+	ErrInstanceCleaningUp = errors.New("instance is still cleaning up")
+)
+
+// ErrInvalidBrokerUpstream marks a create request whose upstream credential
+// broker URL cannot be relayed to.
+var ErrInvalidBrokerUpstream = errors.New("invalid credential broker upstream url")
+
+// ValidateBrokerUpstream accepts an empty URL or an absolute http or https URL
+// without userinfo, query or fragment whose path ends in /resolve.
+func ValidateBrokerUpstream(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	if raw != strings.TrimSpace(raw) {
+		return fmt.Errorf("%w: surrounding whitespace", ErrInvalidBrokerUpstream)
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w: not a URL", ErrInvalidBrokerUpstream)
+	case u.Scheme != "http" && u.Scheme != "https", u.Host == "":
+		return fmt.Errorf("%w: absolute http or https URL required", ErrInvalidBrokerUpstream)
+	case u.User != nil:
+		return fmt.Errorf("%w: userinfo is not allowed", ErrInvalidBrokerUpstream)
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#"):
+		return fmt.Errorf("%w: query and fragment are not allowed", ErrInvalidBrokerUpstream)
+	case !strings.HasSuffix(u.Path, "/resolve"):
+		return fmt.Errorf("%w: path must end in /resolve", ErrInvalidBrokerUpstream)
+	}
+	return nil
+}
+
+// effectiveAgentEnv returns the environment agent processes are given. An
+// instance that relays a broker advertises its own listener as the broker URL,
+// so the upstream address is never process-visible.
+func effectiveAgentEnv(req *CreateRequest, port int) map[string]string {
+	relaying := &config.InstanceConfig{Port: port, BrokerUpstreamURL: req.BrokerUpstreamURL}
+	return relaying.EffectiveBrokerURLEnv(req.Env)
+}
 
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
@@ -148,6 +193,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	if req == nil {
 		return nil, errors.New("create instance request is required")
 	}
+	if err := ValidateBrokerUpstream(req.BrokerUpstreamURL); err != nil {
+		return nil, err
+	}
 	protocol := req.Protocol
 	if protocol == "" {
 		protocol = string(m.config.Defaults.Protocol)
@@ -241,25 +289,26 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 		return nil, fmt.Errorf("create instance abandoned while queued: %w", err)
 	}
 
-	agentEnv, err := config.CollectInstanceAgentEnvWithError(req.Env)
-	if err != nil {
-		return nil, fmt.Errorf("prepare agent environment: %w", err)
-	}
-
 	id := req.ID
 	if id == "" {
 		id = uuid.New().String()
 	}
 	if _, exists := m.instances[id]; exists {
-		return nil, fmt.Errorf("instance with ID %s already exists", id)
+		return nil, fmt.Errorf("instance with ID %s: %w", id, ErrInstanceExists)
 	}
 	if _, exists := m.provisional[id]; exists {
-		return nil, fmt.Errorf("instance with ID %s is still cleaning up", id)
+		return nil, fmt.Errorf("instance with ID %s: %w", id, ErrInstanceCleaningUp)
 	}
 
 	lease, listener, err := m.allocatePortAndListener(id)
 	if err != nil {
 		return nil, err
+	}
+	agentEnv, err := config.CollectInstanceAgentEnvWithError(effectiveAgentEnv(req, lease.Port))
+	if err != nil {
+		_ = listener.Close()
+		m.portAlloc.Release(lease)
+		return nil, fmt.Errorf("prepare agent environment: %w", err)
 	}
 	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
 	m.provisional[id] = bundle
@@ -332,9 +381,10 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		manager:       procMgr,
 		listenerDone:  make(chan struct{}),
 	}
+	inst.sessionMCP = instanceCfg.SessionMCP
 	inst.MarkActivity()
 
-	handler := activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr))
+	handler := newMCPGuard(instanceCfg.SessionMCP, m.logger)(activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr)))
 	return inst, handler, instanceCfg, nil
 }
 
@@ -383,6 +433,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               req.BaseBranches,
 		ComparisonTargets:          req.ComparisonTargets,
+		GitHooks:                   req.GitHooks,
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
@@ -390,6 +441,8 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		SessionMCPToken:            req.SessionMCPToken,
+		BrokerUpstreamURL:          req.BrokerUpstreamURL,
 	}
 }
 
@@ -633,9 +686,37 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	return m.stopInstance(ctx, id, inst)
 }
 
+// StopInstanceMatching stops the instance only while it still holds the token
+// with the given fingerprint, reporting whether it was stopped. The comparison
+// and the stop act on the same instance, so a replacement that took the ID
+// meanwhile is never removed.
+func (m *Manager) StopInstanceMatching(ctx context.Context, id, tokenFingerprint string) (bool, error) {
+	m.mu.RLock()
+	inst, ok := m.instances[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false, fmt.Errorf("instance %s not found", id)
+	}
+	return m.stopInstanceIf(ctx, id, inst, tokenFingerprint)
+}
+
 func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
+	_, err := m.stopInstanceIf(ctx, id, inst, "")
+	return err
+}
+
+// stopInstanceIf tears the instance down; a non-empty fingerprint is checked
+// under the per-instance stop lock before any teardown starts.
+func (m *Manager) stopInstanceIf(ctx context.Context, id string, inst *Instance, fingerprint string) (bool, error) {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
+	if fingerprint != "" && inst.MCPTokenFingerprint() != fingerprint {
+		return false, nil
+	}
+	return true, m.stopInstanceLocked(ctx, id, inst)
+}
+
+func (m *Manager) stopInstanceLocked(ctx context.Context, id string, inst *Instance) error {
 
 	// A concurrent successful stop may have removed the instance while this
 	// caller waited for the per-instance teardown lock.

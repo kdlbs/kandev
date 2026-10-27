@@ -182,7 +182,7 @@ func (m *acpLogManager) writeRaw(protocol, agentID, sessionID, eventType string,
 		Protocol: protocol,
 		Agent:    agentID,
 		Event:    eventType,
-		Data:     rawData,
+		Data:     redactAuthorization(rawData),
 	}
 	m.write(rawFileName(protocol, agentID, sessionID), entry)
 }
@@ -194,6 +194,54 @@ func (m *acpLogManager) writeNormalized(protocol, agentID, sessionID string, eve
 		// Copy: json.Marshal returns a fresh slice, safe to retain.
 		m.ring(sessionID).add(line)
 	}
+}
+
+const redactedValue = "[redacted]"
+
+// redactAuthorization replaces every Authorization header value in a recorded
+// frame, in both the map form ({"Authorization": "..."}) and the ACP list form
+// ({"name": "Authorization", "value": "..."}), so neither the debug file nor the
+// served output carries a bearer token.
+func redactAuthorization(raw json.RawMessage) json.RawMessage {
+	if !strings.Contains(strings.ToLower(string(raw)), "authorization") {
+		return raw
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return json.RawMessage(`"` + redactedValue + `"`)
+	}
+	out, err := json.Marshal(redactAuthorizationValue(v))
+	if err != nil {
+		return json.RawMessage(`"` + redactedValue + `"`)
+	}
+	return out
+}
+
+func redactAuthorizationValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		isListHeader := false
+		if name, ok := t["name"].(string); ok && strings.EqualFold(name, "authorization") {
+			isListHeader = true
+		}
+		for k, val := range t {
+			switch {
+			case strings.EqualFold(k, "authorization"):
+				t[k] = redactedValue
+			case isListHeader && k == "value":
+				t[k] = redactedValue
+			default:
+				t[k] = redactAuthorizationValue(val)
+			}
+		}
+		return t
+	case []any:
+		for i, val := range t {
+			t[i] = redactAuthorizationValue(val)
+		}
+		return t
+	}
+	return v
 }
 
 // write marshals entry and appends it to the named file's writer. Returns the

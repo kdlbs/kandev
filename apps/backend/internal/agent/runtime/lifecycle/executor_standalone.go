@@ -63,6 +63,9 @@ type StandaloneExecutor struct {
 	unstoppableRecorder UnstoppableSessionRecorder
 	peerCapabilities    []string
 	peerCapabilitiesSet bool
+	// readSessionKey reads the MCP token signing key for adoption checks. Nil
+	// disables them (executors built without a key store).
+	readSessionKey func() ([]byte, error)
 }
 
 // NewStandaloneExecutor creates a new standalone runtime.
@@ -295,6 +298,8 @@ func buildStandaloneCreateInstanceRequest(
 		McpMode:                    req.McpMode,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
+		SessionMCPToken:            req.SessionMCPToken,
+		BrokerUpstreamURL:          req.BrokerUpstreamURL,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
@@ -303,6 +308,7 @@ func buildStandaloneCreateInstanceRequest(
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		GitHooks:                   gitHooksFromMetadata(req.Metadata),
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
@@ -509,8 +515,12 @@ func (r *StandaloneExecutor) RecoverInstancesDetailed(ctx context.Context, recor
 	results := r.dispatchRecoveryStopsWithClient(correlation.ToStop, control)
 	tracker := &jointFailureTracker{exec: r, winners: winnersBySession, control: control}
 	r.collectRecoveryStops(ctx, results, correlation.Winners, pending, tracker)
+	tokenOutcomes := r.verifyWinnerTokens(ctx, control, lease, correlation.Winners, indexRecordsBySession(records))
 
 	outcomes := r.classifyNonWinningOutcomes(ctx, records, instances, correlation.Winners, winnersBySession)
+	for sessionID, outcome := range tokenOutcomes {
+		outcomes[sessionID] = outcome
+	}
 	recovered := r.buildRecoveredInstancesWithLease(controlCtx, correlation.Winners, indexRecordsBySession(records), lease)
 	return recovered, outcomes, nil
 }

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/ownershipproof"
 	"github.com/kandev/kandev/internal/secrets"
@@ -43,7 +42,7 @@ func newRecordingControlServer(t *testing.T) *recordingControlServer {
 		case r.Method == http.MethodGet && r.URL.Path == "/identity":
 			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
 				ServerIdentity: rec.identity,
-				Capabilities:   lifecycle.RequiredSurvivalCapabilities,
+				Capabilities:   localAdoptionCapabilities(),
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":
 			var req struct {

@@ -1414,10 +1414,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// backend process owns, so it dies with the backend regardless, and
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
-	if reason == StopReasonBackendShutdown && isRemoteRecoveryBackendShutdown(execution.RuntimeName) {
+	// Sandbox callbacks and egress leases belong to this backend process.
+	if execution.SandboxSelection == nil && reason == StopReasonBackendShutdown && isRemoteRecoveryBackendShutdown(execution.RuntimeName) {
 		return m.detachAgentExecution(executionID, execution)
 	}
-	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
+	if execution.SandboxSelection == nil && m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
 		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution) {
 		return m.detachAgentExecution(executionID, execution)
 	}
@@ -1447,6 +1448,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// an unobservable orphan process.
 	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
+	}
+	if err := execution.closeSandbox(); err != nil {
+		return fmt.Errorf("sandbox cleanup remains incomplete: %w", err)
 	}
 	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
 		cleanupCtx, cancelCleanup := kubernetesDurableContext(ctx)

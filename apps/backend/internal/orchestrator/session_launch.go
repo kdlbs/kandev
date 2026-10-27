@@ -539,7 +539,7 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	}
 	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return s.checkBootstrapAttemptRecoveryBlock(ctx, sessionID)
 	}
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
@@ -1635,6 +1635,10 @@ func (s *Service) prepareSessionRecoveryLaunchContext(
 	session *models.TaskSession,
 	action, errorStamp string,
 ) (models.WorkspaceRecoveryErrorObservation, context.Context, error) {
+	ctx, err := s.prepareBootstrapRecoveryContext(ctx, session, errorStamp)
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, nil, err
+	}
 	observation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
 	if err != nil {
 		return models.WorkspaceRecoveryErrorObservation{}, nil, err
@@ -2114,6 +2118,9 @@ func (s *Service) recoverOfficeSessionThroughScheduler(
 		var required *sessionRecoveryRequiredError
 		if !errors.As(err, &required) {
 			return nil, err
+		}
+		if required.Block == nil || required.Block.ID == "" {
+			return nil, errOfficeTaskResumeRequiresScheduler
 		}
 	}
 	if action == "fresh_start" {

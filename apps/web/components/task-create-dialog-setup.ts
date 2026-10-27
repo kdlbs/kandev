@@ -35,6 +35,7 @@ import { listRepositoryBranchPolicies } from "@/lib/api";
 import { useTaskCreateDialogMCPSetup } from "@/components/task-create-dialog-mcp";
 import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
 import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import { useTaskEditSandbox } from "@/hooks/domains/task/use-task-edit-sandbox";
 import {
   buildWorkflowAgentOverrideValidation,
   type WorkflowAgentOverrideValidation,
@@ -146,6 +147,7 @@ type SubmitWiringArgs = {
   isEditMode: boolean;
   autoTitle: boolean;
   editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
+  editSandbox: ReturnType<typeof useTaskEditSandbox>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
   workflowAgentOverridesBlockedReason?: string;
@@ -163,6 +165,7 @@ function useSubmitHandlersWiring({
   isEditMode,
   autoTitle,
   editDependencies,
+  editSandbox,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
   workflowAgentOverridesBlockedReason,
@@ -237,6 +240,7 @@ function useSubmitHandlersWiring({
     initialWorkspaceLayout,
     blockedBy: fs.blockedBy,
     editDependencies,
+    editSandbox,
     mcpServerIds: fs.mcpServerIds,
     mcpServerIdsDirty: fs.mcpServerIdsDirty,
     saveTaskMCPSelections:
@@ -524,6 +528,13 @@ export function useTaskCreateDialogSetup(
     refreshBranchPolicies,
     savedBaseSubmitBlockedReason,
   } = data;
+  const editSandbox = useTaskEditSandbox({
+    open: open && isEditMode,
+    task: editingTask,
+    hasStarted: isTaskStarted,
+    agentProfileId: computed.effectiveAgentProfileId,
+    executorId: fs.executorId,
+  });
   const workflowAgentOverrideValidation = resolveWorkflowAgentOverrideValidation(
     mode,
     workspaceId,
@@ -550,6 +561,7 @@ export function useTaskCreateDialogSetup(
     isEditMode,
     autoTitle,
     editDependencies,
+    editSandbox,
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
     workflowAgentOverridesBlockedReason,
@@ -594,6 +606,7 @@ export function useTaskCreateDialogSetup(
     handleJiraImport,
     handleLinearImport,
     editDependencies,
+    editSandbox,
     savedBaseSubmitBlockedReason,
     workflowAgentOverrideValidation,
     mcpDefinitions: mcp.definitions,

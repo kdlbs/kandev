@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func TestGenericWrapperRequiresAuthenticatedControl(t *testing.T) {
@@ -85,6 +87,19 @@ func TestGenericWrapperCapabilityMatchesInstanceAndControl(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &identity))
 			require.Contains(t, identity.Capabilities, launchwrapper.Capability)
+			switch runtime.GOOS {
+			case "linux":
+				require.Contains(t, identity.Capabilities, sandbox.LaunchCapability)
+			case "darwin":
+				if seatbeltHostProbe(t.Context()) == nil {
+					require.Contains(t, identity.Capabilities, sandbox.LaunchCapability)
+				} else {
+					require.NotContains(t, identity.Capabilities, sandbox.LaunchCapability)
+				}
+			default:
+				require.NotContains(t, identity.Capabilities, sandbox.LaunchCapability)
+			}
+			require.Contains(t, identity.Capabilities, subproc.ManagedGitPolicyCapability)
 			require.Equal(t, SurvivalCapabilities, identity.Capabilities)
 		})
 	}

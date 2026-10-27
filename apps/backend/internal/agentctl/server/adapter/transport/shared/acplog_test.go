@@ -342,3 +342,20 @@ func TestACPLog_ConcurrentSessions(t *testing.T) {
 		t.Errorf("expected 32 files, got %d", len(entries))
 	}
 }
+
+func TestRedactAuthorizationCoversMapAndListHeaderForms(t *testing.T) {
+	frame := json.RawMessage(`{"method":"session/new","params":{"mcpServers":[` +
+		`{"name":"kandev","headers":[{"name":"Authorization","value":"Bearer SECRET-1"}]},` +
+		`{"name":"x","headers":{"Authorization":"Bearer SECRET-2","X-Other":"keep"}}]}}`)
+	got := string(redactAuthorization(frame))
+	if strings.Contains(got, "SECRET") {
+		t.Fatalf("token survived redaction: %s", got)
+	}
+	if !strings.Contains(got, "keep") {
+		t.Fatalf("unrelated header dropped: %s", got)
+	}
+	plain := json.RawMessage(`{"a":1}`)
+	if string(redactAuthorization(plain)) != string(plain) {
+		t.Fatal("frame without Authorization must be untouched")
+	}
+}

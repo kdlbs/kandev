@@ -20,6 +20,7 @@ import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 import type { TaskStatusSummary } from "./task-status-summary";
 import type { AgentGoalReconciliation } from "@/lib/agent-goal";
+import type { ExecutionSnapshot } from "./execution";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 export type * from "./http-mcp";
@@ -347,6 +348,8 @@ export type Repository = {
   worktree_branch_prefix: string;
   worktree_branch_template?: string;
   pull_before_worktree: boolean;
+  /** Re-enables repository Git hooks for Kandev-managed Git; hooks stay off by default. */
+  run_git_hooks?: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
@@ -688,6 +691,8 @@ export type SessionRecoveryBlockProjection = {
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
+  execution_snapshot?: ExecutionSnapshot | null;
+  execution_observation?: import("./execution").ExecutionObservation | null;
   /** Immutable queue ownership identity; changes when a textual session ID is recreated. */
   queue_incarnation_id?: string;
   /** Frontend-only owner for an in-flight optimistic resume projection. */

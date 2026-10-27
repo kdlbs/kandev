@@ -14,7 +14,7 @@ import (
 // UpdateWorkspaceFields writes supplied columns and returns the row observed
 // by that statement. A supplied timestamp fences the same atomic write.
 func (r *Repository) UpdateWorkspaceFields(ctx context.Context, id string, update models.WorkspaceFieldUpdate, expected *time.Time) (*models.Workspace, error) {
-	assignments := []string{"updated_at = ?"}
+	assignments := []string{updatedAtAssignment}
 	args := []any{time.Now().UTC()}
 	appendValue := func(column string, value any) {
 		assignments = append(assignments, column+" = ?")

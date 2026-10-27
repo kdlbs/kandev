@@ -162,6 +162,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agent-profiles/:id", cfg, h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
+	api.GET("/agent-profiles/:id/command-preview", cfg, h.httpPreviewSavedProfileCommand)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 	api.GET("/agent-profiles/:id/mcp-selections", h.httpListProfileMCPSelections)
@@ -676,6 +677,7 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
+	SafeOnly           bool             `json:"safe_only"`
 	Model              string           `json:"model"`
 	PermissionSettings map[string]bool  `json:"permission_settings"`
 	CLIPassthrough     bool             `json:"cli_passthrough"`
@@ -697,6 +699,7 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	}
 
 	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
+		SafeOnly:           body.SafeOnly,
 		Model:              body.Model,
 		PermissionSettings: body.PermissionSettings,
 		CLIPassthrough:     body.CLIPassthrough,
@@ -704,6 +707,14 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 		CommandPrefix:      body.CommandPrefix,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrInvalidCommandPrefix) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid command prefix"})
+			return
+		}
+		if body.SafeOnly {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "command preview unavailable"})
+			return
+		}
 		h.logger.Error("failed to preview agent command", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

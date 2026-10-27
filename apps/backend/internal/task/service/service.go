@@ -475,6 +475,7 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	sandboxCreationAdmission        func(context.Context, *models.Task, *CreateTaskRequest) error
 	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory

@@ -37,6 +37,12 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Optional operator-managed sandbox policies. Core command wrapping is independent.
+  KANDEV_FEATURES_SANDBOX_POLICIES:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
+
   # Integrated navigation across existing authorized workspace conversations.
   KANDEV_FEATURES_INTEGRATED_CONTROL:
     prod: "false"

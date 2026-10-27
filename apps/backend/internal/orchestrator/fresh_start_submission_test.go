@@ -114,10 +114,12 @@ func TestFreshStartPendingReceiptBlockedByLaterPromptAcrossRestart(t *testing.T)
 				"the visible initial user row does not prove provider acceptance")
 
 			var agentRunning atomic.Bool
+			// Ordinary resume retains inventory. Missing bootstrap inventory
+			// requires a stamped recovery action before any later prompt.
+			seedExecutorRunning(t, repo, sessionID, taskID, "fresh-start-existing-execution")
 			if !resumePrompt {
 				require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
 				agentRunning.Store(true)
-				seedExecutorRunning(t, repo, sessionID, taskID, "fresh-start-existing-execution")
 			}
 			manager := &mockAgentManager{
 				repoForExecutionLookup: repo,

@@ -23,6 +23,14 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	initial, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	if hasBoundedProviderCalls(&initial.Manifest) {
+		s.closeProviderAdmission(id)
+		defer s.reopenProviderAdmissionIfActive(id)
+	}
 	dispatchLock := s.dispatchLocks.lockFor(id)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()

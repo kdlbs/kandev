@@ -50,12 +50,17 @@ func bearerTokenAuth(expectedToken string, exemptPaths ...string) gin.HandlerFun
 	}
 
 	exempt := make(map[string]bool, len(exemptPaths))
+	var exemptPrefixes []string
 	for _, p := range exemptPaths {
+		if strings.HasSuffix(p, "/") {
+			exemptPrefixes = append(exemptPrefixes, p)
+			continue
+		}
 		exempt[p] = true
 	}
 
 	return func(c *gin.Context) {
-		if exempt[c.Request.URL.Path] {
+		if exempt[c.Request.URL.Path] || hasAnyPrefix(c.Request.URL.Path, exemptPrefixes) {
 			c.Next()
 			return
 		}
@@ -95,12 +100,18 @@ func bearerTokenAuth(expectedToken string, exemptPaths ...string) gin.HandlerFun
 // unaffected.
 func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.HandlerFunc {
 	exempt := make(map[string]bool, len(exemptPaths))
+	var exemptPrefixes []string
 	for _, p := range exemptPaths {
+		if strings.HasSuffix(p, "/") {
+			exemptPrefixes = append(exemptPrefixes, p)
+			continue
+		}
 		exempt[p] = true
 	}
 
 	return func(c *gin.Context) {
-		if exempt[c.Request.URL.Path] {
+		path := c.Request.URL.Path
+		if exempt[path] || hasAnyPrefix(path, exemptPrefixes) {
 			c.Next()
 			return
 		}
@@ -168,4 +179,13 @@ func extractBearerToken(r *http.Request) string {
 // tokenEqual compares two tokens in constant time to prevent timing attacks.
 func tokenEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func hasAnyPrefix(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }

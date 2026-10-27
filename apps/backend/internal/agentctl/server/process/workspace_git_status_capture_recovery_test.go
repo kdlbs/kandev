@@ -365,7 +365,7 @@ func installFailOnceGitStatus(t *testing.T) func() int {
 	marker := filepath.Join(binDir, "failed-once")
 	calls := filepath.Join(binDir, "status-calls")
 	shim := filepath.Join(binDir, "git")
-	script := fmt.Sprintf("#!/bin/sh\ncase \" $* \" in\n  *\" status --porcelain --untracked-files=no \"*)\n    printf x >> %q\n    if [ ! -e %q ]; then : > %q; printf 'Permission denied\\n' >&2; exit 128; fi\n    ;;\nesac\nexec %q \"$@\"\n", calls, marker, marker, realGit)
+	script := fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\ncase \" $* \" in\n  *\" status --porcelain --untracked-files=no \"*)\n    printf x >> %q\n    if [ ! -e %q ]; then : > %q; printf 'Permission denied\\n' >&2; exit 128; fi\n    ;;\nesac\nexec %q \"$@\"\n", calls, marker, marker, realGit)
 	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
 		t.Fatalf("write Git command wrapper: %v", err)
 	}
@@ -388,7 +388,7 @@ func installCountingGitCommands(t *testing.T) func() int {
 	binDir := t.TempDir()
 	calls := filepath.Join(binDir, "git-calls")
 	shim := filepath.Join(binDir, "git")
-	script := fmt.Sprintf("#!/bin/sh\nprintf x >> %q\nexec %q \"$@\"\n", calls, realGit)
+	script := fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nprintf x >> %q\nexec %q \"$@\"\n", calls, realGit)
 	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
 		t.Fatalf("write Git command wrapper: %v", err)
 	}

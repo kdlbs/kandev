@@ -909,6 +909,59 @@ The generic `PluginRegistry.registerComponent` signature lets the contribution
 declare `slotProps?: PluginComposerSlotProps` directly, without narrowing an
 `unknown` slot prop.
 
+## Contribute a sandbox provider
+
+The optional `pluginsdk.SandboxProviderPlugin` interface translates policy and
+runtime evidence. Implement all six methods from the
+[SDK contract](../../apps/backend/pkg/pluginsdk/sandbox_provider.go): describe,
+compile, normalize approval, normalize status, read report, and propose revision.
+Use the maintained [fixture provider](../../apps/backend/cmd/plugin-fixture/sandbox_provider.go)
+and its [tests](../../apps/backend/cmd/plugin-fixture/sandbox_provider_test.go)
+as a contract example. The fixture does not enforce confinement.
+
+Add this declaration to a managed API v2 manifest:
+
+```yaml
+capabilities:
+  sandbox_provider: true
+sandbox_providers:
+  - key: policy
+    display_name: Example sandbox
+    protocol_major: 1
+```
+
+The experimental `features.sandboxPolicies` setting gates host dispatch and is
+off in all shipped profiles. Its environment alias is
+`KANDEV_FEATURES_SANDBOX_POLICIES`; changing it requires a restart. The optional
+contract does not change basic agent command wrapping. A plugin without this
+interface remains compatible and returns `Unimplemented` for these RPCs.
+
+Set response schema version 1 and copy the request operation ID into the response
+context. Return typed prefix tokens, UTF-8 configuration artifacts, and the exact
+canonical effective grants. Do not return replacement agent commands, executable
+artifacts, arbitrary file paths, or a claim that confinement is active.
+Kandev rejects unknown fields, invalid references, expanded grants, oversized
+messages, stale installations, and expired deadlines.
+
+The runtime description identifies a packaged executable by relative path and SHA-256. The host verifies its checksum-manifest entry and exact bytes. The installation record stores the checksum-manifest digest, so an attempt can retain its runtime identity across upgrades.
+
+Artifact `bindings` contain an object-key `path` and a `runtime_reference`. Each destination must already be an empty JSON string. Core inserts values after compilation with JSON escaping. Private callback references are excluded from RPC inputs and command arguments. A description can supply `approval_wire` JSON bodies for allow-once, deny, and timeout. These static bodies do not authorize a decision. Approval normalization also returns `provider_session_id` and `child_pid` for core ownership checks.
+
+Canonical grants include exact `environment_keys`, never environment values or wildcard names. The provider must preserve these grants and reject its own configuration overrides.
+
+When an operator grants agent state, core supplies `sandbox.child.home`, `sandbox.child.config`, `sandbox.child.state`, and `sandbox.child.tmp` runtime references. Bind them into the child environment through private JSON artifacts. The paths share a granted child home and remain separate from supervisor state. They contain no credentials. Preserve these paths for the captured attempt. Do not infer or grant the operator's real home. Without these references, do not inject a child home. Core owns allocation, persistence, and cleanup.
+
+Compilation is limited to 32 artifacts and 1 MiB in total. Artifact names must
+be relative and cannot traverse directories. Core owns process creation,
+cancellation, approval decisions, and policy persistence. Provider reports and
+proposals cannot grant access or save policy. Keep production providers in
+separate repositories; package runtime helpers through the normal reviewed
+plugin artifact workflow.
+
+The contract and fixture establish API compatibility. Full runtime support also
+requires an implementation that passes real discovery, chat, terminal, recovery,
+cancellation, cleanup, and negative filesystem/network checks.
+
 ## Backend contract
 
 ### Plugin lifecycle surface
@@ -917,6 +970,7 @@ declare `slotProps?: PluginComposerSlotProps` directly, without narrowing an
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | Plugin.OnEvent       | OnEvent(ctx, \*pluginsdk.Event) error; event has EventID, EventType, OccurredAt, WorkspaceID, Payload                             | Matching capabilities.events subject/pattern                          | Delivery is sequential per plugin with bounded queue and retries; make handlers idempotent by EventID and reconcile critical state | if event.EventType == "task.created" { ... }       |
 | Plugin.HandleWebhook | HandleWebhook(ctx, *pluginsdk.WebhookRequest) (*WebhookResponse, error); request includes key, method, path, query, headers, body | webhooks[].key; auth additionally required for login assertion header | Undeclared keys are 404; GET/POST are relayed; validate method/signature and bound side effects                                    | if req.WebhookKey == "inbound" { ... }             |
+| SandboxProviderPlugin | Six typed policy, evidence, report, and proposal RPCs | `capabilities.sandbox_provider`, `sandbox_providers`, managed API v2 | Host bounds messages and deadlines; disable, restart, crash, upgrade, and uninstall cancel calls | [Sandbox provider recipe](#contribute-a-sandbox-provider) |
 | Host.EmitEvent       | EmitEvent(ctx, name, payload) publishes plugin.<id>.<name>                                                                        | None; intentionally ungated                                           | Subscribers must declare the emitted subject; use versioned names/payloads                                                         | host.EmitEvent(ctx, "sync.completed", payload-map) |
 
 Event delivery is best-effort: Kandev makes the initial attempt plus retries
@@ -3748,3 +3802,7 @@ repackaging.
 
 Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md),
 [Plugin marketplace](plugins-marketplace.md), and [Extending Kandev](extending-kandev.md).
+
+Sandbox providers can declare bounded runtime records below the private state directory. Use identity records to associate a supervisor, child, and provider session. Keep identity separate from confinement evidence: a process registry without a policy digest must not certify active protection. Core verifies ownership and reads the declared files.
+
+A sandbox provider can require the optional `egress_proxy` host capability when its runtime cannot enforce exact TCP ports. Core supplies an attempt-owned CONNECT relay at the reserved `sandbox.egress.endpoint` artifact reference. Bind the reference to an existing empty JSON string in a private artifact. The relay accepts only the attempt's captured host/port pairs. Basic command wrappers do not require this capability.

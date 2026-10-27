@@ -24,7 +24,11 @@ func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentEx
 			resolved = append(resolved, server)
 		}
 	}
-	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(resolved, mcpconfig.PassthroughPaths{
+	authed, err := m.withSessionMCPAuth(ctx, execution, agent, pt.MCPStrategy, resolved)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
+	}
+	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(authed, mcpconfig.PassthroughPaths{
 		TempConfigPath: snapshot.ConfigPath, WorkspaceDir: snapshot.WorkspacePath, Unix: true,
 	})
 	if err != nil {

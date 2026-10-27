@@ -250,7 +250,7 @@ test.describe("Profile capability discovery", () => {
       await expect(saveButton).toBeEnabled();
 
       await testPage.getByTestId("cli-flag-flag-0").fill("--profile-catalog=draft-cli");
-      await testPage.getByTestId("profile-advanced-options-trigger").click();
+      await expect(testPage.getByTestId("profile-execution-section")).toBeVisible();
       await testPage.getByTestId("command-prefix-input").fill(alpha.commandPrefix);
       await testPage.getByTestId("profile-refresh-capabilities").click();
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(

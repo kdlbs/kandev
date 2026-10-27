@@ -786,7 +786,11 @@ Some older profiles contain compatibility fields such as Auggie's `allow_indexin
 
 ### Command prefixes
 
-**Command prefix** wraps structured agent sessions, ACP model discovery and utility prompts, and native terminal passthrough. Basic wrapping requires no provider-specific plugin. Kandev parses the prefix into structured argv rather than running a shell: quote a path containing spaces, for example `"/opt/launchers/safe wrapper" --`. The resulting argv is prefixed to the agent command, so shell features such as pipes, redirects, variable expansion, and command substitution are not evaluated.
+Open an agent profile in **Settings > Agents** and find **Command wrapper** in **Execution**. The same field applies to structured sessions and native terminal profiles. It preserves the existing `command_prefix` value and works without plugins.
+
+The wrapper applies to agent sessions, ACP model discovery, and utility prompts. Kandev parses it into structured argv rather than running a shell: quote a path containing spaces, for example `"/opt/launchers/safe wrapper" --`. The resulting argv is prefixed to the agent command, so shell features such as pipes, redirects, variable expansion, and command substitution are not evaluated.
+
+Expand **Command Preview** to inspect the composition. It shows command names and symbolic runtime references. It omits opaque arguments, environment values, and executable directory paths. The preview is not a shell command to copy and run.
 
 The prefix must contain a nonempty first argv element that is not flag-like. Malformed quotes, a trailing escape, an empty launcher, or a prefix beginning with `-` is rejected when you save or preview it. If an older persisted profile contains an invalid prefix, Kandev fails the launch rather than silently running the agent without its configured launcher. Check the command preview after changing a prefix.
 
@@ -805,7 +809,31 @@ Wrapped ACP probes require an authenticated agentctl control connection. Agentct
 
 SSH native terminal passthrough does not yet carry wrapper settings. Kandev refuses a wrapped SSH terminal launch before starting the remote agent. Local native terminal wrapping and compatible remote ACP execution remain supported.
 
-Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Rich sandbox configuration through plugins is not implemented.
+Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Structured sandbox policies are experimental and disabled by default. Their provider installation checks do not prove that an agent is confined. On macOS (Apple silicon), a provider that supports the host launches the agent under Seatbelt and owns its process tree rather than a kernel container. Such sessions have no approval prompts or enforcement report, native terminals and utility agents are refused, and a host where the Seatbelt check fails is refused with `sandbox_host_unsupported`.
+
+When an operator enables structured policies, use an authenticated administrator account:
+
+1. Open a Local or Worktree executor profile in **Settings > Executors**. Select the provider, ceiling, eligible revisions, and default. These settings apply to all profiles of that executor.
+2. Use **Create policy** to publish an immutable revision with explicit filesystem, network, environment-name, and Kandev MCP grants. The form grants no access by default. Publication does not select the revision.
+3. Set an agent default in its **Execution** section, or select a revision in a workflow step or existing task's edit dialog. An empty selection inherits. Task choices take precedence over workflow, agent, and executor defaults.
+4. Save the selection. Use **Check availability** for a bounded provider/runtime check. This does not launch an agent or prove confinement.
+
+Choose preview context when a profile or workflow can use different agents or executors. Context choices do not change their assignment. Started-task editing requires an explicit preview agent. Policy changes apply to future launches. Task **Update** saves its policy draft, while **Cancel** discards it. A failed policy save prevents launch and keeps the editor open.
+
+A sandboxed session retains its captured working directory. Attach repository sources before starting it, or start a new session in the changed workspace.
+
+An unavailable provider or incompatible stored policy remains selected until an operator repairs it. Kandev does not silently remove the policy to start an unconfined agent. The same configuration actions are available on phones.
+
+Open **Execution details** from the session tab or its action menu. On a phone, use the labelled **Execution** control. The view separates the captured launch from current defaults for the next launch. Command previews omit private arguments and environment values. An active shield requires fresh evidence for that exact attempt. A wrapper name, installed provider, or old observation cannot establish active protection.
+
+A pending sandbox permission adds a request control beside Execution. Open it to inspect the operation, target, policy digest, and expiry. An authenticated administrator can select **Allow once** or **Deny**. Allow once applies to that operation and does not modify a saved policy. Sandbox decisions remain explicit even when the agent profile enables automatic ACP permission approval.
+
+The review stays open to show the delivery result. Expired, stale, disconnected, or read-only requests cannot be decided. A failed decision is not retried automatically. Check the refreshed record before trying again. You can also open recorded requests from **Execution details > Approvals**. Desktop and phone use the same records and authority rules.
+
+Open **Execution details > Denials** to read captured denial evidence. Select **Refresh report** for a new bounded read. The report shows its capture time, supported denial classes, source integrity, and whether cleanup produced a final capture. An incomplete or empty capture does not prove that no operations were denied. A failed refresh keeps earlier records visible and reports the failure. Reading or refreshing a report does not grant access or change a policy.
+
+Operators can select denial records and choose **Review selected denials**. Enter a policy name and choose a workspace or installation scope. Select **Review changes** to inspect the added access and source policy. Select **Create revision** only after reviewing that diff. Creation preserves the source policy, report digest, selected records, and provider identity. Select the new revision separately in policy settings. The running task keeps its captured policy. Stale reports, revoked sources, changed ceilings, and additions outside the captured ceiling are rejected.
+
 
 
 </details>

@@ -78,7 +78,7 @@ export function resolveMobileReviewSource(
   return null;
 }
 
-const TOP_NAV_HEIGHT = "3.5rem";
+const TOP_NAV_HEIGHT = "var(--task-mobile-header-height, 3.5rem)";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
 
 export function mobilePanelTopNavHeight(

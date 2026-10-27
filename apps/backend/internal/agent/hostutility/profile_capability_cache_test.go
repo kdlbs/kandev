@@ -77,3 +77,16 @@ func TestProfileCapabilityCacheDoesNotStoreTransientFailures(t *testing.T) {
 		t.Fatal("transient failure was cached")
 	}
 }
+
+func TestSandboxPolicyCacheIdentity(t *testing.T) {
+	base := ProfileProbeContext{Scope: "user", ProfileID: "profile", ExecutorID: "executor", SandboxDigest: "policy-runtime-digest"}
+	key := []byte("key")
+	revision := profileContextRevision(key, base, "agent", "acp", nil, false, nil, 1, 1)
+	for _, change := range []func(*ProfileProbeContext){func(c *ProfileProbeContext) { c.ExecutorID = "other" }, func(c *ProfileProbeContext) { c.ProfileID = "other" }, func(c *ProfileProbeContext) { c.SandboxDigest = "new-revision" }} {
+		candidate := base
+		change(&candidate)
+		if profileContextRevision(key, candidate, "agent", "acp", nil, false, nil, 1, 1) == revision {
+			t.Fatal("sandbox context change reused cached capability")
+		}
+	}
+}

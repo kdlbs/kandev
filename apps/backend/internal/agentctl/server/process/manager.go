@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -113,6 +114,8 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	sandboxOwner             atomic.Pointer[sandbox.ProcessOwner]
+	sandboxStarts            map[string]*sandboxStartRecord
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
@@ -839,6 +842,16 @@ func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error
 	return err
 }
 
+// gitHooksEnabled reports whether the repository at the exact workspace entry
+// key opted into running Git hooks. The map is a launch-time snapshot, so an
+// absent key means hooks off and the root key is never a fallback.
+func (m *Manager) gitHooksEnabled(entryKey string) bool {
+	if m.cfg == nil {
+		return false
+	}
+	return m.cfg.GitHooks[entryKey]
+}
+
 // getBaseBranches returns a snapshot of cfg.BaseBranches under the
 // dedicated baseBranchesMu so callers (rescan, lazy-subpath, the
 // UpdateBaseBranches re-stamp loop) read a consistent map even when a
@@ -1555,6 +1568,7 @@ func (m *Manager) GitOperator() *GitOperator {
 	if m.gitOperator == nil {
 		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
 		m.gitOperator.setEnvironmentProvider(m.gitEnvironment)
+		m.gitOperator.gitHooks = m.gitHooksEnabled("")
 		if binding, ok := m.cfg.RemoteContributions[""]; ok {
 			m.gitOperator.setRemoteContribution(&binding)
 		}
@@ -1595,6 +1609,7 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 	}
 	op := NewGitOperatorForRepo(full, cleaned, m.logger, tracker)
 	op.setEnvironmentProvider(m.gitEnvironment)
+	op.gitHooks = m.gitHooksEnabled(cleaned)
 	if binding, ok := m.cfg.RemoteContributions[cleaned]; ok {
 		op.setRemoteContribution(&binding)
 	}
@@ -1784,10 +1799,15 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// A previous lifecycle may still be live: an agent that exited on its own
 	// never ran teardown, and Start is reachable without an intervening Stop.
 	m.finishPreviousLifecycle(ctx)
+	record, err := m.beginSandboxStart()
+	if err != nil {
+		return 0, err
+	}
+	defer m.completeSandboxStart(record)
 
 	m.logger.Info("starting agent process",
 		zap.String("protocol", string(m.cfg.Protocol)),
-		zap.Strings("args", m.cfg.AgentArgs),
+		zap.Strings("args", m.sandboxLogArgs(m.cfg.AgentArgs)),
 		zap.String("workdir", m.cfg.WorkDir),
 		zap.Int("mcp_servers", len(m.cfg.McpServers)))
 
@@ -1809,6 +1829,10 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
+		if record != nil {
+			m.status.Store(StatusError)
+			return 0, sandbox.ErrInvalidPolicy
+		}
 		if err := m.startOneShot(); err != nil {
 			return 0, err
 		}
@@ -1820,10 +1844,11 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 		m.status.Store(StatusError)
 		return 0, err
 	}
-	return m.startManagedProcess()
+	return m.startManagedProcess(record)
 }
 
-func (m *Manager) startManagedProcess() (uint64, error) {
+func (m *Manager) startManagedProcess(record *sandboxStartRecord) (uint64, error) {
+	m.sandboxOwner.Store(nil)
 	// Set up stdin/stdout/stderr pipes (must happen before process starts)
 	if err := m.startProcessPipes(); err != nil {
 		m.status.Store(StatusError)
@@ -1832,14 +1857,23 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 
 	m.ClearStderrBuffer()
 	// Start the subprocess now that pipes are connected
-	if err := m.cmd.Start(); err != nil {
+	if err := startSandboxCommand(m.cmd, m.cfg.Sandbox, record); err != nil {
 		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
-		if !m.cfg.LaunchWrapper.IsZero() {
+		if !m.cfg.LaunchWrapper.IsZero() || m.cfg.Sandbox != nil {
 			return 0, errors.New("wrapped agent process failed to start")
 		}
 		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	owner, ownerErr := sandbox.CaptureProcessOwner(m.cfg.Sandbox, m.cmd.Process.Pid)
+	if ownerErr != nil {
+		_ = killProcessGroup(m.cmd.Process.Pid)
+		_ = killAndWaitStartedCommand(m.cmd)
+		_ = m.closeStderrPipe()
+		m.status.Store(StatusError)
+		return 0, ownerErr
+	}
+	m.sandboxOwner.Store(owner)
 	processGeneration := m.beginManagedStartupGeneration()
 	if err := m.closeStderrWriter(); err != nil {
 		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
@@ -1859,21 +1893,8 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 	m.stopChClosed.Store(false)
 	m.shutdownIntent.Store(&atomic.Bool{})
 
-	// Connect adapter to the process stdin/stdout pipes
-	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
-		reapErr, owned := m.reapMainProcessLifecycle()
-		switch {
-		case !owned:
-			reapErr = killAndWaitStartedCommand(m.cmd)
-		case reapErr != nil:
-			fallbackErr := killAndWaitStartedCommand(m.cmd)
-			reapErr = errors.Join(reapErr, fallbackErr)
-		default:
-			reapErr = killAndWaitStartedCommand(m.cmd)
-		}
-		_ = m.closeStderrReader()
-		m.status.Store(StatusError)
-		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
+	if err := m.connectStartedAdapter(); err != nil {
+		return 0, err
 	}
 
 	// Start stderr reader and exit waiter. Keep the completion channel local to
@@ -2029,7 +2050,7 @@ func (m *Manager) buildFinalCommand() error {
 		return err
 	}
 	m.finalCommand = strings.Join(finalArgs, " ")
-	if !m.cfg.LaunchWrapper.IsZero() {
+	if !m.cfg.LaunchWrapper.IsZero() || m.cfg.Sandbox != nil {
 		m.finalCommand = "[wrapped agent]"
 	}
 	cmdArgs = finalArgs[1:]
@@ -2043,11 +2064,16 @@ func (m *Manager) buildFinalCommand() error {
 	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
 	setAgentProcGroup(m.cmd)
+	if m.cfg.Sandbox != nil {
+		if err := sandbox.ConfigureProcess(m.cmd); err != nil {
+			return err
+		}
+	}
 
 	envBytes, largestEnv := summarizeEnvBytes(m.cfg.AgentEnv, 3)
 	m.logger.Info("agent command prepared",
-		zap.Strings("args", m.cfg.AgentArgs),
-		zap.Strings("extra_args", extraArgs),
+		zap.Strings("args", m.sandboxLogArgs(m.cfg.AgentArgs)),
+		zap.Strings("extra_args", m.sandboxLogArgs(extraArgs)),
 		zap.String("workdir", m.cfg.WorkDir),
 		zap.Int("env_count", len(m.cfg.AgentEnv)),
 		zap.Int("env_bytes", envBytes),
@@ -2231,13 +2257,13 @@ func (m *Manager) buildShellConfigWithAgentEnv(agentEnv []string) (shell.Config,
 // process request. Explicit request values remain authoritative.
 func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequest, error) {
 	var err error
-	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), m.cfg.EffectiveBrokerURLEnv(req.Env))
 	return req, err
 }
 
 func (m *Manager) buildPipedProcessRequest(req PipedStartRequest) (PipedStartRequest, error) {
 	var err error
-	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), m.cfg.EffectiveBrokerURLEnv(req.Env))
 	if err != nil {
 		return req, err
 	}
@@ -2269,7 +2295,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -2277,10 +2303,10 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, wrapper...)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, wrapper ...launchwrapper.Spec) error {
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, sandboxLaunch *sandbox.Launch, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -2288,31 +2314,27 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 		return fmt.Errorf("cannot configure while agent is running")
 	}
 
+	if err := m.validateSandboxConfiguration(sandboxLaunch, agentArgsPresent); err != nil {
+		return err
+	}
 	spec, err := configuredLaunchWrapper(wrapper, agentArgsPresent)
 	if err != nil {
 		return err
 	}
-	args := agentArgs
-	if !agentArgsPresent {
-		args = config.ParseCommand(command)
-	}
-	if err := config.ValidateCommandArgs(args); err != nil {
+	args, err := configuredCommandArgs(command, agentArgs, agentArgsPresent)
+	if err != nil {
 		return err
 	}
-	if continueArgsPresent {
-		if err := config.ValidateCommandArgs(continueArgs); err != nil {
-			return fmt.Errorf("invalid continue command: %w", err)
-		}
-	} else if continueCommand != "" {
-		continueArgs = config.ParseCommand(continueCommand)
-		if err := config.ValidateCommandArgs(continueArgs); err != nil {
+	if continueArgsPresent || continueCommand != "" {
+		continueArgs, err = configuredCommandArgs(continueCommand, continueArgs, continueArgsPresent)
+		if err != nil {
 			return fmt.Errorf("invalid continue command: %w", err)
 		}
 	}
 
 	// Compose the environment before changing any other configuration so a
 	// malformed indexed Git block leaves the instance fully unchanged.
-	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, env, replaceEnv, m.managedGitTools)
+	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, m.cfg.EffectiveBrokerURLEnv(env), replaceEnv, m.managedGitTools)
 	if err != nil {
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
@@ -2321,6 +2343,9 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentArgs = args
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
+	m.cfg.Sandbox = sandboxLaunch.Clone()
+	m.cfg.SandboxRequired = sandboxLaunch != nil
+	m.configureSandboxMCP()
 
 	// Store continue command for one-shot adapters
 	if continueArgsPresent {
@@ -3337,7 +3362,7 @@ func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 		}
 
 		line, keep := safeManagedNpmStderrLine(rawLine)
-		if !keep && m.cfg != nil && !m.cfg.LaunchWrapper.IsZero() {
+		if !keep && m.cfg != nil && (!m.cfg.LaunchWrapper.IsZero() || m.cfg.Sandbox != nil) {
 			continue
 		}
 		if !keep {
@@ -3676,6 +3701,11 @@ type autoApprovalDecision struct {
 // request, so the caller keeps the provider waiting until that durable claim
 // succeeds.
 func (m *Manager) nonCoordinatorAutoApproval(req *adapter.PermissionRequest) (*adapter.PermissionOption, *adapter.PermissionResponse) {
+	if m.guardedSession() {
+		if resolved, response := m.guardedKandevApproval(req); resolved {
+			return nil, response
+		}
+	}
 	if m.cfg.AutoApprovePermissions {
 		if decision, approved := m.autoApprovePermission(req); approved {
 			return &decision.option, nil

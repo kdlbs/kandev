@@ -24,6 +24,9 @@ import (
 // and executes it through the host utility instance. A missing or ineligible
 // profile fails before dispatch; no agent/model fallback is used.
 func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (*PromptResult, error) {
+	if err := m.admitSandbox(ctx, &ProfileProbeContext{ProfileID: profileID}); err != nil {
+		return nil, err
+	}
 	if m.profileResolver == nil {
 		return nil, errors.New("utility profile resolver is not configured")
 	}
@@ -147,6 +150,9 @@ func (m *Manager) ResolveModelConfig(
 ) (ModelConfigResolution, error) {
 	if req.ProfileContext != nil {
 		return m.resolveProfileModelConfig(ctx, agentType, req)
+	}
+	if err := m.admitSandbox(ctx, &ProfileProbeContext{}); err != nil {
+		return ModelConfigResolution{}, err
 	}
 	if m == nil || m.modelCache == nil {
 		return ModelConfigResolution{}, errors.New("host utility manager not configured")
@@ -416,6 +422,9 @@ func (m *Manager) ExecutePromptWithMCP(
 ) (*PromptResult, error) {
 	if prompt == "" {
 		return nil, fmt.Errorf("prompt is required")
+	}
+	if err := m.admitSandbox(ctx, &ProfileProbeContext{}); err != nil {
+		return nil, err
 	}
 	inst, ia, err := m.getInstance(ctx, agentType)
 	if err != nil {

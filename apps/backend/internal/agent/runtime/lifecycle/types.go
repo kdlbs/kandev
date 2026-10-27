@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
+	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -31,6 +32,13 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
+	SandboxSelection             *policy.SelectionContext `json:"-"`
+	sandboxMu                    sync.Mutex
+	sandboxAttempt               SandboxAttempt
+	sandboxConfigHome            string
+	sandboxPreviousAttempt       string
+	sandboxGeneration            uint64
+	sandboxDispatched            bool
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -1583,6 +1591,7 @@ type RepoLaunchSpec struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RunGitHooks            bool
 	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
@@ -1639,6 +1648,7 @@ type WorkspaceRepositorySpec struct {
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
 	PullBeforeWorktree      bool
+	RunGitHooks             bool
 	RemoteSyncHandled       bool
 	BranchSlug              string
 	BranchIdentitySlug      string
@@ -1661,6 +1671,7 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
+	SandboxSelection *policy.SelectionContext `json:"-"`
 	// ResumePassthrough preserves provider resume intent after runtime cleanup.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string
@@ -1792,7 +1803,8 @@ type LaunchRequest struct {
 	WorktreeBranchTemplate string // Branch name template for worktree branches
 	WorktreeBranchTicket   string // External ticket value for branch templates
 	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
+	RunGitHooks            bool
+	RemoteSyncHandled      bool // Authenticated provider refresh already completed
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository          func(context.Context) error
@@ -1853,6 +1865,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       r.WorktreeBranchTicket,
 		PullBeforeWorktree:         r.PullBeforeWorktree,
+		RunGitHooks:                r.RunGitHooks,
 		RemoteSyncHandled:          r.RemoteSyncHandled,
 		RefreshRepository:          r.RefreshRepository,
 		RefreshRepositoryWithState: r.RefreshRepositoryWithState,

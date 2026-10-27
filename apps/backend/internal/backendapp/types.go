@@ -2,6 +2,8 @@ package backendapp
 
 import (
 	"errors"
+	"github.com/kandev/kandev/internal/agent/sandbox"
+	"github.com/kandev/kandev/internal/agent/sandboxruntime"
 	replaywire "github.com/kandev/kandev/internal/coordinator/replay/wire"
 	taskusage "github.com/kandev/kandev/internal/task/usage"
 
@@ -83,6 +85,8 @@ type Repositories struct {
 }
 
 type Services struct {
+	Sandbox                  *sandbox.Service
+	SandboxRuntime           *sandboxruntime.Manager
 	capacityRetryClock       *e2eCapacityRetryClock
 	DeliveryRetention        *deliveryretention.Worker
 	ManagedRuntimeSelections managedruntime.SelectionStore

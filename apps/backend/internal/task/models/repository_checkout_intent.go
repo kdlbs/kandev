@@ -4,4 +4,6 @@ package models
 type RepositoryCheckoutIntent struct {
 	DefaultBranch      *string
 	PullBeforeWorktree *bool
+	// RunGitHooks is set only by the repository settings REST handlers.
+	RunGitHooks *bool
 }

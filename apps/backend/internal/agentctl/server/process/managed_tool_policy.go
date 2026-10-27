@@ -4,12 +4,12 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/mcp/profile"
 )
 
 const managedMCPHTTPTransport = "http"
+const managedMCPSSETransport = "sse"
 
 // MCPServersForSession constrains managed conversations to the local Kandev
 // broker. Caller-supplied MCP servers are never forwarded for these turns.
@@ -42,22 +42,22 @@ func (m *Manager) validateManagedMCPProfile() error {
 func (m *Manager) canonicalManagedMCPServers() []types.McpServer {
 	servers := make([]types.McpServer, 0, 2)
 	for _, server := range m.cfg.McpServers {
-		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || len(server.Headers) != 0 {
+		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || !m.cfg.SessionMCP.MatchesHeaders(server.Headers) {
 			continue
 		}
 		wantURL := ""
 		switch server.Type {
 		case managedMCPHTTPTransport:
-			wantURL = config.MCPServerURL(m.cfg.MCPHost, m.cfg.Port, "/mcp")
+			wantURL = canonicalKandevMCPURL(m.cfg, "http")
 		case "sse":
-			wantURL = config.MCPServerURL(m.cfg.MCPHost, m.cfg.Port, "/sse")
+			wantURL = canonicalKandevMCPURL(m.cfg, "sse")
 		default:
 			continue
 		}
-		if server.URL != wantURL {
+		if server.URL != wantURL || wantURL == "" {
 			continue
 		}
-		servers = append(servers, types.McpServer{Name: injectedKandevMCPServerName, Type: server.Type, URL: wantURL})
+		servers = append(servers, types.McpServer{Name: injectedKandevMCPServerName, Type: server.Type, URL: wantURL, Headers: server.Headers})
 	}
 	return servers
 }
@@ -81,7 +81,7 @@ func (m *Manager) adapterMCPServers() ([]adapter.McpServerConfig, error) {
 	}
 	out := make([]adapter.McpServerConfig, len(servers))
 	for i, server := range servers {
-		out[i] = adapter.McpServerConfig{Name: server.Name, URL: server.URL, Type: server.Type}
+		out[i] = adapter.McpServerConfig{Name: server.Name, URL: server.URL, Type: server.Type, Headers: server.Headers}
 	}
 	return out, nil
 }

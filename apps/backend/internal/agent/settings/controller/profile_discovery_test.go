@@ -138,7 +138,7 @@ func TestFetchProfileDynamicModelsUsesSavedLaunchSettings(t *testing.T) {
 	ctrl.hostUtility = utility
 
 	response, err := ctrl.FetchProfileDynamicModels(ctx, "codex-acp", dto.ProfileCapabilityRequest{
-		ProfileID: profile.ID, AuthorizationScope: "user-1", Refresh: true,
+		ProfileID: profile.ID, ExecutorID: "executor-context", AuthorizationScope: "user-1", Refresh: true,
 	})
 	if err != nil {
 		t.Fatalf("FetchProfileDynamicModels: %v", err)
@@ -148,6 +148,8 @@ func TestFetchProfileDynamicModelsUsesSavedLaunchSettings(t *testing.T) {
 	}
 	want := hostutility.ProfileProbeContext{
 		Scope:         "user-1:" + profile.ID,
+		ProfileID:     profile.ID,
+		ExecutorID:    "executor-context",
 		Env:           map[string]string{"CODEX_PATH": "/profile/codex"},
 		CLIFlags:      []string{"--profile-catalog=saved"},
 		CommandPrefix: []string{"npx", "--"},

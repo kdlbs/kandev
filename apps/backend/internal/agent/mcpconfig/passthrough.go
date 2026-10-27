@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/passthroughconfig"
+	"github.com/kandev/kandev/internal/common/sessionmcp"
 )
 
 // PassthroughPaths carries filesystem locations a strategy may use to
@@ -226,8 +227,16 @@ func codexServerArgs(srv types.McpServer) ([]string, error) {
 		// this behind `experimental_use_rmcp_client = true`; if a pinned Codex
 		// build ever stops loading the kandev server, emit that override here.
 		pairs = append(pairs, pair{"url", srv.URL})
-		if len(srv.Headers) > 0 {
-			pairs = append(pairs, pair{"http_headers", srv.Headers})
+		headers := srv.Headers
+		if srv.Name == codexKandevServerName {
+			if _, ok := headers["Authorization"]; ok {
+				// The token travels in the process environment, never in argv.
+				headers = withoutHeader(headers, "Authorization")
+				pairs = append(pairs, pair{"env_http_headers", map[string]string{"Authorization": sessionmcp.CodexTokenEnv}})
+			}
+		}
+		if len(headers) > 0 {
+			pairs = append(pairs, pair{"http_headers", headers})
 		}
 	}
 	if srv.Name == codexKandevServerName {
@@ -246,6 +255,16 @@ func codexServerArgs(srv types.McpServer) ([]string, error) {
 		args = append(args, "-c", "mcp_servers."+codexKeyName(srv.Name)+"."+p.key+"="+string(enc))
 	}
 	return args, nil
+}
+
+func withoutHeader(headers map[string]string, name string) map[string]string {
+	out := make(map[string]string, len(headers))
+	for k, v := range headers {
+		if k != name {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // codexKeyName renders an MCP server name as a single TOML key segment for a

@@ -101,10 +101,9 @@ test.describe("Mobile agent profile config selector", () => {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
       const prefixInput = testPage.getByTestId("command-prefix-input");
-      const advancedTrigger = testPage.getByTestId("profile-advanced-options-trigger");
-      await expect(advancedTrigger).toBeVisible({ timeout: 15_000 });
-      await expect(prefixInput).toBeHidden();
-      await advancedTrigger.tap();
+      await expect(testPage.getByTestId("profile-execution-section")).toBeVisible({
+        timeout: 15_000,
+      });
       await expect(prefixInput).toBeVisible({ timeout: 15_000 });
       await prefixInput.fill("greywall --");
 
@@ -116,11 +115,9 @@ test.describe("Mobile agent profile config selector", () => {
       // Reload — the saved prefix must still be there.
       await testPage.reload();
       const prefixInputAfterReload = testPage.getByTestId("command-prefix-input");
-      await expect(testPage.getByTestId("profile-advanced-options-trigger")).toBeVisible({
+      await expect(testPage.getByTestId("profile-execution-section")).toBeVisible({
         timeout: 15_000,
       });
-      await expect(prefixInputAfterReload).toBeHidden();
-      await testPage.getByTestId("profile-advanced-options-trigger").tap();
       await expect(prefixInputAfterReload).toHaveValue("greywall --", {
         timeout: 15_000,
       });
@@ -140,10 +137,9 @@ test.describe("Mobile agent profile config selector", () => {
 
       await testPage.reload();
       const prefixInputAfterClear = testPage.getByTestId("command-prefix-input");
-      await expect(testPage.getByTestId("profile-advanced-options-trigger")).toBeVisible({
+      await expect(testPage.getByTestId("profile-execution-section")).toBeVisible({
         timeout: 15_000,
       });
-      await testPage.getByTestId("profile-advanced-options-trigger").tap();
       await expect(prefixInputAfterClear).toHaveValue("", {
         timeout: 15_000,
       });

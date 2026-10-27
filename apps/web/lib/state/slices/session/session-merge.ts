@@ -6,6 +6,8 @@ import {
   type AgentDeliveryRecovery,
 } from "@/lib/session-agent-delivery-recovery";
 import { parseTurnTimestamp } from "./turn-actions";
+import { mergeExecutionSnapshot } from "./execution-snapshot-merge";
+import { mergeExecutionObservation } from "./execution-observation-merge";
 
 // i18n-exempt: stable backend failure code, not user-facing copy.
 const DURABLE_DELIVERY_UNCERTAIN = "DURABLE_DELIVERY_UNCERTAIN";
@@ -298,6 +300,7 @@ function mergeParkedProjection(
 
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
+  const executionSnapshot = mergeExecutionSnapshot(existing, incoming);
   const cancellation = mergeCancellationProjection(existing, incoming);
   const parked = mergeParkedProjection(existing, incoming);
   const incomingRouteGeneration = incoming.route_generation;
@@ -326,6 +329,8 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
   if (incoming.resume_projection_id === undefined) delete merged.resume_projection_id;
   return {
     ...merged,
+    execution_snapshot: executionSnapshot,
+    execution_observation: mergeExecutionObservation(existing, incoming, executionSnapshot),
     ...cancellation,
     ...parked,
     ...(routeIsStale

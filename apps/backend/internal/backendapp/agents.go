@@ -180,6 +180,7 @@ func provideLifecycleManager(
 	registerKubernetesPreparer(preparerRegistry, log)
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStores.runtime)
+	wireSessionMCPKey(standaloneExec, lifecycleMgr, secretStores.runtime, log)
 	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
 		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
 	}
@@ -549,4 +550,29 @@ func credentialFilePath(cfg *config.Config) string {
 		return strings.TrimSpace(cfg.Credentials.File)
 	}
 	return strings.TrimSpace(os.Getenv("KANDEV_CREDENTIALS_FILE"))
+}
+
+// wireSessionMCPKey makes the MCP token signing key usable before recovery
+// runs: it is created or repaired here, and adoption only ever reads it.
+func wireSessionMCPKey(
+	standalone *lifecycle.StandaloneExecutor,
+	mgr *lifecycle.Manager,
+	store secrets.SecretStore,
+	log *logger.Logger,
+) {
+	keys, ok := store.(secrets.SessionKeyStore)
+	if !ok {
+		log.Error("runtime secret store cannot hold the MCP token signing key; session MCP tokens are disabled")
+		return
+	}
+	standalone.SetSessionKeyReader(func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return keys.SessionMCPKey(ctx)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := mgr.EnsureSessionMCPKey(ctx); err != nil {
+		log.Error("mcp_token_key_unavailable: could not prepare the MCP token signing key; launches will be refused", zap.Error(err))
+	}
 }

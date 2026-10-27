@@ -16,6 +16,10 @@ type AvailabilitySnapshot = agentctl.AvailabilitySnapshot
 
 const AvailabilityStatusAvailable = agentctl.AvailabilityStatusAvailable
 
+// ErrSandboxLaunchUnsupported is the generic refusal for a runtime that cannot
+// launch under a sandbox.
+var ErrSandboxLaunchUnsupported = agentctl.ErrSandboxLaunchUnsupported
+
 type AgentctlEventPayload = lifecycle.AgentctlEventPayload
 
 var (

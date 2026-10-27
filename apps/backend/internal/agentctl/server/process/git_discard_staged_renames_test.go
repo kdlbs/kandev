@@ -293,7 +293,7 @@ func newFaultedRenameDiscardOperator(t *testing.T, f renameDiscardFixture, shape
 	outputPath := filepath.Join(dir, "output")
 	require.NoError(t, os.WriteFile(outputPath, []byte(output), 0o600))
 	git := filepath.Join(dir, "git")
-	writeExecutable(t, git, fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = status ] && [ \"$3\" = -z ]; then cat %q; exit %d; fi\nexec %q \"$@\"\n", outputPath, exit, realGit))
+	writeExecutable(t, git, fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nif [ \"$1\" = status ] && [ \"$3\" = -z ]; then cat %q; exit %d; fi\nexec %q \"$@\"\n", outputPath, exit, realGit))
 	probe, probeErr := exec.Command(git, "status", "--porcelain", "-z", "--untracked-files=no").CombinedOutput()
 	require.Equal(t, output, string(probe), "faulted external boundary must be reachable")
 	assert.Equal(t, exit == 0, probeErr == nil)

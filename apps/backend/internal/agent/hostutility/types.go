@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	policy "github.com/kandev/kandev/internal/agent/sandbox"
 )
 
 // Status reports the state of a host utility instance for a given agent type.
@@ -130,10 +131,14 @@ type ModelConfigResolutionRequest struct {
 // includes the authorization principal and profile identity; secret values
 // stay in Env only for the bounded subprocess lifetime.
 type ProfileProbeContext struct {
-	Scope         string
-	Env           map[string]string
-	CLIFlags      []string
-	CommandPrefix []string
+	SandboxSelection *policy.SelectionContext `json:"-"`
+	ProfileID        string
+	ExecutorID       string
+	SandboxDigest    string
+	Scope            string
+	Env              map[string]string
+	CLIFlags         []string
+	CommandPrefix    []string
 }
 
 type ProfileCapabilityRequest struct {

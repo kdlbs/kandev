@@ -42,18 +42,24 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry              *registry.Registry
-	eventBus              bus.EventBus
-	credsMgr              CredentialsManager
-	profileResolver       ProfileResolver
-	ownerAdmission        OwnerAdmission
-	worktreeMgr           *worktree.Manager
-	mcpProvider           McpConfigProvider
-	mcpResolver           MCPResolutionProvider
-	mcpStateRepo          mcpconfig.SessionMCPSelectionStateRepository
-	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
-	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
-	logger                *logger.Logger
+	// codexProbe overrides the Codex version probe in tests.
+	codexProbe                codexProbeFunc
+	registry                  *registry.Registry
+	eventBus                  bus.EventBus
+	credsMgr                  CredentialsManager
+	profileResolver           ProfileResolver
+	sandboxAdmission          func(context.Context, *LaunchRequest) error
+	sandboxPrepare            SandboxPrepare
+	executionSnapshotRecorder ExecutionSnapshotRecorder
+	sandboxRecoveryAdmission  func(context.Context, *AgentExecution) error
+	ownerAdmission            OwnerAdmission
+	worktreeMgr               *worktree.Manager
+	mcpProvider               McpConfigProvider
+	mcpResolver               MCPResolutionProvider
+	mcpStateRepo              mcpconfig.SessionMCPSelectionStateRepository
+	cursorInventoryLoader     func(context.Context) (mcpconfig.CursorNativeInventory, error)
+	cursorNativeMCPRunner     mcpconfig.NativeMCPCommandRunner
+	logger                    *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -256,6 +262,9 @@ type Manager struct {
 	// every workspace can be seeded at agentctl-ready time, not just full
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
+
+	// gitHooksProvider supplies the stored Git hooks opt-in read at create time.
+	gitHooksProvider GitHooksProvider
 
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.

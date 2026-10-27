@@ -63,6 +63,7 @@ type Manifest struct {
 	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`
 	// ExecutorProviders declares remote compute providers this plugin owns.
 	ExecutorProviders []ExecutorProvider `yaml:"executor_providers,omitempty" json:"executor_providers,omitempty"`
+	SandboxProviders  []SandboxProvider  `yaml:"sandbox_providers,omitempty" json:"sandbox_providers,omitempty"`
 	// ReferenceSources declares composer sources this plugin owns while active.
 	ReferenceSources []ReferenceSource `yaml:"reference_sources,omitempty" json:"reference_sources,omitempty"`
 
@@ -168,6 +169,7 @@ type Capabilities struct {
 	// ExecutorProvider permits the plugin to allocate and manage remote
 	// execution environments through the host's operation-scoped provider API.
 	ExecutorProvider bool `yaml:"executor_provider,omitempty" json:"executor_provider,omitempty"`
+	SandboxProvider  bool `yaml:"sandbox_provider,omitempty" json:"sandbox_provider,omitempty"`
 }
 
 // ExecutorProvider describes one provider implementation owned by a plugin.

@@ -250,7 +250,7 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 	for key, value := range getPassthroughMCPEnv(execution) {
 		env[key] = value
 	}
-	return env, nil
+	return withBrokerRelayURL(execution.ExecutorType, env, passthroughMCPConfigPort(execution)), nil
 }
 
 // startPassthroughShell starts the shell session for a passthrough execution.
@@ -366,8 +366,8 @@ func redactPassthroughArgs(args []string) []string {
 }
 
 func passthroughCommandForLog(execution *AgentExecution, args []string) []string {
-	if isSSHPassthrough(execution) {
-		return []string{"remote CLI", "<arguments omitted>"}
+	if isSSHPassthrough(execution) || (execution != nil && execution.SandboxSelection != nil) {
+		return []string{"agent CLI", "<arguments omitted>"}
 	}
 	return redactPassthroughArgs(args)
 }
@@ -460,6 +460,9 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	if isSSHPassthrough(execution) {
 		return m.applySSHPassthroughMCP(ctx, execution, pt, agentConfig, profileInfo, operation)
 	}
+	if err := m.requireSessionMCPCarrier(execution, agentConfig, pt.MCPStrategy); err != nil {
+		return preparedPassthroughMCP{}, err
+	}
 	if isCursorMCPAuthStrategy(pt.MCPStrategy) {
 		if err := m.prepareCursorMCPAuthWithProgress(execution, profileInfo, execution.ExecutorType, pt.MCPStrategy, progress); err != nil {
 			return preparedPassthroughMCP{}, err
@@ -479,9 +482,16 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	if err != nil {
 		return preparedPassthroughMCP{}, err
 	}
-	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(servers, m.passthroughMCPPaths(execution))
+	authed, err := m.withSessionMCPAuth(ctx, execution, agentConfig, pt.MCPStrategy, servers)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
+	}
+	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(authed, m.passthroughMCPPaths(execution))
 	if err != nil {
 		return preparedPassthroughMCP{}, fmt.Errorf("build passthrough MCP config: %w", err)
+	}
+	if err := validateSandboxMCPArtifacts(execution, len(servers), artifacts); err != nil {
+		return preparedPassthroughMCP{}, err
 	}
 	if err := m.writePassthroughMCPFiles(ctx, execution, artifacts.Files); err != nil {
 		return preparedPassthroughMCP{}, err
@@ -506,11 +516,14 @@ func (m *Manager) passthroughMCPServers(
 	if port <= 0 {
 		return nil, fmt.Errorf("standalone port unavailable for passthrough MCP config")
 	}
-	servers := []agentctltypes.McpServer{{
-		Name: kandevMCPServerName,
-		Type: string(mcpconfig.ServerTypeHTTP),
-		URL:  m.agentMCPURL(execution, port, "/mcp"),
-	}}
+	endpoint, err := m.sandboxMCPRoute(ctx, execution, m.agentMCPURL(execution, port, "/mcp"))
+	if err != nil {
+		return nil, err
+	}
+	servers := []agentctltypes.McpServer{}
+	if endpoint != "" {
+		servers = append(servers, agentctltypes.McpServer{Name: kandevMCPServerName, Type: string(mcpconfig.ServerTypeHTTP), URL: endpoint})
+	}
 	var operation *preparedMCPOperation
 	if len(operations) > 0 {
 		operation = operations[0]
@@ -536,6 +549,9 @@ func (m *Manager) passthroughMCPServers(
 // kandev-owned temp config path (for file+flag / file+env strategies) and the
 // workspace dir (for project-local file strategies like Cursor).
 func (m *Manager) passthroughMCPPaths(execution *AgentExecution) mcpconfig.PassthroughPaths {
+	if execution.SandboxSelection != nil {
+		return sandboxMCPPaths(execution)
+	}
 	root := m.dataDir
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "kandev")
@@ -606,6 +622,9 @@ func (m *Manager) materializePassthroughFile(ctx context.Context, execution *Age
 }
 
 func (m *Manager) materializePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+	if execution.SandboxSelection != nil {
+		return m.materializeSandboxMCPFileLocked(execution, f)
+	}
 	if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
 		return false, fmt.Errorf("validate passthrough MCP config path: %w", err)
 	} else if escapes {
@@ -897,7 +916,11 @@ func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, ex
 	if cmd.IsEmpty() {
 		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
 	}
-	return ptAgent, pt, rt, passthroughCommand{Command: cmd, wrapper: launchwrapper.Profile(prefix)}, mcpArgs.operation, nil
+	wrapper := launchwrapper.Profile(prefix)
+	if err := m.checkCodexCarrier(ctx, execution, cmd.Args(), wrapper); err != nil {
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, err
+	}
+	return ptAgent, pt, rt, passthroughCommand{Command: cmd, wrapper: wrapper}, mcpArgs.operation, nil
 }
 
 // buildInteractiveStartRequest builds the InteractiveStartRequest for a passthrough session.

@@ -539,6 +539,7 @@ func TestLocalPreparer_PreservesFetchFailureWhenCheckoutAlsoFails(t *testing.T) 
 	fakeBin := t.TempDir()
 	fakeGit := filepath.Join(fakeBin, "git")
 	script := `#!/bin/sh
+while [ "${1:-}" = "-c" ]; do shift 2; done
 case "$1" in
 rev-parse)
   pwd
@@ -716,6 +717,7 @@ func TestLocalPreparer_BranchCheckedOutElsewhereFailsClosed(t *testing.T) {
 	fakeBin := t.TempDir()
 	fakeGit := filepath.Join(fakeBin, "git")
 	script := `#!/bin/sh
+while [ "${1:-}" = "-c" ]; do shift 2; done
 case "$1" in
 fetch)
   echo "fatal: couldn't find remote ref feature/shared" >&2

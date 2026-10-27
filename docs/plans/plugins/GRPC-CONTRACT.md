@@ -564,6 +564,40 @@ Disabling, failing, or uninstalling a plugin immediately revokes leases for all
 manifest-declared provider IDs. Repository host and path matching are exact and
 case-sensitive. The broker does not add, remove, or equate a trailing `.git`.
 
+### Sandbox providers
+
+`SandboxProviderPlugin` is an optional, complete six-method extension. The SDK
+exports the generated typed messages from `plugin/v1` and the interface in
+`apps/backend/pkg/pluginsdk/sandbox_provider.go`. An older plugin remains
+compatible and returns `Unimplemented` for this extension.
+
+Each request binds protocol major 1, installation, provider key, operation,
+attempt, execution, generation, and deadline. Responses contain schema version 1, the operation ID, and an optional error code. The host rejects unknown protobuf fields, messages over 1 MiB,
+stale installation bindings, and malformed results. RPC budgets are 5 seconds
+for describe/status/report, 10 seconds for compile/propose, and 2 seconds for
+approval normalization, bounded by the caller deadline.
+
+The runtime description identifies a packaged executable by relative path and SHA-256. The host verifies its checksum-manifest entry and exact bytes. The installation record stores the checksum-manifest digest, so an attempt can retain its runtime identity across upgrades.
+
+Artifact `bindings` contain an object-key `path` and a `runtime_reference`. Each destination must already be an empty JSON string. Core inserts values after compilation with JSON escaping. Private callback references are excluded from RPC inputs and command arguments. A description can supply `approval_wire` JSON bodies for allow-once, deny, and timeout. These static bodies do not authorize a decision. Approval normalization also returns `provider_session_id` and `child_pid` for core ownership checks.
+
+Canonical grants include exact `environment_keys`, never environment values or wildcard names. The provider must preserve these grants and reject its own configuration overrides.
+
+Compilation returns typed prefix references, bounded UTF-8 artifacts, override
+constraints, and canonical effective grants. Effective grants must match the
+request. The host admits the original child separately. Normalized approval
+and status responses are evidence, not authorization or authoritative active
+state. Report and proposal results do not persist policy.
+
+Manifest API v2, a managed binary, `capabilities.sandbox_provider`, and a valid
+`sandbox_providers` declaration are required. The restart-required
+`features.sandboxPolicies` gate is off in every shipped profile. Lifecycle
+revocation cancels in-flight calls on disable, restart, crash, upgrade, and
+uninstall. Core owns process termination and retained policy artifacts.
+
+See the [public recipe](../../public/plugins-authoring.md#contribute-a-sandbox-provider)
+and [fixture](../../../apps/backend/cmd/plugin-fixture/sandbox_provider.go).
+
 ### Remote executor providers
 
 The optional `ExecutorProviderPlugin` extension is all-or-nothing. Its seven RPCs
@@ -1335,3 +1369,9 @@ multipart field `package` → verify checksums.txt covers all files & hashes mat
 ```
 
 ```
+
+Sandbox provider descriptions can declare bounded private state sources through `SandboxRuntimeSource`. Core owns file reads and enforces directory, suffix, depth, count, and byte limits. `NormalizeSandboxStatusResponse` returns either confinement evidence or `SandboxRuntimeIdentity`. Identity-only replies never prove an active policy; core must check process birth and ancestry before binding approval authority.
+
+Sandbox providers that need host enforcement of exact TCP destinations declare the required `egress_proxy` capability. Core supplies `sandbox.egress.endpoint` only through a protected JSON artifact binding, using an existing empty string destination. This reserved reference cannot enter provider request values, supervisor arguments, or public projections. The relay belongs to one captured attempt and closes its tunnels on cancellation.
+
+Core-owned child state uses the existing `SandboxRuntimeReference` contract. The four keys are `sandbox.child.home`, `sandbox.child.config`, `sandbox.child.state`, and `sandbox.child.tmp`. Core sends them only for an explicit agent-state grant. Providers validate grant coverage and use artifact bindings for child environment settings. These references do not replace private supervisor directories or transfer allocation ownership.

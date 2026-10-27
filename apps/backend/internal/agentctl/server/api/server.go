@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -66,6 +67,9 @@ func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
 // If mcpBackendClient is provided, the agent stream becomes bidirectional for MCP.
 func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
+	probeSandboxHost(func(err error) {
+		log.Warn("sandbox host probe failed; sandbox-launch.v1 is not advertised", zap.Error(err))
+	})
 
 	s := &Server{
 		cfg:              cfg,
@@ -91,9 +95,12 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 	// Exempt paths from auth:
 	// - /health: liveness probe
-	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
-	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	// - /git-credentials/: the Git credential relay; the lease in the body is
+	//   the capability and the upstream broker validates it.
+	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess, which
+	//   does not hold the control credential. They are authenticated by the
+	//   per-instance MCP token guard instead.
+	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp", GitCredentialRelayPrefix))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -115,6 +122,9 @@ func (s *Server) setupRoutes() {
 	// Health check
 	s.router.GET("/health", s.handleHealth)
 	s.router.GET("/identity", s.handleInstanceIdentity)
+	// The relay decides its own 404/405 so an unregistered subpath and a wrong
+	// method are answered by the documented rules, not by router defaults.
+	s.router.Any(GitCredentialRelayPrefix+"*path", s.handleGitCredentialRelay)
 
 	// Agent control
 	api := s.router.Group("/api/v1")
@@ -127,6 +137,9 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.GET("/agent/sandbox/owner", s.handleSandboxOwner)
+		api.GET("/agent/sandbox/:attemptID/receipt", s.handleSandboxStartReceipt)
+		api.PUT("/agent/sandbox/owner", s.handleSetSandboxOwner)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
@@ -268,6 +281,7 @@ func (s *Server) setupRoutes() {
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
+		api.Any("/agent/sandbox/mcp", s.handleSandboxMCP)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
@@ -485,6 +499,7 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
+	Sandbox         *sandbox.Launch    `json:"sandbox,omitempty"`
 	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	Command         string             `json:"command"`
 	AgentArgs       optionalArgs       `json:"agent_args"`
@@ -525,15 +540,8 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	if !req.LaunchWrapper.IsZero() {
-		if !c.GetBool(authenticatedControlContextKey) {
-			c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for launch wrappers"})
-			return
-		}
-		if !req.AgentArgs.Present || req.LaunchWrapper.Validate() != nil {
-			c.JSON(http.StatusBadRequest, AgentConfigureResponse{Error: "invalid launch wrapper configuration"})
-			return
-		}
+	if !s.admitExecutionConfiguration(c, req) {
+		return
 	}
 
 	if !req.AgentArgs.Present && req.Command == "" {
@@ -544,12 +552,11 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	var configureErr error
-	if req.ReplaceEnv {
-		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
-	} else {
-		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
-	}
+	configureErr := s.procMgr.ConfigureExecution(process.ExecutionConfiguration{
+		Command: req.Command, Args: req.AgentArgs.Args, ArgsPresent: req.AgentArgs.Present, Environment: req.Env,
+		ContinueCommand: req.ContinueCommand, ContinueArgs: req.ContinueArgs.Args, ContinueArgsPresent: req.ContinueArgs.Present,
+		ReplaceEnvironment: req.ReplaceEnv, Wrapper: req.LaunchWrapper, Sandbox: req.Sandbox,
+	})
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent", zap.Error(configureErr))
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{

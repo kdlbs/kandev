@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/npmresolution"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	"go.uber.org/zap"
 )
 
@@ -84,7 +85,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		zap.String("model", model))
 
 	env := sanitizeEnvForAgent(cfg)
-	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
+	args, env, prepareErr := prepareACPProcess(cfg, resolvedCmd, args, env)
 	if prepareErr != nil {
 		return &PromptResponse{Success: false, Error: prepareErr.Error()}, nil
 	}
@@ -97,6 +98,11 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	cmd.Dir = workDir
 	cmd.Env = env
 	configureACPCommand(cmd, e.logger)
+	if cfg.Sandbox != nil {
+		if err := sandbox.ConfigureProcess(cmd); err != nil {
+			return &PromptResponse{Success: false, Error: "sandbox process isolation is unavailable"}, nil
+		}
+	}
 
 	// Same reasoning as the probe: without this the child's own account of why
 	// it died is discarded.
@@ -113,7 +119,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startUtilitySandboxCommand(cmd, cfg); err != nil {
 		return &PromptResponse{Success: false, Error: utilityStartError(cfg, err)}, nil
 	}
 	lifecycle, err := installACPCommandLifecycle(cmd)
@@ -123,6 +129,9 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}
 
 	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
+	if err := bindUtilitySandbox(ctx, cmd, cfg); err != nil {
+		return &PromptResponse{Success: false, Error: "sandbox ownership was not acknowledged"}, nil
+	}
 
 	// Execute ACP protocol
 	mcpServers, dropped := toACPMcpServers(req.MCPServers)
@@ -133,7 +142,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth)
 	if err != nil {
 		failure := withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail())
-		if !cfg.LaunchWrapper.IsZero() {
+		if !cfg.LaunchWrapper.IsZero() || cfg.Sandbox != nil {
 			failure = "wrapped utility execution failed"
 			e.logger.Error(failure, zap.String("agent_id", req.AgentID))
 		} else {
@@ -484,14 +493,14 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	isOpenCode := isOpenCodeACPCommand(cfg.Command)
 	var refreshedOpenCodeModels []ProbeModel
 	if isOpenCode && req.Refresh {
-		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true, req.ProfileContext || !cfg.LaunchWrapper.IsZero(), cfg)
+		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true, req.ProfileContext || !cfg.LaunchWrapper.IsZero() || cfg.Sandbox != nil, cfg)
 	}
 
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
 	env := sanitizeEnvForAgent(cfg)
-	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
+	args, env, prepareErr := prepareACPProcess(cfg, resolvedCmd, args, env)
 	if prepareErr != nil {
 		return &ProbeResponse{Success: false, Error: prepareErr.Error(), FailureCode: ProbeFailureUnsupportedContext}, nil
 	}
@@ -509,6 +518,11 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	cmd.Dir = workDir
 	cmd.Env = env
 	configureACPCommand(cmd, e.logger)
+	if cfg.Sandbox != nil {
+		if err := sandbox.ConfigureProcess(cmd); err != nil {
+			return &ProbeResponse{Success: false, Error: "sandbox process isolation is unavailable"}, nil
+		}
+	}
 
 	// Keep the child's stderr. A probe that dies before answering otherwise
 	// reports only "peer disconnected before response", and the reason the
@@ -526,7 +540,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if err != nil {
 		return &ProbeResponse{Success: false, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startUtilitySandboxCommand(cmd, cfg); err != nil {
 		return &ProbeResponse{Success: false, Error: utilityStartError(cfg, err)}, nil
 	}
 	lifecycle, err := installACPCommandLifecycle(cmd)
@@ -539,6 +553,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		cleanupOnce.Do(func() { cleanupACPCommand(ctx, cmd, lifecycle, e.logger) })
 	}
 	defer cleanup()
+	if err := bindUtilitySandbox(ctx, cmd, cfg); err != nil {
+		return &ProbeResponse{Success: false, Error: "sandbox ownership was not acknowledged"}, nil
+	}
 
 	resp, err := e.probeACPSessionWithContext(
 		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth,
@@ -551,7 +568,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		managedFailureCode := managedRuntimeProbeFailureCode(cfg.Command, stderrTail)
 		failureCode := managedFailureCode
 		failureMessage := sanitizeProbeDiagnostic(withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail))
-		if req.ProfileContext || !cfg.LaunchWrapper.IsZero() {
+		if req.ProfileContext || !cfg.LaunchWrapper.IsZero() || cfg.Sandbox != nil {
 			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
 		}
 		e.logProbeFailure(req, err, logTail, failureCode, managedFailureCode)
@@ -564,13 +581,16 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 	if len(resp.Models) == 0 && isOpenCode {
 		if len(refreshedOpenCodeModels) == 0 {
-			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false, req.ProfileContext || !cfg.LaunchWrapper.IsZero(), cfg)
+			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false, req.ProfileContext || !cfg.LaunchWrapper.IsZero() || cfg.Sandbox != nil, cfg)
 		}
 		resp.Models = refreshedOpenCodeModels
 	}
 	observationPrefix := cfg.CommandPrefix
 	if !cfg.LaunchWrapper.IsZero() {
 		observationPrefix = cfg.LaunchWrapper.Argv
+	}
+	if cfg.Sandbox != nil {
+		observationPrefix = cfg.Sandbox.Prefix
 	}
 	resp.RuntimeInfo = e.collectRuntimeObservation(
 		ctx,
@@ -668,15 +688,18 @@ func probeOpenCodeModels(
 	if len(configs) > 0 && configs[0] != nil {
 		cfg = configs[0]
 	}
+	if cfg.Sandbox != nil {
+		return nil, errors.New("secondary model discovery requires a separate sandbox attempt")
+	}
 	env := sanitizeEnvForAgent(cfg)
-	argv, err := prepareACPLaunch(cfg, resolvedCmd, append([]string{resolvedCmd}, args...), env)
+	argv, env, err := prepareACPProcess(cfg, resolvedCmd, append([]string{resolvedCmd}, args...), environWithNoColor(env))
 	if err != nil {
 		return nil, err
 	}
 	//nolint:gosec // prepareACPLaunch admits the child and validates the authorized wrapper.
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workDir
-	cmd.Env = environWithNoColor(env)
+	cmd.Env = env
 	out, err := runACPCommandWithOutput(ctx, cmd, zap.NewNop())
 	if err != nil {
 		return nil, err

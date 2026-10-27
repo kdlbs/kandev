@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -263,6 +265,8 @@ type InstanceConfig struct {
 	// AgentArgs is the parsed command (derived from AgentCommand)
 	AgentArgs             []string
 	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	Sandbox               *sandbox.Launch    `json:"sandbox,omitempty"`
+	SandboxRequired       bool               `json:"sandbox_required,omitempty"`
 	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
 
 	// WorkDir is the working directory for the agent process
@@ -292,6 +296,13 @@ type InstanceConfig struct {
 
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
+
+	// SessionMCP holds the per-instance MCP bearer token (memory only).
+	SessionMCP *SessionMCPToken `json:"-"`
+
+	// BrokerUpstreamURL is the backend Git credential broker URL the instance
+	// relays to; empty when the instance has no relay.
+	BrokerUpstreamURL string `json:"-"`
 
 	// InjectedKandevMCP records that this instance configuration was created
 	// with the host-owned Kandev MCP server injected into McpServers.
@@ -383,6 +394,11 @@ type InstanceConfig struct {
 	// credential-free comparison bindings. Targets are installed before
 	// tracker polling so an unavailable target cannot fall back to origin.
 	ComparisonTargets map[string]models.ComparisonTarget
+
+	// GitHooks maps workspace entry keys to repositories that opted into
+	// running their Git hooks. Absent entries mean hooks off. It is a
+	// launch-time snapshot and never changes for the life of the instance.
+	GitHooks map[string]bool
 
 	// RemoteContributions maps workspace repository subpaths to the
 	// server-authored contribution binding used for source-routed writes.
@@ -674,13 +690,14 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	}
 
 	applyOverrides(cfg, overrides)
+	cfg.SessionMCP = NewSessionMCPToken(overrideSessionToken(overrides))
 
 	// Inject local kandev MCP server for MCP tunneling through the agent stream.
 	// This adds the kandev MCP server as an entry in InstanceConfig.McpServers.
 	// The MCP server uses the agent stream WebSocket connection (bidirectional)
 	// to forward tool calls to the backend.
 	if port > 0 {
-		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost)
+		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost, cfg.SessionMCP.Headers())
 		cfg.InjectedKandevMCP = true
 	}
 
@@ -693,6 +710,13 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	}
 
 	return cfg
+}
+
+func overrideSessionToken(overrides *InstanceOverrides) string {
+	if overrides == nil {
+		return ""
+	}
+	return overrides.SessionMCPToken
 }
 
 // applyOverrides applies non-zero fields from overrides to cfg.
@@ -765,6 +789,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.ComparisonTargets) > 0 {
 		cfg.ComparisonTargets = cloneComparisonTargets(overrides.ComparisonTargets)
 	}
+	if len(overrides.GitHooks) > 0 {
+		cfg.GitHooks = maps.Clone(overrides.GitHooks)
+	}
 	if len(overrides.RemoteContributions) > 0 {
 		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
 	}
@@ -786,6 +813,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DeliveryHarnessGeneration > 0 {
 		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
 	}
+	cfg.BrokerUpstreamURL = overrides.BrokerUpstreamURL
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -827,6 +855,7 @@ type InstanceOverrides struct {
 	ProviderGatewayAuth        *acpprovider.GatewayAuth
 	BaseBranches               map[string]string
 	ComparisonTargets          map[string]models.ComparisonTarget
+	GitHooks                   map[string]bool
 	RemoteContributions        map[string]models.RemoteContribution
 	ContributionDestinations   map[string]models.ContributionDestination
 	WorkspaceSourceRoots       []string
@@ -834,6 +863,8 @@ type InstanceOverrides struct {
 	DeliveryStreamID           string
 	DeliveryIncarnationID      string
 	DeliveryHarnessGeneration  uint64
+	SessionMCPToken            string
+	BrokerUpstreamURL          string
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
@@ -1230,19 +1261,21 @@ const kandevMcpServerName = "kandev"
 // the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
 // SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
-	return injectKandevMcpServerAtHost(servers, port, "localhost")
+	return injectKandevMcpServerAtHost(servers, port, "localhost", nil)
 }
 
-func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string) []McpServerConfig {
+func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string, headers map[string]string) []McpServerConfig {
 	kandevMcpSse := McpServerConfig{
-		Name: kandevMcpServerName,
-		Type: "sse",
-		URL:  MCPServerURL(host, port, "/sse"),
+		Name:    kandevMcpServerName,
+		Type:    "sse",
+		URL:     MCPServerURL(host, port, "/sse"),
+		Headers: headers,
 	}
 	kandevMcpHttp := McpServerConfig{
-		Name: kandevMcpServerName,
-		Type: "http",
-		URL:  MCPServerURL(host, port, "/mcp"),
+		Name:    kandevMcpServerName,
+		Type:    "http",
+		URL:     MCPServerURL(host, port, "/mcp"),
+		Headers: headers,
 	}
 
 	// Filter out any existing kandev server and prepend the local ones

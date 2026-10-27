@@ -3352,10 +3352,14 @@ func (s *Service) executionTeardownClaimFor(sessionID, executionID string) (exec
 // If the token is still present in the DB, the agent was started with --resume.
 func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil {
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return false
 	}
-	return running.ResumeToken != ""
+	if running != nil {
+		return running.ResumeToken != ""
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return err == nil && sessionHasProviderSessionToken(session)
 }
 
 // clearResumeToken removes the resume token from the executor running record so

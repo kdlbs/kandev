@@ -39,6 +39,9 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 	if rt == nil || rt.ProjectMCPStrategy == nil {
 		return nil
 	}
+	if err := m.requireSessionMCPCarrier(execution, agentConfig, rt.ProjectMCPStrategy); err != nil {
+		return err
+	}
 	if isCursorMCPAuthStrategy(rt.ProjectMCPStrategy) {
 		if err := m.prepareCursorMCPAuthWithProgress(execution, profileInfo, executorType, rt.ProjectMCPStrategy, progress); err != nil {
 			return err
@@ -55,9 +58,16 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 	if len(servers) == 0 {
 		return nil
 	}
-	artifacts, err := rt.ProjectMCPStrategy.BuildPassthroughMCP(servers, m.passthroughMCPPaths(execution))
+	authed, err := m.withSessionMCPAuth(ctx, execution, agentConfig, rt.ProjectMCPStrategy, servers)
+	if err != nil {
+		return err
+	}
+	artifacts, err := rt.ProjectMCPStrategy.BuildPassthroughMCP(authed, m.passthroughMCPPaths(execution))
 	if err != nil {
 		return fmt.Errorf("build project MCP config: %w", err)
+	}
+	if err := validateSandboxMCPArtifacts(execution, len(servers), artifacts); err != nil {
+		return err
 	}
 	return m.writePassthroughMCPFiles(ctx, execution, artifacts.Files)
 }

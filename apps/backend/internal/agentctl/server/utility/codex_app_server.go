@@ -48,7 +48,7 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	if strings.TrimSpace(req.InferenceConfig.WorkDir) == "" {
 		return &ProbeResponse{Error: "work_dir is required for Codex app-server probe"}, nil
 	}
-	if !req.InferenceConfig.LaunchWrapper.IsZero() || (req.ProfileContext && (len(req.InferenceConfig.CLIFlags) > 0 || len(req.InferenceConfig.CommandPrefix) > 0)) {
+	if req.InferenceConfig.Sandbox != nil || !req.InferenceConfig.LaunchWrapper.IsZero() || (req.ProfileContext && (len(req.InferenceConfig.CLIFlags) > 0 || len(req.InferenceConfig.CommandPrefix) > 0)) {
 		return &ProbeResponse{
 			Error:       "profile launch settings are unsupported by the Codex app-server probe",
 			FailureCode: ProbeFailureUnsupportedContext,
@@ -224,7 +224,7 @@ func resolveCodexAppServerCommand(cfg *InferenceConfigDTO) (string, []string, er
 	if cfg == nil {
 		return "", nil, errors.New("inference config is required")
 	}
-	if cfg.OperatorDefined || !cfg.LaunchWrapper.IsZero() || len(cfg.CommandPrefix) != 0 || len(cfg.CLIFlags) != 0 {
+	if cfg.Sandbox != nil || cfg.OperatorDefined || !cfg.LaunchWrapper.IsZero() || len(cfg.CommandPrefix) != 0 || len(cfg.CLIFlags) != 0 {
 		return "", nil, errors.New("codex app-server utility requires the built-in unwrapped command")
 	}
 	args := cfg.Command

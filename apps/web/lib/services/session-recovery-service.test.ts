@@ -44,6 +44,30 @@ it("localizes typed cleanup responses without inspecting transport prose", () =>
 });
 const recoveryAction = "session.recover";
 
+it.each(["resume", "fresh_start", "runtime_retry"] as const)(
+  "sends the bootstrap failure stamp for %s on the wire",
+  async (action) => {
+    mocks.request.mockResolvedValueOnce({ success: true });
+    await requestSessionRecover({
+      taskId: "task-1",
+      sessionId: "session-1",
+      action,
+      errorStamp: "bootstrap-attempt-1",
+      failureMessage: "Recovery failed",
+    });
+    expect(mocks.request).toHaveBeenCalledWith(
+      "session.recover",
+      {
+        task_id: "task-1",
+        session_id: "session-1",
+        action,
+        error_stamp: "bootstrap-attempt-1",
+      },
+      30_000,
+    );
+  },
+);
+
 describe("recoveryInspectionBusyDetails", () => {
   it("recognizes only the structured inspection-contention conflict", () => {
     const error = new WebSocketRequestError("busy", "CONFLICT", {

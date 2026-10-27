@@ -525,6 +525,95 @@ describe("useTaskSubmitHandlers — started task edits", () => {
     expect(onSuccess).toHaveBeenCalledWith({ id: TASK_ID, title: RENAMED_TITLE }, "edit");
   });
 
+  it.each(["handleSubmit", "handleUpdateWithoutAgent", "handleCreateWithPlanMode"] as const)(
+    "blocks %s while the policy draft is invalid",
+    async (action) => {
+      const save = vi.fn();
+      const onOpenChange = vi.fn();
+      const deps = makeDeps({
+        isEditMode: true,
+        taskName: ORIGINAL_TITLE,
+        editingTask: {
+          id: TASK_ID,
+          title: ORIGINAL_TITLE,
+          description: ORIGINAL_PROMPT,
+          workflowStepId: "step-1",
+          state: TODO_STATE,
+        },
+        descriptionInputRef: makeRef(UPDATED_PROMPT),
+        onOpenChange,
+        editSandbox: { isDirty: true, ready: false, save },
+      });
+      const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+      await act(async () => {
+        if (action === "handleSubmit")
+          await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+        else await result.current[action]();
+      });
+      expect(updateTaskMock).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+      expect(launchSessionMock).not.toHaveBeenCalled();
+      expect(onOpenChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it("saves an explicit sandbox selection before starting an edited task", async () => {
+    const save = vi.fn(async () => undefined);
+    const onOpenChange = vi.fn();
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: ORIGINAL_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: ORIGINAL_TITLE,
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: TODO_STATE,
+      },
+      descriptionInputRef: makeRef(UPDATED_PROMPT),
+      onOpenChange,
+      editSandbox: { isDirty: true, ready: true, save },
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+    expect(save).toHaveBeenCalledOnce();
+    expect(launchSessionMock).toHaveBeenCalledOnce();
+    expect(save.mock.invocationCallOrder[0]).toBeLessThan(
+      launchSessionMock.mock.invocationCallOrder[0]!,
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps the editor open and does not launch after a policy save failure", async () => {
+    const onOpenChange = vi.fn();
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: ORIGINAL_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: ORIGINAL_TITLE,
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: TODO_STATE,
+      },
+      descriptionInputRef: makeRef(UPDATED_PROMPT),
+      onOpenChange,
+      editSandbox: {
+        isDirty: true,
+        ready: true,
+        save: vi.fn().mockRejectedValue({ sandboxUpdate: true }),
+      },
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+    expect(launchSessionMock).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
   it("replaces edited dependencies after task fields and closes on success", async () => {
     const save = vi.fn(async () => undefined);
     const onOpenChange = vi.fn();

@@ -31,6 +31,7 @@ import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
 import { WorkflowStepAgentProfileSelector } from "./workflow-step-agent-profile-selector";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
+import { SandboxSelectionSettings } from "./sandbox-selection-settings";
 
 // --- StepConfigHeader ---
 
@@ -580,6 +581,12 @@ export function StepConfigPanel({
         <SessionConfigEditor
           {...{ step, savedStep, steps, onUpdate, readOnly }}
           onResolutionPendingChange={onSessionConfigResolutionPendingChange}
+        />
+        <SandboxSelectionSettings
+          scope="workflow_step"
+          targetId={savedStep?.id ?? ""}
+          agentProfileId={step.agent_profile_id}
+          readOnly={readOnly}
         />
         <StepTransitionsSection
           step={step}

@@ -306,6 +306,30 @@ describe("useSessionRecoveryActions", () => {
     });
   });
 
+  it.each(["resume", "fresh_start", "runtime_retry"] as const)(
+    "binds %s to the displayed failure stamp",
+    async (action) => {
+      mocks.requestSessionRecover.mockResolvedValueOnce(undefined);
+      const { result } = renderHook(() =>
+        useSessionRecoveryActions({
+          taskId: TASK_ID,
+          sessionId: SESSION_ID,
+          errorStamp: "bootstrap-attempt-1",
+        }),
+      );
+      await act(async () => {
+        await result.current.handleRecover(action);
+      });
+      expect(mocks.requestSessionRecover).toHaveBeenCalledWith({
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        action,
+        errorStamp: "bootstrap-attempt-1",
+        failureMessage: FAILED_TO_RESUME_MESSAGE_KEY,
+      });
+    },
+  );
+
   it("retains a failed action for retry and releases its busy state", async () => {
     mocks.requestSessionRecover
       .mockRejectedValueOnce(new Error(PROVIDER_UNAVAILABLE))

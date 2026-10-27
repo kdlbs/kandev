@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // hardenedSubmoduleConfig are the `-c` git config overrides applied when
@@ -57,6 +59,7 @@ var hardenedSubmoduleConfig = []string{
 // context deadline. Kept separate from initSubmodules so tests can assert the
 // hardening flags/env are present at the sink.
 func (m *Manager) newSubmoduleUpdateCmd(ctx context.Context, dir string) *exec.Cmd {
+	ctx = subproc.WithGitHooks(ctx, false)
 	args := make([]string, 0, len(hardenedSubmoduleConfig)*2+4)
 	for _, c := range hardenedSubmoduleConfig {
 		args = append(args, "-c", c)
@@ -96,6 +99,9 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 // Failures are non-fatal: submodule URLs may be unreachable (private repos,
 // missing credentials), but the worktree is still usable for non-submodule files.
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
+	// The policy is applied from the context the command runs with, so the
+	// no-hooks decision must be on that context, not only on construction.
+	ctx = subproc.WithGitHooks(ctx, false)
 	cmd, err := m.scopedSubmoduleUpdateCmd(ctx, dir)
 	if err != nil {
 		m.logger.Warn("failed to discover sparse-checkout submodules", zap.String("dir", dir), zap.Error(err))

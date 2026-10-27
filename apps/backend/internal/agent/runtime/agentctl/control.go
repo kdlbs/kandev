@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -109,6 +110,9 @@ type CreateInstanceRequest struct {
 	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	ComparisonTargets        map[string]models.ComparisonTarget        `json:"comparison_targets,omitempty"`
+	// GitHooks maps workspace entry key → repository opted into running Git
+	// hooks. Absent entries mean hooks off.
+	GitHooks map[string]bool `json:"git_hooks,omitempty"`
 	// WorkspaceSourceRoots are canonical host roots explicitly attached to the
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
@@ -123,7 +127,21 @@ type CreateInstanceRequest struct {
 	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
 	// DeliveryHarnessGeneration fences events to one native harness conversation.
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// SessionMCPToken authenticates the instance MCP endpoint. agentctl keeps
+	// it in memory only.
+	SessionMCPToken string `json:"session_mcp_token,omitempty"`
+	// BrokerUpstreamURL is the backend credential broker URL the instance
+	// relays to. Set only for executors that share the backend's host.
+	BrokerUpstreamURL string `json:"credential_broker_upstream_url,omitempty"`
 }
+
+// String redacts the session token.
+func (r CreateInstanceRequest) String() string {
+	return fmt.Sprintf("CreateInstanceRequest{ID:%s}", r.ID)
+}
+
+// GoString redacts the session token under %#v.
+func (r CreateInstanceRequest) GoString() string { return r.String() }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
 type CreateInstanceResponse struct {
@@ -314,8 +332,41 @@ func (c *ControlClient) SubprocessAdmission(ctx context.Context) (subproc.Snapsh
 	return snapshot, nil
 }
 
+// ErrManagedGitPolicyUnsupported reports an agentctl build that does not
+// advertise the managed Git policy capability.
+var ErrManagedGitPolicyUnsupported = errors.New("agentctl does not support the managed Git policy. Update the execution runtime before retrying")
+
+// ErrManagedGitPolicyUnverified reports that the capability could not be
+// checked (timeout, transport error, non-success status, or malformed body).
+var ErrManagedGitPolicyUnverified = errors.New("could not verify that agentctl supports the managed Git policy")
+
+const managedGitPolicyProbeTimeout = 5 * time.Second
+
+// requireManagedGitPolicy fails unless the peer advertises the managed Git
+// policy capability. A caller context that is cancelled or past its deadline
+// returns that context error; only the probe's own bound is a failed
+// verification.
+func (c *ControlClient) requireManagedGitPolicy(ctx context.Context) error {
+	probeCtx, cancel := context.WithTimeout(ctx, managedGitPolicyProbeTimeout)
+	defer cancel()
+	info, err := c.GetIdentity(probeCtx)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return fmt.Errorf("%w: %v", ErrManagedGitPolicyUnverified, err)
+	}
+	if !slices.Contains(info.Capabilities, subproc.ManagedGitPolicyCapability) {
+		return ErrManagedGitPolicyUnsupported
+	}
+	return nil
+}
+
 // CreateInstance creates a new agent instance.
 func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceRequest) (*CreateInstanceResponse, error) {
+	if err := c.requireManagedGitPolicy(ctx); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -347,6 +398,9 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 			return nil, fmt.Errorf("failed to decode error response: %w", err)
 		}
+		if resp.StatusCode == http.StatusConflict && isCreateConflictCode(errResp.Error) {
+			return nil, &CreateConflictError{Code: errResp.Error}
+		}
 		return nil, fmt.Errorf("failed to create instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
 
@@ -363,10 +417,15 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 }
 
 // DeleteInstance stops and removes an agent instance.
+// A context from WithExpectedTokenFingerprint adds the token precondition.
 func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) error {
+	tokenFingerprint := ExpectedTokenFingerprintFrom(ctx)
 	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/instances/"+instanceID, nil)
 	if err != nil {
 		return err
+	}
+	if tokenFingerprint != "" {
+		req.Header.Set(expectedTokenFingerprintHeader, tokenFingerprint)
 	}
 
 	resp, err := c.httpClient.Do(req)

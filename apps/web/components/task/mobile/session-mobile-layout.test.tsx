@@ -89,7 +89,7 @@ const REPO = "frontend";
 
 describe("mobilePanelTopNavHeight", () => {
   it("reserves the fixed header only when no earlier page feedback owns the offset", () => {
-    expect(mobilePanelTopNavHeight(false)).toBe("3.5rem");
+    expect(mobilePanelTopNavHeight(false)).toBe("var(--task-mobile-header-height, 3.5rem)");
     expect(mobilePanelTopNavHeight(true)).toBe("0px");
     expect(mobilePanelTopNavHeight(false, true)).toBe("0px");
     expect(mobilePanelTopNavHeight(true, true)).toBe("0px");
@@ -104,7 +104,7 @@ describe("mobilePanelTopPadding", () => {
 
   it("keeps panel-owned safe-area padding for ordinary and shared-error layouts", () => {
     expect(mobilePanelTopPadding(false, false)).toBe(
-      "calc(3.5rem + env(safe-area-inset-top, 0px))",
+      "calc(var(--task-mobile-header-height, 3.5rem) + env(safe-area-inset-top, 0px))",
     );
     expect(mobilePanelTopPadding(true, false)).toBe("calc(0px + env(safe-area-inset-top, 0px))");
   });

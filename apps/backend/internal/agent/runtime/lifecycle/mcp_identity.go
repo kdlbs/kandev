@@ -11,8 +11,13 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// reasonGuardUnavailable is the retryable refusal reason when the caller's
+// sandbox task guard cannot be read.
+const reasonGuardUnavailable = "sandbox_guard_unavailable"
 
 var errMCPHandlerUnavailable = errors.New("MCP handler is not configured")
 
@@ -121,6 +126,11 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 			zap.String("session_id", h.sessionID),
 			zap.String("action", msg.Action),
 			zap.Error(err))
+		if errors.Is(err, mcpscope.ErrGuardUnavailable) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable,
+				"sandbox guard is temporarily unavailable; retry the call",
+				map[string]interface{}{"reason": reasonGuardUnavailable})
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to resolve the session principal", nil)
 	}

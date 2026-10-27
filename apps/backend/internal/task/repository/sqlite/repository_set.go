@@ -281,7 +281,7 @@ func (r *Repository) patchRepositorySet(
 	defer func() { _ = tx.Rollback() }()
 
 	*updatedAt = time.Now().UTC()
-	assignments := []string{"updated_at = ?"}
+	assignments := []string{updatedAtAssignment}
 	args := []any{*updatedAt}
 	if patch.Name != nil {
 		assignments = append(assignments, "name = ?")

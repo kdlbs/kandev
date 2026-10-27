@@ -296,9 +296,9 @@ func (s *Service) withExecutorProvider(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	callCtx, release, err := s.beginExecutorProviderDispatch(ctx, pluginID)
+	callCtx, release, err := s.beginProviderDispatch(ctx, pluginID)
 	if err != nil {
-		return err
+		return ErrExecutorProviderUnavailable
 	}
 	defer release()
 	return call(callCtx, remote, provider)

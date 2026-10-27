@@ -165,7 +165,7 @@ func validRecord() *models.ControlServerRecord {
 		Endpoint:           "127.0.0.1:9999",
 		ServerIdentity:     "matching-identity",
 		CredentialSecretID: "secret-1",
-		Capabilities:       []string{"agent-survival.v1"},
+		Capabilities:       []string{"agent-survival.v1", "session_mcp_token"},
 		DiagnosticLogPath:  testDiagnosticLogPath,
 	}
 }
@@ -173,7 +173,7 @@ func validRecord() *models.ControlServerRecord {
 func validIdentity() *agentctl.IdentityInfo {
 	return &agentctl.IdentityInfo{
 		ServerIdentity:  "matching-identity",
-		Capabilities:    []string{"agent-survival.v1"},
+		Capabilities:    []string{"agent-survival.v1", "session_mcp_token"},
 		UnownedPeriodMS: 300000,
 	}
 }
@@ -950,3 +950,30 @@ func TestRecordFreshControlServerPropagatesIdentityFailure(t *testing.T) {
 // AC-EXECUTORS-CONTROL-OWNERSHIP-004.7's "already absent counts as success"
 // carve-out for this stop too: a dial-level connection-refused error must
 // not be retried to exhaustion, and the immediate-repair step still runs.
+
+// A control server that predates the session MCP token advertises only the
+// survival capability; it is refused and replaced rather than adopted.
+func TestAttemptAdoptControlServerWithoutSessionTokenCapabilityIsRefused(t *testing.T) {
+	secretStore := newInMemorySecretStore()
+	secretID, err := storeControlServerCredential(context.Background(), secretStore, "", "current-token")
+	if err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	record := validRecord()
+	record.CredentialSecretID = secretID
+	identity := validIdentity()
+	identity.Capabilities = []string{"agent-survival.v1"}
+	client := &fakeAdoptionControlClient{
+		heldCredential: "current-token",
+		identity:       identity,
+		rotateResult:   &agentctl.CredentialRotationResult{RotationID: 7, Credential: "rotated-token"},
+	}
+	store, factory := adoptionFixture(t, record, client)
+
+	outcome := AttemptAdoptControlServer(context.Background(), store, secretStore, factory,
+		testHomeDir, RequiredSurvivalCapabilities, 0, -1, newAdoptionTestLogger(t))
+
+	if outcome.Adopted || outcome.Reason != AdoptionReasonCapabilityIncompatible || !client.shutdownCalled {
+		t.Fatalf("outcome = %+v shutdown=%v, want refused and stopped", outcome, client.shutdownCalled)
+	}
+}

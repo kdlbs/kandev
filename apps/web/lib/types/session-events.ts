@@ -1,3 +1,4 @@
+import type { ExecutionSnapshot, ExecutionObservation } from "./execution";
 import type { BackendMessage } from "./backend-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { FileChangeNotificationPayload } from "./workspace-files";
@@ -45,6 +46,9 @@ export type MessageAddedPayload = {
 export type TaskSessionStateChangedPayload = {
   task_id: string;
   session_id: string;
+  execution_snapshot?: ExecutionSnapshot | null;
+  execution_observation?: ExecutionObservation | null;
+  queue_incarnation_id?: string;
   old_state?: string;
   new_state?: string;
   /** Authoritative row timestamp — used to drop out-of-order subscribe snapshots. */
@@ -276,6 +280,20 @@ export type AvailableCommandPayload = {
 };
 
 export type SessionBackendMessageMap = {
+  "session.sandbox_approvals_changed": BackendMessage<
+    "session.sandbox_approvals_changed",
+    { task_id: string; session_id: string; queue_incarnation_id: string }
+  >;
+  "session.execution_changed": BackendMessage<
+    "session.execution_changed",
+    {
+      task_id: string;
+      session_id: string;
+      queue_incarnation_id: string;
+      execution_snapshot: ExecutionSnapshot;
+      execution_observation?: ExecutionObservation | null;
+    }
+  >;
   "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
   "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
   "session.message.deleted": BackendMessage<"session.message.deleted", MessageAddedPayload>;

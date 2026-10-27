@@ -103,6 +103,9 @@ func (r *remotePassthroughRunner) target(processID string) (types.PassthroughTar
 }
 
 func (r *remotePassthroughRunner) Start(ctx context.Context, request process.InteractiveStartRequest) (*process.InteractiveProcessInfo, error) {
+	if request.Sandbox != nil {
+		return nil, errors.New("remote terminal transport does not support sandbox launches")
+	}
 	if !request.LaunchWrapper.IsZero() {
 		return nil, errors.New("remote terminal transport does not support launch wrappers")
 	}

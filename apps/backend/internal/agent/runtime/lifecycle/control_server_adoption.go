@@ -22,7 +22,7 @@ import (
 // api.SurvivalCapabilities -- kept as an independent literal here rather
 // than imported, since agentctl/server/api is not a package the backend
 // package layer depends on.
-var RequiredSurvivalCapabilities = []string{"agent-survival.v1"}
+var RequiredSurvivalCapabilities = []string{"agent-survival.v1", "session_mcp_token"}
 
 // AdoptionRecordStore is the narrow persistence interface the adoption
 // orchestration reads and writes the single installation-scoped

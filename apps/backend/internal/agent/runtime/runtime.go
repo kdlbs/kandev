@@ -31,6 +31,10 @@ type ExecutionOwnerKind = lifecycle.ExecutionOwnerKind
 type ExecutionOwner = lifecycle.ExecutionOwner
 type OwnerAdmission = lifecycle.OwnerAdmission
 type LaunchRequest = lifecycle.LaunchRequest
+type SandboxAttempt = lifecycle.SandboxAttempt
+
+const MetadataKeyExecutorProfileID = lifecycle.MetadataKeyExecutorProfileID
+
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 type AgentExecution = lifecycle.AgentExecution

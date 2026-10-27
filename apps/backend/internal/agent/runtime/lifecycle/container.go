@@ -63,6 +63,8 @@ type ContainerConfig struct {
 	McpMode                        string
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
+	SessionMCPToken                string
+	BrokerUpstreamURL              string
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
 	AllowUserNamespaces            bool   // If true, the container is launched with a relaxed seccomp profile and apparmor=unconfined.
@@ -77,6 +79,7 @@ type ContainerConfig struct {
 	RemoteContributions         map[string]models.RemoteContribution
 	ContributionDestinations    map[string]models.ContributionDestination
 	ComparisonTargets           map[string]models.ComparisonTarget
+	GitHooks                    map[string]bool
 	DurableJournalHostPath      string
 	DurableJournalContainerPath string
 	DeliveryStreamID            string
@@ -146,6 +149,8 @@ func buildContainerCreateInstanceRequest(
 		McpMode:                    config.McpMode,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
+		SessionMCPToken:            config.SessionMCPToken,
+		BrokerUpstreamURL:          config.BrokerUpstreamURL,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
@@ -154,6 +159,7 @@ func buildContainerCreateInstanceRequest(
 		RemoteContributions:        config.RemoteContributions,
 		ContributionDestinations:   config.ContributionDestinations,
 		ComparisonTargets:          config.ComparisonTargets,
+		GitHooks:                   config.GitHooks,
 		DurableJournalPath:         config.DurableJournalContainerPath,
 		DeliveryStreamID:           config.DeliveryStreamID,
 		DeliveryIncarnationID:      config.DeliveryIncarnationID,

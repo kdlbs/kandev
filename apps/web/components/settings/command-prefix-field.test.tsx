@@ -89,11 +89,8 @@ describe("CommandPrefixField", () => {
       (_content, element) =>
         element?.tagName === "P" &&
         element.textContent ===
-          "Tokens prepended to the agent launch command, so it runs under a sandbox launcher " +
-            "(e.g. greywall --). The value is shell-tokenised. Leave empty to run the agent " +
-            "directly. Applies to ACP sessions only; it has no effect when the profile " +
-            "uses TUI passthrough.",
+          "Prepend an executable and arguments to the agent command (for example, env --). This applies to local discovery, chat, and native terminals. Quotes group arguments. Shell operators are not evaluated. Leave empty to run the agent directly. A wrapper alone does not prove sandbox protection.",
     );
-    expect(help.querySelector("code")?.textContent).toBe(PREFIX);
+    expect(help.querySelector("code")?.textContent).toBe("env --");
   });
 });

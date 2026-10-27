@@ -102,6 +102,10 @@ func TestPluginExecutorLaunch(t *testing.T) {
 	const instancePort = testPluginExecutorInstancePort
 	var instanceRequest agentctl.CreateInstanceRequest
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/identity" {
+			writeManagedGitIdentity(w)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/instances" {
 			http.NotFound(w, r)
 			return
@@ -252,7 +256,11 @@ func TestPluginExecutorConnectionResolverPreservesProviderRejection(t *testing.T
 func TestPluginExecutorInstanceCreationRejectsUnusablePorts(t *testing.T) {
 	for _, port := range []int{0, 65536} {
 		t.Run(strconv.Itoa(port), func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/identity" {
+					writeManagedGitIdentity(w)
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = fmt.Fprintf(w, `{"id":"execution-plugin-1","port":%d}`, port)
 			}))

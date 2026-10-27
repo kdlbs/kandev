@@ -268,6 +268,7 @@ type CreateRequest struct {
 
 	// PullBeforeWorktree indicates whether to pull from remote before creating the worktree.
 	PullBeforeWorktree bool
+	RunGitHooks        bool
 
 	// RemoteSyncHandled means the caller already refreshed origin through an
 	// authenticated provider seam. Worktree creation must use local/remote-

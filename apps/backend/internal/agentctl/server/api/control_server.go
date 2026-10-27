@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -59,6 +60,9 @@ func NewControlServer(cfg *config.Config, instMgr *instance.Manager, log *logger
 	gin.SetMode(gin.ReleaseMode)
 
 	csLogger := log.WithFields(zap.String("component", "control-server"))
+	probeSandboxHost(func(err error) {
+		csLogger.Warn("sandbox host probe failed; sandbox-launch.v1 is not advertised", zap.Error(err))
+	})
 	unownedPeriod, adjustments := ownershipperiod.Resolve(cfg.UnownedPeriod, cfg.IdleTimeout)
 	for _, reason := range adjustments {
 		csLogger.Warn(reason,
@@ -140,6 +144,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.POST("/instances/:id/mcp-token/revoke", m.handleRevokeMCPToken)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
 	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
@@ -215,6 +220,15 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 
 	resp, err := m.instMgr.CreateInstance(c.Request.Context(), &req)
 	if err != nil {
+		if code, ok := createConflictCode(err); ok {
+			m.logger.Warn("create instance refused", zap.String("code", code), zap.String("id", req.ID))
+			c.JSON(http.StatusConflict, gin.H{"error": code})
+			return
+		}
+		if errors.Is(err, instance.ErrInvalidBrokerUpstream) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		m.logger.Error("failed to create instance", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to create instance: " + err.Error(),
@@ -248,11 +262,22 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	id := c.Param("id")
 
 	// First check if instance exists
-	if _, found := m.instMgr.GetInstance(id); !found {
+	_, found := m.instMgr.GetInstance(id)
+	if !found {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "instance not found",
 		})
 		return
+	}
+	// A delete that names the token fingerprint it expects removes only that
+	// instance: a replacement that took the ID meanwhile survives.
+	var expected string
+	if values, present := c.Request.Header[expectedTokenFingerprintHeader]; present {
+		if len(values) != 1 || values[0] == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid expected token fingerprint"})
+			return
+		}
+		expected = values[0]
 	}
 
 	// Use a detached context so cleanup isn't canceled when the HTTP client disconnects.
@@ -261,7 +286,11 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := m.instMgr.StopInstance(stopCtx, id)
+	stopped, err := m.stopForDelete(stopCtx, id, expected)
+	if err == nil && !stopped {
+		c.JSON(http.StatusOK, messageBody(fingerprintDiffersMessage))
+		return
+	}
 	if err != nil {
 		m.logger.Error("failed to stop instance", zap.String("id", id), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -273,4 +302,43 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "instance stopped successfully",
 	})
+}
+
+func (m *ControlServer) stopForDelete(ctx context.Context, id, expected string) (bool, error) {
+	if expected == "" {
+		return true, m.instMgr.StopInstance(ctx, id)
+	}
+	return m.instMgr.StopInstanceMatching(ctx, id, expected)
+}
+
+func messageBody(msg string) gin.H { return gin.H{"message": msg} }
+
+const (
+	// expectedTokenFingerprintHeader carries the delete precondition: the token
+	// fingerprint the caller believes the instance holds.
+	expectedTokenFingerprintHeader = "X-Expected-Token-Fingerprint"
+	fingerprintDiffersMessage      = "instance fingerprint differs; nothing deleted"
+)
+
+// createConflictCode maps the manager's duplicate-ID refusals to their 409 codes.
+func createConflictCode(err error) (string, bool) {
+	switch {
+	case errors.Is(err, instance.ErrInstanceExists):
+		return "instance_exists", true
+	case errors.Is(err, instance.ErrInstanceCleaningUp):
+		return "instance_cleaning_up", true
+	}
+	return "", false
+}
+
+// handleRevokeMCPToken clears the instance's in-memory MCP token. It is
+// idempotent.
+func (m *ControlServer) handleRevokeMCPToken(c *gin.Context) {
+	inst, found := m.instMgr.GetInstance(c.Param("id"))
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
+		return
+	}
+	inst.RevokeMCPToken()
+	c.JSON(http.StatusOK, messageBody("mcp token revoked"))
 }

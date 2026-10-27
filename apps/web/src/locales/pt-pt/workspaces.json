@@ -301,5 +301,7 @@
   "cloneSourceMissing": "O espaço de trabalho de origem já não está disponível.",
   "cloneConfigurationUnsupported": "Este espaço de trabalho tem definições geridas, predefinições indisponíveis ou referências em fluxos de trabalho que não podem ser clonadas.",
   "cloneFailed": "Não foi possível clonar o espaço de trabalho. Tente novamente.",
-  "workspaceActionsNamed": "Ações de {{name}}"
+  "workspaceActionsNamed": "Ações de {{name}}",
+  "runGitHooks": "Executar hooks do Git",
+  "runGitHooksHelp": "Os hooks do Git do repositório são executados com as permissões do Kandev, e qualquer pessoa ou agente com acesso de escrita ao repositório pode alterá-los. Enquanto esta opção estiver desativada, os hooks da configuração global do utilizador e do sistema também são ignorados. Uma alteração aplica-se às instâncias de agente criadas depois, não às que já estão em execução (Repor o ambiente inicia uma nova). Ao ativá-la, a recursão de submódulos fica desativada nos pull, fetch e push do Kandev neste repositório. Os monitores do sistema de ficheiros, os filtros além do Git LFS padrão e do git-crypt, os conversores de texto e os drivers de merge continuam desativados."
 }

@@ -67,6 +67,7 @@ function buildDraftRepo(
     worktree_branch_prefix: "feature/",
     worktree_branch_template: defaultWorktreeBranchTemplate,
     pull_before_worktree: true,
+    run_git_hooks: false,
     setup_script: "",
     cleanup_script: "",
     dev_script: "",
@@ -103,6 +104,7 @@ function useRepositorySaveHandlers({
     const repo = repositoryItems.find((item) => item.id === repoId);
     if (!repo) return Promise.resolve();
     const submitted = cloneRepository(repo);
+    let published = false;
     const save = Promise.resolve()
       .then(() =>
         saveRepositoryDraft(
@@ -110,6 +112,7 @@ function useRepositorySaveHandlers({
           savedRepositoriesById.get(repoId),
           workspace?.id ?? repo.workspace_id,
           (baseline, draft) => {
+            published = true;
             setRepositoryItems((prev) =>
               prev.map((item) =>
                 item.id === repoId ? mergeSavedRepositoryDraft(item, submitted, draft) : item,
@@ -123,6 +126,21 @@ function useRepositorySaveHandlers({
           },
         ),
       )
+      .catch((error: unknown) => {
+        // A rejected repository write shows the stored hooks decision again;
+        // every other unsaved edit stays in the draft.
+        if (!published) {
+          const stored = savedRepositoriesById.get(repoId)?.run_git_hooks ?? false;
+          setRepositoryItems((prev) =>
+            prev.map((item) =>
+              item.id === repoId && item.run_git_hooks === submitted.run_git_hooks
+                ? { ...item, run_git_hooks: stored }
+                : item,
+            ),
+          );
+        }
+        throw error;
+      })
       .finally(() => {
         pendingSaves.current.delete(repoId);
       });

@@ -143,3 +143,8 @@ type notificationBodyReadError struct {
 func (r notificationBodyReadError) Read([]byte) (int, error) {
 	return 0, r.err
 }
+
+// ServeStreamableHTTP serves the existing MCP transport behind an authenticated host route.
+func (s *Server) ServeStreamableHTTP(w http.ResponseWriter, r *http.Request) {
+	s.streamableHTTPHandler().ServeHTTP(w, r)
+}
