@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/nomad"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestNomadDestroyIdentityLaunchRollback(t *testing.T) {
@@ -174,4 +176,52 @@ func TestNomadDestroyIdentityRefusedBeforeStageSettlesWithoutQuarantine(t *testi
 	if final := f.lastCheckpoint(t); final.Phase != nomadPhaseAbsent || final.QuarantineState != "" {
 		t.Fatalf("phase=%q quarantine=%q, want absent without quarantine", final.Phase, final.QuarantineState)
 	}
+}
+
+// archiveCleanupSettledRow runs the archive-driven cleanup to absent and returns the
+// inventory row it leaves, together with the pre-cleanup launch request the still
+// waiting launch rollback holds.
+func archiveCleanupSettledRow(t *testing.T, f *nomadCreateFixture) (*models.ExecutorRunning, *ExecutorCreateRequest) {
+	t.Helper()
+	stale := *f.request
+	stale.Metadata = cloneRemoteRecoveryRecord(&models.ExecutorRunning{Metadata: f.request.Metadata}).Metadata
+	if err := runNomadCleanupFixture(f); err != nil {
+		t.Fatalf("archive cleanup: %v", err)
+	}
+	settled := f.lastCheckpoint(t)
+	if settled.Phase != nomadPhaseAbsent {
+		t.Fatalf("archive cleanup phase=%q, want absent", settled.Phase)
+	}
+	metadata := cloneRemoteRecoveryRecord(&models.ExecutorRunning{Metadata: f.request.Metadata}).Metadata
+	if err := nomad.PutEnvironmentState(metadata, settled); err != nil {
+		t.Fatal(err)
+	}
+	row := &models.ExecutorRunning{
+		SessionID: f.request.SessionID, TaskID: f.request.TaskID, AgentExecutionID: f.request.InstanceID,
+		Runtime: agentruntime.RuntimeNomad, Metadata: metadata,
+	}
+	return row, &stale
+}
+
+func TestNomadLaunchRollbackAfterArchiveCleanupSettledTreatsAbsenceAsDone(t *testing.T) {
+	t.Run("absent row with its receipt", func(t *testing.T) {
+		f := prepareNomadCleanupFixture(t)
+		row, stale := archiveCleanupSettledRow(t, f)
+		checkpoints := len(f.checkpoints)
+		manager := &Manager{runningWriter: &rereadClaimWriter{row: row}, logger: newTestLogger()}
+		coordinator := &managerNomadCleanup{manager: manager, executor: f.runtime}
+		if err := coordinator.DestroyLaunch(context.Background(), stale); err != nil {
+			t.Fatalf("rollback after archive cleanup settled = %v, want done", err)
+		}
+		if f.cleanup.drainCalls != 1 {
+			t.Fatalf("drain=%d, want the archive cleanup's single drain", f.cleanup.drainCalls)
+		}
+		if len(f.checkpoints) != checkpoints {
+			t.Fatalf("rollback wrote %d stale checkpoint(s) over the settled row", len(f.checkpoints)-checkpoints)
+		}
+		if f.fake.eligibility == "ineligible" {
+			t.Fatal("rollback quarantined the node after a settled cleanup")
+		}
+	})
+
 }

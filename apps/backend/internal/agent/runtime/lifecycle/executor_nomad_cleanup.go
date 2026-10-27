@@ -138,9 +138,25 @@ func (c *managerNomadCleanup) DestroyLaunch(ctx context.Context, req *ExecutorCr
 	return c.destroy(ctx, req)
 }
 
+// destroy runs the launch rollback under the cleanup claim. The inventory row is
+// re-read once the claim is held, so a rollback that waited behind an archive
+// cleanup resumes from that cleanup's receipt and absence instead of draining
+// again from the launch's own stale state. A launch with no matching row yet
+// keeps its own request.
 func (c *managerNomadCleanup) destroy(ctx context.Context, req *ExecutorCreateRequest) error {
 	return c.manager.withNomadCleanupClaim(ctx, req, func(claimed context.Context, claimID string) error {
-		return c.executor.destroyNomadOperation(claimed, req, claimID)
+		current := req
+		fresh, err := c.manager.claimedNomadCleanupRequest(claimed, req)
+		switch {
+		case err == nil:
+			if fresh.AuthToken == "" {
+				fresh.AuthToken = req.AuthToken
+			}
+			current = fresh
+		case !errors.Is(err, models.ErrExecutionRotated):
+			return err
+		}
+		return c.executor.destroyNomadOperation(claimed, current, claimID)
 	})
 }
 
