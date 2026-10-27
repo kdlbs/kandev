@@ -298,8 +298,35 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await testPage.getByTestId("azure-work-item-column-done").click();
   await testPage.getByRole("option", { name: "Done" }).click();
   await testPage.getByRole("button", { name: "Move" }).click();
-  await testPage.getByTestId("azure-work-item-assign-current-user").click();
-  await testPage.getByTestId("azure-work-item-detail-close").click();
+  let releaseAssignment!: () => void;
+  let assignmentStarted!: () => void;
+  const assignmentHeld = new Promise<void>((resolve) => {
+    releaseAssignment = resolve;
+  });
+  const assignmentSeen = new Promise<void>((resolve) => {
+    assignmentStarted = resolve;
+  });
+  let heldAssignment = false;
+  await testPage.route("**/api/v1/azure-devops/work-items/101?*", async (route) => {
+    if (route.request().method() === "PATCH" && !heldAssignment) {
+      heldAssignment = true;
+      assignmentStarted();
+      await assignmentHeld;
+    }
+    await route.continue();
+  });
+  const assignment = waitForHttp(testPage, "PATCH", /\/azure-devops\/work-items\/101$/);
+  try {
+    await testPage.getByTestId("azure-work-item-assign-current-user").click();
+    await assignmentSeen;
+    await testPage.getByTestId("azure-work-item-detail-close").click();
+    await expect(testPage.getByTestId("azure-work-item-detail")).toBeHidden();
+  } finally {
+    releaseAssignment();
+  }
+  await assignment;
+  await expect(testPage.getByTestId("azure-board-card-101")).toContainText(MOCK_STATE.user.email);
+  await expect(testPage.getByTestId("azure-work-item-detail")).toBeHidden();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
 
   await testPage
