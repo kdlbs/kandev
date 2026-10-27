@@ -217,6 +217,16 @@ test.describe("mobile PR CI automation options", () => {
     await expect(promptDialog).toContainText("ordinary merge-conflict context");
     await expect(promptDialog).toContainText("actionable queue-removal context");
     await testPage.keyboard.press("Escape");
+    await expect(promptDialog).toBeHidden();
+    if (!(await drawer.isVisible())) {
+      await session.tapPRStatusChip();
+    }
+    await expect(drawer).toHaveCount(1);
+    await expect(drawer).toBeVisible();
+    await drawer.getByLabel("Explain CI automation options").tap();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Auto-fix repairs ordinary merge conflicts and actionable queue removals.",
+    );
   });
 
   test("mobile auto-fix repairs an existing merge conflict once", async ({
@@ -240,21 +250,19 @@ test.describe("mobile PR CI automation options", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
-    await session.tapPRStatusChip();
-    const drawer = session.prStatusChipDrawer();
-    await expect(drawer.getByTestId("pr-ci-automation-controls")).toBeVisible();
-    await drawer.getByLabel("Explain CI automation options").tap();
-    await expect(testPage.getByRole("tooltip")).toContainText(
-      "Auto-fix repairs ordinary merge conflicts and actionable queue removals.",
-    );
-    await testPage.keyboard.press("Escape");
-
     // Keep the repair active while repeated provider feedback is checked for deduplication.
     await apiClient.updateTaskCIAutomationOptions(taskId, {
       auto_fix_prompt_override:
         '{{pr.feedback}}\ne2e:message("Conflict repair active")\ne2e:delay(60000)',
     });
-    await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
+    await session.tapPRStatusChip();
+    const drawer = session.prStatusChipDrawer();
+    await expect(drawer).toHaveCount(1);
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByTestId("pr-ci-automation-controls")).toBeVisible();
+    const autoFixSwitch = drawer.getByRole("switch", { name: "Auto-fix CI and address comments" });
+    await expect(autoFixSwitch).toBeVisible();
+    await autoFixSwitch.tap();
     await expect(
       session.activeChat().getByText("Conflict repair active", { exact: true }),
     ).toBeVisible();
