@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { seededAgentProfile } from "../../helpers/seeded-agent-profile";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 
 /**
@@ -10,12 +11,14 @@ import { waitForFiniteAnimations } from "../../helpers/animations";
  * profile would race with SSR.
  */
 test.describe("Mobile agent profile duplicate", () => {
-  test("duplicates the seeded profile from the settings list", async ({ testPage, apiClient }) => {
+  test("duplicates the seeded profile from the settings list", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(90_000);
 
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     const copyName = `${profile.name} Copy`;
 
     try {
@@ -86,10 +89,9 @@ test.describe("Mobile agent profile duplicate", () => {
   test("keeps an open profile menu usable when another profile is removed", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     const extraName = "Temporary mobile profile";
     const copyName = `${profile.name} Copy`;
     const extra = await apiClient.createAgentProfile(agent.id, extraName, {

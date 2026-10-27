@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { seededAgentProfile } from "../../helpers/seeded-agent-profile";
 
 /**
  * Verifies the agent profile duplicate flow:
@@ -14,12 +15,14 @@ import { test, expect } from "../../fixtures/test-base";
  * freshly POSTed profile race-conditions with SSR.
  */
 test.describe("Agent profile duplicate", () => {
-  test("duplicates the seeded profile from the settings list", async ({ testPage, apiClient }) => {
+  test("duplicates the seeded profile from the settings list", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(90_000);
 
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     const copyName = `${profile.name} Copy`;
 
     try {
@@ -91,10 +94,9 @@ test.describe("Agent profile duplicate", () => {
   test("keeps profile actions in the overflow menu at tablet width", async ({
     tabletTestPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
 
     await tabletTestPage.goto("/settings/agents");
 
@@ -119,10 +121,9 @@ test.describe("Agent profile duplicate", () => {
   test("keeps the profile menu open when agent discovery completes", async ({
     tabletTestPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     await tabletTestPage.goto("/settings/agents");
     await tabletTestPage.waitForFunction((agentName) => {
       const discovery = Reflect.get(window, "__KANDEV_E2E_STORE__")?.getState().agentDiscovery;
@@ -151,10 +152,9 @@ test.describe("Agent profile duplicate", () => {
   test("keeps the profile menu open when another profile is added or removed", async ({
     tabletTestPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     const extraName = "Temporary profile for menu refresh";
     let extraId: string | undefined;
     try {
@@ -191,12 +191,11 @@ test.describe("Agent profile duplicate", () => {
   test("duplicates from the profile page header and navigates to the copy", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     test.setTimeout(90_000);
 
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     const copyName = `${profile.name} Copy`;
 
     try {

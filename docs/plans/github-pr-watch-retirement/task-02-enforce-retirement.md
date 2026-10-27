@@ -248,3 +248,14 @@ the waits were added. Afterward, five phone repetitions, four directory-move
 repetitions, and the complete three-test drag-and-drop spec passed with retries
 disabled. The affected agent page and profile component suites passed 23
 Vitest tests, and changed-file ESLint and frontend typecheck passed.
+
+A later shard failed because the first agent had no profiles. The profile
+settings tests now find the fixture's seeded profile by ID; a unit regression
+covers a profile-less agent preceding it. The desktop duplication spec and
+mobile deletion/duplication specs each passed five tests without retries.
+
+A Kubernetes UID-protection test also reported a closed backend socket in CI;
+its artifacts do not identify the request or cause. One local Kind-backed run
+passed with retries disabled after rebuilding the backend and Linux helpers
+together, but that does not establish why CI failed. The original local attempt
+used mismatched binary identities and was stopped after that setup error.
