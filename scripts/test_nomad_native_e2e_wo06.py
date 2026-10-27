@@ -716,6 +716,133 @@ class QuarantineMarkerTest(Wo06Base):
         self.assertEqual(self.world.eligibility_calls, [False])
 
 
+class FakeScheduler:
+    def __init__(self, calls, fail=False):
+        self.calls, self.fail, self.algorithm = calls, fail, "binpack"
+
+    def read(self):
+        return {"SchedulerAlgorithm": self.algorithm}
+
+    def set_algorithm(self, algorithm):
+        self.calls.append(("scheduler", algorithm))
+        if self.fail:
+            raise PreflightError("Nomad scheduler configuration change is unreachable")
+        self.algorithm = algorithm
+
+
+class FakeMeta:
+    def __init__(self, calls, sim):
+        self.calls, self.sim = calls, sim
+
+    def apply(self, node_id, value):
+        self.calls.append(("meta", node_id, value))
+        self.sim.node.setdefault("Meta", {})["kandev.ssh_host_key_sha256"] = value
+
+
+class ReplayRestoreRecordsTest(Wo06Base):
+    COMMIT = "c" * 40
+    BRANCH_RECORD = {"branch": "kandev-e2e/checkout-branch", "base_commit": "b" * 40, "commit": COMMIT, "repo": "/repo/x", "deleted": False,
+                     "restore_with": "git -C /repo/x update-ref -d refs/heads/kandev-e2e/checkout-branch"}
+
+    def prepare(self, **records):
+        self.assert_failed(self.run_scn("admission", linger=True), "still present", "release-a-operator-teardown")
+        self.world.flags["linger"] = False
+        path = self.fixture_root() / "fixture.json"
+        state = json.loads(path.read_text())
+        state.update(records)
+        path.write_text(json.dumps(state))
+        self.calls = []
+        self.scheduler = FakeScheduler(self.calls)
+
+    def cleanup_with(self, scheduler_fail=False, git_fail=False):
+        import nomad_native_e2e_pool_checkout as checkout
+        import nomad_native_e2e_pool_refusals as refusals
+        self.scheduler.fail = scheduler_fail
+        self.git = []
+
+        def local_exec(command):
+            self.git.append(command)
+            if "--verify --quiet" in command:
+                return 0, self.COMMIT + "\n"
+            return (1, "") if git_fail else (0, "")
+
+        ops = dataclasses.replace(self.world.ops(), local_exec=local_exec)
+        with mock.patch.object(checkout, "make_scheduler", lambda runner: self.scheduler), \
+                mock.patch.object(refusals, "make_meta", lambda runner: FakeMeta(self.calls, self.world)):
+            return self.cleanup(ops=ops)
+
+    def saved(self, key):
+        return json.loads((self.fixture_root() / "fixture.json").read_text())[key]
+
+    def test_applied_scheduler_flip_is_reverted_and_marked_restored(self):
+        self.prepare(scheduler_restore={"original": "spread", "flipped_to": "binpack", "applied": True, "restored": False, "restore_with": "x"})
+        code, out, err = self.cleanup_with()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls, [("scheduler", "spread")])
+        self.assertTrue(self.saved("scheduler_restore")["restored"])
+        self.assertIn("scheduler algorithm", self.evidence()["cleanup"]["restored_records"])
+
+    def test_scheduler_record_that_was_never_applied_is_left_alone(self):
+        self.prepare(scheduler_restore={"original": "spread", "flipped_to": "binpack", "applied": False, "restored": False, "restore_with": "x"})
+        code, out, err = self.cleanup_with()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls, [])
+
+    def test_stray_fixture_branch_ref_is_deleted_from_the_source_repository(self):
+        self.prepare(checkout_branch_fixture=dict(self.BRANCH_RECORD))
+        code, out, err = self.cleanup_with()
+        self.assertEqual(code, 0, err)
+        self.assertTrue(any("update-ref -d" in command and self.COMMIT in command for command in self.git), self.git)
+        self.assertTrue(self.saved("checkout_branch_fixture")["deleted"])
+
+    def test_refusal_faults_are_all_replayed(self):
+        token_src = self.tmp / "token-src"
+        token_src.write_text("original-token\n")
+        token_path = self.tmp / "swapped-token"
+        token_path.write_text("replacement\n")
+        self.prepare(refusal_restore={
+            "eligibility": {NODE: {"node_id": NODE, "attach": "ssh", "original": "eligible", "changed_by_runner": True, "restored": False, "restore_with": "x"}},
+            "host_key_override": {"node_id": NODE, "key": "kandev.ssh_host_key_sha256", "original": "REAL", "override": "FAKE", "applied": True, "restored": False, "restore_with": "y"},
+            "token": {"path": str(token_path), "restored": False, "restore_from": str(token_src)}})
+        self.world.node["SchedulingEligibility"] = "ineligible"
+        code, out, err = self.cleanup_with()
+        self.assertEqual(code, 0, err)
+        self.assertIn(("meta", NODE, "REAL"), self.calls)
+        self.assertEqual(self.world.node["SchedulingEligibility"], "eligible")
+        self.assertEqual(token_path.read_text(), "original-token\n")
+        self.assertEqual(token_path.stat().st_mode & 0o777, 0o600)
+        record = self.saved("refusal_restore")
+        self.assertTrue(record["host_key_override"]["restored"] and record["token"]["restored"] and record["eligibility"][NODE]["restored"])
+
+    def test_recovery_pin_is_reenabled_when_the_original_was_eligible(self):
+        self.prepare(recovery_restore={"node_id": NODE, "original": "eligible", "restored": False, "restore_with": "x"})
+        self.world.node["SchedulingEligibility"] = "ineligible"
+        code, out, err = self.cleanup_with()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.world.node["SchedulingEligibility"], "eligible")
+        self.assertTrue(self.saved("recovery_restore")["restored"])
+
+    def test_already_restored_records_are_not_touched(self):
+        self.prepare(scheduler_restore={"original": "spread", "applied": True, "restored": True, "restore_with": "x"},
+                     checkout_branch_fixture={**self.BRANCH_RECORD, "deleted": True})
+        code, out, err = self.cleanup_with()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls, [])
+        self.assertFalse(any("update-ref" in command for command in self.git))
+
+    def test_a_failed_restore_fails_cleanup_reprints_the_command_and_still_tries_the_rest(self):
+        self.prepare(scheduler_restore={"original": "spread", "applied": True, "restored": False,
+                                        "restore_with": "nomad operator scheduler set-config -scheduler-algorithm=spread"},
+                     checkout_branch_fixture=dict(self.BRANCH_RECORD))
+        code, out, err = self.cleanup_with(scheduler_fail=True)
+        self.assertEqual(code, 2)
+        self.assertTrue(any(line.startswith("operator cleanup:") for line in out), out)
+        self.assertIn("-scheduler-algorithm=spread", "\n".join(err))
+        self.assertTrue(any("update-ref -d" in command for command in self.git))
+        self.assertFalse(self.saved("scheduler_restore")["restored"])
+        self.assertFalse(self.saved("torn_down") if "torn_down" in json.loads((self.fixture_root() / "fixture.json").read_text()) else False)
+
+
 class ProcessIdentityTest(Wo06Base):
     def test_executor_is_never_killed_or_labelled_agentctl(self):
         self.assertEqual(self.run_scn("disconnect"), 0, "\n".join(self.err))

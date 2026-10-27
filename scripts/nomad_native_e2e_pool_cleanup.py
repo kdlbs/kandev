@@ -1,12 +1,14 @@
 """Pool cleanup create-fixture scenarios: unplaced and refused launches, an unknown register outcome, and a force stop.
 
-* pool-unplaced-cleanup: both pool nodes are made ineligible so the job is registered but never placed. Archiving the task
+* pool-unplaced-cleanup: the ssh node is made ineligible and the profile sets exclude_local, so the pool launch preflight
+  (one ready, eligible node with capacity) passes while the registered job has no node it may run on. Archiving the task
   must settle the inventory to ``absent`` with the job stopped, no quarantine variable and a deletable task. A second phase
-  repeats the archive for a launch refused on the local node (host identity mismatch), which must also end ``absent``
-  without a quarantine marker.
+  repeats the archive, with exclude_local lifted from the profile, for a launch refused on the local node (host identity
+  mismatch), which must also end ``absent`` without a quarantine marker.
 * pool-register-unknown: a loopback fault proxy sits between Kandev and Nomad and loses the job-register response after
   Nomad committed it (connection dropped, then an HTTP 502). No job may stay running without a durable inventory record and
-  each launch must end ``absent`` with its job stopped.
+  each launch must end ``absent`` with its job stopped. The proxy serves plain http, so the profile carries no ca_file; the
+  proxy still verifies the upstream with the CA, and only the backend-to-proxy leg is plaintext.
 * pool-force-stop: a running session on each node type is force-stopped. Its recorded agent processes must be gone (matched
   by pid and start time) and the session must never be reported stopped while one of them still runs.
 
@@ -150,6 +152,40 @@ class SettleMixin:
 
 
 # -- pool-unplaced-cleanup -------------------------------------------------------------------------------
+class ProfileHooks:
+    """Reversible overrides on the fixture runner: extra pool profile keys and the Nomad token secret reference."""
+
+    def __init__(self, runner: fx.Runner):
+        self.runner = runner
+        self.token_ref: str | None = None
+        self._config = runner.pool_profile_config
+        self._api = runner.api
+
+    def install(self, add: dict[str, str] | None = None, drop: tuple[str, ...] = ()) -> None:
+        base = self._config
+        self.runner.pool_profile_config = lambda cfg: {**{k: v for k, v in base(cfg).items() if k not in drop}, **(add or {})}
+
+        def api(method: str, path: str, body: Any) -> Any:
+            result = self._api(method, path, body)
+            if method == "POST" and path == "/secrets" and isinstance(result, dict) and result.get("id"):
+                self.token_ref = f"$kandev-secret:{result['id']}"
+            return result
+
+        self.runner.api = api
+
+    def restore(self) -> None:
+        self.runner.pool_profile_config = self._config
+        self.runner.api = self._api
+
+    def replace_profile_config(self, cfg: dict[str, Any], *, drop: tuple[str, ...]) -> None:
+        """PATCH the fixture profile with the base pool config minus ``drop``, keeping the original token reference."""
+        if not self.token_ref:
+            raise PreflightError("the Nomad token secret reference was not recorded")
+        config = {k: v for k, v in self._config(cfg).items() if k not in drop}
+        executor, profile = self.runner._task_ctx["executor_id"], self.runner.state["executor_profile_id"]
+        self._api("PATCH", f"/executors/{executor}/profiles/{profile}", {"config": {**config, "nomad_token": self.token_ref}})
+
+
 class UnplacedScenario(SettleMixin, refusals.RefusalScenario):
     def __init__(self, runner: fx.Runner, cfg: dict[str, Any], name: str):
         super().__init__(runner, cfg, name, None)  # type: ignore[arg-type]
@@ -202,7 +238,7 @@ class UnplacedScenario(SettleMixin, refusals.RefusalScenario):
         return {"cleanup": settled, "task_deleted": deleted}
 
 
-def _unplaced_steps(runner: fx.Runner, cfg: dict[str, Any], step: Callable[..., Any], scn: UnplacedScenario) -> dict[str, Any]:
+def _unplaced_steps(runner: fx.Runner, cfg: dict[str, Any], step: Callable[..., Any], scn: UnplacedScenario, hooks: ProfileHooks) -> dict[str, Any]:
     scn.data["node"] = step("verify-node-identity", scn.verify_node_identity)
     step("poll-node-ready", lambda: scn.poll(scn.node_ready, "Nomad node is not ready and eligible"))
     scn.data["nodes"] = step("verify-two-nodes", scn.verify_two_nodes)
@@ -210,8 +246,8 @@ def _unplaced_steps(runner: fx.Runner, cfg: dict[str, Any], step: Callable[..., 
     step("verify-host-identity-token", scn.check_token)
     step("start-git-daemon", runner.start_git_daemon)
     scn.marker_baseline = step("record-quarantine-baseline", scn.marker_paths)
-    # The first task launches as soon as the fixture objects exist, so no node is eligible before that.
-    step("unplaced-disable-local-node", lambda: scn.disable_node("local"))
+    # The first task launches as soon as the fixture objects exist. The pool preflight needs one eligible node, so the
+    # local node stays eligible and the profile (exclude_local) is what makes the registered job unplaceable.
     step("unplaced-disable-ssh-node", lambda: scn.disable_node("ssh"))
     step("start-backend", lambda: runner.start_backend(None))
     step("create-fixture-objects", lambda: runner.setup_api_objects(cfg))
@@ -221,6 +257,7 @@ def _unplaced_steps(runner: fx.Runner, cfg: dict[str, Any], step: Callable[..., 
     unplaced.update(scn.finish_case(scn.envs["U1"], task, step, "unplaced"))
     scn.cases["unplaced"] = unplaced
     step("unplaced-restore", scn.restore_and_verify)
+    step("local-refusal-allow-local-placement", lambda: hooks.replace_profile_config(cfg, drop=("exclude_local",)))
     step("local-refusal-disable-ssh-node", lambda: scn.disable_node("ssh"))
     step("local-refusal-replace-host-identity-token", scn.swap_token)
     second = step("local-refusal-launch", lambda: runner.create_task("Nomad pool cleanup: refused local launch"))
@@ -239,13 +276,17 @@ def _unplaced_steps(runner: fx.Runner, cfg: dict[str, Any], step: Callable[..., 
 def drive_pool_unplaced_cleanup(runner: fx.Runner, cfg: dict[str, Any], ops: fx.Ops, root: Path) -> dict[str, Any]:
     check_scenario_config(cfg, SCENARIO_UNPLACED)
     scn = UnplacedScenario(runner, cfg, SCENARIO_UNPLACED)
+    hooks = ProfileHooks(runner)
+    hooks.install(add={"exclude_local": "true"})
     try:
-        return _unplaced_steps(runner, cfg, runner.step, scn)
+        return _unplaced_steps(runner, cfg, runner.step, scn, hooks)
     except BaseException:
         failures = scn.restore_all()
         if failures:
             scn.data["restore_failures"] = failures
         raise
+    finally:
+        hooks.restore()
 
 
 # -- pool-register-unknown -------------------------------------------------------------------------------
@@ -426,6 +467,7 @@ def _register_steps(runner: fx.Runner, cfg: dict[str, Any], step: Callable[..., 
     address = step("start-register-fault-proxy", proxy.start)
     proxy.arm("drop")
     proxied = {**cfg, "nomad": {**cfg["nomad"], "address": address}}
+    # The proxy is plain http and the backend rejects ca_file with a non-https address.
     step("start-backend", lambda: runner.start_backend(None))
     step("create-fixture-objects", lambda: runner.setup_api_objects(proxied))
     scn.known_jobs = scn.kandev_jobs()
@@ -436,6 +478,7 @@ def _register_steps(runner: fx.Runner, cfg: dict[str, Any], step: Callable[..., 
     scn.cases["five-xx"] = scn.run_case("five-xx", "D2", "5xx", second, proxy, 1, step)
     cleanup = step("teardown", lambda: scn.finish({"released": [], "operator_calls": []}))
     return {"scenario": scn.name, "pool": True, "register_unknown": True, "cases": scn.cases, "faults": proxy.fired,
+            "backend_to_proxy_leg": "plaintext-http", "proxy_upstream_verified_with_ca": bool((cfg.get("security") or {}).get("ca_file")),
             "production_cleanup": True, "release": "none", "cleanup": cleanup, "environments": wo07._env_report(scn)}
 
 
@@ -444,10 +487,13 @@ def drive_pool_register_unknown(runner: fx.Runner, cfg: dict[str, Any], ops: fx.
     scn = RegisterScenario(runner, cfg, SCENARIO_REGISTER)
     scn.cases = {}  # type: ignore[attr-defined]
     proxy = RegisterFaultProxy(runner.state["nomad"]["address"], (cfg.get("security") or {}).get("ca_file"))
+    hooks = ProfileHooks(runner)
+    hooks.install(drop=("ca_file",))
     try:
         return _register_steps(runner, cfg, runner.step, scn, proxy)
     finally:
         proxy.stop()
+        hooks.restore()
 
 
 # -- pool-force-stop -------------------------------------------------------------------------------------
@@ -494,9 +540,11 @@ class ForceStopScenario(pool.TwoNodeScenario):
 
         def settled() -> bool:
             self.focus(env)
-            running = self.alive(agents)
-            state = self.soft(lambda: self.session_state(task))
+            # The stop report (call returned, state) is read before the processes: a process seen alive after the report
+            # proves the session was reported stopped too early, while one that died after an earlier read proves nothing.
             done = not worker.is_alive()
+            state = self.soft(lambda: self.session_state(task))
+            running = self.alive(agents)
             samples.append((state, len(running)))
             if done and outcome.get("error"):
                 raise PreflightError(f"environment {env['label']}: the force-stop was not accepted: {outcome['error']}")

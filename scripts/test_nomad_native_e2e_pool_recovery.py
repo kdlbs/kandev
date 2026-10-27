@@ -107,6 +107,9 @@ class Sim:
         if "curl" in command:
             self.tunnel_calls += 1
             return (0, "200") if self.tunnel_up and not self.flags.get("tunnel_bad_status") else ((0, "502") if self.tunnel_up else (7, ""))
+        if "KANDEV_ACP_IDLE_TIMEOUT" in command:
+            value = self.flags.get("idle_env", "0")
+            return (0, f"{value}\n") if value is not None else (1, "")
         if "/proc/" in command:
             return (0, "http://127.0.0.1:40555\n") if self.flags.get("environ_port") else (1, "")
         return 0, ""
@@ -488,6 +491,29 @@ class IdleOutageTest(DriveBase):
         self.assertEqual(self.sim.state["manifest_env"]["KANDEV_ACP_IDLE_TIMEOUT"], "1m")
         self.assertEqual(self.sim.state["manifest_env"]["A"], "b")
         self.assertTrue(report["production_cleanup"])
+
+    def test_agentctl_idle_timeout_zero_is_observed_on_the_ssh_node(self):
+        report = self.run_it()
+        self.assertTrue(report["idle_timeout_observed"])
+        self.assertEqual(report["agentctl_idle_timeout"], "0")
+        self.assertEqual(report["scenario_kind"], "idle-timeout-disabled-and-survival")
+
+    def test_agentctl_with_a_live_idle_timeout_fails(self):
+        self.assert_fails(rec.drive_pool_idle_outage, "idle timeout", idle_env="1m")
+
+    def test_unobservable_idle_timeout_is_recorded_and_the_scenario_is_survival_only(self):
+        report = self.run_it(idle_env=None)
+        self.assertFalse(report["idle_timeout_observed"])
+        self.assertIsNone(report["agentctl_idle_timeout"])
+        self.assertEqual(report["scenario_kind"], "survival-only")
+        self.assertTrue(any("survival only" in item for item in report["limitations"]))
+
+    def test_local_node_idle_timeout_is_read_from_the_process_environment(self):
+        for text, want in (("PATH=/x KANDEV_ACP_IDLE_TIMEOUT=0 HOME=/h", "0"), ("A=b\nKANDEV_ACP_IDLE_TIMEOUT=1m\n", "1m"), ("A=b", None)):
+            self.assertEqual(rec.parse_idle_timeout(text), want)
+        with mock.patch.object(rec.RecoveryScenario, "local_environ", lambda self, pid: "KANDEV_ACP_IDLE_TIMEOUT=0", create=True):
+            report = self.run_it(landed_local=True)
+        self.assertTrue(report["idle_timeout_observed"])
 
     def test_idle_override_is_in_place_before_the_backend_starts(self):
         seen = {}

@@ -139,6 +139,7 @@ class AclOpsTest(unittest.TestCase):
         self.assertEqual(sent[0][2]["Rules"], "rules")
         self.assertEqual(sent[1][2]["Policies"], ["kandev-executor"])
         self.assertEqual(sent[1][2]["Type"], "client")
+        self.assertEqual(sent[1][2]["ExpirationTTL"], "24h")
         self.assertTrue(all(item[3] == "mgmt" for item in sent))
 
     def test_revoke_deletes_the_token_and_policy_and_tolerates_absence(self):
@@ -180,10 +181,19 @@ class CliTest(unittest.TestCase):
                 self.assertEqual(main(["security-material", "--out", str(target)]), 0)
             self.assertTrue((target / "server.hcl").is_file())
             self.assertIn("nomad acl bootstrap", out.getvalue())
+            self.assertIn("rpc TLS is off", out.getvalue())
             err = io.StringIO()
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
                 self.assertEqual(main(["security-material", "--out", str(target)]), 2)
             self.assertIn("security-material failed", err.getvalue())
+
+
+class ServerConfigTest(unittest.TestCase):
+    def test_rpc_tls_is_off_so_a_second_node_can_join_without_client_certs(self):
+        import nomad_native_e2e_security as security
+        text = security.render_server_config(Path("/tmp/x"))
+        self.assertIn("rpc                    = false", text)
+        self.assertNotIn("rpc                    = true", text)
 
 
 class MaterialTest(unittest.TestCase):
@@ -317,7 +327,7 @@ class SecurityWorld(World):
         self.token_type = "management"
         self.missing = set()
         self.provisioned, self.revoked = [], []
-        self.issue_policies = ["kandev-executor"]
+        self.issue_policies = None
         self.revoke_error = None
 
     def nomad_factory(self, address, token, namespace, region):
@@ -338,7 +348,8 @@ class SecurityWorld(World):
     def acl_provision(self, address, token, policy_name, rules):
         assert token == TOKEN
         self.provisioned.append((address, policy_name, rules))
-        return {"secret": SCOPED, "accessor": ACCESSOR, "policies": list(self.issue_policies), "type": "client"}
+        policies = [policy_name] if self.issue_policies is None else list(self.issue_policies)
+        return {"secret": SCOPED, "accessor": ACCESSOR, "policies": policies, "type": "client"}
 
     def acl_revoke(self, address, token, accessor, policy_name):
         assert token == TOKEN
@@ -378,7 +389,10 @@ class SecurityFlowTest(FixtureBase):
         self.run_flow()
         self.assertEqual(self.world.secret_value, SCOPED)
         self.assertNotEqual(self.world.secret_value, TOKEN)
-        self.assertEqual(self.world.provisioned, [("https://127.0.0.1:4646", "kandev-executor", self.policy.read_text())])
+        self.assertEqual(len(self.world.provisioned), 1)
+        address, policy_name, rules = self.world.provisioned[0]
+        self.assertEqual((address, rules), ("https://127.0.0.1:4646", self.policy.read_text()))
+        self.assertRegex(policy_name, r"kandev-executor-[0-9a-f]{8}")
         self.assertTrue(all(TOKEN not in body for body in self.world.bodies))
         self.assertEqual([body for body in self.world.bodies if SCOPED in body], [json.dumps({"name": "nomad-fixture-token", "value": SCOPED})])
 
@@ -390,6 +404,22 @@ class SecurityFlowTest(FixtureBase):
         self.assertEqual((config["namespace"], config["node_pool"], config["placement"]), ("kandev", "kandev", "spread"))
         self.assertEqual(config["memory_max_mb"], config["memory_mb"])
 
+    def make_runner(self):
+        from types import SimpleNamespace
+        runner = fixture.Runner.__new__(fixture.Runner)
+        runner.root, runner.token, runner.ops = self.tmp, TOKEN, self.world.ops()
+        runner.state = {"nomad": {"address": "https://127.0.0.1:4646", "namespace": "kandev", "region": "global"}}
+        runner.evidence = SimpleNamespace(secrets=[], data={})
+        runner.nomad = self.world.nomad_factory("https://127.0.0.1:4646", TOKEN, "kandev", "global")
+        return runner
+
+    def test_provisioning_twice_reuses_the_first_token(self):
+        runner = self.make_runner()
+        first = runner.provision_scoped_token(self.config)
+        second = runner.provision_scoped_token(self.config)
+        self.assertEqual((first, second), (SCOPED, SCOPED))
+        self.assertEqual(len(self.world.provisioned), 1)
+
     def test_neither_token_appears_in_the_evidence_or_state(self):
         self.world.recover_mutation = "fence"
         self.assertEqual(self.run_flow(), 2)
@@ -397,7 +427,7 @@ class SecurityFlowTest(FixtureBase):
         self.assertNotIn(TOKEN, written)
         self.assertNotIn(SCOPED, written)
         state = json.loads((self.fixture_root() / "fixture.json").read_text())
-        self.assertEqual(state["scoped_token"], {"accessor": ACCESSOR, "policy": "kandev-executor"})
+        self.assertEqual(state["scoped_token"], {"accessor": ACCESSOR, "policy": self.world.provisioned[0][1]})
         self.assertEqual(state["security"], {"ca_file": self.config["security"]["ca_file"]})
 
     def test_cluster_preconditions_fail_fast_before_a_token_is_issued(self):
@@ -421,9 +451,18 @@ class SecurityFlowTest(FixtureBase):
         self.assertEqual(self.run_flow(), 2)
         self.assertIn("scoped", self.evidence()["error"])
 
+    def test_the_accessor_is_saved_before_validation_so_a_refused_token_is_still_revoked(self):
+        self.world.issue_policies = ["other"]
+        self.assertEqual(self.run_flow(), 2)
+        state = json.loads((self.fixture_root() / "fixture.json").read_text())
+        self.assertEqual(state["scoped_token"]["accessor"], ACCESSOR)
+        self.assertEqual(self.world.revoked, [])
+        fixture.run_cleanup_fixture(str(self.fixture_root()), ops=self.world.ops(), out=self.out.append, err=self.err.append)
+        self.assertEqual(self.world.revoked, [(ACCESSOR, self.world.provisioned[0][1])])
+
     def test_teardown_revokes_the_scoped_token_once(self):
         self.assertEqual(self.run_flow(), 0, self.err)
-        self.assertEqual(self.world.revoked, [(ACCESSOR, "kandev-executor")])
+        self.assertEqual(self.world.revoked, [(ACCESSOR, self.world.provisioned[0][1])])
         self.assertTrue(self.evidence()["cleanup"]["scoped_token_revoked"])
 
     def test_cleanup_fixture_revokes_it_after_a_failed_run_with_the_management_token(self):
@@ -432,7 +471,7 @@ class SecurityFlowTest(FixtureBase):
         self.assertEqual(self.world.revoked, [])
         self.world.fence = "owner:fence-content\n"
         self.assertEqual(fixture.run_cleanup_fixture(str(self.fixture_root()), ops=self.world.ops(), out=self.out.append, err=self.err.append), 0, self.err)
-        self.assertEqual(self.world.revoked, [(ACCESSOR, "kandev-executor")])
+        self.assertEqual(self.world.revoked, [(ACCESSOR, self.world.provisioned[0][1])])
         self.assertEqual(self.configured[-1][0], "https://127.0.0.1:4646")
 
     def test_a_failed_revoke_fails_cleanup_and_keeps_the_command(self):

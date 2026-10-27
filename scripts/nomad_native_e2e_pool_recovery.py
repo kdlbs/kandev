@@ -6,7 +6,9 @@
   existing instance (same job, allocation, agentctl and fence) and that the Kandev API is reachable again through the
   reverse tunnel the agentctl uses.
 * pool-idle-outage configures the backend with a 1m agentctl idle timeout, stops it for longer than that and asserts
-  the retained instance stayed alive throughout and is re-attached after the restart.
+  the retained instance stayed alive throughout and is re-attached after the restart. The running agentctl must carry
+  KANDEV_ACP_IDLE_TIMEOUT=0 in its process environment (read on the node); when that cannot be observed the evidence
+  records idle_timeout_observed false and labels the scenario survival-only.
 
 Every scenario ends through production archive cleanup with no operator mutation. Each one needs no config keys
 beyond the pool block. The idle timeout and the outage window are module constants.
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,6 +42,15 @@ LIMITATIONS = [
     "the Kandev API call through the tunnel is made from the ssh node to the loopback URL the agentctl is given; the inert agent makes no API call itself",
     "the Go side forces the idle timeout of a Nomad-managed agentctl to 0, so the 1m setting is observable only as the instance surviving",
 ]
+SURVIVAL_ONLY_LIMITATION = "the agentctl idle timeout could not be read from its process environment, so this run proves survival only"
+_IDLE_TIMEOUT_ZERO = re.compile(r"0+(ns|us|ms|s|m|h)?")
+_IDLE_ASSIGNMENT = re.compile(r"(?:^|[\s\0])" + IDLE_ENV + r"=(\S*)")
+
+
+def parse_idle_timeout(text: str) -> str | None:
+    """The KANDEV_ACP_IDLE_TIMEOUT value in a NUL, newline or space separated environment dump, or None."""
+    found = _IDLE_ASSIGNMENT.search(text)
+    return found.group(1) if found else None
 
 
 # -- pure helpers --------------------------------------------------------------------------------------------
@@ -150,6 +162,34 @@ class RecoveryScenario(pool.TwoNodeScenario):
         env = {**self.r.state["manifest_env"], IDLE_ENV: IDLE_TIMEOUT}
         self.r.save_state(manifest_env=env, idle_timeout_override=IDLE_TIMEOUT)
         return {IDLE_ENV: IDLE_TIMEOUT}
+
+    def local_environ(self, pid: int) -> str:
+        """The process environment of a local-node process: /proc on Linux, ``ps eww`` elsewhere."""
+        proc = Path(f"/proc/{pid}/environ")
+        if proc.exists():
+            return proc.read_bytes().decode("utf-8", "replace")
+        return subprocess.run(["ps", "eww", "-p", str(pid)], capture_output=True, text=True, timeout=15, check=False).stdout
+
+    def agentctl_idle_timeout(self, env: dict[str, Any]) -> str | None:
+        """The idle timeout the running agentctl process carries, or None when it cannot be observed."""
+        self.focus(env)
+        leader = next((item for item in self.tree(env) if item["depth"] == 0 and item["role"] == "agentctl"), None)
+        if leader is None:
+            raise PreflightError(f"environment {env['label']} has no identifiable agentctl root process")
+        pid = int(leader["pid"])
+        if _is_ssh(env):
+            code, out = self.r.ssh(f"tr '\\0' '\\n' < /proc/{pid}/environ | sed -n 's/^{IDLE_ENV}=//p'")
+            return out.strip() if code == 0 and out.strip() else None
+        try:
+            return parse_idle_timeout(self.local_environ(pid))
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def assert_idle_timeout_disabled(self, env: dict[str, Any]) -> dict[str, Any]:
+        value = self.agentctl_idle_timeout(env)
+        if value is not None and not _IDLE_TIMEOUT_ZERO.fullmatch(value):
+            raise PreflightError(f"environment {env['label']}: the agentctl idle timeout is {value!r}, not 0, so it can reap itself while the backend is down")
+        return {"idle_timeout_observed": value is not None, "agentctl_idle_timeout": value}
 
     # -- instance observation -------------------------------------------------------------------------
     def digests(self, env: dict[str, Any]) -> dict[str, Any]:
@@ -395,6 +435,7 @@ def drive_pool_idle_outage(runner: fx.Runner, cfg: dict[str, Any], ops: fx.Ops, 
         task, env, layout = _running_instance(runner, cfg, step, scn)
         port = step("determine-tunnel-port", lambda: scn.tunnel_port(env)) if _is_ssh(env) else None
         before = step("snapshot-before-outage", lambda: scn.snapshot(env, task))
+        idle = step("assert-agentctl-idle-timeout-disabled", lambda: scn.assert_idle_timeout_disabled(env))
         old = step("stop-backend", scn.stop_backend)
         outage = step("hold-outage-beyond-idle-timeout", lambda: _hold_outage(scn, env, before))
         new = step("restart-backend", lambda: runner.start_backend(None))
@@ -407,8 +448,12 @@ def drive_pool_idle_outage(runner: fx.Runner, cfg: dict[str, Any], ops: fx.Ops, 
         cleanup = step("teardown", lambda: scn.finish({"released": [], "operator_calls": []}))
     finally:
         guard.restore()
-    return _report(scn, cleanup, idle_outage=True, idle_timeout=IDLE_TIMEOUT, outage=outage, instance_survived=True, tunnel=tunnel,
-                   node_attach=env["attach"], backend_pids={"before": old["pid"], "after": new["pid"]})
+    report = _report(scn, cleanup, idle_outage=True, idle_timeout=IDLE_TIMEOUT, outage=outage, instance_survived=True, tunnel=tunnel,
+                     node_attach=env["attach"], backend_pids={"before": old["pid"], "after": new["pid"]}, **idle,
+                     scenario_kind="idle-timeout-disabled-and-survival" if idle["idle_timeout_observed"] else "survival-only")
+    if not idle["idle_timeout_observed"]:
+        report["limitations"] = [*LIMITATIONS, SURVIVAL_ONLY_LIMITATION]
+    return report
 
 
 def _hold_outage(scn: RecoveryScenario, env: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:

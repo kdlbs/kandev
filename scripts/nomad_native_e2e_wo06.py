@@ -745,6 +745,107 @@ def stop_stray_jobs(scn: "Scenario") -> list[dict[str, Any]]:
     return stopped
 
 
+def _save_record(scn: "Scenario", key: str, record: dict[str, Any]) -> None:
+    scn.r.save_state(**{key: record})
+
+
+def _set_eligibility_checked(scn: "Scenario", node_id: str, eligible: bool) -> None:
+    namespace = scn.nomad_cfg["namespace"]
+    if scn.get_or_none(quarantine_marker_path(node_id, namespace)) is not None:
+        raise PreflightError(f"quarantine marker kandev/quarantine/{node_id} exists; the node is left ineligible; {quarantine_operator_step(node_id, namespace)}")
+    scn.ops.nomad_set_eligibility(scn.nomad_cfg["address"], scn.r.token, scn.nomad_cfg["region"], node_id, eligible)
+    want = "eligible" if eligible else "ineligible"
+    scn.poll(lambda: scn.r.nomad(f"/v1/node/{node_id}").get("SchedulingEligibility") == want, f"node {node_id} did not become {want}")
+
+
+def _replay_scheduler(scn: "Scenario", record: dict[str, Any]) -> str:
+    import nomad_native_e2e_pool_checkout as checkout
+    scheduler = checkout.make_scheduler(scn.r)
+    scheduler.set_algorithm(record["original"])
+    scn.poll(lambda: scheduler.read().get("SchedulerAlgorithm") == record["original"], f"the scheduler algorithm did not become {record['original']} again")
+    return "restored"
+
+
+def _replay_branch(scn: "Scenario", record: dict[str, Any]) -> str:
+    import nomad_native_e2e_pool_checkout as checkout
+    if record.get("branch") != checkout.BRANCH:
+        raise PreflightError("the recorded fixture branch is not the one this runner creates")
+    branch = checkout.FixtureBranch(scn.ops, record["repo"], "")
+    branch.record = record
+    return branch.delete()
+
+
+def _replay_pin(scn: "Scenario", record: dict[str, Any]) -> str:
+    _set_eligibility_checked(scn, record["node_id"], record["original"] == "eligible")
+    return "restored"
+
+
+def _replay_refusals(scn: "Scenario", record: dict[str, Any]) -> str:
+    import nomad_native_e2e_pool_refusals as refusals
+    notes: list[str] = []
+    override = record.get("host_key_override")
+    if override and override.get("applied") and not override.get("restored"):
+        refusals.make_meta(scn.r).apply(override["node_id"], override["original"])
+        scn.poll(lambda: (scn.r.nomad(f"/v1/node/{override['node_id']}").get("Meta") or {}).get(override["key"]) == override["original"],
+                 "the original host key metadata is not visible again")
+        override["restored"] = True
+        notes.append("host key metadata")
+    swap = record.get("token")
+    if swap and not swap.get("restored"):
+        text = Path(swap["restore_from"]).read_text(encoding="utf-8")
+        fx._write_private(Path(swap["path"]), text)
+        Path(swap["path"]).chmod(0o600)
+        swap["restored"] = True
+        notes.append("host identity token")
+    for window in (record.get("eligibility") or {}).values():
+        if window.get("changed_by_runner") and not window.get("restored"):
+            _set_eligibility_checked(scn, window["node_id"], window["original"] == "eligible")
+            window["restored"] = True
+            notes.append(f"{window.get('attach', 'node')} eligibility")
+    return ", ".join(notes) or "not needed"
+
+
+def _pending(record: Any, applied_key: str | None) -> bool:
+    if not record or record.get("restored") or record.get("deleted"):
+        return False
+    return record.get(applied_key, True) if applied_key else True
+
+
+RESTORE_REPLAYS: tuple[tuple[str, str, str | None, Callable[["Scenario", dict[str, Any]], str]], ...] = (
+    ("refusal_restore", "refusal faults", None, _replay_refusals),
+    ("recovery_restore", "recovery node pin", "applied", _replay_pin),
+    ("scheduler_restore", "scheduler algorithm", "applied", _replay_scheduler),
+    ("checkout_branch_fixture", "fixture branch", None, _replay_branch),
+)
+
+
+def replay_restore_records(scn: "Scenario") -> tuple[dict[str, str], list[str]]:
+    """Reverts every fault a pool scenario recorded as applied and not yet restored; each is attempted and failures are returned."""
+    done: dict[str, str] = {}
+    failures: list[str] = []
+    for key, label, applied_key, replay in RESTORE_REPLAYS:
+        record = scn.r.state.get(key)
+        if key == "refusal_restore":
+            pending = bool(record) and (_pending(record.get("host_key_override"), "applied") or _pending(record.get("token"), None)
+                                        or any(w.get("changed_by_runner") and _pending(w, None) for w in (record.get("eligibility") or {}).values()))
+        else:
+            pending = _pending(record, applied_key)
+        if not pending:
+            continue
+        try:
+            note = replay(scn, record)
+            if key == "checkout_branch_fixture":
+                record["deleted"] = True
+            elif key != "refusal_restore":
+                record["restored"] = True
+            _save_record(scn, key, record)
+            done[label] = note
+        except Exception as exc:  # noqa: BLE001 - every restoration is attempted
+            command = fx.redact_path(str(record.get("restore_with") or ""), scn.r.root)
+            failures.append(f"{label}: {fx.redact_path(str(exc), scn.r.root)}" + (f"; restore with `{command}`" if command else ""))
+    return done, failures
+
+
 def cleanup_fixture(runner: fx.Runner) -> dict[str, Any]:
     """Idempotent operator teardown of every recorded environment of an admission or disconnect fixture."""
     scn = Scenario(runner, None, runner.state["scenario"])
@@ -757,6 +858,10 @@ def cleanup_fixture(runner: fx.Runner) -> dict[str, Any]:
         if scn.envs[label].get("job_id"):
             report["released"].append(scn.release(label, kill_first=True, strict=False))
     report["stray_jobs"] = stop_stray_jobs(scn)
+    restored, failures = replay_restore_records(scn)
+    report["restored_records"] = restored
+    if failures:
+        raise PreflightError("restoration failed: " + "; ".join(failures))
     if runner.state.get("relay"):
         report["relay"] = "gone: the relay lived in the runner process that has exited"
     return scn.finish(report)

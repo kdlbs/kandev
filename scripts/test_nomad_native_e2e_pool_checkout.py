@@ -198,6 +198,7 @@ def make_runner(sim):
         sim.state.update(task_id=task["id"], session_id=task["session_id"])
 
     runner.setup_api_objects = setup
+    runner.provision_scoped_token = lambda cfg: sim.calls.append(("provision",)) or "scoped"
 
     def poll(timeout, interval, probe, failure):
         for _ in range(3):
@@ -367,6 +368,22 @@ class CheckoutHappyPathTest(CheckoutDriveBase):
         self.assertEqual(record["branch"], checkout.BRANCH)
         self.assertTrue(record["deleted"])
         self.assertIn(f"update-ref -d refs/heads/{checkout.BRANCH}", record["restore_with"])
+
+
+    def test_evidence_and_error_commands_carry_no_home_directory_while_state_keeps_the_real_path(self):
+        repo = f"{Path.home()}/projects/fixture-repo"
+        cfg = self.cfg(path=repo, base_branch="main")
+        report = self.drive(cfg=cfg)
+        shown = self.sim.evidence.data["fixture_branch"]
+        self.assertEqual(shown["repo"], "~/projects/fixture-repo")
+        self.assertNotIn(str(Path.home()), shown["restore_with"])
+        self.assertNotIn(str(Path.home()), json.dumps(report["fixture_branch"]))
+        self.assertEqual(self.sim.state["checkout_branch_fixture"]["repo"], repo)
+        self.setUp()
+        with self.assertRaises(PreflightError) as ctx:
+            self.drive(cfg=cfg, delete_fails=True)
+        self.assertNotIn(str(Path.home()), str(ctx.exception))
+        self.assertIn("~/projects/fixture-repo", str(ctx.exception))
 
 
 class CheckoutFailureTest(CheckoutDriveBase):
@@ -541,6 +558,18 @@ class BinpackHappyPathTest(BinpackDriveBase):
         self.assertLess(calls.index(("scheduler", "binpack")), calls.index(("archive", "task-1")))
         self.assertEqual(calls.count(("scheduler", "spread")), 1)
         self.assertEqual(self.sim.launches, 1)
+
+    def test_scoped_token_is_provisioned_before_the_flip_in_security_mode(self):
+        cfg = self.cfg()
+        cfg["security"] = {"tls": True}
+        self.drive(cfg=cfg)
+        calls = self.sim.calls
+        self.assertLess(calls.index(("provision",)), calls.index(("scheduler", "binpack")))
+        self.assertEqual(calls.count(("provision",)), 1)
+
+    def test_no_token_is_provisioned_outside_security_mode(self):
+        self.drive()
+        self.assertNotIn(("provision",), self.sim.calls)
 
     def test_restore_record_is_saved_before_the_flip(self):
         self.sim_state_at_flip = None

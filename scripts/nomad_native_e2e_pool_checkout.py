@@ -70,6 +70,10 @@ class FixtureBranch:
     def restore_with(self) -> str:
         return f"git -C {self.repo} update-ref -d {self.ref}"
 
+    def public(self) -> dict[str, Any]:
+        """The record with the home directory redacted, for evidence and printed commands."""
+        return {key: fx.redact_path(value) if isinstance(value, str) else value for key, value in (self.record or {}).items()}
+
     def create(self) -> dict[str, Any]:
         if self._git("rev-parse", "--verify", "--quiet", self.ref)[0] == 0:
             raise PreflightError(f"the branch {self.ref} already exists in the fixture repository; refusing to overwrite or delete it")
@@ -90,8 +94,11 @@ class FixtureBranch:
     def delete(self) -> str:
         if self.record is None or self.record["deleted"]:
             return "not needed"
+        if self._git("rev-parse", "--verify", "--quiet", self.ref)[0] != 0:
+            self.record["deleted"] = True
+            return "already absent"
         if self._git("update-ref", "-d", self.ref, self.record["commit"])[0] != 0:
-            raise PreflightError(f"the fixture repository branch could not be deleted; remove it with `{self.restore_with}`")
+            raise PreflightError(f"the fixture repository branch could not be deleted; remove it with `{fx.redact_path(self.restore_with)}`")
         self.record["deleted"] = True
         return "deleted"
 
@@ -266,7 +273,7 @@ def _run_case(scn: CheckoutScenario, step: Callable[..., Any], case: dict[str, A
 
 def _save_branch_record(scn: CheckoutScenario, fixture: FixtureBranch) -> None:
     scn.r.save_state(checkout_branch_fixture=fixture.record)
-    scn.data["fixture_branch"] = fixture.record
+    scn.data["fixture_branch"] = fixture.public()
 
 
 def _checkout_steps(runner: fx.Runner, cfg: dict[str, Any], root: Path, scn: CheckoutScenario, fixture: FixtureBranch) -> dict[str, Any]:
@@ -298,7 +305,7 @@ def _checkout_steps(runner: fx.Runner, cfg: dict[str, Any], root: Path, scn: Che
     outcomes = {name: case["outcome"] for name, case in scn.cases.items()}
     production = all(case["path"] == "production-archive-cleanup" for case in scn.cases.values())
     return {"scenario": scn.name, "pool": True, "checkout_branch": True, "cases": scn.cases, "outcomes": outcomes,
-            "fixture_branch": dict(fixture.record or {}), "production_cleanup": production, "release": "none" if production else "operator-teardown",
+            "fixture_branch": fixture.public(), "production_cleanup": production, "release": "none" if production else "operator-teardown",
             "restored": restored, "limitations": CHECKOUT_LIMITATIONS, "cleanup": cleanup, "environments": wo07._env_report(scn)}
 
 
@@ -438,6 +445,8 @@ def _binpack_steps(runner: fx.Runner, cfg: dict[str, Any], scn: BinpackScenario)
     scn.data["scheduler_before"] = step("verify-scheduler", scn.verify_scheduler)
     step("start-git-daemon", runner.start_git_daemon)
     step("start-backend", lambda: runner.start_backend(None))
+    if cfg.get("security"):
+        step("provision-scoped-token", lambda: runner.provision_scoped_token(cfg) and None)
     flipped = step("flip-scheduler-to-binpack", scn.flip)
     step("create-fixture-objects", lambda: runner.setup_api_objects(cfg))
     task = {"id": runner.state["task_id"], "session_id": runner.state["session_id"]}

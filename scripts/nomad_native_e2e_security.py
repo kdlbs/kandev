@@ -19,10 +19,10 @@ CA_DAYS = 3
 
 
 def render_server_config(directory: Path) -> str:
-    """Server config fragment for a loopback throwaway server: TLS (no client certs), ACLs on, spread, no oversubscription."""
+    """Server config fragment for a loopback throwaway server: TLS (HTTP only; rpc TLS is mutual and would block a client node without certs), ACLs on, spread, no oversubscription."""
     return f'''tls {{
   http                   = true
-  rpc                    = true
+  rpc                    = false
   ca_file   = "{directory}/ca.pem"
   cert_file = "{directory}/server.pem"
   key_file  = "{directory}/server.key"
@@ -85,6 +85,7 @@ def material_command(out_text: str) -> int:
     print("throwaway TLS material written; start the throwaway server with server_config, then:")
     for name, path in files.items():
         print(f"  {name}: {path}")
+    print("  note: rpc TLS is off in the fragment (it is mutual and a client node would need its own certs); only HTTP TLS matters for Kandev's ca_file")
     print("  nomad acl bootstrap   # keep the management token in nomad.token_file; the runner creates the scoped Kandev token")
     print("  nomad namespace apply kandev && nomad node pool apply -description kandev kandev   # or the pool spec file")
     print("  runner config: nomad.address https://127.0.0.1:<port>, nomad.namespace kandev, pool.node_pool kandev, security {tls, acl_policy, ca_file}")

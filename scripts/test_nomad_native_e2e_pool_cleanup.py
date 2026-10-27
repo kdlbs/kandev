@@ -52,6 +52,7 @@ class Base:
         self.state = {"nomad": {"address": "http://127.0.0.1:4646", "namespace": "kandev", "region": "global", "node_id": SSH},
                       "environments": [], "baseline_jobs": [], "pool_state_root": "/ssh-root", "port": 1234}
         self.sessions = {}
+        self.patches, self.profile_config = [], None
 
     # -- Nomad ---------------------------------------------------------------------------------------
     def nomad(self, path):
@@ -94,6 +95,11 @@ class Base:
 
     def api(self, method, path, body):
         parts = path.split("/")
+        if method == "POST" and path == "/secrets":
+            return {"id": "secret-1"}
+        if method == "PATCH" and path.startswith("/executors/") and "/profiles/" in path:
+            self.patches.append((path, body))
+            return {}
         if method == "DELETE" and path.startswith("/tasks/"):
             if self.flags.get("delete_fails"):
                 raise PreflightError("fixture API DELETE /tasks/x failed with status 500")
@@ -127,8 +133,20 @@ def make_runner(sim, creates):
     runner.start_backend = lambda barrier: {"pid": 1}
     runner.database = "db"
 
+    def pool_profile_config(cfg):
+        config = {"node_pool": "kandev"}
+        if cfg.get("security"):
+            config["ca_file"] = cfg["security"]["ca_file"]
+        return config
+
+    runner.pool_profile_config = pool_profile_config
+    runner._task_ctx = {"executor_id": "exec-1"}
+    sim.state["executor_profile_id"] = "prof-1"
+
     def setup(cfg):
         sim.setup_cfg = cfg
+        runner.api("POST", "/secrets", {"name": "nomad-fixture-token", "value": "x"})
+        sim.profile_config = runner.pool_profile_config(cfg)
         task = creates()
         sim.state.update(task_id=task["id"], session_id=task["session_id"])
 
@@ -296,11 +314,29 @@ class UnplacedHappyTest(UnplacedBase):
         report = self.drive()
         self.assert_restored()
         calls = self.sim.calls
-        self.assertEqual(calls[:2], [("eligibility", LOCAL, False), ("eligibility", SSH, False)])
-        self.assertEqual(calls.count(("eligibility", LOCAL, True)), 1 + 0)
+        self.assertEqual(calls[0], ("eligibility", SSH, False))
+        self.assertNotIn(("eligibility", LOCAL, False), calls[:1])
         self.assertTrue(report["unplaced"] and report["cleanup"]["finished"])
         self.assertTrue(self.sim.finished)
         self.assertNotIn(TOKEN.strip(), json.dumps(self.sim.evidence.data))
+
+    def test_unplaced_launch_keeps_one_node_eligible_so_pool_preflight_passes(self):
+        self.drive()
+        self.assertNotIn(("eligibility", LOCAL, False), self.sim.calls)
+        self.assertEqual(self.sim.calls[0], ("eligibility", SSH, False))
+
+    def test_unplaced_profile_excludes_the_local_node_and_the_refusal_phase_lifts_it(self):
+        self.drive()
+        self.assertEqual(self.sim.profile_config.get("exclude_local"), "true")
+        self.assertEqual(len(self.sim.patches), 1)
+        path, body = self.sim.patches[0]
+        self.assertEqual(path, "/executors/exec-1/profiles/prof-1")
+        self.assertNotIn("exclude_local", body["config"])
+        self.assertEqual(body["config"]["nomad_token"], "$kandev-secret:secret-1")
+
+    def test_profile_hooks_are_restored_after_the_run(self):
+        self.drive()
+        self.assertNotIn("exclude_local", self.runner.pool_profile_config({}))
 
     def test_job_purged_by_production_cleanup_counts_as_stopped(self):
         report = self.drive(bad={1: "purged"})
@@ -620,6 +656,18 @@ class RegisterHappyTest(RegisterBase):
         self.drive(security=True)
         self.assertEqual(FakeProxy.instances[0].ca_file, "/ca.pem")
 
+    def test_plaintext_proxy_profile_drops_ca_file_and_evidence_records_it(self):
+        report = self.drive(security=True)
+        self.assertNotIn("ca_file", self.sim.profile_config)
+        self.assertEqual(report["backend_to_proxy_leg"], "plaintext-http")
+        self.assertTrue(report["proxy_upstream_verified_with_ca"])
+
+    def test_without_security_no_ca_file_and_leg_is_plaintext(self):
+        report = self.drive()
+        self.assertNotIn("ca_file", self.sim.profile_config)
+        self.assertEqual(report["backend_to_proxy_leg"], "plaintext-http")
+        self.assertFalse(report["proxy_upstream_verified_with_ca"])
+
     def test_a_launch_that_recovers_to_ready_is_archived_and_cleaned(self):
         report = self.drive(bad={1: "ready"})
         self.assertEqual(report["cases"]["drop"]["launch_outcome"], "ready")
@@ -662,6 +710,7 @@ class ForceSim(Base):
         self.sent = []
         self.script = {}
         self.release = {}
+        self.stop_returned = threading.Event()
 
     def launch(self):
         self.launches += 1
@@ -722,6 +771,15 @@ def force_scenario_class(sim):
             if sim.tasks[task_id]["session"] not in sim.sent:
                 return [item for item in identities if (item["pid"], item["started"]) in sim.alive_agents[task_id]]
             script = sim.script.setdefault(task_id, list(sim.flags.get("script", [])))
+            if script and script[0].get("late"):
+                # The processes are observed alive, then die and the stop call returns before the caller reads anything else.
+                script.pop(0)
+                seen = [item for item in identities if (item["pid"], item["started"]) in sim.alive_agents[task_id]]
+                sim.alive_agents[task_id] = {key for key in sim.alive_agents[task_id] if key[0] % 100 == 0}
+                sim.release[task_id].set()
+                sim.stop_returned.wait(5)
+                time.sleep(0.2)
+                return seen
             if script:
                 step = script.pop(0)
                 if step["kill"]:
@@ -739,6 +797,7 @@ def force_scenario_class(sim):
             if not sim.flags.get("script"):
                 sim.release[task_id].set()
             sim.release[task_id].wait(5)
+            sim.stop_returned.set()
             if sim.flags.get("rejected"):
                 raise PreflightError("session force-stop was rejected or failed")
 
@@ -796,12 +855,17 @@ class ForceStopHappyTest(ForceBase):
 
 class ForceStopFailureTest(ForceBase):
     def test_stopped_state_while_an_agent_process_runs_fails(self):
-        error = self.assert_fails("reported stopped while", script=[{"kill": False, "state": "CANCELLED"}, {"kill": True}])
+        error = self.assert_fails("reported stopped while", script=[{"kill": False, "state": "CANCELLED"}, {"kill": False}, {"kill": True}])
         self.assertNotIn(NOMAD_TOKEN, str(error))
 
     def test_force_stop_accepted_while_an_agent_process_runs_fails(self):
         # The call returns (script exhausted) with the agent still alive: the accepted stop is a stopped report.
         self.assert_fails("reported stopped while", script=[{"kill": False}])
+
+    def test_agents_dying_and_the_stop_returning_between_reads_is_not_a_false_failure(self):
+        report = self.drive(script=[{"late": True}, {"kill": True, "state": "CANCELLED"}])
+        self.assertEqual(report["force_stop"]["ssh"]["agent_processes_after"], 0)
+        self.assertEqual(report["force_stop"]["local"]["agent_processes_after"], 0)
 
     def test_rejected_force_stop_fails_even_when_the_agent_is_gone(self):
         self.assert_fails("force-stop was not accepted", script=[{"kill": True}], rejected=True)

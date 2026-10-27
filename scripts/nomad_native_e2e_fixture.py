@@ -22,6 +22,7 @@ import json
 import os
 import posixpath
 import re
+import secrets
 import shlex
 import shutil
 import signal
@@ -385,9 +386,18 @@ def _default_nomad_delete_variable(address: str, token: str, namespace: str, pat
         raise PreflightError("Nomad variable DELETE is unreachable") from None
 
 
+def redact_path(text: str, root: Path | None = None) -> str:
+    """Replaces the fixture root and the home directory in operator-facing text so evidence carries no local layout."""
+    if root is not None:
+        text = text.replace(str(root), "<fixture-root>")
+    home = str(Path.home())
+    return text.replace(home, "~") if home not in ("", "/") else text
+
+
 _ACL_NAME = re.compile(r"[a-z][a-z0-9-]{0,62}")
 _ACL_ACCESSOR = re.compile(r"[A-Za-z0-9-]{1,64}")
 ACL_POLICY_NAME = "kandev-executor"
+ACL_TOKEN_TTL = "24h"
 
 
 def _acl_call(address: str, token: str, method: str, path: str, body: Any = None, tolerate_absent: bool = False) -> Any:
@@ -410,7 +420,7 @@ def _default_nomad_acl_provision(address: str, token: str, policy_name: str, rul
     if not _ACL_NAME.fullmatch(policy_name) or policy_name == "management":
         raise PreflightError("refusing to provision an ACL policy with an unsafe name")
     _acl_call(address, token, "POST", f"/v1/acl/policy/{policy_name}", {"Name": policy_name, "Description": "kandev fixture executor", "Rules": rules})
-    issued = _acl_call(address, token, "POST", "/v1/acl/token", {"Name": "kandev-fixture-executor", "Type": "client", "Policies": [policy_name], "Global": False})
+    issued = _acl_call(address, token, "POST", "/v1/acl/token", {"Name": "kandev-fixture-executor", "Type": "client", "Policies": [policy_name], "Global": False, "ExpirationTTL": ACL_TOKEN_TTL})
     return {"secret": issued.get("SecretID"), "accessor": issued.get("AccessorID"), "policies": issued.get("Policies"), "type": issued.get("Type")}
 
 
@@ -749,14 +759,20 @@ class Runner:
 
     def provision_scoped_token(self, cfg: dict[str, Any]) -> str:
         """Creates the scoped Kandev token from the policy file with the management token; Kandev receives only this one."""
+        cached = getattr(self, "_scoped_secret", None)
+        if cached:
+            return cached
         report = self.verify_security_cluster()
         address = self.state["nomad"]["address"]
-        issued = self.ops.nomad_acl_provision(address, self.token, ACL_POLICY_NAME, Path(cfg["security"]["acl_policy"]).read_text(encoding="utf-8"))
+        policy_name = f"{ACL_POLICY_NAME}-{secrets.token_hex(4)}"
+        issued = self.ops.nomad_acl_provision(address, self.token, policy_name, Path(cfg["security"]["acl_policy"]).read_text(encoding="utf-8"))
+        if issued.get("accessor"):
+            self.save_state(scoped_token={"accessor": issued["accessor"], "policy": policy_name})
         secret = issued.get("secret")
-        if issued.get("policies") != [ACL_POLICY_NAME] or issued.get("type") != "client" or not secret or secret == self.token:
+        if issued.get("policies") != [policy_name] or issued.get("type") != "client" or not secret or secret == self.token:
             raise PreflightError("security mode: the Kandev token is not a client token scoped to the kandev-executor policy alone")
         self.evidence.secrets.append(secret)
-        self.save_state(scoped_token={"accessor": issued["accessor"], "policy": ACL_POLICY_NAME})
+        self._scoped_secret = secret
         self.evidence.data["security"] = {**report, "tls": True, "kandev_token_policies": issued["policies"], "kandev_token_accessor": issued["accessor"]}
         return secret
 
