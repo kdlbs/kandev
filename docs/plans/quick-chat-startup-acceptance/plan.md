@@ -259,6 +259,16 @@ Implementation results are recorded in the completed work orders below.
 - `node scripts/validate-public-docs.mjs`, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 - The public Quick Chat recovery guide was updated and validated. No commit or publication was made.
 
+### PR review fixup revalidation (2026-10-27)
+
+- From `apps/backend`, `go test -trimpath -tags fts5 ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp -run 'TestQuickChatCreationIdentity|TestCommitQuickChatStartFailureRequiresCurrentOwner|TestPostgresCommitQuickChatStartFailureIfCurrentAttempt|TestQuickChatStartFailure|TestQuickChatAcceptance|TestQuickChatFailureRetention|TestHTTPListQuickChatSessions|Test.*ReservedExternalID|Test.*QuickChat.*Authz' -count=1` passed. The environment-gated PostgreSQL case was not exercised because `KANDEV_TEST_POSTGRES_DSN` was unset.
+- From `apps/backend`, `go test -race -trimpath -tags fts5 ./internal/task/handlers ./internal/orchestrator ./internal/task/repository/sqlite -run 'TestQuickChatCreationIdentity|TestQuickChatStartFailureIgnoresCompetingStartingSession|TestQuickChatStartFailureDoesNotOverwriteReplacementWaitingSession|TestCommitQuickChatStartFailureRequiresCurrentOwner|TestPostgresCommitQuickChatStartFailureIfCurrentAttempt' -count=1` passed.
+- From `apps/backend`, `go test -race ./internal/task/handlers -run 'TestHTTPStartQuickChat(ForwardsAutoTitleAndKeepsProvisionalTitle|WithoutAutoTitleDoesNotMarkPendingTitle)$' -count=1` passed after the full CI shard exposed unlocked async-test reads.
+- `bash scripts/lint-go-changed` passed for all changed Go files, including `task_http_handlers_test.go`, with zero issues; `make -C apps/backend build` succeeded.
+- From `apps/web`, the work-order Vitest command passed 34 files and 290 tests; `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck`, `pnpm run i18n:check`, `pnpm run i18n:ratchet`, changed-file ESLint, Prettier, and `pnpm run build` passed.
+- Desktop Chromium managed E2E passed 8 tests and phone `mobile-chrome` managed E2E passed 4 tests. Each runner built the backend fixture and production web assets.
+- Public-doc validation passed 63 tests and validated 54 pages. The specification catalog validated 404 decisions and 1,746 specifications; full specification lint and `git diff --check` passed.
+
 ### Current-base revalidation (2026-10-27)
 
 - Task 01 and Task 02 backend regression commands passed for handlers,

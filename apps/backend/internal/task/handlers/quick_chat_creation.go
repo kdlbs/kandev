@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	"go.uber.org/zap"
 )
 
 func quickChatCreationExternalID(ctx context.Context, creationID string) (string, error) {
@@ -65,6 +66,38 @@ func quickChatTaskAgentProfileID(task *models.Task) string {
 	return profileID
 }
 
+func quickChatParamsForExisting(task *models.Task, fallbackAgentID, fallbackExecutorID string) quickChatParams {
+	params := quickChatParams{metadata: make(map[string]interface{})}
+	if task == nil {
+		return params
+	}
+	for key, value := range task.Metadata {
+		params.metadata[key] = value
+	}
+	params.agentProfileID = firstNonEmpty(quickChatTaskAgentProfileID(task), fallbackAgentID)
+	params.executorID = firstNonEmpty(models.StringFromAny(task.Metadata[models.MetaKeyExecutorID]), fallbackExecutorID)
+	params.title = firstNonEmpty(task.Title, "Quick Chat")
+	for _, repository := range task.Repositories {
+		if repository == nil {
+			continue
+		}
+		params.repos = append(params.repos, service.TaskRepositoryInput{
+			RepositoryID: repository.RepositoryID,
+			BaseBranch:   repository.BaseBranch,
+		})
+	}
+	if len(params.repos) > 0 {
+		params.executorID = models.ExecutorIDWorktree
+	}
+	if params.agentProfileID != "" {
+		params.metadata[models.MetaKeyAgentProfileID] = params.agentProfileID
+	}
+	if params.executorID != "" {
+		params.metadata[models.MetaKeyExecutorID] = params.executorID
+	}
+	return params
+}
+
 func (h *TaskHandlers) writeQuickChatCreation(c *gin.Context, task *models.Task, creationID string) {
 	response, err := h.quickChatCreationDescriptor(c.Request.Context(), task, creationID)
 	if err != nil {
@@ -74,39 +107,103 @@ func (h *TaskHandlers) writeQuickChatCreation(c *gin.Context, task *models.Task,
 	c.JSON(http.StatusOK, response)
 }
 
+func (h *TaskHandlers) respondWithFoundQuickChatCreation(
+	c *gin.Context,
+	workspaceID, externalID, creationID string,
+	result service.CreateTaskResult,
+) bool {
+	if result.Outcome == service.CreateTaskOutcomeCreated {
+		return false
+	}
+	task := result.Task
+	if task == nil || task.ExternalID != externalID || task.WorkspaceID != workspaceID || !isQuickChatCreationTask(task) {
+		c.JSON(http.StatusConflict, gin.H{"code": "quick_chat_creation_conflict"})
+		return true
+	}
+	h.writeQuickChatCreation(c, task, creationID)
+	return true
+}
+
+func (h *TaskHandlers) respondQuickChatCreateError(c *gin.Context, err error) {
+	if status, ok := quickChatCreateHTTPStatus(err); ok {
+		errorBody := taskErrorBody(err)
+		errorBody[errorDetailKeyErrorCode] = "quick_chat_creation_rejected"
+		c.JSON(status, errorBody)
+		return
+	}
+	h.logger.Error("failed to create ephemeral task", zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create quick chat"})
+}
+
+func (h *TaskHandlers) settleQuickChatCreation(
+	c *gin.Context,
+	taskID, externalID, creationID string,
+) bool {
+	if creationID == "" {
+		return true
+	}
+	settled, survivor, err := h.service.SettleExternalID(c.Request.Context(), taskID, externalID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "quick chat creation no longer exists")
+		return false
+	}
+	if settled {
+		return true
+	}
+	if survivor != nil && survivor.ExternalIDSettledAt != nil {
+		h.writeQuickChatCreation(c, survivor, creationID)
+		return false
+	}
+	if survivor == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "quick chat creation no longer exists"})
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"code":              "quick_chat_creation_identity_lost",
+		"task_id":           survivor.ID,
+		"creation_id":       creationID,
+		"creation_complete": false,
+	})
+	return false
+}
+
 func (h *TaskHandlers) existingQuickChatCreation(
 	c *gin.Context,
 	workspaceID string,
 	body httpStartQuickChatRequest,
-) (string, bool) {
+) (string, *models.Task, func(), bool) {
 	if body.CreationID == "" {
-		return "", false
+		return "", nil, nil, false
 	}
 	ctx := c.Request.Context()
 	if err := h.service.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeTaskWrite); err != nil {
 		handleNotFound(c, h.logger, err, "workspace not found")
-		return "", true
+		return "", nil, nil, true
 	}
 	externalID, err := quickChatCreationExternalID(ctx, body.CreationID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "creation_id must be a canonical UUID"})
-		return "", true
+		return "", nil, nil, true
 	}
+	release := h.lockQuickChatCreation(externalID)
 	existing, err := h.service.GetTaskByExternalID(ctx, workspaceID, externalID)
 	if errors.Is(err, taskrepo.ErrTaskNotFound) {
-		return externalID, false
+		return externalID, nil, release, false
 	}
 	if err != nil {
 		handleNotFound(c, h.logger, err, "quick chat creation not found")
-		return "", true
+		return "", nil, release, true
 	}
 	if existing == nil || existing.ExternalID != externalID ||
 		existing.WorkspaceID != workspaceID || !isQuickChatCreationTask(existing) {
 		c.JSON(http.StatusConflict, gin.H{"code": "quick_chat_creation_conflict"})
-		return "", true
+		return "", nil, release, true
 	}
-	h.writeQuickChatCreation(c, existing, body.CreationID)
-	return "", true
+	if existing.ExternalIDSettledAt != nil || existing.ArchivedAt != nil {
+		h.writeQuickChatCreation(c, existing, body.CreationID)
+		return "", nil, release, true
+	}
+	return externalID, existing, release, false
 }
 
 func (h *TaskHandlers) httpGetQuickChatCreation(c *gin.Context) {

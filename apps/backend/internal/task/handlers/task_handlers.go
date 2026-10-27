@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,8 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
+	quickChatCreationLocksMu      sync.Mutex
+	quickChatCreationLocks        map[string]*quickChatCreationLock
 	workspaceAdoptionCallerGuard  func(*gin.Context) bool
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
@@ -52,6 +55,36 @@ type TaskHandlers struct {
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	backgroundWorkEnabled         bool
 	logger                        *logger.Logger
+}
+
+type quickChatCreationLock struct {
+	mu         sync.Mutex
+	references int
+}
+
+func (h *TaskHandlers) lockQuickChatCreation(identity string) func() {
+	h.quickChatCreationLocksMu.Lock()
+	if h.quickChatCreationLocks == nil {
+		h.quickChatCreationLocks = make(map[string]*quickChatCreationLock)
+	}
+	lock := h.quickChatCreationLocks[identity]
+	if lock == nil {
+		lock = &quickChatCreationLock{}
+		h.quickChatCreationLocks[identity] = lock
+	}
+	lock.references++
+	h.quickChatCreationLocksMu.Unlock()
+
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		h.quickChatCreationLocksMu.Lock()
+		defer h.quickChatCreationLocksMu.Unlock()
+		lock.references--
+		if lock.references == 0 {
+			delete(h.quickChatCreationLocks, identity)
+		}
+	}
 }
 
 func (h *TaskHandlers) SetBackgroundWorkEnabled(enabled bool) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import { ApiError } from "@/lib/api/client";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/local-storage";
 import type { QuickChatOpeningPayload } from "@/lib/state/slices/ui/types";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import { isQuickChatStartupPending } from "./quick-chat-startup-state";
 import { toQuickChatDraftAttachments } from "@/lib/state/slices/ui/quick-chat-opening-draft";
 import {
   isCreationStatusResponse,
@@ -35,6 +36,8 @@ type QuickChatOwner = {
   activeSessionId: string | null;
   workspaceId: string;
   userId: string;
+  setupKey: number;
+  generation: number;
 };
 
 export type QuickChatCreationActions = {
@@ -54,7 +57,15 @@ export type QuickChatCreationActions = {
 type QuickChatCreationArgs = {
   workspaceId: string;
   userId: string;
-  quickChat: Pick<QuickChatState, "isOpen" | "activeSessionId" | "sessions" | "handleSelectAgent">;
+  quickChat: Pick<
+    QuickChatState,
+    | "isOpen"
+    | "activeSessionId"
+    | "setupKey"
+    | "sessions"
+    | "handleSelectAgent"
+    | "reportSetupError"
+  >;
   setupDraft: SetupDraft;
 };
 
@@ -77,26 +88,62 @@ function ownsQuickChatSetup(owner: QuickChatOwner, current: QuickChatOwner): boo
     current.isOpen &&
     current.activeSessionId === owner.activeSessionId &&
     current.workspaceId === owner.workspaceId &&
-    current.userId === owner.userId
+    current.userId === owner.userId &&
+    current.generation === owner.generation
   );
 }
 
-function useQuickChatCreationStatus(args: QuickChatCreationArgs) {
-  const { workspaceId, userId, quickChat, setupDraft } = args;
-  const [checking, setChecking] = useState(false);
-  const checkedEventCreationRef = useRef<string | null>(null);
+function useQuickChatSetupOwner(args: {
+  quickChat: Pick<QuickChatState, "isOpen" | "activeSessionId" | "setupKey">;
+  workspaceId: string;
+  userId: string;
+}): React.MutableRefObject<QuickChatOwner> {
+  const { quickChat, workspaceId, userId } = args;
   const activationRef = useRef<QuickChatOwner>({
     isOpen: quickChat.isOpen,
     activeSessionId: quickChat.activeSessionId,
     workspaceId,
     userId,
+    setupKey: quickChat.setupKey,
+    generation: 0,
   });
-  activationRef.current = {
-    isOpen: quickChat.isOpen,
-    activeSessionId: quickChat.activeSessionId,
-    workspaceId,
-    userId,
-  };
+  useLayoutEffect(() => {
+    const previous = activationRef.current;
+    const changed =
+      previous.isOpen !== quickChat.isOpen ||
+      previous.activeSessionId !== quickChat.activeSessionId ||
+      previous.workspaceId !== workspaceId ||
+      previous.userId !== userId ||
+      previous.setupKey !== quickChat.setupKey;
+    activationRef.current = {
+      isOpen: quickChat.isOpen,
+      activeSessionId: quickChat.activeSessionId,
+      workspaceId,
+      userId,
+      setupKey: quickChat.setupKey,
+      generation: previous.generation + (changed ? 1 : 0),
+    };
+  }, [quickChat.activeSessionId, quickChat.isOpen, quickChat.setupKey, userId, workspaceId]);
+  useLayoutEffect(
+    () => () => {
+      const previous = activationRef.current;
+      activationRef.current = {
+        ...previous,
+        isOpen: false,
+        generation: previous.generation + 1,
+      };
+    },
+    [],
+  );
+  return activationRef;
+}
+
+function useQuickChatCreationStatus(args: QuickChatCreationArgs) {
+  const { workspaceId, userId, quickChat, setupDraft } = args;
+  const [checking, setChecking] = useState(false);
+  const autoCheckedCreationRef = useRef<string | null>(null);
+  const activeLookupsRef = useRef(new Set<string>());
+  const activationRef = useQuickChatSetupOwner({ quickChat, workspaceId, userId });
   const openQuickChat = useAppStore((state) => state.openQuickChat);
   const upsertQuickChatSessionFromEvent = useAppStore(
     (state) => state.upsertQuickChatSessionFromEvent,
@@ -106,20 +153,29 @@ function useQuickChatCreationStatus(args: QuickChatCreationArgs) {
   const pendingCreation = setupDraft.pendingCreation;
 
   const check = useCallback(
-    (candidate?: PendingQuickChatCreation) =>
-      lookupQuickChatCreation({
-        workspaceId,
-        userId,
-        candidate,
-        pendingCreation,
-        activationRef,
-        setupDraft,
-        agentProfiles,
-        openQuickChat,
-        upsertQuickChatSessionFromEvent,
-        setQuickChatInitialPrompt,
-        setChecking,
-      }),
+    async (candidate?: PendingQuickChatCreation) => {
+      const pending = candidate ?? pendingCreation;
+      if (!pending || activeLookupsRef.current.has(pending.creationId)) return;
+      autoCheckedCreationRef.current = pending.creationId;
+      activeLookupsRef.current.add(pending.creationId);
+      try {
+        await lookupQuickChatCreation({
+          workspaceId,
+          userId,
+          candidate: pending,
+          pendingCreation,
+          activationRef,
+          setupDraft,
+          agentProfiles,
+          openQuickChat,
+          upsertQuickChatSessionFromEvent,
+          setQuickChatInitialPrompt,
+          setChecking,
+        });
+      } finally {
+        activeLookupsRef.current.delete(pending.creationId);
+      }
+    },
     [
       agentProfiles,
       openQuickChat,
@@ -135,14 +191,18 @@ function useQuickChatCreationStatus(args: QuickChatCreationArgs) {
     (session) => session.creationId === pendingCreation?.creationId,
   );
   useEffect(() => {
+    if (!pendingCreation) {
+      autoCheckedCreationRef.current = null;
+      return;
+    }
+    const restoredReceipt = pendingCreation.state !== "submitting";
+    const receivedSession = pendingCreation.state === "submitting" && pendingCreationSession;
     if (
-      !pendingCreation ||
-      pendingCreation.state !== "submitting" ||
-      !pendingCreationSession ||
-      checkedEventCreationRef.current === pendingCreation.creationId
+      (!restoredReceipt && !receivedSession) ||
+      autoCheckedCreationRef.current === pendingCreation.creationId
     )
       return;
-    checkedEventCreationRef.current = pendingCreation.creationId;
+    autoCheckedCreationRef.current = pendingCreation.creationId;
     void check(pendingCreation);
   }, [check, pendingCreation, pendingCreationSession]);
 
@@ -221,7 +281,7 @@ function handOffAcceptedQuickChat(
     workspaceId: args.workspaceId,
     agentProfileId: profileId,
     creationId: pending.creationId,
-    startupPending: accepted.session_state === "CREATED" || accepted.session_state === "STARTING",
+    startupPending: isQuickChatStartupPending({ sessionState: accepted.session_state }),
   });
   const isPassthrough = args.agentProfiles.find(
     (profile) => profile.id === profileId,
@@ -333,9 +393,13 @@ function useQuickChatCreationSubmission(
   const remove = useCallback(async () => {
     const pending = pendingCreation;
     if (!pending?.taskId) return;
-    await deleteTaskAfterUserAction(pending.taskId);
-    clearPendingCreation(pending.creationId);
-  }, [clearPendingCreation, pendingCreation]);
+    try {
+      await deleteTaskAfterUserAction(pending.taskId);
+      clearPendingCreation(pending.creationId);
+    } catch (error) {
+      quickChat.reportSetupError(error);
+    }
+  }, [clearPendingCreation, pendingCreation, quickChat]);
 
   return { start, retry, remove };
 }

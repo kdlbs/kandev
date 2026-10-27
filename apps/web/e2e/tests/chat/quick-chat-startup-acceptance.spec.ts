@@ -196,7 +196,12 @@ test.describe("Quick Chat startup acceptance", () => {
     await expect(dialog.getByTestId("quick-chat-send")).toBeDisabled();
     const editor = dialog.getByTestId("task-description-input");
     await editor.press("Control+Enter");
-    await dwell(100, "negative-assertion", "verify an unresolved creation ignores keyboard submit");
+    await dwell(
+      testPage,
+      100,
+      "negative-assertion",
+      "a blocked submit emits no request or WebSocket event to observe",
+    );
     expect(creationIds).toHaveLength(1);
     expect(creationIds[0]).toBeTruthy();
     const allocated = created[0]!;

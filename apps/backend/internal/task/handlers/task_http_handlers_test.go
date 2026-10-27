@@ -305,7 +305,7 @@ func TestHTTPStartQuickChatForwardsAutoTitleAndKeepsProvisionalTitle(t *testing.
 	require.NotNil(t, repo.task)
 	assert.Equal(t, "Agent A - Chat 1", repo.task.Title)
 	assert.True(t, models.IsAgentTitlePending(repo.task.Metadata))
-	assert.Len(t, orch.requests, 1)
+	assert.Equal(t, 1, quickChatIntentCount(orch, orchestrator.IntentPrepare))
 }
 
 func TestHTTPStartQuickChatWithoutAutoTitleDoesNotMarkPendingTitle(t *testing.T) {
@@ -326,7 +326,7 @@ func TestHTTPStartQuickChatWithoutAutoTitleDoesNotMarkPendingTitle(t *testing.T)
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.NotNil(t, repo.task)
 	assert.False(t, models.IsAgentTitlePending(repo.task.Metadata))
-	assert.Len(t, orch.requests, 1)
+	assert.Equal(t, 1, quickChatIntentCount(orch, orchestrator.IntentPrepare))
 }
 
 // TestStartAgentForNewTask_SetsDeferredStart pins the call-site half of the

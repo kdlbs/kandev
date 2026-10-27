@@ -12,6 +12,7 @@ import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-sess
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import type { QuickChatOpeningPayload } from "@/lib/state/slices/ui/types";
 import type { QuickChatStore } from "./use-quick-chat-modal";
+import { isQuickChatStartupPending } from "./quick-chat-startup-state";
 
 type StartQuickChatForAgentOptions = {
   workspaceId: string;
@@ -73,6 +74,7 @@ async function startQuickChatForAgent(options: StartQuickChatForAgentOptions) {
         ? response.creation_complete === true
         : (response.creation_complete ?? true),
       sessionState: response.session_state,
+      archived: response.archived === true,
     };
   } catch (error) {
     if (creationId) throw error;
@@ -83,10 +85,6 @@ async function startQuickChatForAgent(options: StartQuickChatForAgentOptions) {
 }
 
 type QuickChatStartResult = Awaited<ReturnType<typeof startQuickChatForAgent>>;
-
-function isStartupPending(sessionState: string | undefined): boolean {
-  return sessionState === "CREATED" || sessionState === "STARTING";
-}
 
 function recordRecentAgentUse(store: QuickChatStore, agentProfileId: string): void {
   recordAgentProfileRecentUseBestEffort("quick_chat", agentProfileId, (record) =>
@@ -108,7 +106,7 @@ function upsertIncompleteCreation(
     kind: "chat",
     taskId: result.taskId,
     creationId,
-    startupPending: isStartupPending(result.sessionState),
+    startupPending: isQuickChatStartupPending({ sessionState: result.sessionState }),
   });
 }
 
@@ -127,7 +125,7 @@ function reconcileSupersededStart(
     taskId: result.taskId,
     name: result.name,
     creationId,
-    startupPending: isStartupPending(result.sessionState),
+    startupPending: isQuickChatStartupPending({ sessionState: result.sessionState }),
   });
   recordRecentAgentUse(store, result.agentProfileId);
 }
@@ -196,6 +194,10 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   const requestState = useQuickChatSelectionRequestState(workspaceId);
   const { pendingAgentId, setPendingAgentId, setupError, setSetupError, latestRequestId, reset } =
     requestState;
+  const reportSetupError = useCallback(
+    (error: unknown) => setSetupError(setQuickChatSetupError(error) ?? t("chat:unknownError")),
+    [setSetupError, t],
+  );
 
   const handleSelectAgent = useCallback(
     async (
@@ -220,9 +222,12 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
         });
         if (
           creationId &&
-          (result.creationId !== creationId || !result.creationComplete || !result.sessionId)
+          (result.creationId !== creationId ||
+            !result.creationComplete ||
+            !result.sessionId ||
+            result.archived)
         ) {
-          upsertIncompleteCreation(store, workspaceId, creationId, result);
+          if (!result.archived) upsertIncompleteCreation(store, workspaceId, creationId, result);
           return false;
         }
         if (!result.sessionId || !result.taskId) throw new Error(t("chat:unknownError"));
@@ -253,5 +258,5 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
     [latestRequestId, setPendingAgentId, setSetupError, store, t, workspaceId],
   );
 
-  return { pendingAgentId, setupError, reset, handleSelectAgent };
+  return { pendingAgentId, setupError, reportSetupError, reset, handleSelectAgent };
 }

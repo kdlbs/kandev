@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
@@ -7,6 +7,7 @@ import type { QuickChatOpeningPayload } from "@/lib/state/slices/ui/types";
 const getCreation = vi.hoisted(() => vi.fn());
 const deleteTask = vi.hoisted(() => vi.fn());
 const handleSelectAgent = vi.hoisted(() => vi.fn());
+const reportSetupError = vi.hoisted(() => vi.fn());
 let appState: {
   openQuickChat: ReturnType<typeof vi.fn>;
   upsertQuickChatSessionFromEvent: ReturnType<typeof vi.fn>;
@@ -38,13 +39,18 @@ const ACTIVATION_DRAFT = "Keep this until activation";
 const CORRECTABLE_DRAFT = "Keep the draft editable";
 const STABLE_MESSAGE_ID = "message-stable";
 const UNCERTAIN_DRAFT = "Keep this uncertain draft";
+const UPLOADED_ATTACHMENT_ID = "uploaded-id";
+const ATTACHMENT_MIME_TYPE = "text/plain";
+const ATTACHMENT_FILE_NAME = "notes.txt";
 
 function makeQuickChat(isOpen = true) {
   return {
     isOpen,
     activeSessionId: isOpen ? SETUP_SESSION_ID : null,
+    setupKey: 0,
     sessions: [],
     handleSelectAgent,
+    reportSetupError,
   };
 }
 
@@ -56,7 +62,7 @@ function useCreationHarness(quickChat = makeQuickChat()) {
     quickChat,
     setupDraft,
   });
-  return { setupDraft, creation };
+  return { setupDraft, creation, quickChat };
 }
 
 function openingPayload(message: string, clientMessageId = STABLE_MESSAGE_ID) {
@@ -66,6 +72,7 @@ function openingPayload(message: string, clientMessageId = STABLE_MESSAGE_ID) {
 beforeEach(() => {
   window.sessionStorage.clear();
   handleSelectAgent.mockReset().mockResolvedValue(false);
+  reportSetupError.mockReset();
   getCreation.mockReset();
   deleteTask.mockReset().mockResolvedValue(undefined);
   appState = {
@@ -111,6 +118,101 @@ it("keeps an uncertain submission and retries with the same identity before clea
   expect(result.current.setupDraft.draft.message).toBe("");
 });
 
+it("clears an unchanged uploaded draft after same-token retry and a new setup mount", async () => {
+  handleSelectAgent
+    .mockImplementationOnce(async (...args: unknown[]) => {
+      (args[4] as (error: unknown) => void)(new ApiError("gateway timeout", 502, null));
+      return false;
+    })
+    .mockResolvedValueOnce(true);
+  getCreation.mockRejectedValue(new Error("status unavailable"));
+  const attachment = {
+    id: "local-row-id",
+    attachmentId: UPLOADED_ATTACHMENT_ID,
+    mimeType: ATTACHMENT_MIME_TYPE,
+    fileName: ATTACHMENT_FILE_NAME,
+    size: 5,
+    isImage: false,
+    deliveryMode: "path" as const,
+    uploadStatus: "ready" as const,
+  };
+  const { result, unmount } = renderHook(() => useCreationHarness());
+  act(() =>
+    result.current.setupDraft.update({ message: OPENING_REQUEST, attachments: [attachment] }),
+  );
+
+  await act(async () => {
+    await result.current.creation.start(
+      "agent-1",
+      [],
+      {
+        ...openingPayload(OPENING_REQUEST),
+        attachments: [
+          {
+            type: "resource",
+            mime_type: ATTACHMENT_MIME_TYPE,
+            name: ATTACHMENT_FILE_NAME,
+            attachment_id: UPLOADED_ATTACHMENT_ID,
+          },
+        ],
+      },
+      { message: OPENING_REQUEST, attachments: [attachment] },
+    );
+  });
+  const creationId = result.current.setupDraft.pendingCreation?.creationId;
+  expect(creationId).toBeTruthy();
+  expect(result.current.setupDraft.draft.attachments).toHaveLength(1);
+
+  await act(async () => {
+    expect(await result.current.creation.retry()).toBe(true);
+  });
+  expect(result.current.setupDraft.draft).toMatchObject({ message: "", attachments: [] });
+  expect(result.current.setupDraft.pendingCreation).toBeNull();
+  unmount();
+
+  const newSetup = renderHook(() => useQuickChatSetupDraft(WORKSPACE_ID, USER_ID));
+  expect(newSetup.result.current.draft).toMatchObject({ message: "", attachments: [] });
+  expect(newSetup.result.current.pendingCreation).toBeNull();
+});
+
+it("checks a restored receipt without posting or replaying an attempted opening message", async () => {
+  window.sessionStorage.setItem(
+    `quick-chat-creation:${USER_ID}:${WORKSPACE_ID}`,
+    JSON.stringify({
+      creationId: "restored-creation",
+      clientMessageId: "restored-message",
+      message: "Already attempted opening",
+      attachments: [],
+      agentProfileId: "agent-1",
+      repositories: [],
+      runtimeId: "runtime-1",
+      state: "unknown",
+      messageAttempted: true,
+    }),
+  );
+  getCreation.mockResolvedValue({
+    task_id: "task-restored",
+    session_id: "session-restored",
+    creation_id: "restored-creation",
+    creation_complete: true,
+    agent_profile_id: "agent-1",
+    session_state: "WAITING_FOR_INPUT",
+  });
+
+  renderHook(() => useCreationHarness());
+
+  await waitFor(() => expect(getCreation).toHaveBeenCalledWith(WORKSPACE_ID, "restored-creation"));
+  expect(handleSelectAgent).not.toHaveBeenCalled();
+  expect(appState.setQuickChatInitialPrompt).not.toHaveBeenCalled();
+  expect(appState.openQuickChat).toHaveBeenCalledWith(
+    "session-restored",
+    WORKSPACE_ID,
+    "agent-1",
+    "chat",
+    "task-restored",
+  );
+});
+
 it("accepts status with a stable uploaded attachment identity and clears only the unchanged draft", async () => {
   getCreation.mockImplementation(async (_workspaceId: string, creationId: string) => ({
     task_id: "task-1",
@@ -124,8 +226,8 @@ it("accepts status with a stable uploaded attachment identity and clears only th
   const attachment = {
     id: "local-upload-row",
     attachmentId: "uploaded-attachment",
-    mimeType: "text/plain",
-    fileName: "notes.txt",
+    mimeType: ATTACHMENT_MIME_TYPE,
+    fileName: ATTACHMENT_FILE_NAME,
     size: 9,
     isImage: false,
     deliveryMode: "path" as const,
@@ -141,8 +243,8 @@ it("accepts status with a stable uploaded attachment identity and clears only th
         attachments: [
           {
             type: "resource",
-            mime_type: "text/plain",
-            name: "notes.txt",
+            mime_type: ATTACHMENT_MIME_TYPE,
+            name: ATTACHMENT_FILE_NAME,
             attachment_id: "uploaded-attachment",
           },
         ],
@@ -181,12 +283,13 @@ it("records accepted status without opening or clearing after setup dismissal", 
   getCreation.mockReturnValue(new Promise((resolve) => (resolveStatus = resolve)));
   const quickChat = makeQuickChat(true);
   const { result, rerender } = renderHook(
-    ({ open }) => {
+    ({ open, setupKey }) => {
       quickChat.isOpen = open;
       quickChat.activeSessionId = open ? SETUP_SESSION_ID : null;
+      quickChat.setupKey = setupKey;
       return useCreationHarness(quickChat);
     },
-    { initialProps: { open: true } },
+    { initialProps: { open: true, setupKey: 0 } },
   );
   act(() => result.current.setupDraft.update({ message: ACTIVATION_DRAFT }));
   act(() => {
@@ -197,7 +300,7 @@ it("records accepted status without opening or clearing after setup dismissal", 
   act(() => {
     checking = result.current.creation.check(pending);
   });
-  rerender({ open: false });
+  rerender({ open: false, setupKey: 0 });
   await act(async () => {
     resolveStatus({
       task_id: "task-late",
@@ -210,6 +313,89 @@ it("records accepted status without opening or clearing after setup dismissal", 
   });
 
   expect(appState.openQuickChat).not.toHaveBeenCalled();
+  expect(result.current.setupDraft.pendingCreation).toMatchObject({ state: "accepted" });
+  expect(result.current.setupDraft.draft.message).toBe(ACTIVATION_DRAFT);
+});
+
+it("does not let a delayed status check steal a reopened setup with the same session id", async () => {
+  let resolveStatus!: (value: unknown) => void;
+  getCreation.mockReturnValue(new Promise((resolve) => (resolveStatus = resolve)));
+  const quickChat = makeQuickChat(true);
+  const { result, rerender } = renderHook(
+    ({ open, setupKey }) => {
+      quickChat.isOpen = open;
+      quickChat.activeSessionId = open ? SETUP_SESSION_ID : null;
+      quickChat.setupKey = setupKey;
+      return useCreationHarness(quickChat);
+    },
+    { initialProps: { open: true, setupKey: 0 } },
+  );
+  act(() => result.current.setupDraft.update({ message: ACTIVATION_DRAFT }));
+  act(() => {
+    result.current.setupDraft.beginPendingCreation(openingPayload(ACTIVATION_DRAFT), "agent-1", []);
+  });
+  const pending = result.current.setupDraft.pendingCreation!;
+  let checking!: Promise<void>;
+  act(() => {
+    checking = result.current.creation.check(pending);
+  });
+
+  rerender({ open: false, setupKey: 0 });
+  rerender({ open: true, setupKey: 1 });
+  await act(async () => {
+    resolveStatus({
+      task_id: "task-late",
+      session_id: "session-late",
+      creation_id: pending.creationId,
+      creation_complete: true,
+      agent_profile_id: "agent-1",
+    });
+    await checking;
+  });
+
+  expect(appState.openQuickChat).not.toHaveBeenCalled();
+  expect(appState.setQuickChatInitialPrompt).not.toHaveBeenCalled();
+  expect(result.current.setupDraft.pendingCreation).toMatchObject({ state: "accepted" });
+  expect(result.current.setupDraft.draft.message).toBe(ACTIVATION_DRAFT);
+});
+
+it("does not let a delayed status check steal selection after a tab change", async () => {
+  let resolveStatus!: (value: unknown) => void;
+  getCreation.mockReturnValue(new Promise((resolve) => (resolveStatus = resolve)));
+  const quickChat = makeQuickChat(true);
+  const { result, rerender } = renderHook(
+    ({ activeSessionId }) => {
+      quickChat.isOpen = true;
+      quickChat.activeSessionId = activeSessionId;
+      return useCreationHarness(quickChat);
+    },
+    { initialProps: { activeSessionId: SETUP_SESSION_ID } },
+  );
+  act(() => result.current.setupDraft.update({ message: ACTIVATION_DRAFT }));
+  act(() => {
+    result.current.setupDraft.beginPendingCreation(openingPayload(ACTIVATION_DRAFT), "agent-1", []);
+  });
+  const pending = result.current.setupDraft.pendingCreation!;
+  let checking!: Promise<void>;
+  act(() => {
+    checking = result.current.creation.check(pending);
+  });
+
+  rerender({ activeSessionId: "another-session" });
+  rerender({ activeSessionId: SETUP_SESSION_ID });
+  await act(async () => {
+    resolveStatus({
+      task_id: "task-late",
+      session_id: "session-late",
+      creation_id: pending.creationId,
+      creation_complete: true,
+      agent_profile_id: "agent-1",
+    });
+    await checking;
+  });
+
+  expect(appState.openQuickChat).not.toHaveBeenCalled();
+  expect(appState.setQuickChatInitialPrompt).not.toHaveBeenCalled();
   expect(result.current.setupDraft.pendingCreation).toMatchObject({ state: "accepted" });
   expect(result.current.setupDraft.draft.message).toBe(ACTIVATION_DRAFT);
 });
@@ -292,4 +478,25 @@ it("deletes a confirmed task and retires its pending receipt", async () => {
 
   expect(deleteTask).toHaveBeenCalledWith("task-delete");
   expect(result.current.setupDraft.pendingCreation).toBeNull();
+});
+
+it("keeps the receipt and reports a deletion failure", async () => {
+  const { result } = renderHook(() => useCreationHarness());
+  act(() => {
+    result.current.setupDraft.beginPendingCreation(openingPayload("Keep this chat"), "agent-1", []);
+  });
+  const pending = result.current.setupDraft.pendingCreation!;
+  act(() =>
+    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: "task-delete" }),
+  );
+  deleteTask.mockRejectedValueOnce(new ApiError("delete unavailable", 503, null));
+
+  await act(async () => {
+    await result.current.creation.remove();
+  });
+
+  expect(result.current.setupDraft.pendingCreation).toMatchObject({
+    creationId: pending.creationId,
+  });
+  expect(reportSetupError).toHaveBeenCalledWith(expect.any(ApiError));
 });

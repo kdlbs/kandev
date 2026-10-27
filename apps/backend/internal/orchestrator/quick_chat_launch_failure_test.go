@@ -154,6 +154,9 @@ func TestQuickChatStartFailureIgnoresCompetingStartingSession(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task-quick-chat-competing"] = &v1.Task{ID: "task-quick-chat-competing", IsEphemeral: true}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	entry := &transientRetryEntry{attempt: 1}
+	svc.transientRetries.Store("session-quick-chat-competing", entry)
+	svc.lastTurnPrompt.Store("session-quick-chat-competing", capturedPrompt{text: "keep retry prompt"})
 
 	_, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:                "task-quick-chat-competing",
@@ -168,6 +171,12 @@ func TestQuickChatStartFailureIgnoresCompetingStartingSession(t *testing.T) {
 	require.Equal(t, models.TaskSessionStateStarting, session.State)
 	_, hasFailure := models.LoadLastAgentError(session.Metadata)
 	require.False(t, hasFailure)
+	storedEntry, retryStillOwned := svc.transientRetries.Load("session-quick-chat-competing")
+	require.True(t, retryStillOwned, "a competing startup must preserve the current retry owner")
+	require.Same(t, entry, storedEntry)
+	prompt, promptRetained := svc.lastTurnPrompt.Load("session-quick-chat-competing")
+	require.True(t, promptRetained, "a competing startup must preserve the current retry prompt")
+	require.Equal(t, "keep retry prompt", prompt.(capturedPrompt).text)
 }
 
 func TestQuickChatStartFailureDoesNotOverwriteReplacementWaitingSession(t *testing.T) {
@@ -180,6 +189,9 @@ func TestQuickChatStartFailureDoesNotOverwriteReplacementWaitingSession(t *testi
 	taskRepo.tasks["task-quick-chat-replaced"] = &v1.Task{ID: "task-quick-chat-replaced", IsEphemeral: true}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 	launchErr := errors.New("stale startup failure")
+	entry := &transientRetryEntry{attempt: 1}
+	svc.transientRetries.Store("session-quick-chat-replaced", entry)
+	svc.lastTurnPrompt.Store("session-quick-chat-replaced", capturedPrompt{text: "keep replacement prompt"})
 
 	err := svc.handleQuickChatStartCreatedFailure(
 		ctx,
@@ -198,6 +210,12 @@ func TestQuickChatStartFailureDoesNotOverwriteReplacementWaitingSession(t *testi
 	require.Equal(t, "replacement-execution-attempt", models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
 	_, hasFailure := models.LoadLastAgentError(session.Metadata)
 	require.False(t, hasFailure)
+	storedEntry, retryStillOwned := svc.transientRetries.Load("session-quick-chat-replaced")
+	require.True(t, retryStillOwned, "stale failures must not clean up replacement retry state")
+	require.Same(t, entry, storedEntry)
+	prompt, promptRetained := svc.lastTurnPrompt.Load("session-quick-chat-replaced")
+	require.True(t, promptRetained, "stale failures must not clear the replacement prompt")
+	require.Equal(t, "keep replacement prompt", prompt.(capturedPrompt).text)
 }
 
 func TestQuickChatStartFailurePreservesCapacityDeferredSession(t *testing.T) {

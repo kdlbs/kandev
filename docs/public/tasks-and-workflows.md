@@ -1132,7 +1132,7 @@ If task or workspace preparation fails, select **Show details** in the error str
 
 Quick Chat creation can take longer than the request. If the result is uncertain, the setup keeps your submitted draft and shows **Check status**. Checking status does not start another chat or send the opening message.
 
-If Kandev has not found the creation, select **Retry** to continue the same creation. Kandev opens only the matching conversation and shows its preparation progress. Use the recovery controls in that conversation if startup or message delivery needs attention.
+If Kandev has not found the creation, select **Retry creation** to continue the same creation. Kandev opens only the matching conversation and shows its preparation progress. Use the recovery controls in that conversation if startup or message delivery needs attention.
 
 After a reload, Quick Chat checks the saved creation status but does not submit the request again or replay an opening message whose delivery was already attempted. If creation is incomplete and has no prepared session, Kandev keeps the draft and requires the existing delete confirmation before you discard the task.
 

@@ -106,3 +106,12 @@ Verification passed:
 - The final focused backend regression run passed across handlers, orchestrator, executor, SQLite, service, and backendapp. It includes `TestQuickChatPreparedStartPersistsEarlyFailure`, which verifies that a fresh session can claim its first deferred-start attempt when the metadata key is absent.
 - `bash scripts/lint-go-changed` passed for the changed Go files with zero issues.
 - `git diff --check`
+
+PR review fixup revalidation on 2026-10-27:
+
+- From `apps/backend`, `go test -trimpath -tags fts5 ./internal/task/handlers ./internal/orchestrator ./internal/orchestrator/executor -run 'TestQuickChatAcceptance|TestHTTPQuickChatOpeningPayload|TestHTTPConfigChatOpeningPayload|TestQuickChatFailureRetention|TestQuickChatLaunch' -count=1` passed.
+- From `apps/backend`, `go test -race -trimpath -tags fts5 ./internal/task/handlers ./internal/orchestrator ./internal/task/repository/sqlite -run 'TestQuickChatCreationIdentity|TestQuickChatStartFailureIgnoresCompetingStartingSession|TestQuickChatStartFailureDoesNotOverwriteReplacementWaitingSession|TestCommitQuickChatStartFailureRequiresCurrentOwner|TestPostgresCommitQuickChatStartFailureIfCurrentAttempt' -count=1` passed.
+- From `apps/backend`, `go test -race ./internal/task/handlers -run 'TestHTTPStartQuickChat(ForwardsAutoTitleAndKeepsProvisionalTitle|WithoutAutoTitleDoesNotMarkPendingTitle)$' -count=1` passed after the full CI shard exposed unlocked async-test reads.
+- `bash scripts/lint-go-changed apps/backend/internal/orchestrator/quick_chat_launch_failure_test.go apps/backend/internal/task/handlers/quick_chat_creation.go apps/backend/internal/task/handlers/quick_chat_creation_identity_test.go apps/backend/internal/task/handlers/task_handlers.go apps/backend/internal/task/handlers/task_http_handlers.go apps/backend/internal/task/handlers/task_http_handlers_test.go apps/backend/internal/task/repository/sqlite/quick_chat_start_failure_cas_postgres_test.go` passed with zero issues; `make -C apps/backend build` succeeded.
+- The PostgreSQL CAS regression is environment-gated. No local PostgreSQL DSN was configured, so its live database execution remains covered by CI.
+- `git diff --check` passed.

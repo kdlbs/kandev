@@ -30,8 +30,14 @@ Startup progress and failures belong to the accepted conversation.
 New browser submissions keep a stable creation ID through uncertain responses.
 The server binds that ID to its authenticated principal and workspace.
 It uses a reserved external-ID namespace and the existing uniqueness constraint.
-Found creations return their own state without another allocation or launch.
-Status reads never repair, start, or send work.
+Settled and archived creations return their own state without another
+allocation or launch. A later keyed POST may resume missing work for the exact
+unsettled Quick Chat when the adapter resolves it before generic create and
+serializes the per-creation operation. It reuses a session, settles before
+dispatch, and starts only a still-`CREATED` session. A concurrent
+`FoundUnsettled` create outcome remains a read-only descriptor. Status reads
+never repair, start, or send work. Generic external-ID callers retain their
+no-side-effects contract.
 
 Browser structured opening messages keep their subscribed message admission path.
 Terminal-backed openings keep backend delivery with the existing retained
@@ -41,7 +47,7 @@ Explicit HTTP prompts from legacy structured clients also retain backend deliver
 
 The [opening composer design](../specs/tasks/system-design/quick-chat-opening-composer.md#startup-acceptance-amendment)
 owns the detailed contract. The
-[delivery package](../plans/quick-chat-startup-acceptance/plan.md) remains pending.
+[delivery package](../plans/quick-chat-startup-acceptance/plan.md) records the completed implementation and verification.
 
 ## Consequences
 
@@ -51,8 +57,9 @@ Request cancellation does not erase accepted work or its authenticated owner.
 
 The browser must retain pending submission ownership and reconcile late results.
 The adapter must preserve found/unsettled behavior and reserved-prefix isolation.
-An interrupted creation can remain incomplete and require explicit recovery or
-confirmed deletion. This decision adds no autonomous job queue.
+An interrupted creation can remain incomplete until an explicit same-token
+POST resumes it or the user confirms deletion. This decision adds no autonomous
+job queue.
 Identity retention follows the task lifetime. Browser deletion retires its token.
 Server tombstones after physical deletion remain outside this repair.
 

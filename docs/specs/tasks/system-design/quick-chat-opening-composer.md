@@ -132,6 +132,16 @@ and `dispatchTaskSession`. Do not route ephemeral chats through the task form.
 6. Return HTTP 200 with the existing task/session fields. Dispatch
    `IntentStartCreated` once, outside the request's cancellation lifetime.
 
+A keyed POST retry that resolves an exact unsettled Quick Chat before calling
+`CreateTask` holds the per-creation handler lock while it resumes missing
+preparation and settlement. It reconstructs launch parameters from the retained
+task, reuses its primary session when present, and dispatches only when that
+session is still `CREATED`. If `CreateTask` itself returns `FoundUnsettled`
+after an earlier lookup missed, return the incomplete descriptor without
+preparing or dispatching; that outcome can still belong to a concurrent owner.
+The status GET remains read-only. This endpoint-specific retry does not change
+the generic external-ID create contract.
+
 The response describes an accepted conversation, not a ready agent. It must be
 available while repository preparation remains blocked. Keep HTTP 200 for legacy
 callers and keep the global server write timeout unchanged.
@@ -199,22 +209,30 @@ It must not submit that token again. Existing local deletion tombstones still
 refuse late response/event activation.
 
 Use `Service.GetTaskByExternalID`, `CreateTaskResult.Outcome`, and
-`Service.SettleExternalID`. These APIs ship today. The aggregate creation
-coordinator in [Task creation protocol](task-creation-protocol.md) is still a
-draft. This repair does not require or implement that separate migration.
+`Service.SettleExternalID`. These APIs ship today. Only the reserved Quick Chat
+POST adapter may resume the exact unsettled Quick Chat it resolves before
+`CreateTask`; generic external-ID callers and status GET remain read-only. The
+aggregate creation coordinator in [Task creation protocol](task-creation-protocol.md)
+is still a draft. This repair does not require or implement that separate migration.
 
 Resolve a found identity before validating mutable creation fields or allocating
-anything. A found result never prepares a session, claims files, or dispatches
-an agent again. A concurrent unique-key loser follows the same rule.
-Return the original result even when the retry carries changed creation fields.
-The browser resends only its captured immutable snapshot.
+anything. A settled or archived result returns immediately. A same-token POST
+that finds an unsettled Quick Chat may resume that task under the per-creation
+handler lock. It never allocates another task or session. It dispatches only a
+retained `CREATED` session after settlement. The `FoundUnsettled` result from
+`CreateTask` remains read-only because it can still belong to another request.
+Return the original task's persisted opening data even when the retry carries
+changed creation fields. The browser resends only its captured immutable
+snapshot. Status GET never repairs, prepares, settles, or dispatches.
 
 Successful keyed responses add `creation_id` and `creation_complete: true`.
 `creation_complete` means allocation and required acceptance work completed.
-It does not mean startup completed. A found unsettled task returns
-`creation_complete: false` and its task ID. Include a session ID only when the
-authoritative task/session binding exists. Do not invent a session or choose the
-workspace's newest chat. An archived or deleted result is never started again.
+It does not mean startup completed. A `FoundUnsettled` create outcome returns
+`creation_complete: false` and its task ID without post-create work. A keyed
+POST retry that resolves the same Quick Chat before `CreateTask` may resume it
+as defined above. Include a session ID only when the authoritative task/session
+binding exists. Do not invent a session or choose the workspace's newest chat.
+An archived or deleted result is never started again.
 
 Add a read-only route:
 

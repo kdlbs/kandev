@@ -2548,13 +2548,21 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	externalID, handled := h.existingQuickChatCreation(c, workspaceID, body)
+	externalID, task, releaseCreationLock, handled := h.existingQuickChatCreation(c, workspaceID, body)
+	if releaseCreationLock != nil {
+		defer releaseCreationLock()
+	}
 	if handled {
 		return
 	}
-	if err := body.validateRepositories(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if task == nil {
+		if err := body.validateRepositories(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		body.Prompt = task.Description
+		body.Title = task.Title
 	}
 	if err := validateQuickChatOpeningPayload(body.Prompt, body.Attachments); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -2574,63 +2582,90 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	workspace, err := h.service.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		handleNotFound(c, h.logger, err, "workspace not found")
-		return
-	}
-
-	params := body.resolveParams(workspace)
-	if params.agentProfileID == "" {
-		h.logger.Error("no agent profile configured for quick chat", zap.String("workspace_id", workspaceID))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no default agent profile configured"})
-		return
-	}
-
-	result, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID:             workspaceID,
-		Title:                   params.title,
-		Description:             body.Prompt,
-		AutoTitle:               body.AutoTitle,
-		Repositories:            params.repos,
-		IsEphemeral:             true,
-		Metadata:                params.metadata,
-		ExternalID:              externalID,
-		AllowReservedExternalID: body.CreationID != "",
-	})
-	if err != nil {
-		if status, ok := quickChatCreateHTTPStatus(err); ok {
-			body := taskErrorBody(err)
-			body[errorDetailKeyErrorCode] = "quick_chat_creation_rejected"
-			c.JSON(status, body)
+	var params quickChatParams
+	if task == nil {
+		workspace, workspaceErr := h.service.GetWorkspace(ctx, workspaceID)
+		if workspaceErr != nil {
+			handleNotFound(c, h.logger, workspaceErr, "workspace not found")
 			return
 		}
-		h.logger.Error("failed to create ephemeral task", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create quick chat"})
-		return
-	}
-	task := result.Task
-	if result.Outcome != service.CreateTaskOutcomeCreated {
-		if task == nil || task.ExternalID != externalID || task.WorkspaceID != workspaceID || !isQuickChatCreationTask(task) {
+		params = body.resolveParams(workspace)
+		if params.agentProfileID == "" {
+			h.logger.Error("no agent profile configured for quick chat", zap.String("workspace_id", workspaceID))
+			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no default agent profile configured"})
+			return
+		}
+	} else {
+		params = quickChatParamsForExisting(task, body.AgentProfileID, body.ExecutorID)
+		if params.agentProfileID == "" {
 			c.JSON(http.StatusConflict, gin.H{"code": "quick_chat_creation_conflict"})
 			return
 		}
-		h.writeQuickChatCreation(c, task, body.CreationID)
+	}
+
+	existingTask := task != nil
+	if task == nil {
+		result, createErr := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+			WorkspaceID:             workspaceID,
+			Title:                   params.title,
+			Description:             body.Prompt,
+			AutoTitle:               body.AutoTitle,
+			Repositories:            params.repos,
+			IsEphemeral:             true,
+			Metadata:                params.metadata,
+			ExternalID:              externalID,
+			AllowReservedExternalID: body.CreationID != "",
+		})
+		if createErr != nil {
+			h.respondQuickChatCreateError(c, createErr)
+			return
+		}
+		task = result.Task
+		if h.respondWithFoundQuickChatCreation(c, workspaceID, externalID, body.CreationID, result) {
+			return
+		}
+		if result.Outcome != service.CreateTaskOutcomeCreated {
+			existingTask = true
+		}
+	}
+	if task == nil {
+		c.JSON(http.StatusConflict, gin.H{"code": "quick_chat_creation_conflict"})
 		return
 	}
 
-	// Allocate the session without materializing its workspace. The accepted
-	// identity is returned before repository preparation and agent startup.
-	prepareResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		InitialPromptPreview:    models.NewInitialPromptPreview(strings.TrimSpace(body.Prompt), body.Attachments),
-		InitialPromptSubmission: initialSubmission,
-		TaskID:                  task.ID,
-		Intent:                  orchestrator.IntentPrepare,
-		AgentProfileID:          params.agentProfileID,
-		ExecutorID:              params.executorID,
-		DeferredStart:           true,
-		Attachments:             body.Attachments,
-	})
+	var prepareResp *orchestrator.LaunchSessionResponse
+	var err error
+	shouldDispatchStart := true
+	if existingTask {
+		existingSession, sessionErr := h.service.GetPrimarySession(ctx, task.ID)
+		if sessionErr != nil && !errors.Is(sessionErr, taskrepo.ErrNoPrimarySession) &&
+			!errors.Is(sessionErr, models.ErrTaskSessionNotFound) {
+			handleNotFound(c, h.logger, sessionErr, "quick chat creation not found")
+			return
+		}
+		if existingSession != nil {
+			prepareResp = &orchestrator.LaunchSessionResponse{
+				SessionID:      existingSession.ID,
+				AgentProfileID: firstNonEmpty(existingSession.AgentProfileID, params.agentProfileID),
+				State:          string(existingSession.State),
+			}
+			shouldDispatchStart = existingSession.State == models.TaskSessionStateCreated
+		}
+	}
+	if prepareResp == nil {
+		// Allocate the session without materializing its workspace. The accepted
+		// identity is returned before repository preparation and agent startup.
+		prepareResp, err = h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+			InitialPromptPreview:    models.NewInitialPromptPreview(strings.TrimSpace(body.Prompt), body.Attachments),
+			InitialPromptSubmission: initialSubmission,
+			TaskID:                  task.ID,
+			Intent:                  orchestrator.IntentPrepare,
+			AgentProfileID:          params.agentProfileID,
+			ExecutorID:              params.executorID,
+			DeferredStart:           true,
+			Attachments:             body.Attachments,
+		})
+	}
 	if err != nil {
 		if body.CreationID != "" {
 			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.TaskDeleteTimeout)
@@ -2681,25 +2716,8 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		h.respondQuickChatLaunchFailure(c, task.ID, err, restoreErr == nil)
 		return
 	}
-	if body.CreationID != "" {
-		settled, survivor, settleErr := h.service.SettleExternalID(ctx, task.ID, externalID)
-		if settleErr != nil {
-			handleNotFound(c, h.logger, settleErr, "quick chat creation no longer exists")
-			return
-		}
-		if !settled {
-			if survivor == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "quick chat creation no longer exists"})
-				return
-			}
-			c.JSON(http.StatusConflict, gin.H{
-				"code":              "quick_chat_creation_identity_lost",
-				"task_id":           survivor.ID,
-				"creation_id":       body.CreationID,
-				"creation_complete": false,
-			})
-			return
-		}
+	if !h.settleQuickChatCreation(c, task.ID, externalID, body.CreationID) {
+		return
 	}
 	h.logger.Info("quick chat session created",
 		zap.String("task_id", task.ID),
@@ -2714,17 +2732,19 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	if body.CreationID != "" {
 		response.CreationID = body.CreationID
 		response.CreationComplete = quickChatBoolPointer(true)
-		response.SessionState = string(models.TaskSessionStateCreated)
+		response.SessionState = firstNonEmpty(prepareResp.State, string(models.TaskSessionStateCreated))
 	}
 	c.JSON(http.StatusOK, response)
-	h.dispatchTaskSession(ctx, task.ID, body.Prompt, httpCreateTaskRequest{
-		AgentProfileID: params.agentProfileID,
-		Attachments:    body.Attachments,
-	}, &startAgentDispatch{
-		sessionID:             prepareResp.SessionID,
-		noInitialPrompt:       strings.TrimSpace(body.Prompt) == "",
-		quickChatInitialStart: true,
-	})
+	if shouldDispatchStart {
+		h.dispatchTaskSession(ctx, task.ID, body.Prompt, httpCreateTaskRequest{
+			AgentProfileID: params.agentProfileID,
+			Attachments:    body.Attachments,
+		}, &startAgentDispatch{
+			sessionID:             prepareResp.SessionID,
+			noInitialPrompt:       strings.TrimSpace(body.Prompt) == "",
+			quickChatInitialStart: true,
+		})
+	}
 }
 
 func (h *TaskHandlers) respondQuickChatLaunchFailure(

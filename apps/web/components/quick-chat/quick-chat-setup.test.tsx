@@ -318,6 +318,68 @@ it("blocks button and keyboard submission while a creation is unresolved", async
   expect(props.onRetryCreation).not.toHaveBeenCalled();
 });
 
+it("keeps an uncertain submission identity when Enter is pressed again", async () => {
+  chatSubmitKey = "cmd_enter";
+  const creationId = "uncertain-creation-id";
+  let acceptedMessageId = "";
+  const start: ComponentProps<typeof QuickChatSetup>["onStartQuickChat"] = async (
+    _agentId,
+    _repositories,
+    payload,
+  ) => {
+    props.onStartQuickChat("agent-a", [], payload, { message: PROMPT_MESSAGE, attachments: [] });
+    acceptedMessageId = payload.clientMessageId ?? "";
+    return false;
+  };
+  function Harness() {
+    const [pendingCreation, setPendingCreation] = useState<NonNullable<
+      ComponentProps<typeof QuickChatSetup>["pendingCreation"]
+    > | null>(null);
+    const [draft, setDraft] = useState({ ...initialDraft, message: PROMPT_MESSAGE });
+    const handleDraftChange = useCallback((patch: Partial<QuickChatSetupDraft>) => {
+      setDraft((current) => ({ ...current, ...patch }));
+    }, []);
+    const onStart = useCallback<ComponentProps<typeof QuickChatSetup>["onStartQuickChat"]>(
+      async (agentId, repositories, payload, capturedDraft) => {
+        const accepted = await start(agentId, repositories, payload, capturedDraft);
+        setPendingCreation({
+          creationId,
+          clientMessageId: payload.clientMessageId ?? "",
+          message: payload.message,
+          attachments: [],
+          agentProfileId: agentId,
+          repositories,
+          runtimeId: "runtime-1",
+          state: "unknown",
+          messageAttempted: false,
+        });
+        return accepted;
+      },
+      [],
+    );
+    return (
+      <QuickChatSetup
+        {...props}
+        draft={draft}
+        pendingCreation={pendingCreation}
+        onDraftChange={handleDraftChange}
+        onStartQuickChat={onStart}
+      />
+    );
+  }
+  render(<Harness />);
+  const input = screen.getByTestId(DESCRIPTION_TEST_ID);
+
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+  await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledOnce());
+  expect((screen.getByTestId(SEND_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+
+  expect(props.onStartQuickChat).toHaveBeenCalledTimes(1);
+  expect(acceptedMessageId).toEqual(expect.any(String));
+  expect(screen.getByText(/Retry creation/i)).toBeTruthy();
+});
+
 it("delivers staged attachments with the opening message", () => {
   const attachment: FileAttachment = {
     id: "attachment-row",

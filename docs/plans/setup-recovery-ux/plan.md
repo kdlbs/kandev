@@ -15,7 +15,7 @@ legacy_specs: []
 
 The [startup acceptance repair](../quick-chat-startup-acceptance/plan.md) extends
 retained-chat recovery to slow startup and uncertain creation responses.
-Its new work orders are pending. Existing verification results remain historical evidence.
+Its work orders are complete. Existing verification results remain historical evidence.
 
 ## Overview
 

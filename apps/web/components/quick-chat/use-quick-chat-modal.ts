@@ -305,6 +305,7 @@ export function useQuickChatModal(
   const {
     pendingAgentId,
     setupError,
+    reportSetupError,
     reset,
     handleSelectAgent: doSelectAgent,
   } = useAgentSelection(workspaceId, store);
@@ -360,6 +361,7 @@ export function useQuickChatModal(
     ),
     pendingAgentId,
     setupError,
+    reportSetupError,
     handleSelectAgent,
   };
 }

@@ -180,3 +180,13 @@ Final revalidation on 2026-10-27 also passed the changed-file frontend ESLint ru
 with zero errors, the Prettier check, and the changed-file Go linter with zero
 issues. A rendered phone recovery screenshot was inspected; the temporary
 screenshot probe and file were removed.
+
+PR review fixup revalidation on 2026-10-27:
+
+- `pnpm exec vitest run components/quick-chat lib/api/domains/workspace-api-retention.test.ts lib/state/slices/ui/quick-chat-actions.test.ts lib/state/slices/ui/quick-chat-sync.test.ts lib/ws/handlers/tasks-quick-chat.test.ts hooks/use-quick-chat-resync.test.ts`: 34 files and 290 tests passed.
+- `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- From `apps/web`, `pnpm exec eslint components/quick-chat/quick-chat-setup.test.tsx components/quick-chat/quick-chat-startup-state.ts components/quick-chat/use-agent-selection-retention.test.ts components/quick-chat/use-quick-chat-agent-selection.ts components/quick-chat/use-quick-chat-creation.test.tsx components/quick-chat/use-quick-chat-creation.ts components/quick-chat/use-quick-chat-modal.ts e2e/tests/chat/quick-chat-startup-acceptance.spec.ts` and the matching `pnpm exec prettier --check` command passed. `pnpm run build` succeeded.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/chat/quick-chat-startup-acceptance.spec.ts tests/chat/quick-chat-opening-composer.spec.ts tests/chat/setup-recovery.spec.ts)`: 8 tests passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-quick-chat-startup-acceptance.spec.ts tests/chat/mobile-quick-chat-opening-composer.spec.ts tests/chat/mobile-setup-recovery.spec.ts)`: 4 tests passed. Both commands built the current backend fixture and production web assets.
+- `node --test scripts/validate-public-docs.test.mjs`: 63 tests passed. `node scripts/validate-public-docs.mjs`: 54 pages validated.
+- `python3 scripts/list-docs.py validate`: 404 decisions and 1,746 specifications validated. `python3 scripts/lint-spec-files.py --all` and `git diff --check` passed.

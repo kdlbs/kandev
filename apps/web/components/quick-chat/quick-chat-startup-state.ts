@@ -1,8 +1,6 @@
-import type { TaskSessionState } from "@/lib/types/http";
-
 export function isQuickChatStartupPending(args: {
   startupPending?: boolean;
-  sessionState?: TaskSessionState | null;
+  sessionState?: string | null;
 }): boolean {
   if (args.sessionState) {
     return args.sessionState === "CREATED" || args.sessionState === "STARTING";
