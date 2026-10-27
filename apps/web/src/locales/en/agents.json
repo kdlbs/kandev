@@ -723,5 +723,6 @@
   "restartReviewReadOnly": "Only an operator can select a different policy.",
   "restartReviewChanged": "The current policy differs from the captured policy.",
   "restartReviewSame": "The current policy matches the captured policy.",
-  "restartPermissions": "Permissions"
+  "restartPermissions": "Permissions",
+  "sandboxPolicyWorkspace": "Policy workspace"
 }

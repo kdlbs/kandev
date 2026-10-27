@@ -65,6 +65,7 @@ func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
 	destinationPort, err := strconv.Atoi(destinationURL.Port())
 	require.NoError(t, err)
 	grants := contract.Grants{KandevMCP: true, Network: []contract.NetworkGrant{{Host: destinationURL.Hostname(), Port: uint16(destinationPort), Protocol: "tcp"}}, Filesystem: []contract.FilesystemGrant{{Reference: "agent_state", Writable: true}, {Path: work, Writable: true}, {Path: child}}}
+	grants.Filesystem = append(grants.Filesystem, runtimeEnvToolGrants(t)...)
 	selected := policy.Policy{ID: "selected", Name: "Work", InstallationID: binding.InstallationID, ProviderKey: binding.ProviderKey, Grants: grants}
 	revision, err := policies.Publish(ctx, selected, 0)
 	require.NoError(t, err)
@@ -81,7 +82,7 @@ func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
 	prepared, err := manager.Prepare(ctx, PrepareRequest{MCPForward: forward, Selection: selection, SessionID: "approval-session", ExecutionID: "approval-execution", Generation: 1, WorkDir: work, Arguments: []string{child}})
 	require.NoError(t, err)
 	require.Equal(t, prepared.agentState.Directories().Home, prepared.Launch().ChildHome)
-	args, env, err := contract.PrepareLaunch(prepared.Launch(), []string{child}, []string{"UNAPPROVED_SECRET=private-parent-value"})
+	args, env, err := contract.PrepareLaunch(prepared.Launch(), []string{child}, []string{"UNAPPROVED_SECRET=private-parent-value", "PATH=" + os.Getenv("PATH")})
 	require.NoError(t, err)
 	command := exec.CommandContext(ctx, args[0], args[1:]...)
 	command.Env = env

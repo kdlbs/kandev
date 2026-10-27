@@ -723,5 +723,6 @@
   "restartReviewReadOnly": "別のポリシーを選択できるのはオペレーターのみです。",
   "restartReviewChanged": "現在のポリシーは記録済みのポリシーと異なります。",
   "restartReviewSame": "現在のポリシーは記録済みのポリシーと一致します。",
-  "restartPermissions": "権限"
+  "restartPermissions": "権限",
+  "sandboxPolicyWorkspace": "ポリシーのワークスペース"
 }

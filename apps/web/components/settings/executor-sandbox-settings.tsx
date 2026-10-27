@@ -1,6 +1,8 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
+import { useAppStore } from "@/components/state-provider";
 import { CardContent } from "@kandev/ui/card";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSandboxAccess } from "@/hooks/domains/settings/use-sandbox-access";
@@ -38,7 +40,9 @@ function useExecutorSandboxEditor({ executorId, identity, canEdit }: Props) {
   const { t } = useTranslation();
   const binding = useSandboxBinding("executor", executorId);
   const policy = binding.draft?.executor ?? emptyExecutorPolicy("disabled");
-  const reads = useSandboxExecutorReads(identity, binding.draft?.executor, canEdit);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const workspaces = useAppStore((state) => state.workspaces.items);
+  const reads = useSandboxExecutorReads(identity, binding.draft?.executor, canEdit, workspaceId);
   const revision = JSON.stringify(binding.draft);
   const ready =
     canEdit &&
@@ -61,7 +65,7 @@ function useExecutorSandboxEditor({ executorId, identity, canEdit }: Props) {
   });
   const update = (patch: Partial<SandboxExecutorPolicy>) =>
     binding.update({ executor: { ...policy, ...patch } });
-  return { binding, policy, reads, update, canEdit };
+  return { binding, policy, reads, update, canEdit, workspaceId, setWorkspaceId, workspaces };
 }
 
 function ExecutorSandboxEditor(props: Props) {
@@ -118,11 +122,13 @@ function ExecutorSandboxPolicies({ model }: { model: Model }) {
       item.policy.provider_key === policy.provider_key &&
       !item.revoked,
   );
-  const choices = available.map((item) => ({
-    value: item.id,
-    label: `${item.policy.name} (${item.number})`,
-    disabled: false,
-  }));
+  const choices = available
+    .filter((item) => !item.policy.workspace_id)
+    .map((item) => ({
+      value: item.id,
+      label: `${item.policy.name} (${item.number})`,
+      disabled: false,
+    }));
   const selected = (id: string) =>
     choices.some((item) => item.value === id) || !id
       ? choices
@@ -139,6 +145,7 @@ function ExecutorSandboxPolicies({ model }: { model: Model }) {
       />
       <fieldset className="space-y-1">
         <legend className="text-sm font-medium">{t("agents:sandboxExecutorEligible")}</legend>
+        <ExecutorPolicyWorkspace model={model} />
         {available.map((item) => (
           <label key={item.id} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
             <Checkbox
@@ -154,6 +161,12 @@ function ExecutorSandboxPolicies({ model }: { model: Model }) {
             />
             <span className="break-words">
               {item.policy.name} ({item.number})
+              {item.policy.workspace_id && (
+                <span className="block text-xs text-muted-foreground">
+                  {model.workspaces.find((workspace) => workspace.id === item.policy.workspace_id)
+                    ?.name ?? t("agents:learningWorkspace")}
+                </span>
+              )}
             </span>
           </label>
         ))}
@@ -173,6 +186,22 @@ function ExecutorSandboxPolicies({ model }: { model: Model }) {
         onChange={(default_revision_id) => update({ default_revision_id })}
       />
     </>
+  );
+}
+
+function ExecutorPolicyWorkspace({ model }: { model: Model }) {
+  const { t } = useTranslation();
+  return (
+    <SandboxChoice
+      label={t("agents:sandboxPolicyWorkspace")}
+      placeholder={t("agents:sandboxPolicyWorkspace")}
+      value={model.workspaceId || "installation"}
+      choices={[
+        { value: "installation", label: t("agents:learningInstallation") },
+        ...model.workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name })),
+      ]}
+      onChange={(value) => model.setWorkspaceId(value === "installation" ? "" : value)}
+    />
   );
 }
 

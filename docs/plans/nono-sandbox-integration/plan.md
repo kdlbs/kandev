@@ -1,6 +1,6 @@
 ---
 created: 2026-10-22
-status: in_progress
+status: done
 requirements:
   - REQ-AGENTS-SANDBOX-001
   - REQ-AGENTS-SANDBOX-002
@@ -26,13 +26,13 @@ legacy_specs: []
 Deliver optional sandbox policies and Nono provider services above the core wrapping in PR #4538.
 First preserve runtime evidence and repair generic failed-bootstrap recovery.
 Then add the optional contract, policy authority, dedicated provider, approvals, MCP routing, and operator learning.
-The user authorized implementation after reviewing the package. Tasks 01, 02, and 03 are complete. Task 04 is in progress.
-Tasks 05, 06, and 07 have tested components in progress. Product lifecycle integration and the remaining work orders are unfinished.
+The user authorized implementation after reviewing the package. Tasks 01, 02, 03, and 08 are complete.
+Tasks 04 through 07 and 10 now have completed component and actual managed-agent acceptance. Task 09 has completed real acceptance and draft-PR delivery. Current-policy attestation remains explicitly unsupported, with unknown status.
 
 Own branch: `feature/integrate-nono-sandb-7tq`.
 Verified base: `main` at `1eb53576f496759b58ae73d4cba7bd96cbc91288`.
 [PR #4538](https://github.com/kdlbs/kandev/pull/4538) merged as `76c9ada7baaa6b15bf814aec2ef093cc7dc07610`.
-The user authorized the base change after that merge. The future draft PR targets `main` and identifies #4538 as its merged prerequisite.
+The user authorized the base change after that merge. [Draft PR #4769](https://github.com/kdlbs/kandev/pull/4769) targets `main` and identifies #4538 as its merged prerequisite.
 The original design commit was replayed on this base. The parent branch and worktree remain unchanged.
 
 ## Scope
@@ -55,7 +55,7 @@ Confirmed: basic wrapping stays in core, plugins are optional, production provid
 Verified: the retained authentication/bootstrap/queue sequence and the pinned file-approval exchange appear in [investigation.md](investigation.md).
 Proposed for review: authenticated-human-only structured enforcement, immutable managed policy revisions, and a protected per-attempt callback capability.
 Verified in component tests: actual Nono callback isolation, file decisions, and a Kandev MCP tool call through a per-attempt relay.
-Unverified in the product: complete Nono discovery, ACP/native lifecycle, restart, settings, and indicators. macOS and non-file approvals remain unsupported.
+Managed Nono discovery, ACP/native file and MCP work, PTY input/resize, reviewed restart, cancellation, detached-child cleanup, scoped deletion, and paired negative enforcement checks passed. Settings and indicators have desktop/phone fixture checks. macOS and non-file approvals remain unsupported.
 These are explicit implementation gates. The package does not label them supported.
 
 ## Design inputs
@@ -163,13 +163,13 @@ No broad suite or generic review work order is added.
 - [x] [Task 01: Pin the runtime and build conformance evidence](task-01-runtime-contract.md)
 - [x] [Task 02: Recover failed bootstrap attempts without losing queued work](task-02-bootstrap-recovery.md)
 - [x] [Task 03: Add the optional sandbox provider contract](task-03-plugin-capability.md)
-- [ ] [Task 04: Persist and enforce policy selections](task-04-policy-authority.md)
-- [ ] [Task 05: Implement Nono in its own repository](task-05-nono-provider-lifecycle.md)
-- [ ] [Task 06: Connect verified approvals to operator decisions](task-06-approval-channel.md)
-- [ ] [Task 07: Permit only the current Kandev MCP route](task-07-mcp-connectivity.md)
-- [ ] [Task 10: Deliver Execution settings and session visibility](task-10-execution-surfaces.md)
+- [x] [Task 04: Persist and enforce policy selections](task-04-policy-authority.md)
+- [x] [Task 05: Implement Nono in its own repository](task-05-nono-provider-lifecycle.md)
+- [x] [Task 06: Connect verified approvals to operator decisions](task-06-approval-channel.md)
+- [x] [Task 07: Permit only the current Kandev MCP route](task-07-mcp-connectivity.md)
+- [x] [Task 10: Deliver Execution settings and session visibility](task-10-execution-surfaces.md)
 - [x] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
-- [ ] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
+- [x] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
 
 Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09.
 Task IDs remain stable after adding Task 10. Dependency lists state hard prerequisites, not permission to delegate.
@@ -228,3 +228,8 @@ Callback isolation and nested PTY behavior require actual negative evidence befo
 The current Nono documentation and pinned source disagree about webhook availability.
 Kernel support, same-user trust, policy inheritance, and missing audit data constrain support claims.
 A successful replacement conversation cannot close the original recovery acceptance item.
+
+
+## Current implementation checkpoint (2026-10-27)
+
+Tasks 01 through 08 and 10 are complete for the supported Linux amd64 Local/Worktree matrix. Task 09 records real managed acceptance and draft-PR delivery. Earlier pending statements above are historical checkpoints. The runtime feature remains off in shipped profiles. Nono supplies no accepted current-policy attestation, so actual status remains unknown. Both PRs remain drafts. The user test endpoint remains stopped.

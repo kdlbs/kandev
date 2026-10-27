@@ -1,7 +1,7 @@
 ---
 id: "10-execution-surfaces"
 title: "Deliver Execution settings and session visibility"
-status: in_progress
+status: done
 wave: 8
 depends_on:
   - "04-policy-authority"
@@ -231,3 +231,8 @@ Manual restart reviews captured and current approved permissions before any stop
 The stable application-owned review survives menu disposal and rejects concurrent or stale confirmations. It cancels on account, attempt, connection, or navigation changes. Current task context comes from an authorized no-store read, so a missing board cache cannot disable the preview. Confirmation reads that task again. Stale policy data refreshes before another confirmation can run. Desktop uses a focused dialog; phone uses fixed header/actions and one full-height scroller. The phone picker closes without selecting a different session. Captured permissions can be expanded; current permissions are open by default.
 
 Complete policy tests pass with SQLite and PostgreSQL. Packaged-provider preparation, resume handoffs, operator authority, stale binding rejection, task-guard persistence, and frozen replacement race tests pass. Eight frontend files pass 82 tests. Typecheck, localization, SQL guard, public docs, specification checks, and scoped Go/frontend lint pass. Desktop and phone browser flows pass for explicit choice, cancellation, changed policy, read-only authority, scroll containment, and 393/700/767px phone geometry. Both screenshots were inspected. These fixture checks do not establish complete managed Pi acceptance.
+
+
+## Completed acceptance (2026-10-27)
+
+All delivered surfaces now have focused checks: core wrapper settings, provider/policy selection, executor ceilings and workspace eligibility, immutable session details, truthful indicators, approvals, denial review/learning, and manual restart review. Desktop and phone browser checks passed, including widths 393, 700, and 767 where specified. The latest workspace eligibility slice passed six focused tests, typecheck, localization, lint, both rendered checks, and screenshot inspection. Actual managed attempts remain unknown because the pinned provider supplies identity without current-policy attestation. Fixture active-state tests prove conditional UI behavior only. They do not certify active Nono status.

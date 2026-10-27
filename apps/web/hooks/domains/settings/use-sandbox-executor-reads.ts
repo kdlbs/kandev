@@ -12,6 +12,7 @@ export function useSandboxExecutorReads(
   identity: string,
   policy: SandboxExecutorPolicy | undefined,
   canEdit: boolean,
+  workspaceId = "",
 ) {
   const providers = useQuery({
     queryKey: ["sandbox", "providers", identity],
@@ -21,8 +22,8 @@ export function useSandboxExecutorReads(
     gcTime: 0,
   });
   const catalog = useQuery({
-    queryKey: ["sandbox", "policies", identity, ""],
-    queryFn: ({ signal }) => fetchSandboxPolicies("", { init: { signal } }),
+    queryKey: ["sandbox", "policies", identity, workspaceId],
+    queryFn: ({ signal }) => fetchSandboxPolicies(workspaceId, { init: { signal } }),
     enabled: canEdit,
     retry: false,
     gcTime: 0,

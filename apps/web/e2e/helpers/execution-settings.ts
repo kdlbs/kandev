@@ -13,6 +13,7 @@ export async function installSandboxSettingsFixture(
     agentProfileId?: string;
     workspaceId?: string;
     workflowStepId?: string;
+    workspacePolicies?: boolean;
   } = {},
 ) {
   const scope = options.scope ?? "agent";
@@ -45,6 +46,16 @@ export async function installSandboxSettingsFixture(
       sources: [],
     },
   }));
+  const workspacePolicy: SandboxRevision = {
+    ...policies[0],
+    id: "revision-workspace",
+    policy: {
+      ...policies[0].policy,
+      id: "workspace-policy",
+      name: "Workspace policy",
+      workspace_id: options.workspaceId ?? "",
+    },
+  };
   let binding: SandboxBinding = {
     scope,
     target_id: profileId,
@@ -128,7 +139,14 @@ export async function installSandboxSettingsFixture(
         };
         policies.push(created);
         body = created;
-      } else body = { policies };
+      } else
+        body = {
+          policies:
+            options.workspacePolicies &&
+            new URL(request.url()).searchParams.get("workspace_id") === options.workspaceId
+              ? [...policies, workspacePolicy]
+              : policies,
+        };
     } else if (path.endsWith(`/bindings/${scope}/${profileId}`)) {
       if (request.method() === "PUT") {
         const payload = request.postDataJSON();
@@ -156,7 +174,7 @@ export async function installSandboxSettingsFixture(
     } else if (path.endsWith("/preview")) {
       body = preview(request);
     } else if (path.includes("/revisions/")) {
-      body = policies.find((item) => path.endsWith(item.id));
+      body = [...policies, workspacePolicy].find((item) => path.endsWith(item.id));
     } else {
       throw new Error(`Unexpected sandbox fixture request: ${request.method()} ${path}`);
     }
@@ -293,6 +311,50 @@ export async function checkExecutorSandboxSettings(
     default_revision_id: "revision-created",
     eligible_revision_ids: ["revision-created"],
   });
+}
+
+export async function checkExecutorWorkspacePolicies(
+  page: Page,
+  writes: SandboxBinding[],
+  mobile: boolean,
+) {
+  const section = page.getByTestId("executor-sandbox-settings");
+  await chooseSandboxSetting(page, "Policy workspace", "E2E Workspace", mobile);
+  await section
+    .getByRole("checkbox", { name: "Workspace policy (1) E2E Workspace", exact: true })
+    .check();
+  for (const label of ["Permission ceiling", "Default policy"]) {
+    await section.getByLabel(label, { exact: true }).click();
+    await expect(
+      page.getByRole("option", { name: "Workspace policy (1)", exact: true }),
+    ).toHaveCount(0);
+    await page.getByRole("option", { name: "New policy (1)", exact: true }).click();
+  }
+  await page
+    .getByRole("button", { name: /^Save( changes)?$/i })
+    .first()
+    .click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1].executor?.eligible_revision_ids).toEqual([
+    "revision-created",
+    "revision-workspace",
+  ]);
+  expect(writes[1].executor?.default_revision_id).toBe("revision-created");
+  expect(writes[1].executor?.ceiling_revision_id).toBe("revision-created");
+  expect(writes[1].workspace_id).toBe("");
+  if (mobile) {
+    for (const width of [393, 700, 767]) {
+      await page.setViewportSize({ width, height: 851 });
+      await expect(section.getByLabel("Policy workspace", { exact: true })).toBeVisible();
+      expect(
+        (await section.getByLabel("Policy workspace", { exact: true }).boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+    await page.setViewportSize({ width: 393, height: 851 });
+  }
 }
 
 async function createSandboxPolicyInSettings(page: Page, mobile: boolean) {

@@ -62,13 +62,13 @@ Disposable paths and callback secrets do not enter cache keys or public projecti
 
 ## Policy resolution
 
-Proposed executor binding contains `provider_id`, required mode, ceiling revision, eligible revision IDs, and default revision ID.
+Executor bindings select a provider, required mode, global ceiling/default, and eligible revisions. A global executor can admit operator-accessible workspace revisions; selection stays bound to that workspace.
 The executor mode is `disabled` or `required`. Optional describes plugin installation, not fallback after selection.
 An absent reference means inherit, never disable. A required executor with no eligible default refuses launch.
 Agent profiles, workflow steps, and tasks hold only optional revision references.
 Resolve explicit task, workflow step, agent default, then executor default.
-Task-free utilities use agent and executor defaults. Omit the task MCP grant when no session exists. Preserve saved policy intent and capture the reduced runtime grants. Task sessions still require a scoped MCP forwarder.
-A policy-aware discovery request must identify its Local/Worktree executor context. Missing context fails rather than certifying an unrelated host default.
+Task-free utilities inherit agent/executor defaults and omit task MCP. Capture reduced runtime grants without changing saved intent. Task sessions require a scoped MCP forwarder.
+Policy-aware discovery requires its Local/Worktree executor context. Refuse missing context.
 Once a higher-priority reference exists, invalidity fails admission. It never falls through to a weaker default.
 
 The executor ceiling remains mandatory regardless of selection source.

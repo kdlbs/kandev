@@ -92,7 +92,13 @@ func (s *Service) validateExecutorRevisions(ctx context.Context, binding Binding
 		if err != nil {
 			return err
 		}
-		if !matchesExecutor(revision, executor, binding.WorkspaceID) {
+		workspaceID := binding.WorkspaceID
+		// Eligibility permits a workspace choice; it does not make that
+		// revision a default or authorize launches in another workspace.
+		if workspaceID == "" && ref != executor.DefaultRevisionID {
+			workspaceID = revision.Policy.WorkspaceID
+		}
+		if !matchesExecutor(revision, executor, workspaceID) {
 			return ErrIneligible
 		}
 		if err = contract.WithinCeiling(revision.Policy.Grants, ceiling.Policy.Grants); err != nil {

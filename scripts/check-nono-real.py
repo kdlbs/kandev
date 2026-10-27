@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Credential-free Linux Nono conformance. Set NONO_ACCEPTANCE_BINARY explicitly.
+"""Pinned Linux Nono conformance and opt-in managed product acceptance.
 
-The runner never installs Nono, reads provider credentials, or uses Kandev state.
-The pinned binary must match the published 0.80.0 Linux x86_64 musl artifact.
+Conformance does not read credentials or Kandev state. Managed acceptance requires
+an explicitly selected disposable fixture and test credential file. Both modes
+require the published 0.80.0 Linux x86_64 musl artifact.
 """
 import argparse
 import ctypes
@@ -304,8 +305,10 @@ def main(argv=None):
                           'scope': 'binary_and_host_prerequisites', 'landlock_abi': landlock_abi()}))
         return 0
     if args.run:
-        print(json.dumps({'status': 'blocked', 'reason': 'product_acceptance_not_implemented'}))
-        return 2
+        spec = importlib.util.spec_from_file_location('nono_managed', Path(__file__).with_name('nono_managed.py'))
+        managed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(managed)
+        return managed.main(binary, args.record)
     def interrupted(signum, frame):
         raise KeyboardInterrupt()
     previous = signal.signal(signal.SIGTERM, interrupted)

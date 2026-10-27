@@ -3,11 +3,14 @@ import {
   installSandboxSettingsFixture,
   enableSandboxSettingsFixture,
   checkExecutorSandboxSettings,
+  checkExecutorWorkspacePolicies,
 } from "../../helpers/execution-settings";
 
 test("phone executor settings use sheets and save the same policy contract", async ({
   testPage,
   apiClient,
+  seedData,
+  prCapture,
 }) => {
   const executors = (await apiClient.listExecutors()).executors;
   const executor = executors.find((item) => item.type === "local");
@@ -20,7 +23,10 @@ test("phone executor settings use sheets and save the same policy contract", asy
     env_vars: [],
   });
   try {
-    const fixture = await installSandboxSettingsFixture(testPage, "unused", executors);
+    const fixture = await installSandboxSettingsFixture(testPage, "unused", executors, {
+      workspaceId: seedData.workspaceId,
+      workspacePolicies: true,
+    });
     await testPage.goto(`/settings/executors/${profile.id}`);
     await enableSandboxSettingsFixture(testPage);
     await checkExecutorSandboxSettings(
@@ -29,6 +35,10 @@ test("phone executor settings use sheets and save the same policy contract", asy
       true,
       fixture.policyWrites,
     );
+    await checkExecutorWorkspacePolicies(testPage, fixture.executorWrites, true);
+    await prCapture.screenshot("workspace-policy-phone", {
+      caption: "Make a workspace policy eligible while keeping installation defaults and ceilings.",
+    });
   } finally {
     await apiClient.deleteExecutorProfile(profile.id);
   }

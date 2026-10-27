@@ -15,6 +15,12 @@ export function executorPolicyReady(policy: SandboxExecutorPolicy, revisions: Sa
     !policy.eligible_revision_ids.includes(policy.default_revision_id)
   )
     return false;
+  if (
+    [policy.ceiling_revision_id, policy.default_revision_id].some((id) =>
+      revisions.some((item) => item.id === id && Boolean(item.policy.workspace_id)),
+    )
+  )
+    return false;
   return [policy.ceiling_revision_id, ...policy.eligible_revision_ids].every((id) =>
     revisions.some(
       (item) =>

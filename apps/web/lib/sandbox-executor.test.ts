@@ -17,6 +17,21 @@ const policy: SandboxExecutorPolicy = {
 };
 
 describe("executor policy form readiness", () => {
+  it("permits workspace eligibility but keeps global defaults and ceilings", () => {
+    const workspace = {
+      ...revision,
+      id: "workspace",
+      policy: { ...revision.policy, workspace_id: "workspace-1" },
+    };
+    const eligible = { ...policy, eligible_revision_ids: ["ceiling", "workspace"] };
+    expect(executorPolicyReady(eligible, [revision, workspace])).toBe(true);
+    expect(
+      executorPolicyReady({ ...eligible, default_revision_id: "workspace" }, [revision, workspace]),
+    ).toBe(false);
+    expect(
+      executorPolicyReady({ ...eligible, ceiling_revision_id: "workspace" }, [revision, workspace]),
+    ).toBe(false);
+  });
   it("requires an explicit provider, ceiling and eligible default", () => {
     expect(executorPolicyReady(policy, [revision])).toBe(true);
     expect(executorPolicyReady({ ...policy, default_revision_id: "" }, [revision])).toBe(false);

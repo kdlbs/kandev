@@ -723,5 +723,6 @@
   "restartReviewReadOnly": "운영자만 다른 정책을 선택할 수 있습니다.",
   "restartReviewChanged": "현재 정책은 기록된 정책과 다릅니다.",
   "restartReviewSame": "현재 정책은 기록된 정책과 같습니다.",
-  "restartPermissions": "권한"
+  "restartPermissions": "권한",
+  "sandboxPolicyWorkspace": "정책 워크스페이스"
 }

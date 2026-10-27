@@ -1,7 +1,7 @@
 ---
 id: "04-policy-authority"
 title: "Persist and enforce policy selections"
-status: in_progress
+status: done
 wave: 4
 depends_on:
   - "03-plugin-capability"
@@ -50,7 +50,8 @@ Commands run from the Kandev repository root unless a subshell selects the dedic
 New test and runner paths below are implementation deliverables, not existing passing evidence.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/agent/sandbox/... ./internal/agent/settings/handlers ./internal/task/handlers ./internal/workflow/... -run 'SandboxPolicy|SandboxAuthority' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/agent/sandbox/... -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/backendapp ./internal/task/service -run 'SandboxAuthority|SandboxPolicy' -count=1)
 (cd apps/backend && go test -trimpath ./internal/agent/sandbox/... -run 'SandboxPolicy.*SQLite' -count=1)
 (cd apps/backend && KANDEV_TEST_POSTGRES_DSN="${KANDEV_TEST_POSTGRES_DSN:?Supply a disposable PostgreSQL DSN privately}" go test -trimpath ./internal/agent/sandbox/... -run 'SandboxPolicy.*Postgres' -count=1)
 ```
@@ -99,3 +100,15 @@ Durable task guards retain the admitted permission limit across service reloads 
 Logical `work_dir` grants support reusable policies without granting a parent task directory. Focused tests cover read/write ceilings, per-execution resolution, missing paths, protected roots, and symlink aliases. The import/copy integration audit, final environment enforcement, runtime compilation, and immutable attempt materialization remain. Native Nono profiles are not accepted as live authority; the current import contract accepts only canonical revisions and pinned revision sources. Do not treat these service-level results as full product acceptance.
 
 Immutable attempt persistence now passes focused SQLite and PostgreSQL race tests. Capture rechecks the selected revision and binding version, and stores provider/runtime identity plus resolved grants. Tests cover service reload, later policy publication, stale selection, stale lifecycle writes, process identity replacement, and terminal-state revival refusal. Runtime preparation and lifecycle callers still need to adopt this store. Custom database WAL and SHM paths are also protected by passing startup-policy tests.
+
+
+### Workspace eligibility repair (2026-10-27)
+
+Actual workspace learning exposed a validation defect: a global Local/Worktree executor could not admit a workspace revision into its explicit eligible set. Core now checks operator access when loading that revision and preserves the existing launch-time workspace match and executor ceiling. Global defaults and ceilings remain installation-scoped. Regression coverage pairs successful same-workspace task selection with refused foreign-workspace launch, default/ceiling misuse, inaccessible revisions, and unchanged bindings after rejection.
+
+Executor settings browse eligible policies by workspace. Browsing preserves the pending binding and never changes the global default or ceiling. Desktop uses the existing compact selector. Phone uses the existing workspace-named picker sheet, 44px targets, and the Settings scroll owner. Policy rows show workspace names. Focused hook tests cover selection changes and stale responses. Desktop and phone browser checks cover eligibility, saved defaults, and phone widths 393, 700, and 767. Desktop and phone rendered checks passed. Both screenshots were inspected. The complete policy package passed SQLite/PostgreSQL race checks after this repair.
+
+
+## Completed acceptance (2026-10-27)
+
+The complete policy package passed SQLite and PostgreSQL race checks after the workspace eligibility repair. Real managed acceptance published a workspace revision from an operator-selected denial, retained its report/base/ceiling/provider provenance, and left the running attempt unchanged. The operator then admitted it into the executor's eligible set, selected it for that task, and reviewed restart. Only the new attempt gained the selected file access. Its rotated MCP endpoint returned the exact new task marker. Global defaults and ceilings remained unchanged. Core creation/copy guard tests preserve caller restrictions. Native Nono profile import remains unsupported; canonical revision import cannot bypass validation.

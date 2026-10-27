@@ -1,7 +1,7 @@
 ---
 id: "06-approval-channel"
 title: "Connect verified approvals to operator decisions"
-status: in_progress
+status: done
 wave: 6
 depends_on:
   - "05-nono-provider-lifecycle"
@@ -105,3 +105,8 @@ A packaged Nono integration check now exercises a real file request, an operator
 The shared approval review is now connected to committed, workspace-scoped live events. It shows the session, captured policy revision and digest, exact operation and target, deadline, and delivery state. Allow once and Deny require an explicit operator action. Decisions preserve saved policies. Reads and mutations are scoped to the authenticated user, session incarnation, attempt, and connection epoch. Duplicate clicks share one request. Late responses after sign-out or operator replacement cannot enable an old action.
 
 A deferred-read regression found that ordinary query invalidation could retain an older empty response. Live events now cancel that read and obtain the current list. Desktop browser testing found that the final request removed its own focus target; closing now returns focus to Execution. Twenty-four focused frontend tests, typecheck, localization, scoped lint, and public-doc validation pass. Desktop and phone browser checks pass for live arrival, explicit allow/deny, focus return, read-only access, expiry, disconnection, long content, 44px touch targets, and phone widths 393, 700, and 767. Both final screenshots were inspected. Browser fixtures prove interface behavior only. Full actual-agent acceptance, denial learning, explicit restart review, and child-state deletion remain open.
+
+
+## Completed acceptance (2026-10-27)
+
+A real managed ACP Pi session requested a file outside its saved grants while agent auto-approval was enabled. The callback still required the authenticated human operator. Denial produced a report. A later explicit allow-once decision permitted each requested low-level operation without changing policy. Pi performs a MIME probe and the actual read separately, so both requests received separate operator decisions. The packaged-provider regression passed real request/decision handling, callback isolation, MCP, and denial controls. Runtime conformance passed deny, allow, invalid response, and timeout. Existing authority/forgery/replay tests and desktop/phone approval checks remain the evidence for those boundaries.

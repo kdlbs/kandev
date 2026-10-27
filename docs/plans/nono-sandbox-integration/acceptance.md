@@ -1,3 +1,15 @@
+# Nono acceptance evidence
+
+## Current result (2026-10-27)
+
+Linux amd64 Local/Worktree acceptance passed with Pi ACP 0.0.34, Pi CLI 1.3.0, Node 24.19.0, and packaged Nono 0.80.0. The latest managed transport record below is the repeatable six-journey result. Separate operator-managed receipts cover discovery, file approval/denial, immutable denial learning, explicit workspace selection, and reviewed adoption. Earlier pending statements below are historical checkpoints, not the current support matrix.
+
+The provider source is `kdlbs/kandev-plugin-nono` at `8f68c6a10add119a1187c7428c5fad51aa6ca25a`, with SDK source `beca1157060f61a7a4dafbec0e759e71a469de98`. The independently validated package SHA-256 is `27e52f8a75b7a62ab29c321fe462888f720252d9c355aa3be67ac7b7def1b7ef`. Both host and provider PRs remain drafts. The tested host binaries include the workspace eligibility slice on that base; their exact hashes are in the final record. Shipped profiles keep the feature off.
+
+Current-policy attestation remains unsupported. Actual status is unknown. macOS, Windows, remote executors, and non-file approvals are unsupported. This does not prove recovery of the original failed Task 04 or use the replacement sales run as recovery evidence. The generic failed-bootstrap repair has its own same-session SQLite and browser evidence.
+
+Private receipts were archived before the disposable verification instance stopped. Main :9998 remains available, and the user-test :57397 endpoint remains stopped. No credentials are part of this record.
+
 
 ## Pinned runtime conformance
 
@@ -280,3 +292,65 @@ Passing evidence: `/tmp/kandev-nono-state-cleanup-common-green.log`, `/tmp/kande
 The core reviewed-restart RED is recorded in `/tmp/kandev-nono-reviewed-restart-red.log`. Separate RED checks reproduce lost resume handoffs, review reuse during automatic replacement, dropped review input on the no-policy path, stale guard persistence, premature stopping, StrictMode dismissal, missing board context, and confirmation during refresh. The full policy suite passes in `/tmp/kandev-nono-reviewed-restart-policy-complete.log`, including PostgreSQL. `/tmp/kandev-nono-reviewed-restart-runtime-final.log` passes packaged-provider preparation, lifecycle, resume, and backend wiring race tests. `/tmp/kandev-nono-reviewed-restart-web-final3.log` passes 82 frontend tests. Scoped Go lint reports zero issues. Frontend lint, typecheck, localization, SQL guard, public docs, and specification checks pass.
 
 Final desktop/phone browser checks are recorded in `/tmp/kandev-nono-reviewed-restart-desktop-final.log` and `/tmp/kandev-nono-reviewed-restart-phone-final.log`. They verify explicit current-policy choice, captured-policy choice, no stop on Cancel or stale review, operator-only changes, phone picker dismissal, 44px touch targets, 28px desktop actions, one scroll owner, and phone widths 393/700/767. Both screenshots were inspected. Main :9998 remains reachable on its Tailscale interface; user-test :57397 remains offline. Complete managed Pi acceptance remains open.
+
+## Pinned runtime conformance
+
+```json
+{
+  "scope": "runtime_conformance",
+  "status": "passed",
+  "version": "0.80.0",
+  "source_commit": "8bb041356d48f771a221e58c98d9b1ff442e76fe",
+  "archive_sha256": "cae6755f1188b561ea02f62995feb8ad87d457f6d5255956ec54f41bbefca31e",
+  "binary_sha256": "a66396777ed756dff196ef61cf704abd4feebf58599d41e2da3363bbe90e22af",
+  "platform": "linux/x86_64",
+  "checks": {
+    "pipe": "passed",
+    "filesystem": "passed",
+    "network": "passed",
+    "approval_denied": "passed",
+    "approval_granted": "passed",
+    "approval_invalid": "passed",
+    "approval_timeout": "passed",
+    "pty_input_resize": "passed",
+    "cancellation_cleanup": "passed",
+    "fresh_restart": "passed"
+  },
+  "active_status_evidence": "unsupported",
+  "limitations": [
+    "No current policy digest in the session registry",
+    "Fresh runtime restart is not Kandev same-session recovery",
+    "No ACP agent, provider login, MCP, callback isolation, or plugin acceptance"
+  ],
+  "recorded_at": "2026-10-27T00:45:48.758489+00:00"
+}
+```
+
+## Managed transport acceptance
+
+```json
+{
+  "scope": "managed_transport_acceptance",
+  "status": "passed",
+  "checks": {
+    "actual_acp_tools_and_mcp": "passed",
+    "native_input_resize_mcp_and_disconnect": "passed",
+    "permitted_work_and_filesystem_network_denials": "passed",
+    "same_session_restart_and_rotated_mcp": "passed",
+    "active_cancellation_descendant_cleanup_and_sibling_isolation": "passed",
+    "scoped_session_state_cleanup_and_workspace_retention": "passed"
+  },
+  "nono_binary_sha256": "a66396777ed756dff196ef61cf704abd4feebf58599d41e2da3363bbe90e22af",
+  "pi_acp_version": "0.0.34",
+  "pi_version": "1.3.0",
+  "host_base_commit": "beca1157060f61a7a4dafbec0e759e71a469de98",
+  "host_binary_sha256": "f9b608a9f69353ac0afa1eb3c977829b503c0811ebff46fec607f37dec4e3fd6",
+  "agentctl_binary_sha256": "178c99aabee3b8a9cb1fad81970c9745d24d76e56f30a1e90405008018e48e36",
+  "active_status_evidence": "unsupported",
+  "limitations": [
+    "This mode uses one explicitly selected disposable authenticated fixture.",
+    "Operator approval, learning, and policy selection use separate integration and managed evidence.",
+    "No accepted current policy attestation exists in the pinned Nono registry. Status remains unknown."
+  ]
+}
+```

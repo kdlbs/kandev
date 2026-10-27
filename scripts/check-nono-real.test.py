@@ -19,6 +19,15 @@ spec.loader.exec_module(runner)
 
 
 class NonoRunnerTests(unittest.TestCase):
+    def test_product_run_requires_an_explicit_owned_fixture(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(runner, 'prerequisites', return_value=(Path('/verified/nono'), None)):
+            with patch.object(runner, 'landlock_abi', return_value=8), patch.object(subprocess, 'Popen') as spawn:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(runner.main(['--run']), 2)
+                self.assertEqual(json.loads(output.getvalue())['reason'], 'missing_product_fixture')
+                spawn.assert_not_called()
+
     # @covers AC-AGENTS-SANDBOX-003.2, AC-AGENTS-SANDBOX-006.4
     def test_missing_binary_refuses_before_starting_a_process(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(subprocess, 'Popen') as spawn:

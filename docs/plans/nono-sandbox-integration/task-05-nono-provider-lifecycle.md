@@ -1,7 +1,7 @@
 ---
 id: "05-nono-provider-lifecycle"
 title: "Implement Nono in its own repository"
-status: in_progress
+status: done
 wave: 5
 depends_on:
   - "01-runtime-contract"
@@ -65,7 +65,7 @@ New test and runner paths below are implementation deliverables, not existing pa
 (cd apps/backend && go test -trimpath -race ./internal/agent/hostutility ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/utility -run 'SandboxLifecycle|SandboxTransport|GenericWrapper' -count=1)
 (cd "${NONO_PLUGIN_DIR:?Set the dedicated plugin checkout}" && go test ./... -count=1)
 (cd "${NONO_PLUGIN_DIR:?Set the dedicated plugin checkout}" && make validate package)
-python3 scripts/check-nono-real.py --plugin-smoke --record docs/plans/nono-sandbox-integration/acceptance.md
+KANDEV_TEST_SANDBOX_PACKAGE="${NONO_PLUGIN_PACKAGE:?Set the dedicated packaged plugin}" go -C apps/backend test -race ./internal/plugins -run TestSandboxProviderExternalPackageRetainsOwnedRuntime -count=1
 ```
 
 Use TDD for changed logic. Before the first pnpm command in this workspace, run `(cd apps && pnpm install --frozen-lockfile)`.
@@ -172,3 +172,8 @@ Session-state deletion is implemented (2026-10-26). Core inventories attempt his
 
 
 Manual restart review is implemented (2026-10-26). The new path compiles an explicitly reviewed current revision through the packaged provider. It captures operator authority and exact selection evidence before dispatch and rechecks mutable bindings at insert. The review is consumed before automatic replacement. Frozen restart remains unchanged. The complete policy suite passes with SQLite/PostgreSQL; focused runtime, lifecycle, resume, and backend wiring race tests pass. Desktop/phone review checks pass. Full managed-agent acceptance remains open.
+
+
+## Completed acceptance (2026-10-27)
+
+The production provider is in the dedicated repository, with draft PR https://github.com/kdlbs/kandev-plugin-nono/pull/2 at `8f68c6a10add119a1187c7428c5fad51aa6ca25a`. Its SDK source is host commit `beca1157060f61a7a4dafbec0e759e71a469de98`. `make validate` and `make verify-package` passed with the pinned runtime. Actual managed Pi discovery, ACP and native MCP/file work, both PTY sizes, cancellation including a detached child, same-session restart, sibling isolation, and owned state deletion passed. The repeatable transport runner also passed. No release or marketplace publication occurred. Registry identity still provides no accepted current-policy attestation. The status-normalization fallback is unsupported/unknown, as required by Task 01.

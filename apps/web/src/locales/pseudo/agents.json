@@ -723,5 +723,6 @@
   "restartReviewReadOnly": "Ōńĺŷ àń ōƥēŕàţōŕ ćàń śēĺēćţ à ďĩƒƒēŕēńţ ƥōĺĩćŷ.",
   "restartReviewChanged": "Ţĥē ćũŕŕēńţ ƥōĺĩćŷ ďĩƒƒēŕś ƒŕōḿ ţĥē ćàƥţũŕēď ƥōĺĩćŷ.",
   "restartReviewSame": "Ţĥē ćũŕŕēńţ ƥōĺĩćŷ ḿàţćĥēś ţĥē ćàƥţũŕēď ƥōĺĩćŷ.",
-  "restartPermissions": "Ƥēŕḿĩśśĩōńś"
+  "restartPermissions": "Ƥēŕḿĩśśĩōńś",
+  "sandboxPolicyWorkspace": "Ƥōĺĩćŷ ŵōŕķśƥàćē"
 }

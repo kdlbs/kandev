@@ -723,5 +723,6 @@
   "restartReviewReadOnly": "只有操作員可以選擇其他策略。",
   "restartReviewChanged": "目前策略與已捕獲的策略不同。",
   "restartReviewSame": "目前策略與已捕獲的策略相同。",
-  "restartPermissions": "權限"
+  "restartPermissions": "權限",
+  "sandboxPolicyWorkspace": "策略工作區"
 }
