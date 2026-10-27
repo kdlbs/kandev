@@ -170,6 +170,34 @@ Task 01 is committed on the feature branch and under review in PR #4821. Public
 documentation is included in Task 02; native OS and installed-runtime evidence
 is still required.
 
+### PR fixup, 2026-10-27
+
+Rebased onto `main` at `f80b89ec4993d6dda5c6f69b08c6bcc0d3c40277` with no
+conflicts. The first check run for `16b3a7d3e49` failed `E2E Shard 26/28` on
+`Task List › sort and group options are deep-linkable and persisted`
+(`apps/web/e2e/tests/task/task-list.spec.ts`): the backend reported
+`tasks_list_group` as `none` after the selection.
+
+Cause: the tasks list sent its sort/group preference snapshots as independent
+fire-and-forget PATCHes, so an older snapshot could land after a newer one, and
+the spec also read the backend once, immediately after the interaction. The
+defect is outside the CLI feature, but it blocked a required current-head check,
+so it is fixed here:
+
+- `apps/web/app/tasks/tasks-page-client.tsx` serializes preference writes, so
+  the newest selection always reaches the server last.
+- `apps/web/e2e/tests/task/task-list.spec.ts` polls the persisted preference
+  instead of a single read, matching the `task-list-facet.spec.ts` precedent.
+- `apps/web/app/tasks/tasks-page-client.facet-selection.test.tsx` covers the
+  ordered writes; it fails with two concurrent PATCHes before the change.
+
+Verification on the rebased branch:
+
+- `(cd apps/web && pnpm exec vitest run app/tasks)`: PASS, 70 tests.
+- `(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-list.spec.ts)`: PASS, 9 tests.
+- `(cd apps/web && NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck)`: PASS.
+- `(cd apps/web && pnpm exec eslint app/tasks/tasks-page-client.tsx app/tasks/tasks-page-client.facet-selection.test.tsx e2e/tests/task/task-list.spec.ts)`: PASS.
+
 ## Risks
 
 - Startup files can hang, exit, print sensitive output, or change unrelated exports.
