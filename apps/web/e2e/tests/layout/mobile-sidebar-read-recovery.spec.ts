@@ -55,6 +55,19 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   const retryBox = await retry.boundingBox();
   if (!retryBox) throw new Error("mobile sidebar retry control is not visible");
   expect(retryBox.height).toBeGreaterThanOrEqual(44);
+  await retry.scrollIntoViewIfNeeded();
+  await expect
+    .poll(() =>
+      retry.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        return hit === element || element.contains(hit);
+      }),
+    )
+    .toBe(true);
 
   readPhase = "recovering";
   const recoveredWorkflowRead = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {

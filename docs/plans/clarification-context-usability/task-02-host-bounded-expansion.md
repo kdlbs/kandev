@@ -186,3 +186,15 @@ Fixed the four host-resizing review findings. Expand availability now compares t
 - The first PR E2E run had one persistent four-attempt failure in the mobile image-question prompt viewport test. Three other tests failed once but passed on retry (Threads auto-scroll, mobile clarification auto-run queue, and plugin-action focus return).
 - Local browser verification with retries disabled passed for the exact phone image-question scenario (1 test), the desktop/mobile clarification and Threads suites (28 tests), and the phone image-question and plugin-action suites. Web typecheck and focused ESLint with `--max-warnings 0` passed.
 - The fresh phone image-question capture produced and visually validated three assets (question with preview, answer controls, and image viewer). `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
+
+### PR CI fixup (2026-10-27)
+
+The first PR run on `aa4dfc5` failed six E2E tests across five shards. The runtime-update rollback assertion rejected harmless subpixel rounding; the profile-deletion fixture assumed the first agent had a profile; the guided-setup option and mobile controls were tapped before their animations or hit targets had settled; and pagination unarchived a task while archive cleanup was still running.
+
+- Share a 0.01px touch-dimension tolerance between the plugin-action and runtime-update specs.
+- Select the seeded agent profile by ID in all mobile profile-deletion tests.
+- Wait for the guided-setup popover and queued-message panel animations. Scroll the sidebar retry into view and confirm its center owns the hit target before tapping.
+- Wait for each archive-cleanup job to finish before the pagination test unarchives its task. The failing backend log identified the cleanup lifecycle race.
+- Exact-merge reruns after a frozen workspace install and build passed: profile-deletion (3 tests), guided setup (4), sidebar recovery (1), sidebar pagination (1), mobile Auto-run clarification (1), runtime rollback (1), and plugin action touch targets (1).
+- The synthetic-merge backend, E2E fixture packages, and E2E Vite build passed. Web typecheck and focused ESLint passed.
+- The PR head has not yet been pushed with these fixes, so GitHub checks must be rerun against the updated head.

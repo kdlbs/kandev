@@ -9,11 +9,7 @@ import {
   setAppStatusBarEnabled,
   type AppStatusBarSettingsBaseline,
 } from "../../helpers/app-status-bar-settings";
-
-function expectTouchDimension(dimension: number) {
-  // Playwright reports fractional CSS pixels; allow only float-rounding noise.
-  expect(dimension + 0.01).toBeGreaterThanOrEqual(44);
-}
+import { expectTouchDimension } from "../../helpers/touch-targets";
 
 async function assertGlyphSize(action: Locator, size: number): Promise<void> {
   const svg = action.locator('[data-slot="surface-action-icon"] > svg');

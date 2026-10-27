@@ -2,6 +2,7 @@
 // (docs/plans/workspace-coordinator-p2/task-07-guided-setup.md).
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
 import {
@@ -23,11 +24,20 @@ async function twoBoards(apiClient: ApiClient, seedData: SeedData) {
 }
 
 async function chooseIdentity(page: Page) {
+  async function chooseFirstOption() {
+    const popover = page.locator('[data-slot="popover-content"]:visible');
+    await expect(popover).toBeVisible();
+    const option = popover.getByRole("option").first();
+    await expect(option).toBeVisible();
+    await waitForFiniteAnimations(popover);
+    await option.click();
+  }
+
   await page.getByLabel("Name").fill(NAME);
   await page.getByTestId("coordinator-agent-profile-picker").click();
-  await page.getByRole("option").first().click();
+  await chooseFirstOption();
   await page.getByTestId("executor-profile-selector").first().click();
-  await page.getByRole("option").first().click();
+  await chooseFirstOption();
 }
 
 async function reachReview(page: Page) {

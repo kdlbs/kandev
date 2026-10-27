@@ -131,6 +131,7 @@ test.describe("Mobile clarification multiline answer", () => {
     await testPage.getByTestId("queue-chip").tap();
     const panel = testPage.getByTestId("queued-ghost-list");
     await expect(panel).toBeVisible();
+    await waitForFiniteAnimations(panel);
     const autoRun = panel.getByTestId("queue-auto-run");
     await expect(autoRun).toHaveAttribute("data-state", "checked");
     await autoRun.tap();
