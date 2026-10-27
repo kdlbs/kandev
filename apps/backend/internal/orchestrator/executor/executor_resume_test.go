@@ -957,6 +957,9 @@ func TestResumeSession_RecoveredIdleRacePreservesNewerStateAndAttempt(t *testing
 			if !errors.As(err, &superseded) {
 				t.Fatalf("ResumeSession error = %v, want superseded attempt", err)
 			}
+			if !errors.Is(err, ErrExecutionAlreadyRunning) {
+				t.Fatalf("ResumeSession error = %v, want duplicate-runtime classification", err)
+			}
 			if got := repo.sessions["sess-1"].State; got != newerState {
 				t.Fatalf("state = %s, want %s", got, newerState)
 			}

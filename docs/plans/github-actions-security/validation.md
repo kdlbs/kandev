@@ -412,3 +412,13 @@ Full web typecheck, scoped ESLint/formatting, pinned golangci-lint 2.9.0 for the
 two changed Go packages, document catalog/spec lint, and diff checks passed.
 Recovery fix `07ed9feb` and Azure fix `6a820eb2` passed normal commit hooks.
 Fresh exact-head CI and review evidence remain the delivery gate after push.
+
+A follow-up caller-level regression found that a lost state comparison could
+still reach generic launch-failure handling. It reproduced `RUNNING` and a newer
+`STARTING` attempt becoming `FAILED`. The executor now retains both the
+already-running and superseded-state error identities when another owner wins;
+other rollback errors still propagate. The caller then applies its normal
+current-state prompt gate. SQLite-backed cancellation, running-session, and
+newer-attempt cases all pass under the race detector, preserve the successor
+state, send no prompt, and retain queued messages for active successors. The
+broader targeted resume/rollback/availability/queue race suite also passes.
