@@ -422,3 +422,22 @@ current-state prompt gate. SQLite-backed cancellation, running-session, and
 newer-attempt cases all pass under the race detector, preserve the successor
 state, send no prompt, and retain queued messages for active successors. The
 broader targeted resume/rollback/availability/queue race suite also passes.
+
+
+## Mobile Stats recovery fixture
+
+Delivery CI exposed a race in the mobile Stats retry fixture. The original test
+failed locally on its third repetition with retries disabled. A request/event
+probe reproduced the failure again: the first daily-activity response returned
+503, then the initial browser `pageshow` event triggered the supported foreground
+recovery. The fixture allowed that second request to succeed, so the error panel
+was gone before its manual Retry assertion.
+
+The fixture now keeps daily activity unavailable until the enabled Retry control
+is ready to be tapped. It retains the 44px touch-size check, successful response,
+error-panel removal, enabled Copy Stats control, and no horizontal overflow.
+Five mobile repetitions passed with retries disabled on two CPUs. The unchanged
+desktop companion passed three repetitions under the same limits. Scoped ESLint,
+formatting, document checks, and diff checks passed. No production UI or recovery
+behavior changed; public guides and screenshots remain current. Fresh CI after
+the next push remains the delivery gate.

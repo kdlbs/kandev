@@ -135,6 +135,8 @@ resume stuck in `STARTING`. The fixes preserve selection ownership and restore
 only a ready, previously idle session through the existing attempt-fenced state
 transition. Canvas measurement uses the same settled-animation and 44px helper
 as other mobile controls. Validation records the deterministic regressions.
+The mobile Stats fixture keeps its simulated outage active until manual Retry,
+so initial foreground recovery cannot consume the error state under test.
 
 ## Risks
 
