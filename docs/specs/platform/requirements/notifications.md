@@ -33,6 +33,10 @@ Kandev currently treats every transition to a session's generic `WAITING_FOR_INP
 
 - **AC-PLATFORM-NOTIFICATIONS-001.12:** When a notification settings Save succeeds, the accepted baseline and shared saved-provider snapshot advance to the acknowledged canonical configuration. Any later provider/event, Apprise name/URL, create-form, or deletion draft remains current and dirty wherever it differs from that baseline. A subsequent explicit Save persists those choices; Reset restores the acknowledged baseline. A confirmed failed Save preserves the draft and existing error behavior. This applies to the existing desktop and phone controls without changing their composition.
 
+- **AC-PLATFORM-NOTIFICATIONS-001.13:** When the Linux System provider uses `notify-send`, the selected notification title and body shall reach that transport as literal operands even when either resembles a command option. Ordinary text remains unchanged.
+- **AC-PLATFORM-NOTIFICATIONS-001.14:** The Linux System provider shall retain its configured timeout and icon behavior, report command failures to its caller, and honor cancellation of an in-flight command.
+- **AC-PLATFORM-NOTIFICATIONS-001.15:** In mock E2E mode, System delivery shall remain suppressed without invoking an operating-system notification command.
+
 ## Migrated source detail
 
 ## Why
@@ -261,6 +265,7 @@ Notification bodies contain the task title but not the question text.
 
 ## Implementation Plan
 
+- [Linux notification operand boundary](../../../plans/linux-notification-operands/plan.md), with the [System transport design](../system-design/linux-notification-operands.md).
 - [Notification window focus](../../../plans/notification-window-focus/plan.md), with the focused [Local notification attention design](../system-design/local-notification-attention.md).
 - [Notification Save draft preservation](../../../plans/notification-save-drafts/plan.md)
 - [Notification settings atomicity](../../../plans/notification-settings-atomicity/plan.md)
