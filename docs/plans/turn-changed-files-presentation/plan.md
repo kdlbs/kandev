@@ -116,6 +116,7 @@ Implementation verification passed:
 - After the fixup, the focused card test passed 7 cases; web typecheck, focused
   ESLint, the E2E web build, and `git diff --check` passed.
 - Catalog validation covered 403 decisions and 1,740 specifications; specification lint and `git diff --check` passed.
+- Current PR fixup: the Chromium changed-files E2E rebuilt the backend and web assets and passed all 6 cases, including the narrow fine-pointer phone case. Mobile agent-profile deletion passed 3 cases; the targeted Chromium restart, branch-selector, and session-recency cases passed 3 cases with retries disabled. Focused ESLint and `git diff --check` passed.
 
 ## Risks
 

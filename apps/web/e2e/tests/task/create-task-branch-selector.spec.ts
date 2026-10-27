@@ -6,6 +6,7 @@ import { expectWebkitDialogMotion } from "../../helpers/dialog-webkit-metrics";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test.use({ trace: "retain-on-failure" });
 
@@ -658,7 +659,10 @@ test.describe("Branch refresh + filter", () => {
     await testPage.locator(`[cmdk-item][data-value="${seedData.repositoryId}"]`).click();
     // Worktree executor → branch selector enabled and refresh button visible.
     await testPage.getByTestId("executor-profile-selector").click();
-    await testPage.getByRole("option", { name: worktreeProfileName }).click();
+    const worktreeOption = testPage.getByRole("option", { name: worktreeProfileName });
+    await expect(worktreeOption).toBeVisible();
+    await waitForFiniteAnimations(worktreeOption);
+    await worktreeOption.click();
     await expect(testPage.getByTestId("executor-profile-selector")).toBeFocused();
 
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();

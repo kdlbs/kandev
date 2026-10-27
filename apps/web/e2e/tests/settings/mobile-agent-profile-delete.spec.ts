@@ -21,8 +21,9 @@ test.describe("Agent profile deletion on mobile", () => {
     apiClient,
   }) => {
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const agent = agents.find((candidate) => candidate.profiles?.length);
+    const profile = agent?.profiles?.[0];
+    if (!agent || !profile) throw new Error("Expected an installed agent profile");
 
     await testPage.goto("/settings/agents");
 
@@ -67,9 +68,11 @@ test.describe("Agent profile deletion on mobile", () => {
     prCapture,
   }) => {
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const agent = agents.find((candidate) => candidate.profiles?.length);
+    const model = agent?.profiles?.[0]?.model;
+    if (!agent || !model) throw new Error("Expected an installed agent profile");
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Delete Me", {
-      model: agent.profiles[0].model,
+      model,
     });
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
@@ -122,9 +125,11 @@ test.describe("Agent profile deletion on mobile", () => {
     test.setTimeout(60_000);
 
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const agent = agents.find((candidate) => candidate.profiles?.length);
+    const model = agent?.profiles?.[0]?.model;
+    if (!agent || !model) throw new Error("Expected an installed agent profile");
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Overflow Profile", {
-      model: agent.profiles[0].model,
+      model,
     });
     await testPage.route(`**/api/v1/agent-profiles/${profile.id}**`, async (route) => {
       if (route.request().method() !== "DELETE") {

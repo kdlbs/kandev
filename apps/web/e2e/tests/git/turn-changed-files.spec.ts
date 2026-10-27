@@ -286,8 +286,15 @@ test("keeps renamed paths readable on a narrow fine-pointer viewport", async ({
     } = await import("./turn-changed-files-qa-helpers");
     await routeRenamedTurnFile(testPage);
     resetTurnQaFile(seedData.repositoryPath);
+    const fileTreeLoaded = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/repositories/") &&
+        response.url().includes("/files?") &&
+        response.status() === 200,
+    );
     const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);
+    await fileTreeLoaded;
 
     const card = testPage.getByTestId("turn-changed-files-card");
     await expect(card).toBeVisible();
