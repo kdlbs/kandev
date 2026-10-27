@@ -198,3 +198,36 @@ func nomadExecutorRunningFixture(executionID string, generation int64, phase str
 		Metadata: metadata,
 	}
 }
+
+func TestNomadExecutorInventoryCASPersistsReverseAPITunnelIdentity(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedNomadExecutorInventory(t, repo, 1)
+	first := nomadExecutorRunningFixture("execution-one", 1, "intent")
+	if err := repo.CheckpointNomadExecutorInventory(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := nomadExecutorRunningFixture("execution-one", 1, "intent")
+	updated.ExpectedNomadExecutorRevision = first.ExpectedNomadExecutorRevision
+	updated.Metadata["ssh_runtime_api_local_url"] = "http://127.0.0.1:38429/api/v1"
+	updated.Metadata["ssh_runtime_api_remote_port"] = "41234"
+	if err := repo.CheckpointNomadExecutorInventory(ctx, updated); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetExecutorRunningBySessionID(ctx, first.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata["ssh_runtime_api_local_url"] != "http://127.0.0.1:38429/api/v1" ||
+		stored.Metadata["ssh_runtime_api_remote_port"] != "41234" {
+		t.Fatalf("reverse API tunnel identity was not persisted: %#v", stored.Metadata)
+	}
+
+	rotated := nomadExecutorRunningFixture("execution-one", 1, "intent")
+	rotated.ExpectedNomadExecutorRevision = updated.ExpectedNomadExecutorRevision
+	rotated.Metadata["ssh_runtime_api_remote_port"] = "50000"
+	if err := repo.CheckpointNomadExecutorInventory(ctx, rotated); !errors.Is(err, models.ErrExecutionRotated) {
+		t.Fatalf("tunnel port rotation error = %v, want ErrExecutionRotated", err)
+	}
+}

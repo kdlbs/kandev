@@ -75,16 +75,17 @@ func TestNomadCreateReconcilesCommittedRegistrationAfterResponseLoss(t *testing.
 
 func TestNomadCreateFailureRetainsDurableIntentWithoutClaimingAllocation(t *testing.T) {
 	fixture := newNomadCreateFixture(t, true)
+	fixture.jobHistoryMissing = true // the 5xx answer left no job behind
 	_, err := fixture.runtime.CreateInstance(context.Background(), fixture.request)
-	if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
-		t.Fatalf("CreateInstance() error = %v, want registration failure", err)
+	if err == nil || !strings.Contains(err.Error(), "did not reconcile") {
+		t.Fatalf("CreateInstance() error = %v, want unreconciled registration failure", err)
 	}
-	if len(fixture.checkpoints) != 2 || fixture.checkpoints[0].Phase != "intent" || fixture.checkpoints[1].NativeJobSpecSHA256 == "" {
-		t.Fatalf("failed registration did not retain only durable intent: %+v", fixture.checkpoints)
+	if len(fixture.checkpoints) != 3 || fixture.checkpoints[0].Phase != "intent" || fixture.checkpoints[1].NativeJobSpecSHA256 == "" {
+		t.Fatalf("failed registration did not retain durable intent and the cleanup record: %+v", fixture.checkpoints)
 	}
 	state, decodeErr := nomad.EnvironmentStateFromMetadata(fixture.request.Metadata)
-	if decodeErr != nil || state.Phase != "intent" || state.AllocationID != "" {
-		t.Fatalf("failed registration was reported as allocated: %+v, err=%v", state, decodeErr)
+	if decodeErr != nil || state.Phase != "cleanup_pending" || state.AllocationID != "" {
+		t.Fatalf("failed registration was reported as allocated or lost its cleanup record: %+v, err=%v", state, decodeErr)
 	}
 	fixture.runtime.mu.Lock()
 	_, retained := fixture.runtime.sessions[fixture.request.InstanceID]

@@ -497,10 +497,13 @@ func (r *NomadExecutor) RecoverInstances(ctx context.Context, records []*models.
 	}
 	instances := make([]*ExecutorInstance, 0)
 	for _, record := range records {
-		if record == nil || record.Runtime != executor.NameNomad || isTerminalExecutorRunningStatus(record.Status) {
+		if record == nil || record.Runtime != executor.NameNomad {
 			continue
 		}
 		if handled := r.resumeNomadCleanupRecord(ctx, record); handled {
+			continue
+		}
+		if isTerminalExecutorRunningStatus(record.Status) {
 			continue
 		}
 		instance, err := r.recoverReadyNomadRecord(ctx, record)

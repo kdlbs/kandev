@@ -365,22 +365,24 @@ func (r *NomadExecutor) registerNomadJob(
 	if err != nil && !isNomadRegistrationReconcilable(err) {
 		return nil, fmt.Errorf("register immutable Nomad job: %w", err)
 	}
+	// The PUT was sent: from here on a failure may leave a registered job, so
+	// every exit records the cleanup intent and stops it.
 	registered, getErr := nomadClient.GetJob(ctx, profile.Namespace, state.JobID)
 	if getErr != nil || !jobMatchesState(registered, *state) {
-		return nil, fmt.Errorf("nomad job registration did not reconcile to the exact immutable job %q", state.JobID)
+		return nil, r.abortRegisteredNomadLaunch(ctx, req, state, fmt.Errorf("nomad job registration did not reconcile to the exact immutable job %q", state.JobID))
 	}
 	if !isNomadRegistrationReconcilable(err) && registration.JobModifyIndex != registered.JobModifyIndex {
-		return nil, errors.New("nomad registered definition index differs from the full job read")
+		return nil, r.abortRegisteredNomadLaunch(ctx, req, state, errors.New("nomad registered definition index differs from the full job read"))
 	}
 	if registered.CreateIndex == 0 || registered.JobModifyIndex == 0 {
-		return nil, errors.New("nomad job read omitted immutable creation or definition index")
+		return nil, r.abortRegisteredNomadLaunch(ctx, req, state, errors.New("nomad job read omitted immutable creation or definition index"))
 	}
 	state.Phase = nomadPhaseRegistered
 	state.JobCreateIndex = registered.CreateIndex
 	state.JobDefinitionIndex = registered.JobModifyIndex
 	state.Revision++
 	if err := checkpointNomadState(ctx, req, state); err != nil {
-		return nil, fmt.Errorf("checkpoint registered Nomad job: %w", err)
+		return nil, r.abortRegisteredNomadLaunch(ctx, req, state, fmt.Errorf("checkpoint registered Nomad job: %w", err))
 	}
 	return nomadClient, nil
 }

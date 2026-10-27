@@ -166,7 +166,14 @@ func nomadCleanupResumable(state nomad.EnvironmentState) bool {
 		return false
 	}
 	return state.QuarantineState == nomad.QuarantinePending ||
-		state.Phase == nomadPhaseCleanupPending || state.Phase == nomadPhaseAbsent
+		state.Phase == nomadPhaseCleanupPending || state.Phase == nomadPhaseAbsent || unplacedPoolLaunch(state)
+}
+
+// unplacedPoolLaunch reports a pool launch row that never recorded a node.
+// Startup recovery owns it: no live launch holds such a row after a restart.
+func unplacedPoolLaunch(state nomad.EnvironmentState) bool {
+	return state.PlacementMode == nomad.ModePool && state.NodeID == "" &&
+		(state.Phase == nomadPhaseIntent || state.Phase == nomadPhaseRegistered)
 }
 
 // nomadCleanupRequest builds the cleanup request for a connected instance from

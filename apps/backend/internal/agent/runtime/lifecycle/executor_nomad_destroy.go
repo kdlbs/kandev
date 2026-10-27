@@ -165,6 +165,8 @@ func (c *nomadCleanup) resume(ctx context.Context) error {
 	switch {
 	case c.hasReceipt() && (c.state.Phase == nomadPhaseAbsent || c.state.Phase == nomadPhaseCleanupPending):
 		return c.continueFromReceipt(ctx)
+	case unplacedPoolLaunch(c.state):
+		return c.drainAndSettle(ctx)
 	case c.state.Phase == nomadPhaseCleanupPending && c.state.QuarantineState == "":
 		// The cleanup checkpoint committed but neither a drain receipt nor a
 		// quarantine did. Fence the node; resume never drains.
@@ -177,7 +179,9 @@ func (c *nomadCleanup) resume(ctx context.Context) error {
 // persisted. The staged bootstrap environment file is removed first because the
 // run that staged it may not have reached its own removal.
 func (c *nomadCleanup) continueFromReceipt(ctx context.Context) error {
-	c.removeBootstrapEnvironment(ctx)
+	if !c.nothingStaged() {
+		c.removeBootstrapEnvironment(ctx)
+	}
 	if c.state.Phase == nomadPhaseAbsent {
 		return c.finish(ctx)
 	}
@@ -246,7 +250,7 @@ func (c *nomadCleanup) drainAndSettle(ctx context.Context) error {
 		return c.retained(nomadCleanupReasonCheckpoint)
 	}
 	if !c.runtimeIdentityRecorded() {
-		if c.state.RefusedBeforeStage {
+		if c.nothingStaged() {
 			return c.settleRefusedLaunch(ctx)
 		}
 		return c.fail(ctx, nomadCleanupReasonIdentityUnrecorded)
@@ -387,6 +391,9 @@ func (c *nomadCleanup) ownedBootstrapEnvironmentPath() (string, bool) {
 // settle stops the whole job, requires exact terminal evidence, and only then
 // records absence.
 func (c *nomadCleanup) settle(ctx context.Context) error {
+	if c.neverPlaced() {
+		return c.settleNeverPlaced(ctx)
+	}
 	if err := c.client.StopJob(ctx, c.state.Namespace, c.state.JobID); err != nil {
 		return c.fail(ctx, nomadCleanupReasonStopFailed)
 	}
@@ -453,14 +460,10 @@ func (c *nomadCleanup) observeStop(ctx context.Context) (reason string, pending 
 // finish releases the worker fence for exactly this environment, then the
 // inventory. Both are idempotent and retried from the persisted absent phase.
 func (c *nomadCleanup) finish(ctx context.Context) error {
-	if err := c.removeWorkspace(ctx); err != nil {
-		return c.retained(nomadCleanupReasonWorkspaceRemove)
-	}
-	if err := c.removeAllocationDir(ctx); err != nil {
-		return c.retained(nomadCleanupReasonAllocationDirRemove)
-	}
-	if err := c.releaseFence(ctx); err != nil {
-		return c.retained(nomadCleanupReasonFenceReleaseFailed)
+	if !c.nothingStaged() {
+		if reason := c.removeStagedState(ctx); reason != "" {
+			return c.retained(reason)
+		}
 	}
 	if c.req.ReleaseRuntimeInventory == nil {
 		return c.retained(nomadCleanupReasonInventoryRelease)
@@ -470,6 +473,21 @@ func (c *nomadCleanup) finish(ctx context.Context) error {
 	}
 	c.exec.discardRecoveredNomadConnection(c.state.ExecutionID)
 	return nil
+}
+
+// removeStagedState removes what a launch staged on its node, in order, and
+// reports the retained-cleanup reason of the first step that failed.
+func (c *nomadCleanup) removeStagedState(ctx context.Context) string {
+	if err := c.removeWorkspace(ctx); err != nil {
+		return nomadCleanupReasonWorkspaceRemove
+	}
+	if err := c.removeAllocationDir(ctx); err != nil {
+		return nomadCleanupReasonAllocationDirRemove
+	}
+	if err := c.releaseFence(ctx); err != nil {
+		return nomadCleanupReasonFenceReleaseFailed
+	}
+	return ""
 }
 
 // removeWorkspace deletes a pool environment's workspace once the runtime is

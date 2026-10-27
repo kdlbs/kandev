@@ -85,7 +85,6 @@ func TestNomadWorkerQuarantineReadmitRequiresAttestation(t *testing.T) {
 		"job stopped":   func(r *nomad.NomadReadmitRequest) { r.Attestation.JobStoppedPurgeFalse = false },
 		"fence removed": func(r *nomad.NomadReadmitRequest) { r.Attestation.FenceRemoved = false },
 		"operator":      func(r *nomad.NomadReadmitRequest) { r.Attestation.Operator = "  " },
-		"node":          func(r *nomad.NomadReadmitRequest) { r.NodeID = "" },
 		"generation":    func(r *nomad.NomadReadmitRequest) { r.Generation = 0 },
 		"control chars": func(r *nomad.NomadReadmitRequest) { r.Attestation.Operator = "op\nerator" },
 	}
@@ -107,6 +106,7 @@ func TestNomadWorkerQuarantineReadmitRequiresAttestation(t *testing.T) {
 func TestNomadWorkerQuarantineReadmitExactRowOnly(t *testing.T) {
 	for name, mutate := range map[string]func(*nomad.NomadReadmitRequest){
 		"node":        func(r *nomad.NomadReadmitRequest) { r.NodeID = "node-2" },
+		"empty node":  func(r *nomad.NomadReadmitRequest) { r.NodeID = "" },
 		"environment": func(r *nomad.NomadReadmitRequest) { r.EnvironmentID = "environment-2" },
 		"generation":  func(r *nomad.NomadReadmitRequest) { r.Generation = 2 },
 		"job":         func(r *nomad.NomadReadmitRequest) { r.JobID = "job-2" },
@@ -278,5 +278,29 @@ func TestNomadWorkerQuarantineReadmitPhaseErrorReleasesOnlyItsOwnClaim(t *testin
 	}
 	if store.held != "" || base.checkpoints != 0 {
 		t.Fatalf("held = %q checkpoints = %d", store.held, base.checkpoints)
+	}
+}
+
+func TestNomadReadmitReleasesNeverPlacedPoolRowWithEmptyNode(t *testing.T) {
+	manager, store := newReadmitHarness(t, "cleanup_pending")
+	state, err := nomad.EnvironmentStateFromMetadata(store.row.Metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.PlacementMode, state.NodePool, state.Placement, state.MemoryMaxMB = nomad.ModePool, "kandev", nomad.PlacementSpread, 2048
+	state.NodeID, state.AgentctlPath, state.BootstrapPath, state.WorkspaceRoot, state.AllocationRoot = "", "", "", "", ""
+	state.WorkspacePath, state.NativeJobPolicyVersion, state.NativeJobSpecSHA256 = "", 0, ""
+	state.SSHHost, state.SSHUser, state.SSHPort, state.SSHHostFingerprint = "", "", 0, ""
+	state.StateRoot, state.NodeContractSHA256, state.NodeAttach, state.AllocationID = "", "", "", ""
+	if err := nomad.PutEnvironmentState(store.row.Metadata, state); err != nil {
+		t.Fatal(err)
+	}
+	req := readmitRequest()
+	req.NodeID = ""
+	if err := manager.ReadmitNomadEnvironment(context.Background(), req); err != nil {
+		t.Fatalf("readmit never-placed row = %v", err)
+	}
+	if store.checkpoints != 1 {
+		t.Fatalf("checkpoints = %d, want 1", store.checkpoints)
 	}
 }

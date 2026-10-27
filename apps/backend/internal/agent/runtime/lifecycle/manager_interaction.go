@@ -1436,6 +1436,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
 	}
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
+	if agentStopFailed && backendForce && execution.RuntimeName == executor.NameNomad && !nomadStopDestroys(reason) {
+		return fmt.Errorf("stop agent for execution %q: agentctl did not confirm termination", executionID)
+	}
 	// Backend shutdown retains interrupted delivery outcomes. Its terminal
 	// checkpoint follows confirmed process termination, before runtime cleanup.
 	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
@@ -1569,7 +1572,9 @@ func (m *Manager) stopExecutionAgentctl(
 		return false
 	}
 	defer client.Close()
-	if force {
+	// A forced Nomad stop preserves the allocation, so the agent process only
+	// ends through agentctl.
+	if force && execution.RuntimeName != executor.NameNomad {
 		return false
 	}
 	if execution.RuntimeName == executor.NameNomad {

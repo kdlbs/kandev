@@ -198,15 +198,22 @@ func (r *Repository) updateNomadExecutorRow(ctx context.Context, tx *sqlx.Tx, ru
 	return nil
 }
 
+var nomadImmutableCheckpointMetadataKeys = []string{
+	"env_secret_id_AGENTCTL_BOOTSTRAP_NONCE", "env_secret_id_AGENTCTL_AUTH_TOKEN",
+	"ssh_runtime_api_local_url", "ssh_runtime_api_remote_port",
+}
+
 func mergeNomadMetadata(current, incomingMetadata map[string]interface{}, state nomad.EnvironmentState) (map[string]interface{}, error) {
 	merged := make(map[string]interface{}, len(current)+3)
 	for key, value := range current {
 		merged[key] = value
 	}
-	// Credential values never belong in executor inventory. These two immutable
-	// references are the only runtime-secret metadata accepted from a Nomad
-	// checkpoint update; an operation cannot silently rotate either reference.
-	for _, key := range []string{"env_secret_id_AGENTCTL_BOOTSTRAP_NONCE", "env_secret_id_AGENTCTL_AUTH_TOKEN"} {
+	// Credential values never belong in executor inventory. The two secret
+	// references and the reverse Kandev API tunnel identity (original URL and
+	// remote port, needed to reopen the same listener on recovery) are the only
+	// metadata accepted from a Nomad checkpoint update; an operation cannot
+	// silently rotate any of them.
+	for _, key := range nomadImmutableCheckpointMetadataKeys {
 		next, _ := incomingMetadata[key].(string)
 		if next == "" {
 			continue

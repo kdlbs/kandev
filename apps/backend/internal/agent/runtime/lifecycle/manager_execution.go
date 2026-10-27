@@ -943,11 +943,12 @@ func validateRetainedNomadLaunchInputs(info *WorkspaceInfo, request *ExecutorCre
 	if err != nil || !state.WorkspaceInputCaptured {
 		return errors.New("retained Nomad operation is missing captured original workspace input")
 	}
-	workspacePath, err := nomad.EnvironmentWorkspacePath(profile.WorkspaceRoot, info.TaskEnvironmentID, info.ValidatedTaskEnvironmentGeneration)
+	workspacePath, err := nomadIdentityWorkspacePath(profile, info.TaskEnvironmentID, info.ValidatedTaskEnvironmentGeneration)
 	if err != nil {
 		return fmt.Errorf("derive retained Nomad environment workspace: %w", err)
 	}
-	digest, err := nomadLaunchDigest(profile, request, state.WorkspaceInputPath, workspacePath)
+	digest, err := nomadLaunchDigest(profile, request, state.WorkspaceInputPath,
+		nomadDigestWorkspacePath(profile, info.TaskEnvironmentID, info.ValidatedTaskEnvironmentGeneration, workspacePath))
 	if err != nil {
 		return err
 	}

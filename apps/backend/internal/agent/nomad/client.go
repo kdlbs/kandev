@@ -181,7 +181,7 @@ func (c *Client) RegisterCreateOnly(ctx context.Context, job Job) (RegisterResul
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Never include response bodies: Nomad diagnostics can echo submitted
 		// jobspec fields, and the caller only needs a safe status classification.
-		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		if (resp.StatusCode >= 300 && resp.StatusCode < 400) || resp.StatusCode >= 500 {
 			return RegisterResult{}, fmt.Errorf("%w: Nomad returned HTTP %d", ErrRegistrationOutcomeUnknown, resp.StatusCode)
 		}
 		if resp.StatusCode == http.StatusConflict {
@@ -285,6 +285,18 @@ func (c *Client) getJSON(ctx context.Context, path string, result any) error {
 	return nil
 }
 
+// apiStatusError is a non-200 answer to a read request.
+type apiStatusError struct{ status int }
+
+func (e *apiStatusError) Error() string { return fmt.Sprintf("nomad API returned HTTP %d", e.status) }
+
+// IsNotFound reports whether err is Nomad's authoritative 404 for a read: the
+// object does not exist.
+func IsNotFound(err error) bool {
+	var statusErr *apiStatusError
+	return errors.As(err, &statusErr) && statusErr.status == http.StatusNotFound
+}
+
 func (c *Client) getRawJSON(ctx context.Context, path string) (json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
@@ -297,7 +309,7 @@ func (c *Client) getRawJSON(ctx context.Context, path string) (json.RawMessage, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("nomad API returned HTTP %d", resp.StatusCode)
+		return nil, &apiStatusError{status: resp.StatusCode}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxJobResponseBytes+1))
 	if err != nil {

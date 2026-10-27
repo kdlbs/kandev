@@ -20,7 +20,9 @@ var (
 )
 
 // NomadReadmitRequest names one exact retained inventory row and the
-// operator's manual attestation that its runtime and fence are gone.
+// operator's manual attestation that its runtime and fence are gone. NodeID is
+// empty only for a pool row that was never placed on a node; the exact-row
+// match rejects an empty NodeID against any placed row.
 type NomadReadmitRequest struct {
 	NodeID        string
 	EnvironmentID string
@@ -32,7 +34,7 @@ type NomadReadmitRequest struct {
 // Validate rejects an incomplete identity or attestation.
 func (r NomadReadmitRequest) Validate() error {
 	operator := strings.TrimSpace(r.Attestation.Operator)
-	if r.NodeID == "" || r.EnvironmentID == "" || r.Generation < 1 || r.JobID == "" ||
+	if r.EnvironmentID == "" || r.Generation < 1 || r.JobID == "" ||
 		!r.Attestation.Complete() || len(operator) > readmitOperatorMaxLen || strings.ContainsFunc(operator, isControlRune) {
 		return ErrNomadReadmitInvalid
 	}

@@ -174,11 +174,11 @@ func (conn *nomadAgentctlConnection) establish(
 	if err != nil {
 		return err
 	}
-	created, err := ensureNomadAgentctlInstance(ctx, control, state, req)
+	created, createdNow, err := ensureNomadAgentctlInstance(ctx, control, state, req)
 	if err != nil {
 		return err
 	}
-	if err := conn.attachNomadAgentctlInstance(ctx, created, identity, state, req, log); err != nil {
+	if err := conn.attachNomadAgentctlInstance(ctx, created, createdNow, identity, state, req, log); err != nil {
 		return err
 	}
 	conn.instance = &ExecutorInstance{
@@ -253,26 +253,26 @@ func ensureNomadAgentctlInstance(
 	control *agentctl.ControlClient,
 	state *nomad.EnvironmentState,
 	req *ExecutorCreateRequest,
-) (*agentctl.InstanceInfo, error) {
+) (*agentctl.InstanceInfo, bool, error) {
 	created, err := control.GetInstance(ctx, req.InstanceID)
 	createdNow := false
 	if errors.Is(err, agentctl.ErrInstanceNotFound) {
 		created, err = createNomadAgentctlInstance(ctx, control, state, req)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		createdNow = true
 	} else if err != nil {
-		return nil, fmt.Errorf("connect Nomad agentctl: inspect retained instance: %w", err)
+		return nil, false, fmt.Errorf("connect Nomad agentctl: inspect retained instance: %w", err)
 	}
 	if created == nil || created.ID != req.InstanceID || created.Port != state.InstancePort ||
 		created.TaskID != req.TaskID || created.SessionID != req.SessionID || created.WorkspacePath != state.WorkspacePath {
 		if created != nil && created.ID != "" && createdNow {
 			deleteNomadAgentctlInstance(control, created.ID)
 		}
-		return nil, errors.New("connect Nomad agentctl: retained instance owner, workspace, identity, or reserved port does not match Nomad allocation")
+		return nil, false, errors.New("connect Nomad agentctl: retained instance owner, workspace, identity, or reserved port does not match Nomad allocation")
 	}
-	return created, nil
+	return created, createdNow, nil
 }
 
 func createNomadAgentctlInstance(
@@ -301,24 +301,32 @@ func createNomadAgentctlInstance(
 }
 
 // attachNomadAgentctlInstance forwards the instance port, waits for health, and
-// checkpoints the ready phase with the proven server identity.
+// checkpoints the ready phase with the proven server identity. On failure the
+// instance is deleted only when this attempt created it; a pre-existing
+// instance may still be live and is left for the next attempt.
 func (conn *nomadAgentctlConnection) attachNomadAgentctlInstance(
 	ctx context.Context,
 	created *agentctl.InstanceInfo,
+	createdNow bool,
 	identity *agentctl.IdentityInfo,
 	state *nomad.EnvironmentState,
 	req *ExecutorCreateRequest,
 	log *logger.Logger,
 ) error {
 	control := conn.controlClient
+	rollback := func() {
+		if createdNow {
+			deleteNomadAgentctlInstance(control, created.ID)
+		}
+	}
 	instanceForwarder, err := conn.transport.Forward(created.Port, log)
 	if err != nil {
-		deleteNomadAgentctlInstance(control, created.ID)
+		rollback()
 		return fmt.Errorf("connect Nomad agentctl: forward instance port: %w", err)
 	}
 	conn.instanceForwarder = instanceForwarder
 	if err := waitAgentctlHealthy(ctx, instanceForwarder.LocalPort(), sshAgentctlHealthTimeout); err != nil {
-		deleteNomadAgentctlInstance(control, created.ID)
+		rollback()
 		return fmt.Errorf("connect Nomad agentctl: instance health check failed: %w", err)
 	}
 	if state.ServerIdentity != identity.ServerIdentity || state.Phase != nomadPhaseReady {
@@ -326,7 +334,7 @@ func (conn *nomadAgentctlConnection) attachNomadAgentctlInstance(
 		state.Phase = nomadPhaseReady
 		state.Revision++
 		if err := checkpointNomadState(ctx, req, state); err != nil {
-			deleteNomadAgentctlInstance(control, created.ID)
+			rollback()
 			return fmt.Errorf("connect Nomad agentctl: checkpoint server identity: %w", err)
 		}
 	}
