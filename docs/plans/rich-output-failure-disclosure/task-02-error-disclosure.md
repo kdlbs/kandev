@@ -261,3 +261,20 @@ Post-merge checks also passed the rich-output component tests (7), backend MCP
 server package test, web typecheck, full web lint, the rich-output and resize
 desktop E2E files, and the five related mobile E2E files (11 tests). The E2E
 runner rebuilt the web app successfully.
+
+PR fixup on 2026-10-27: merged the current `main` base at `d549fa694b7` into
+the PR branch. The earlier profile-deletion conflict now uses the base's
+`getSeededAgentProfile` helper, which targets the fixture profile. The merge
+completed without conflicts, and the existing debug-skill edits in the
+worktree were left unstaged.
+
+The prior PR-head E2E run reported the mobile shared-sidebar test failing on
+all four attempts. Its backend log showed that unarchive raced an archive
+cleanup still in the `running` state. The destination is only rendered as a
+sidebar row, so its fixture no longer creates an unnecessary completed
+session; the anchor retains the seeded conversation needed by the test.
+Focused verification on the merged base passed: the mobile shared-sidebar
+test passed three repetitions with retries disabled, the desktop counterpart
+passed once with retries disabled, and targeted ESLint, Prettier, and
+`git diff --check` passed. The PR has not yet received CI results for the
+merged head.
