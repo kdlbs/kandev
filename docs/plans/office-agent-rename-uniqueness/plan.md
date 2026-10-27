@@ -35,12 +35,14 @@ implemented and locally verified. The single sequential work order is complete.
   through independent tests using the real service and repository.
 - Preserve successful unchanged/omitted-name saves, unused names, reuse in
   another workspace, exact string semantics, and the global profile namespace.
+- Correct two existing workflowsync test fixtures exposed during required CI:
+  wait for automatic sync completion before changing their next-phase inputs.
 
 ### Out of scope
 
 Schema/index/migration changes, concurrency admission or locking changes,
 existing-data repair, exporter workarounds, broad rename refactoring, the
-legacy `office/service` facade, config import/sync reconciliation, execution
+legacy `office/service` facade, production config import/sync reconciliation, execution
 profile naming, frontend or browser changes, dependency changes, and runtime
 feature flags.
 
@@ -210,3 +212,37 @@ verification results remain the historical initial-slice evidence.
 - A refactor to compare names globally, normalize strings, or include deleted
   rows would change existing namespace semantics; retain the repository helper
   and its controls.
+
+### Required CI fixture completion correction
+
+Required CI exposed a synchronization gap in the existing workflowsync tests.
+`PollSuspended` is persisted before the automatic worker releases its workspace
+lock and removes its in-flight entry. Observing the saved flag does not prove
+that the first worker has finished; a following rearm tick can lose its
+`TryLock`, and metric or clock assertions can race the prior worker.
+
+The delivery scope includes only these additional test paths:
+
+- `apps/backend/internal/workflowsync/circuit_test.go`:
+  `TestSyncDueConfigs_FirstKnownFingerprintRearmsSuspendedConfig`.
+- `apps/backend/internal/workflowsync/service_test.go`:
+  `TestPermanentFailureSuspendsPollingUntilManualRecovery`.
+
+Each fixture now waits, under `automaticMu`, for
+`automaticInFlight["ws-1"] == nil` after observing persisted suspension and
+before changing provider, metric, or clock inputs. Existing assertions and
+one-second eventual-check bounds remain intact. Production workflowsync code,
+Office behavior, public documentation, and the product contract do not change.
+
+The hosted failure supplies the original failure evidence. The unchanged local
+selection passed both cases at count 20, so the CI failure was not reproduced
+locally; it was not rerun to obtain a failure. After the waits, the same
+selection passed at count 20 with race detection (Go result 1.248s), and the
+affected workflowsync package passed once (Go result 1.322s). Changed-Go lint
+passed with zero issues at the canonical 3GiB limit. Catalog/specification
+checks, all 24 local links, delivery coverage, gofmt, and diff checks passed.
+Hosted CI and review remain external delivery gates.
+
+Three exact failing browser cases also passed once locally with retries
+disabled: mobile Stats, mobile review toggling, and desktop review toggling.
+Those passes do not clear their required CI failures or establish their causes.

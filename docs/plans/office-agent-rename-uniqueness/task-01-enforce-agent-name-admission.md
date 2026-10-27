@@ -45,7 +45,7 @@ export, while valid saves continue to work.
 
 Repository/storage changes, schema/index/migration changes, concurrent-writer
 serialization, existing duplicate repair, exporter changes, the legacy
-`office/service` facade, import/sync changes, execution-profile naming,
+`office/service` facade, production import/sync changes, execution-profile naming,
 frontend/locales, browser tests, dependency changes, and broad verification.
 
 ## Acceptance
@@ -183,6 +183,8 @@ const runtime = [
   'apps/backend/internal/office/agents/handler.go',
   'apps/backend/internal/office/agents/service_name_uniqueness_test.go',
   'apps/backend/internal/office/agents/handler_name_uniqueness_test.go',
+  'apps/backend/internal/workflowsync/circuit_test.go',
+  'apps/backend/internal/workflowsync/service_test.go',
 ];
 const result = validateCoverage({
   changedFiles: [...documents, ...runtime].map(filename => ({ filename, status: 'modified' })),
@@ -211,6 +213,11 @@ Owned new test files:
 
 - `apps/backend/internal/office/agents/service_name_uniqueness_test.go`
 - `apps/backend/internal/office/agents/handler_name_uniqueness_test.go`
+
+Additional owned existing tests for required CI synchronization correction:
+
+- `apps/backend/internal/workflowsync/circuit_test.go`
+- `apps/backend/internal/workflowsync/service_test.go`
 
 Owned design/delivery records:
 
@@ -328,3 +335,45 @@ Remediation results on 2026-10-26:
 
 No dependency reinstall or broad suite was run. The earlier successful results
 remain the initial-slice history. The existing requirement is unchanged.
+
+### Required CI fixture completion correction
+
+The required Backend Postgres packages job exposed
+`TestSyncDueConfigs_FirstKnownFingerprintRearmsSuspendedConfig` failing at the
+applier-count assertion. The test uses isolated in-memory SQLite, even in that
+cohort. A second diagnosed fixture,
+`TestPermanentFailureSuspendsPollingUntilManualRecovery`, shares the same gap:
+saved suspension precedes automatic-worker completion.
+
+Add only an existing-state completion wait in both named tests after the saved
+suspension check and before subsequent provider, metric, or clock operations.
+Use `require.Eventually` with the existing one-second/one-millisecond bounds;
+read `automaticInFlight["ws-1"] == nil` under `automaticMu`. Preserve every
+existing assertion and timeout. No production change, new helper, sleep,
+selector adjustment, or broader fixture repair belongs to this correction.
+
+Run the following unchanged selection once as a baseline, then once after the
+waits. A passing baseline means the hosted failure was unreproduced locally.
+
+```bash
+(cd apps/backend && timeout --kill-after=10s 5m env GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -trimpath -race -tags=fts5 -p=1 -count=20 -timeout=4m ./internal/workflowsync -run '^(TestSyncDueConfigs_FirstKnownFingerprintRearmsSuspendedConfig|TestPermanentFailureSuspendsPollingUntilManualRecovery)$')
+
+(cd apps/backend && timeout --kill-after=10s 6m env GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -trimpath -race -tags=fts5 -p=1 -count=1 -timeout=5m ./internal/workflowsync)
+
+timeout --kill-after=10s 7m env -u GOMEMLIMIT GOTOOLCHAIN=local GOMAXPROCS=2 bash scripts/lint-go-changed apps/backend/internal/workflowsync/circuit_test.go apps/backend/internal/workflowsync/service_test.go
+```
+
+Results on 2026-10-27:
+
+- Unchanged two-case baseline, count 20: exit 0, Go result 1.249s. The hosted
+  failure was not reproduced locally; no repeat was used to seek a failure.
+- The two-case selection after the waits, count 20: exit 0, Go result 1.248s,
+  race detection enabled.
+- Affected workflowsync package once: exit 0, Go result 1.322s, race enabled.
+- Changed-Go lint over the two test files: exit 0, zero issues, canonical
+  3GiB limit.
+- Catalog/specification checks passed, all 24 local links resolve, delivery
+  coverage is covered without errors, and gofmt/diff checks passed.
+
+The Office agents suite and already-passing browser selections are not replayed
+for this test-only correction. Hosted CI remains a separate delivery gate.
