@@ -1096,11 +1096,13 @@ export class SessionPage {
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
-    await tab.click(options);
     const tabWrapper = tab.locator(
       "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' dv-tab ')][1]",
     );
-    await expect(tabWrapper).toHaveClass(/dv-active-tab/, { timeout: 10_000 });
+    await expect(async () => {
+      await tab.click(options);
+      await expect(tabWrapper).toHaveClass(/dv-active-tab/, { timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
   }
 
   /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
