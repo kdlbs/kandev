@@ -128,3 +128,21 @@ numeric controls. A skipped PostgreSQL subtest is not a PostgreSQL pass.
   installation; placing the pinned binary first on PATH fixed the invocation.
 - Specification catalog validation, specification lint and its tests,
   documentation coverage preflight, and diff/status checks passed.
+
+## Required CI test precondition repair
+
+The hosted E2E conflict auto-fix case twice failed after its incidental tooltip
+and Escape sequence; the CI cause is unknown. Mobile help-text coverage moved
+to the controls case. The conflict case sets its prompt override before opening
+the drawer through the existing UI helper, checks the unique visible scoped
+controls and uses the normal switch tap. Conflict feedback, round count,
+single-message deduplication, and cleanup assertions remain unchanged.
+
+- `pnpm --dir apps/web e2e:run --host --shards 1 --no-build --project
+  mobile-chrome` with the 13-case CI worker prefix, `--retries=0 --trace=on`:
+  13 passed (1.4m); this single worker run omits the other three concurrent CI
+  processes and does not establish the original failure cause.
+- `pnpm --dir apps/web exec eslint
+  e2e/tests/pr/mobile-ci-automation-options.spec.ts`: passed.
+- Existing backend binary, web entry point, and fixture plugin identity hashes
+  matched before and after. Hosted validation of this follow-up is pending.

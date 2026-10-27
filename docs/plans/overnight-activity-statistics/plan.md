@@ -91,3 +91,17 @@ records the commands and remaining document checks.
   or multiplies counts. Preserve the independent bounded aggregate check.
 - PostgreSQL timezone and date semantics require live dialect evidence when an
   existing authorized DSN is available; do not invent a database or credentials.
+
+## Required CI test precondition repair
+
+The first hosted E2E retry failed in the mobile conflict auto-fix case when
+the automation drawer was no longer available after an incidental help-tooltip
+Escape sequence. A later retry repeated the same test failure. The CI cause
+remains unknown: the failure trace was unavailable and unchanged isolated and
+worker-prefix runs passed. The test-only follow-up moves the help-text assertion
+to the mobile controls test and opens the conflict drawer through its existing
+UI helper after prompt setup. Conflict and deduplication assertions remain.
+
+A single 13-case mobile worker prefix passed with one worker, retries disabled,
+and tracing enabled against the unchanged verified build. Scoped ESLint passed
+for the changed test. Hosted CI has not yet run this follow-up.
