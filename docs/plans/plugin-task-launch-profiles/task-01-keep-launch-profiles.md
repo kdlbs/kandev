@@ -51,6 +51,15 @@ profile.
 - Fixup passed from `apps/backend`: `go test ./internal/plugins -run '^(TestExactTaskCreateRecoversDomainCommit|TestExactTaskCreateRejectsUnknownLaunchProfilesForNewTasks|TestPluginHost_Tasks_CreateOnly)' -count=1`.
 - Fixup passed from `apps/backend`: `go test ./internal/backendapp -run '^TestPluginsTaskWriter_FindTaskByExternalID$' -count=1`.
 - Fixup passed from `apps/backend`: `go test ./internal/task/service -run '^TestFindTaskByExternalIDForCreateUsesCreateAuthorization$' -count=1`.
-- Fixup: `bash scripts/lint-go-changed` on the seven changed Go files reported
+- Fixup: `bash scripts/lint-go-changed` on the eight changed Go files reported
   0 issues.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
+- Fixup (rebase) from `apps/backend`: `go test ./internal/plugins -count=1`,
+  `go test ./internal/backendapp -run '^TestPluginsTaskWriter' -count=1`, and
+  `go test ./internal/task/service -run '^TestFindTaskByExternalIDForCreateUsesCreateAuthorization$' -count=1`
+  passed; `bash scripts/lint-go-changed` reported 0 issues on the eight changed
+  Go files.
+- Fixup (CI): `file-tree-rename.spec.ts` passed 20/20 with `--retries=0
+  --repeat-each=5` after selecting Files once the rename dirtied the worktree;
+  `mobile-turn-end-history-refresh.spec.ts` passed 8/8 with `--retries=0
+  --repeat-each=8` after asserting the auto-scroll toggle's own pressed state.

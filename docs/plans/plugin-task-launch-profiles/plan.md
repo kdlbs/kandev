@@ -55,10 +55,32 @@ the step prompt and the task description, as it does for native watchers.
 - Fixup passed from `apps/backend`: `go test ./internal/plugins -run '^(TestExactTaskCreateRecoversDomainCommit|TestExactTaskCreateRejectsUnknownLaunchProfilesForNewTasks|TestPluginHost_Tasks_CreateOnly)' -count=1`.
 - Fixup passed from `apps/backend`: `go test ./internal/backendapp -run '^TestPluginsTaskWriter_FindTaskByExternalID$' -count=1`.
 - Fixup passed from `apps/backend`: `go test ./internal/task/service -run '^TestFindTaskByExternalIDForCreateUsesCreateAuthorization$' -count=1`.
-- Fixup: `bash scripts/lint-go-changed` on the seven changed Go files reported
+- Fixup: `bash scripts/lint-go-changed` on the eight changed Go files reported
   0 issues.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 - The new tests cover storing both profiles, storing only the ones given, the
   writer receiving them without a start, and rejecting unknown profiles without
   a start. The fixup adds exact-create retry coverage for removal of either
   profile after the domain task commits but before the command receipt completes.
+- Fixup (rebase) from `apps/backend`: `go test ./internal/plugins -count=1`,
+  `go test ./internal/backendapp -run '^TestPluginsTaskWriter' -count=1`, and
+  `go test ./internal/task/service -run '^TestFindTaskByExternalIDForCreateUsesCreateAuthorization$' -count=1`
+  passed. `bash scripts/lint-go-changed` on the eight changed Go files reported
+  0 issues.
+- Fixup (CI): rebased onto current `main`. The only conflict was
+  `apps/web/e2e/tests/task/file-tree-drag-drop.spec.ts`, where `main` already
+  carried the equivalent stabilization, so the branch kept `main`'s version.
+- Fixup (CI): `pnpm e2e:run --host --no-build --project chromium
+  tests/task/file-tree-rename.spec.ts -- --retries=0 --repeat-each=5` passed 20
+  tests after the scenario selected Files once the rename dirtied the worktree.
+- Fixup (CI): `pnpm e2e:run --host --no-build --project mobile-chrome
+  tests/chat/mobile-turn-end-history-refresh.spec.ts -- --retries=0
+  --repeat-each=8` passed 8 tests after the scenario asserted the auto-scroll
+  toggle's own pressed state instead of its swapped label.
+- Fixup (CI): the pseudo-locale spec cannot run on the local host because the
+  local backend advertises an available Kandev update, which the pseudo check
+  flags as un-externalized copy. The CI shard that owns that spec passed with
+  this fix on the previous head.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py
+  --all`, and the changed-spec ESLint and `e2e:sleep-ratchet` checks passed
+  after the rebase.

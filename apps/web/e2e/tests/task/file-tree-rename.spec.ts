@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { waitForSessionGitHydration } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { dwell, watchWs } from "../../helpers/causal-waits";
 
@@ -60,6 +61,8 @@ async function setupTask(args: {
   await testPage.reload();
   await session.waitForLoad();
   await treeResponse;
+  // Initial commit discovery can activate Changes after the tree read settles.
+  await waitForSessionGitHydration(testPage, task.session_id!);
   await session.clickTab("Files");
   return session;
 }
@@ -117,15 +120,17 @@ test.describe("File tree inline rename", () => {
     });
     await input.press("Enter");
 
-    // Old node disappears from the tree, new node appears.
-    await expect(session.fileTreeNode("rename-me.ts")).toHaveCount(0, { timeout: 10_000 });
-    await session.fileTree.waitForFileTreeNode("renamed.ts");
-
-    // And the rename hit the file system.
+    // The rename makes the worktree dirty, which activates Changes. Prove the
+    // rename on disk first, then select Files before asserting the tree.
     await expect
       .poll(() => fs.existsSync(path.join(repoDir, "renamed.ts")), { timeout: 10_000 })
       .toBe(true);
     expect(fs.existsSync(path.join(repoDir, "rename-me.ts"))).toBe(false);
+
+    // Old node disappears from the tree, new node appears.
+    await session.clickTab("Files");
+    await session.fileTree.waitForFileTreeNode("renamed.ts");
+    await expect(session.fileTreeNode("rename-me.ts")).toHaveCount(0, { timeout: 10_000 });
   });
 
   test("rename cancels on Escape and leaves the tree and disk untouched", async ({
@@ -214,6 +219,7 @@ test.describe("File tree inline rename", () => {
       .poll(() => fs.existsSync(path.join(repoDir, "blur-final.ts")), { timeout: 10_000 })
       .toBe(true);
     expect(fs.existsSync(path.join(repoDir, "blur-original.ts"))).toBe(false);
+    await session.clickTab("Files");
     await session.fileTree.waitForFileTreeNode("blur-final.ts");
     await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);
   });
