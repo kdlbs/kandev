@@ -1017,17 +1017,23 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await filters.saveAs("Compact task rows");
     await filters.expectActiveViewChip("Compact task rows");
 
-    const savedSettings = await apiClient.getUserSettings();
-    const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
-      .views as Array<{
+    type SavedView = {
       id: string;
       name?: string;
       task_row?: { details_enabled?: boolean };
-    }>;
-    const savedView = savedViews.find((view) => view.name === "Compact task rows");
-    expect(savedView?.task_row).toMatchObject({
-      details_enabled: false,
-    });
+    };
+    const readSavedView = async () => {
+      const savedSettings = await apiClient.getUserSettings();
+      const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
+        .views as SavedView[];
+      return savedViews.find((view) => view.name === "Compact task rows");
+    };
+    await expect
+      .poll(async () => (await readSavedView())?.task_row)
+      .toMatchObject({
+        details_enabled: false,
+      });
+    const savedView = await readSavedView();
 
     await filters.setTaskRowTrailing("Relative time");
     await filters.saveOverwrite();

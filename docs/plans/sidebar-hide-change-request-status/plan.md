@@ -49,7 +49,9 @@ Desktop and mobile sidebar filter Playwright tests prove selection and preview.
 ## Verification results
 
 Component regression: passed (1). Existing task-item suite: passed (49).
-Desktop and mobile managed Playwright scenarios: passed (1 each).
+Desktop and mobile managed Playwright scenarios: passed (1 each). The existing
+desktop saved-view scenario passed with retries disabled after its persistence
+assertion was changed to wait for the confirmed save.
 Specification validation and lint: passed. TypeScript check with an 8 GiB Node heap: passed.
 Public documentation validation:
 63 tests and 54 pages passed. Focused frontend lint: passed.

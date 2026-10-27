@@ -43,6 +43,7 @@ for the current and intended row. The phone action remains touch accessible.
 (cd apps && pnpm --filter @kandev/web test -- --run components/task/task-item-hidden-status.test.tsx)
 (cd apps/web && CAPTURE_PR_ASSETS=1 ../../scripts/run-quiet e2e --summary -- pnpm e2e:run e2e/tests/task/sidebar-filter.spec.ts -- --grep "hides change-request status with Nothing")
 (cd apps/web && CAPTURE_PR_ASSETS=1 ../../scripts/run-quiet e2e --summary -- pnpm e2e:run --no-build --project mobile-chrome e2e/tests/task/mobile-sidebar-views.spec.ts -- --grep "hides change-request status with Nothing")
+(cd apps/web && ../../scripts/run-quiet e2e --summary -- pnpm e2e:run --no-build e2e/tests/task/sidebar-filter.spec.ts -- --grep "previews, saves, discards, and reloads task row presentation with compact trailing content" --retries=0)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 ```
@@ -70,4 +71,6 @@ The final component test passed (1); desktop and mobile managed Playwright
 scenarios passed (1 each). The mobile run reused the fresh desktop build.
 Specification validation and lint passed. TypeScript checking passed with an
 8 GiB Node heap after the default heap was exhausted. The full pre-existing task-item
-suite also passed (49 tests).
+suite also passed (49 tests). CI exposed an existing optimistic-save timing
+race in the desktop presentation test; its persistence assertion now polls
+the settings API. The focused scenario passed with retries disabled (1).
