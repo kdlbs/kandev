@@ -42,8 +42,10 @@ Out of scope: a prepare-script mechanism for plugin executors.
 
 ## Verification
 
-- `go test -tags fts5 ./internal/agent/runtime/lifecycle` passes as a whole.
-- `executor_plugin_git_identity_test.go` runs the command through a real shell
-  and `git`, reads the identity back from the remote home's `.gitconfig`,
-  checks that neither value is in a command line, and checks that nothing runs
-  when either value is missing. Dropping the email from the command makes it fail.
+- `go test -run '^(TestPluginExecutor|TestApplyPluginExecutorGitIdentity|TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment)' ./internal/agent/runtime/lifecycle` passes.
+- The tests run identity setup through the agentctl process API at fresh launch
+  and retained attach. They read the identity from the agent's effective Git
+  configuration, isolate XDG paths from host configuration, and check that a
+  failed setup does not fail launch.
+- A full `go test ./internal/agent/runtime/lifecycle` run was stopped after six
+  minutes without output. The full package result is unknown.

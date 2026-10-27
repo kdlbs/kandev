@@ -124,7 +124,7 @@ func TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment(t *te
 	runtime.SetRecoveryDependencies(&pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
 		Provider: testPluginExecutorLaunchProvider(), ProfileID: profileID,
 	}}, store)
-	runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		if executionID != runtimeIdentity || token != "agentctl-secret" {
 			return nil, fmt.Errorf("runtime identity=%q token=%q", executionID, token)
 		}
