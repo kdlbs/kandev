@@ -310,7 +310,7 @@ test.describe("File tree drag and drop", () => {
     await session.fileTreeNode("dest/src").click();
     await expect(session.fileTreeNode("dest/src/a.txt")).toBeVisible();
     await session.fileTreeNode("dest/src/sub").click();
-    await expect(session.fileTreeNode("dest/src/sub/keep.txt")).toBeVisible();
+    await session.fileTree.waitForFileTreeNode("dest/src/sub/keep.txt");
     await expect(session.fileTreeNode("dest/a.txt")).toHaveCount(0);
   });
 

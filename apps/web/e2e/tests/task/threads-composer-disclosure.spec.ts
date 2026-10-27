@@ -34,11 +34,15 @@ for (const layout of ["grid", "columns"] as const) {
     await seedThreadPresentation(apiClient, { layout, autoHideComposer: true });
     await testPage.goto(`/threads?taskId=${task.id}`);
 
+    const board = testPage.getByTestId("threads-board");
     const tile = testPage.getByTestId(`thread-column-${task.id}`);
     const container = tile.getByTestId("clarification-overlay-container");
     const transcript = tile.locator(".chat-message-list");
+    await expect(board).toHaveAttribute("data-layout", layout);
+    await expect(tile.getByTestId("clarification-option")).toHaveCount(3, {
+      timeout: 30_000,
+    });
     await expect(container).toBeVisible();
-    await expect(tile.getByTestId("clarification-option")).toHaveCount(3);
     await expect
       .poll(() => transcript.evaluate((el) => el.getBoundingClientRect().height))
       .toBeGreaterThanOrEqual(79);
