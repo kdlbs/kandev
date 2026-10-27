@@ -37,8 +37,9 @@ test("latest task search wins and clear cancels queued input", async ({
   ).toBeVisible();
 
   // Freeze only the browser timer during this queued-input cancellation control.
-  await testPage.clock.install();
-  await testPage.clock.pauseAt(new Date());
+  const clockStart = new Date();
+  await testPage.clock.install({ time: clockStart });
+  await testPage.clock.pauseAt(new Date(clockStart.getTime() + 60_000));
   const queries: string[] = [];
   testPage.on("request", (request) => {
     const url = new URL(request.url());

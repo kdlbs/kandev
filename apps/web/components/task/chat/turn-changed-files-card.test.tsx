@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
+import { FileIcon } from "@/components/ui/file-icon";
 import { TurnChangedFilesCard } from "./turn-changed-files-card";
 
 const sessionId = "session-1";
@@ -75,6 +76,12 @@ function translateCardTestCopy(key: string, options?: Record<string, unknown>): 
   const translations: Record<string, () => string> = {
     "task:turnChangesFileCount": () => `${options?.count ?? 0} changed files`,
     "task:turnChangesLoadedFileCount": () => `${options?.count ?? 0} loaded files`,
+    "task:turnChangesBinaryCount": () => `${options?.count ?? 0} binary files`,
+    "task:turnChangesUnknownCount": () => `${options?.count ?? 0} unknown files`,
+    "task:turnChangesUnknownCounts": () => "Unknown counts",
+    "task:turnChangesKindAdded": () => "Added",
+    "task:turnChangesKindRenamed": () => "Renamed",
+    "task:turnChangesKindModified": () => "Modified",
     "task:turnChangesFolderAccessibleLabel": () =>
       `${options?.path} folder, ${options?.count} loaded files, +${options?.added} -${options?.deleted}, ${options?.unknown} unknown`,
     "task:turnChangesFileAccessibleLabel": () =>
@@ -117,6 +124,109 @@ it("keeps folder expansion separate from exact checkout file selection", () => {
     path: "src/main.ts",
     fileKind: "modified",
   });
+});
+
+it("uses shared file icons, kind colors, and line statistics for known counts", () => {
+  const knownFile = {
+    id: "known-file",
+    repository_change_id: repositoryChangeId,
+    checkout_id: checkoutId,
+    path: "src/component.tsx",
+    kind: "modified",
+    added_lines: 3,
+    deleted_lines: 1,
+    content_availability: "ready",
+  };
+  const unknownFile = {
+    id: "unknown-file",
+    repository_change_id: repositoryChangeId,
+    checkout_id: checkoutId,
+    path: "src/unknown.kandev-test-no-icon",
+    kind: "added",
+    content_availability: "ready",
+  };
+  const binaryFile = {
+    id: "binary-file",
+    repository_change_id: repositoryChangeId,
+    checkout_id: checkoutId,
+    path: "logo.png",
+    old_path: "old-logo.png",
+    kind: "renamed",
+    binary: true,
+    content_availability: "ready",
+  };
+  mockFiles.byRepository = {
+    [repositoryChangeId]: [knownFile, unknownFile, binaryFile],
+  };
+  mockFiles.totalsByRepository = { [repositoryChangeId]: 3 };
+
+  render(
+    <>
+      <span data-testid="file-tree-known-icon">
+        <FileIcon fileName="component.tsx" />
+      </span>
+      <span data-testid="file-tree-unknown-icon">
+        <FileIcon fileName="unknown.kandev-test-no-icon" />
+      </span>
+      <TurnChangedFilesCard
+        sessionId={sessionId}
+        summary={{
+          ...summary,
+          file_count: 3,
+          added_lines: 6,
+          deleted_lines: 3,
+          binary_file_count: 1,
+          unknown_count_file_count: 1,
+        }}
+        onOpenDiff={vi.fn()}
+      />
+    </>,
+  );
+
+  const card = screen.getByTestId("turn-changed-files-card");
+  const sourceFolder = within(card).getByRole("button", { name: /src folder/ });
+  if (sourceFolder.getAttribute("aria-expanded") !== "true") fireEvent.click(sourceFolder);
+  const knownRow = within(card).getByRole("button", { name: /src\/component\.tsx/ });
+  const unknownRow = within(card).getByRole("button", {
+    name: /src\/unknown\.kandev-test-no-icon/,
+  });
+  const iconFor = (row: HTMLElement) =>
+    row.querySelector<HTMLSpanElement>("span[style*='font-family']");
+  const treeKnownIcon = screen
+    .getByTestId("file-tree-known-icon")
+    .querySelector<HTMLSpanElement>("span[style*='font-family']");
+  const treeUnknownIcon = screen
+    .getByTestId("file-tree-unknown-icon")
+    .querySelector<HTMLSpanElement>("span[style*='font-family']");
+  const rowUnknownIcon = iconFor(unknownRow);
+  if (!rowUnknownIcon || !treeUnknownIcon) {
+    throw new Error("Expected both unknown-file icons to render before comparing them");
+  }
+
+  expect(iconFor(knownRow)?.textContent).toBe(treeKnownIcon?.textContent);
+  expect(iconFor(knownRow)?.style.color).toBe(treeKnownIcon?.style.color);
+  expect(rowUnknownIcon.textContent).toBe(treeUnknownIcon.textContent);
+  expect(rowUnknownIcon.style.color).toBe(treeUnknownIcon.style.color);
+
+  expect(within(knownRow).getByText("Modified").className).toContain("text-amber-600");
+  expect(within(unknownRow).getByText("Added").className).toContain("text-emerald-600");
+  expect(within(card).getByText("1 binary files")).toBeTruthy();
+  expect(within(card).getAllByText("1 unknown files")).toHaveLength(2);
+  expect(within(card).getByText("task:turnChangesBinary")).toBeTruthy();
+  expect(within(card).getByText("Unknown counts")).toBeTruthy();
+
+  expect(within(card).getByText("+6").className).toContain("text-emerald-600");
+  expect(within(card).getByText("-3").className).toContain("text-rose-600");
+  expect(
+    within(card)
+      .getAllByText("+3")
+      .every((element) => element.className.includes("text-emerald-600")),
+  ).toBe(true);
+  expect(
+    within(card)
+      .getAllByText("-1")
+      .every((element) => element.className.includes("text-rose-600")),
+  ).toBe(true);
 });
 
 it("labels renamed binary files without inventing line counts", () => {

@@ -1,21 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import {
-  getQuickChatRetainedSessionFromError,
-  startQuickChat,
-  type QuickChatRepositoryInput,
-} from "@/lib/api/domains/workspace-api";
+import type { QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import { updateQuickTerminalTab } from "@/lib/api/domains/quick-terminal-api";
 import { ApiError } from "@/lib/api/client";
 import { type PtyTerminalState } from "@/components/settings/pty-terminal-view";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
-import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import { registerQuickChatCloseHandler } from "./quick-chat-focus";
 import type {
   QuickChatOpeningPayload,
@@ -24,6 +19,9 @@ import type {
 } from "@/lib/state/slices/ui/types";
 import { useQuickChatCloseActions, resolveQuickChatTaskId } from "./use-quick-chat-close-actions";
 import { useQuickChatTabOrder } from "./use-quick-chat-tab-order";
+import { useAgentSelection } from "./use-quick-chat-agent-selection";
+
+export { useAgentSelection };
 
 const noop = () => {};
 
@@ -65,7 +63,7 @@ function useQuickChatStore(workspaceId: string) {
   );
 }
 
-type QuickChatStore = ReturnType<typeof useQuickChatStore>;
+export type QuickChatStore = ReturnType<typeof useQuickChatStore>;
 
 function persistQuickTerminalState(
   store: QuickChatStore,
@@ -146,148 +144,6 @@ function useWorkspaceQuickChat(store: QuickChatStore) {
     }
   }, [activeSession, activeTerminalTab, store]);
   return { sessions, terminalTabs, activeSession, activeTerminalTab };
-}
-
-/** POSTs to start a quick-chat session and returns the response. */
-async function startQuickChatForAgent(
-  workspaceId: string,
-  agentId: string,
-  store: QuickChatStore,
-  repositories: QuickChatRepositoryInput[],
-  openingPayload?: QuickChatOpeningPayload,
-) {
-  const agent = store.agentProfiles.find((p) => p.id === agentId);
-  const sessionCount =
-    store.sessions.filter(
-      (session) =>
-        session.workspaceId === workspaceId &&
-        (session.kind ?? "chat") === "chat" &&
-        !isQuickChatSetupSessionId(session.sessionId),
-    ).length + 1;
-  // i18n-exempt: persisted as the quick-chat task title, same contract as use-config-chat.ts.
-  const initialName = `${agent?.label || "Agent"} - Chat ${sessionCount}`;
-  try {
-    const response = await startQuickChat(workspaceId, {
-      agent_profile_id: agentId,
-      title: initialName,
-      ...(store.agentGeneratedTaskTitles ? { auto_title: true } : {}),
-      repositories: repositories.length > 0 ? repositories : undefined,
-      ...(agent?.cli_passthrough && openingPayload
-        ? {
-            prompt: openingPayload.message,
-            ...(openingPayload.attachments?.length
-              ? { attachments: openingPayload.attachments }
-              : {}),
-          }
-        : {}),
-    });
-    return {
-      sessionId: response.session_id,
-      name: initialName,
-      taskId: response.task_id,
-      agentProfileId: response.agent_profile_id ?? agentId,
-    };
-  } catch (error) {
-    const retained = getQuickChatRetainedSessionFromError(error);
-    if (!retained) throw error;
-    return { ...retained, name: initialName, agentProfileId: agentId };
-  }
-}
-
-/** Manages the eager agent-init lifecycle for the picker.
- *
- * Eager init means the backend boots a real agent process before responding.
- * Aborting the fetch on a rapid second click would NOT stop the backend agent
- * (it's already running by the time the abort lands), and we'd never see the
- * task_id on the FE. Every request runs to completion; request ownership
- * determines activation while late responses reconcile retained tabs.
- *
- * Exported for unit testing — see `use-quick-chat-modal.test.ts`. */
-export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
-  const { t } = useTranslation();
-  const { toast } = useToast();
-  const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
-  const [setupError, setSetupError] = useState<string | null>(null);
-  // Monotonic request id; the latest click "wins" for activation,
-  // while earlier responses upsert without activating.
-  const latestRequestId = useRef(0);
-
-  const reset = useCallback(() => {
-    latestRequestId.current += 1;
-    setPendingAgentId(null);
-    setSetupError(null);
-  }, []);
-
-  const handleSelectAgent = useCallback(
-    async (
-      agentId: string,
-      repositories: QuickChatRepositoryInput[] = [],
-      openingPayload?: QuickChatOpeningPayload,
-    ): Promise<boolean> => {
-      const requestId = ++latestRequestId.current;
-      const setupSessionId = store.activeSessionId;
-      setSetupError(null);
-      setPendingAgentId(agentId);
-      try {
-        const result = await startQuickChatForAgent(
-          workspaceId,
-          agentId,
-          store,
-          repositories,
-          openingPayload,
-        );
-        if (latestRequestId.current !== requestId) {
-          // A newer pick superseded us for activation — upsert the session
-          // into the workspace tabs without selecting it or deleting it.
-          store.upsertQuickChatSessionFromEvent({
-            sessionId: result.sessionId,
-            workspaceId,
-            agentProfileId: result.agentProfileId,
-            kind: "chat",
-            taskId: result.taskId,
-            name: result.name,
-          });
-          recordAgentProfileRecentUseBestEffort("quick_chat", result.agentProfileId, (record) =>
-            store.applyAgentProfileRecentUse("quick_chat", record),
-          );
-          return false;
-        }
-        recordAgentProfileRecentUseBestEffort("quick_chat", result.agentProfileId, (record) =>
-          store.applyAgentProfileRecentUse("quick_chat", record),
-        );
-        if (setupSessionId && isQuickChatSetupSessionId(setupSessionId)) {
-          store.closeQuickChatSession(setupSessionId);
-        }
-        store.openQuickChat(
-          result.sessionId,
-          workspaceId,
-          result.agentProfileId,
-          "chat",
-          result.taskId,
-        );
-        if (
-          openingPayload &&
-          !store.agentProfiles.find((profile) => profile.id === agentId)?.cli_passthrough
-        ) {
-          store.setQuickChatInitialPrompt(result.sessionId, openingPayload);
-        }
-        store.renameQuickChatSession(result.sessionId, result.name);
-        return true;
-      } catch (error) {
-        if (latestRequestId.current !== requestId) return false;
-        const description = error instanceof Error ? error.message : t("chat:unknownError");
-        setSetupError(description);
-        return false;
-      } finally {
-        if (latestRequestId.current === requestId) {
-          setPendingAgentId(null);
-        }
-      }
-    },
-    [workspaceId, store, toast],
-  );
-
-  return { pendingAgentId, setupError, reset, handleSelectAgent };
 }
 
 type QuickChatTabActionsOptions = {
@@ -449,6 +305,7 @@ export function useQuickChatModal(
   const {
     pendingAgentId,
     setupError,
+    reportSetupError,
     reset,
     handleSelectAgent: doSelectAgent,
   } = useAgentSelection(workspaceId, store);
@@ -477,7 +334,9 @@ export function useQuickChatModal(
       agentId: string,
       repositories: QuickChatRepositoryInput[] = [],
       openingPayload?: QuickChatOpeningPayload,
-    ) => doSelectAgent(agentId, repositories, openingPayload),
+      creationId?: string,
+      onFailure?: (error: unknown) => void,
+    ) => doSelectAgent(agentId, repositories, openingPayload, creationId, onFailure),
     [doSelectAgent],
   );
 
@@ -502,6 +361,7 @@ export function useQuickChatModal(
     ),
     pendingAgentId,
     setupError,
+    reportSetupError,
     handleSelectAgent,
   };
 }

@@ -163,6 +163,10 @@ export type QuickChatSession = {
   taskId?: string;
   name?: string;
   agentProfileId?: string;
+  /** Idempotency key for browser-owned Quick Chat creation. */
+  creationId?: string;
+  /** The accepted startup still owns a CREATED/STARTING session. */
+  startupPending?: boolean;
   initialPrompt?: QuickChatInitialPrompt;
 };
 

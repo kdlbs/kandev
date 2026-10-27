@@ -256,6 +256,7 @@ function renderScenario(session: ScenarioSession) {
         editors: { items: [], loaded: true, loading: false, folderOpeningAvailable: false },
         userSettings: { ...defaultState.userSettings, loaded: true },
         connection: { status: "connected", error: null, issueSeverity: "none" },
+        tasks: { ...defaultState.tasks, activeSessionId: id },
         taskSessions: { items: { [id]: session } },
         environmentIdBySessionId: { [id]: session.environment_id },
         sessionAgentctl: { itemsBySessionId: { [id]: { status: "ready" } } },

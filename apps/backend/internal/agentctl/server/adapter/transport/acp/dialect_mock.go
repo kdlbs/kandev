@@ -10,9 +10,26 @@ import (
 func newMockACPDialect() acpDialect {
 	return acpDialect{responseAttemptReset: mockResponseAttemptResetMeta,
 		continuationSupport:         streams.ContinuationNativeSavedHistoryV2,
+		continuationSupportForError: mockContinuationSupportForError,
 		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV1,
 		continuationError:           mockContinuationError,
 		retainedApplicationErr:      mockRetainedApplicationError}
+}
+
+func mockContinuationSupportForError(err error) streams.ContinuationSupport {
+	var request *sdk.RequestError
+	if !errors.As(err, &request) || request.Code != -32603 {
+		return ""
+	}
+	data, ok := request.Data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	meta, ok := nestedMap(data, "kandevMock")
+	if !ok || meta["agentManagedPendingTools"] != true {
+		return ""
+	}
+	return streams.ContinuationAgentManagedToolsV3
 }
 
 func mockRetainedApplicationError(err error) bool {

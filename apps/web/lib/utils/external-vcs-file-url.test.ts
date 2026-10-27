@@ -338,3 +338,19 @@ describe("resolveExternalVcsFileURL SSH identity validation", () => {
     ).toBeNull();
   });
 });
+
+it("builds a verified GHES file URL from its persisted provider identity", () => {
+  expect(
+    resolveExternalVcsFileURL({
+      repository: {
+        provider: "github",
+        provider_host: "https://git.company.example:8443",
+        provider_owner: "acme",
+        provider_name: "site",
+        remote_url: "https://git.company.example:8443/acme/site.git",
+      },
+      path: "README.md",
+      baseBranch: "main",
+    })?.url,
+  ).toBe("https://git.company.example:8443/acme/site/blob/main/README.md");
+});

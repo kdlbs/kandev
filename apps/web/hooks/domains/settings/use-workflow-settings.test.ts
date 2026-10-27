@@ -16,6 +16,8 @@ type StoreWorkflow = {
   agent_profile_id?: string;
   hidden?: boolean;
   style?: "kanban" | "office" | "custom";
+  source?: string;
+  source_path?: string;
 };
 
 type MockState = { workflows: { items: StoreWorkflow[] } };
@@ -66,6 +68,39 @@ function renderWithStoreItem(initial: Workflow[], store: StoreWorkflow) {
 
 beforeEach(() => {
   setStore([]);
+});
+
+describe("useWorkflowSettings provenance", () => {
+  const synced = { source: "github", source_path: ".kandev/workflows/review.yaml" };
+
+  it("keeps provenance on workflows first seen through the store", () => {
+    const { result } = renderWithStoreItem([], { ...STORE_B1, ...synced });
+    expect(result.current.workflowItems[0]).toMatchObject(synced);
+    expect(result.current.savedWorkflowItems[0]).toMatchObject(synced);
+  });
+
+  it("tracks sync and removal without discarding local field drafts", () => {
+    const manual = { source: "manual", source_path: "" };
+    const initial = { ...wf("wf-b1", "ws-b", NAME_B1), ...manual };
+    const { result, rerender } = renderWithStoreItem([initial], { ...STORE_B1, ...manual });
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, description: UNSAVED_LOCAL_DRAFT })),
+      );
+    });
+    rerender({ storeItems: [{ ...STORE_B1, ...synced }] });
+    expect(result.current.workflowItems[0]).toMatchObject({
+      ...synced,
+      description: UNSAVED_LOCAL_DRAFT,
+    });
+    expect(result.current.savedWorkflowItems[0]).toMatchObject(synced);
+    rerender({ storeItems: [{ ...STORE_B1, ...manual }] });
+    expect(result.current.workflowItems[0]).toMatchObject({
+      ...manual,
+      description: UNSAVED_LOCAL_DRAFT,
+    });
+    expect(result.current.savedWorkflowItems[0]).toMatchObject(manual);
+  });
 });
 
 describe("useWorkflowSettings — store boundary filters", () => {

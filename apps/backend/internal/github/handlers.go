@@ -39,40 +39,43 @@ func RegisterMockRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 }
 
 func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
-	dispatcher.RegisterFunc(ws.ActionGitHubStatus, wsStatus(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRsList, wsListTaskPRs(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRGet, wsGetTaskPR(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubPRFeedbackGet, wsGetPRFeedback(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubReviewWatchesList, wsListReviewWatches(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubReviewWatchCreate, wsCreateReviewWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubReviewWatchUpdate, wsUpdateReviewWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubReviewWatchDelete, wsDeleteReviewWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubReviewTrigger, wsTriggerReviewWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubReviewTriggerAll, wsTriggerAllReviewChecks(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubPRWatchesList, wsListPRWatches(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubPRWatchDelete, wsDeletePRWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubPRFilesGet, wsGetPRFiles(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitsGet, wsGetPRCommits(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitGet, wsGetPRCommitDetail(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRSync, wsSyncTaskPR(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubStats, wsGetStats(svc, log))
+	register := func(action string, handler ws.HandlerFunc) {
+		dispatcher.RegisterFunc(action, withWSExpectedGitHubHost(handler))
+	}
+	register(ws.ActionGitHubStatus, wsStatus(svc, log))
+	register(ws.ActionGitHubTaskPRsList, wsListTaskPRs(svc, log))
+	register(ws.ActionGitHubTaskPRGet, wsGetTaskPR(svc, log))
+	register(ws.ActionGitHubPRFeedbackGet, wsGetPRFeedback(svc, log))
+	register(ws.ActionGitHubReviewWatchesList, wsListReviewWatches(svc, log))
+	register(ws.ActionGitHubReviewWatchCreate, wsCreateReviewWatch(svc, log))
+	register(ws.ActionGitHubReviewWatchUpdate, wsUpdateReviewWatch(svc, log))
+	register(ws.ActionGitHubReviewWatchDelete, wsDeleteReviewWatch(svc, log))
+	register(ws.ActionGitHubReviewTrigger, wsTriggerReviewWatch(svc, log))
+	register(ws.ActionGitHubReviewTriggerAll, wsTriggerAllReviewChecks(svc, log))
+	register(ws.ActionGitHubPRWatchesList, wsListPRWatches(svc, log))
+	register(ws.ActionGitHubPRWatchDelete, wsDeletePRWatch(svc, log))
+	register(ws.ActionGitHubPRFilesGet, wsGetPRFiles(svc, log))
+	register(ws.ActionGitHubPRCommitsGet, wsGetPRCommits(svc, log))
+	register(ws.ActionGitHubPRCommitGet, wsGetPRCommitDetail(svc, log))
+	register(ws.ActionGitHubTaskPRSync, wsSyncTaskPR(svc, log))
+	register(ws.ActionGitHubStats, wsGetStats(svc, log))
 
 	// Issue watch handlers
-	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchesList, wsListIssueWatches(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchCreate, wsCreateIssueWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchUpdate, wsUpdateIssueWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubIssueWatchDelete, wsDeleteIssueWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubIssueTrigger, wsTriggerIssueWatch(svc, log))
-	dispatcher.RegisterFunc(ws.ActionGitHubIssueTriggerAll, wsTriggerAllIssueChecks(svc, log))
+	register(ws.ActionGitHubIssueWatchesList, wsListIssueWatches(svc, log))
+	register(ws.ActionGitHubIssueWatchCreate, wsCreateIssueWatch(svc, log))
+	register(ws.ActionGitHubIssueWatchUpdate, wsUpdateIssueWatch(svc, log))
+	register(ws.ActionGitHubIssueWatchDelete, wsDeleteIssueWatch(svc, log))
+	register(ws.ActionGitHubIssueTrigger, wsTriggerIssueWatch(svc, log))
+	register(ws.ActionGitHubIssueTriggerAll, wsTriggerAllIssueChecks(svc, log))
 
 	// Action preset handlers
-	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsList, wsListActionPresets(svc))
-	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsUpdate, wsUpdateActionPresets(svc))
-	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsReset, wsResetActionPresets(svc))
+	register(ws.ActionGitHubActionPresetsList, wsListActionPresets(svc))
+	register(ws.ActionGitHubActionPresetsUpdate, wsUpdateActionPresets(svc))
+	register(ws.ActionGitHubActionPresetsReset, wsResetActionPresets(svc))
 
 	// Manual cleanup sweeps
-	dispatcher.RegisterFunc(ws.ActionGitHubCleanupReviewTasks, wsCleanupReviewTasks(svc))
-	dispatcher.RegisterFunc(ws.ActionGitHubCleanupIssueTasks, wsCleanupIssueTasks(svc))
+	register(ws.ActionGitHubCleanupReviewTasks, wsCleanupReviewTasks(svc))
+	register(ws.ActionGitHubCleanupIssueTasks, wsCleanupIssueTasks(svc))
 }
 
 // wsCleanupReviewTasks runs the manual full sweep and returns the count

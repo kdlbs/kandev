@@ -1610,6 +1610,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                   onFirstMessageHiddenChange={setIsFirstMessageHidden}
                   anchoredBarHeight={showAnchoredBar && canMountBar ? anchoredBarHeight : 0}
                   isVisible={transcriptIsVisible}
+                  detailActive={detailActive}
                   launchErrorOwned={launchErrorOwned}
                   launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
                   launchErrorOccurredAt={

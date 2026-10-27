@@ -156,7 +156,9 @@ The public object key remains
    verifies that `FETCH_HEAD` resolves to the event `HEAD_SHA`. It does not
    check out that ref.
 3. The trusted context helper computes the merge base, patch, manifest, and
-   bounded regular UTF-8 files from the immutable head object.
+   bounded regular UTF-8 files from the immutable head object. The manifest maps
+   original paths to neutral blob filenames, so PR instruction files cannot
+   become automatically discovered agent policy.
 4. The agent reads trusted instructions plus that bounded context, edits only
    `.pr-walkthrough/draft.json`, and invokes the fixed trusted renderer.
 5. Publication and linking run in separate jobs with their existing minimal
@@ -225,8 +227,9 @@ trigger.
   use contributor-controlled workflow, skill, setup, or link helpers.
 - Walkthrough generation receives the existing model credential but no R2
   credentials or pull request write permission.
-- The review workflows retain their existing read-only agent policies and
-  advisory posting boundaries.
+- The review workflows use the [privileged input design](privileged-workflow-inputs.md)
+  for trusted execution checkouts and immutable PR data. They retain read-only
+  agent policies and advisory posting boundaries.
 - The preview workflow builds contributor input in a tokenless job. A separate
   tokenless package job runs only the trusted preview command from
   `github.workflow_sha` with a restricted environment.

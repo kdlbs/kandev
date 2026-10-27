@@ -427,13 +427,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_all_opencode_jobs_use_the_trusted_reusable_setup_action(self) -> None:
         workflows = self.workflow + self.review_workflow
-        self.assertEqual(workflows.count("uses: ./.trusted-actions/setup-opencode"), 3)
-        self.assertEqual(
-            workflows.count(
-                'git show "$BASE_SHA:.github/actions/setup-opencode/action.yml"'
-            ),
-            2,
-        )
+        self.assertEqual(self.workflow.count("uses: ./.trusted-actions/setup-opencode"), 1)
+        self.assertEqual(self.review_workflow.count("uses: ./.github/actions/setup-opencode"), 2)
         self.assertEqual(
             workflows.count(
                 'git show "$TRUSTED_SHA:.github/actions/setup-opencode/action.yml"'
@@ -449,12 +444,12 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             action,
         )
 
-    def test_fork_job_fetches_base_before_materializing_setup_action(self) -> None:
-        fetch = self.fork_review.index('git fetch --no-tags --prune origin "$BASE_SHA"')
-        materialize = self.fork_review.index(
-            'git show "$BASE_SHA:.github/actions/setup-opencode/action.yml"'
-        )
-        self.assertLess(fetch, materialize)
+    def test_fork_job_prepares_verified_objects_before_trusted_setup(self) -> None:
+        self.assertIn("ref: ${{ github.workflow_sha }}", self.fork_review)
+        prepare = self.fork_review.index('bash .github/scripts/prepare-pr-review.sh')
+        install = self.fork_review.index('uses: ./.github/actions/setup-opencode')
+        self.assertLess(prepare, install)
+        self.assertNotIn("ref: ${{ github.event.pull_request.head.sha }}", self.fork_review)
 
     def test_publication_is_artifact_only_and_exports_validated_url(self) -> None:
         self.assertIn("needs: pr-walkthrough-generate", self.publication)

@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
   createContinuationFixture,
+  hasAttestedContinuationRefusal,
   waitForContinuationMessage,
   waitForNativeContinuationPrompt,
   assertNativeContinuationTrace,
@@ -18,6 +19,7 @@ for (const scenario of [
   "read",
   "write",
   "shell",
+  "pending-v3",
   "output",
   "read-restore-transient",
   "read-restore-hard",
@@ -239,7 +241,10 @@ for (const scenario of ["pending", "unknown"]) {
         fixture.sessionId,
         (message) => message.metadata?.runtime_retained === true,
       );
-      expect(failure.metadata?.attempts_started ?? 0).toBe(0);
+      expect(hasAttestedContinuationRefusal(failure, "unsafe_work", 0)).toBe(true);
+      await expect(session.activeChat()).toContainText(
+        "Kandev cannot continue automatically because a tool is pending or its outcome is uncertain.",
+      );
       await expect(session.recoveryResumeButton()).toHaveCount(0);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
       await expect(session.transientRetryCard()).toBeHidden();

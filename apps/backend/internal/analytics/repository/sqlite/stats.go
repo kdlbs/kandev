@@ -387,15 +387,14 @@ func (r *Repository) GetDailyActivity(
 				COUNT(DISTINCT task_id) AS task_count
 			FROM turn_scope
 			GROUP BY activity_date
-		), message_days AS (
-			SELECT DISTINCT task_session_id, activity_date
-			FROM turn_scope
 		), message_activity AS (
-			SELECT md.activity_date, COUNT(msg.id) AS message_count
-			FROM message_days md
-			JOIN task_session_messages msg ON msg.task_session_id = md.task_session_id
-			WHERE %s = md.activity_date
-			GROUP BY md.activity_date
+			SELECT d.date AS activity_date, COUNT(msg.id) AS message_count
+			FROM task_session_messages msg
+			JOIN task_sessions s ON s.id = msg.task_session_id
+			JOIN tasks t ON t.id = s.task_id
+			JOIN dates d ON d.date = %s
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+			GROUP BY d.date
 		)
 		SELECT
 			%s AS date,
@@ -408,7 +407,7 @@ func (r *Repository) GetDailyActivity(
 		ORDER BY d.date ASC
 	`, dateStart, datePlus, curDate, dateOfTurn, dateOfTurn, dateOfMsg, dateText)
 
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID, workspaceID)
 	if err != nil {
 		return nil, err
 	}

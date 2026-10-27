@@ -287,6 +287,8 @@ export type WorkflowsState = {
     prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
+    source?: string;
+    source_path?: string;
     hidden?: boolean;
     /**
      * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the

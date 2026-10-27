@@ -273,7 +273,10 @@ function TaskItemContent({
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
-          showChangeRequestStatus={resolvedTaskRow.trailing !== "change_request_status"}
+          showChangeRequestStatus={
+            resolvedTaskRow.trailing !== "change_request_status" &&
+            resolvedTaskRow.trailing !== "none"
+          }
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
         />

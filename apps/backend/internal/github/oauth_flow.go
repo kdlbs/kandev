@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"io"
 	"net/http"
 	"net/url"
@@ -97,6 +99,9 @@ type oauthFlowStore interface {
 }
 
 type OAuthFlowRequest struct {
+	RedirectURI                        string
+	ExpectedAppCredentialGeneration    int64
+	GitHubHost                         string
 	WorkspaceID                        string
 	UserID                             string
 	AppRegistrationID                  string
@@ -133,6 +138,14 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	if request.WorkspaceID == "" || request.UserID == "" || request.AppRegistrationID == "" {
 		return OAuthFlowStart{}, errors.New("workspace, user, and App registration are required for GitHub OAuth")
 	}
+	host, err := connectionHost(request.GitHubHost)
+	if err != nil {
+		return OAuthFlowStart{}, err
+	}
+	policy := OAuthPolicyPKCES256
+	if host.Family() == githubhost.EnterpriseFamily {
+		policy = OAuthPolicyConfidentialCode
+	}
 	ttl, err := oauthFlowTTL(request.Kind)
 	if err != nil {
 		return OAuthFlowStart{}, err
@@ -143,7 +156,7 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	}
 
 	var verifier, challenge string
-	if request.Kind == AuthFlowKindPersonal {
+	if request.Kind == AuthFlowKindPersonal && policy == OAuthPolicyPKCES256 {
 		verifier, err = randomBase64URL(m.random)
 		if err != nil {
 			return OAuthFlowStart{}, fmt.Errorf("generate GitHub OAuth PKCE verifier: %w", err)
@@ -155,6 +168,8 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	now := m.now().UTC()
 	stateDigest := sha256.Sum256([]byte(state))
 	flow := &AuthFlow{
+		GitHubHost: host.String(), OAuthPolicy: policy,
+		RedirectURI: request.RedirectURI, ExpectedAppCredentialGeneration: request.ExpectedAppCredentialGeneration,
 		StateHash:                          stateDigestString(stateDigest),
 		WorkspaceID:                        request.WorkspaceID,
 		UserID:                             request.UserID,
@@ -254,10 +269,14 @@ type GitHubOAuthClient struct {
 }
 
 func NewGitHubOAuthClient(clientID, clientSecret string) *GitHubOAuthClient {
+	return NewGitHubOAuthClientForHost(clientID, clientSecret, githubhost.Public())
+}
+
+func NewGitHubOAuthClientForHost(clientID, clientSecret string, host githubhost.Host) *GitHubOAuthClient {
 	return &GitHubOAuthClient{
 		clientID: clientID, clientSecret: clientSecret,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		webBaseURL: "https://github.com", apiBaseURL: githubAPIBase, now: time.Now,
+		httpClient: newGitHubHTTPClient(30 * time.Second),
+		webBaseURL: host.WebURL(), apiBaseURL: host.RESTURL(), now: time.Now,
 	}
 }
 
@@ -294,7 +313,7 @@ func (c *GitHubOAuthClient) GetOAuthUser(ctx context.Context, accessToken string
 	if err != nil {
 		return GitHubOAuthUser{}, err
 	}
-	response, err := c.httpClient.Do(request)
+	response, err := doGitHubRequest(c.httpClient, request)
 	if err != nil {
 		return GitHubOAuthUser{}, fmt.Errorf("request GitHub OAuth user: %w", err)
 	}
@@ -319,7 +338,7 @@ func (c *GitHubOAuthClient) UserCanAccessInstallation(
 	if err != nil {
 		return false, err
 	}
-	response, err := c.httpClient.Do(request)
+	response, err := doGitHubRequest(c.httpClient, request)
 	if err != nil {
 		return false, fmt.Errorf("request GitHub user installation: %w", err)
 	}
@@ -348,7 +367,7 @@ func (c *GitHubOAuthClient) exchangeTokens(ctx context.Context, form url.Values)
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := c.httpClient.Do(request)
+	response, err := doGitHubRequest(c.httpClient, request)
 	if err != nil {
 		return GitHubOAuthTokens{}, fmt.Errorf("exchange GitHub OAuth token: %w", err)
 	}
@@ -399,4 +418,20 @@ func (c *GitHubOAuthClient) apiRequest(
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	request.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 	return request, nil
+}
+
+func validateAuthFlowRegistration(flow *AuthFlow, hostname string, generation int64, redirectURI string) error {
+	host, err := connectionHost(hostname)
+	if err != nil || flow == nil || defaultAuthFlowHost(flow.GitHubHost) != host.String() || flow.ExpectedAppCredentialGeneration != generation {
+		return ErrOAuthFlowStale
+	}
+	if flow.RedirectURI != "" && flow.RedirectURI != redirectURI {
+		return ErrOAuthFlowStale
+	}
+	switch defaultOAuthPolicy(flow.OAuthPolicy) {
+	case OAuthPolicyPKCES256, OAuthPolicyConfidentialCode:
+	default:
+		return ErrOAuthFlowStale
+	}
+	return nil
 }

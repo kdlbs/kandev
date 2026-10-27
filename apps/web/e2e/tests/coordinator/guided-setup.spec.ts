@@ -2,9 +2,9 @@
 // (docs/plans/workspace-coordinator-p2/task-07-guided-setup.md).
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
-import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { ApiClient } from "../../helpers/api-client";
-import type { Locator, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { chooseIdentity } from "./guided-setup-helpers";
 import {
   linkToCoordinatorAdd,
   linkToCoordinatorSettings,
@@ -23,29 +23,11 @@ async function twoBoards(apiClient: ApiClient, seedData: SeedData) {
   return { first, second };
 }
 
-async function chooseIdentity(page: Page) {
-  async function chooseFirstOption(trigger: Locator) {
-    await trigger.click();
-    await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    const popoverId = await trigger.getAttribute("aria-controls");
-    if (!popoverId) throw new Error("profile selector did not expose its open popover");
-    const popover = page.locator(`[id="${popoverId}"]`);
-    await expect(popover).toBeVisible();
-    const option = popover.getByRole("option").first();
-    await expect(option).toBeVisible();
-    await waitForFiniteAnimations(popover);
-    await option.click();
-    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+async function reachReview(page: Page, seedData: SeedData) {
+  await page.getByLabel("Name").fill(NAME);
+  if (await page.getByTestId("setup-next").isDisabled()) {
+    await chooseIdentity(page, NAME, seedData);
   }
-
-  await page.getByLabel("Name").fill(NAME);
-  await chooseFirstOption(page.getByTestId("coordinator-agent-profile-picker"));
-  await chooseFirstOption(page.getByTestId("executor-profile-selector").first());
-}
-
-async function reachReview(page: Page) {
-  await page.getByLabel("Name").fill(NAME);
-  if (await page.getByTestId("setup-next").isDisabled()) await chooseIdentity(page);
   for (let i = 0; i < 5; i++) await page.getByTestId("setup-next").click();
   await expect(page.getByTestId("setup-review")).toBeVisible();
 }
@@ -67,7 +49,7 @@ test.describe("Guided setup", () => {
     await expect(testPage.getByTestId("setup-next")).toBeDisabled();
     await testPage.getByLabel("Name").fill(NAME);
     if (await testPage.getByTestId("setup-next").isDisabled()) {
-      await chooseIdentity(testPage);
+      await chooseIdentity(testPage, NAME, seedData);
     }
     await testPage.getByTestId("setup-next").click();
 
@@ -128,7 +110,7 @@ test.describe("Guided setup", () => {
       }),
     );
     await testPage.goto(linkToCoordinatorAdd(seedData.workspaceId));
-    await reachReview(testPage);
+    await reachReview(testPage, seedData);
     const answered = waitForHttp(testPage, "POST", SETUP_PATH);
     await testPage.getByTestId("setup-finish").click();
     await answered;
@@ -146,7 +128,7 @@ test.describe("Guided setup", () => {
   }) => {
     await testPage.route(SETUP_PATH, (route) => route.abort("failed"));
     await testPage.goto(linkToCoordinatorAdd(seedData.workspaceId));
-    await reachReview(testPage);
+    await reachReview(testPage, seedData);
     await testPage.getByTestId("setup-finish").click();
     await expect(testPage.getByTestId("setup-banner-unconfirmed")).toBeVisible();
     await expect(testPage.getByTestId("setup-review")).toBeVisible();

@@ -113,6 +113,7 @@ func (s *Store) addProviderColumns() error {
 	statements := []string{
 		`ALTER TABLE workflow_sync_configs ADD COLUMN provider TEXT NOT NULL DEFAULT 'github'`,
 		`ALTER TABLE workflow_sync_configs ADD COLUMN project_path TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN github_host TEXT NOT NULL DEFAULT 'github.com'`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.Exec(stmt); err != nil && !db.IsDuplicateColumnError(err) {
@@ -133,7 +134,7 @@ func (s *Store) addPollEnabledColumn() error {
 	return nil
 }
 
-const configSelectColumns = `workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
+const configSelectColumns = `workspace_id, provider, github_host, repo_owner, repo_name, project_path, branch, path,
 	interval_seconds, poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash,
 	created_at, updated_at, failure_class, consecutive_failures, next_retry_at,
 	config_fingerprint, credential_fingerprint, last_error_class, poll_suspended,
@@ -152,6 +153,7 @@ func scanConfig(row configScanner) (*Config, error) {
 	if err := row.Scan(
 		&cfg.WorkspaceID,
 		&cfg.Provider,
+		&cfg.GitHubHost,
 		&cfg.RepoOwner,
 		&cfg.RepoName,
 		&cfg.ProjectPath,
@@ -250,13 +252,14 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO workflow_sync_configs (
-			workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
+			workspace_id, provider, github_host, repo_owner, repo_name, project_path, branch, path,
 			interval_seconds, poll_enabled,
 			last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at,
 			failure_class, consecutive_failures, next_retry_at, config_fingerprint
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?, '', 0, NULL, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?, '', 0, NULL, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			provider = excluded.provider,
+ github_host = excluded.github_host,
 			repo_owner = excluded.repo_owner,
 			repo_name = excluded.repo_name,
 			project_path = excluded.project_path,
@@ -277,7 +280,7 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 			last_error_class = '',
 			poll_suspended = FALSE,
 			poll_suspension_reason = ''
-	`), workspaceID, req.Provider, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, req.Path,
+	`), workspaceID, req.Provider, req.GitHubHost, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, req.Path,
 		req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now, req.fingerprint())
 	if err != nil {
 		return nil, err

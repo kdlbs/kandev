@@ -93,6 +93,21 @@ function setVisibility(value: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", { configurable: true, value });
 }
 
+describe("workflow provenance refresh", () => {
+  it("retains workflow provenance across a collection refresh", async () => {
+    vi.clearAllMocks();
+    mockState = initialMockState();
+    const synced = { source: "github", source_path: ".kandev/workflows/review.yaml" };
+    mockListWorkflows.mockResolvedValueOnce({
+      workflows: [{ ...makeWorkflow("wf-A", "ws-A"), ...synced }],
+    });
+    renderHook(() => useWorkflows("ws-A", true));
+    await waitFor(() =>
+      expect(mockSetWorkflows).toHaveBeenCalledWith([expect.objectContaining(synced)], undefined),
+    );
+  });
+});
+
 describe("useWorkflows — stale response guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -13,6 +13,11 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 
 export async function seedSelectedFilters(api: ApiClient, seed: SeedData, tmpDir: string) {
+  // Worker resets preserve repository configuration; this fixture owns its option inventory.
+  const { repositories: existing } = await api.listRepositories(seed.workspaceId);
+  for (const repository of existing) {
+    if (repository.id !== seed.repositoryId) await api.deleteRepository(repository.id);
+  }
   for (const suffix of ["A", "B", "C", "D", "Remote"]) {
     const directory = path.join(tmpDir, `filter-repo-${suffix}`);
     fs.mkdirSync(directory, { recursive: true });

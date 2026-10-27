@@ -164,6 +164,17 @@ sequence counters advance. Cancellation,
 owner changes, inventory changes, and unresolved work retain the admission
 fence. This wait does not repeat native Resume or dispatch a prompt.
 
+When terminal settlement committed the outcome but not the final submission
+binding, recovery may read the exact retained terminal effect instead. This
+fallback requires all final binding fields and settlement/pruning markers to be
+absent, matching owner, hash, outcome, stream and sequence, a block-resolved or
+completed terminal effect with no newer terminal for that submission/stream,
+and a fully projected cursor. Partial or conflicting bindings fail closed.
+Lifecycle derives only a recovery view; it does not write terminal references,
+settle workflow/queue effects or release a block while authenticating the journal.
+The existing locked admission transaction revalidates the same SQL predicate
+after journal retirement. Full settlement and retention remain separately gated.
+
 ## Prompt readiness after native boot
 
 A native boot event establishes runtime availability, not delivery admission.

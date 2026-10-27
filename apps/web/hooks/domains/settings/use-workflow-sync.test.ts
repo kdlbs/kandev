@@ -1,3 +1,7 @@
+const ENTERPRISE_HOST = "git.company.example";
+import { createElement, type ReactNode } from "react";
+import { StateProvider } from "@/components/state-provider";
+import type { GitHubStatus } from "@/lib/types/github";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { WorkflowSyncConfig } from "@/lib/types/workflow-sync";
@@ -264,4 +268,74 @@ describe("useWorkflowSync — GitLab form paths", () => {
     expect(payload).not.toHaveProperty("repo_owner");
     expect(payload).not.toHaveProperty("repo_name");
   });
+});
+
+it("reloads and saves a captured Enterprise workflow repository host", async () => {
+  const config = makeConfig({ github_host: "git.company.example:8443" });
+  getWorkflowSyncConfigMock.mockResolvedValue(config);
+  setWorkflowSyncConfigMock.mockResolvedValue(config);
+  const { result } = renderHook(() => useWorkflowSync("ws-1"));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.url).toBe("https://git.company.example:8443/kdlbs/kandev");
+  await act(async () => {
+    await result.current.handleSave();
+  });
+  expect(setWorkflowSyncConfigMock).toHaveBeenCalledWith(
+    expect.objectContaining({ github_host: "git.company.example:8443" }),
+    { workspaceId: "ws-1" },
+  );
+});
+
+it("uses the configured host for new URLs without reinterpreting legacy workflow state", async () => {
+  getWorkflowSyncConfigMock.mockResolvedValue(makeConfig());
+  setWorkflowSyncConfigMock.mockResolvedValue(
+    makeConfig({ github_host: ENTERPRISE_HOST, repo_owner: "acme", repo_name: "site" }),
+  );
+  const githubStatus = {
+    workspace_id: "ws-1",
+    automation: { github_host: ENTERPRISE_HOST },
+  } as GitHubStatus;
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(
+      StateProvider,
+      {
+        children,
+        initialState: {
+          githubStatus: {
+            byWorkspaceId: { "ws-1": { status: githubStatus, loaded: true, loading: false } },
+            pendingPRDiscoveryHealthByWorkspaceId: {},
+          },
+        },
+      },
+      children,
+    );
+  const { result } = renderHook(() => useWorkflowSync("ws-1"), { wrapper });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.url).toBe("https://github.com/kdlbs/kandev");
+  act(() => result.current.setUrlInput("https://git.company.example/acme/site"));
+  expect(result.current.urlInvalid).toBe(false);
+  expect(result.current.form.github_host).toBe(ENTERPRISE_HOST);
+  await act(async () => {
+    await result.current.handleSave();
+  });
+  expect(setWorkflowSyncConfigMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      github_host: ENTERPRISE_HOST,
+      repo_owner: "acme",
+      repo_name: "site",
+    }),
+    { workspaceId: "ws-1" },
+  );
+});
+
+vi.mock("@/hooks/domains/github/use-github-status", async () => {
+  const { useOptionalAppStore } = await import("@/components/state-provider");
+  return {
+    useGitHubStatus: (workspaceId: string) => ({
+      status: useOptionalAppStore(
+        (state) => state.githubStatus.byWorkspaceId[workspaceId]?.status ?? null,
+        null,
+      ),
+    }),
+  };
 });

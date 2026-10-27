@@ -11,7 +11,8 @@ import (
 func TestAssociatePRWithTask_UsesCanonicalTaskRepositoryID(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	svc.SetTaskIssueStore(&fakeTaskIssueStore{
-		task: &taskmodels.Task{ID: "task-A"},
+		task:     &taskmodels.Task{ID: "task-A"},
+		entities: map[string]*taskmodels.Repository{"repo-canonical": {ID: "repo-canonical"}},
 		repos: []*taskmodels.TaskRepository{{
 			ID:           "task-repo-row",
 			RepositoryID: "repo-canonical",

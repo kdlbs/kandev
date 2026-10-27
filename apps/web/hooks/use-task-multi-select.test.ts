@@ -291,7 +291,10 @@ function makeStoreApi(
         wf1: {
           workflowId: "wf1",
           workflowName: "wf1",
-          steps: [{ id: "step1", position: 0 }],
+          steps: [
+            { id: "step1", position: 0 },
+            { id: "step2", position: 1 },
+          ],
           tasks,
         },
       },

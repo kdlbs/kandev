@@ -250,10 +250,16 @@ async function runProfileSessionLifecycleScenario(
     (await apiClient.listSessionTurns(originalASessionId)).turns.map((turn) => turn.id),
   );
   await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
+  let sessions: WorkflowTaskSessions = [];
   await expect
     .poll(
       async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const movedTask = await apiClient.getTask(task.id);
+        if (Object.hasOwn(movedTask.metadata ?? {}, "manual_move_lifecycle_pending")) return false;
+        sessions = (await apiClient.listTaskSessions(task.id)).sessions;
+        const priorB = sessions.find((item) => item.agent_profile_id === profileB.id);
+        if (priorB?.state !== (endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED"))
+          return false;
         const primaryA = sessions.find(
           (item) =>
             item.agent_profile_id === profileA.id &&
@@ -271,12 +277,20 @@ async function runProfileSessionLifecycleScenario(
     .toBe(true);
   await expect
     .poll(async () => {
-      const { sessions } = await apiClient.listTaskSessions(task.id);
-      return sessions.find((item) => item.agent_profile_id === profileB.id)?.state;
+      sessions = (await apiClient.listTaskSessions(task.id)).sessions;
+      return {
+        originalA: sessions.find((item) => item.id === originalASessionId)?.state,
+        returnedA: sessions.find((item) => item.agent_profile_id === profileA.id && item.is_primary)
+          ?.state,
+        parkedB: sessions.find((item) => item.agent_profile_id === profileB.id)?.state,
+      };
     })
-    .toBe(endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED");
+    .toEqual({
+      originalA: "WAITING_FOR_INPUT",
+      returnedA: "WAITING_FOR_INPUT",
+      parkedB: endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED",
+    });
 
-  const { sessions } = await apiClient.listTaskSessions(task.id);
   expect(sessions).toHaveLength(startPolicy === "reuse" ? 2 : 3);
   const originalA = sessions.find((item) => item.id === originalASessionId);
   const returnedA = sessions.find(

@@ -28,29 +28,39 @@ test.describe("ssh executor — persistence + UI sweep", () => {
     await page.gotoExisting(seedData.sshExecutorId);
 
     const originalName = await page.nameInput.inputValue();
-    const renamed = `${originalName} renamed`;
-    await page.nameInput.fill(renamed);
-    await expect(page.floatingSaveButton).toBeVisible();
-    await expect(page.floatingSaveButton).toBeDisabled();
+    try {
+      const renamed = `${originalName} renamed`;
+      await page.nameInput.fill(renamed);
+      await expect(page.floatingSaveButton).toBeVisible();
+      await expect(page.floatingSaveButton).toBeDisabled();
 
-    const beforeSave = (await apiClient.listExecutors()).executors.find(
-      (executor) => executor.id === seedData.sshExecutorId,
-    );
-    expect(beforeSave?.name).toBe(originalName);
+      const beforeSave = (await apiClient.listExecutors()).executors.find(
+        (executor) => executor.id === seedData.sshExecutorId,
+      );
+      expect(beforeSave?.name).toBe(originalName);
 
-    await page.clickTest();
-    expect(await page.waitForTestResult()).toBe("true");
-    await page.tickTrust();
-    await expect(page.floatingSaveButton).toBeEnabled();
-    await page.floatingSaveButton.click();
-    await expect(page.floatingSaveButton).not.toBeVisible({ timeout: 15_000 });
+      await page.clickTest();
+      expect(await page.waitForTestResult()).toBe("true");
+      await page.tickTrust();
+      await expect(page.floatingSaveButton).toBeEnabled();
+      const saved = testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().endsWith(`/executors/${seedData.sshExecutorId}`),
+      );
+      await page.floatingSaveButton.click();
+      expect((await saved).ok()).toBe(true);
+      await expect(page.floatingSaveButton).not.toBeVisible({ timeout: 15_000 });
 
-    const afterSave = (await apiClient.listExecutors()).executors.find(
-      (executor) => executor.id === seedData.sshExecutorId,
-    );
-    expect(afterSave?.name).toBe(renamed);
-    await testPage.reload();
-    await expect(page.nameInput).toHaveValue(renamed);
+      const afterSave = (await apiClient.listExecutors()).executors.find(
+        (executor) => executor.id === seedData.sshExecutorId,
+      );
+      expect(afterSave?.name).toBe(renamed);
+      await testPage.reload();
+      await expect(page.nameInput).toHaveValue(renamed);
+    } finally {
+      await apiClient.updateExecutor(seedData.sshExecutorId, { name: originalName });
+    }
   });
 
   test("opening the new-executor form does not leak state from a prior session", async ({

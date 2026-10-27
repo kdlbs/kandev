@@ -5,6 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { waitForComposerQueueMode } from "../../helpers/type-while-busy";
@@ -101,6 +102,7 @@ async function switchMobileTask(testPage: Page, title: string) {
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible({ timeout: 15_000 });
+  await waitForFiniteAnimations(sheet);
   await taskRow.tap();
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
 }

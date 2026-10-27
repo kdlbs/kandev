@@ -677,22 +677,40 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
-For a supported interactive task, Kandev can continue an unfinished request
-in the same live conversation after the normal retry delay when the model is
-at capacity and at least one tool has a confirmed result. Kandev keeps those
-actions in the conversation and asks the agent to continue without repeating
-them. This does not guarantee exactly-once execution. Eligible capacity recovery
-uses up to 11 additional attempts within 30 minutes, with waits increasing from
-5 seconds to at most 5 minutes. The inline notice shows the attempt count, next
-retry, recovery deadline, and **Cancel** action. Sending a new message, changing
-the session configuration, or cancelling stops pending recovery. A backend
-restart also stops automatic recovery; it does not restore the retry schedule.
-The deadline prevents another retry but does not interrupt a turn already running.
-Kandev leaves the
-error for you to handle when a tool or permission is still pending, an outcome
-is uncertain, background work is unaccounted for, the provider does not
-support live continuation, or the runtime is no longer usable. The composer
-remains available for a new message.
+## Recover from provider errors
+
+### Connection loss
+
+After a recognized connection loss, Kandev can continue an unfinished request
+on the same live Cursor runtime when conversation evidence is valid. A
+foreground tool can remain pending after its permission is resolved. Cursor
+inspects this pending work and chooses what to do next. Kandev sends a hidden
+`continue` prompt. It does not resend the original prompt or replay pending tool
+calls. Cursor can repeat an action, so this policy does not promise exactly-once
+effects. Failed, cancelled, unknown, or background tool work still requires
+your review. If the runtime is unavailable or evidence is incomplete, Kandev
+leaves the session waiting for you. A new message, a session change, **Cancel**,
+or a backend restart stops pending automatic recovery.
+
+### Model capacity
+
+For interactive tasks, Kandev retries a model-capacity error when the runtime
+supports live continuation and at least one tool has a confirmed result. Kandev
+keeps confirmed actions in the conversation. It asks the agent to continue
+without repeating those actions. This does not guarantee exactly-once effects.
+
+Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
+from 5 seconds to a maximum of 5 minutes. The inline notice shows the attempt
+count, next retry, deadline, and **Cancel** action. A new message, a session
+configuration change, or **Cancel** stops pending recovery. A backend restart
+also stops automatic recovery. It does not restore the retry schedule. The
+deadline does not stop a turn that is already running.
+
+Kandev leaves a model-capacity error for you to handle when a tool or permission
+is pending, an outcome is uncertain, background work is unaccounted for, the
+provider does not support live continuation, or the runtime is unavailable.
+The composer stays available for a new message. These limits apply to capacity
+recovery. Connection-loss recovery uses the normal short retry policy.
 
 ## Answer clarification questions
 
@@ -853,6 +871,8 @@ The **TASKS** list in the left sidebar can combine up to ten sort rules. Each la
 On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. Drag a rule by its grip to change its priority, or open **More** and choose **Move up** or **Move down**. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies. Automatic color rules and task-row details use the same grip and **More** menu. Color-rule changes apply immediately; sort and task-row changes follow the view's save or discard controls.
 
 When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to align the rows with the normal sidebar inset. It is enabled by default. Turning it off removes only the group inset; headings, counts, collapse controls, and subtask nesting remain.
+
+Expand **Task row** in sidebar filters to choose the details shown below each title and the value on the right. Choose **Nothing** on the right to hide change-request status icons; pull request numbers remain available as a separate detail. The task actions menu remains available.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
@@ -1130,7 +1150,11 @@ Select an archived task to read its saved conversation in the current page. Arch
 
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For first-startup prompt replay and session recovery behavior, see [Sessions and review](sessions-and-review.md).
 
-If Quick Chat setup fails after a session is created, Kandev keeps the chat in your tab strip with its preparation details and safe error details so you can inspect the failure or retry. A failure before a session exists keeps your selected agent and repository choices on the setup form with an inline error and a **Retry** action.
+Quick Chat creation can take longer than the request. If the result is uncertain, the setup keeps your submitted draft and shows **Check status**. Checking status does not start another chat or send the opening message.
+
+If Kandev has not found the creation, select **Retry creation** to continue the same creation. Kandev opens only the matching conversation and shows its preparation progress. Use the recovery controls in that conversation if startup or message delivery needs attention.
+
+After a reload, Quick Chat checks the saved creation status but does not submit the request again or replay an opening message whose delivery was already attempted. If creation is incomplete and has no prepared session, Kandev keeps the draft and requires the existing delete confirmation before you discard the task.
 
 <details>
 <summary>Worktree recovery after archive</summary>

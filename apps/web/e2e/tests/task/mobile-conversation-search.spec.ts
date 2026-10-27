@@ -31,13 +31,15 @@ test("searches conversations from a labelled phone action", async ({
           `/api/v1/workspaces/${seedData.workspaceId}/tasks/conversations?query=mobilequartz&limit=20`,
         );
         if (!response.ok) return false;
-        const result = (await response.json()) as { tasks?: Array<{ id: string }> };
-        return result.tasks?.some((candidate) => candidate.id === task.id) ?? false;
+        const result = (await response.json()) as {
+          state: string;
+          tasks: Array<{ id: string }>;
+        };
+        return (
+          result.state === "ready" && result.tasks.some((candidate) => candidate.id === task.id)
+        );
       },
-      {
-        timeout: 30_000,
-        message: "Conversation search should index the seeded message before opening the palette",
-      },
+      { timeout: 30_000, message: "Waiting for the seeded conversation to be indexed" },
     )
     .toBe(true);
 

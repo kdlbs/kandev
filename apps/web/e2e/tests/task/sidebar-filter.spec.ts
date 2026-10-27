@@ -858,6 +858,56 @@ test.describe("Sidebar filter — repository dimension (#1213)", () => {
 });
 
 test.describe("Sidebar filter — task-row presentation", () => {
+  test("hides change-request status with Nothing", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const title = "Desktop hidden PR status";
+    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [title]);
+    const tasks = await apiClient.listTasks(seedData.workspaceId);
+    const task = tasks.tasks.find((candidate) => candidate.title === title)!;
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 903,
+      pr_url: "https://github.com/testorg/testrepo/pull/903",
+      pr_title: "Desktop hidden status",
+      head_branch: "feature/hidden-status",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+    });
+    await testPage.reload();
+    await session.waitForLoad();
+    const row = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: title });
+    const icon = row.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible();
+    await filters.open();
+    await filters.openTaskRowSettings();
+    await filters.setTaskRowTrailing("Nothing");
+    await expect(icon).toHaveCount(0);
+    await filters.saveAs("Hidden PR status");
+    await filters.expectActiveViewChip("Hidden PR status");
+    await filters.close();
+    await prCapture.screenshot("desktop-hidden-pr-status", {
+      caption: "Desktop sidebar with PR status hidden",
+    });
+    await row.hover();
+    await expect(row.getByRole("button", { name: "Task actions" })).toBeVisible();
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(icon).toHaveCount(0);
+    await filters.open();
+    await filters.openTaskRowSettings();
+    await filters.setTaskRowTrailing("Git changes");
+    await expect(icon).toBeVisible();
+  });
+
   test("previews, saves, discards, and reloads task row presentation with compact trailing content", async ({
     testPage,
     apiClient,
@@ -967,17 +1017,23 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await filters.saveAs("Compact task rows");
     await filters.expectActiveViewChip("Compact task rows");
 
-    const savedSettings = await apiClient.getUserSettings();
-    const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
-      .views as Array<{
+    type SavedView = {
       id: string;
       name?: string;
       task_row?: { details_enabled?: boolean };
-    }>;
-    const savedView = savedViews.find((view) => view.name === "Compact task rows");
-    expect(savedView?.task_row).toMatchObject({
-      details_enabled: false,
-    });
+    };
+    const readSavedView = async () => {
+      const savedSettings = await apiClient.getUserSettings();
+      const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
+        .views as SavedView[];
+      return savedViews.find((view) => view.name === "Compact task rows");
+    };
+    await expect
+      .poll(async () => (await readSavedView())?.task_row)
+      .toMatchObject({
+        details_enabled: false,
+      });
+    const savedView = await readSavedView();
 
     await filters.setTaskRowTrailing("Relative time");
     await filters.saveOverwrite();
