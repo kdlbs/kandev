@@ -686,8 +686,21 @@ test.describe("Clarification flow", () => {
     await expect(firstOption.locator("a")).toHaveCount(0);
 
     const context = session.clarificationContext();
-    await expect(context).toContainText("Keep `context` literal.");
-    await expect(context.locator("code")).toHaveCount(0);
+    await expect(context.locator("strong")).toHaveText("Shared deployment context.");
+    await expect(context.locator("table tr")).toHaveCount(2);
+    await expect(context.locator("[data-clarification-context-table-scroll]")).toHaveCSS(
+      "overflow-x",
+      "auto",
+    );
+    const contextGuide = context.getByRole("link", { name: "context guide" });
+    await expect(contextGuide).toHaveAttribute("href", "https://example.com/context");
+    await expectClarificationReferencePopup(
+      testPage,
+      () => contextGuide.click(),
+      "https://example.com/context",
+    );
+    await expect(overlay).toBeVisible();
+    await expect(card).toBeVisible();
 
     await firstOption.locator("code").click();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
@@ -839,6 +852,37 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(context).toHaveText(
       "Picking the foundational stack.\n\nAnswer all three so we can move forward.",
     );
+  });
+
+  test("renders paragraph context as Markdown and keeps reference activation read-only", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Context Paragraphs",
+      { scenario: "clarification-context-paragraphs" },
+    );
+    const overlay = session.clarificationOverlay();
+    const context = session.clarificationContext();
+
+    await expect(overlay).toBeVisible({ timeout: 30_000 });
+    await expect(context.locator("strong")).toHaveText("Shared deployment context.");
+    await expect(context.locator("table tr")).toHaveCount(2);
+    const contextGuide = context.getByRole("link", { name: "context guide" });
+    await expectClarificationReferencePopup(
+      testPage,
+      () => contextGuide.click(),
+      "https://example.com/context",
+    );
+    await expect(overlay).toBeVisible();
+    await expect(session.clarificationQuestionCardById("context-paragraphs")).toBeVisible();
+
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
   test("mix custom text + option selections round-trips", async ({

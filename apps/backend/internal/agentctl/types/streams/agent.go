@@ -238,6 +238,10 @@ type AgentEvent struct {
 	// RecoveredActivityAt is replay context, excluded from durable payload identity.
 	RecoveredActivityAt *time.Time `json:"-"`
 
+	// CanonicalMessageBaseID is the stable identity before segment-boundary
+	// resolution. Retries always derive from this value, never a resolved ID.
+	CanonicalMessageBaseID string `json:"canonical_message_base_id,omitempty"`
+
 	// CanonicalMessageID is assigned by the backend inbox projector for output
 	// events. It is stable across reconnects and is not a transport cursor.
 	CanonicalMessageID string `json:"canonical_message_id,omitempty"`

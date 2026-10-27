@@ -4,7 +4,7 @@ import { waitForHttp } from "../../helpers/causal-waits";
 
 async function selectListOption(page: Page, testId: string, optionLabel: string) {
   await page.getByTestId(testId).click();
-  await page.getByRole("listbox").getByRole("option", { name: optionLabel }).click();
+  await page.getByRole("listbox").getByRole("option", { name: optionLabel, exact: true }).click();
 }
 
 async function taskRowTitles(page: Page): Promise<string[]> {

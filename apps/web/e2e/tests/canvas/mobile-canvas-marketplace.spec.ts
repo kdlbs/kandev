@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { expectTouchControl } from "../../helpers/control-sizing";
 import { enableCanvasFeature } from "./canvas-fixture";
 
@@ -102,7 +103,7 @@ test.describe("Canvas marketplace on mobile", () => {
       await expect(detail).toBeVisible();
       const install = detail.getByRole("button", { name: "Review and install", exact: true });
       await expect(install).toBeVisible();
-      expect((await install.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expectTouchControl(install);
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
@@ -110,9 +111,8 @@ test.describe("Canvas marketplace on mobile", () => {
       await install.tap();
       const dialog = testPage.getByRole("dialog").last();
       await expect(dialog.getByText("Preview images")).toBeVisible();
-      expect(
-        (await dialog.getByRole("button", { name: "Cancel", exact: true }).boundingBox())?.height,
-      ).toBeGreaterThanOrEqual(44);
+      await waitForFiniteAnimations(dialog);
+      await expectTouchControl(dialog.getByRole("button", { name: "Cancel", exact: true }));
     } finally {
       await releaseFeature();
     }

@@ -92,14 +92,20 @@ export function PRMergeButton({
   // provider state catches up so a repeat click cannot submit a second request.
   const [acceptedFor, setAcceptedFor] = useState<string | null>(null);
   const workspaceId = useTaskWorkspaceId(taskPR.task_id);
-  const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
+  const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo, taskPR.github_host);
 
   // Reset after switching PRs or after GitHub reports an observable lifecycle
   // or mergeability transition, including a PR ejected from a merge queue.
   const signature = `${taskPR.id}:${taskPR.state}:${taskPR.mergeable_state}`;
   const accepted = acceptedFor === signature;
   const ready = canAttemptPRMerge(taskPR);
-  const access = useRepoMergeAccess(workspaceId, taskPR.owner, taskPR.repo, ready && !accepted);
+  const access = useRepoMergeAccess(
+    workspaceId,
+    taskPR.owner,
+    taskPR.repo,
+    ready && !accepted,
+    taskPR.github_host ?? "github.com",
+  );
   const mutationActor = getGitHubActorLabel(access.actor);
 
   if (accepted || !ready) return null;
@@ -123,13 +129,10 @@ export function PRMergeButton({
     const submittedSignature = signature;
     setMerging(true);
     try {
-      const result = await mergePR(
-        workspaceId,
-        taskPR.owner,
-        taskPR.repo,
-        taskPR.pr_number,
-        method,
-      );
+      const result = await mergePR(workspaceId, taskPR.owner, taskPR.repo, taskPR.pr_number, {
+        mergeMethod: method,
+        expectedHost: taskPR.github_host ?? "github.com",
+      });
       setAcceptedFor(submittedSignature);
       toast({
         description: t(

@@ -54,15 +54,15 @@ describe("useRepoMergeAccess", () => {
   });
 
   // @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.18
-  it.each(["workspace", "repository", "actor", "credential", "user"])(
+  it.each(["workspace", "repository", "host", "actor", "credential", "user"])(
     "discards permission responses from a previous %s context",
     async (change) => {
       const old = pendingAccess();
       const current = pendingAccess();
       mocks.request.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
       const { result, rerender } = renderHook(
-        ({ workspace, owner }) => useRepoMergeAccess(workspace, owner, "site"),
-        { initialProps: { workspace: "ws-1", owner: "upstream" } },
+        ({ workspace, owner, host }) => useRepoMergeAccess(workspace, owner, "site", true, host),
+        { initialProps: { workspace: "ws-1", owner: "upstream", host: "git.company.example" } },
       );
       const status = { authenticated: true } as GitHubStatus;
       if (change === "actor")
@@ -74,6 +74,7 @@ describe("useRepoMergeAccess", () => {
       rerender({
         workspace: change === "workspace" ? "ws-2" : "ws-1",
         owner: change === "repository" ? "another" : "upstream",
+        host: change === "host" ? "github.com" : "git.company.example",
       });
       expect(result.current.state).toBe("loading");
       expect(mocks.request.mock.calls[0][3].init.signal.aborted).toBe(true);

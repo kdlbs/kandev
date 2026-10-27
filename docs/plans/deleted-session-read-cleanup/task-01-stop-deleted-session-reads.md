@@ -93,3 +93,7 @@ of memory; the listed 7 GiB heap command passed.
 Review follow-up added a red/green remount regression, retained the deletion
 fence until scope reset, and made the browser assertion wait for client state
 eviction before its negative observation interval.
+
+After merging the latest base, the focused Go tests and all 54 selected
+frontend tests passed. A rebuilt Chromium run of this spec alongside the full
+pseudo-locale spec passed all 25 tests with retries disabled.

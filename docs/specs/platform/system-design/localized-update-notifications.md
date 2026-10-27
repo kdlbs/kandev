@@ -16,7 +16,7 @@ that version is present. Remote provider delivery is unchanged.
 
 ## Requirement mapping
 
-`AC-PLATFORM-NOTIFICATIONS-001.13` is met by formatting the known version with
+`AC-PLATFORM-NOTIFICATIONS-001.16` is met by formatting the known version with
 existing client locale keys in `useUpdateAvailableToast` before dispatching the
 same localized title and body to the in-app toast and native notification. If a
 legacy event lacks a version, its supplied title and body remain the fallback.

@@ -167,12 +167,41 @@ func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
 	})
 
 	assert.Contains(t, context, "hard user-input barrier")
-	assert.Contains(t, context, "do not call another tool")
-	assert.Contains(t, context, "do not continue working")
-	assert.Contains(t, context, "do not provide a final response")
-	assert.Contains(t, context, "until the tool returns completed user answers or a structured rejection")
-	assert.Contains(t, context, "If the tool reports a validation error before creating a question, correct the request and retry")
-	assert.Contains(t, context, "If an accepted question returns without completed answers or a structured rejection, end your turn immediately")
+	assert.Contains(t, context, "do no more work, make no tool calls, or send a final response until completed answers or structured rejection")
+	assert.Contains(t, context, "On validation error before question creation, correct and retry")
+	assert.Contains(t, context, "If an accepted call returns incomplete")
+	assert.Contains(t, context, "end the turn without inferring an answer or continuing work")
+}
+
+func TestFormatKandevContext_ConciseQuestionContext(t *testing.T) {
+	normalTask := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
+		IncludeUserQuestionTool: true,
+	})
+	for _, expected := range []string{
+		"1-3 short sentences or brief bullets",
+		"about 100 words or fewer",
+		"full reports, logs, and repeated conversation outside this call, before it",
+		"each question and its options self-contained",
+		"hard user-input barrier",
+	} {
+		assert.Contains(t, normalTask, expected)
+	}
+
+	for name, options := range map[string]KandevContextOptions{
+		"autopilot child": {
+			Autopilot:                 true,
+			IncludeParentQuestionTool: true,
+		},
+		"autopilot root": {
+			Autopilot: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			context := FormatKandevContextWithOptions("task-abc", "session-xyz", options)
+			assert.NotContains(t, context, "1-3 short sentences or brief bullets")
+			assert.NotContains(t, context, "about 100 words or fewer")
+		})
+	}
 }
 
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {

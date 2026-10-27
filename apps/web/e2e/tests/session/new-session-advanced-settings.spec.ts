@@ -98,7 +98,6 @@ test.describe("New session Advanced settings", () => {
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
     await testPage.screenshot({ path: testInfo.outputPath("desktop-advanced.png") });
     await session.newSessionStartButton().click();
-    await expect(dialog).not.toBeVisible();
     const created = await expectCreatedSelection(
       apiClient,
       seedData,
@@ -106,6 +105,7 @@ test.describe("New session Advanced settings", () => {
       task.session_id!,
       definitions[1].id,
     );
+    await expect(dialog).not.toBeVisible();
     const messages = (await apiClient.listSessionMessages(created.id)).messages;
     expect(
       messages.find((message) => message.author_type === "user")?.metadata?.attachments,

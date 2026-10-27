@@ -30,7 +30,7 @@ import {
 import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { QuestionImages } from "./question-images";
-import { useQuestionImageDraft } from "./question-image-draft-context";
+import { useClarificationDraft } from "./clarification-draft-context";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { useTranslation } from "react-i18next";
 
@@ -48,6 +48,10 @@ type ClarificationInputOverlayProps = {
   onDismiss: () => void;
   // Called by the expanded header's collapse control.
   onCollapse?: () => void;
+  onExpandPanel?: () => void;
+  onResetPanel?: () => void;
+  canExpandPanel?: boolean;
+  canResetPanel?: boolean;
   collapseContentId?: string;
   // Additive: reports every settled submission outcome, distinct from
   // onResolved's narrower "this caller's own answer landed" signal. The
@@ -183,6 +187,12 @@ function ClarificationCard(props: CardProps) {
           )}
         </div>
       )}
+      <ClarificationMarkdown
+        variant="block"
+        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      >
+        {question.prompt}
+      </ClarificationMarkdown>
       <QuestionImages
         pendingId={metadata.pending_id}
         questionId={meta.questionId}
@@ -191,12 +201,6 @@ function ClarificationCard(props: CardProps) {
         enabled={props.previewsEnabled}
         onInspectionChange={props.onInspectionChange}
       />
-      <ClarificationMarkdown
-        variant="block"
-        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-      >
-        {question.prompt}
-      </ClarificationMarkdown>
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}
@@ -661,6 +665,10 @@ export function ClarificationInputOverlay({
   agentDisconnected = false,
   onDismiss,
   onCollapse,
+  onExpandPanel,
+  onResetPanel,
+  canExpandPanel,
+  canResetPanel,
   collapseContentId,
   lateAnswerState,
 }: ClarificationInputOverlayProps) {
@@ -689,19 +697,9 @@ export function ClarificationInputOverlay({
   const draftKey = group.pendingId
     ? JSON.stringify([sortedMessages[0]?.session_id, group.pendingId, mode])
     : null;
-  const retainDraft =
-    !lateMode &&
-    sortedMessages.some((message) => {
-      const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-      return Boolean(
-        metadata?.question?.images?.length ||
-        metadata?.question?.options?.some((option) => option.images?.length),
-      );
-    });
   const { customDrafts, setCustomDrafts, rawActiveIndex, setActiveIndex, savedAnswers } =
-    useQuestionImageDraft(
+    useClarificationDraft(
       draftKey,
-      retainDraft,
       group.answers,
       group.submitState === "ok" || group.submitState === "expired",
     );
@@ -841,6 +839,10 @@ export function ClarificationInputOverlay({
         lateMode={lateInteraction}
         onLateClose={onDismiss}
         onCollapse={onCollapse}
+        onExpandPanel={onExpandPanel}
+        onResetPanel={onResetPanel}
+        canExpandPanel={canExpandPanel}
+        canResetPanel={canResetPanel}
         collapseContentId={collapseContentId}
       />
       {group.submitState === "error" && (
@@ -852,11 +854,8 @@ export function ClarificationInputOverlay({
           <ClarificationStatusBanner state="error" onRetry={retryLateAnswer} />
         )}
       {sharedContext && (
-        <div
-          data-testid="clarification-context"
-          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap text-[13px]"
-        >
-          {sharedContext}
+        <div data-testid="clarification-context" className="mx-4 mt-3 mb-2 text-[13px]">
+          <ClarificationMarkdown variant="context">{sharedContext}</ClarificationMarkdown>
         </div>
       )}
       <ClarificationCarouselBody

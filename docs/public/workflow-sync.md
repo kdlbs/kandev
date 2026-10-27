@@ -38,6 +38,12 @@ The workspace automation connection must have contents-read access to the config
 - an exact named `gh` CLI host/login; or
 - a GitHub App installation with **Contents: read** permission for the repository.
 
+GitHub.com, Enterprise Cloud tenant hosts, and GitHub Enterprise Server are supported.
+The saved sync configuration retains its repository host. Changing the workspace
+connection to a different host pauses that configuration until you save a matching
+repository; files already fetched from the old connection cannot overwrite workflows
+after replacement.
+
 Without a usable workspace automation connection, sync fails. Existing migrated workspaces may temporarily use **Legacy shared**, which alone consults ambient backend `gh`, `GITHUB_TOKEN`, `GH_TOKEN`, or old globally named secrets.
 
 ### GitLab
@@ -50,7 +56,7 @@ Grant only the repository access that this operation needs, protect the backend 
 
 Open **Settings → Workspaces → select a workspace → Workflows → Workflow Sync**, then choose **GitHub** or **GitLab**.
 
-1. Enter the repository. For GitHub, paste a repository link; the field accepts an HTTPS URL with or without a scheme, a `www.github.com` URL, a `.git` suffix, or an SSH form such as `git@github.com:OWNER/REPO.git`. For GitLab, enter the project path directly (e.g. `group/project`, or a nested `group/subgroup/project`) or paste a full project link (any host, including self-managed).
+1. Enter the repository. For GitHub, paste a repository link on the workspace's connected host; the field accepts an HTTPS URL with or without a scheme, a `www.github.com` URL, a `.git` suffix, or an SSH form such as `git@github.com:OWNER/REPO.git`. For GitLab, enter the project path directly (e.g. `group/project`, or a nested `group/subgroup/project`) or paste a full project link (any host, including self-managed).
 2. Set **Branch** and **Directory** directly; these are their own fields, not just derived text. Pasting a `/tree/BRANCH/DIRECTORY` (GitHub) or `/-/tree/BRANCH/DIRECTORY` (GitLab) link still convenience-fills both from the link, but you can always correct either field afterward. This matters because a branch name can itself contain a slash (a common convention, e.g. `features/TICKET-123`). No link parser can always tell where the branch ends and the directory begins, so a wrong guess from a pasted link is fixed directly in these fields rather than by reshaping the link.
 3. Enable **Auto-sync** if the background poller should run. Set an interval of at least 60 seconds; the default is 300 seconds.
 4. Save the configuration, then select **Sync now** for the first immediate reconciliation. Saving alone does not fetch definitions.
@@ -62,6 +68,7 @@ There is at most one sync configuration per workspace.
 | JSON field | Requirement and default |
 |------------|-------------------------|
 | `provider` | `"github"` or `"gitlab"`. Omitted means `"github"`. |
+| `github_host` | GitHub web authority, such as `git.company.example` or `acme.ghe.com`. Omitted means `github.com` for compatibility. Must match the workspace connection. Ignored for GitLab. |
 | `repo_owner` | GitHub only. Required after trimming; cannot contain a slash or space. |
 | `repo_name` | GitHub only. Required after trimming; cannot contain a slash or space. |
 | `project_path` | GitLab only. Required; a namespace path such as `group/project` or `group/subgroup/project` (at least two segments, no empty/`.`/`..` segments, no spaces). |

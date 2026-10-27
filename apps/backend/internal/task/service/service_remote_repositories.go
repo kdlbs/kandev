@@ -85,7 +85,7 @@ func validateBuiltInRemoteHints(input TaskRepositoryInput) error {
 	if input.TrustedProviderDescriptor {
 		return nil
 	}
-	provider, owner, name, canonicalURL, err := parseRemoteRepositoryURL(effectiveRemoteURL(input), input.Provider)
+	provider, owner, name, canonicalURL, err := parseRemoteRepositoryURL(effectiveRemoteURL(input), effectiveRemoteProvider(input))
 	if err != nil {
 		return NewRepositorySelectionError(RepositorySelectionErrorInvalid, err)
 	}

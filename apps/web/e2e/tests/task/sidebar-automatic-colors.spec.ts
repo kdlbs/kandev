@@ -370,6 +370,9 @@ test.describe("Sidebar automatic task colors", () => {
     await more.click();
     await testPage.getByTestId("automatic-color-rule-more-desktop-overlap-blue-move-up").click();
     await expect(marker).toHaveAttribute("data-color-token", "blue");
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.sidebar_task_color_automation)
+      .toEqual({ enabled: true, rules: [automation.rules[1], automation.rules[0]] });
     await testPage.goto(`/t/${task.task_id}`);
     await session.waitForLoad();
     await expect(
@@ -377,8 +380,5 @@ test.describe("Sidebar automatic task colors", () => {
         "task-item-color-marker",
       ),
     ).toHaveAttribute("data-color-token", "blue");
-    await expect
-      .poll(async () => (await apiClient.getUserSettings()).settings.sidebar_task_color_automation)
-      .toEqual({ enabled: true, rules: [automation.rules[1], automation.rules[0]] });
   });
 });

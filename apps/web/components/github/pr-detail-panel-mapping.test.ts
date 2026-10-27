@@ -98,3 +98,12 @@ describe("mapGitHubComments", () => {
     });
   });
 });
+
+it("keeps comment-author profiles on the PR host", () => {
+  const feedback = {
+    comments: [{ id: 1, author: "alice", body: "Review", created_at: ISSUE_TIMESTAMP }],
+  } as PRFeedback;
+  expect(mapGitHubComments(feedback, "git.company.example")[0]?.author.url).toBe(
+    "https://git.company.example/alice",
+  );
+});

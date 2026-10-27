@@ -586,6 +586,8 @@ Protected backlog and canonical history can continue to grow. Retention is not a
 Cleanup starts when the background worker starts, without an initial delay.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
 Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
+
+After a batch deadline, that phase retries with half as many candidates, down to one, within the same row, byte and time ceilings. The `agent_delivery.retention.batch_failed` log records the phase, candidate limits and repository error. A failed batch is rolled back and remains a failure in the pass snapshot; successful batches in other phases do not imply that its payloads were removed.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.

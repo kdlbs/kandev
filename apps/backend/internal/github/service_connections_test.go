@@ -107,6 +107,7 @@ func TestSetWorkspaceConnectionPATIsScopedAndValidatedBeforeWrite(t *testing.T) 
 
 func TestWorkspaceAuthStatusIncludesEffectiveActorsAndCapabilities(t *testing.T) {
 	service, _ := newWorkspaceConnectionService(t, "octocat")
+	service.resolver.SetAutomationProvider(testAutomationCredentialProvider{client: NewMockClient()})
 	if _, err := service.SetWorkspaceConnection(context.Background(), "ws-1", SetWorkspaceConnectionRequest{
 		Source: ConnectionSourcePAT,
 		Token:  "ghp_workspace",

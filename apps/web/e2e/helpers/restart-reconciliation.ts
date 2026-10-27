@@ -9,6 +9,10 @@ import { createDelayedResumeProfile } from "./session-resume-prompt-queue";
 import { SessionPage } from "../pages/session-page";
 import { attachGatewayTrafficCapture } from "./ws-traffic";
 import {
+  observeAgentRuntimeAvailability,
+  waitForAgentRuntimeReplacement,
+} from "./agent-runtime-availability";
+import {
   captureSilentRestartSnapshot,
   expectRestartConversationIdentity,
   expectSilentRestartRestoration,
@@ -59,7 +63,10 @@ export async function verifyAutomaticRestartReconciliation(
     const snapshot = await captureSilentRestartSnapshot(api, task.id, active.id);
     const traffic = attachGatewayTrafficCapture(page);
     const bootId = await api.getBackendBootID();
-    expect((await api.killLocalAgentRuntimeChild()).killed).toBe(true);
+    await observeAgentRuntimeAvailability(page);
+    const killedRuntime = await api.killLocalAgentRuntimeChild();
+    expect(killedRuntime.killed).toBe(true);
+    await waitForAgentRuntimeReplacement(page, killedRuntime.runtime_epoch, bootId);
     const sibling = resumeDelay ? await createRecoverySibling(api, seed) : undefined;
     siblingTask = sibling?.taskId;
     try {

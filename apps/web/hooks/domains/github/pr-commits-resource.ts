@@ -12,6 +12,7 @@ export type PRCommitsState = {
 };
 
 export type PRCommitsRequest = {
+  host?: string;
   workspaceId: string;
   owner: string;
   repo: string;
@@ -71,7 +72,13 @@ function pendingState(commits: PRCommitInfo[] = []): PRCommitsState {
 }
 
 function identityFor(request: PRCommitsRequest): string {
-  return [request.workspaceId, request.owner, request.repo, request.prNumber].join("\0");
+  return [
+    request.workspaceId,
+    request.host ?? "github.com",
+    request.owner,
+    request.repo,
+    request.prNumber,
+  ].join("\0");
 }
 
 function errorMessage(error: unknown): string {
@@ -86,6 +93,7 @@ async function requestPRCommits(request: PRCommitsRequest): Promise<PRCommitsRes
     owner: request.owner,
     repo: request.repo,
     number: request.prNumber,
+    expected_host: request.host ?? "github.com",
   });
 }
 

@@ -967,6 +967,7 @@ export const NativeMessageList = memo(
       dividerBeforeItemKey,
       anchoredBarHeight,
       isVisible = true,
+      detailActive,
       launchErrorOwned = false,
       launchErrorStamp,
       launchErrorOccurredAt,
@@ -975,7 +976,7 @@ export const NativeMessageList = memo(
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const showTurnChangedFiles = useAppStore((state) => state.userSettings.showTurnChangedFiles);
-    const turnChanges = useSessionTurnChanges(sessionId);
+    const turnChanges = useSessionTurnChanges(sessionId, { detailActive });
 
     const visibleItems = useMemo(
       () =>

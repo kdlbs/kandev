@@ -482,6 +482,7 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 		return
 	}
 
+	ctx = github.WithGitHubWatchConnection(ctx, evt.GitHubHost, evt.CredentialGeneration)
 	pr := evt.PR
 	repoSlug := fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName)
 
@@ -1836,6 +1837,7 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 		return
 	}
 
+	ctx = github.WithGitHubWatchConnection(ctx, evt.GitHubHost, evt.CredentialGeneration)
 	issue := evt.Issue
 	repoSlug := fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)
 

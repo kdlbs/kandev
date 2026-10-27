@@ -68,6 +68,28 @@ func (s *Service) syncWorkspaceWatchesBatched(
 			return nil, ErrGitHubWorkspaceRequired
 		}
 	}
+	host, err := s.selectedGitHubHost(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	currentWatches := make([]*PRWatch, 0, len(watches))
+	for _, watch := range watches {
+		if err := requireExpectedGitHubHost(withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost)), host); err != nil {
+			if errors.Is(err, ErrGitHubHostMismatch) {
+				continue
+			}
+			return nil, err
+		}
+		if err := s.validatePRWatchHost(ctx, workspaceID, watch); err != nil {
+			return nil, err
+		}
+		currentWatches = append(currentWatches, watch)
+	}
+	if len(currentWatches) == 0 {
+		return nil, nil
+	}
+	watches = currentWatches
+	ctx = withExpectedGitHubHost(ctx, host.String())
 	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
 	if err != nil {
 		return nil, err
@@ -80,7 +102,7 @@ func (s *Service) syncWorkspaceWatchesBatched(
 		s.invalidateWorkflowAttentionForResolvedWatches(resolved, watches)
 	}
 	return s.syncWatchesBatchedWithClient(
-		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches, explicitRefresh,
+		withGitHubOperationFence(ctx, s, workspaceID, resolved), resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches, explicitRefresh,
 	)
 }
 
@@ -725,6 +747,17 @@ func (s *Service) absorbMissingReposErr(
 func (s *Service) applyBatchedNumberedWatch(
 	ctx context.Context, cacheScope string, w *PRWatch, statusByKey map[string]*PRStatus, now time.Time,
 ) PRWatchSyncResult {
+	var unlock func()
+	var lockErr error
+	ctx, unlock, lockErr = s.lockResourceMutation(ctx, w.WorkspaceID)
+	if lockErr != nil {
+		return PRWatchSyncResult{Watch: w, SyncFailed: true}
+	}
+	defer unlock()
+	if err := s.validatePRWatchHost(ctx, w.WorkspaceID, w); err != nil {
+		return PRWatchSyncResult{Watch: w, SyncFailed: true}
+	}
+
 	// Repo is in the 10-min negative cache — the fetch path didn't include
 	// it in the GraphQL batch, so the apply path can't probe upstream either.
 	// Bump last_checked_at to suppress retry storms and surface SyncFailed
@@ -853,6 +886,17 @@ func (s *Service) applyBatchedSearchingWatch(
 	ctx context.Context, client Client, cacheScope string, w *PRWatch, statuses *batchedWatchStatuses, now time.Time,
 	skipFallback, sharedResolved, sharedSyncFailed bool,
 ) PRWatchSyncResult {
+	var unlock func()
+	var lockErr error
+	ctx, unlock, lockErr = s.lockResourceMutation(ctx, w.WorkspaceID)
+	if lockErr != nil {
+		return PRWatchSyncResult{Watch: w, SyncFailed: true}
+	}
+	defer unlock()
+	if err := s.validatePRWatchHost(ctx, w.WorkspaceID, w); err != nil {
+		return PRWatchSyncResult{Watch: w, SyncFailed: true}
+	}
+
 	// Read the previous probe time before the stamp below overwrites it —
 	// lookupSearchingWatchPR throttles on it.
 	lastChecked := w.LastCheckedAt

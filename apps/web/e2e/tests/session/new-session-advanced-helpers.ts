@@ -126,7 +126,12 @@ export async function expectCreatedSelection(
   originalId: string,
   selectedId: string,
 ) {
-  await expect.poll(async () => (await apiClient.listTaskSessions(taskId)).sessions.length).toBe(2);
+  await expect
+    .poll(async () => (await apiClient.listTaskSessions(taskId)).sessions.length, {
+      timeout: 30_000,
+      message: "Waiting for the new session to be created",
+    })
+    .toBe(2);
   const { sessions } = await apiClient.listTaskSessions(taskId);
   const created = sessions.find((session) => session.id !== originalId)!;
   await expect
@@ -183,7 +188,6 @@ export async function checkAdvancedHandoff(
       await expect(context).toBeVisible();
       await session.newSessionStartButton().click();
     }
-    await expect(dialog).not.toBeVisible();
     const created = await expectCreatedSelection(
       apiClient,
       seed,
@@ -191,6 +195,7 @@ export async function checkAdvancedHandoff(
       task.session_id!,
       definitions[1].id,
     );
+    await expect(dialog).not.toBeVisible();
     expect(created.agent_profile_id).toBe(target.id);
     await waitForSessionDone(apiClient, task.id, created.id, "Waiting for handed off agent");
   } finally {

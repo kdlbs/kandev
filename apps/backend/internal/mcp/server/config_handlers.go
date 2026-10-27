@@ -304,13 +304,7 @@ func (s *Server) getSharedPromptHandler() server.ToolHandlerFunc {
 // --- Executor config tools ---
 
 func (s *Server) registerConfigExecutorTools() {
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_executors_kandev",
-			"List all executors.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_executors_kandev", s.listExecutorsHandler()),
-	)
+	s.registerListExecutorsTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_executor_profiles_kandev",
 			mcp.WithDescription("List all profiles for an executor."),
@@ -350,6 +344,19 @@ func (s *Server) registerConfigExecutorTools() {
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The executor profile ID to delete")),
 		),
 		s.wrapHandler("delete_executor_profile_kandev", s.deleteExecutorProfileHandler()),
+	)
+}
+
+func (s *Server) registerListExecutorsTool() {
+	listTool := mcp.NewToolWithRawSchema("list_executors_kandev",
+		"List every executor available to the authenticated caller, including custom executor IDs, with its visible profiles. Use a returned profile ID as executor_profile_id in create_task_kandev. Visibility does not grant authority to launch later; task creation and executor admission check current ownership.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	// NewToolWithRawSchema does not accept option functions, so set annotations directly.
+	listTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	s.mcpServer.AddTool(
+		listTool,
+		s.wrapHandler("list_executors_kandev", s.listExecutorsHandler()),
 	)
 }
 

@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-PLATFORM-NOTIFICATIONS-001
 acceptance_criteria:
-  - AC-PLATFORM-NOTIFICATIONS-001.13
+  - AC-PLATFORM-NOTIFICATIONS-001.16
 system_design:
   - ../../specs/platform/system-design/localized-update-notifications.md
 ---
@@ -79,3 +79,7 @@ pseudo-locale browser spec passed 23 tests with retries disabled. Typecheck,
 changed-file lint, i18n checks, and specification checks passed. The original
 CI shard contains other specs and uses four concurrent processes; it was not
 repeated locally under the repository's resource guard.
+
+After merging the latest base, the selected frontend suites passed 54 tests and
+the rebuilt Chromium run of this spec and the deleted-task spec passed all 25
+tests with retries disabled.

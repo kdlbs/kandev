@@ -964,7 +964,7 @@ func validateCloneAuth(auth *cloneAuth) error {
 
 func cleanGitEnvironment() []string {
 	env := withoutEnv(os.Environ(),
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
 		gitCredentialUsernameFileEnv, gitCredentialPasswordFileEnv,
 		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND",
 		"GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { settledBoundingBox } from "../../helpers/settled-box";
+import { expectTouchDimension } from "../../helpers/touch-targets";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("managed agent runtime updates on mobile", () => {
@@ -102,7 +103,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     const selector = drawer.getByTestId(`agent-update-version-${runtime.agentName}`);
     const selectorBox = await selector.boundingBox();
     expect(selectorBox).not.toBeNull();
-    expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(selectorBox!.height);
     const drawerBefore = await settledBoundingBox(drawer);
     await selector.tap();
     const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);

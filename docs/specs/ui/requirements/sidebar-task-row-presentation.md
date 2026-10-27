@@ -40,6 +40,7 @@ defaults, persistence ownership, accessibility, or responsive interaction behavi
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.14:** Right-side time uses right alignment and tabular numbers. A missing or invalid timestamp reserves no time width, and assistive technology receives the full localized relative time. Column sizing follows criterion 1.15.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.15:** On desktop fine-pointer rows, the time/action column occupies only the wider of the localized time and the menu button. Long titles use the remaining space after visible badges and normal row spacing. Hover, keyboard focus, and opening or closing the menu do not change the title's available width for an unchanged timestamp. Short titles keep their badges adjacent.
 - **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.16:** Phone rows retain a visible action with a target of at least 44 by 44 CSS pixels. Time and action remain contained without overlap, and tapping the row still navigates to the task.
+- **AC-UI-SIDEBAR-TASK-ROW-PRESENTATION-001.17:** Selecting Nothing hides change-request status indicators from the title and trailing areas, while preserving independently selected pull request number details and task actions.
 
 ## Migrated source detail
 
@@ -90,7 +91,7 @@ belongs to the same view because a review view and a planning view can need diff
   provider indicator from the title area. It does not create a duplicate indicator.
 - A missing value does not reserve empty space. For example, a task without a pull request shows no
   pull request number or trailing status gap.
-- **Nothing** removes the trailing data. The task action menu remains available.
+- **Nothing** removes the trailing data and change-request status indicators beside the title. Pull request number details and the task action menu remain available.
 - An idle fine-pointer row does not reserve space for its hidden action menu. A present trailing
   value uses the far-right edge.
 - Row hover or keyboard focus reveals the action menu. The menu appears beside an interactive
@@ -211,3 +212,5 @@ portable user settings.
 [Compact sidebar trailing content plan](../../../plans/sidebar-task-row-compact-trailing/plan.md)
 
 [Sidebar title width plan](../../../plans/sidebar-title-width/plan.md) supersedes the earlier fixed-width time-column delivery contract.
+
+[Hide sidebar change-request status plan](../../../plans/sidebar-hide-change-request-status/plan.md) corrects the Nothing selection.

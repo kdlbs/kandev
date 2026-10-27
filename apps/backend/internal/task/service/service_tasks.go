@@ -1356,7 +1356,7 @@ func (s *Service) claimRepositoryBranchSlot(
 // empty. Best-effort: lookup failures degrade to the next fallback.
 func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepositoryInput, repositoryID string) string {
 	if remoteURL := effectiveRemoteURL(repoInput); remoteURL != "" {
-		if _, owner, name, _, err := parseRemoteRepositoryURL(remoteURL, repoInput.Provider); err == nil {
+		if _, owner, name, _, err := parseRemoteRepositoryURL(remoteURL, effectiveRemoteProvider(repoInput)); err == nil {
 			return owner + "/" + name
 		}
 	}
@@ -1675,8 +1675,11 @@ func (s *Service) resolveRepoInputLocal(
 func (s *Service) resolveRepoInputRemote(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, baseBranch string,
 ) (string, string, bool, error) {
+	if err := s.inferEnterpriseGitHubProvider(ctx, workspaceID, &repoInput); err != nil {
+		return "", "", false, err
+	}
 	provider, owner, name, canonicalURL, parseErr := parseRemoteRepositoryURL(
-		effectiveRemoteURL(repoInput), repoInput.Provider,
+		effectiveRemoteURL(repoInput), effectiveRemoteProvider(repoInput),
 	)
 	if parseErr != nil {
 		return "", "", false, parseErr
@@ -1688,8 +1691,11 @@ func (s *Service) resolveRepoInputRemote(
 	if metadataErr != nil {
 		return "", "", false, metadataErr
 	}
+	if err := s.verifyEnterpriseGitHubOrigin(ctx, workspaceID, repoInput); err != nil {
+		return "", "", false, err
+	}
 	defaultBranch := firstNonEmpty(repoInput.DefaultBranch, repoInput.BaseBranch)
-	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil && provider == providerGitHub {
+	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil && provider == providerGitHub && remoteProviderHost(provider, canonicalURL) == githubProviderHost {
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
 	providerHost := remoteProviderHost(provider, canonicalURL)
@@ -1814,7 +1820,7 @@ func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, 
 	originHost := strings.ToLower(parsed.Host)
 	parts := strings.Split(strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/"), "/")
 	switch host {
-	case "github.com", "www.github.com":
+	case publicGitHubHostname, legacyGitHubHostname:
 		return parseGitHubRemote(host, parts, sshStyle)
 	case "gitlab.com", "www.gitlab.com":
 		return parseGitLabRemote(parsed.Scheme, strings.TrimPrefix(originHost, "www."), parts, sshStyle)
@@ -1823,6 +1829,9 @@ func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, 
 	case "ssh.dev.azure.com":
 		return parseAzureSSHRemote(parts)
 	default:
+		if strings.EqualFold(providerHint, providerGitHub) {
+			return parseEnterpriseGitHubRemote(parsed, parts, sshStyle)
+		}
 		if strings.EqualFold(providerHint, providerGitLab) &&
 			(parsed.Scheme == protocolHTTP || parsed.Scheme == protocolHTTPS) {
 			return parseGitLabRemote(parsed.Scheme, originHost, parts, false)
@@ -1856,7 +1865,11 @@ func parseGitHubRemote(host string, parts []string, sshStyle bool) (string, stri
 		return "", "", "", "", fmt.Errorf("invalid GitHub repository URL: expected github.com/owner/repo")
 	}
 	owner, name := parts[0], parts[1]
-	canonical := fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
+	webHost := host
+	if webHost == legacyGitHubHostname {
+		webHost = publicGitHubHostname
+	}
+	canonical := fmt.Sprintf("https://%s/%s/%s.git", webHost, owner, name)
 	if sshStyle {
 		canonical = fmt.Sprintf("git@%s:%s/%s.git", host, owner, name)
 	}
@@ -1889,7 +1902,7 @@ func parseGitLabRemote(scheme, host string, parts []string, sshStyle bool) (stri
 
 func remoteProviderHost(provider, remoteURL string) string {
 	if provider == providerGitHub {
-		return githubProviderHost
+		return enterpriseGitHubRemoteOrigin(remoteURL)
 	}
 	if !strings.EqualFold(provider, providerGitLab) {
 		return ""
@@ -4579,6 +4592,10 @@ type workspaceArchiveModeLister interface {
 	ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error)
 }
 
+type workspaceCommandPanelLister interface {
+	ListTasksByWorkspaceForCommandPanel(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error)
+}
+
 func listTasksByWorkspaceWithArchiveMode(repo taskrepo.TaskRepository, ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
 	if lister, ok := repo.(workspaceArchiveModeLister); ok {
 		return lister.ListTasksByWorkspaceWithArchiveMode(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
@@ -4600,10 +4617,32 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 // used by the sidebar archive view. onlyArchived takes precedence over
 // includeArchived when both are true.
 func (s *Service) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return s.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, false)
+}
+
+func (s *Service) ListTasksByWorkspaceForCommandPanel(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	if workflowID == "" || query != "" {
+		return nil, 0, fmt.Errorf("command panel listing requires a workflow and empty query")
+	}
+	return s.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, true)
+}
+
+func (s *Service) listTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, commandPanelVisible bool) ([]*models.Task, int, error) {
 	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
 		return nil, 0, err
 	}
-	tasks, total, err := listTasksByWorkspaceWithArchiveMode(s.tasks, ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
+	var tasks []*models.Task
+	var total int
+	var err error
+	if commandPanelVisible {
+		lister, ok := s.tasks.(workspaceCommandPanelLister)
+		if !ok {
+			return nil, 0, fmt.Errorf("command panel workspace listing is unavailable")
+		}
+		tasks, total, err = lister.ListTasksByWorkspaceForCommandPanel(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
+	} else {
+		tasks, total, err = listTasksByWorkspaceWithArchiveMode(s.tasks, ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
+	}
 	if err != nil {
 		return nil, 0, err
 	}

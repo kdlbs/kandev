@@ -19,12 +19,14 @@ const recoveryDispositionManual = "manual"
 const recoveryDispositionExhausted = "exhausted"
 const failureKindProviderInterrupted = "provider_interrupted"
 const continuationRefusalMissingEvidence = "missing_evidence"
+const continuationRefusalUnsupportedRestore = "unsupported_restore"
 
 type continuationPolicy string
 
 const (
-	continuationPolicySavedHistoryRestore continuationPolicy = "saved_history_restore"
-	continuationPolicyCapacityLive        continuationPolicy = "capacity_live"
+	continuationPolicySavedHistoryRestore     continuationPolicy = "saved_history_restore"
+	continuationPolicyCapacityLive            continuationPolicy = "capacity_live"
+	continuationPolicyAgentManagedPendingLive continuationPolicy = "agent_managed_pending_live"
 )
 
 // continuationBinding is an immutable admission snapshot, retained only in process.
@@ -38,31 +40,32 @@ type continuationBinding struct {
 }
 
 func (s *Service) continuationBindingForFailure(ctx context.Context, data watcher.AgentEventData) *continuationBinding {
-	classified := classifyKanbanFailure(data)
-	if classified == nil {
+	var previous *transientRetryEntry
+	if value, ok := s.transientRetries.Load(data.SessionID); ok {
+		previous, _ = value.(*transientRetryEntry)
+	}
+	return s.continuationBindingForFailureWithPrevious(ctx, data, previous)
+}
+
+func (s *Service) continuationBindingForFailureWithPrevious(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	previous *transientRetryEntry,
+) *continuationBinding {
+	policy := s.continuationPolicyForFailure(data, previous)
+	if policy == "" {
 		return nil
 	}
-	policy := continuationPolicy("")
-	switch classified.Code {
-	case routingerr.CodeModelCapacity:
-		if !s.capacityContinuationFailureHasEvidence(data) {
-			return nil
-		}
-		policy = continuationPolicyCapacityLive
-	default:
-		if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry ||
-			!s.continuationFailureHasEvidence(data) {
-			return nil
-		}
-		policy = continuationPolicySavedHistoryRestore
-	}
-	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
-	if err != nil || session == nil || session.TaskID != data.TaskID || session.IsPassthrough || session.AgentProfileID == "" {
-		return nil
-	}
-	task, err := s.repo.GetTask(ctx, data.TaskID)
-	if err != nil || task == nil || task.IsFromOffice || task.ArchivedAt != nil ||
-		(policy == continuationPolicyCapacityLive && models.IsAutomationTaskOrigin(task.Origin)) {
+	return s.continuationBindingForPolicy(ctx, data, policy)
+}
+
+func (s *Service) continuationBindingForPolicy(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	policy continuationPolicy,
+) *continuationBinding {
+	session, task := s.continuationSessionAndTaskForPolicy(ctx, data, policy)
+	if session == nil || task == nil {
 		return nil
 	}
 	nativeID := continuationNativeID(session)
@@ -72,7 +75,7 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 	}
 	var initiator authn.Identity
 	initiatorKnown := false
-	if policy == continuationPolicyCapacityLive {
+	if policy == continuationPolicyCapacityLive || policy == continuationPolicyAgentManagedPendingLive {
 		initiator, initiatorKnown = s.promptAttemptInitiator(data)
 		if !initiatorKnown && (s.sessionPromptCheck != nil || s.sessionAccessCheck != nil) {
 			return nil
@@ -84,9 +87,86 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 	}
 }
 
+func (s *Service) continuationSessionAndTaskForPolicy(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	policy continuationPolicy,
+) (*models.TaskSession, *models.Task) {
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || session == nil || session.TaskID != data.TaskID || session.IsPassthrough || session.AgentProfileID == "" {
+		return nil, nil
+	}
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil || task == nil || task.IsFromOffice || task.ArchivedAt != nil ||
+		(policy == continuationPolicyCapacityLive && models.IsAutomationTaskOrigin(task.Origin)) {
+		return nil, nil
+	}
+	return session, task
+}
+
+func (s *Service) continuationPolicyForFailure(
+	data watcher.AgentEventData,
+	previous *transientRetryEntry,
+) continuationPolicy {
+	classified := classifyKanbanFailure(data)
+	if classified == nil {
+		return ""
+	}
+	switch classified.Code {
+	case routingerr.CodeModelCapacity:
+		if s.capacityContinuationFailureHasEvidence(data) {
+			return continuationPolicyCapacityLive
+		}
+		return ""
+	default:
+		if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
+			return ""
+		}
+		if continuationPendingToolsV3(data.ContinuationSafety) || s.agentManagedPendingEpisodeMatches(previous, data) {
+			if s.agentManagedPendingFailureHasEvidence(data, classified) {
+				return continuationPolicyAgentManagedPendingLive
+			}
+			return ""
+		}
+		if s.continuationFailureHasEvidence(data) {
+			return continuationPolicySavedHistoryRestore
+		}
+		return ""
+	}
+}
+
 func (s *Service) continuationFailureHasEvidence(data watcher.AgentEventData) bool {
 	return data.OwnerKind == queueStatusScopeTask && !data.DynamicRouteAttempt &&
+		data.ContinuationSafety != nil && !data.ContinuationSafety.Pending &&
 		data.ContinuationSafety.SafeFor(data.PromptGeneration) && data.EvidenceKnown && s.continuationPromptIdentityMatches(data)
+}
+
+func continuationPendingToolsV3(snapshot *streams.ContinuationSafetySnapshot) bool {
+	return snapshot != nil && snapshot.Support == streams.ContinuationAgentManagedToolsV3 && snapshot.Pending
+}
+
+func (s *Service) agentManagedPendingEpisodeMatches(previous *transientRetryEntry, data watcher.AgentEventData) bool {
+	if previous == nil || previous.mode != recoveryModeContinue ||
+		previous.continuationPolicy != continuationPolicyAgentManagedPendingLive || previous.continuation == nil ||
+		previous.retainedRuntime == nil {
+		return false
+	}
+	previous.mu.Lock()
+	defer previous.mu.Unlock()
+	return previous.started > 0 && previous.acceptedExecution == data.AgentExecutionID &&
+		previous.acceptedGeneration == data.PromptGeneration
+}
+
+func (s *Service) agentManagedPendingFailureHasEvidence(
+	data watcher.AgentEventData,
+	classified *routingerr.Error,
+) bool {
+	return classified != nil && classified.Code == routingerr.CodeAgentTransportLost &&
+		data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+		data.PromptFailureDisposition.Valid() && data.OwnerKind == queueStatusScopeTask &&
+		!data.DynamicRouteAttempt && data.ContinuationSafety != nil &&
+		data.ContinuationSafety.SafeFor(data.PromptGeneration) &&
+		data.EvidenceKnown && s.continuationPromptIdentityMatches(data)
 }
 
 func (s *Service) capacityContinuationFailureHasEvidence(data watcher.AgentEventData) bool {
@@ -132,11 +212,31 @@ func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.Ag
 	if safety == nil || !safety.Known || !data.EvidenceKnown || !s.continuationPromptIdentityMatches(data) {
 		return continuationRefusalMissingEvidence
 	}
-	if safety.Unsafe || safety.Pending {
+	if safety.Unsafe {
 		return "unsafe_work"
 	}
-	if (safety.Support != streams.ContinuationNativeSavedHistoryV1 && safety.Support != streams.ContinuationNativeSavedHistoryV2) || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
-		return "unsupported_restore"
+	if data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
+		return continuationRefusalUnsupportedRestore
+	}
+	switch {
+	case safety.Pending:
+		if safety.Support != streams.ContinuationAgentManagedToolsV3 {
+			return "unsafe_work"
+		}
+		if !safety.SafeFor(data.PromptGeneration) {
+			return continuationRefusalMissingEvidence
+		}
+		if classified == nil || classified.Code != routingerr.CodeAgentTransportLost ||
+			data.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime ||
+			!data.PromptFailureDisposition.Valid() {
+			return continuationRefusalUnsupportedRestore
+		}
+	case safety.Support != streams.ContinuationNativeSavedHistoryV1 &&
+		safety.Support != streams.ContinuationNativeSavedHistoryV2 &&
+		safety.Support != streams.ContinuationAgentManagedToolsV3:
+		return continuationRefusalUnsupportedRestore
+	case !safety.SafeFor(data.PromptGeneration):
+		return continuationRefusalMissingEvidence
 	}
 	if s.continuationBindingForFailure(ctx, data) == nil {
 		return continuationRefusalMissingEvidence
@@ -153,7 +253,7 @@ func (s *Service) capacityContinuationRefusalReason(ctx context.Context, data wa
 		return "unsafe_work"
 	}
 	if !supportsCapacityContinuation(snapshot.Support) {
-		return "unsupported_restore"
+		return continuationRefusalUnsupportedRestore
 	}
 	if !capacityContinuationAdmissionMatches(snapshot, data) {
 		return continuationRefusalMissingEvidence

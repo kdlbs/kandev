@@ -219,6 +219,13 @@ func (a *Adapter) sendPrompt(
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
 		notificationsDrained := a.syncNotifQueue()
 		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
+			if a.dialect.continuationSupportForError != nil {
+				if support := a.dialect.continuationSupportForError(err); support != "" {
+					turn.evidenceMu.Lock()
+					turn.continuationSupportOverride = support
+					turn.evidenceMu.Unlock()
+				}
+			}
 			// Recognized interruptions follow queued output regardless of continuation eligibility.
 			snapshot := a.continuationSafetySnapshot(turn)
 			a.cancelAsyncTurnComplete(sessionID)

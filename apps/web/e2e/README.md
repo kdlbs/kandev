@@ -336,10 +336,10 @@ baseline.
 
 ### Flake rate and trend
 
-CI keeps three retries for diagnostics and sets `E2E_FAIL_ON_FLAKY=1`, so a test
-that fails and then passes still fails the build. The **E2E flake rate** section
-of the `e2e-report` job summary makes that number visible without downloading
-anything. It reports, for the run:
+CI allows three retries and accepts tests that pass after a retry. Set
+`E2E_FAIL_ON_FLAKY=1` for a diagnostic run that fails on retry passes. The
+**E2E flake rate** section of the `e2e-report` job summary reports these results
+without requiring a download:
 
 - the flake count, the number of executed tests, and the rate per 1000;
 - the baseline (median of the last 10 recorded runs) and the change against it;

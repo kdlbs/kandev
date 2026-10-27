@@ -1427,7 +1427,20 @@ func (e *Executor) resumeSession(
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
-			if startAgent {
+			if startAgent && resumeInitialState == models.TaskSessionStateWaitingForInput &&
+				e.agentManager.IsAgentReadyForPrompt(ctx, session.ID) {
+				// A recovered idle runtime has no new boot event to clear our STARTING claim.
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, resumeInitialErrorMessage,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					if errors.Is(rollbackErr, ErrSessionStateSuperseded) {
+						// A newer owner preserves the duplicate-runtime classification.
+						return nil, errors.Join(ErrExecutionAlreadyRunning, rollbackErr)
+					}
+					return nil, rollbackErr
+				}
+			} else if startAgent {
 				// The live process owns this session's active lifecycle. Keep the
 				// STARTING projection for that process to reconcile instead of
 				// marking it FAILED as if this duplicate launch had failed.

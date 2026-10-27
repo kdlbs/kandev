@@ -15,9 +15,13 @@ async function scrollReview(page: Page, root: Locator, mobile: boolean, directio
   const box = await root.boundingBox();
   if (!box) throw new Error("Review scroller is missing");
   if (mobile) {
+    const header = await root.getByTestId("review-file-header").first().boundingBox();
+    if (!header) throw new Error("Review file header is missing");
     const cdp = await page.context().newCDPSession(page);
-    const x = box.x + box.width / 2;
-    const startY = box.y + box.height / 2;
+    // Diff rows can be replaced during rendering. Keep the gesture on the persistent header.
+    const x = header.x + header.width / 2;
+    const startY = header.y + header.height / 2;
+    const distance = direction === 1 ? Math.min(200, startY - 4) : 200;
     try {
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchStart",
@@ -26,7 +30,7 @@ async function scrollReview(page: Page, root: Locator, mobile: boolean, directio
       for (let step = 1; step <= 10; step++) {
         await cdp.send("Input.dispatchTouchEvent", {
           type: "touchMove",
-          touchPoints: [{ x, y: startY - direction * step * 20 }],
+          touchPoints: [{ x, y: startY - (direction * step * distance) / 10 }],
         });
         await page.evaluate(
           () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),

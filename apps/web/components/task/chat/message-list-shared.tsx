@@ -90,6 +90,7 @@ export type MessageListProps = {
    * remain mounted while inactive and use this transition to recover missed
    * oldest-page sentinel observations. */
   isVisible?: boolean;
+  detailActive?: boolean;
   /** The task-owned launch card renders the matching failure. */
   launchErrorOwned?: boolean;
   /** Stamp used to distinguish a matching last-agent-error notice. */

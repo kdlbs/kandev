@@ -6,6 +6,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/changes"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type runtimeTurnChangeCaptureHandler struct {
@@ -59,7 +60,11 @@ func (h *runtimeTurnChangeCaptureHandler) ProcessTurnChanges(
 		return err
 	}
 	if h.publisher != nil {
-		return h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
+		err := h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
+		// Uncaptured or removed turns have no summary to publish.
+		if !errors.Is(err, repoerrors.ErrTurnChangeSetNotFound) {
+			return err
+		}
 	}
 	return nil
 }

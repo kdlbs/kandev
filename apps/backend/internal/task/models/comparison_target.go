@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
+
 	"github.com/kandev/kandev/internal/common/securityutil"
 )
 
@@ -145,8 +147,10 @@ func validateComparisonTargetProviderHost(provider, host string) error {
 	if strings.TrimSpace(host) == "" {
 		return errors.New("repository host is required")
 	}
-	if provider == ComparisonTargetProviderGitHub && !strings.EqualFold(host, "github.com") {
-		return fmt.Errorf("GitHub repository host %q is unsupported", host)
+	if provider == ComparisonTargetProviderGitHub {
+		if _, err := githubhost.Parse(host); err != nil {
+			return fmt.Errorf("GitHub repository host %q is unsupported", host)
+		}
 	}
 	return nil
 }

@@ -189,6 +189,7 @@ test.describe("File tree drag and drop", () => {
     const renameResponse = ws.waitForResponse("workspace.file.rename");
     await dispatchHtmlDnd(session.fileTree, "movable.ts", "target-dir");
     await renameResponse;
+    // Initial Git loading can preserve Files, so select Changes explicitly.
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible();
     await expect(session.changesFileRow("movable.ts")).toBeVisible({ timeout: 15_000 });
@@ -304,13 +305,14 @@ test.describe("File tree drag and drop", () => {
     expect(replies.get(requests[0].id)?.payload.success).toBe(true);
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible();
+    await expect(session.changesFileRow("dest/src/a.txt")).toBeVisible();
     await session.clickTab("Files");
     await session.fileTreeNode("dest").click();
     await session.fileTree.waitForFileTreeNode("dest/src");
     await session.fileTreeNode("dest/src").click();
     await expect(session.fileTreeNode("dest/src/a.txt")).toBeVisible();
     await session.fileTreeNode("dest/src/sub").click();
-    await expect(session.fileTreeNode("dest/src/sub/keep.txt")).toBeVisible();
+    await session.fileTree.waitForFileTreeNode("dest/src/sub/keep.txt");
     await expect(session.fileTreeNode("dest/a.txt")).toHaveCount(0);
   });
 

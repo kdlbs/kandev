@@ -1,6 +1,13 @@
 "use client";
 
-import { IconChevronDown, IconCheck, IconX, IconMessageQuestion } from "@tabler/icons-react";
+import {
+  IconArrowsMaximize,
+  IconChevronDown,
+  IconCheck,
+  IconRestore,
+  IconX,
+  IconMessageQuestion,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -33,6 +40,10 @@ type ClarificationOverlayTopBarProps = {
   lateMode?: boolean;
   onLateClose?: () => void;
   onCollapse?: () => void;
+  onExpandPanel?: () => void;
+  onResetPanel?: () => void;
+  canExpandPanel?: boolean;
+  canResetPanel?: boolean;
   collapseContentId?: string;
 };
 
@@ -53,6 +64,10 @@ export function ClarificationOverlayTopBar({
   lateMode = false,
   onLateClose,
   onCollapse,
+  onExpandPanel,
+  onResetPanel,
+  canExpandPanel,
+  canResetPanel,
   collapseContentId,
 }: ClarificationOverlayTopBarProps) {
   const { t } = useTranslation();
@@ -87,6 +102,10 @@ export function ClarificationOverlayTopBar({
         lateMode={lateMode}
         onLateClose={onLateClose}
         onCollapse={onCollapse}
+        onExpandPanel={onExpandPanel}
+        onResetPanel={onResetPanel}
+        canExpandPanel={canExpandPanel}
+        canResetPanel={canResetPanel}
         collapseContentId={collapseContentId}
       />
     </div>
@@ -102,6 +121,10 @@ type ClarificationHeaderActionsProps = {
   lateMode?: boolean;
   onLateClose?: () => void;
   onCollapse?: () => void;
+  onExpandPanel?: () => void;
+  onResetPanel?: () => void;
+  canExpandPanel?: boolean;
+  canResetPanel?: boolean;
   collapseContentId?: string;
 };
 
@@ -149,6 +172,10 @@ export function ClarificationHeaderActions({
   lateMode = false,
   onLateClose,
   onCollapse,
+  onExpandPanel,
+  onResetPanel,
+  canExpandPanel = false,
+  canResetPanel = false,
   collapseContentId,
 }: ClarificationHeaderActionsProps) {
   const { t } = useTranslation();
@@ -183,10 +210,38 @@ export function ClarificationHeaderActions({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-end gap-2",
+        "flex shrink-0 flex-wrap items-center justify-end gap-1.5",
         total > 1 && "w-full md:w-auto",
       )}
     >
+      {onExpandPanel && onResetPanel && (
+        <>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0 [@media(pointer:coarse)]:min-h-11"
+            onClick={onExpandPanel}
+            disabled={!canExpandPanel}
+            data-testid="clarification-panel-expand"
+          >
+            <IconArrowsMaximize className="size-3.5" aria-hidden="true" />
+            {t("chat:expandClarificationPanel")}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0 [@media(pointer:coarse)]:min-h-11"
+            onClick={onResetPanel}
+            disabled={!canResetPanel}
+            data-testid="clarification-panel-reset"
+          >
+            <IconRestore className="size-3.5" aria-hidden="true" />
+            {t("chat:resetClarificationPanel")}
+          </Button>
+        </>
+      )}
       {total > 1 && (
         <KeyboardShortcutTooltip
           shortcut={SHORTCUTS.SUBMIT}
@@ -194,7 +249,7 @@ export function ClarificationHeaderActions({
           enabled={!isSubmitting}
         >
           <span
-            className="inline-flex min-w-0 flex-1 md:flex-none"
+            className="inline-flex min-w-28 flex-1 md:min-w-0 md:flex-none"
             data-testid="clarification-submit-shortcut"
             tabIndex={!allAnswered && !isSubmitting ? 0 : undefined}
           >

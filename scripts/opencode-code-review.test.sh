@@ -58,23 +58,17 @@ if [[ "$relative_patch_count" != "2" ]]; then
 fi
 pass "OpenCode patches are passed as relative workspace files in both workflow paths"
 
-fork_base_fetch_count="$(count_occurrences 'git fetch --no-tags --prune origin "$BASE_SHA"')"
-if [[ "$fork_base_fetch_count" != "1" ]]; then
-  fail "Fork review fetches the trusted base commit before building the diff"
+prepare_script="$ROOT_DIR/.github/scripts/prepare-pr-review.sh"
+if ! grep -Fq 'git fetch --no-tags origin "$BASE_SHA"' "$prepare_script"; then
+  fail "Review preparation fetches the event base for the full diff"
 fi
-pass "Fork review fetches the trusted base commit before building the diff"
+pass "Review preparation fetches the event base for the full diff"
 
-shallow_base_fetch_count="$(count_occurrences 'git fetch --no-tags --prune --depth=1 origin "$BASE_SHA"')"
-if [[ "$shallow_base_fetch_count" != "0" ]]; then
-  fail "Fork review does not shallow-fetch the base commit before a three-dot diff"
-fi
-pass "Fork review does not shallow-fetch the base commit before a three-dot diff"
-
-recreate_config_count="$(count_occurrences 'rm -rf .opencode')"
+recreate_config_count="$(count_occurrences 'rm -rf .opencode opencode.json opencode.jsonc')"
 if [[ "$recreate_config_count" != "2" ]]; then
-  fail "OpenCode project config is recreated before writing the review agent"
+  fail "Both model steps clear root and directory agent configuration"
 fi
-pass "OpenCode project config is recreated before writing the review agent"
+pass "Both model steps clear root and directory agent configuration"
 
 allowed_tools_prompt_count="$(count_occurrences 'Use only read/search tools made available by OpenCode, such as glob, grep, and read.')"
 if [[ "$allowed_tools_prompt_count" != "2" ]]; then
@@ -130,11 +124,11 @@ if [[ "$explicit_patch_arg_count" != "2" ]]; then
 fi
 pass "OpenCode posting steps explicitly pass review.patch for inline filtering"
 
-trusted_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
+trusted_script_count="$(count_occurrences 'python3 scripts/opencode-code-review "${post_args[@]}"')"
 if [[ "$trusted_script_count" != "2" ]]; then
-  fail "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
+  fail "OpenCode review executes the parser script from the trusted workflow checkout in both workflow paths"
 fi
-pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
+pass "OpenCode review executes the parser script from the trusted workflow checkout in both workflow paths"
 
 artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1')"
 total_artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@')"
@@ -178,12 +172,12 @@ if [[ "$(count_occurrences 'GH_TOKEN: ${{ github.token }}')" != "1" ]]; then
 fi
 pass "Only advisory fork posting uses github.token"
 
-if [[ "$(count_occurrences 'ref: ${{ github.event.pull_request.head.sha }}')" != "2" ]] || [[ "$(count_occurrences 'git rev-parse HEAD')" != "2" ]]; then
-  fail "Both review paths use and assert immutable PR head SHA checkouts"
+if [[ "$(count_occurrences 'ref: ${{ github.workflow_sha }}')" != "2" ]] || [[ "$(count_occurrences 'bash .github/scripts/prepare-pr-review.sh')" != "2" ]]; then
+  fail "Both review paths use trusted checkouts and verified head objects"
 fi
-pass "Both review paths use and assert immutable PR head SHA checkouts"
+pass "Both review paths use trusted checkouts and verified head objects"
 
-if [[ "$(count_occurrences 'RANGE="$BASE_SHA...$HEAD_SHA"')" != "2" ]] || rg -q 'incremental|BEFORE|AFTER' "$WORKFLOW"; then
+if ! grep -Fq 'RANGE="$BASE_SHA...$HEAD_SHA"' "$prepare_script" || rg -q 'incremental|BEFORE|AFTER' "$WORKFLOW"; then
   fail "Both review paths always review the full base-to-head PR range"
 fi
 pass "Both review paths always review the full base-to-head PR range"

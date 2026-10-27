@@ -27,6 +27,37 @@ func TestCursorContinuationEvidenceWithoutOptIn(t *testing.T) {
 	require.Equal(t, uint16(1), snapshot.CompletedTools)
 }
 
+func TestCursorContinuationEvidencePendingV3(t *testing.T) {
+	a, turn := newCursorPromptTurn(t, 7)
+	a.capabilities.LoadSession = true
+	a.sessionID = "session-1"
+	for _, frame := range []string{
+		`{"sessionUpdate":"tool_call","toolCallId":"done-1","title":"Execute","kind":"execute","status":"completed"}`,
+		`{"sessionUpdate":"tool_call","toolCallId":"pending-1","title":"Execute","kind":"execute","status":"in_progress"}`,
+	} {
+		var notification acpsdk.SessionNotification
+		require.NoError(t, json.Unmarshal([]byte(`{"sessionId":"session-1","update":`+frame+`}`), &notification))
+		a.handleACPUpdate(notification, 7)
+	}
+
+	snapshot := a.continuationSafetySnapshot(turn)
+	require.NotNil(t, snapshot)
+	require.Equal(t, streams.ContinuationAgentManagedToolsV3, snapshot.Support)
+	require.True(t, snapshot.Pending)
+	require.True(t, snapshot.PermissionsResolved)
+	require.True(t, snapshot.SafeFor(7))
+	require.Equal(t, uint16(1), snapshot.CompletedTools)
+	completed := acpsdk.ToolCallStatusCompleted
+	a.handleACPUpdate(makeNotification("session-1", acpsdk.SessionUpdate{ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+		ToolCallId: "pending-1", Status: &completed,
+	}}), 7)
+	require.True(t, snapshot.Pending, "a late completion cannot mutate the published interruption evidence")
+	require.False(t, a.continuationSafetySnapshot(turn).Pending, "a later snapshot can record the completion")
+	raw, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"permissions_resolved":true`)
+}
+
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
 func TestCursorContinuationEvidenceTerminalOutput(t *testing.T) {
 	a, fake, conn := setupHandoffFakeAgent(t)
@@ -113,7 +144,7 @@ func TestCursorContinuationEvidenceToolOutcomes(t *testing.T) {
 	}{
 		{name: "output only", safe: true},
 		{name: "completed read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"in_progress","rawInput":{"path":"fixture.txt"}}`, `{"sessionUpdate":"tool_call_update","toolCallId":"read-1","status":"completed"}`}, safe: true, tools: 1},
-		{name: "pending read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"in_progress"}`}},
+		{name: "pending read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"in_progress"}`}, safe: true},
 		{name: "write", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"write-1","title":"Edit","kind":"edit","status":"completed"}`}, safe: true, tools: 1},
 		{name: "execute", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"completed"}`}, safe: true, tools: 1},
 		{name: "missing kind", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"unknown-1","title":"Tool","status":"completed"}`}, safe: true, tools: 1},
@@ -127,7 +158,7 @@ func TestCursorContinuationEvidenceToolOutcomes(t *testing.T) {
 		{name: "late Cursor subagent input", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"task-1","title":"Task: Subagent task","kind":"other","status":"in_progress"}`, `{"sessionUpdate":"tool_call_update","toolCallId":"task-1","status":"completed","rawInput":{"_toolName":"task"}}`}},
 		{name: "background shell", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"completed","rawInput":{"command":"fixture","wait":false}}`}},
 		{name: "nested", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","_meta":{"parentToolCallId":"parent"}}`}},
-		{name: "mixed completed and pending", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`, `{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"in_progress"}`}},
+		{name: "mixed completed and pending", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`, `{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"in_progress"}`}, safe: true, tools: 1},
 		{name: "reused id", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`, `{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`}},
 	}
 	for _, tc := range cases {
@@ -177,6 +208,30 @@ func TestCursorContinuationEvidenceV1ReadOnlyWireSkew(t *testing.T) {
 				require.Equal(t, tc.reads, snapshot.CompletedReads)
 			}
 		})
+	}
+}
+
+func TestCursorContinuationEvidenceV2RejectsPendingTools(t *testing.T) {
+	for _, frames := range [][]string{
+		{`{"sessionUpdate":"tool_call","toolCallId":"pending-1","title":"Execute","kind":"execute","status":"in_progress"}`},
+		{
+			`{"sessionUpdate":"tool_call","toolCallId":"done-1","title":"Execute","kind":"execute","status":"completed"}`,
+			`{"sessionUpdate":"tool_call","toolCallId":"pending-1","title":"Execute","kind":"execute","status":"in_progress"}`,
+		},
+	} {
+		a, turn := newCursorPromptTurn(t, 7)
+		a.dialect.continuationSupport = streams.ContinuationNativeSavedHistoryV2
+		a.capabilities.LoadSession = true
+		a.sessionID = "session-1"
+		for _, frame := range frames {
+			var notification acpsdk.SessionNotification
+			require.NoError(t, json.Unmarshal([]byte(`{"sessionId":"session-1","update":`+frame+`}`), &notification))
+			a.handleACPUpdate(notification, 7)
+		}
+		snapshot := a.continuationSafetySnapshot(turn)
+		require.Equal(t, streams.ContinuationNativeSavedHistoryV2, snapshot.Support)
+		require.True(t, snapshot.Pending)
+		require.False(t, snapshot.SafeFor(7))
 	}
 }
 

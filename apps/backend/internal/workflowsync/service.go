@@ -33,6 +33,8 @@ type Applier interface {
 
 // GitHubClientProvider exposes workspace-routed GitHub repository reads.
 type GitHubClientProvider interface {
+	BindWorkspaceGitHubHost(context.Context, string, string) (context.Context, error)
+	CommitWorkspaceGitHubHost(context.Context, string, func(context.Context) error) error
 	ListRepoDirectoryForWorkspace(
 		ctx context.Context, workspaceID, owner, repo, path, ref string,
 	) ([]github.RepoContentEntry, error)
@@ -210,7 +212,7 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
-	cfg, err := s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
+	cfg, err := s.upsertHostBoundConfig(ctx, workspaceID, req)
 	if err == nil {
 		s.invalidateAutomaticJob(workspaceID)
 	}
@@ -313,8 +315,13 @@ func (s *Service) syncWorkspaceLocked(
 	if err := s.prepareSyncAttempt(ctx, cfg, mode, force, state); err != nil {
 		return nil, err
 	}
-	wasRecovering := cfg.ConsecutiveFailures > 0 || cfg.PollSuspended
-	previousFailureClass := cfg.LastErrorClass
+	if cfg.Provider != ProviderGitLab && s.githubClients != nil {
+		ctx, err = s.githubClients.BindWorkspaceGitHubHost(ctx, workspaceID, cfg.GitHubHost)
+		if err != nil {
+			s.recordFailure(ctx, workspaceID, cfg, err, mode)
+			return nil, err
+		}
+	}
 	ctx = syncContext(ctx, cfg, mode)
 
 	files, err := s.fetchSyncFiles(ctx, cfg, state)
@@ -325,36 +332,21 @@ func (s *Service) syncWorkspaceLocked(
 	if err != nil {
 		return nil, err
 	}
-	parsed, warnings := parseFiles(files)
-	applied, err := s.applier.ApplySyncedWorkflows(ctx, workspaceID, parsed)
+	var result *SyncResult
+	apply := func(applyCtx context.Context) error {
+		var applyErr error
+		result, applyErr = s.applyFetchedFiles(applyCtx, cfg, files, mode)
+		return applyErr
+	}
+	if cfg.Provider != ProviderGitLab && s.githubClients != nil {
+		err = s.githubClients.CommitWorkspaceGitHubHost(ctx, workspaceID, apply)
+	} else {
+		err = apply(ctx)
+	}
 	if err != nil {
 		s.recordFailure(ctx, workspaceID, cfg, err, mode)
-		return nil, err
 	}
-	warnings = append(warnings, applied.Warnings...)
-	successState := cfg.circuitState()
-	successState.RecordSuccess()
-	persistCtx, cancel := terminalSyncPersistenceContext(ctx, mode)
-	defer cancel()
-	if err := s.store.RecordSyncStatus(
-		persistCtx, workspaceID, true, "", warnings, contentHash(files), s.now().UTC(), successState,
-	); err != nil {
-		return nil, err
-	}
-	if wasRecovering {
-		incWorkflowSyncTransition("recovered", cfg.Provider, previousFailureClass, "")
-		s.logger.Info("workflow sync polling recovered",
-			zap.String("workspace_id", workspaceID),
-			zap.String("provider", cfg.Provider),
-			zap.String("previous_failure_class", previousFailureClass))
-	}
-	return &SyncResult{
-		Created:   applied.Created,
-		Updated:   applied.Updated,
-		Deleted:   applied.Deleted,
-		Warnings:  warnings,
-		Unchanged: len(applied.Created)+len(applied.Updated)+len(applied.Deleted) == 0 && len(warnings) == 0,
-	}, nil
+	return result, err
 }
 
 func (s *Service) prepareSyncAttempt(
