@@ -123,9 +123,11 @@ func (r *NomadExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateR
 func (r *NomadExecutor) launchNewOperation(ctx context.Context, req *ExecutorCreateRequest, id nomadLaunchIdentity) (_ *ExecutorInstance, returnedErr error) {
 	profile := id.profile
 	state := newNomadIntentState(req, id)
-	if err := r.admitNomadLaunch(ctx, req, profile); err != nil {
+	node, err := r.admitNomadLaunch(ctx, req, profile)
+	if err != nil {
 		return nil, err
 	}
+	state.PinnedNodePool = node.NodePool
 	nonce, err := recordNomadLaunchIntent(ctx, req, state)
 	if err != nil {
 		return nil, err
@@ -197,12 +199,12 @@ func (r *NomadExecutor) abortRegisteredNomadLaunch(ctx context.Context, req *Exe
 	return cause
 }
 
-func (r *NomadExecutor) admitNomadLaunch(ctx context.Context, req *ExecutorCreateRequest, profile nomad.ProfileConfig) error {
+func (r *NomadExecutor) admitNomadLaunch(ctx context.Context, req *ExecutorCreateRequest, profile nomad.ProfileConfig) (*nomad.NodeRecord, error) {
 	client, err := r.newNomadAdmissionClient(ctx, profile)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return r.admitNewNomadOperation(ctx, req, profile, client)
+	return r.admitNewNomadOperationNode(ctx, req, profile, client)
 }
 
 func (r *NomadExecutor) newNomadAdmissionClient(ctx context.Context, profile nomad.ProfileConfig) (*nomad.Client, error) {

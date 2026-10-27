@@ -97,6 +97,9 @@ type EnvironmentState struct {
 	// RefusedBeforeStage records that placement admission refused the node before
 	// any worker file was staged, so no runtime exists to drain or fence.
 	RefusedBeforeStage bool `json:"refused_before_stage,omitempty"`
+	// PinnedNodePool is the node pool of the pinned node, read at admission.
+	// Empty is a pinned environment from before it was recorded: pool "default".
+	PinnedNodePool string `json:"pinned_node_pool,omitempty"`
 	// PlacementMode is ModePool for pool-placed environments; empty is legacy.
 	PlacementMode string `json:"placement_mode,omitempty"`
 	// NodeContractSHA256 binds the placed node's kandev.* metadata at attach time.
@@ -120,6 +123,9 @@ func (s EnvironmentState) Validate() error {
 	}
 	if s.carriesPoolFields() {
 		return fmt.Errorf("nomad legacy environment state carries pool placement fields")
+	}
+	if s.PinnedNodePool != "" && !safeNodeID.MatchString(s.PinnedNodePool) {
+		return fmt.Errorf("nomad environment state has an invalid pinned node pool")
 	}
 	if !s.hasOperationIdentity() {
 		return fmt.Errorf("nomad environment state has invalid immutable operation identity")

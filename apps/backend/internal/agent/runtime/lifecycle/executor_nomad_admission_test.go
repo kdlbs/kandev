@@ -23,6 +23,7 @@ type nomadAdmissionFake struct {
 	eligibility     string
 	status          string
 	datacenter      string
+	nodePool        string
 	failNodeGet     bool
 	failEligibility bool
 	failMarkerRead  bool
@@ -63,7 +64,7 @@ func (f *nomadAdmissionFake) serve(w http.ResponseWriter, r *http.Request) bool 
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ID": "node-1", "Datacenter": f.datacenter, "Status": f.status, "SchedulingEligibility": f.eligibility,
-			"Attributes": map[string]string{"kernel.name": "darwin", "cpu.arch": "arm64"},
+			"NodePool": f.nodePool, "Attributes": map[string]string{"kernel.name": "darwin", "cpu.arch": "arm64"},
 		})
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/node/node-1/eligibility":
 		body, _ := io.ReadAll(r.Body)

@@ -167,6 +167,8 @@ func (c *nomadCleanup) resume(ctx context.Context) error {
 		return c.continueFromReceipt(ctx)
 	case unplacedPoolLaunch(c.state):
 		return c.drainAndSettle(ctx)
+	case c.state.Phase == nomadPhaseCleanupPending && c.state.QuarantineState == "" && c.pinnedNeverAllocated(ctx):
+		return c.drainAndSettle(ctx)
 	case c.state.Phase == nomadPhaseCleanupPending && c.state.QuarantineState == "":
 		// The cleanup checkpoint committed but neither a drain receipt nor a
 		// quarantine did. Fence the node; resume never drains.
@@ -253,6 +255,9 @@ func (c *nomadCleanup) drainAndSettle(ctx context.Context) error {
 		if c.nothingStaged() {
 			return c.settleRefusedLaunch(ctx)
 		}
+		if c.pinnedNeverAllocated(ctx) {
+			return c.settleNeverAllocated(ctx)
+		}
 		return c.fail(ctx, nomadCleanupReasonIdentityUnrecorded)
 	}
 	receipt, reason := c.drain(ctx)
@@ -273,13 +278,22 @@ func (c *nomadCleanup) drainAndSettle(ctx context.Context) error {
 // any worker file was staged. No runtime exists, so there is nothing to drain
 // and the node is not fenced; the absence receipt records an empty drain.
 func (c *nomadCleanup) settleRefusedLaunch(ctx context.Context) error {
+	if err := c.recordEmptyDrainReceipt(ctx); err != nil {
+		return err
+	}
+	return c.settle(ctx)
+}
+
+// recordEmptyDrainReceipt persists the absence receipt of an environment that
+// never had a runtime to drain.
+func (c *nomadCleanup) recordEmptyDrainReceipt(ctx context.Context) error {
 	c.state.DrainReceiptDigest = nomad.ReceiptDigest(c.state, agentctl.RuntimeDrainReceipt{}, c.claimID)
 	c.state.DrainReceiptGeneration = c.state.Generation
 	c.state.Revision++
 	if err := checkpointNomadState(ctx, c.req, &c.state); err != nil {
 		return c.retained(nomadCleanupReasonReceiptCheckpoint)
 	}
-	return c.settle(ctx)
+	return nil
 }
 
 // drain seals the exact recorded runtime and waits for its managed teardown.
@@ -394,6 +408,9 @@ func (c *nomadCleanup) settle(ctx context.Context) error {
 	if c.neverPlaced() {
 		return c.settleNeverPlaced(ctx)
 	}
+	if c.pinnedWithoutAllocation() && c.hasReceipt() && c.pinnedNeverAllocated(ctx) {
+		return c.settleNeverAllocated(ctx)
+	}
 	if err := c.client.StopJob(ctx, c.state.Namespace, c.state.JobID); err != nil {
 		return c.fail(ctx, nomadCleanupReasonStopFailed)
 	}
@@ -460,7 +477,7 @@ func (c *nomadCleanup) observeStop(ctx context.Context) (reason string, pending 
 // finish releases the worker fence for exactly this environment, then the
 // inventory. Both are idempotent and retried from the persisted absent phase.
 func (c *nomadCleanup) finish(ctx context.Context) error {
-	if !c.nothingStaged() {
+	if !c.nothingStaged() && !c.pinnedWithoutAllocation() {
 		if reason := c.removeStagedState(ctx); reason != "" {
 			return c.retained(reason)
 		}

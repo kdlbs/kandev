@@ -23,30 +23,37 @@ const (
 // admitNewNomadOperation is the durable worker start fence for new operations.
 // Every read that cannot positively prove the node is clean fails closed.
 func (r *NomadExecutor) admitNewNomadOperation(ctx context.Context, req *ExecutorCreateRequest, profile nomad.ProfileConfig, client *nomad.Client) error {
+	_, err := r.admitNewNomadOperationNode(ctx, req, profile, client)
+	return err
+}
+
+// admitNewNomadOperationNode runs the admission fence and returns the admitted
+// node, so a pinned launch can record the node's actual node pool.
+func (r *NomadExecutor) admitNewNomadOperationNode(ctx context.Context, req *ExecutorCreateRequest, profile nomad.ProfileConfig, client *nomad.Client) (*nomad.NodeRecord, error) {
 	if req == nil || client == nil {
-		return fmt.Errorf("%w: admission inputs are unavailable", ErrNomadWorkerQuarantined)
+		return nil, fmt.Errorf("%w: admission inputs are unavailable", ErrNomadWorkerQuarantined)
 	}
 	if err := admitAgainstRetainedInventory(ctx, req, profile); err != nil {
-		return err
+		return nil, err
 	}
 	marker, _, err := client.ReadQuarantineMarker(ctx, profile.Namespace, profile.NodeID)
 	if err != nil {
-		return fmt.Errorf("%w: quarantine marker could not be read: %w", ErrNomadWorkerQuarantined, err)
+		return nil, fmt.Errorf("%w: quarantine marker could not be read: %w", ErrNomadWorkerQuarantined, err)
 	}
 	if marker != nil {
-		return fmt.Errorf("%w: node carries a quarantine marker", ErrNomadWorkerQuarantined)
+		return nil, fmt.Errorf("%w: node carries a quarantine marker", ErrNomadWorkerQuarantined)
 	}
 	node, err := client.GetNode(ctx, profile.NodeID)
 	if err != nil {
-		return fmt.Errorf("%w: node state could not be read: %w", ErrNomadWorkerQuarantined, err)
+		return nil, fmt.Errorf("%w: node state could not be read: %w", ErrNomadWorkerQuarantined, err)
 	}
 	if err := nomad.CheckDedicatedNode(profile, node); err != nil {
-		return fmt.Errorf("%w: %w", ErrNomadWorkerQuarantined, err)
+		return nil, fmt.Errorf("%w: %w", ErrNomadWorkerQuarantined, err)
 	}
 	if node.SchedulingEligibility != nomadNodeEligible || node.Status != nomadNodeStatusReadyStr {
-		return fmt.Errorf("%w: node is not eligible and ready", ErrNomadWorkerQuarantined)
+		return nil, fmt.Errorf("%w: node is not eligible and ready", ErrNomadWorkerQuarantined)
 	}
-	return nil
+	return node, nil
 }
 
 func admitAgainstRetainedInventory(ctx context.Context, req *ExecutorCreateRequest, profile nomad.ProfileConfig) error {

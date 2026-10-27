@@ -136,6 +136,15 @@ type NativeJobInput struct {
 
 const defaultNodePool = "default"
 
+// pinnedNodePool is the node pool a pinned job targets: the pool recorded from
+// the pinned node, or the default pool for a state that predates the record.
+func pinnedNodePool(s EnvironmentState) string {
+	if s.PinnedNodePool != "" {
+		return s.PinnedNodePool
+	}
+	return defaultNodePool
+}
+
 func NativeJobFromState(state EnvironmentState) (Job, error) {
 	if state.PlacementMode == ModePool {
 		return BuildPoolJob(PoolJobInput{Profile: PoolProfileFromState(state), State: state, ArtifactDigest: state.ArtifactSHA256})
@@ -166,7 +175,7 @@ func BuildNativeJob(input NativeJobInput) (Job, error) {
 	group := nativeTaskGroup(p, s, agentctlPath, bootstrapPath)
 	job := Job{
 		ID: s.JobID, Name: s.JobID, Type: "batch", Namespace: p.Namespace, Region: p.Region,
-		Priority: 50, NodePool: defaultNodePool, Datacenters: []string{p.Datacenter}, Meta: metadata,
+		Priority: 50, NodePool: pinnedNodePool(s), Datacenters: []string{p.Datacenter}, Meta: metadata,
 		Constraints: []Constraint{{LTarget: nodeUniqueIDTarget, Operand: "=", RTarget: p.NodeID}},
 		TaskGroups:  []TaskGroup{group},
 	}
