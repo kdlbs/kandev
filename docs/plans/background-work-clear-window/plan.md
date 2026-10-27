@@ -64,6 +64,11 @@ defines the transitions. Do not infer overlap or use transport offsets as JS
 indices, retain historical copies, or expand the public DTO, wire, or schema.
 Preserve search, truncation and auto-scroll; each view clears independently.
 
+The store-subscribing clear-output hook lives in
+`hooks/domains/session/use-cleared-background-output.ts`, following the scoped
+frontend hook ownership rule. The panel imports the same selection and anchor
+behavior; the work order records focused correction checks.
+
 ## ASCII UI preview
 
 UI-01: Desktop detail after clear, then a fresh append. Entry: select a workload

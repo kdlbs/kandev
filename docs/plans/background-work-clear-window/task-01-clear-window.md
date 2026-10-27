@@ -185,3 +185,51 @@ passed for all six changed TS/TSX files. Canonical web typecheck passed with
 `NODE_OPTIONS=--max-old-space-size=6144`. HappyDOM verifies rendered behavior,
 not Chromium geometry or a phone clear control. Staged ratchets and the
 documentation preflight passed as recorded in the plan.
+
+## Review correction: hook ownership
+
+Greptile comment 4395153358, thread `PRRT_kwDOQ2-eWs6w60d8`, identifies that
+the store-subscribing `useClearedOutput` is co-located in the component despite
+`apps/web/AGENTS.md` requiring hooks under `hooks/domains/`. Move the same hook
+body to `apps/web/hooks/domains/session/use-cleared-background-output.ts` and
+import it into the panel. Preserve its selection, anchor, return values, and
+rendered behavior. This is a focused ownership correction, not a new contract;
+the real panel/store rendered regression already exercises the hook. Do not add
+a mirror unit test or broaden snapshot reconciliation. The separate correction
+implementation and HEAVY grant was received before the move.
+
+After that grant, use the pinned PATH, task-owned run-quiet directory and actual
+handle joins described above. Run the following affected checks after the move,
+with no zero-test success and no test-only replacement of the actual hook:
+
+```bash
+(cd apps/web && pnpm exec vitest run --project browser-locales --maxWorkers=1 --no-file-parallelism components/task/chat/background-work/background-work-clear-window.test.tsx)
+(cd apps/web && pnpm exec vitest run --project browser --maxWorkers=1 --no-file-parallelism components/task/chat/background-work/background-work.test.tsx)
+(cd apps/web && pnpm exec eslint --max-warnings 0 components/task/chat/background-work/background-work-panel.tsx hooks/domains/session/use-cleared-background-output.ts)
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+Before staged ratchets, review and stage only actual owned correction paths,
+including the new hook and changed component and design/work-order records;
+include any additional actual changed TS/TSX in scoped ESLint. For this move:
+
+```bash
+git add -- apps/web/components/task/chat/background-work/background-work-panel.tsx apps/web/hooks/domains/session/use-cleared-background-output.ts docs/specs/agents/system-design/background-work.md docs/plans/background-work-clear-window/plan.md docs/plans/background-work-clear-window/task-01-clear-window.md
+git diff --cached --name-status
+(cd apps/web && pnpm run i18n:ratchet)
+(cd apps/web && pnpm run e2e:sleep-ratchet)
+git diff --cached --check
+```
+
+Rerun the staged PR-documentation preflight from the verification section with
+the current staged work order and its referenced committed/staged artifacts,
+then use normal active hooks. Keep the original hosted observer and its deadline
+through the correction; do not start another observer or retry CI without a
+separate grant. Correction results: hook body matched the original apart from
+the export and imports; the `browser-locales` rendered suite passed 7 tests and
+the existing `browser` panel suite passed 4 tests. Scoped ESLint and canonical
+web typecheck with the 6 GiB heap passed. Staged ratchets, coverage preflight,
+catalog/spec/diff checks, and normal hooks are delivery checks for this correction.

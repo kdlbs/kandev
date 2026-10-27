@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { useBackgroundWork } from "@/hooks/domains/session/use-background-work";
+import { useClearedOutput } from "@/hooks/domains/session/use-cleared-background-output";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
 import { cn } from "@/lib/utils";
@@ -356,57 +357,6 @@ function WorkloadInputForm({
       </Button>
     </form>
   );
-}
-
-function useClearedOutput(sessionId: string, workload: WorkloadRunObservation, search: string) {
-  const outputWindow = useAppStore(
-    (state) => state.backgroundWork?.outputWindowsBySessionId?.[sessionId]?.[workload.work_id],
-  );
-  const [clearAnchor, setClearAnchor] = useState<{
-    sessionId: string;
-    workId: string;
-    runId: string | undefined;
-    generation: number | undefined;
-    end: number;
-  } | null>(null);
-  const displayOutput = useMemo(() => {
-    let text = workload.output || "";
-    if (
-      clearAnchor &&
-      clearAnchor.sessionId === sessionId &&
-      clearAnchor.workId === workload.work_id &&
-      clearAnchor.runId === workload.run_id &&
-      clearAnchor.generation === outputWindow?.generation
-    ) {
-      text = text.slice(
-        Math.max(0, Math.min(text.length, clearAnchor.end - (outputWindow?.evicted ?? 0))),
-      );
-    }
-    if (!search.trim()) return text;
-    const q = search.toLowerCase();
-    return text
-      .split("\n")
-      .filter((line) => line.toLowerCase().includes(q))
-      .join("\n");
-  }, [
-    workload.output,
-    workload.work_id,
-    workload.run_id,
-    sessionId,
-    clearAnchor,
-    outputWindow,
-    search,
-  ]);
-
-  const clear = () =>
-    setClearAnchor({
-      sessionId,
-      workId: workload.work_id,
-      runId: workload.run_id,
-      generation: outputWindow?.generation,
-      end: (outputWindow?.evicted ?? 0) + (workload.output || "").length,
-    });
-  return { displayOutput, clear };
 }
 
 function WorkloadDetailView({

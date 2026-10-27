@@ -268,7 +268,9 @@ snapshot ordering or a new reconciliation contract.
 The count and token are bounded scalar metadata per retained workload, with no
 historical string copy. Keep the existing cap, truncation indication, transport,
 and persisted history. Search filters the post-clear view and auto-scroll uses
-that view. The current phone chip drawer renders raw output without a clear
+that view. The store subscription, anchor, and visible-output selection belong
+in `hooks/domains/session/use-cleared-background-output.ts`; the detail component
+uses that hook. The current phone chip drawer renders raw output without a clear
 control; this fix does not add one or change its composition.
 
 Add normalized workload-output observations for command output where the adapter
