@@ -119,23 +119,28 @@ function computeLiveReviewState(feedback: PRFeedback, fallbackState: TaskPR["rev
   if (reviews.length === 0) {
     return requestedReviewers.length > 0 ? "pending" : fallbackState || "";
   }
+  return summarizeBindingReviews(reviews);
+}
+
+function summarizeBindingReviews(reviews: PRFeedback["reviews"]): TaskPR["review_state"] {
   const latestByAuthor = new Map<string, { state: string; createdAt: number }>();
   for (const review of reviews) {
-    const current = latestByAuthor.get(review.author);
     const createdAt = new Date(review.created_at).getTime();
-    if (!current || createdAt > current.createdAt) {
-      latestByAuthor.set(review.author, { state: review.state, createdAt });
+    const author = review.author || `<anon>:${createdAt}`;
+    const state = review.state.toUpperCase();
+    const current = latestByAuthor.get(author);
+    const binding = state === "APPROVED" || state === "CHANGES_REQUESTED";
+    if (!binding && current) continue;
+    if (!current || createdAt >= current.createdAt) {
+      latestByAuthor.set(author, { state, createdAt });
     }
   }
-  let hasChangesRequested = false;
-  let allApproved = true;
+  let hasApproval = false;
   for (const review of latestByAuthor.values()) {
-    if (review.state === "CHANGES_REQUESTED") hasChangesRequested = true;
-    if (review.state !== "APPROVED") allApproved = false;
+    if (review.state === "CHANGES_REQUESTED") return "changes_requested";
+    if (review.state === "APPROVED") hasApproval = true;
   }
-  if (hasChangesRequested) return "changes_requested";
-  if (allApproved) return "approved";
-  return "pending";
+  return hasApproval ? "approved" : "pending";
 }
 
 function derivePanelMetrics(taskPR: TaskPR, feedback: PRFeedback | null): PRPanelMetrics {
