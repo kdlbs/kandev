@@ -69,3 +69,20 @@ errors does not take its own healthy account out of rotation.
 - Changing rule order, confidence levels, or classification flags.
 - Changing the provider-neutral rules or the runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
+
+
+## Codex retry-exhaustion signature
+
+### REQ-AGENTS-CODEX-RATE-SIGNATURE-001: Recognize terminal Codex throttling
+
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.1:** A Codex error line beginning with
+  `exceeded retry limit, last status: 429 Too Many Requests` shall classify as
+  high-confidence `rate_limited`. Established error-label prefixes may precede it.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.2:** Mid-sentence quotations, other HTTP
+  statuses, unrelated providers, and incomplete signatures shall not match this rule.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.3:** Existing structured classification
+  precedence and explicit quota, authentication, and usage-limit classifications
+  shall remain unchanged. Classification alone shall not authorize prompt replay.
+
+[Design](../system-design/provider-error-signatures.md).
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).

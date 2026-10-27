@@ -588,7 +588,7 @@ export function removeLabel(
   options?: ApiRequestOptions,
 ) {
   return fetchJson<void>(
-    `${BASE}/workspaces/${workspaceId}/tasks/${taskId}/labels/${encodeURIComponent(labelName)}`,
+    `${BASE}/workspaces/${workspaceId}/tasks/${taskId}/labels?${new URLSearchParams({ name: labelName })}`,
     {
       ...options,
       init: { method: "DELETE", ...options?.init },

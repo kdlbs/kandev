@@ -24,6 +24,10 @@ const (
 	genericRateLimitSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?(?:rate\s+limited:\s*)?` +
 		`(?:rate[\s_-]?limit(?:ed)?\b[\s:]*(?:exceeded|reached)\b|` +
 		`(?:HTTP\s+)?429\s+Too\s+Many\s+Requests\b|too\s+many\s+requests\b|rate_limit_(?:exceeded|error)\b)`
+	// codexRetryExhaustedRateLimitSignature recognizes Codex's terminal message
+	// after its own retry budget has seen an HTTP 429.
+	codexRetryExhaustedRateLimitSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?` +
+		`exceeded\s+retry\s+limit,\s*last\s+status:\s*429\s+too\s+many\s+requests\b`
 	// genericQuotaSignature is exhausted-quota wording such as OpenAI's
 	// "insufficient_quota" and "You exceeded your current quota". These
 	// signatures also start an error line, not a quote in agent prose.
@@ -74,6 +78,7 @@ var providerRules = map[string][]rule{
 				`(?im)^\s*\{[^\n]*"codexErrorInfo"\s*:\s*"usageLimitExceeded"`,
 			CodeQuotaLimited, ConfHigh,
 		),
+		mustRule("codex.stderr.rate.retry_exhausted.v1", codexRetryExhaustedRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("codex.stderr.rate.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?(?:rate_limit_exceeded\b|too\s+many\s+requests\b)`, CodeRateLimited, ConfHigh),
 		mustRule("codex.stderr.auth.v1", `(?i)invalid api key|incorrect api key|missing api key`, CodeMissingCredentials, ConfHigh),
 		mustRule("codex.stderr.model.v1", `(?i)model_not_found`, CodeModelUnavailable, ConfHigh),

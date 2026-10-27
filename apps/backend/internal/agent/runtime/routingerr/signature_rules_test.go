@@ -1,6 +1,53 @@
 package routingerr
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
+
+// @covers AC-AGENTS-CODEX-RATE-SIGNATURE-001.1 AC-AGENTS-CODEX-RATE-SIGNATURE-001.2 AC-AGENTS-CODEX-RATE-SIGNATURE-001.3
+func TestCodexRetryExhausted429Classification(t *testing.T) {
+	resetInjection()
+	const signature = "exceeded retry limit, last status: 429 Too Many Requests"
+	for _, text := range []string{
+		signature,
+		"Internal error: " + signature,
+		"API Error: " + signature,
+	} {
+		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "codex-acp", Stderr: text})
+		if got.Code != CodeRateLimited || got.Confidence != ConfHigh {
+			t.Errorf("Codex message %q classified as %s/%s, want high-confidence rate limit", text, got.Code, got.Confidence)
+		}
+	}
+
+	for _, tc := range []struct {
+		name      string
+		provider  string
+		text      string
+		status    int
+		wantOther Code
+	}{
+		{name: "mid-sentence quote", provider: "codex-acp", text: "Request ended after " + signature},
+		{name: "other status", provider: "codex-acp", text: "exceeded retry limit, last status: 503 Service Unavailable"},
+		{name: "incomplete signature", provider: "codex-acp", text: "exceeded retry limit, last status: 429"},
+		{name: "unrelated provider", provider: "opencode-acp", text: signature},
+		{name: "structured authentication precedence", provider: "codex-acp", text: signature, status: http.StatusUnauthorized, wantOther: CodeAuthRequired},
+		{name: "quota signature precedence", provider: "codex-acp", text: "insufficient_quota\n" + signature, wantOther: CodeQuotaLimited},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Classify(Input{Phase: PhasePromptSend, ProviderID: tc.provider, Stderr: tc.text, HTTPStatus: tc.status})
+			if tc.wantOther != "" {
+				if got.Code != tc.wantOther {
+					t.Fatalf("classification = %s (%s), want %s", got.Code, got.ClassifierRule, tc.wantOther)
+				}
+				return
+			}
+			if got.Code == CodeRateLimited {
+				t.Fatalf("message %q from %s classified as rate limit by %s", tc.text, tc.provider, got.ClassifierRule)
+			}
+		})
+	}
+}
 
 // agentProseAboutLimits is agent output that talks about limits it read
 // elsewhere. None of it is the reporting agent's own provider failing.

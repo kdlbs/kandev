@@ -127,7 +127,7 @@ Unknown YAML fields are ignored by the current decoder. Do not use that as an ex
 
 | Field | Export behavior | Import behavior |
 |-------|-----------------|-----------------|
-| `name` | Always emitted. | Exact empty string is rejected. Existing target-workspace name causes a skip. |
+| `name` | Always emitted. | Exact empty string is rejected. Existing target-workspace names and later occurrences of the same exact name in one document are skipped. |
 | `description` | Omitted when empty. | Stored as supplied. |
 | `agent_profile` | Omitted when no workflow profile resolves. | Exact value match; see [Profile matching](#profile-matching). |
 | `steps` | Always emitted, possibly empty. | Empty lists are currently accepted, although an empty workflow is not useful. |
@@ -279,10 +279,17 @@ If there is no exact match, import still succeeds and silently leaves that workf
 Browser imports follow these rules:
 
 1. The preview decodes and validates the complete envelope, applies name deduplication, and returns direct step-profile candidates without creating anything.
-2. Existing workflows are compared by exact name. Matches are reported under `skipped`; they are not updated or merged.
+2. Names are compared exactly, including case and whitespace. Every occurrence matching an existing destination workflow, including hidden workflows, is skipped. Otherwise, the first occurrence in document order is retained and later occurrences are skipped. Skipped definitions are not updated or merged.
 3. Each new workflow and its steps receive fresh IDs. Step-position references are remapped to those IDs.
 4. Exact profile matches are preselected. Unmatched direct step descriptors require explicit eligible profile selections.
-5. The final request validates every binding, profile ID, profile revision, and portable reference before creating any workflow.
+5. The final request structurally validates every supplied binding and portable reference. It checks retained steps' profile IDs and revisions before creating any workflow.
+
+Preview, browser submission, raw YAML, and MCP imports use the same name-selection
+rule. Results report each skipped occurrence under `skipped`. Only retained
+workflows need profile selections, so a missing profile in a later duplicate
+does not block the first workflow. Preview and binding `workflow_index` values
+refer to the original document array, including skipped entries. Structural
+validation still checks the complete document before creation.
 
 Browser preview, selection validation, and profile conflicts write nothing. After
 that validation pass, a database failure during creation is still not one

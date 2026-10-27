@@ -5,6 +5,18 @@ import { waitForFiniteAnimations } from "../helpers/animations";
 export class NewSessionDialogPage {
   constructor(private readonly page: Page) {}
 
+  advancedTrigger(): Locator {
+    return this.page.getByTestId("new-session-advanced-settings-trigger");
+  }
+
+  mcpTrigger(): Locator {
+    return this.page.getByTestId("new-session-mcp-select");
+  }
+
+  mcpPicker(): Locator {
+    return this.page.getByTestId("new-session-mcp-options");
+  }
+
   /** Agent profile combobox inside the new-session or handoff dialog. */
   agentSelector(): Locator {
     return this.page

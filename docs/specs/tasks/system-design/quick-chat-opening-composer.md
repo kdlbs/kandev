@@ -184,3 +184,21 @@ was needed because this design reuses those established boundaries.
 ## Implementation plan
 
 [Quick Chat opening composer](../../../plans/quick-chat-opening-composer/plan.md).
+
+
+## Lossless opening draft restoration
+
+Plain-text restoration must preserve every newline, including empty paragraphs.
+`use-tiptap-editor.ts` must restore text with the existing structured
+`textToEditorContent` conversion. An empty line is an empty paragraph, not a
+paragraph containing a hard break. Keep stored rich-document restoration first.
+Preserve literal text, code, mentions, and saved-prompt syntax during restoration.
+
+Acceptance cleanup retains exact snapshot ownership. Do not collapse whitespace
+or clear the editor unconditionally to compensate for conversion differences.
+Clear matching text, rich content, and attachments together. Newer edits and
+another session's draft must survive. Provider failure after message acceptance
+does not restore that accepted message as unsent input.
+
+This implements existing criteria `AC-TASKS-QUICK-CHAT-COMPOSER-001.9` and `.10`.
+Delivery: [draft and rate retry package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
