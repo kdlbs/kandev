@@ -423,7 +423,7 @@
   "tasks": "タスク",
   "taskReadRefreshFailureNotice": "タスクの詳細を更新できませんでした。現在の表示は引き続き利用できます。",
   "taskReadTemporarilyUnavailable": "タスクを一時的に利用できません",
-  "taskReadTemporarilyUnavailableDescription": "このタスクを読み込めませんでした。ネットワーク接続を確認して、もう一度お試しください。",
+  "taskReadTemporarilyUnavailableDescription": "Kandev は現在このタスクを読み込めませんでした。しばらくしてからもう一度お試しください。",
   "taskStateBlocked": "ブロック中",
   "taskStateCancelled": "キャンセル済み",
   "taskStateCompleted": "完了",

@@ -29,11 +29,13 @@ import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types
 import {
   beginTaskNavigation,
   isTaskNavigationCurrent,
+  isTemporaryTaskNavigationError,
   retainTaskNavigationRead,
   readTaskNavigationIdentity,
   useTaskNavigationReadState,
 } from "@/lib/state/task-navigation-reads";
 import type { TaskNavigationContext } from "@/lib/state/task-navigation-reads";
+import { TaskLoadErrorState } from "@/components/task/task-page-content";
 import { getOwnedTaskSessionId, useTaskRouteProjection } from "./task-route-projection";
 import { useTaskDetailRouteRecovery } from "./task-detail-route-recovery";
 import { deriveTaskDetailRouteView } from "./task-detail-route-view";
@@ -119,7 +121,10 @@ export function TaskDetailRoute({
   }
 
   if (route.showInitialLoading) {
-    return <TaskRouteLoading retrying={route.readState.phase === "retrying"} />;
+    if (route.readState.phase === "retrying") {
+      return <TaskLoadErrorState temporaryError retrying onRetry={route.retrySessionRead} />;
+    }
+    return <TaskRouteLoading />;
   }
 
   return (
@@ -290,6 +295,7 @@ function useTaskDetailRouteData({
     routeSessionId: sessionId,
     selectedSessionId: selectedSessionForNavigation,
     projection,
+    readState,
   });
   useTaskDetailRouteEnrichment({
     view,
@@ -522,6 +528,7 @@ function taskRouteReadError(routeKey: string, error: unknown): TaskDetailRouteSt
     routeKey,
     status: "error",
     data: null,
+    temporary: isTemporaryTaskNavigationError(error),
     sessionAdmission: error instanceof TaskSessionAdmissionError ? error.reason : undefined,
   };
 }

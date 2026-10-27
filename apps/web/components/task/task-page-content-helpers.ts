@@ -40,6 +40,7 @@ export function shouldReservePageLevelMobileFeedbackOffset(params: {
   hasTaskMoveError: boolean;
   hasEnsureSessionError: boolean;
   hasBootstrapRecoveryError: boolean;
+  hasTaskReadRecovery?: boolean;
   hasComposerRecoveryOwner?: boolean;
   effectiveSessionId: string | null;
   isSessionPassthrough: boolean;
@@ -54,7 +55,10 @@ export function shouldReservePageLevelMobileFeedbackOffset(params: {
         (params.hasResumptionError || params.hasResumptionNotice));
   return (
     params.isMobile &&
-    (params.hasTaskMoveError || params.hasEnsureSessionError || hasPageRecoveryFeedback)
+    (params.hasTaskMoveError ||
+      params.hasEnsureSessionError ||
+      Boolean(params.hasTaskReadRecovery) ||
+      hasPageRecoveryFeedback)
   );
 }
 

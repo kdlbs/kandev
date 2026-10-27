@@ -1,4 +1,5 @@
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
+import type { TaskNavigationReadSnapshot } from "@/lib/state/task-navigation-reads";
 import type { Task } from "@/lib/types/http";
 import type { TaskDetailRouteState } from "./task-detail-route-state";
 import type { useTaskRouteProjection } from "./task-route-projection";
@@ -11,6 +12,7 @@ type DeriveTaskDetailRouteViewArgs = {
   routeSessionId?: string;
   selectedSessionId?: string;
   projection?: ReturnType<typeof useTaskRouteProjection>;
+  readState?: TaskNavigationReadSnapshot;
 };
 
 export function deriveTaskDetailRouteView({
@@ -21,6 +23,7 @@ export function deriveTaskDetailRouteView({
   routeSessionId,
   selectedSessionId,
   projection,
+  readState,
 }: DeriveTaskDetailRouteViewArgs) {
   const view = deriveFallbackTaskDetailRouteView({
     currentRouteState,
@@ -30,7 +33,7 @@ export function deriveTaskDetailRouteView({
     routeSessionId,
     selectedSessionId,
   });
-  if (currentRouteState.status !== "loading" || !projection) return view;
+  if (!shouldRetainProjection(currentRouteState, projection, readState)) return view;
   return {
     ...view,
     displayedRouteKey: null,
@@ -46,6 +49,19 @@ export function deriveTaskDetailRouteView({
     showShell: true,
     showInitialLoading: false,
   };
+}
+
+function shouldRetainProjection(
+  currentRouteState: TaskDetailRouteState,
+  projection: DeriveTaskDetailRouteViewArgs["projection"],
+  readState: TaskNavigationReadSnapshot | undefined,
+): projection is NonNullable<DeriveTaskDetailRouteViewArgs["projection"]> {
+  if (!projection) return false;
+  if (readState?.phase === "failed" && !readState.temporary) return false;
+  return (
+    currentRouteState.status === "loading" ||
+    (currentRouteState.status === "error" && currentRouteState.temporary === true)
+  );
 }
 
 type FallbackViewArgs = Omit<DeriveTaskDetailRouteViewArgs, "projection">;

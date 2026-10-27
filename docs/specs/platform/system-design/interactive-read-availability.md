@@ -1,6 +1,7 @@
 ---
-status: draft
+status: current
 system: platform
+updated: 2026-10-27
 requirements:
   - REQ-PLATFORM-INTERACTIVE-READS-001
   - REQ-PLATFORM-INTERACTIVE-READS-002
@@ -239,21 +240,65 @@ details. Do not infer that an empty fallback session list is authoritative.
 Classify network failures and HTTP 429/502/503/504 as temporary. Recognize the
 existing persistence code through `ApiError.body.code`; `ApiError.errorCode`
 currently exposes only `error_code`. Do not change server envelopes or retry
-parse errors, aborts, authorization errors, or 404. A recovery cycle permits two
-scheduled retries after 2 and 5 seconds, honoring a larger Retry-After. Each read
-attempt has a ten-second deadline; expiry aborts its task and session requests
-and is classified as a temporary failure within that retry budget. Navigation
-cancellation remains an abort and does not retry. Hidden tabs suspend scheduled
-retry work. Manual Retry starts a new bounded cycle. Foreground recovery
-coalesces with active recovery and starts at most one cycle per foreground
-episode. Ordinary rerenders and WS notifications cannot restart an exhausted
-cycle.
+parse errors, aborts, authorization errors, or 404.
 
-When no task details exist, render a temporary read-error surface with Retry and
-the existing task-overview link. Keep permanent failures in `TaskLoadErrorState`.
-For a failed same-task refresh, retain authorized loaded content and show a small
-in-flow availability notice with Retry. Existing cache invalidation still clears
-data when authorization or workspace scope changes.
+### Bounded recovery across a health cycle
+
+One cycle includes the initial attempt and at most four automatic retries.
+The retry delays are 2, 5, 10, and 10 seconds after each preceding failure.
+Prompt failures therefore start attempts near 0, 2, 7, 17, and 27 seconds.
+The later attempts cover a complete fifteen-second health-probe interval.
+This revises the previous two-retry policy without adding another recovery owner.
+
+Cap the entire cycle at thirty seconds of visible-tab time, including attempts and delays.
+Keep the ten-second wall-time deadline for each individual attempt.
+The earlier deadline wins while the tab is visible.
+Hiding the tab pauses the cycle budget and scheduled retry delay.
+An existing attempt can settle or reach its own deadline while hidden.
+No automatic retry starts until the tab becomes visible again.
+Foreground triggers join that active cycle without renewing its budget.
+
+Keep the visible-time clock private to task navigation, beside `TaskNavigationReads`.
+The proposed helper is `lib/state/task-navigation-recovery-clock.ts`.
+It owns the remaining cycle time, visibility listener, and deadline timer.
+The navigation owner disposes those resources on success, exhaustion, cancellation, and final release.
+Use a monotonic clock and fake timers in tests.
+Keep budget expiry distinct from navigation cancellation.
+Budget expiry aborts outstanding task/session work and publishes a temporary failed snapshot.
+Navigation cancellation remains an abort and cannot publish into the new scope.
+Preserve the most recent temporary error during a pending retry so the notice does not disappear between attempts.
+
+Honor a larger `ApiError.retryAfterSeconds` value without sending an early request.
+When its delay exceeds the remaining budget, wait only until budget exhaustion and stop.
+Do not extend the cycle, shorten the server delay, or schedule another attempt after exhaustion.
+At the deadline, success requires a completed response accepted before expiry.
+A late response cannot revive the exhausted cycle.
+
+Manual Retry starts a new bounded cycle after exhaustion.
+Repeated clicks and mixed route/component triggers share the active promise.
+Foreground recovery starts at most one new cycle per foreground episode after exhaustion.
+Ordinary rerenders and WS notifications cannot restart an exhausted cycle.
+Keep the existing optional session-list fallback and shared `TaskSessionReads` ownership rules.
+
+### Content continuity and presentation
+
+When no task content exists, show recovery status while the bounded cycle runs.
+Keep Retry disabled with its stable accessible name and leave the task-overview link usable.
+After exhaustion, enable Retry in the temporary error surface.
+Keep permanent failures in `TaskLoadErrorState` without automatic retries.
+Use neutral availability copy that does not attribute a server failure to the user's connection.
+
+Preserve the route error's temporary classification through `TaskDetailRouteState` and `taskRouteReadError`.
+In `deriveTaskDetailRouteView`, permit the current `useTaskRouteProjection` during loading and temporary failures.
+That selector already checks task identity, authentication, active workspace, archive state, and requested-session ownership.
+Do not broaden its eligibility or replay a previous route's hydration payload as fallback.
+Keep `initialState` null for a retained projection so stale data cannot overwrite newer store state.
+For loaded same-task details, preserve the current task view and selected session through failed refreshes.
+The shared read snapshot drives an in-flow availability notice during retries and after exhaustion.
+On success, clear the notice without remounting the conversation or resetting a draft.
+On a permanent lookup or authorization failure, stop retention even when a projection remains cached.
+Existing invalidation still clears content when authorization or workspace scope changes.
+Retained content does not authorize a mutation, queue writes, or establish backend health.
 
 Desktop enters through the sidebar; phone enters through existing task navigation
 or a direct route. Reuse the missing-task recovery surface and `task-layout.tsx`
@@ -262,16 +307,29 @@ state. Show status, explanation, primary Retry, then the overview link.
 Phone stacks actions inside the main content area, retains the route's scroll
 owner and safe-area handling, and provides targets of at least 44px. Desktop uses
 ordinary 28px buttons. Use semantic status announcements and retain focus on the
-Retry control during attempts. No overlay or automatic page reload is needed.
+Retry control during attempts. Keep the overview action reachable during an initial cold-load recovery.
+Show the retained-content notice as one row on desktop and a wrapped block on phone.
+The notice remains in normal flow above the existing task content.
+`TaskNavigationReadFeedback` in `components/task/task-navigation-read-feedback.tsx` owns this strip.
+Place it directly below the task header and above the session tabs and panels, across the task content area.
+Replace its current absolute positioning with normal layout participation.
+Include this strip in the existing mobile header-offset calculation so the fixed phone header cannot cover it.
+Preserve the single content scroll region and keep the composer outside the notice's bounds.
+No modal, blocking overlay, or automatic page reload is needed.
 
 Add copy in all seven locale catalogs, generating the Traditional Chinese pair
 with `i18n:zh-hant`. Test temporary failure followed by success, exhausted retries,
 manual recovery, valid selected-session preservation, and navigation during an
-old pending retry. Cover permanent 404 behavior separately.
+old pending retry. Reproduce a thirteen-second structured persistence outage and a fifteen-second boundary case with fake timers.
+Add a rendered current-projection regression that remains visible after an exhausted temporary cycle.
+Then return 404 or an authorization error and require the permanent unavailable surface.
+Cover hidden-time accounting, never-settling reads, late responses, Retry-After beyond the budget, and cleanup.
+Desktop and phone E2E cover automatic recovery without a new user event, exhaustion, manual recovery, and retained content.
 
 ## Implementation plans
 
 - [Task navigation availability repair](../../../plans/task-navigation-availability/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-004 and -005.
+- [Task read resilience](../../../plans/task-read-resilience/plan.md) revises recovery timing and preserves current task content for REQ-PLATFORM-INTERACTIVE-READS-005.
 
 ## Journey loading extension
 
