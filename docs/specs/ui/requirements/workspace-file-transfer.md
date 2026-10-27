@@ -81,7 +81,11 @@ folder, so that I can supply fixtures, exports, and assets without a terminal or
   meaningful leading and trailing whitespace in their names when checked for conflicts and written,
   subject to the destination filesystem. An empty destination denotes the workspace root; a
   whitespace-only destination denotes a folder with that name. An empty or entirely whitespace
-  relative file path is rejected under the existing upload API contract.
+  relative file path is rejected under the existing upload API contract. Upload path metadata
+  (destination folder, relative file path, or repository scope) containing a carriage return or
+  line feed is unsupported: preflight and upload reject it without a workspace write. Valid spaces
+  and tabs in the destination folder and relative file path are retained; repository scope keeps its
+  existing rules.
 
 ### REQ-UI-WORKSPACE-FILE-TRANSFER-004: Conflicts are resolved before anything is written
 

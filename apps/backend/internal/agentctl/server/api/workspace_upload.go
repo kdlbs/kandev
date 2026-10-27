@@ -78,6 +78,10 @@ func (s *Server) handleUploadPreflight(c *gin.Context) {
 			return
 		}
 	}
+	if err := validateUploadPathMetadata(req.Repo, req.Dir, ""); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if len(req.Paths) == 0 {
 		c.JSON(http.StatusOK, uploadPreflightResponse{Conflicts: []process.UploadConflict{}})
 		return
@@ -427,6 +431,9 @@ func isUploadRequestError(err error) bool {
 // rewriting "../x" to "x" would land the file somewhere the caller did not ask
 // for, which is a worse failure than refusing the request.
 func (s *Server) scopedUploadPath(repo, dir, relativePath string) (string, error) {
+	if err := validateUploadPathMetadata(repo, dir, relativePath); err != nil {
+		return "", err
+	}
 	cleanRel, err := sanitizeUploadSegment(relativePath, "relative_path")
 	if err != nil {
 		return "", err
@@ -446,6 +453,15 @@ func (s *Server) scopedUploadPath(repo, dir, relativePath string) (string, error
 		return "", err
 	}
 	return scoped, nil
+}
+
+func validateUploadPathMetadata(repo, dir, relativePath string) error {
+	for _, value := range []string{repo, dir, relativePath} {
+		if strings.ContainsAny(value, "\r\n") {
+			return errors.New("invalid path: upload path metadata contains a line break")
+		}
+	}
+	return nil
 }
 
 // sanitizeUploadSegment validates one caller-supplied path fragment, rejecting

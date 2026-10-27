@@ -119,6 +119,15 @@ change separator normalization, traversal and absolute-path rejection, repositor
 and the ordinary or replacement write target agree; keep-both derives its existing next available
 variant from that exact target. The preflight remains advisory, and publication rechecks conflicts.
 
+Browser upload metadata travels as multipart text while preflight travels as JSON. Line-ending
+normalization in multipart serialization can change a name between those requests. At the agentctl
+upload boundary reject carriage return and line feed anywhere in `dir`, `relative_path` or `repo`
+in both preflight and upload, before conflict lookup, repository resolution or workspace mutation.
+Validate `dir` and `repo` even for an empty preflight path list. This is an upload-specific supported-
+name limit, not a change to the shared repository resolver or other workspace APIs. Preserve spaces,
+tabs, other existing normalization, and all containment and collision policies. Return a request error
+rather than silently replacing line endings; no workspace destination or existing file is modified.
+
 ### Upload routes
 
 The backend route is `POST /api/v1/task-sessions/:id/workspace/files`. It forwards a multipart form to

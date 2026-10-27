@@ -27,18 +27,20 @@ system_design:
 ## Summary
 
 Repair the shared agentctl upload path interpretation so preflight and file publication preserve
-valid whitespace-bearing names. Independently reproduce the reported router failure with a new
-regression before changing production code.
+valid whitespace-bearing names. A corrective pass rejects CR/LF-bearing upload metadata before
+preflight lookup or workspace writes, closing the JSON/multipart identity gap.
 
 ## In scope
 
 - `scopedUploadPath` and `sanitizeUploadSegment` in the agentctl upload API.
 - Authenticated preflight and multipart router tests against disposable real filesystem paths.
+- Upload-specific rejection of CR/LF in `dir`, `relative_path`, and `repo`; validate directory and
+  repository metadata even when the preflight list is empty.
 
 ## Out of scope
 
 - Permission and overwrite policy changes, broader path APIs, separator conventions, UI copy,
-  unrelated uploads, and support for entirely whitespace relative paths.
+  unrelated uploads, multipart encoding changes, and support for entirely whitespace relative paths.
 
 ## Acceptance
 
@@ -46,13 +48,20 @@ regression before changing production code.
   and empty or entirely whitespace relative paths are rejected. Return paths match writes.
 - Exact and unspaced collisions are distinguished; ordinary upload, unresolved conflict, replace,
   and keep-both preserve existing behavior, including a conflict arising after preflight.
-- Empty, traversal, absolute and existing symlink escape rejection continue without writes outside
-  allowed roots. Existing normalization and native filesystem restrictions remain unchanged.
+- Both endpoints reject CR or LF in each upload path metadata field before lookup or mutation,
+  including empty-list preflight directory/repository metadata. Normal spaces and tabs remain exact;
+  traversal, absolute and symlink containment and existing conflict policy remain unchanged.
 
 ## Verification
 
-Add `TestWorkspaceUploadExactNames` in the file below, run the first command before the fix and
-record the expected causal failures, then run both commands after the fix. Run from repository root:
+Extend `TestWorkspaceUploadExactNames` independently for CR, LF and CRLF in each metadata field
+and empty-list preflight. Run the affected test before the correction and record causal failures,
+then run the targeted suite and lint after correction. Seed distinct LF and CRLF targets: preflight
+with the JSON-shaped LF name and a direct multipart upload carrying the serialized CRLF name with
+`replace` must both be rejected and leave each sentinel unchanged. Include tab and ordinary controls;
+probe native naming support for sentinel cases only. The Node 24.21.0 probe produced multipart field
+bytes `file\r\n` from `file\n`; no browser-to-filesystem reproduction has been run. Run from
+repository root:
 
 ```bash
 (cd apps/backend && GOMAXPROCS=2 GOTOOLCHAIN=local GOMEMLIMIT=512MiB go test -trimpath -tags fts5 -p 1 -timeout 10m ./internal/agentctl/server/api -run 'TestWorkspaceUploadExactNames|TestHandleFileUpload|TestHandleUploadPreflight' -count=1)
@@ -94,6 +103,13 @@ None.
 - Existing upload router tests and `WorkspaceTracker` path resolution.
 
 ## Results
+
+The CR/LF corrective router regression failed before the fix: preflight accepted the LF target and
+`replace` overwrote the distinct CRLF sentinel; CR/LF field and empty-list cases failed while the tab
+control passed. The targeted Go suite and changed-Go lint passed after the fix. All CR/LF and
+sentinel cases ran on this host. Catalog validation, specification lint and diff checks passed.
+
+The following results apply to the original published exact-space implementation:
 
 - Independent router regression before the fix: exit 1 with seven causal failures; ordinary and
   invalid-path controls passed.
