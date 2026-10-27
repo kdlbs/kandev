@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 
 
 EXPECTED_NOMAD_VERSION = "2.0.7"
+POOL_COVERAGE_SCENARIOS = ("pool-pre-ready-recovery", "pool-backend-restart", "pool-idle-outage", "pool-unplaced-cleanup", "pool-register-unknown", "pool-force-stop", "pool-checkout-branch", "pool-binpack-refused")
 REQUIRED_SCENARIOS = {
     "session",
     "admission",
@@ -43,6 +44,14 @@ REQUIRED_SCENARIOS = {
     "pool-queue",
     "pool-partition",
     "pool-refusals",
+    "pool-pre-ready-recovery",
+    "pool-backend-restart",
+    "pool-idle-outage",
+    "pool-unplaced-cleanup",
+    "pool-register-unknown",
+    "pool-force-stop",
+    "pool-checkout-branch",
+    "pool-binpack-refused",
     "recovery",
     "pre-ready-recovery",
     "distribution",
@@ -1097,14 +1106,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "cleanup-fixture":
         return _fixture_module().cleanup_fixture_command(args.fixture_root)
     if args.command == "run" and args.create_fixture:
-        if args.scenario not in ("pre-ready-recovery", "admission", "disconnect", "cleanup-positive", "cleanup-negative", "pool-placement", "pool-two-node", "pool-node-quarantine", "pool-queue", "pool-partition", "pool-refusals") or not args.require_real:
-            print("--create-fixture requires --require-real --scenario pre-ready-recovery|admission|disconnect|cleanup-positive|cleanup-negative|pool-placement|pool-two-node|pool-node-quarantine|pool-queue|pool-partition|pool-refusals", file=sys.stderr)
+        if args.scenario not in ("pre-ready-recovery", "admission", "disconnect", "cleanup-positive", "cleanup-negative", "pool-placement", "pool-two-node", "pool-node-quarantine", "pool-queue", "pool-partition", "pool-refusals", *POOL_COVERAGE_SCENARIOS) or not args.require_real:
+            print("--create-fixture requires --require-real --scenario pre-ready-recovery|admission|disconnect|cleanup-positive|cleanup-negative|pool-placement|pool-two-node|pool-node-quarantine|pool-queue|pool-partition|pool-refusals|" + "|".join(POOL_COVERAGE_SCENARIOS), file=sys.stderr)
             return 2
         if args.scenario == "pool-partition":
             _fixture_module()
             import nomad_native_e2e_pool_partition
             return nomad_native_e2e_pool_partition.create_fixture_command(args.config)
-        if args.scenario in ("pool-placement", "pool-two-node", "pool-node-quarantine", "pool-queue", "pool-refusals"):
+        if args.scenario in ("pool-placement", "pool-two-node", "pool-node-quarantine", "pool-queue", "pool-refusals", *POOL_COVERAGE_SCENARIOS):
             return _pool_module().create_fixture_command(args.config, args.scenario)
         if args.scenario in ("cleanup-positive", "cleanup-negative"):
             return _wo07_module().create_fixture_command(args.config, args.scenario)

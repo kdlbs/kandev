@@ -21,7 +21,17 @@ import nomad_native_e2e_wo06 as wo06
 import nomad_native_e2e_wo07 as wo07
 from nomad_native_e2e import PreflightError
 
-SCENARIOS = ("pool-placement", "pool-two-node", "pool-node-quarantine", "pool-queue", "pool-refusals")
+COVERAGE_DRIVERS = {
+    "pool-pre-ready-recovery": ("nomad_native_e2e_pool_recovery", "drive_pool_pre_ready_recovery"),
+    "pool-backend-restart": ("nomad_native_e2e_pool_recovery", "drive_pool_backend_restart"),
+    "pool-idle-outage": ("nomad_native_e2e_pool_recovery", "drive_pool_idle_outage"),
+    "pool-unplaced-cleanup": ("nomad_native_e2e_pool_cleanup", "drive_pool_unplaced_cleanup"),
+    "pool-register-unknown": ("nomad_native_e2e_pool_cleanup", "drive_pool_register_unknown"),
+    "pool-force-stop": ("nomad_native_e2e_pool_cleanup", "drive_pool_force_stop"),
+    "pool-checkout-branch": ("nomad_native_e2e_pool_checkout", "drive_pool_checkout_branch"),
+    "pool-binpack-refused": ("nomad_native_e2e_pool_checkout", "drive_pool_binpack_refused"),
+}
+SCENARIOS = ("pool-placement", "pool-two-node", "pool-node-quarantine", "pool-queue", "pool-refusals", *tuple(sorted(COVERAGE_DRIVERS)))
 CONTRACT_KEYS = ("kandev.attach", "kandev.state_root")
 NODE_ID_TARGET = "${node.unique.id}"
 
@@ -343,7 +353,8 @@ def _lazy_driver(module: str, name: str) -> Callable[..., dict[str, Any]]:
 
 DRIVERS = {"pool-placement": drive_pool_placement, "pool-two-node": drive_pool_two_node, "pool-node-quarantine": drive_pool_node_quarantine,
            "pool-queue": _lazy_driver("nomad_native_e2e_pool_queue", "drive_pool_queue"),
-           "pool-refusals": _lazy_driver("nomad_native_e2e_pool_refusals", "drive_pool_refusals")}
+           "pool-refusals": _lazy_driver("nomad_native_e2e_pool_refusals", "drive_pool_refusals"),
+           **{name: _lazy_driver(*target) for name, target in COVERAGE_DRIVERS.items()}}
 
 
 def run_scenario(config: Any, scenario: str, ops: fx.Ops | None = None, **kwargs: Any) -> int:
