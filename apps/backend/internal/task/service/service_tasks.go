@@ -1697,7 +1697,9 @@ func (s *Service) resolveRepoInputRemote(
 		return "", "", false, fmt.Errorf("remote_url provider host %q does not match %q", providerHost, repoInput.ProviderHost)
 	}
 	if provider == providerGitLab && providerHost != "https://gitlab.com" && !repoInput.TrustedRemote {
-		return "", "", false, fmt.Errorf("untrusted GitLab origin %q", providerHost)
+		if err := s.verifyRemoteRepositoryOrigin(ctx, workspaceID, &repoInput); err != nil {
+			return "", "", false, err
+		}
 	}
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 		WorkspaceID:    workspaceID,

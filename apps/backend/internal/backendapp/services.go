@@ -118,7 +118,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		validateProfile: taskSvc.ValidateWorkspaceCloneProfile,
 	})
 	integrations, err := initIntegrationWiring(
-		ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, workflowSvc, agentSettingsController, providers.github, version, log,
+		ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, workflowSvc, agentSettingsController, providers.github, providers.gitlab, version, log,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -445,6 +445,7 @@ func initIntegrationWiring(
 	workflowSvc *workflowservice.Service,
 	agentSettingsController *agentsettingscontroller.Controller,
 	githubSvc *github.Service,
+	gitlabSvc *gitlab.Service,
 	version string,
 	log *logger.Logger,
 ) (*integrationWiring, error) {
@@ -465,7 +466,7 @@ func initIntegrationWiring(
 		return nil, err
 	}
 	gitCredentialBroker, shareHTTP, err := initGitCredentialAndRemoteWiring(
-		ctx, cfg, dbPool, repos, storeTracker, taskSvc, githubSvc, pluginsSvc, version, log,
+		ctx, cfg, dbPool, repos, storeTracker, taskSvc, githubSvc, gitlabSvc, pluginsSvc, version, log,
 	)
 	if err != nil {
 		return nil, err
@@ -789,6 +790,7 @@ func initGitCredentialAndRemoteWiring(
 	storeTracker *requiredstores.Tracker,
 	taskSvc *taskservice.Service,
 	githubSvc *github.Service,
+	gitlabSvc *gitlab.Service,
 	pluginsSvc *plugins.Service,
 	version string,
 	log *logger.Logger,
@@ -813,8 +815,8 @@ func initGitCredentialAndRemoteWiring(
 	// ("Remote") repos serve branches from their owning provider rather than relying
 	// on a local clone that may not exist yet (or ever - some executors clone
 	// inside their own container).
-	if githubSvc != nil || pluginsSvc != nil {
-		taskSvc.SetRemoteBranchLister(codeHostBranchListerAdapter{github: githubSvc, plugins: pluginsSvc})
+	if githubSvc != nil || gitlabSvc != nil || pluginsSvc != nil {
+		taskSvc.SetRemoteBranchLister(codeHostBranchListerAdapter{github: githubSvc, gitlab: gitlabSvc, plugins: pluginsSvc})
 	}
 	if githubSvc != nil {
 		taskSvc.SetPRTaskResolver(githubSvc)
@@ -2594,14 +2596,15 @@ func isOlderAgentProfileMatch(candidate, current *agentsettingsmodels.AgentProfi
 	return candidate.ID < current.ID
 }
 
-// codeHostBranchListerAdapter routes first-party GitHub repositories directly
+// codeHostBranchListerAdapter routes first-party GitHub and GitLab repositories directly
 // and manifest-owned providers through their standardized branch action. It maps
-// both responses into the task
+// provider responses into the task
 // service's Branch shape with Type="remote" so the dialog renders branches
 // the same way URL-mode does - bare names without an "origin/" prefix, since
 // there is no checked-out clone whose tracking config could disambiguate.
 type codeHostBranchListerAdapter struct {
 	github  *github.Service
+	gitlab  *gitlab.Service
 	plugins *plugins.Service
 }
 
@@ -2615,6 +2618,27 @@ func (a codeHostBranchListerAdapter) ListRepoBranches(
 			return nil, fmt.Errorf("GitHub branch provider is unavailable")
 		}
 		remote, err := a.github.ListRepoBranchesForWorkspace(ctx, source.WorkspaceID, source.Owner, source.Name)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]taskservice.Branch, 0, len(remote))
+		for _, branch := range remote {
+			out = append(out, taskservice.Branch{Name: branch.Name, Type: codeHostRemoteBranchType})
+		}
+		return out, nil
+	}
+	if strings.EqualFold(source.Provider, "gitlab") {
+		if a.gitlab == nil {
+			return nil, fmt.Errorf("GitLab branch provider is unavailable")
+		}
+		if strings.TrimSpace(source.ProviderHost) == "" {
+			return nil, gitlab.ErrWorkspaceHostMismatch
+		}
+		client, err := a.gitlab.ClientForWorkspaceHost(ctx, source.WorkspaceID, source.ProviderHost)
+		if err != nil {
+			return nil, err
+		}
+		remote, err := client.ListProjectBranches(ctx, source.Owner+"/"+source.Name)
 		if err != nil {
 			return nil, err
 		}

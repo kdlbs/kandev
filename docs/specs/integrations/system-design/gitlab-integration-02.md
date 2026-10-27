@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITLAB-INTEGRATION-001
 created: 2026-05-04
-updated: 2026-10-22
+updated: 2026-10-27
 owners:
   - tbd
 ---
@@ -23,7 +23,27 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .20-.23) | [Watch dialog ownership](#watch-dialog-ownership) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .16-.19) | [Pipeline job summary classification](#pipeline-job-summary-classification) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .24-.27) | [Merge API source-head compatibility](#merge-api-source-head-compatibility) |
+| `AC-INTEGRATIONS-GITLAB-INTEGRATION-001.28`, `.29` | [Task repository selection and branches](#task-repository-selection-and-branches) |
 
+## Task repository selection and branches
+
+`task/service.resolveRepoInputRemote` reuses `verifyRemoteRepositoryOrigin`
+before resolving a self-managed GitLab URL. The backend's existing
+`GitLabRepositoryOriginVerifier` reads only the selected workspace's connection
+metadata and verifies the normalized scheme, host, and port. Public GitLab and
+internally trusted contribution inputs retain their existing paths. Typed
+selection errors propagate through the existing task error handling.
+
+`backendapp.codeHostBranchListerAdapter` routes GitLab repositories to the
+first-party GitLab service. It requires a persisted provider host and calls
+`ClientForWorkspaceHost` with the repository's workspace and origin before
+`ListProjectBranches` with its full namespace/name. Branches retain the task
+service's existing remote branch shape. GitHub and plugin providers keep their
+existing routes. No credential resolution or provider routing moves into the
+task service.
+
+The [repair plan](../../../plans/gitlab-task-repositories/plan.md) records
+regressions for task persistence, origin validation, and branch routing.
 
 ## Merge API source-head compatibility
 

@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-05-04
-updated: 2026-10-22
+updated: 2026-10-27
 owners:
   - tbd
 ---
@@ -106,6 +106,11 @@ implementation and verification; unrelated criteria retain their lifecycle.
 
 This clarification excludes review-freshness UX, new permissions or settings,
 source-branch deletion, and changes to other GitLab features or providers.
+
+#### Task repository selection and branches
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.28:** Creating a task from a self-managed GitLab HTTP(S) repository URL shall accept the selected workspace's configured origin, including its scheme and port. Missing, unavailable, or mismatched connection metadata shall fail without persisting a task or repository. Existing public GitLab and server-verified contribution behavior shall remain supported.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.29:** Listing branches for a saved GitLab repository shall use the selected workspace's GitLab connection and the repository's full namespace and name, without requiring a repository-provider plugin. Missing or mismatched stored origins and unconfigured workspaces shall fail without falling back to another connection.
 
 ## System design
 
