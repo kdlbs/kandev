@@ -131,3 +131,4 @@ Verification passed:
 - `python3 scripts/list-docs.py validate`: 403 decisions and 1,740 specifications validated.
 - `python3 scripts/lint-spec-files.py --all` and `git diff --check`.
 - Current PR fixup: the Chromium changed-files E2E rebuilt the backend and web assets and passed all 6 cases, including the narrow fine-pointer phone case. Mobile agent-profile deletion passed 3 cases; the targeted Chromium restart, branch-selector, and session-recency cases passed 3 cases with retries disabled. Focused ESLint and `git diff --check` passed.
+- PR CI follow-up: profile-order cleanup skips the invalid empty-order API request; the mobile profile-order E2E passed 1 case with retries disabled. The c18ad90 workflow is still incomplete, with three flaky shards reported and other jobs queued.
