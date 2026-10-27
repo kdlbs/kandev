@@ -116,6 +116,38 @@ test.describe("Agent profile duplicate", () => {
     await expect(tabletTestPage.getByTestId(`delete-profile-${profile.id}`)).toBeVisible();
   });
 
+  test("keeps the profile menu open when agent discovery completes", async ({
+    tabletTestPage,
+    apiClient,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = agent.profiles[0];
+    await tabletTestPage.goto("/settings/agents");
+    await tabletTestPage.waitForFunction((agentName) => {
+      const discovery = Reflect.get(window, "__KANDEV_E2E_STORE__")?.getState().agentDiscovery;
+      return (
+        discovery?.loaded &&
+        discovery.items.some((item: { name: string }) => item.name === agentName)
+      );
+    }, agent.name);
+    await tabletTestPage.evaluate(() => {
+      const store = Reflect.get(window, "__KANDEV_E2E_STORE__");
+      Reflect.set(window, "__profileDiscoverySnapshot", store.getState().agentDiscovery.items);
+      store.getState().setAgentDiscovery([]);
+    });
+    const trigger = tabletTestPage.getByTestId(`profile-actions-menu-${profile.id}`);
+    await trigger.tap();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await tabletTestPage.evaluate(() => {
+      const store = Reflect.get(window, "__KANDEV_E2E_STORE__");
+      store.getState().setAgentDiscovery(Reflect.get(window, "__profileDiscoverySnapshot"));
+      Reflect.deleteProperty(window, "__profileDiscoverySnapshot");
+    });
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(tabletTestPage.getByTestId(`duplicate-profile-${profile.id}`)).toBeVisible();
+  });
+
   test("keeps the profile menu open when another profile is added or removed", async ({
     tabletTestPage,
     apiClient,

@@ -230,3 +230,21 @@ insufficient for the typecheck.
   12 tests and the delayed-save Azure sequence passed 8, all without retries.
 - The same resource limits and retry-free settings produced 34 passing tests
   in the profile sequence, including the CI predecessor specs.
+
+### Further E2E results
+
+The next CI head exposed three more retry failures. A delayed agent-discovery
+transition reproduced the tablet menu dismissal locally: the configured and
+then discovered versions of an agent used different card keys. Both now use
+the agent name, and the new transition test failed before the fix and passed
+with the existing menu tests in nine retry-free runs. The earlier profile-count
+remount fix remains covered by its own regression.
+
+The phone passthrough fixture now waits for the initial session to become idle
+before submitting a follow-up draft. The directory-move fixture waits for the
+initial turn and Git hydration, then for Git to report all moved paths before
+reopening Files. These two exact CI failures were not reproduced locally before
+the waits were added. Afterward, five phone repetitions, four directory-move
+repetitions, and the complete three-test drag-and-drop spec passed with retries
+disabled. The affected agent page and profile component suites passed 23
+Vitest tests, and changed-file ESLint and frontend typecheck passed.
