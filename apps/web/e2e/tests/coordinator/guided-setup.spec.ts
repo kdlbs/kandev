@@ -4,7 +4,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { ApiClient } from "../../helpers/api-client";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import {
   linkToCoordinatorAdd,
   linkToCoordinatorSettings,
@@ -24,20 +24,23 @@ async function twoBoards(apiClient: ApiClient, seedData: SeedData) {
 }
 
 async function chooseIdentity(page: Page) {
-  async function chooseFirstOption() {
-    const popover = page.locator('[data-slot="popover-content"]:visible');
+  async function chooseFirstOption(trigger: Locator) {
+    await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const popoverId = await trigger.getAttribute("aria-controls");
+    if (!popoverId) throw new Error("profile selector did not expose its open popover");
+    const popover = page.locator(`[id="${popoverId}"]`);
     await expect(popover).toBeVisible();
     const option = popover.getByRole("option").first();
     await expect(option).toBeVisible();
     await waitForFiniteAnimations(popover);
     await option.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
   }
 
   await page.getByLabel("Name").fill(NAME);
-  await page.getByTestId("coordinator-agent-profile-picker").click();
-  await chooseFirstOption();
-  await page.getByTestId("executor-profile-selector").first().click();
-  await chooseFirstOption();
+  await chooseFirstOption(page.getByTestId("coordinator-agent-profile-picker"));
+  await chooseFirstOption(page.getByTestId("executor-profile-selector").first());
 }
 
 async function reachReview(page: Page) {
