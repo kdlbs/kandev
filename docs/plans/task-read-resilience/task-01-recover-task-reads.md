@@ -112,9 +112,9 @@ Run each E2E command sequentially. The managed runner builds fresh web and backe
 For a fresh worktree, first run `(cd apps && pnpm install --frozen-lockfile)` once.
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/state/task-navigation-reads.test.ts lib/state/task-navigation-recovery-clock.test.ts src/task-detail-route.test.tsx src/task-detail-route-recovery.test.tsx components/task/task-page-content.test.tsx components/task/task-page-content-helpers.test.ts)
+(cd apps/web && pnpm exec vitest run lib/state/task-navigation-reads.test.ts lib/state/task-navigation-reads-retry.test.ts lib/state/task-navigation-reads-budget.test.ts lib/state/task-navigation-recovery-clock.test.ts src/task-detail-route.test.tsx src/task-detail-route-session-selection.test.tsx src/task-detail-route-recovery.test.tsx src/task-detail-route-view.test.ts components/task/task-page-content.test.tsx components/task/task-page-content-permanent-read.test.tsx components/task/task-removal-boundary.test.tsx components/task/task-page-mobile-feedback.test.ts components/task/task-page-content-helpers.test.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint lib/state/task-navigation-reads.ts lib/state/task-navigation-recovery-clock.ts src/task-detail-route.tsx src/task-detail-route-state.ts src/task-detail-route-view.ts components/task/task-page-content.tsx components/task/task-page-inner.tsx components/task/task-navigation-read-feedback.tsx components/task/task-page-content-helpers.ts)
+(cd apps/web && pnpm exec eslint lib/state/task-navigation-reads.ts lib/state/task-navigation-attempt.ts lib/state/task-navigation-recovery-clock.ts src/task-detail-route.tsx src/task-detail-route-state.ts src/task-detail-route-view.ts src/task-detail-route-recovery.ts components/task/task-page-content.tsx components/task/task-page-inner.tsx components/task/task-page-inner-helpers.ts components/task/task-navigation-read-feedback.tsx components/task/task-page-content-helpers.ts)
 (cd apps/web && pnpm run i18n:zh-hant)
 (cd apps/web && pnpm run i18n:pseudo)
 (cd apps/web && pnpm run i18n:check)
@@ -127,8 +127,7 @@ python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-The clock test path is delivered and covered by the focused commands above.
-Add any further changed test suite to this block before marking the task done.
+All delivered test suites and changed source files are included above.
 Capture a desktop and phone recovery state and record the actual discovered and passing E2E counts.
 The narrow fine-pointer phone viewport also needs the 44px target assertion when controls use responsive sizing.
 
