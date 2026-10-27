@@ -273,3 +273,16 @@ measured during the navigation drawer animation. The test now waits for finite
 animations before measuring. The original 44px minimum remains unchanged.
 The three-spec sequence passed all ten checks with retries disabled, two CPUs,
 and 4 GiB of memory. See the work order for diagnostic limits and results.
+
+## CI follow-up: live workflow provenance (2026-10-27)
+
+CI at `e1d3d6f120fb` exposed a separate frontend defect: workflow sync provenance
+was discarded during HTTP, boot, and WebSocket mapping. Settings could therefore
+keep a synced workflow editable when a no-change sync did not reload the page.
+The frontend now carries the existing `source` and `source_path` fields into
+settings, preserves local field drafts, and releases ownership on sync removal.
+
+Six focused regressions failed before correction; all 53 focused tests passed
+afterward. Four GitLab browser cases and 22 lifecycle/approval/pagination cases
+passed with retries disabled. The work order records the state-boundary fixture
+corrections and the separate walkthrough-generation timeout evidence.

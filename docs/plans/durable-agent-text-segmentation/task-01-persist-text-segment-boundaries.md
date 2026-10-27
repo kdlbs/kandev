@@ -229,3 +229,44 @@ four retry attempts, 4,266 passed attempts, and 40 skipped attempts, with no
 parse errors. These are attempt counts, not distinct-test verdicts. All four
 leaf failures are covered by the fixture corrections above. The old-head
 workflow rollup was still queued after the bounded wait.
+
+## CI follow-up: live workflow provenance (2026-10-27)
+
+The next CI run at `e1d3d6f120fb` exposed four more E2E failures. The GitLab sync
+case revealed an implementation defect: the backend already emits `source`
+and `source_path`, but frontend HTTP, boot, and WebSocket mappings dropped them.
+Settings then reconstructed newly observed workflows without sync ownership.
+A no-change manual sync does not reload the page, so that workflow could stay
+editable until a later navigation.
+
+The frontend now retains provenance through those mappings and both settings
+snapshots. Provenance updates apply while local editable-field drafts remain
+intact. Missing metadata in partial events preserves known ownership; explicit
+manual ownership and an empty path release it. The browser regression runs an
+initial sync outside the view's handler, observes read-only controls through
+live updates, and confirms a subsequent no-change manual sync preserves them.
+
+Validation:
+
+- Six new runtime regressions failed before the correction. After correction,
+  the three focused Vitest files passed all 53 tests.
+- The rebuilt GitLab workflow-sync browser suite passed all four cases with
+  retries disabled.
+- The state-boundary fixture suite passed all 22 checks with retries disabled:
+  Office approval waits for the committed status, profile reuse inspects one
+  snapshot with both sessions settled, and desktop/phone pagination waits for
+  archive cleanup before restoring a task. It retains the identity, state,
+  pagination, and conversation assertions.
+- Type checking passed. Changed-file ESLint passed without warnings after
+  extracting the workflow mapping callback. Prettier and diff checks passed.
+
+Public documentation already defines read-only synced workflows and release
+to manual editing in `docs/public/workflow-sync.md`. This correction restores
+that contract. The metadata change uses the shared settings state and leaves
+the phone and desktop interaction structure intact.
+
+The separate walkthrough generation job reached its 600-second deadline on
+both the original run and one fresh generation run. Both diagnostic artifacts
+contain an empty draft and no agent stdout; verification never ran. The cause
+is unknown. These jobs execute the trusted base workflow, independently of the
+feature code under review. Both failed artifacts were retained.

@@ -316,6 +316,8 @@ function mapWorkflowItem(workflow: Workflow) {
     description: workflow.description ?? null,
     sortOrder: workflow.sort_order ?? 0,
     ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
+    ...(workflow.source !== undefined ? { source: workflow.source } : {}),
+    ...(workflow.source_path !== undefined ? { source_path: workflow.source_path } : {}),
     ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
     ...(workflow.style !== undefined ? { style: workflow.style } : {}),
   };
