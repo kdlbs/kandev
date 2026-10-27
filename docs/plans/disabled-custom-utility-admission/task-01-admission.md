@@ -25,6 +25,7 @@ Enforce saved custom-utility availability at the shared execution preparation bo
 - Add independent service and registered-HTTP/SQLite regression coverage for both branches and controls described in the plan; correct existing executable fixtures' enabled state where necessary.
 - Update the custom utility how-to in `docs/public/developer-tools.md` with the admission behavior.
 - Isolate the existing review-checkbox E2E scenario's disposable seed checkout and assert its two intended review files before the first scroll, addressing a hosted CI fixture interaction.
+- Carry the separately validated mobile profile-deletion E2E correction that selects the seeded profile by ID instead of assuming the first agent has a profile.
 
 ## Out of scope
 
@@ -70,6 +71,7 @@ The repo's web TypeScript configuration excludes `e2e/`; the browser runs exerci
 - `apps/backend/internal/utility/handlers/handlers.go`, `execute_handlers_test.go`, and `admission_test.go`
 - `docs/public/developer-tools.md`
 - `apps/web/e2e/tests/review/review-viewed-toggling-flow.ts`
+- `apps/web/e2e/tests/settings/mobile-agent-profile-delete.spec.ts`
 - This plan and work order for status/results; the paired requirement and design for lifecycle reconciliation.
 
 ## Dependencies
@@ -95,3 +97,5 @@ sequential
 Focused RED failed on the intended behavior: disabled utilities returned 200 in both modes and resolved profiles/routes. Focused GREEN passed, followed by both complete owning packages with `-race` (pass). Changed-Go lint passed (0 issues); `list-docs.py validate` and specification lint passed; public-doc test suite passed 63 tests and the validator passed 54 pages. Frozen pnpm installation completed once. PR documentation coverage preflight: covered, no errors. Final diff check passed.
 
 For hosted CI remediation, the saved failing ordered run contained four review inputs (two expected), establishing the new precondition's RED evidence without a repeat. The managed host runner reused fresh assets and ran the same two passthrough predecessors followed by the exact desktop review case once: 3 passed, one worker, zero retries. The exact mobile review case also passed once with one worker and zero retries. Focused ESLint and Prettier checks passed. No UI production code changed. In the contaminated diagnostic, two sentinels crossed together but only the preceding file was marked; the internal cause remains unproven and this fixture repair does not claim to resolve it. Hosted verification remains pending.
+
+The mobile profile-deletion fixture correction is carried byte-for-byte from commit `86913def0773785e99b18f37302f1e203a77d7d9` (Git blob `b7d19f242e703571d9f88f1e435786ea2dba9712`). ROOT verified the producer ran its three mobile cases once with one worker and zero retries, all passing. The carried file passed focused ESLint and Prettier checks here; no duplicate browser run was made. Hosted verification remains pending.

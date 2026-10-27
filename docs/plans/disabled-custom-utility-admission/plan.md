@@ -34,7 +34,7 @@ Independently author `TestExecuteDisabledCustomAdmission` in `apps/backend/inter
 
 ## E2E tests
 
-The externally observable API is exercised through registered HTTP and SQLite in both transport modes. The hosted E2E repair isolates the review checkbox scenario's disposable seed checkout and asserts that its two intended files are the only review inputs. The existing desktop and mobile scrolling assertions remain intact; no rendered UI changes.
+The externally observable API is exercised through registered HTTP and SQLite in both transport modes. Hosted E2E repairs isolate the review checkbox scenario's disposable seed checkout and assert its two intended files, and select the seeded agent profile by identity in mobile profile-deletion scenarios. The existing desktop and mobile interaction assertions remain intact; no rendered UI changes.
 
 ## Work orders
 
@@ -45,6 +45,8 @@ The externally observable API is exercised through registered HTTP and SQLite in
 Focused RED reproduced disabled admission in both modes and unexpected profile/route resolution. Focused GREEN and both owning Go packages passed with race detection. Changed-Go lint passed with zero issues. Catalog validation, specification lint, public-doc tests (63 passed), and public-doc validation (54 pages) passed. PR documentation coverage preflight and final diff check are recorded in the work order.
 
 The hosted review-checkbox E2E failed in both original and failed-jobs retry attempts. An ordered local run with the two preceding passthrough cases reproduced the failure: four review files were present rather than two. After resetting the disposable checkout and asserting its exact inputs, the same ordered desktop sequence passed (3 cases) and the mobile review case passed (1 case), both with one worker and zero retries. This addresses fixture isolation; the missed mark for one of two crossed sentinels in a contaminated multi-file list was observed; its internal cause remains unproven.
+
+The prior hosted mobile profile-deletion failure selected an agent's first profile without verifying that one existed. The independently validated correction from commit `86913def0773785e99b18f37302f1e203a77d7d9` selects the seeded profile by ID and checks its unique owner. ROOT verified the producer's three mobile cases passed once with one worker and zero retries; the identical carried file passed focused ESLint and Prettier checks here. Hosted verification remains pending.
 
 ## Risks
 

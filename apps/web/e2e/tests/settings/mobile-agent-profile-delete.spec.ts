@@ -1,5 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+
+async function getSeededAgentProfile(apiClient: ApiClient, profileId: string) {
+  const { agents } = await apiClient.listAgents();
+  const matches = agents.flatMap((agent) =>
+    agent.profiles
+      .filter((profile) => profile.id === profileId)
+      .map((profile) => ({ agent, profile })),
+  );
+  expect(matches, "The seeded profile must have exactly one owning agent").toHaveLength(1);
+  return matches[0]!;
+}
 
 function longProfileDeleteConflict() {
   return {
@@ -19,10 +31,9 @@ test.describe("Agent profile deletion on mobile", () => {
   test("keeps list-row deletion controls above the row link and returns focus on cancel", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { profile } = await getSeededAgentProfile(apiClient, seedData.agentProfileId);
 
     await testPage.goto("/settings/agents");
 
@@ -64,12 +75,15 @@ test.describe("Agent profile deletion on mobile", () => {
   test("opens simple deletion in a sheet with touch-sized cancel and delete actions", async ({
     testPage,
     apiClient,
+    seedData,
     prCapture,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const { agent, profile: seedProfile } = await getSeededAgentProfile(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Delete Me", {
-      model: agent.profiles[0].model,
+      model: seedProfile.model,
     });
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
@@ -118,13 +132,19 @@ test.describe("Agent profile deletion on mobile", () => {
     await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });
   });
 
-  test("keeps conflict actions visible with many tasks", async ({ testPage, apiClient }) => {
+  test("keeps conflict actions visible with many tasks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(60_000);
 
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const { agent, profile: seedProfile } = await getSeededAgentProfile(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Overflow Profile", {
-      model: agent.profiles[0].model,
+      model: seedProfile.model,
     });
     await testPage.route(`**/api/v1/agent-profiles/${profile.id}**`, async (route) => {
       if (route.request().method() !== "DELETE") {
