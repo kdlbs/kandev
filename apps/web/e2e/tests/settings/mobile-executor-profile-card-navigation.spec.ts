@@ -32,19 +32,41 @@ test("phone opens and independently deletes an existing provider profile", async
     const row = testPage.getByTestId(`executor-profile-card-${selected.id}`);
     const open = row.getByRole("button", { name: selected.name });
     const remove = row.getByTestId("executor-profile-delete-button");
+    const chevron = row.locator("svg").last().locator("..");
     await expect(row).toBeVisible();
+    await row.scrollIntoViewIfNeeded();
     const primaryBox = await requireBox(open, "profile navigation");
     const deleteBox = await requireBox(remove, "profile deletion");
-    for (const box of [primaryBox, deleteBox]) {
+    const chevronBox = await requireBox(chevron, "profile chevron target");
+    for (const box of [primaryBox, deleteBox, chevronBox]) {
       expect(box.width).toBeGreaterThanOrEqual(44);
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
     expect(primaryBox.x + primaryBox.width).toBeLessThanOrEqual(deleteBox.x);
+    expect(deleteBox.x + deleteBox.width).toBeLessThanOrEqual(chevronBox.x);
     await assertNoDocumentHorizontalOverflow(testPage, "profile card");
     await row.screenshot({ path: test.info().outputPath("profile-card-phone.png") });
+    const deletes: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.method() === "DELETE" && request.url().endsWith(`/profiles/${selected.id}`)) {
+        deletes.push(request.url());
+      }
+    });
+    const rowBox = await requireBox(row, "profile row");
+    await testPage.touchscreen.tap(rowBox.x + rowBox.width - 20, rowBox.y + rowBox.height / 2);
+    await expect(testPage).toHaveURL(`/settings/executors/${encodeURIComponent(selected.id)}`);
+    expect(deletes).toEqual([]);
+    await testPage.goto("/settings/executors");
+    await row.scrollIntoViewIfNeeded();
+    const paddingBox = await requireBox(row, "profile row padding");
+    await testPage.touchscreen.tap(paddingBox.x + 4, paddingBox.y + paddingBox.height / 2);
+    await expect(testPage).toHaveURL(`/settings/executors/${encodeURIComponent(selected.id)}`);
+    expect(deletes).toEqual([]);
+    await testPage.goto("/settings/executors");
     await open.tap();
     await expect(testPage).toHaveURL(`/settings/executors/${encodeURIComponent(selected.id)}`);
     await expect(testPage.getByTestId("plugin-executor-profile-page")).toBeVisible();
+    expect(deletes).toEqual([]);
     await testPage.goto("/settings/executors");
     const deleted = waitForHttp(
       testPage,

@@ -38,11 +38,11 @@ credential links use `executorProfileSettingsPath(profileId)` from
 `/settings/executors/:profileId` route independent of executor type. Discovery
 retains fragments; connection helpers remain separate.
 
-Hub and legacy detail share `ExecutorProfilesCard`. A focus-visible native row
-button opens via `onOpen` on Enter, Space, click or touch. Name and badge label
-it; delete is a sibling with its existing refresh path.
-Primary fills the row except delete. Phone targets are 44px minimum and do not
-overlap; desktop delete is 28px. Retain truncation, chevron, state and scrolling;
+Hub and legacy detail share `ExecutorProfilesCard`. A native, focus-visible
+button, named by profile and badge, opens via `onOpen` on Enter, Space, click
+or touch. Sibling delete keeps its refresh path and precedes the right chevron.
+Padding and chevron also open. Phone targets are 44px minimum without
+overlap; desktop delete is 28px. Retain truncation, state and scroll;
 no drawer or copy.
 
 ## Bookmark compatibility

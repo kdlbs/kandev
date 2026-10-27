@@ -130,3 +130,78 @@ test("pointer opens the selected profile and delete stays on the hub", async ({
     await uninstallFixturePlugin(apiClient);
   }
 });
+
+test("old chevron and row padding open without deleting a profile", async ({
+  testPage,
+  apiClient,
+}) => {
+  test.setTimeout(120_000);
+  let executorId = "";
+  let selectedId = "";
+  let siblingId = "";
+  try {
+    const executor = await installFixtureExecutorProvider(testPage, apiClient);
+    executorId = executor.id;
+    await testPage.goto("/settings/executors");
+    const selected = await createFixtureExecutorProfile(testPage, executor, false);
+    selectedId = selected.id;
+    await testPage.goto("/settings/executors");
+    const sibling = await createFixtureExecutorProfile(testPage, executor, false);
+    siblingId = sibling.id;
+    await testPage.goto("/settings/executors");
+    const row = testPage.getByTestId(`executor-profile-card-${selected.id}`);
+    await row.scrollIntoViewIfNeeded();
+    const box = await row.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) throw new Error("Profile row has no geometry");
+    const targetPath = `/settings/executors/${encodeURIComponent(selected.id)}`;
+    const outcome = Promise.race([
+      testPage.waitForURL(targetPath).then(() => "opened"),
+      testPage
+        .waitForResponse(
+          (response) =>
+            response.request().method() === "DELETE" &&
+            response.url().endsWith(`/profiles/${selected.id}`),
+        )
+        .then((response) => `deleted:${response.status()}`),
+    ]);
+    await testPage.mouse.click(box.x + box.width - 20, box.y + box.height / 2);
+    expect(await outcome, "the old chevron position must open, not delete").toBe("opened");
+    await expect(testPage.getByTestId("plugin-executor-profile-page")).toBeVisible();
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/executors/${executor.id}/profiles/${selected.id}`,
+        )
+      ).ok,
+    ).toBe(true);
+    expect(
+      (await apiClient.rawRequest("GET", `/api/v1/executors/${executor.id}/profiles/${sibling.id}`))
+        .ok,
+    ).toBe(true);
+    await testPage.goto("/settings/executors");
+    await row.scrollIntoViewIfNeeded();
+    const paddingBox = await row.boundingBox();
+    if (!paddingBox) throw new Error("Profile row has no geometry");
+    await testPage.mouse.click(paddingBox.x + 4, paddingBox.y + paddingBox.height / 2);
+    await expect(testPage).toHaveURL(targetPath);
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/executors/${executor.id}/profiles/${selected.id}`,
+        )
+      ).ok,
+    ).toBe(true);
+  } finally {
+    if (executorId && selectedId)
+      await apiClient.rawRequest(
+        "DELETE",
+        `/api/v1/executors/${executorId}/profiles/${selectedId}`,
+      );
+    if (executorId && siblingId)
+      await apiClient.rawRequest("DELETE", `/api/v1/executors/${executorId}/profiles/${siblingId}`);
+    await uninstallFixturePlugin(apiClient);
+  }
+});

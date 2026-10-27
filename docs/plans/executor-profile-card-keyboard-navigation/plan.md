@@ -42,25 +42,26 @@ package and released implementation under its exclusive local heavy lease.
 
 UI-01, executor profile card, existing profile (AC .28). Before: the row is
 pointer-clickable but keyboard Tab skips its edit action. After: the primary
-name/badge area is one native button, and delete is a separate sibling. The
-chevron may remain decorative; exact spacing is illustrative.
+name/badge area is one native button, delete is its sibling, and the decorative
+chevron stays on the right in the open row target. Spacing is illustrative.
 
 ```text
 Desktop, before                         Desktop, after
 Provider                         [Add] Provider                         [Add]
-| Profile name     [Delete]  > |       | [Profile name        >] [Delete] |
+| Profile name     [Delete]  > |       | [Profile name       ] [Delete]  > |
   Tab: Add -> Delete -> outside          Tab: Add -> profile -> Delete
                                          Enter / Space -> profile editor
 
 Phone, after (direct navigation)
 Provider                        [Add]
-| [Profile name             >] [Delete] |
+| [Profile name              ] [Delete]  > |
       tap -> profile editor
 ```
 
 The row remains in the existing vertically scrolling settings content, with no
 new overlay or scroll owner. On phone, primary and delete are separate 44px
-minimum touch targets without overlap; preserve safe-area behavior and avoid
+minimum touch targets without overlap, as is the row-owned chevron target;
+preserve safe-area behavior and avoid
 horizontal overflow. Desktop ordinary delete remains 28px; the primary row is
 content-sized. Use shared state and routing on both viewports, following the
 existing hub and `components/kanban-with-preview.tsx` direct-navigation
@@ -99,3 +100,36 @@ mutation defects. A test must drive real native Tab and activation, identify the
 actual profile route and check both navigation and delete isolation, rather than
 only inspecting markup. Confirm the phone control sizes on the actual rendered
 surface. Maintain the existing unrelated catalogue-refresh behavior.
+
+## Review correction: preserve the original row targets
+
+CodeRabbit's [finding](https://github.com/kdlbs/kandev/pull/4868#discussion_r4394365465)
+is valid: base `46eed0e90c72acbd107a7c3a9a673eb3ec9e2638` placed delete
+before the far-right chevron; published `7b9cfd30a50f501f4d46160e8341c023d3d06b3e`
+puts delete at that former open target. A familiar pointer or touch there can
+now delete. Existing AC .28 already requires the pointer destination and
+independent delete; no new product requirement is needed. ROOT reviewed the
+bounded refinement and separately released implementation and a heavy lease.
+
+Restore the old visual order and actionable row padding without nesting buttons:
+profile primary button, sibling delete button, then decorative chevron. Let
+the row's existing navigation handler receive primary-button activation and
+pointer/touch on its padding and chevron; the existing delete handler stops
+propagation. The primary remains a native focus-visible button. The phone
+chevron's row-owned target is at least 44px square, separate from the delete
+and primary hit areas. No confirmation, new copy, API or state change.
+
+```text
+Before original: | name and row padding    [delete]  > |
+Published:       | [name               >]  [delete]   |  <- old > can delete
+Correction:      | [name              ]    [delete]  > |  <- row/chevron open
+Tab order:         Add -> name -> delete
+Phone:             name / delete / right chevron open, separate touch areas
+```
+
+The work order defines an independent real-browser coordinate oracle: click or
+tap the old chevron position and row padding, prove the selected editor opens
+and no deletion occurs; separately prove delete still deletes only its target.
+Capture causal RED at the frozen head before production correction, then run
+only affected checks. Preserve the original running PR observer across the head
+change. No retry, rebase, broad replay or optional polish is authorized.
