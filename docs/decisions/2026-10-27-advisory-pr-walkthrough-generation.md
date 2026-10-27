@@ -29,9 +29,10 @@ returns a verified output pair. The publication and description-link jobs run
 only when that output is `true`, so an unverified attempt never publishes or
 rewrites the pull request description.
 
-Diagnostics still upload for every outcome. A missing diagnostic artifact is a
-warning instead of a job failure, so capture problems cannot turn a skipped
-walkthrough into a red check.
+Diagnostics still upload for every outcome. Staging, upload, and missing-artifact
+failures are advisory when generation produced no verified pair, so capture
+problems cannot turn a skipped walkthrough into a red check; they stay strict
+once a verified pair must reach publication.
 
 Publication and description linking remain strict. Once generation produced a
 verified pair, an R2 upload, public-URL validation, or race-safe body update

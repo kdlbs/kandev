@@ -274,6 +274,13 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             self.publication,
         )
         self.assertIn("if-no-files-found: warn", self.generation)
+        for step_name in ("Stage walkthrough artifact", "Upload walkthrough artifact"):
+            step = self.generation.split(f"- name: {step_name}", 1)[1].split(
+                "- name:", 1
+            )[0]
+            self.assertIn(
+                "continue-on-error: ${{ steps.generate.outcome != 'success' }}", step
+            )
 
     def test_generation_budgets_preparation_and_generation_time(self) -> None:
         self.assertIn("timeout-minutes: 25", self.generation)

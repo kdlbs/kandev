@@ -99,7 +99,7 @@ Each attempt retains stdout, stderr, the draft, output files when present, and a
 
 Stop reasons distinguish render completion, incomplete zero exit, unexpected exit, cleanup failure, deadline, cancellation, and launch failure. Verification results distinguish cleanup failure from verifier failure and cancellation. Logs include timestamps and errors without environment dumps. Diagnostic capture runs in the adapter's cleanup path, including timeout and cancellation.
 
-The workflow summary reports stage durations and the final generation result. It does not expose a completion marker as proof. Artifact upload retains the existing `always()` path, and a missing artifact is a warning so diagnostics capture cannot fail the job. The generation job emits `generated=true` only after the runner returns a verified output pair, and emits `generated=false` with a warning annotation for every other outcome.
+The workflow summary reports stage durations and the final generation result. It does not expose a completion marker as proof. Artifact upload retains the existing `always()` path. Staging, upload, and a missing artifact are advisory when generation produced no verified pair, so diagnostics capture cannot fail a skipped check; they stay strict once a verified pair must reach publication. The generation job emits `generated=true` only after the runner returns a verified output pair, and emits `generated=false` with a warning annotation for every other outcome.
 
 ## Runner and hosting configuration
 
