@@ -110,6 +110,28 @@ it("does not refresh after the consumer unmounts before subscription readiness",
   expect(unsubscribe).toHaveBeenCalledTimes(1);
 });
 
+it("subscribes only while session detail is active and reconciles when reactivated", async () => {
+  const unsubscribe = vi.fn();
+  const subscribe = vi.fn(() => ({ ready: Promise.resolve(), unsubscribe }));
+  setWebSocketClient({ subscribeSessionWithReady: subscribe } as unknown as WebSocketClient);
+  api.list.mockResolvedValue(page(1));
+  const { rerender } = renderHook(
+    ({ detailActive }: { detailActive: boolean }) =>
+      useSessionTurnChanges("session-1", { detailActive }),
+    { wrapper, initialProps: { detailActive: false } },
+  );
+  await waitFor(() => expect(api.list).toHaveBeenCalledTimes(1));
+  expect(subscribe).not.toHaveBeenCalled();
+  rerender({ detailActive: true });
+  await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+  expect(subscribe).toHaveBeenCalledTimes(1);
+  rerender({ detailActive: false });
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
+  rerender({ detailActive: true });
+  await waitFor(() => expect(api.list).toHaveBeenCalledTimes(3));
+  expect(subscribe).toHaveBeenCalledTimes(2);
+});
+
 it("keeps a newer live revision when the post-subscription page arrives late", async () => {
   const ready = deferred<void>();
   const refreshed = deferred<ReturnType<typeof page>>();

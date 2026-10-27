@@ -21,8 +21,9 @@ After session-subscription readiness, revalidate the newest history page so an
 update between an initial read and registration cannot be lost. An earlier
 in-flight page must settle before that read starts. Revision-aware merging
 preserves newer live updates when a page arrives late. Revalidate after
-reconnection and release the subscription with its consumer. Offline reads
-remain available.
+reconnection and release the subscription with its consumer. Transcript
+consumers subscribe only while their session detail is active, and reconcile
+when it becomes active again. Offline reads remain available.
 
 The transcript and historical-diff consumers share this behavior across
 desktop and phone; their presentation and scroll ownership remain unchanged.
