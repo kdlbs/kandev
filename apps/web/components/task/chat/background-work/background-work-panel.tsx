@@ -20,6 +20,14 @@ import { useBackgroundWork } from "@/hooks/domains/session/use-background-work";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
 import { cn } from "@/lib/utils";
+import { canRunWorkloadAction, hasReadableOutput } from "@/lib/background-work/capabilities";
+import {
+  workloadExitStatusKey,
+  workloadKindLabelKey,
+  workloadOutputUnavailableKey,
+  workloadStateBadgeVariant,
+  workloadStateLabelKey,
+} from "./presentation";
 
 export type BackgroundWorkPanelProps = {
   panelId: string;
@@ -153,14 +161,11 @@ function WorkloadCard({ workload }: { workload: WorkloadRunObservation }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate font-medium text-sm text-foreground">{workload.title}</span>
-            <Badge
-              variant={workload.state === "running" ? "default" : "outline"}
-              className="text-[10px] capitalize"
-            >
-              {workload.state}
-            </Badge>
+            <WorkloadStateBadge workload={workload} />
           </div>
-          <span className="text-[11px] text-muted-foreground capitalize">{workload.kind}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {t(workloadKindLabelKey(workload.kind))}
+          </span>
         </div>
       </div>
       <Button
@@ -177,6 +182,23 @@ function WorkloadCard({ workload }: { workload: WorkloadRunObservation }) {
   );
 }
 
+function WorkloadStateBadge({ workload }: { workload: WorkloadRunObservation }) {
+  const { t } = useTranslation();
+  return (
+    <Badge
+      variant={workloadStateBadgeVariant(workload.state)}
+      className={cn(
+        "text-[10px]",
+        workload.state === "running" && "bg-primary text-primary-foreground",
+      )}
+      data-testid={`background-work-state-${workload.work_id}`}
+      data-state={workload.state}
+    >
+      {t(workloadStateLabelKey(workload.state))}
+    </Badge>
+  );
+}
+
 function WorkloadDetailHeader({
   workload,
   onInterrupt,
@@ -187,64 +209,64 @@ function WorkloadDetailHeader({
   onStop: () => void;
 }) {
   const { t } = useTranslation();
-  const stopCap = workload.capabilities?.actions?.stop;
-  const canStop =
-    stopCap !== undefined
-      ? stopCap.supported && stopCap.available
-      : workload.state === "running" || workload.state === "waiting";
-  const intCap = workload.capabilities?.actions?.interrupt;
-  const canInterrupt =
-    intCap !== undefined
-      ? intCap.supported && intCap.available
-      : workload.kind === "subagent" &&
-        (workload.state === "running" || workload.state === "waiting");
+  const canStop = canRunWorkloadAction(workload, "stop");
+  const canInterrupt = canRunWorkloadAction(workload, "interrupt");
+  const exitKey = workloadExitStatusKey(workload);
 
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex items-center gap-2">
-          <span className="font-semibold">{workload.title}</span>
-          <Badge variant="outline" className="text-[10px] capitalize">
-            {workload.kind}
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-semibold">{workload.title}</span>
+          <Badge variant="outline" className="text-[10px]">
+            {t(workloadKindLabelKey(workload.kind))}
           </Badge>
-          <Badge
-            variant={workload.state === "running" ? "default" : "outline"}
-            className={cn(
-              "text-[10px] capitalize",
-              workload.state === "running" && "bg-primary text-primary-foreground",
-            )}
-          >
-            {workload.state}
-          </Badge>
+          <WorkloadStateBadge workload={workload} />
+          {exitKey && (
+            <Badge variant="outline" className="text-[10px] font-mono">
+              {t(exitKey, { code: workload.exit_code })}
+            </Badge>
+          )}
         </div>
       }
       right={
-        <div className="flex items-center gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!canInterrupt}
-            onClick={onInterrupt}
-            className="h-6 cursor-pointer px-2 text-[11px]"
-            data-testid="interrupt-workload-button"
+        canStop || canInterrupt ? (
+          <div className="flex items-center gap-1.5">
+            {canInterrupt && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onInterrupt}
+                className="h-6 cursor-pointer px-2 text-[11px]"
+                data-testid="interrupt-workload-button"
+              >
+                <IconPlayerPause className="mr-1 h-3 w-3" />
+                {t("task:interruptBackgroundWork")}
+              </Button>
+            )}
+            {canStop && (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={onStop}
+                className="h-6 cursor-pointer px-2 text-[11px]"
+                data-testid="stop-workload-button"
+              >
+                <IconPlayerStop className="mr-1 h-3 w-3" />
+                {t("task:stopBackgroundWork")}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <span
+            className="text-[11px] text-muted-foreground"
+            data-testid="background-work-actions-unavailable"
           >
-            <IconPlayerPause className="mr-1 h-3 w-3" />
-            {t("task:interruptBackgroundWork")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={!canStop}
-            onClick={onStop}
-            className="h-6 cursor-pointer px-2 text-[11px]"
-            data-testid="stop-workload-button"
-          >
-            <IconPlayerStop className="mr-1 h-3 w-3" />
-            {t("task:stopBackgroundWork")}
-          </Button>
-        </div>
+            {t("task:backgroundActionsUnavailable")}
+          </span>
+        )
       }
     />
   );
@@ -260,13 +282,14 @@ function WorkloadOutputViewer({
   outputEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
+  const unavailableKey = workloadOutputUnavailableKey(workload);
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-black/95 p-3 font-mono text-xs text-green-400">
       {workload.output_truncated && (
         <div className="mb-2 text-[10px] text-amber-400">[{t("task:earlierOutputTruncated")}]</div>
       )}
       <pre className="whitespace-pre-wrap break-all">
-        {displayOutput || t("task:liveOutputUnavailable")}
+        {displayOutput || (unavailableKey ? t(unavailableKey) : "")}
       </pre>
       <div ref={outputEndRef} />
     </div>
@@ -372,6 +395,7 @@ function WorkloadDetailView({
   const [actionError, setActionError] = useState<string | null>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
 
+  const outputAvailable = hasReadableOutput(workload.capabilities);
   const displayOutput = useMemo(() => {
     let text = workload.output || "";
     if (clearedOffset > 0) {
@@ -415,7 +439,7 @@ function WorkloadDetailView({
     }
   };
 
-  const writeInputAvailable = workload.capabilities?.actions?.write_input?.available ?? false;
+  const writeInputAvailable = canRunWorkloadAction(workload, "write_input");
 
   return (
     <PanelRoot data-testid={`background-work-detail-${workload.work_id}`}>
@@ -425,13 +449,15 @@ function WorkloadDetailView({
         onStop={() => onAction({ work_id: workload.work_id, action: "stop" })}
       />
       <div className="flex flex-1 min-h-0 flex-col bg-background">
-        <WorkloadOutputToolbar
-          search={search}
-          onSearchChange={setSearch}
-          autoScroll={autoScroll}
-          onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
-          onClear={() => setClearedOffset((workload.output || "").length)}
-        />
+        {outputAvailable && (
+          <WorkloadOutputToolbar
+            search={search}
+            onSearchChange={setSearch}
+            autoScroll={autoScroll}
+            onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
+            onClear={() => setClearedOffset((workload.output || "").length)}
+          />
+        )}
 
         <WorkloadOutputViewer
           workload={workload}

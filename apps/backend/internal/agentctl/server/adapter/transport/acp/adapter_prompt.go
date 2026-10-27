@@ -286,6 +286,10 @@ func (a *Adapter) sendPrompt(
 	// tool_call without a terminal status update from the agent).
 	continuationSafety := a.continuationSafetySnapshot(turn)
 	capacityContinuation := a.capacityContinuationSnapshot(turn, notificationsDrained)
+	// Retained launches whose provider ends delivery with this prompt become
+	// unknown before the generic sweep: no later terminal frame can arrive, so
+	// they must neither be reported as cancelled nor keep fencing new prompts.
+	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool

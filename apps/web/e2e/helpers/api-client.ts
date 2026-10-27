@@ -1888,6 +1888,32 @@ export class ApiClient {
   }
 
   /**
+   * Seeds one shared background-workload projection row and publishes it on
+   * the live WebSocket subject. Lets browser suites cover provider states the
+   * deterministic ACP producer cannot reach, such as a terminal job whose
+   * history must outlive the active count. Only mounted when the backend was
+   * started with KANDEV_E2E_MOCK=true.
+   */
+  async recordBackgroundWorkload(
+    sessionId: string,
+    workload: {
+      work_id: string;
+      run_id?: string;
+      kind: string;
+      title: string;
+      state: string;
+      exit_code?: number;
+      output?: string;
+      revision?: number;
+    },
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/_test/background-work", {
+      session_id: sessionId,
+      ...workload,
+    });
+  }
+
+  /**
    * Seeds a message via the e2e harness. `metadata` lands on the message row;
    * `turnMetadata` is persisted on the ensured turn so specs can exercise the
    * metadata dialog's `turn_metadata` field. `authorType` defaults to agent;

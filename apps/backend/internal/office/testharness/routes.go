@@ -117,6 +117,9 @@ func RegisterRoutes(
 		g.POST("/background-probe", scriptBackgroundProbeHandler(probe))
 		g.GET("/background-probe/:session_id/calls", backgroundProbeCallCountHandler(probe))
 	}
+	if taskSvc != nil {
+		g.POST("/background-work", recordBackgroundWorkHandler(repo, taskSvc, eventBus, log))
+	}
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))

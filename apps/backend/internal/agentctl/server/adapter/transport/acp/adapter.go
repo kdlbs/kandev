@@ -120,6 +120,10 @@ type Adapter struct {
 	// Agent identity (from config, for logging)
 	agentID string
 
+	// backgroundWorkEnabled is the effective shared background-work feature
+	// value resolved by the backend for this launch.
+	backgroundWorkEnabled bool
+
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *Normalizer
 
@@ -504,7 +508,8 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		cfg:                       cfg,
 		logger:                    l,
 		agentID:                   cfg.AgentID,
-		normalizer:                NewNormalizer(cfg.AgentID),
+		backgroundWorkEnabled:     cfg.AgentBackgroundWorkEnabled,
+		normalizer:                NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
 		dialect:                   newACPDialect(cfg.AgentID),
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),

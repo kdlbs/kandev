@@ -97,11 +97,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # Normalized background work and subagent lifecycle management.
+  # Normalized background work and subagent lifecycle management. Enabled by
+  # default so inspection is standard behavior; the runtime flag remains an
+  # operator off switch that gates the read/action endpoints as well.
   KANDEV_FEATURES_AGENT_BACKGROUND_WORK:
-    prod: "false"
-    dev:  "false"
-    e2e:  "false"
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
 
   # High-risk Claude-only background prompt handoff experiment. Off in every
   # profile so it is exercised only by contributors who deliberately opt in.

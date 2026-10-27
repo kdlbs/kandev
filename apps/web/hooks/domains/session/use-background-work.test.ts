@@ -140,8 +140,60 @@ describe("useBackgroundWork calculations", () => {
     expect(result.current.totalCount).toBe(2);
     expect(result.current.runningCount).toBe(1);
     expect(result.current.waitingCount).toBe(1);
+    expect(result.current.unknownCount).toBe(0);
+    expect(result.current.totalJobCount).toBe(2);
     expect(result.current.hasActiveWork).toBe(true);
     expect(result.current.activeWorkload?.work_id).toBe("work-2");
+  });
+
+  it("counts unknown activity separately and keeps terminal history", () => {
+    storeState.backgroundWork = {
+      workloadsBySessionId: {
+        "session-1": [
+          {
+            work_id: "work-1",
+            title: "CI poller",
+            kind: "shell",
+            state: "unknown",
+            capabilities: {
+              discovery: "events_only",
+              output: "none",
+              transcript: false,
+              parentage: false,
+              reasoning_summary: false,
+              attributable_usage: false,
+            },
+            revision: 1,
+          },
+          {
+            work_id: "work-2",
+            title: "Local tests",
+            kind: "shell",
+            state: "completed",
+            capabilities: {
+              discovery: "events_only",
+              output: "none",
+              transcript: false,
+              parentage: false,
+              reasoning_summary: false,
+              attributable_usage: false,
+            },
+            revision: 2,
+          },
+        ],
+      },
+      activeWorkIdBySessionId: {},
+      loadingBySessionId: {},
+    };
+
+    const { result } = renderHook(() => useBackgroundWork("session-1"));
+
+    expect(result.current.unknownCount).toBe(1);
+    expect(result.current.runningCount).toBe(0);
+    expect(result.current.totalCount).toBe(1);
+    expect(result.current.totalJobCount).toBe(2);
+    expect(result.current.hasActiveWork).toBe(true);
+    expect(result.current.hasHistory).toBe(true);
   });
 });
 
