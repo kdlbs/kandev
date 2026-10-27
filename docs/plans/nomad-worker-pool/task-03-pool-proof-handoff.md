@@ -78,3 +78,21 @@ None.
 ## Results
 
 Complete (2026-10-26). All six pool scenarios (`pool-placement`, `pool-two-node`, `pool-node-quarantine`, `pool-queue`, `pool-refusals`, `pool-partition`) passed rc 0 on one build (`0d8ba484e9`, v0.98.0-64) on the laptop two-node fixture; evidence, run ids, defects found per round and the fixture boundary are in `docs/evidence/nomad-pool-p3/README.md`. Contribution notes: `docs/evidence/nomad-pool-p3/contribution-notes.md` (not published). Not covered: startup timing, a multi-machine fleet and a real network partition.
+
+### Closeout (2026-10-28)
+
+The later coverage round has 14 default-mode laptop-fixture passes reported by the operator;
+raw live JSON was not committed. The latest tested code candidate is `1222b56224`.
+The full backend suite exits 2 with 262 failed top-level tests and one interrupted test.
+Exact-name reruns on the candidate, clean previous-card tip `73c8155caf`, and clean upstream
+merge base `baa92e5dcf` reproduce the same 262 failed roots (452 identities with subtests);
+the interrupted test passes on all three. No failed-name difference, skip or missing test
+remains in that selection. Current focused Go and offline Python receipts and the exact
+comparison command/names are recorded in
+[closeout evidence](../../evidence/nomad-e2e-coverage/closeout.md).
+
+The contribution remains a draft. TLS/scoped-ACL mode has not run live; fix 7 has Go tests
+only; native post-restart reattachment has not proved an actual agent-to-Kandev tool call.
+[Remaining fixture instructions](../../evidence/nomad-e2e-coverage/remaining-fixtures.md)
+describe the supported commands and the missing harness extensions. Actual Tank/Neo pool
+evaluation remains a separate approved window.

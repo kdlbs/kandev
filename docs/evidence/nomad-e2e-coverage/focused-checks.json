@@ -1,0 +1,102 @@
+[
+  {
+    "name": "nomad",
+    "cwd": "apps/backend",
+    "argv": [
+      "go",
+      "test",
+      "-trimpath",
+      "-tags",
+      "fts5",
+      "-count=1",
+      "-json",
+      "./internal/agent/nomad/..."
+    ],
+    "exit": 0,
+    "top_level_tests": {
+      "pass": 109
+    }
+  },
+  {
+    "name": "nomad-dependents",
+    "cwd": "apps/backend",
+    "argv": [
+      "go",
+      "test",
+      "-trimpath",
+      "-tags",
+      "fts5",
+      "-count=1",
+      "-json",
+      "-run",
+      "Nomad|Pool|LoadEnvZeroIdleTimeoutDisablesReaper",
+      "./internal/agent/runtime/lifecycle/",
+      "./internal/agent/handlers/",
+      "./internal/agent/executor/",
+      "./internal/agentctl/server/config/",
+      "./internal/agentctl/server/instance/",
+      "./internal/task/service/",
+      "./internal/task/repository/sqlite/",
+      "./internal/orchestrator/executor/"
+    ],
+    "exit": 0,
+    "top_level_tests": {
+      "pass": 235,
+      "skip": 2
+    }
+  },
+  {
+    "name": "nomad-race",
+    "cwd": "apps/backend",
+    "argv": [
+      "go",
+      "test",
+      "-trimpath",
+      "-tags",
+      "fts5",
+      "-count=1",
+      "-json",
+      "-race",
+      "./internal/agent/nomad/..."
+    ],
+    "exit": 0,
+    "top_level_tests": {
+      "pass": 109
+    }
+  },
+  {
+    "name": "lifecycle-race",
+    "cwd": "apps/backend",
+    "argv": [
+      "go",
+      "test",
+      "-trimpath",
+      "-tags",
+      "fts5",
+      "-count=1",
+      "-json",
+      "-race",
+      "-run",
+      "Nomad|Pool",
+      "./internal/agent/runtime/lifecycle/"
+    ],
+    "exit": 0,
+    "top_level_tests": {
+      "pass": 169
+    }
+  },
+  {
+    "name": "vet",
+    "cwd": "apps/backend",
+    "argv": [
+      "go",
+      "vet",
+      "-trimpath",
+      "-tags",
+      "fts5",
+      "./internal/agent/..."
+    ],
+    "exit": 0,
+    "top_level_tests": {}
+  }
+]

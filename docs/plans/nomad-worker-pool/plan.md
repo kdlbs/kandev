@@ -1,6 +1,6 @@
 ---
 created: 2026-10-25
-status: pending
+status: done
 requirements:
   - REQ-EXECUTORS-NOMADPOOL-001
   - REQ-EXECUTORS-NOMADPOOL-002
@@ -10,6 +10,7 @@ requirements:
   - REQ-EXECUTORS-NOMADPOOL-006
 system_design:
   - ../../specs/executors/system-design/nomad-worker-pool.md
+  - ../../specs/executors/system-design/nomad-native-executor.md
 legacy_specs: []
 ---
 
@@ -76,7 +77,17 @@ host key and of a fake local node. Live runs need owner approval.
 
 - [x] [Task 01: Pool placement and transport](task-01-pool-placement-transport.md)
 - [x] [Task 02: Pool workspaces, fences and quarantine](task-02-pool-workspaces-fences.md)
-- [ ] [Task 03: Two-node proof and handoff](task-03-pool-proof-handoff.md)
+- [x] [Task 03: Two-node proof and handoff](task-03-pool-proof-handoff.md)
+
+## Evidence boundary
+
+Completed work orders use the disposable laptop fixture and the evidence disclosures in
+their Results sections. The 2026-10-28 closeout records 14 operator-reported default-mode
+scenario passes and current local verification in
+[`docs/evidence/nomad-e2e-coverage/`](../../evidence/nomad-e2e-coverage/README.md).
+TLS/scoped-ACL live mode, live SFTP upload cancellation, and an actual native agent-to-Kandev
+tool call after restart remain unproven. Completion does not certify the Tank/Neo pool or
+authorize production rollout.
 
 Execute 01 -> 02 -> 03 after native executor work orders 01-07 are done.
 
