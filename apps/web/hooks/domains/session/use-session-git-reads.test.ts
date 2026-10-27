@@ -12,6 +12,7 @@ import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "
 const COMMITS_ACTION = "session.git.commits";
 const DIFF_ACTION = "session.cumulative_diff";
 const DELETED_TASK = "deleted-task";
+const TASK_DELETED = "task.deleted";
 
 function taskSession(id: string, taskId: string): TaskSession {
   return {
@@ -96,6 +97,35 @@ afterEach(() => {
 });
 
 describe("deleted task Git reads", () => {
+  it("does not restart reads when a deleted session is mounted again", async () => {
+    const { result, rerender } = renderSessionRead(
+      (sessionId: string | null) => useCumulativeDiff(sessionId),
+      "session" as string | null,
+      (store) => {
+        store.setState((state) => ({
+          taskSessions: {
+            ...state.taskSessions,
+            items: { session: taskSession("session", DELETED_TASK) },
+          },
+        }));
+      },
+    );
+    act(() => {
+      const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
+      handler({
+        type: "notification",
+        action: TASK_DELETED,
+        payload: { task_id: DELETED_TASK },
+      } as Parameters<typeof handler>[0]);
+    });
+    rerender(null);
+    rerender("session");
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(
+      GitReadSocket.instance.sent.filter((request) => request.payload.session_id === "session"),
+    ).toHaveLength(1);
+  });
+
   it("preserves a sibling commit read when the deleted session owned the shared environment", async () => {
     const { result } = renderSessionRead(
       () => ({ kept: useSessionCommits("other"), deleted: useSessionCommits("session") }),
@@ -111,10 +141,10 @@ describe("deleted task Git reads", () => {
       },
     );
     act(() => {
-      const handler = registerTasksHandlers(result.current.store)["task.deleted"]!;
+      const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
       handler({
         type: "notification",
-        action: "task.deleted",
+        action: TASK_DELETED,
         payload: { task_id: DELETED_TASK },
       } as Parameters<typeof handler>[0]);
     });
@@ -124,7 +154,9 @@ describe("deleted task Git reads", () => {
     });
     expect(result.current.value.kept.commits).toEqual([commit]);
   });
+});
 
+describe("deleted task Git read recovery", () => {
   it("discards a deleted session's late result while a shared-environment session continues", async () => {
     const { result } = renderSessionRead(
       () => ({ deleted: useCumulativeDiff("session"), kept: useCumulativeDiff("other") }),
@@ -143,10 +175,10 @@ describe("deleted task Git reads", () => {
       },
     );
     act(() => {
-      const handler = registerTasksHandlers(result.current.store)["task.deleted"]!;
+      const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
       handler({
         type: "notification",
-        action: "task.deleted",
+        action: TASK_DELETED,
         payload: { task_id: DELETED_TASK },
       } as Parameters<typeof handler>[0]);
     });
@@ -180,10 +212,10 @@ describe("deleted task Git reads", () => {
       );
       await act(async () => rejectReads("INTERNAL_ERROR"));
       act(() => {
-        const handler = registerTasksHandlers(result.current.store)["task.deleted"]!;
+        const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
         handler({
           type: "notification",
-          action: "task.deleted",
+          action: TASK_DELETED,
           payload: { task_id: DELETED_TASK },
         } as Parameters<typeof handler>[0]);
       });

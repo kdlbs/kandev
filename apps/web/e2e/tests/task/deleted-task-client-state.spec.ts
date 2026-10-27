@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -97,11 +98,16 @@ test.describe("deleted task client state", () => {
     await expect.poll(() => gitReads, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
     const initialReads = gitReads;
     await expect.poll(() => gitReads, { timeout: 15_000 }).toBeGreaterThan(initialReads);
+    await expect
+      .poll(async () => (await cachedSessionState(testPage, sessionId)).session)
+      .toBe(true);
     await apiClient.deleteTask(task.id);
     await expect.poll(() => deleted).toBe(true);
+    await expect
+      .poll(async () => (await cachedSessionState(testPage, sessionId)).session)
+      .toBe(false);
     const readsAfterDeletion = gitReads;
-    const deadline = Date.now() + 6500;
-    await expect.poll(() => Date.now(), { timeout: 10_000 }).toBeGreaterThan(deadline);
+    await dwell(testPage, 6500, "negative-assertion", "deleted session Git reads must not retry");
     expect(gitReads).toBe(readsAfterDeletion);
   });
 

@@ -237,7 +237,6 @@ export class SessionReadScope {
         if (read.options.sessionId === sessionId && read.hasListeners) return;
       }
     }
-    this.retiredSessions.delete(sessionId);
     for (const reads of this.reads.values()) {
       for (const [key, read] of reads) {
         if (read.options.sessionId === sessionId) reads.delete(key);

@@ -46,9 +46,11 @@ scheduled retries and pending responses. Retirement is specific to session
 identity, not the environment, which may be shared by another live session.
 Deletion must prevent stale mounted consumers from recreating the retired read.
 When a retired read owned a shared writer group, another active reader in
-that group may claim it so its pending result remains usable. Retirement state
-is released after the last deleted-session subscriber leaves. Scope reset on
-workspace or connection changes remains independent.
+that group may claim it so its pending result remains usable. Retired read
+objects are released after the last subscriber leaves, while the session's
+deletion fence remains for the lifetime of the connection scope to prevent a
+stale consumer from recreating the read. Scope reset on workspace or connection
+changes releases those fences.
 
 Git read handlers classify the repository's typed missing-session error as a
 permanent WebSocket `NOT_FOUND` response rather than a generic internal error.

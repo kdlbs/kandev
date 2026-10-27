@@ -53,7 +53,7 @@ rendered UI.
 
 ## Verification results
 
-Go Git handler tests passed. Three frontend test files passed (35 tests), the
+Go Git handler tests passed. Three frontend test files passed (36 tests), the
 web typecheck and changed-file lint passed, and both Chromium scenarios passed
 with retries disabled. The first final browser run hit a 401 during isolated
 fixture setup; a subsequent run passed both tests. Specification catalog and
@@ -62,4 +62,6 @@ lint checks passed. Exact commands are recorded in the work order.
 ## Risks
 
 A session can share its environment with another live session; cleanup must not
-retire the survivor. A late deletion must not clear a replacement session.
+retire the survivor. A late deletion must not clear a replacement session. The
+connection scope retains one deleted-session ID per observed deletion until the
+scope is replaced, even after the associated read objects have been released.
