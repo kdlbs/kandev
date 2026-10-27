@@ -128,6 +128,10 @@ func TestPATClientProjectDiscovery(t *testing.T) {
 
 func TestPATClientMergeMRRequestAndResponse(t *testing.T) {
 	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"sha":"test-source-head"}`))
+			return
+		}
 		if got, want := r.Method, http.MethodPut; got != want {
 			t.Errorf("method = %q, want %q", got, want)
 		}
@@ -138,7 +142,7 @@ func TestPATClientMergeMRRequestAndResponse(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if !request.Squash || request.SquashCommitMessage != "squashed changes" || request.ShouldRemoveSourceBranch {
+		if request.SHA != "test-source-head" || !request.Squash || request.SquashCommitMessage != "squashed changes" || request.ShouldRemoveSourceBranch {
 			t.Errorf("request = %#v, want squash without source removal", request)
 		}
 		_ = json.NewEncoder(w).Encode(rawMR{IID: 9, State: "merged", Title: "Feature"})

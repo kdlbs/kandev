@@ -547,6 +547,11 @@ func TestPermanentFailureSuspendsPollingUntilManualRecovery(t *testing.T) {
 		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 		return err == nil && cfg != nil && cfg.PollSuspended
 	}, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		svc.automaticMu.Lock()
+		defer svc.automaticMu.Unlock()
+		return svc.automaticInFlight["ws-1"] == nil
+	}, time.Second, time.Millisecond)
 	require.Equal(t, 1, provider.callCount())
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)

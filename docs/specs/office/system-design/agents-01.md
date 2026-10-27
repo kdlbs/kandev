@@ -3,6 +3,7 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-AGENTS-001
+  - REQ-OFFICE-AGENT-NAMES-001
 created: 2026-04-25
 owners:
   - cfl
@@ -12,12 +13,122 @@ owners:
 ## Purpose and boundaries
 
 This design preserves the technical source detail for `REQ-OFFICE-AGENTS-001` during migration.
+It also defines name admission for the persistent Office identity through
+`REQ-OFFICE-AGENT-NAMES-001`.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-AGENTS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-AGENT-NAMES-001` | [Workspace agent name admission](#workspace-agent-name-admission) |
+
+## Workspace agent name admission
+
+### Ownership and contracts
+
+This section extends the existing Office identity contract. The database is
+authoritative for saved identities, as recorded in
+[part 3's persistence guarantees](agents-03.md#persistence-guarantees).
+Workspace exports and sync files are configuration snapshots. The shared
+execution-profile model and its global namespace remain owned by
+[Agents](../../agents/README.md); sharing `agent_profiles` under
+[ADR 0005](../../../decisions/0005-agent-model-unification.md) does not make a
+global execution profile an Office name reservation.
+
+Production mounts Office routes under `/api/v1/office` in
+`backendapp.mountOfficeRoutes`. `office.RegisterAllRoutes` supplies
+`Services.Agents` to `agents.RegisterRoutes`, which registers `PATCH /agents/:id`
+and `POST /workspaces/:wsId/agents`. A narrow test can mount that registrar under another
+prefix without changing which handler and service run.
+
+### Validation and mutation
+
+`agents.Handler.updateAgent` loads the existing identity with
+`GetAgentFromConfig`, applies supplied fields to that model, and calls
+`AgentService.UpdateAgentInstance`. The loaded row supplies `WorkspaceID` and
+`ID`; the update request does not supply a replacement workspace.
+`ApplyProfileConfiguration` and routing validation prepare the model in memory
+on this path. Persistence occurs only after service validation.
+
+`AgentService.validateAgentCreate` already invokes `validateAgentNameUnique`.
+`validateAgentUpdate` invokes the same helper with the current
+`agent.Name`, `agent.WorkspaceID`, and `agent.ID`. Both validators admit names
+after required name/role checks and before CEO-specific checks, so duplicate
+CEO names receive the same name-conflict response. Distinct names still pass
+through the existing CEO-count and reporting-root guards. Name admission also
+precedes the optional `validateReportsTo` return, so a reporting relationship
+cannot bypass name admission. A conflict returns before
+`Repository.UpdateAgentInstance`, so a rejected PATCH saves none of its fields.
+
+The helper uses the existing
+`Repository.AgentInstanceExistsByName(ctx, workspaceID, name, excludeID)`.
+Its predicate is existential: any matching, non-deleted row other than
+`excludeID` blocks admission. It scopes by the persisted workspace and compares
+`name = ?`; it adds no role, status, case-folding, trimming, or filename rules.
+The shared query and its storage implementation stay unchanged.
+
+### Error classification
+
+`ErrAgentNameAlreadyExists` sits beside the existing validation sentinels
+in `agents/service.go`. The helper wraps it with the requested name when the
+name predicate reports a conflict. `agentValidationErrorCode` in
+`agents/handler.go` recognizes it with `errors.Is` and returns
+`agent_name_already_exists`. Existing create and update handler branches then
+produce the established `400` JSON validation shape with `error` and `code`.
+
+The shared helper also classifies an already-refused duplicate create as a
+client error; it does not change which creates are allowed. Repository read
+failures retain their wrapped operational error and must not match the conflict
+sentinel or be reported as an occupied name. Existing HTTP `500` handling for
+operational failures remains applicable.
+
+### Persistence and configuration export
+
+`Repository.UpdateAgentInstance` currently writes `name` and the other mutable
+Office fields directly. No SQL, schema, index, migration, transaction, lock, or
+repository-interface change is needed. The admission check preserves the
+existing concurrency model and provides no new concurrent-writer uniqueness
+guarantee. Existing duplicate rows are not repaired; a row in such a workspace
+can remain blocked by the other matching identity, including an unchanged-name
+save. This package makes no new repair promise.
+
+`ConfigService.ExportManifest` reads the same repository through `ExportBundle`.
+`bundleToFiles` names each agent file `.kandev/agents/<name>.yml`, and
+`validateExportPath` rejects duplicate paths. That guard remains intact.
+Refusing a colliding ordinary update preserves an already-valid manifest;
+renaming exported files or suppressing one identity would conceal the invalid
+saved state and is outside this design.
+
+### Regression evidence and surface boundary
+
+Independent tests use a disposable real SQLite repository initialized with the
+settings-store and Office schemas. Create valid Worker identities through
+`AgentService`, exercise the registered HTTP handler, reread storage, and use
+the real `ConfigService.ExportManifest` on that same repository. The
+[work order](../../../plans/office-agent-rename-uniqueness/task-01-enforce-agent-name-admission.md)
+defines the collision, preservation, accepted-save, namespace, and exact-name
+controls for `AC-OFFICE-AGENT-NAMES-001.1` through `.6`.
+
+The existing Configuration save action handles an unsuccessful API response;
+its existing error fallback can display the response error. There is no
+frontend, layout, navigation, touch, or viewport-dependent change. Desktop and
+phone callers receive the same refusal and preserved state from the shared
+API. HTTP, persistence, and manifest integration evidence covers this backend
+boundary; browser composition and Playwright additions are outside this repair.
+Authorization middleware and agent caller permissions remain in place.
+
+No new logs, metrics, or audit contract are required for this validation error.
+The existing public [Office agent guide](../../../public/office-agents.md)
+already asks for unique names, and the
+[export guide](../../../public/office-config-sync.md#definition-bundle-export)
+already describes the server-owned manifest. This repair restores those
+documented outcomes without a public documentation change. It introduces no
+architectural alternative requiring a new ADR.
+
+### Implementation plan
+
+- [Office agent rename uniqueness](../../../plans/office-agent-rename-uniqueness/plan.md)
 
 ## Migrated source detail
 
@@ -89,7 +200,9 @@ Worktrees are automatic: when a task targets a repository, the system creates a 
 
 ### Agent config (filesystem)
 
-`agents/<name>.yml` in the workspace config tree. Source of truth for agent configuration: editable, versionable via git.
+`agents/<name>.yml` in the workspace config tree is an editable, versionable
+configuration snapshot. Saved identities are authoritative in the database;
+see [persistence guarantees](agents-03.md#persistence-guarantees).
 
 ```yaml
 # agents/ceo.yml
