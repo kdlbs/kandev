@@ -275,20 +275,6 @@ export function shouldClearPendingChangesFocus(result: ActivateChangesPanelResul
   return result === "activated" || result === "no-panel";
 }
 
-export function clearPendingChangesFocusForPanelSelection(args: {
-  activePanelId: string | null;
-  activeEnvKey: string | null;
-  pendingEnvKeys: Set<string>;
-  isRestoringLayout: boolean;
-  isMaximized: boolean;
-}): void {
-  const { activePanelId, activeEnvKey, pendingEnvKeys, isRestoringLayout, isMaximized } = args;
-  if (!activePanelId || activePanelId === "changes" || !activeEnvKey) return;
-  if (isRestoringLayout || isMaximized) return;
-
-  pendingEnvKeys.delete(activeEnvKey);
-}
-
 export function applyChangesPanelAutoFocusState(args: {
   signalsByEnv: Record<string, string>;
   activeEnvKey: string | null;
@@ -375,21 +361,4 @@ export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
       activate: () => activateChangesPanel(api),
     });
   }, [signalsByEnv, activeEnvKey, api, isRestoringLayout, isMaximized, environmentIdBySessionId]);
-
-  useEffect(() => {
-    if (!api) return;
-
-    const disposable = api.onDidActivePanelChange((panel) => {
-      const dockviewState = useDockviewStore.getState();
-      clearPendingChangesFocusForPanelSelection({
-        activePanelId: panel?.id ?? null,
-        activeEnvKey,
-        pendingEnvKeys: pendingEnvKeysRef.current,
-        isRestoringLayout: dockviewState.isRestoringLayout,
-        isMaximized: dockviewState.preMaximizeLayout !== null,
-      });
-    });
-
-    return () => disposable.dispose();
-  }, [api, activeEnvKey]);
 }

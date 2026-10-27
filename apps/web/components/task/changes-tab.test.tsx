@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 
@@ -7,9 +7,6 @@ const state = vi.hoisted(() => ({
   gitStatus: undefined as unknown,
   commitsLoaded: false,
   totalCount: 0,
-  isActive: false,
-  activeChangeListeners: [] as Array<(event: { isActive: boolean }) => void>,
-  groupElement: null as HTMLElement | null,
   activate: vi.fn(),
 }));
 
@@ -18,9 +15,7 @@ vi.mock("dockview-react", () => ({
 }));
 
 vi.mock("@kandev/ui/context-menu", () => {
-  const Wrapper = ({ children, ...props }: React.ComponentProps<"div">) => (
-    <div {...props}>{children}</div>
-  );
+  const Wrapper = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
   return {
     ContextMenu: Wrapper,
     ContextMenuContent: Wrapper,
@@ -62,19 +57,9 @@ import { ChangesTab } from "./changes-tab";
 
 const api = {
   id: "changes",
-  get isActive() {
-    return state.isActive;
-  },
-  group: {
-    get element() {
-      return state.groupElement!;
-    },
-    panels: [],
-  },
-  onDidActiveChange: (listener: (event: { isActive: boolean }) => void) => {
-    state.activeChangeListeners.push(listener);
-    return { dispose: vi.fn() };
-  },
+  isActive: false,
+  group: { panels: [] },
+  onDidActiveChange: () => ({ dispose: vi.fn() }),
 };
 const props = {
   api,
@@ -86,30 +71,10 @@ beforeEach(() => {
   state.gitStatus = undefined;
   state.commitsLoaded = false;
   state.totalCount = 0;
-  state.isActive = false;
-  state.activeChangeListeners = [];
-  state.groupElement = document.createElement("div");
-  document.body.appendChild(state.groupElement);
   state.activate.mockClear();
 });
 
-afterEach(() => {
-  cleanup();
-  state.groupElement?.remove();
-});
-
-function changesTabTree() {
-  return (
-    <div className="dv-tab">
-      <ChangesTab {...props} />
-    </div>
-  );
-}
-
-function setChangesTabActive(isActive: boolean) {
-  state.isActive = isActive;
-  for (const listener of state.activeChangeListeners) listener({ isActive });
-}
+afterEach(() => cleanup());
 
 describe("Changes tab initial activity baseline", () => {
   it("waits for both git status and the initial commit snapshot before auto-activating", () => {
@@ -126,32 +91,5 @@ describe("Changes tab initial activity baseline", () => {
     state.totalCount = 56;
     view.rerender(<ChangesTab {...props} />);
     expect(state.activate).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps Files selected after a user switches away before a delayed git update", () => {
-    const view = render(changesTabTree());
-    state.groupElement!.appendChild(view.container);
-    const filesTab = document.createElement("div");
-    filesTab.className = "dv-tab";
-    state.groupElement!.appendChild(filesTab);
-
-    state.gitStatus = {};
-    state.commitsLoaded = true;
-    view.rerender(changesTabTree());
-
-    fireEvent.pointerDown(screen.getByTestId("dockview-tab-changes"));
-    setChangesTabActive(true);
-    fireEvent.pointerDown(filesTab);
-    setChangesTabActive(false);
-
-    state.totalCount = 1;
-    view.rerender(changesTabTree());
-    expect(state.activate).not.toHaveBeenCalled();
-
-    fireEvent.pointerDown(screen.getByTestId("dockview-tab-changes"));
-    setChangesTabActive(true);
-    state.totalCount = 2;
-    view.rerender(changesTabTree());
-    expect(state.activate).toHaveBeenCalledOnce();
   });
 });
