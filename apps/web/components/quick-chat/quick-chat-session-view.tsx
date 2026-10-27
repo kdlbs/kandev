@@ -153,10 +153,12 @@ function ActiveQuickChatSessionView({
     task,
     quickChatTaskId,
   );
-  const acceptedStartupPending = isQuickChatStartupPending({
-    startupPending: session.startupPending,
-    sessionState: taskSession?.state,
-  });
+  const acceptedStartupPending =
+    session.kind === "chat" &&
+    isQuickChatStartupPending({
+      startupPending: session.startupPending,
+      sessionState: taskSession?.state,
+    });
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
     skipAutomaticRecovery: !automaticRecovery,
     preventAutoResume: preventQuickChatAutoResume(
