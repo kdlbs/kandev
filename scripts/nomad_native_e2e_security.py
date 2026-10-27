@@ -58,10 +58,10 @@ def generate_material(out: Path, run: Callable[..., Any] = subprocess.run) -> di
     ext = out / "server.ext"
     _write_private(ext, "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth,clientAuth\nbasicConstraints=CA:FALSE\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n")
     steps = [
-        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", str(CA_DAYS), "-subj", "/CN=kandev-fixture-ca",
+        ["openssl", "req", "-sha256", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-pkeyopt", "ec_param_enc:named_curve", "-nodes", "-days", str(CA_DAYS), "-subj", "/CN=kandev-fixture-ca",
          "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-addext", "subjectKeyIdentifier=hash", "-keyout", str(ca_key), "-out", str(ca_pem)],
-        ["openssl", "req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-subj", "/CN=kandev-fixture-server", "-keyout", str(key), "-out", str(csr)],
-        ["openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca_pem), "-CAkey", str(ca_key), "-CAcreateserial", "-days", str(CA_DAYS),
+        ["openssl", "req", "-sha256", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-pkeyopt", "ec_param_enc:named_curve", "-nodes", "-subj", "/CN=kandev-fixture-server", "-keyout", str(key), "-out", str(csr)],
+        ["openssl", "x509", "-sha256", "-req", "-in", str(csr), "-CA", str(ca_pem), "-CAkey", str(ca_key), "-CAcreateserial", "-days", str(CA_DAYS),
          "-extfile", str(ext), "-out", str(pem)],
     ]
     for argv in steps:

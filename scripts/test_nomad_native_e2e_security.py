@@ -219,6 +219,10 @@ class MaterialTest(unittest.TestCase):
         joined = "\n".join(" ".join(call) for call in calls)
         self.assertIn("subjectAltName=DNS:localhost,IP:127.0.0.1", (self.out / "server.ext").read_text())
         self.assertIn("-days 3", joined)
+        for argv in calls:
+            self.assertIn("-sha256", argv)
+        for argv in calls[:2]:
+            self.assertIn("ec_param_enc:named_curve", argv)
         self.assertTrue(all(call[0] == "openssl" for call in calls))
         self.assertEqual(sorted(files), ["ca_file", "cert_file", "key_file", "server_config"])
         self.assertEqual(self.out.stat().st_mode & 0o777, 0o700)

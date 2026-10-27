@@ -167,7 +167,7 @@ func (c *nomadCleanup) resume(ctx context.Context) error {
 		return c.continueFromReceipt(ctx)
 	case unplacedPoolLaunch(c.state):
 		return c.drainAndSettle(ctx)
-	case c.state.Phase == nomadPhaseCleanupPending && c.state.QuarantineState == "" && c.pinnedNeverAllocated(ctx):
+	case c.state.Phase == nomadPhaseCleanupPending && c.state.QuarantineState == "" && c.state.RefusedBeforeStage:
 		return c.drainAndSettle(ctx)
 	case c.state.Phase == nomadPhaseCleanupPending && c.state.QuarantineState == "":
 		// The cleanup checkpoint committed but neither a drain receipt nor a
@@ -254,9 +254,6 @@ func (c *nomadCleanup) drainAndSettle(ctx context.Context) error {
 	if !c.runtimeIdentityRecorded() {
 		if c.nothingStaged() {
 			return c.settleRefusedLaunch(ctx)
-		}
-		if c.pinnedNeverAllocated(ctx) {
-			return c.settleNeverAllocated(ctx)
 		}
 		return c.fail(ctx, nomadCleanupReasonIdentityUnrecorded)
 	}
@@ -405,11 +402,8 @@ func (c *nomadCleanup) ownedBootstrapEnvironmentPath() (string, bool) {
 // settle stops the whole job, requires exact terminal evidence, and only then
 // records absence.
 func (c *nomadCleanup) settle(ctx context.Context) error {
-	if c.neverPlaced() {
+	if c.neverPlaced() || c.state.RefusedBeforeStage {
 		return c.settleNeverPlaced(ctx)
-	}
-	if c.pinnedWithoutAllocation() && c.hasReceipt() && c.pinnedNeverAllocated(ctx) {
-		return c.settleNeverAllocated(ctx)
 	}
 	if err := c.client.StopJob(ctx, c.state.Namespace, c.state.JobID); err != nil {
 		return c.fail(ctx, nomadCleanupReasonStopFailed)
@@ -477,7 +471,7 @@ func (c *nomadCleanup) observeStop(ctx context.Context) (reason string, pending 
 // finish releases the worker fence for exactly this environment, then the
 // inventory. Both are idempotent and retried from the persisted absent phase.
 func (c *nomadCleanup) finish(ctx context.Context) error {
-	if !c.nothingStaged() && !c.pinnedWithoutAllocation() {
+	if !c.nothingStaged() {
 		if reason := c.removeStagedState(ctx); reason != "" {
 			return c.retained(reason)
 		}

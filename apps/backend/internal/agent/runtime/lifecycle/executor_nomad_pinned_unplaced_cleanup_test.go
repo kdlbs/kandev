@@ -91,9 +91,10 @@ func pinnedUnplacedCleanup(t *testing.T, server *pinnedUnplacedServer) (*nomadCl
 	return c, &checkpoints, &releases
 }
 
-func TestNomadCleanupSettlesPinnedNeverPlacedPurgedJobAsAbsentWithoutQuarantine(t *testing.T) {
+func TestNomadCleanupSettlesPinnedRefusedBeforeStageWithoutQuarantine(t *testing.T) {
 	server := &pinnedUnplacedServer{}
 	c, checkpoints, releases := pinnedUnplacedCleanup(t, server)
+	c.state.RefusedBeforeStage = true
 	assertSettledAbsent(t, c.drainAndSettle(context.Background()), *checkpoints, *releases)
 	if server.quarantineCalls != 0 || server.deletes != 0 {
 		t.Fatalf("quarantine calls=%d stops=%d, want none for a purged never-placed job", server.quarantineCalls, server.deletes)
@@ -105,13 +106,13 @@ func TestNomadCleanupSettlesPinnedNeverPlacedPurgedJobAsAbsentWithoutQuarantine(
 	}
 }
 
-func TestNomadCleanupStopsPinnedNeverPlacedPendingJobBeforeAbsent(t *testing.T) {
+func TestNomadCleanupRetainsPinnedPendingJobWithoutRuntimeEvidence(t *testing.T) {
 	server := &pinnedUnplacedServer{registered: true}
 	c, checkpoints, releases := pinnedUnplacedCleanup(t, server)
-	assertSettledAbsent(t, c.drainAndSettle(context.Background()), *checkpoints, *releases)
-	if server.deletes != 1 || server.quarantineCalls != 0 {
-		t.Fatalf("stops=%d quarantine calls=%d, want 1 and 0", server.deletes, server.quarantineCalls)
+	if err := c.drainAndSettle(context.Background()); err == nil {
+		t.Fatal("pending job without runtime evidence was released")
 	}
+	assertPinnedRowRetained(t, server, *checkpoints, *releases)
 }
 
 func TestNomadCleanupQuarantinesPinnedRowThatEverHadAnAllocation(t *testing.T) {
@@ -147,7 +148,7 @@ func assertPinnedRowRetained(t *testing.T, server *pinnedUnplacedServer, checkpo
 	}
 }
 
-func TestNomadResumeSettlesPinnedNeverPlacedRowWithoutQuarantine(t *testing.T) {
+func TestNomadResumeSettlesPinnedRefusedBeforeStageWithoutQuarantine(t *testing.T) {
 	for name, prepare := range map[string]func(*nomadCleanup){
 		"cleanup pending without receipt": func(c *nomadCleanup) { c.state.Phase = nomadPhaseCleanupPending },
 		"cleanup pending with empty receipt": func(c *nomadCleanup) {
@@ -160,6 +161,7 @@ func TestNomadResumeSettlesPinnedNeverPlacedRowWithoutQuarantine(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			server := &pinnedUnplacedServer{}
 			c, checkpoints, releases := pinnedUnplacedCleanup(t, server)
+			c.state.RefusedBeforeStage = true
 			prepare(c)
 			*checkpoints = nil
 			assertSettledAbsent(t, c.resume(context.Background()), *checkpoints, *releases)
