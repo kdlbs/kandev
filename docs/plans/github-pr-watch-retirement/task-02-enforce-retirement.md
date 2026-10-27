@@ -259,3 +259,10 @@ its artifacts do not identify the request or cause. One local Kind-backed run
 passed with retries disabled after rebuilding the backend and Linux helpers
 together, but that does not establish why CI failed. The original local attempt
 used mismatched binary identities and was stopped after that setup error.
+
+The tablet MCP drawer test also saw a fractional geometry value of
+`800.000061` at an 800-pixel limit. Its assertion now waits for finite
+animations and allows one pixel for rendering precision at the 80vh bound.
+The focused test passed five retry-free runs; the exact rounding was not
+reproduced locally. After resolving the current-main merge, the selected
+desktop and mobile E2E suites each passed ten tests without retries.
