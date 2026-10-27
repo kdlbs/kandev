@@ -466,10 +466,10 @@ func stageNomadWorkerFilesOver(ctx context.Context, client nomadWorkerTransport,
 	if _, _, err := client.Run(ctx, "mkdir -p "+shellQuote(dir)); err != nil {
 		return nomadWorkerPaths{}, fmt.Errorf("prepare Nomad worker directory: %w", err)
 	}
-	if err := client.Upload(paths.ArtifactPath, artifact, 0o500); err != nil {
+	if err := client.Upload(ctx, paths.ArtifactPath, artifact, 0o500); err != nil {
 		return nomadWorkerPaths{}, fmt.Errorf("stage verified agentctl artifact: %w", err)
 	}
-	if err := client.Upload(paths.BootstrapPath, []byte(script), 0o700); err != nil {
+	if err := client.Upload(ctx, paths.BootstrapPath, []byte(script), 0o700); err != nil {
 		return nomadWorkerPaths{}, fmt.Errorf("stage Nomad bootstrap: %w", err)
 	}
 	command := "umask 077; cat > " + shellQuote(paths.EnvironmentPath) + " && chmod 0600 " + shellQuote(paths.EnvironmentPath)

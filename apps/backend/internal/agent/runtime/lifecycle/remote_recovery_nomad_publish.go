@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/nomad"
@@ -314,6 +315,11 @@ func (m *Manager) reconcileCreatedNomadRepositories(ctx context.Context, executi
 func createdNomadReconcileProjection(info *WorkspaceInfo) ([]WorkspaceRepositoryMaterialization, error) {
 	specs := make([]RepoLaunchSpec, 0, len(info.WorkspaceRepositories))
 	for _, repository := range info.WorkspaceRepositories {
+		if local, err := createdNomadLocalWorktreeVerified(info.WorkspacePath, repository); err != nil {
+			return nil, err
+		} else if local {
+			continue
+		}
 		if reason := createdNomadUnreproducibleReason(repository); reason != "" {
 			return nil, fmt.Errorf("repository %q cannot be reconciled during recovery: %s", repository.RepositoryID, reason)
 		}
@@ -346,4 +352,29 @@ func createdNomadUnreproducibleReason(repository WorkspaceRepositorySpec) string
 	default:
 		return ""
 	}
+}
+
+// createdNomadLocalWorktreeVerified reports whether the repository is a local
+// pool worktree already on disk. Such a worktree has a .git file, which agentctl
+// materialization does not accept, so it is verified against its recorded
+// repository and the generation branch instead and left out of the projection.
+func createdNomadLocalWorktreeVerified(workspacePath string, repository WorkspaceRepositorySpec) (bool, error) {
+	if repository.RepositoryPath == "" || workspacePath == "" {
+		return false, nil
+	}
+	baseBranch := repository.BaseBranch
+	if baseBranch == "" {
+		baseBranch = repository.DefaultBranch
+	}
+	destination, err := remoteWorkspaceRepositoryDestination(RepoLaunchSpec{
+		RepoName: repository.RepoName, BaseBranch: baseBranch, CheckoutBranch: repository.CheckoutBranch,
+	})
+	if err != nil || !localPoolWorktreePresent(workspacePath, destination) {
+		return false, nil
+	}
+	if err := verifyLocalPoolWorktree(context.Background(), repository.RepositoryPath,
+		filepath.Join(workspacePath, destination), localPoolWorktreeBranchForWorkspace(workspacePath)); err != nil {
+		return false, fmt.Errorf("repository %q local worktree cannot be reconciled during recovery: %w", repository.RepositoryID, err)
+	}
+	return true, nil
 }

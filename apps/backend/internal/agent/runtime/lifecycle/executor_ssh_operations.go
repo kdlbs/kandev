@@ -402,6 +402,28 @@ func ensureAgentctlOnHostWithProgress(ctx, helperCtx context.Context, client *ss
 // callers always upload identical content (sha256-keyed binary) or
 // content that doesn't matter if it loses the race (the sha256 sidecar).
 func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os.FileMode) error {
+	return sftpUploadBytesCtx(context.Background(), client, remotePath, data, mode)
+}
+
+// sftpUploadBytesCtx is sftpUploadBytes bounded by ctx. SFTP calls take no
+// context, so cancellation closes the SSH connection, which unblocks any call
+// in flight; the connection is unusable afterwards.
+func sftpUploadBytesCtx(ctx context.Context, client *ssh.Client, remotePath string, data []byte, mode os.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = client.Close() })
+	defer stop()
+	if err := sftpUploadBytesOn(client, remotePath, data, mode); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("%w: %v", ctxErr, err)
+		}
+		return err
+	}
+	return nil
+}
+
+func sftpUploadBytesOn(client *ssh.Client, remotePath string, data []byte, mode os.FileMode) error {
 	c, err := sftp.NewClient(client)
 	if err != nil {
 		return fmt.Errorf("sftp: new client: %w", err)

@@ -305,7 +305,7 @@ func TestLocalTransportUploadRunAndForward(t *testing.T) {
 	dir := t.TempDir()
 	tr := nomadLocalTransport{}
 	path := filepath.Join(dir, "f")
-	if err := tr.Upload(path, []byte("x"), 0o600); err != nil {
+	if err := tr.Upload(context.Background(), path, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {

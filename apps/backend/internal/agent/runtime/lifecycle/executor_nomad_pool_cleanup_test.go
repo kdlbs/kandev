@@ -28,7 +28,7 @@ func (w *recordingWorker) Run(_ context.Context, command string) (string, string
 func (*recordingWorker) RunStdin(context.Context, string, io.Reader) (string, string, error) {
 	return "", "", nil
 }
-func (*recordingWorker) Upload(string, []byte, os.FileMode) error { return nil }
+func (*recordingWorker) Upload(context.Context, string, []byte, os.FileMode) error { return nil }
 func (*recordingWorker) Forward(int, *logger.Logger) (nomadPortForward, error) {
 	return nil, errors.New("unused")
 }

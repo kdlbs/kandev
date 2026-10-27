@@ -27,7 +27,7 @@ type nomadPortForward interface {
 type nomadWorkerTransport interface {
 	Run(ctx context.Context, command string) (stdout, stderr string, err error)
 	RunStdin(ctx context.Context, command string, stdin io.Reader) (stdout, stderr string, err error)
-	Upload(path string, data []byte, mode os.FileMode) error
+	Upload(ctx context.Context, path string, data []byte, mode os.FileMode) error
 	Forward(port int, log *logger.Logger) (nomadPortForward, error)
 	Close() error
 }
@@ -42,8 +42,8 @@ func (t nomadSSHTransport) RunStdin(ctx context.Context, command string, stdin i
 	return runSSHCommandStdin(ctx, t.client, command, stdin)
 }
 
-func (t nomadSSHTransport) Upload(path string, data []byte, mode os.FileMode) error {
-	return sftpUploadBytes(t.client, path, data, mode)
+func (t nomadSSHTransport) Upload(ctx context.Context, path string, data []byte, mode os.FileMode) error {
+	return sftpUploadBytesCtx(ctx, t.client, path, data, mode)
 }
 
 func (t nomadSSHTransport) Forward(port int, log *logger.Logger) (nomadPortForward, error) {
@@ -79,7 +79,10 @@ func nomadLocalRun(ctx context.Context, command string, stdin io.Reader) (string
 
 // Upload writes through a private temporary file and renames it, matching the
 // SFTP upload so a reader never sees a partial file.
-func (nomadLocalTransport) Upload(path string, data []byte, mode os.FileMode) error {
+func (nomadLocalTransport) Upload(ctx context.Context, path string, data []byte, mode os.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp.*")
 	if err != nil {
 		return fmt.Errorf("local upload: create %s: %w", path, err)

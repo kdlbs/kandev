@@ -169,7 +169,7 @@ func stagePoolLaunchFiles(
 	if poolPaths.ArtifactPath != paths.ArtifactPath || poolPaths.BootstrapPath != paths.BootstrapPath {
 		return errors.New("staged Nomad pool worker paths differ from the job's pre-placement evidence")
 	}
-	if err := transport.Upload(poolPaths.ReadyPath, []byte(poolReadyContent), 0o600); err != nil {
+	if err := transport.Upload(ctx, poolPaths.ReadyPath, []byte(poolReadyContent), 0o600); err != nil {
 		return fmt.Errorf("release Nomad pool wait marker: %w", err)
 	}
 	return nil
