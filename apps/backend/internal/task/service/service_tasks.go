@@ -281,16 +281,20 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 
 	prepared, err := s.prepareTaskForCreation(ctx, req, externalID)
 	if err != nil {
-		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
+		if found, ok, lookupErr := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil
+		} else if lookupErr != nil {
+			return CreateTaskResult{}, errors.Join(err, fmt.Errorf("recheck task identity after prepare failure: %w", lookupErr))
 		}
-		return CreateTaskResult{}, err
+		return CreateTaskResult{}, newPreAllocationTaskCreateError(err)
 	}
 
 	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
 	if err := s.createTaskWithCapacity(ctx, prepared.task); err != nil {
-		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
+		if found, ok, lookupErr := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil
+		} else if lookupErr != nil {
+			return CreateTaskResult{}, errors.Join(err, fmt.Errorf("recheck task identity after insert failure: %w", lookupErr))
 		}
 		s.logger.Error("failed to create task", zap.Error(err))
 		return CreateTaskResult{}, err
@@ -669,16 +673,19 @@ func (s *Service) findTaskByExternalIDIfPresent(ctx context.Context, workspaceID
 // means the original error must surface — this also covers a bare task-id
 // primary-key collision, unrelated to external_id, falling through
 // correctly, since no task holds this external_id either way.
-func (s *Service) recoverFoundTaskAfterInsertFailure(ctx context.Context, workspaceID, externalID string) (CreateTaskResult, bool) {
+func (s *Service) recoverFoundTaskAfterInsertFailure(ctx context.Context, workspaceID, externalID string) (CreateTaskResult, bool, error) {
 	if externalID == "" {
-		return CreateTaskResult{}, false
+		return CreateTaskResult{}, false, nil
 	}
 	found, lookupErr := s.tasks.GetTaskByExternalID(ctx, workspaceID, externalID)
+	if errors.Is(lookupErr, taskrepo.ErrTaskNotFound) || found == nil && lookupErr == nil {
+		return CreateTaskResult{}, false, nil
+	}
 	if lookupErr != nil {
-		return CreateTaskResult{}, false
+		return CreateTaskResult{}, false, lookupErr
 	}
 	s.hydrateTaskRelations(ctx, found)
-	return CreateTaskResult{Task: found, Outcome: foundOutcomeFor(found)}, true
+	return CreateTaskResult{Task: found, Outcome: foundOutcomeFor(found)}, true, nil
 }
 
 func deriveProvisionalTaskTitle(description string) (string, error) {

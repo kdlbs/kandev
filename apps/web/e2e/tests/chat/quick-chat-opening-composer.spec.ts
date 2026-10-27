@@ -218,9 +218,12 @@ test.describe("Quick Chat opening composer", () => {
       createAttempts += 1;
       if (createAttempts === 1) {
         return route.fulfill({
-          status: 503,
+          status: 422,
           contentType: "application/json",
-          body: JSON.stringify({ error: "Temporary start failure" }),
+          body: JSON.stringify({
+            error: "Temporary start failure",
+            error_code: "quick_chat_creation_rejected",
+          }),
         });
       }
       return route.continue();

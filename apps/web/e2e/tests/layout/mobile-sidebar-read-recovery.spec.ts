@@ -137,6 +137,7 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   await expect(drawer.getByTestId("sidebar-task-page-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
 
+  await waitForFiniteAnimations(drawer);
   const retry = drawer.getByRole("alert").getByRole("button", { name: "Retry", exact: true });
   const retryBox = await retry.boundingBox();
   if (!retryBox) throw new Error("mobile sidebar retry control is not visible");

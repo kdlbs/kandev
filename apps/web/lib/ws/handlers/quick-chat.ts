@@ -53,6 +53,12 @@ export function quickChatSessionFromTaskEvent(payload: TaskEventPayload): QuickC
     sessionId,
     workspaceId,
     taskId: payload.task_id,
+    ...(typeof payload.quick_chat_creation_id === "string"
+      ? { creationId: payload.quick_chat_creation_id }
+      : {}),
+    ...(payload.primary_session_state
+      ? { startupPending: ["CREATED", "STARTING"].includes(payload.primary_session_state) }
+      : {}),
     name:
       payload.title && payload.title !== QUICK_CHAT_PLACEHOLDER_TITLE ? payload.title : undefined,
     agentProfileId: readMetadataString(payload.metadata, "agent_profile_id"),

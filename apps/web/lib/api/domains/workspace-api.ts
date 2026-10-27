@@ -298,6 +298,7 @@ export async function listRepositoryScripts(repositoryId: string, options?: ApiR
 
 // Quick Chat operations
 type StartQuickChatCommon = {
+  creation_id?: string;
   title?: string;
   agent_profile_id?: string;
   executor_id?: string;
@@ -357,8 +358,22 @@ export function getQuickChatRetainedSessionFromError(
 
 export type StartQuickChatResponse = {
   task_id: string;
-  session_id: string;
+  session_id?: string;
   agent_profile_id?: string;
+  creation_id?: string;
+  creation_complete?: boolean;
+  session_state?: string;
+  archived?: boolean;
+};
+
+export type QuickChatCreationStatusResponse = {
+  task_id: string;
+  creation_id: string;
+  creation_complete: boolean;
+  session_id?: string;
+  agent_profile_id?: string;
+  session_state?: string;
+  archived?: boolean;
 };
 
 export async function startQuickChat(
@@ -372,6 +387,17 @@ export async function startQuickChat(
   });
 }
 
+export async function getQuickChatCreation(
+  workspaceId: string,
+  creationId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<QuickChatCreationStatusResponse>(
+    `/api/v1/workspaces/${workspaceId}/quick-chat/creations/${creationId}`,
+    options,
+  );
+}
+
 export type QuickChatSessionResponse = {
   session_id: string;
   task_id: string;
@@ -379,6 +405,7 @@ export type QuickChatSessionResponse = {
   kind: "chat" | "config";
   name?: string;
   agent_profile_id?: string;
+  creation_id?: string;
 };
 
 export type ListQuickChatSessionsResponse = {

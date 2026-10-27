@@ -553,7 +553,7 @@ describe("useAgentSelection — error handling", () => {
     expect(result.current.setupError).toBeNull();
   });
 
-  it("sets setupError inline without toasting when current request fails before session exists", async () => {
+  it("does not report an uncertain startup as a confirmed setup failure", async () => {
     const store = makeStore();
     mockStartQuickChat.mockRejectedValueOnce(new Error("server exploded"));
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
@@ -562,7 +562,7 @@ describe("useAgentSelection — error handling", () => {
       await result.current.handleSelectAgent("agent-a");
     });
 
-    expect(result.current.setupError).toBe("server exploded");
+    expect(result.current.setupError).toBeNull();
     expect(mockToast).not.toHaveBeenCalled();
     expect(result.current.pendingAgentId).toBeNull();
   });
