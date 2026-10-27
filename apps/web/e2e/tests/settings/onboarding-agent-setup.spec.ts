@@ -194,7 +194,13 @@ test.describe("Onboarding agent setup", () => {
       "href",
       `/settings/agents/${agent.name}/profiles/${profile.id}`,
     );
+    const profileDiscovery = testPage.waitForResponse(
+      (response) =>
+        response.url().endsWith("/agent-models/mock-agent/probe") &&
+        response.request().postDataJSON().profile_id === profile.id,
+    );
     await recovery.click();
+    expect((await profileDiscovery).ok()).toBe(true);
     await expect(testPage.getByTestId("profile-no-auth-panel")).toBeVisible();
     await expect(testPage.getByRole("dialog")).toHaveCount(0);
     expect(writes).toEqual([]);
