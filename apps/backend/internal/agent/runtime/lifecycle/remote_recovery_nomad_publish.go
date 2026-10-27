@@ -289,7 +289,9 @@ func NomadRecoveryRepoBranchSlug(identity, branch string) string {
 // the attached instance. A valid existing checkout is reused untouched; any
 // other existing destination is a collision the caller classes operator_action.
 func (m *Manager) reconcileCreatedNomadRepositories(ctx context.Context, execution *AgentExecution, info *WorkspaceInfo) error {
-	repositories, err := createdNomadReconcileProjection(info)
+	reconcileCtx, cancel := context.WithTimeout(ctx, m.nomadReconcileTimeout())
+	defer cancel()
+	repositories, err := createdNomadReconcileProjection(reconcileCtx, info)
 	if err != nil {
 		return operatorActionRecoveryError(err)
 	}
@@ -301,8 +303,6 @@ func (m *Manager) reconcileCreatedNomadRepositories(ctx context.Context, executi
 		return errors.New("pre-ACP Nomad execution has no agentctl client for repository reconcile")
 	}
 	defer release()
-	reconcileCtx, cancel := context.WithTimeout(ctx, m.nomadReconcileTimeout())
-	defer cancel()
 	if err := materializeWorkspaceRepositories(reconcileCtx, client, repositories); err != nil {
 		return fmt.Errorf("reconcile pre-ACP Nomad repositories: %w", err)
 	}
@@ -312,10 +312,10 @@ func (m *Manager) reconcileCreatedNomadRepositories(ctx context.Context, executi
 // createdNomadReconcileProjection rebuilds the launch repository projection.
 // A repository whose original materialization options recovery cannot
 // reproduce, or whose clone locator is unknown, fails closed.
-func createdNomadReconcileProjection(info *WorkspaceInfo) ([]WorkspaceRepositoryMaterialization, error) {
+func createdNomadReconcileProjection(ctx context.Context, info *WorkspaceInfo) ([]WorkspaceRepositoryMaterialization, error) {
 	specs := make([]RepoLaunchSpec, 0, len(info.WorkspaceRepositories))
 	for _, repository := range info.WorkspaceRepositories {
-		if local, err := createdNomadLocalWorktreeVerified(info.WorkspacePath, repository); err != nil {
+		if local, err := createdNomadLocalWorktreeVerified(ctx, info.WorkspacePath, repository); err != nil {
 			return nil, err
 		} else if local {
 			continue
@@ -358,7 +358,7 @@ func createdNomadUnreproducibleReason(repository WorkspaceRepositorySpec) string
 // pool worktree already on disk. Such a worktree has a .git file, which agentctl
 // materialization does not accept, so it is verified against its recorded
 // repository and the generation branch instead and left out of the projection.
-func createdNomadLocalWorktreeVerified(workspacePath string, repository WorkspaceRepositorySpec) (bool, error) {
+func createdNomadLocalWorktreeVerified(ctx context.Context, workspacePath string, repository WorkspaceRepositorySpec) (bool, error) {
 	if repository.RepositoryPath == "" || workspacePath == "" {
 		return false, nil
 	}
@@ -372,7 +372,7 @@ func createdNomadLocalWorktreeVerified(workspacePath string, repository Workspac
 	if err != nil || !localPoolWorktreePresent(workspacePath, destination) {
 		return false, nil
 	}
-	if err := verifyLocalPoolWorktree(context.Background(), repository.RepositoryPath,
+	if err := verifyLocalPoolWorktree(ctx, repository.RepositoryPath,
 		filepath.Join(workspacePath, destination), localPoolWorktreeBranchForWorkspace(workspacePath)); err != nil {
 		return false, fmt.Errorf("repository %q local worktree cannot be reconciled during recovery: %w", repository.RepositoryID, err)
 	}

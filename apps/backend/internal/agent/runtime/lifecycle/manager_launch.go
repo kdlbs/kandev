@@ -201,7 +201,7 @@ var trustedExecutorConfigKeys = map[string]bool{
 	nomadMetadataKeyAddress: true, nomadMetadataKeyRegion: true, nomadMetadataKeyDatacenter: true,
 	nomadMetadataKeyNodeID: true, nomadMetadataKeyPlatform: true, nomadMetadataKeySSHTarget: true,
 	nomadMetadataKeyWorkspaceRoot: true, nomadMetadataKeyAllocationRoot: true,
-	nomadMetadataKeyCPUMHz: true, nomadMetadataKeyMemoryMB: true, nomadMetadataKeyToken: true, nomadMetadataKeyLostAfter: true,
+	nomadMetadataKeyCPUMHz: true, nomadMetadataKeyMemoryMB: true, nomadMetadataKeyToken: true, nomadMetadataKeyLostAfter: true, nomadMetadataKeyCAFile: true,
 	nomadMetadataKeyNodePool: true, nomadMetadataKeyPlacement: true, nomadMetadataKeyPinNodeID: true,
 	nomadMetadataKeyExcludeLoc: true, nomadMetadataKeyPreferLoc: true, nomadMetadataKeyMemoryMaxMB: true,
 }
@@ -365,6 +365,14 @@ func (m *Manager) authorizeNomadTaskEnvironment(
 }
 
 func nomadCanonicalProfileMetadata(parsed nomadexecutor.ProfileConfig) map[string]string {
+	metadata := nomadCanonicalProfileValues(parsed)
+	if parsed.CAFile != "" {
+		metadata[nomadMetadataKeyCAFile] = parsed.CAFile
+	}
+	return metadata
+}
+
+func nomadCanonicalProfileValues(parsed nomadexecutor.ProfileConfig) map[string]string {
 	if parsed.Mode == nomadexecutor.ModePool {
 		return nomadCanonicalPoolProfileMetadata(parsed)
 	}

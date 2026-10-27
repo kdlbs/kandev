@@ -107,3 +107,34 @@ func TestPoolWorkspaceRemoveDeletesPerGenerationBranchesOnlyUnderThePoolPrefix(t
 		t.Fatal("a branch outside the pool prefix was deleted")
 	}
 }
+
+func TestPoolWorkspaceRemoveKeepsBranchWithUnmergedCommits(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "kandev-checkout")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "init", "-q", "-b", "main")
+	gitIn(t, repo, "commit", "-q", "--allow-empty", "-m", "base")
+	s := poolFenceState(t, root, "env-a")
+	if err := os.MkdirAll(s.WorkspacePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	branch := PoolWorktreeBranch(s.EnvironmentID)
+	wt := filepath.Join(s.WorkspacePath, "repo-main")
+	gitIn(t, repo, "worktree", "add", "-q", "-b", branch, wt, "main")
+	gitIn(t, wt, "commit", "-q", "--allow-empty", "-m", "agent work")
+	command, err := WorkspaceRemoveCommand(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("sh", "-c", command).CombinedOutput(); err != nil {
+		t.Fatalf("remove: %v %s", err, out)
+	}
+	if _, err := os.Stat(s.WorkspacePath); !os.IsNotExist(err) {
+		t.Fatalf("workspace remains: %v", err)
+	}
+	if out := gitIn(t, repo, "branch", "--list", branch); out == "" {
+		t.Fatal("branch with unmerged commits was deleted")
+	}
+}

@@ -385,7 +385,7 @@ var persistentMetadataKeys = map[string]bool{
 	nomadMetadataKeyAddress: true, nomadMetadataKeyRegion: true, nomadMetadataKeyDatacenter: true,
 	nomadMetadataKeyNodeID: true, nomadMetadataKeyPlatform: true, nomadMetadataKeySSHTarget: true,
 	nomadMetadataKeyWorkspaceRoot: true, nomadMetadataKeyAllocationRoot: true,
-	nomadMetadataKeyCPUMHz: true, nomadMetadataKeyMemoryMB: true, nomadMetadataKeyToken: true, nomadMetadataKeyLostAfter: true,
+	nomadMetadataKeyCPUMHz: true, nomadMetadataKeyMemoryMB: true, nomadMetadataKeyToken: true, nomadMetadataKeyLostAfter: true, nomadMetadataKeyCAFile: true,
 	nomadMetadataKeyNodePool: true, nomadMetadataKeyPlacement: true, nomadMetadataKeyPinNodeID: true,
 	nomadMetadataKeyExcludeLoc: true, nomadMetadataKeyPreferLoc: true, nomadMetadataKeyMemoryMaxMB: true,
 

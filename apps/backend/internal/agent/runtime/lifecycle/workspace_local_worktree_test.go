@@ -172,7 +172,7 @@ func TestCreatedNomadReconcileProjectionAcceptsLocalPoolWorktreeByRepositoryAndB
 	info := &WorkspaceInfo{WorkspacePath: ws, WorkspaceRepositories: []WorkspaceRepositorySpec{
 		{RepositoryID: "r", RepoName: "kandev", RepositoryPath: repo, RepositoryURL: "https://example.test/k.git", BaseBranch: "main"},
 	}}
-	got, err := createdNomadReconcileProjection(info)
+	got, err := createdNomadReconcileProjection(context.Background(), info)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestCreatedNomadReconcileProjectionAcceptsLocalPoolWorktreeByRepositoryAndB
 		t.Fatalf("a verified local worktree must not be sent to agentctl materialization: %+v", got)
 	}
 	localWorktreeGit(t, filepath.Join(ws, dest), "checkout", "-q", "-b", "other")
-	if _, err := createdNomadReconcileProjection(info); err == nil {
+	if _, err := createdNomadReconcileProjection(context.Background(), info); err == nil {
 		t.Fatal("a worktree on the wrong branch must fail closed")
 	}
 }

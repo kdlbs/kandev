@@ -614,7 +614,7 @@ func nomadProfileFromMetadata(metadata map[string]interface{}) (nomad.ProfileCon
 	config := make(map[string]string, 16)
 	for _, key := range []string{
 		nomadMetadataKeyAddress, "namespace", nomadMetadataKeyRegion, nomadMetadataKeyDatacenter, nomadMetadataKeyNodeID, nomadMetadataKeyPlatform, nomadMetadataKeySSHTarget, "ssh_port",
-		"ssh_host_fingerprint", nomadMetadataKeyWorkspaceRoot, nomadMetadataKeyAllocationRoot, nomadMetadataKeyCPUMHz, nomadMetadataKeyMemoryMB, nomadMetadataKeyToken, nomadMetadataKeyLostAfter,
+		"ssh_host_fingerprint", nomadMetadataKeyWorkspaceRoot, nomadMetadataKeyAllocationRoot, nomadMetadataKeyCPUMHz, nomadMetadataKeyMemoryMB, nomadMetadataKeyToken, nomadMetadataKeyLostAfter, nomadMetadataKeyCAFile,
 	} {
 		value := getMetadataString(metadata, key)
 		if value != "" {

@@ -324,7 +324,11 @@ func stageNomadLaunchFilesOver(
 	if selectedCheckoutIsPullRequest(req.Metadata) {
 		bootstrapEnv = nil
 	}
-	bootstrapEnv = sshAgentctlLaunchEnv(bootstrapEnv, nonce, req.AgentctlStartupConfig)
+	// A retained Nomad instance is never reaped for idleness; the managed
+	// startup contract would otherwise override the bootstrap script's setting.
+	startup := req.AgentctlStartupConfig
+	startup.IdleTimeout = 0
+	bootstrapEnv = sshAgentctlLaunchEnv(bootstrapEnv, nonce, startup)
 	return stageNomadWorkerFilesOver(ctx, transport, profile, state, artifact, bootstrapEnv)
 }
 

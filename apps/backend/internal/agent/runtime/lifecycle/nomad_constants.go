@@ -38,6 +38,7 @@ const (
 	nomadMetadataKeyMemoryMB       = "memory_mb"
 	nomadMetadataKeyToken          = "nomad_token"
 	nomadMetadataKeyLostAfter      = "disconnect_lost_after"
+	nomadMetadataKeyCAFile         = "ca_file"
 	nomadMetadataKeyNamespace      = "namespace"
 	nomadMetadataKeySSHPort        = "ssh_port"
 	nomadMetadataKeySSHFingerprint = "ssh_host_fingerprint"

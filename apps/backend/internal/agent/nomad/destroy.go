@@ -178,11 +178,13 @@ func PoolWorktreeBranch(environmentID string) string {
 
 // worktreeDetachScript removes every git worktree one level below $d, deletes
 // the per-environment branch it had checked out (the exact $b or a
-// per-generation $b-g<N>, nothing outside that prefix) from its source repository and prunes the
-// repository. A failure exits non-zero so the workspace is retained.
+// per-generation $b-g<N>, nothing outside that prefix) from its source
+// repository when git considers it merged, and prunes the repository. A branch
+// holding unmerged commits is kept. A failure to remove the worktree or prune
+// exits non-zero so the workspace is retained.
 const worktreeDetachScript = `for g in "$d"/*/.git; do [ -f "$g" ] || continue; w="$(dirname "$g")"; ` +
 	`c="$(git -C "$w" rev-parse --path-format=absolute --git-common-dir)" || exit 1; ` +
 	`k="$(git -C "$w" symbolic-ref --short -q HEAD)"; ` +
 	`git -C "$w" worktree remove --force "$w" || exit 1; ` +
-	`case "$k" in "$b"|"$b"-*) if git --git-dir="$c" show-ref --verify --quiet "refs/heads/$k"; then git --git-dir="$c" branch -D "$k" >/dev/null || exit 1; fi;; esac; ` +
+	`case "$k" in "$b"|"$b"-*) if git --git-dir="$c" show-ref --verify --quiet "refs/heads/$k"; then git --git-dir="$c" branch -d "$k" >/dev/null 2>&1 || true; fi;; esac; ` +
 	`git --git-dir="$c" worktree prune || exit 1; done; `
