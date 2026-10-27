@@ -1,9 +1,11 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type { DockviewApi } from "dockview-react";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { getOpenFileTabs, setOpenFileTabs } from "@/lib/local-storage";
+import type { TaskSession } from "@/lib/types/http";
 import { useFileEditors } from "./use-file-editors";
 import { useFileOperations } from "./use-file-operations";
 
@@ -120,6 +122,102 @@ afterEach(() => {
   cleanup();
   useDockviewStore.setState({ api: null });
 });
+
+it("uses the active session workspace to distinguish an external editor during rename", async () => {
+  const session = "external-rename-session";
+  const hst = host();
+  useDockviewStore.setState({ api: hst.api });
+  const h = renderHook(
+    () => {
+      const activeSession = useAppStore((state) => state.tasks.activeSessionId);
+      return { rename: useFileOperations(activeSession).renameFile, store: useAppStoreApi() };
+    },
+    { wrapper },
+  );
+  act(() =>
+    h.result.current.store.setState((state) => ({
+      tasks: { ...state.tasks, activeSessionId: session },
+      taskSessions: {
+        ...state.taskSessions,
+        items: {
+          ...state.taskSessions.items,
+          [session]: { workspace_path: "/workspace" } as TaskSession,
+        },
+      },
+      environmentIdBySessionId: { ...state.environmentIdBySessionId, [session]: "env" },
+    })),
+  );
+  for (const path of ["old.txt", "/outside/notes.txt"]) {
+    act(() =>
+      useDockviewStore.getState().setFileState(path, {
+        path,
+        name: path.split("/").pop()!,
+        content: `draft ${path}`,
+        originalContent: "disk",
+        originalHash: "hash",
+        isDirty: true,
+      }),
+    );
+  }
+  mocks.rename.mockResolvedValueOnce({ success: true });
+  await act(async () => expect(await h.result.current.rename("old.txt", "new.txt")).toBe(true));
+  expect(mocks.rename).toHaveBeenCalledWith(expect.anything(), session, "old.txt", "new.txt");
+  expect(useDockviewStore.getState().openFiles.get("new.txt")?.content).toBe("draft old.txt");
+  expect(useDockviewStore.getState().openFiles.get("/outside/notes.txt")?.content).toBe(
+    "draft /outside/notes.txt",
+  );
+});
+
+it.each(["current", "host replaced", "visit retired"])(
+  "persists renamed tabs after restoration only for the current owner (%s)",
+  async (owner) => {
+    const session = `restore-rename-${owner}`;
+    setOpenFileTabs(session, [
+      { path: "old.txt", name: "old.txt", pinned: false },
+      { path: "other.txt", name: "other.txt", pinned: true },
+    ]);
+    let finishOther!: (value: { content: string; is_binary: boolean }) => void;
+    mocks.read
+      .mockResolvedValueOnce({ content: "first", is_binary: false })
+      .mockReturnValueOnce(new Promise((resolve) => (finishOther = resolve)));
+    mocks.rename.mockResolvedValueOnce({ success: true });
+    const hst = host();
+    useDockviewStore.setState({ api: hst.api });
+    const h = renderHook(
+      () => {
+        const activeSession = useAppStore((state) => state.tasks.activeSessionId);
+        return {
+          editors: useFileEditors(),
+          rename: useFileOperations(activeSession).renameFile,
+          store: useAppStoreApi(),
+        };
+      },
+      { wrapper },
+    );
+    act(() =>
+      h.result.current.store.setState((state) => ({
+        tasks: { ...state.tasks, activeSessionId: session },
+        environmentIdBySessionId: { ...state.environmentIdBySessionId, [session]: "env" },
+      })),
+    );
+    await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+    await act(async () => expect(await h.result.current.rename("old.txt", "new.txt")).toBe(true));
+    expect(useDockviewStore.getState().openFiles.has("new.txt")).toBe(true);
+    if (owner === "host replaced") act(() => useDockviewStore.setState({ api: null }));
+    if (owner === "visit retired") h.unmount();
+    await act(async () => finishOther({ content: "other", is_binary: false }));
+    await waitFor(() =>
+      expect(useDockviewStore.getState().openFiles.get("other.txt")?.originalHash).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(
+        getOpenFileTabs(session)
+          .map((tab) => tab.path)
+          .sort(),
+      ).toEqual(owner === "current" ? ["new.txt", "other.txt"] : ["old.txt", "other.txt"]),
+    );
+  },
+);
 
 // @covers AC-UI-FILE-EDITOR-MUTATION-002.1, AC-UI-FILE-EDITOR-MUTATION-001.2
 it.each([false, true])(

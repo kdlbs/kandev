@@ -125,6 +125,8 @@ type RestoreTabsParams = {
   store: ReturnType<typeof useAppStoreApi>;
   activeSessionId: string;
   activeSessionIdRef: React.MutableRefObject<string | null>;
+  activeEditorVisitRef: React.MutableRefObject<symbol | null>;
+  visit: symbol | null;
   savedTabs: Array<{
     path: string;
     name: string;
@@ -179,12 +181,33 @@ async function loadRestoredTab(
   return true;
 }
 
+function finishRestoredTabs(
+  params: RestoreTabsParams,
+  dockApi: ReturnType<typeof useDockviewStore.getState>["api"],
+) {
+  const { activeSessionId, activeSessionIdRef, activeEditorVisitRef, visit, savedActiveTab } =
+    params;
+  _restorationInProgress = false;
+  if (
+    !visit ||
+    activeEditorVisitRef.current !== visit ||
+    !isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef) ||
+    useDockviewStore.getState().api !== dockApi
+  )
+    return;
+  const targetPanel = dockApi?.getPanel(savedActiveTab);
+  if (targetPanel) targetPanel.api.setActive();
+  const current = useDockviewStore.getState();
+  if (current.api === dockApi && !current.isRestoringLayout) {
+    saveOpenFileTabs(activeSessionId, buildPersistedTabs(current.api, current.openFiles));
+  }
+}
+
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
   const {
     activeSessionId,
     activeSessionIdRef,
     savedTabs,
-    savedActiveTab,
     store,
     setFileState,
     addFileEditorPanel,
@@ -242,14 +265,13 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       return;
     }
   }
-  const targetPanel = dockApi?.getPanel(savedActiveTab);
-  if (targetPanel) targetPanel.api.setActive();
-  _restorationInProgress = false;
+  finishRestoredTabs(params, dockApi);
 }
 
 type FileEditorEffectsParams = {
   activeSessionId: string | null;
   activeSessionIdRef: React.MutableRefObject<string | null>;
+  activeEditorVisitRef: React.MutableRefObject<symbol | null>;
   setFileState: (path: string, state: FileEditorState) => void;
   addFileEditorPanel: (
     path: string,
@@ -264,6 +286,7 @@ type FileEditorEffectsParams = {
 function useFileEditorEffects({
   activeSessionId,
   activeSessionIdRef,
+  activeEditorVisitRef,
   setFileState,
   addFileEditorPanel,
   clearFileStates,
@@ -288,6 +311,8 @@ function useFileEditorEffects({
       store,
       activeSessionId,
       activeSessionIdRef,
+      activeEditorVisitRef,
+      visit: activeEditorVisitRef.current,
       savedTabs,
       savedActiveTab,
       setFileState,
@@ -439,6 +464,7 @@ export function useFileEditors(detailActive = true) {
   useFileEditorEffects({
     activeSessionId,
     activeSessionIdRef,
+    activeEditorVisitRef,
     setFileState,
     addFileEditorPanel,
     clearFileStates,

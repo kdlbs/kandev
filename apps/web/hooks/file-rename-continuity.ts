@@ -4,7 +4,7 @@ import type { FileEditorState } from "@/lib/state/dockview-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { setActiveTabForSession } from "@/lib/local-storage";
-import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
+import { isWorkspaceTreePath, workspaceRelativeFilePath } from "@/lib/workspace-file-path";
 
 export type RenameAdapter = {
   capture: (oldPath: string, newPath: string) => { collision: boolean; publish: () => boolean };
@@ -147,14 +147,37 @@ function panelFor(
 }
 type DockApi = NonNullable<ReturnType<typeof useDockviewStore.getState>["api"]>;
 
-function collectOpenFiles(api: DockApi, oldPath: string, newPath: string) {
+function isExternalFile(file: Pick<RenameFile, "path" | "repo">, root?: string) {
+  if (!root || file.repo) return false;
+  const posix = (path: string) => path.startsWith("/") && !path.startsWith("//");
+  const windows = (path: string) => /^[A-Za-z]:[\\/]/.test(path);
+  const isWindows = windows(root) && windows(file.path);
+  if (!isWindows && !(posix(root) && posix(file.path))) return false;
+  const canonical = (path: string, rootPath: boolean) => {
+    if (path.includes("\0") || (!isWindows && path.includes("\\"))) return false;
+    const normalized = isWindows ? path.replaceAll("\\", "/") : path;
+    const rest = normalized.slice(isWindows ? 3 : 1);
+    if (!rootPath && (!rest || rest.endsWith("/"))) return false;
+    const relative = rootPath ? rest.replace(/\/$/, "") : rest;
+    return (
+      relative === "" || relative.split("/").every((part) => part && part !== "." && part !== "..")
+    );
+  };
+  return (
+    canonical(root, true) &&
+    canonical(file.path, false) &&
+    workspaceRelativeFilePath(file.path, root) === null
+  );
+}
+
+function collectOpenFiles(api: DockApi, oldPath: string, newPath: string, root?: string) {
   const captured: Captured[] = [];
   const targets = new Set<string>();
   let collision = false;
   for (const [key, file] of useDockviewStore.getState().openFiles) {
     const full = treePath(file);
     if (!full) {
-      collision = true;
+      if (!isExternalFile(file, root)) collision = true;
       continue;
     }
     const target = retargetFile(file, oldPath, newPath);
@@ -172,27 +195,38 @@ function collectOpenFiles(api: DockApi, oldPath: string, newPath: string) {
   return { captured, collision };
 }
 
-function panelConflicts(panel: Panel, oldPath: string, newPath: string, captured: Captured[]) {
+function panelConflicts(
+  panel: Panel,
+  oldPath: string,
+  newPath: string,
+  captured: Captured[],
+  root?: string,
+) {
   if (panel.view?.contentComponent !== "file-editor") return false;
   const path = panel.params?.path;
   const repo = panel.params?.repo;
   if (typeof path !== "string" || (repo !== undefined && typeof repo !== "string")) return true;
   const full = treePath({ path, repo });
-  if (!full) return true;
+  if (!full) return !isExternalFile({ path, repo }, root);
   return (
     (isWithin(full, newPath) && !isWithin(full, oldPath)) ||
     (isWithin(full, oldPath) && !captured.some((entry) => entry.panel === panel))
   );
 }
 
-export function captureDockviewRename(oldPath: string, newPath: string, session: string) {
+export function captureDockviewRename(
+  oldPath: string,
+  newPath: string,
+  session: string,
+  root?: string,
+) {
   const { api } = useDockviewStore.getState();
   if (!api) return { collision: false, publish: () => true };
-  const { captured, collision } = collectOpenFiles(api, oldPath, newPath);
+  const { captured, collision } = collectOpenFiles(api, oldPath, newPath, root);
   return {
     collision:
       collision ||
-      (api.panels ?? []).some((panel) => panelConflicts(panel, oldPath, newPath, captured)),
+      (api.panels ?? []).some((panel) => panelConflicts(panel, oldPath, newPath, captured, root)),
     publish: () => publishDockviewRename(api, captured, session),
   };
 }

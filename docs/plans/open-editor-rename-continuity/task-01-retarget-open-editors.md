@@ -172,3 +172,16 @@ subsequent Save request at the new path.
 - Phone rename/save coverage is unavailable because its viewer is read-only
   and its visible touch menu has no Rename action. Tablet owner semantics are
   also covered by focused local-state tests.
+
+Review follow-up reproduced two additional defects: an external absolute tab
+blocked unrelated workspace renames, and a rename while another restored tab
+was loading failed to persist the new path. The fixes require a known,
+comparable workspace root to identify external paths and persist current tabs
+only for the originating visit and host. Focused tests cover persisted readback,
+retired owners and ambiguous or workspace-contained absolute paths. A managed
+browser check also confirmed undo history can reset after rename; preserving it
+is outside this change and is disclosed in the requirements and public guide.
+Five affected Vitest suites passed 51 tests, changed-file ESLint and the 8 GiB
+typecheck passed, and a fresh managed Chromium run passed the rename/save flow
+with tracing enabled. The unrelated hosted executor-selector failure passed one
+isolated local attempt with retries disabled; the hosted result remains failed.

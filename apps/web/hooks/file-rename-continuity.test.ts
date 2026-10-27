@@ -3,6 +3,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type { DockviewApi } from "dockview-react";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import {
   captureDockviewRename,
   isRenameReserved,
@@ -15,6 +16,9 @@ import {
 
 const ROOT_DESTINATION = "web/dest";
 const DESTINATION_FILE = "dest/a.txt";
+const EXTERNAL_FILE = "/outside/notes.txt";
+const WORKSPACE_ROOT = "/workspace";
+const FILE_EDITOR_COMPONENT = "file-editor";
 
 afterEach(() => {
   useDockviewStore.getState().clearFileStates();
@@ -83,6 +87,64 @@ it("rejects an already-open destination even when its key uses a different repos
   expect(useDockviewStore.getState().openFiles.get("web:new.txt")?.content).toBe("destination");
 });
 
+it("allows a workspace rename while an unrelated external file remains open", () => {
+  const source = {
+    id: PREVIEW_FILE_EDITOR_ID,
+    params: { path: "old.txt", previewItemId: "old.txt" },
+    view: { contentComponent: FILE_EDITOR_COMPONENT },
+    api: { updateParameters: vi.fn() },
+    setTitle: vi.fn(),
+  };
+  const external = {
+    id: `file:${EXTERNAL_FILE}`,
+    params: { path: EXTERNAL_FILE },
+    view: { contentComponent: FILE_EDITOR_COMPONENT },
+  };
+  const api = {
+    getPanel: (id: string) => [source, external].find((panel) => panel.id === id),
+    panels: [source, external],
+  } as unknown as DockviewApi;
+  useDockviewStore.setState({ api });
+  for (const path of ["old.txt", EXTERNAL_FILE]) {
+    useDockviewStore.getState().setFileState(path, {
+      path,
+      name: path.split("/").pop()!,
+      content: `draft ${path}`,
+      originalContent: "disk",
+      originalHash: "hash",
+      isDirty: true,
+    });
+  }
+  expect(captureDockviewRename("old.txt", "new.txt", "a").collision).toBe(true);
+  const operation = captureDockviewRename("old.txt", "new.txt", "a", WORKSPACE_ROOT);
+  expect(operation.collision).toBe(false);
+  expect(operation.publish()).toBe(true);
+  expect(useDockviewStore.getState().openFiles.get("new.txt")?.content).toBe("draft old.txt");
+  expect(useDockviewStore.getState().openFiles.get(EXTERNAL_FILE)?.content).toBe(
+    `draft ${EXTERNAL_FILE}`,
+  );
+});
+
+it.each([
+  "/workspace/old.txt",
+  "file:///workspace/old.txt",
+  "/outside/../workspace/old.txt",
+  "/outside//old.txt",
+  "/outside\\old.txt",
+])("does not classify the workspace path %s as external", (path) => {
+  const api = { getPanel: vi.fn(), panels: [] } as unknown as DockviewApi;
+  useDockviewStore.setState({ api });
+  useDockviewStore.getState().setFileState(path, {
+    path,
+    name: "old.txt",
+    content: "draft",
+    originalContent: "disk",
+    originalHash: "hash",
+    isDirty: true,
+  });
+  expect(captureDockviewRename("old.txt", "new.txt", "a", WORKSPACE_ROOT).collision).toBe(true);
+});
+
 // @covers AC-UI-FILE-EDITOR-MUTATION-002.1
 it("replaces a pinned panel in place without losing its buffer when removal cleanup runs", () => {
   type Group = { id: string; panels: Panel[]; activePanel?: Panel };
@@ -103,7 +165,7 @@ it("replaces a pinned panel in place without losing its buffer when removal clea
       id,
       params,
       group,
-      view: { contentComponent: "file-editor", tabComponent: "pinnedDefaultTab" },
+      view: { contentComponent: FILE_EDITOR_COMPONENT, tabComponent: "pinnedDefaultTab" },
       toJSON: () => ({ renderer: "always" }),
       setTitle: vi.fn(),
       api: {
@@ -171,7 +233,7 @@ it("replaces a pinned panel in place without losing its buffer when removal clea
 // @covers AC-UI-FILE-EDITOR-MUTATION-002.5
 it("never overwrites a destination buffer that appears after rename admission", () => {
   const panel = {
-    id: "preview:file-editor",
+    id: PREVIEW_FILE_EDITOR_ID,
     params: { path: "old.txt", previewItemId: "old.txt" },
     api: { updateParameters: vi.fn() },
     setTitle: vi.fn(),
@@ -204,7 +266,7 @@ it("retains the original dirty buffer if a pinned panel cannot be replaced", () 
     id: "file:old.txt",
     params: { path: "old.txt" },
     group: { id: "group", panels: [] as unknown[], activePanel: undefined },
-    view: { contentComponent: "file-editor", tabComponent: "pinnedDefaultTab" },
+    view: { contentComponent: FILE_EDITOR_COMPONENT, tabComponent: "pinnedDefaultTab" },
     toJSON: () => ({}),
   };
   panel.group.panels = [panel];
@@ -234,14 +296,14 @@ it("retains the original dirty buffer if a pinned panel cannot be replaced", () 
 // @covers AC-UI-FILE-EDITOR-MUTATION-002.3
 it("does not adopt a replacement preview panel even if the buffer object remains", () => {
   const original = {
-    id: "preview:file-editor",
+    id: PREVIEW_FILE_EDITOR_ID,
     params: { path: "old.txt", previewItemId: "old.txt" },
-    view: { contentComponent: "file-editor" },
+    view: { contentComponent: FILE_EDITOR_COMPONENT },
   };
   const replacement = { ...original, params: { ...original.params } };
   let preview = original;
   const api = {
-    getPanel: (id: string) => (id === "preview:file-editor" ? preview : undefined),
+    getPanel: (id: string) => (id === PREVIEW_FILE_EDITOR_ID ? preview : undefined),
     get panels() {
       return [preview];
     },

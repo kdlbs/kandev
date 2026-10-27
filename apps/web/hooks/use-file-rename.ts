@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { renameFile } from "@/lib/ws/workspace-files";
 import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import {
   captureDockviewRename,
   renameScope,
@@ -41,6 +42,7 @@ function captureRename(
   oldPath: string,
   newPath: string,
   selectedSession: string,
+  workspaceRoot?: string,
 ) {
   if (options?.dockview === false)
     return (
@@ -49,7 +51,7 @@ function captureRename(
         publish: () => true,
       }
     );
-  return captureDockviewRename(oldPath, newPath, selectedSession);
+  return captureDockviewRename(oldPath, newPath, selectedSession, workspaceRoot);
 }
 
 const ERROR_VARIANT = "error" as const;
@@ -78,7 +80,10 @@ export function useFileRename(
       const scope = renameScope(store, selectedSession);
       if (scope !== renameScope(store, sessionId)) return false;
       const owner = visit.current;
-      const captured = captureRename(options, oldPath, newPath, selectedSession);
+      const workspaceRoot = getSessionWorkspacePath(
+        store.getState().taskSessions.items[selectedSession],
+      );
+      const captured = captureRename(options, oldPath, newPath, selectedSession, workspaceRoot);
       const release = captured.collision ? null : reserveRename(store, scope, oldPath, newPath);
       if (!release) {
         toast({

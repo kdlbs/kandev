@@ -145,6 +145,8 @@ moves that file, or an enclosing folder, through Files.
   within an unchanged editor lifetime.
 - Inferring external filesystem renames, adding phone editing or a new phone
   rename entry point, and general save/rename transaction ordering.
+- Preserving editor undo history across a Files rename. Current text and its
+  saved baseline are retained, but the editor may start a new undo history.
 - Workspace read races outside background refresh of already-open Dockview
   buffers; general filesystem transaction ordering, transport/authorization
   redesign, backend APIs, new settings, and responsive presentation changes.

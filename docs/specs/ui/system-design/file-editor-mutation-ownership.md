@@ -435,6 +435,9 @@ synchronous transaction is active, then schedule the normal settled write. The n
 buffer; `useFileLoader` sees `hasFile` and does not fetch. The existing active
 tab workspace sync can still run under its existing owner checks. Tests must
 verify no fallback loader or removal callback overwrites the buffer.
+The replacement retains text and baseline, but may reset editor undo history.
+Preserving history across Monaco's new document URI and CodeMirror remount is
+outside this bounded ownership change.
 
 For `preview:file-editor`, do not replace the panel: atomically rekey the buffer,
 update path/repo and `previewItemId` through `updateParameters`, preserve
@@ -445,6 +448,12 @@ ordinary future saves use the new key and existing baseline. Tests exercise
 pinned, preview, promoted, active/inactive groups, tab order, cleanup and
 persistence. If an unexpected host/API failure occurs, retain the buffer and
 report it; do not silently merge or drop data.
+
+During tab restoration, save the settled current tab list after loading ends,
+only if the originating session visit and Dockview host are still current.
+Absolute editor paths are excluded from collision checks only when the active
+session's known workspace root proves they are outside that workspace; unknown
+or ambiguous paths remain protected by the collision guard.
 
 Tablet `TaskCenterPanel` has separate local tabs and active selection. Phone
 `MobileFileViewerPanel` is read-only and replaces Files while open; its visible
