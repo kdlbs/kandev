@@ -104,7 +104,6 @@ Popover versus inset Drawer, error ownership and content order are required.
 Spacing and illustrative English labels are not pixel/copy specifications.
 Use localized host labels and existing primitives.
 
-
 Full context: [combined plan previews](plan.md#ascii-ui-preview).
 Capture desktop/phone screenshots and compare structure with UI-02/03.
 
@@ -234,8 +233,10 @@ Follow-up verification passed:
 - `CAPTURE_PR_ASSETS=1 pnpm e2e:run --project mobile-chrome tests/chat/mobile-rich-output-errors.spec.ts` passed (2 tests) and rebuilt the web app.
 
 PR CI follow-up: shard 7 exposed a resize test that dragged the pointer 2,000px
-outside its 1,280px viewport; the clamp test now drags 800px, enough to exceed
-the 600px maximum while keeping the pointer visible. Shards 8 and 9 measured
+outside its 1,280px viewport. An initial reduction to 800px still reached the
+review dialog's far edge in the focused post-merge run, so the final test drags
+400px to exceed the 600px maximum while keeping the pointer inside the dialog.
+Shards 8 and 9 measured
 44px mobile targets at 43.999938px. The remaining direct height assertions now
 use the shared `expectTouchControl` helper's 0.01px layout-rounding tolerance.
 The mobile Quick Chat activity test was marked flaky by CI: its first attempt
@@ -245,3 +246,18 @@ quick action and verifies that the drawer closes. Its focused mobile run passed
 three repetitions with retries disabled. The resize test passed with retries
 disabled, and the full mobile diagnostic-bundle spec passed all three tests
 with retries disabled.
+
+Shard 16 also exposed an agent-profile deletion test that assumed the first
+listed agent had a profile. The current `main` version resolves the fixture's
+seeded profile ID through `seededAgentProfile`. It supersedes the branch's
+first-available-profile workaround. Its focused test passed three repetitions
+before this rebase.
+
+Before this rebase, after merging the then-current `main` base, the focused resize E2E showed that an
+800px drag could reach the far edge of the review dialog and lose the resize
+event. The final resize change passed the clamp case three repetitions with
+retries disabled, and all four tests in its file passed with retries disabled.
+Post-merge checks also passed the rich-output component tests (7), backend MCP
+server package test, web typecheck, full web lint, the rich-output and resize
+desktop E2E files, and the five related mobile E2E files (11 tests). The E2E
+runner rebuilt the web app successfully.
