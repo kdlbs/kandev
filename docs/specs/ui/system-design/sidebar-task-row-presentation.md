@@ -32,6 +32,11 @@ provider state, task navigation, or the full relative-time formatter used by oth
 
 ## Trailing layout
 
+When the saved trailing choice is `none`, `TaskItem` also suppresses the
+title-area change-request indicators for all providers. Other title badges,
+the independently configured pull request number detail, and the task menu
+remain available. Other trailing choices retain their existing status placement.
+
 The change-request branch uses one flex cluster. The status is the only width-bearing item while a
 fine-pointer row is idle. The menu wrapper has zero width and does not create a blank trailing gap.
 

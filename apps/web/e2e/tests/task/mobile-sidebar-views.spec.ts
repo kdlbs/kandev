@@ -619,6 +619,68 @@ test.describe("Mobile sidebar — view system", () => {
     expect(popoverBox!.x + popoverBox!.width).toBeLessThan(drawerBox!.x + drawerBox!.width);
   });
 
+  test("hides change-request status with Nothing", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const title = "Mobile hidden PR status";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await seedAndOpenSheet(testPage, apiClient, seedData, []);
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 904,
+      pr_url: "https://github.com/testorg/testrepo/pull/904",
+      pr_title: "Mobile hidden status",
+      head_branch: "feature/mobile-hidden-status",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+    });
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await waitForFiniteAnimations(sheet);
+    const row = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
+    const icon = row.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible();
+    await sheet.getByTestId("sidebar-filter-gear").tap();
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await popover.getByTestId("task-row-settings-toggle").tap();
+    await popover.getByTestId("task-row-trailing-select").tap();
+    await testPage.getByRole("option", { name: "Nothing", exact: true }).tap();
+    await expect(icon).toHaveCount(0);
+    await popover.getByTestId("view-save-as-button").tap();
+    await popover.getByTestId("view-save-as-name-input").fill("Mobile hidden status");
+    await popover.getByTestId("view-save-as-confirm").tap();
+    await testPage.keyboard.press("Escape");
+    await expect(popover).toBeHidden();
+    await waitForFiniteAnimations(sheet);
+    await prCapture.screenshot("mobile-hidden-pr-status", {
+      caption: "Phone task picker with PR status hidden",
+    });
+    const action = row.getByRole("button", { name: "Task actions" });
+    await expect(action).toBeVisible();
+    const box = await action.boundingBox();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+    await expect(icon).toHaveCount(0);
+    await row.tap();
+    await expect(testPage).toHaveURL((url) => url.pathname === `/t/${task.id}`);
+  });
+
   test("task row settings use the drawer, touch targets, and persisted preview", async ({
     testPage,
     apiClient,
