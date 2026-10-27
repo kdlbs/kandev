@@ -12,8 +12,9 @@ requirements:
 The UI system owns this independent task-row presentation contract. Task and integration systems
 continue to own timestamps, task state, and change-request status.
 
-This refinement changes only the compact trailing slot. It does not change saved view data,
-provider state, task navigation, or the full relative-time formatter used by other surfaces.
+This refinement governs the compact trailing slot and the title-area status visibility for the
+Nothing selection. It does not change saved view data, provider state, task navigation, or the
+full relative-time formatter used by other surfaces.
 
 ## Requirement mapping
 
