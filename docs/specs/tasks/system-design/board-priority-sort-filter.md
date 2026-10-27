@@ -92,7 +92,9 @@ ordering universe.
 move. In All Workflows that argument may describe a different hydrated workflow
 or be null. Resolve scope from the invocation's eligible selection and existing
 workflow snapshots, with the matching single-workflow snapshot as fallback only
-when it supplies consistent evidence. A task found in more than one workflow,
+when it supplies consistent evidence. If the selected workflow's multi-workflow
+snapshot has no steps, offer the matching hydrated board's steps; never take
+steps from a different hydrated workflow. A task found in more than one workflow,
 missing task evidence, conflicting task/snapshot identity, an absent or
 ambiguous destination, or a destination outside the selection's workflow fails
 closed. The offered destinations and invocation guard must agree; revalidate at

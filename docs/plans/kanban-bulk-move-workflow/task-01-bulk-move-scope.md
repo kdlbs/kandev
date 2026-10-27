@@ -64,10 +64,10 @@ existing batch, ordering, error, and phone interaction paths.
 
 The independent routing RED and desktop browser RED have already been recorded.
 The phone trace records an unintended request on trigger and three failed phone
-attempts; retain that evidence. After a later explicit release, add an assertion
-for zero requests when the trigger opens, then one intended request and the
-persisted result after the real destination tap. Run affected checks sequentially,
-using fresh managed E2E builds after production changes.
+attempts; retain that evidence. The phone regression asserts zero requests when
+the trigger opens, then one intended request and the persisted result after
+the real destination tap. Run affected checks sequentially, using fresh
+managed E2E builds after production changes.
 Use the pinned toolchain and acquire the shared heavy lease before installation,
 typecheck, lint, or E2E. Assign each run its own `KANDEV_RUN_QUIET_DIR`.
 
@@ -100,7 +100,7 @@ actual command exits and browser blockers without substituting unit evidence.
 ## Dependencies
 
 The routing portion was released and implemented. The corrected phone trigger
-requires a later explicit release after review of this updated package.
+was released after review of the corrected package.
 
 ## Risks
 
@@ -137,3 +137,9 @@ The phone case asserted zero batch requests after opening, one exact request on
 the explicit destination tap, and the persisted task workflow and step. Scoped
 ESLint, the i18n ratchet, and canonical 6 GiB typecheck passed. The initial
 4 GiB typecheck exhausted its heap; the earlier 6 GiB typecheck also passed.
+
+Review follow-up: a task-bearing empty-step placeholder previously masked
+matching hydrated-board steps. Its regression failed before the fallback;
+six board cases and thirteen hook cases passed after it, as did scoped lint and
+canonical 6 GiB typecheck. Other-workflow and conflicting-target controls
+remained in coverage.

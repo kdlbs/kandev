@@ -236,8 +236,8 @@ export function useMultiSelectDerived(
     }
     const workflowId = resolveBulkSelectionWorkflow([...selectedIds], snapshots, board);
     if (!workflowId) return { isMixedWorkflowSelection: true, multiSelectSteps: [] };
-    const steps =
-      snapshots[workflowId]?.steps ?? (board.workflowId === workflowId ? board.steps : []);
+    let steps = snapshots[workflowId]?.steps ?? [];
+    if (steps.length === 0 && board.workflowId === workflowId) steps = board.steps;
     return {
       isMixedWorkflowSelection: false,
       multiSelectSteps: steps

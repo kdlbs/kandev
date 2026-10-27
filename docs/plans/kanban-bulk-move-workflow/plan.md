@@ -52,7 +52,10 @@ placement; retain its batch request and existing local update on success.
 
 A retained phone trace shows a batch request for the current step during the
 trigger tap, before the intended destination tap. It does not capture the raw
-DOM event target. In `TaskMultiSelectToolbar`, follow the controlled touch
+DOM event target. A later review found task-bearing placeholders can have no
+steps; matching hydrated-board steps now remain available. Its RED test failed
+before the correction, and six board tests, thirteen hook cases, scoped lint,
+and a bounded 6 GiB typecheck passed after it. In `TaskMultiSelectToolbar`, follow the controlled touch
 trigger used by `RepositorySourceMenu`: prevent default on pending touch
 pointerdown, clear pending on cancellation, and toggle on the synthetic click.
 Keep the phone sheet as modal owner, the nested phone menu non-modal, and the
@@ -101,7 +104,10 @@ passed afterward. Final focused tests passed (15 scope/hook and 7 toolbar);
 three desktop browser controls and the phone browser outcome passed after the
 last code change. Scoped lint, localization ratchet, and 6 GiB typecheck passed.
 The initial 4 GiB typecheck exhausted its heap. The trace does not prove the raw
-DOM event target.
+DOM event target. A later review found task-bearing placeholders can have no
+steps; matching hydrated-board steps now remain available. Its RED test failed
+before the correction, and six board tests, thirteen hook cases, scoped lint,
+and a bounded 6 GiB typecheck passed after it.
 
 ## Risks
 

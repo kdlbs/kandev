@@ -181,3 +181,23 @@ describe("bulk move rejects invalid scope (AC-TASKS-BOARD-BULK-MOVE-SCOPE-001.2)
     expect(result.current.selection.selectedIds).toEqual(new Set(["task-b"]));
   });
 });
+
+it("moves using matching hydrated steps when the snapshot is a placeholder", async () => {
+  const { result } = setup("a");
+  act(() => {
+    const state = result.current.store.getState();
+    state.setWorkflowSnapshot("a", {
+      ...state.kanbanMulti.snapshots.a,
+      steps: [],
+      isPlaceholder: true,
+    });
+    result.current.selection.toggleSelect("task-a");
+  });
+  expect(result.current.derived.multiSelectSteps.map((step) => step.id)).toContain("a-done");
+  await act(async () => result.current.selection.bulkMove("a-done"));
+  expect(bulkMoveSelectedTasks).toHaveBeenCalledExactlyOnceWith({
+    task_ids: ["task-a"],
+    target_workflow_id: "a",
+    target_step_id: "a-done",
+  });
+});
