@@ -141,11 +141,14 @@ test.describe("Office task approval flow", () => {
       timeout: 10_000,
     });
 
-    // Confirm via API.
-    const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
-    const inner = (persisted.task as Record<string, unknown>) ?? persisted;
-    const status = (inner.status as string) ?? "";
-    expect(status.toLowerCase()).toBe("done");
+    // The picker updates optimistically; confirm the committed status.
+    await expect
+      .poll(async () => {
+        const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
+        const inner = (persisted.task as Record<string, unknown>) ?? persisted;
+        return ((inner.status as string) ?? "").toLowerCase();
+      })
+      .toBe("done");
   });
 
   test("request-changes records a decision visible in the timeline and queues a run for the assignee", async ({

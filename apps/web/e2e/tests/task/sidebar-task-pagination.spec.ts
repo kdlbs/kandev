@@ -3,6 +3,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import { SidebarTasksPage } from "../../pages/sidebar-tasks-page";
+import { waitForCascadeArchiveCleanup } from "../../helpers/session-resume-recovery";
 import {
   archiveSidebarPaginationTasks,
   seedSidebarPaginationTasks,
@@ -12,6 +13,7 @@ test("desktop sidebar pages 101 matching tasks without changing the open convers
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
   test.setTimeout(120_000);
   const token = `Sidebar page ${Date.now()}`;
@@ -56,9 +58,11 @@ test("desktop sidebar pages 101 matching tasks without changing the open convers
   await apiClient.archiveTask(matchingTaskIds[1]);
   await expect(rows).toHaveCount(99, { timeout: 20_000 });
   await expect(controls).toBeHidden();
+  await waitForCascadeArchiveCleanup(backend.tmpDir, matchingTaskIds[1]);
   await apiClient.unarchiveTask(matchingTaskIds[1]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeHidden();
+  await waitForCascadeArchiveCleanup(backend.tmpDir, matchingTaskIds[0]);
   await apiClient.unarchiveTask(matchingTaskIds[0]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeVisible();

@@ -275,6 +275,22 @@ async function runProfileSessionLifecycleScenario(
       { timeout: 30_000 },
     )
     .toBe(true);
+  await expect
+    .poll(async () => {
+      sessions = (await apiClient.listTaskSessions(task.id)).sessions;
+      return {
+        originalA: sessions.find((item) => item.id === originalASessionId)?.state,
+        returnedA: sessions.find((item) => item.agent_profile_id === profileA.id && item.is_primary)
+          ?.state,
+        parkedB: sessions.find((item) => item.agent_profile_id === profileB.id)?.state,
+      };
+    })
+    .toEqual({
+      originalA: "WAITING_FOR_INPUT",
+      returnedA: "WAITING_FOR_INPUT",
+      parkedB: endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED",
+    });
+
   expect(sessions).toHaveLength(startPolicy === "reuse" ? 2 : 3);
   const originalA = sessions.find((item) => item.id === originalASessionId);
   const returnedA = sessions.find(
