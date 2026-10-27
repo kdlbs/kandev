@@ -24,6 +24,7 @@ import {
 } from "@/components/confirmation/mobile-confirmation-host";
 import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 import { useQuickChatSetupDraft } from "./use-quick-chat-setup-draft";
+import { useQuickChatCreation, type QuickChatCreationActions } from "./use-quick-chat-creation";
 
 const QuickTerminalTabView = dynamic(
   () => import("./quick-terminal-tab-view").then((module) => module.QuickTerminalTabView),
@@ -40,6 +41,7 @@ type QuickChatContentProps = {
   quickChat: ReturnType<typeof useQuickChatModal>;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: QuickChatInitialPrompt) => void;
   setupDraft: ReturnType<typeof useQuickChatSetupDraft>;
+  creationActions: QuickChatCreationActions;
   discardSetupDraft: () => void;
   onCloseModal: () => void;
   onRegisterSetupDiscard: (discard: () => void) => () => void;
@@ -50,12 +52,24 @@ type QuickChatActiveContentProps = Omit<
   "discardSetupDraft" | "onCloseModal"
 >;
 
+type QuickChatModalShellProps = QuickChatContentProps & {
+  isOpen: boolean;
+  width: number;
+  leftResizeHandleProps: ReturnType<typeof useQuickChatWidth>["leftResizeHandleProps"];
+  rightResizeHandleProps: ReturnType<typeof useQuickChatWidth>["rightResizeHandleProps"];
+  onOpenChange: (open: boolean) => void;
+  sessionToDelete: ReturnType<typeof useQuickChatModal>["sessionToClose"];
+  onDeleteDialogOpenChange: (open: boolean) => void;
+  onConfirmDelete: () => void;
+};
+
 function QuickChatContent({
   workspaceId,
   configChat,
   quickChat,
   setQuickChatInitialPrompt,
   setupDraft,
+  creationActions,
   discardSetupDraft,
   onCloseModal,
   onRegisterSetupDiscard,
@@ -80,7 +94,13 @@ function QuickChatContent({
           quickChat.handleCloseTab(sessionId);
         }}
         onNewChat={() => {
-          discardSetupDraft();
+          if (
+            quickChat.activeKind === "conversation" &&
+            quickChat.activeSessionId &&
+            isQuickChatSetupSessionId(quickChat.activeSessionId)
+          ) {
+            discardSetupDraft();
+          }
           quickChat.handleNewChat();
         }}
         onNewTerminal={quickChat.handleNewTerminal}
@@ -98,6 +118,7 @@ function QuickChatContent({
         quickChat={quickChat}
         setQuickChatInitialPrompt={setQuickChatInitialPrompt}
         setupDraft={setupDraft}
+        creationActions={creationActions}
         onRegisterSetupDiscard={onRegisterSetupDiscard}
       />
     </>
@@ -110,6 +131,7 @@ function QuickChatActiveContent({
   quickChat,
   setQuickChatInitialPrompt,
   setupDraft,
+  creationActions,
   onRegisterSetupDiscard,
 }: QuickChatActiveContentProps) {
   const canCreateConfigurationChat = !quickChat.sessions.some(
@@ -127,6 +149,7 @@ function QuickChatActiveContent({
         quickChat={quickChat}
         setQuickChatInitialPrompt={setQuickChatInitialPrompt}
         setupDraft={setupDraft}
+        creationActions={creationActions}
         onRegisterSetupDiscard={onRegisterSetupDiscard}
         canCreateConfigurationChat={canCreateConfigurationChat}
       />
@@ -172,6 +195,7 @@ function QuickChatConversationContent({
   quickChat,
   setQuickChatInitialPrompt,
   setupDraft,
+  creationActions,
   onRegisterSetupDiscard,
   canCreateConfigurationChat,
 }: QuickChatActiveContentProps & { canCreateConfigurationChat: boolean }) {
@@ -189,9 +213,13 @@ function QuickChatConversationContent({
     return (
       <QuickChatSessionView
         session={quickChat.activeSession}
-        onInitialPromptAttempted={() =>
-          setQuickChatInitialPrompt(quickChat.activeSessionId!, undefined)
-        }
+        onInitialPromptAttempted={() => {
+          const sessionId = quickChat.activeSessionId!;
+          setQuickChatInitialPrompt(sessionId, undefined);
+          const pending = setupDraft.pendingCreation;
+          if (pending?.sessionId === sessionId)
+            setupDraft.updatePendingCreation(pending.creationId, { messageAttempted: true });
+        }}
       />
     );
   }
@@ -207,13 +235,14 @@ function QuickChatConversationContent({
         configurationStarting={configChat.isStarting}
         configurationError={configChat.error}
         quickChatError={quickChat.setupError}
+        pendingCreation={creationActions.pending}
+        checkingCreation={creationActions.checking}
+        onCheckCreation={() => creationActions.check()}
+        onRetryCreation={() => creationActions.retry()}
+        onDeleteCreation={() => creationActions.remove()}
         draft={setupDraft.draft}
         onDraftChange={setupDraft.update}
-        onStartQuickChat={async (agentId, repositories, payload) => {
-          const started = await quickChat.handleSelectAgent(agentId, repositories, payload);
-          if (started) setupDraft.clear(false);
-          return started;
-        }}
+        onStartQuickChat={creationActions.start}
         onStartConfigChat={async (agentId, payload) => {
           const sessionId = await configChat.startSession(agentId, payload, {
             setupSessionId: quickChat.activeSessionId ?? undefined,
@@ -222,7 +251,9 @@ function QuickChatConversationContent({
           return Boolean(sessionId);
         }}
         onKindChange={quickChat.handleSetupKindChange}
-        onDiscardDraft={() => setupDraft.clear(false)}
+        onDiscardDraft={() => {
+          if (!setupDraft.pendingCreation) setupDraft.clear(false);
+        }}
         onRegisterDiscard={onRegisterSetupDiscard}
       />
     );
@@ -260,37 +291,26 @@ function QuickChatResizeHandle({
   );
 }
 
-export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
+function QuickChatModalShell({
+  workspaceId,
+  configChat,
+  quickChat,
+  setQuickChatInitialPrompt,
+  setupDraft,
+  creationActions,
+  discardSetupDraft,
+  onCloseModal,
+  onRegisterSetupDiscard,
+  isOpen,
+  width,
+  leftResizeHandleProps,
+  rightResizeHandleProps,
+  onOpenChange,
+  sessionToDelete,
+  onDeleteDialogOpenChange,
+  onConfirmDelete,
+}: QuickChatModalShellProps) {
   const { t } = useTranslation();
-  const configChat = useConfigChat(workspaceId);
-  const setupDraftUserId = useAppStore((state) => state.auth?.user?.id ?? "local");
-  const setupDraft = useQuickChatSetupDraft(workspaceId, setupDraftUserId);
-  const setupDiscardRef = useRef<(() => void) | null>(null);
-  const registerSetupDiscard = useCallback((discard: () => void) => {
-    setupDiscardRef.current = discard;
-    return () => {
-      if (setupDiscardRef.current === discard) setupDiscardRef.current = null;
-    };
-  }, []);
-  const discardSetupDraft = useCallback(() => {
-    if (setupDiscardRef.current) setupDiscardRef.current();
-    else setupDraft.clear(true);
-  }, [setupDraft.clear]);
-  const quickChat = useQuickChatModal(workspaceId, configChat.reset, discardSetupDraft);
-  const handleOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) discardSetupDraft();
-      quickChat.handleOpenChange(open);
-    },
-    [discardSetupDraft, quickChat.handleOpenChange],
-  );
-  const setQuickChatInitialPrompt = useAppStore((state) => state.setQuickChatInitialPrompt);
-  const { width, leftResizeHandleProps, rightResizeHandleProps } = useQuickChatWidth();
-  // A ref, not state: several widgets (a pending clarification, an open
-  // suggestion popup, the reverse-search overlay) can be registered at once
-  // and none of their register/unregister calls should trigger a re-render of
-  // the modal itself -- onEscapeKeyDown reads the live map only when Escape
-  // actually fires.
   const escapeGuardsRef = useRef(new Map<string, ClarificationEscapePredicate>());
   const escapeGuardRegistry = useMemo<ClarificationEscapeGuardRegistry>(
     () => ({
@@ -301,36 +321,18 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
   );
   return (
     <ClarificationEscapeGuardProvider value={escapeGuardRegistry}>
-      <MobileConfirmationHost open={quickChat.isOpen} key={workspaceId}>
+      <MobileConfirmationHost open={isOpen} key={workspaceId}>
         {({ contentProps }) => (
-          <Dialog open={quickChat.isOpen} onOpenChange={handleOpenChange}>
+          <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent
               {...contentProps}
               className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex min-h-0 flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85dvh] sm:!max-h-[85dvh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
               style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
               showCloseButton={false}
               overlayClassName="bg-black/20 sm:bg-black/40 sm:backdrop-blur-sm"
-              onEscapeKeyDown={(event) => {
-                if (contentProps.onEscapeKeyDown) {
-                  contentProps.onEscapeKeyDown(event);
-                  return;
-                }
-                // A pending, expanded clarification (or an open suggestion popup,
-                // or the reverse-search overlay) handles this Escape itself and
-                // the modal stays open -- but only when that widget's own guard
-                // predicate reports it will actually act on this exact keydown
-                // (matching its enabled/scope/modifier state), so Escape never
-                // goes silently swallowed with nothing left to handle it. Once no
-                // guard claims it (e.g. a second, now-unguarded Escape), the modal
-                // closes, matching the main task chat panel's two-stage Escape
-                // after #2729.
-                for (const test of escapeGuardsRef.current.values()) {
-                  if (test(event)) {
-                    event.preventDefault();
-                    break;
-                  }
-                }
-              }}
+              onEscapeKeyDown={(event) =>
+                handleQuickChatEscape(event, contentProps, escapeGuardsRef.current)
+              }
             >
               <MobileConfirmationHostBody>
                 <DialogTitle className="sr-only">{t("common:commandQuickChat")}</DialogTitle>
@@ -342,21 +344,98 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
                   quickChat={quickChat}
                   setQuickChatInitialPrompt={setQuickChatInitialPrompt}
                   setupDraft={setupDraft}
+                  creationActions={creationActions}
                   discardSetupDraft={discardSetupDraft}
-                  onCloseModal={() => handleOpenChange(false)}
-                  onRegisterSetupDiscard={registerSetupDiscard}
+                  onCloseModal={onCloseModal}
+                  onRegisterSetupDiscard={onRegisterSetupDiscard}
                 />
               </MobileConfirmationHostBody>
             </DialogContent>
           </Dialog>
         )}
       </MobileConfirmationHost>
-
       <QuickChatDeleteDialog
-        sessionToDelete={quickChat.sessionToClose}
-        onOpenChange={(open) => !open && quickChat.setSessionToClose(null)}
-        onConfirm={quickChat.handleConfirmClose}
+        sessionToDelete={sessionToDelete}
+        onOpenChange={onDeleteDialogOpenChange}
+        onConfirm={onConfirmDelete}
       />
     </ClarificationEscapeGuardProvider>
+  );
+}
+
+function handleQuickChatEscape(
+  event: KeyboardEvent,
+  contentProps: { onEscapeKeyDown?: (event: KeyboardEvent) => void },
+  guards: Map<string, ClarificationEscapePredicate>,
+) {
+  if (contentProps.onEscapeKeyDown) {
+    contentProps.onEscapeKeyDown(event);
+    return;
+  }
+  for (const test of guards.values()) {
+    if (test(event)) {
+      event.preventDefault();
+      break;
+    }
+  }
+}
+
+export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
+  const configChat = useConfigChat(workspaceId);
+  const setupDraftUserId = useAppStore((state) => state.auth?.user?.id ?? "local");
+  const setupDraft = useQuickChatSetupDraft(workspaceId, setupDraftUserId);
+  const setQuickChatInitialPrompt = useAppStore((state) => state.setQuickChatInitialPrompt);
+  const setupDiscardRef = useRef<(() => void) | null>(null);
+  const registerSetupDiscard = useCallback((discard: () => void) => {
+    setupDiscardRef.current = discard;
+    return () => {
+      if (setupDiscardRef.current === discard) setupDiscardRef.current = null;
+    };
+  }, []);
+  const discardSetupDraft = useCallback(() => {
+    if (setupDraft.pendingCreation) return;
+    if (setupDiscardRef.current) setupDiscardRef.current();
+    else setupDraft.clear(true);
+  }, [setupDraft.clear, setupDraft.pendingCreation]);
+  const quickChat = useQuickChatModal(workspaceId, configChat.reset, discardSetupDraft);
+  const creationActions = useQuickChatCreation({
+    workspaceId,
+    userId: setupDraftUserId,
+    quickChat,
+    setupDraft,
+  });
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) discardSetupDraft();
+      quickChat.handleOpenChange(open);
+    },
+    [discardSetupDraft, quickChat.handleOpenChange],
+  );
+  const width = useQuickChatWidth();
+  const onCloseModal = useCallback(() => handleOpenChange(false), [handleOpenChange]);
+  const onDeleteDialogOpenChange = useCallback(
+    (open: boolean) => !open && quickChat.setSessionToClose(null),
+    [quickChat.setSessionToClose],
+  );
+  return (
+    <QuickChatModalShell
+      workspaceId={workspaceId}
+      configChat={configChat}
+      quickChat={quickChat}
+      setQuickChatInitialPrompt={setQuickChatInitialPrompt}
+      setupDraft={setupDraft}
+      creationActions={creationActions}
+      discardSetupDraft={discardSetupDraft}
+      onCloseModal={onCloseModal}
+      onRegisterSetupDiscard={registerSetupDiscard}
+      isOpen={quickChat.isOpen}
+      width={width.width}
+      leftResizeHandleProps={width.leftResizeHandleProps}
+      rightResizeHandleProps={width.rightResizeHandleProps}
+      onOpenChange={handleOpenChange}
+      sessionToDelete={quickChat.sessionToClose}
+      onDeleteDialogOpenChange={onDeleteDialogOpenChange}
+      onConfirmDelete={quickChat.handleConfirmClose}
+    />
   );
 });

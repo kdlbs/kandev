@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/quickchatidentity"
 )
 
 // ExternalIDMaxBytes is the maximum UTF-8 byte length of a normalized
@@ -22,12 +23,12 @@ const ExternalIDMaxBytes = 255
 var ErrExternalIDInvalid = errors.New("invalid external_id")
 
 // ReservedExternalIDPrefixCoordinatorProposal identifies external ids the
-// coordinator service allocates for the task it creates behind an approved
-// proposal (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
-// CreateTask refuses a value with this prefix unless the request sets
-// AllowReservedExternalID; ReleaseTaskExternalID refuses it unconditionally.
-// No other caller may create or release an id with this prefix.
+// coordinator service allocates for tasks created behind approved proposals.
 const ReservedExternalIDPrefixCoordinatorProposal = "coordinator-proposal:"
+
+// ReservedExternalIDPrefixQuickChatCreation identifies external ids allocated
+// by the authenticated Quick Chat creation adapter.
+const ReservedExternalIDPrefixQuickChatCreation = quickchatidentity.ExternalIDPrefix
 
 // NormalizeExternalID applies the spec's validation/normalization rules to a
 // raw caller-supplied external_id, in this exact order — the order is
@@ -63,15 +64,21 @@ func isASCIIControl(r rune) bool {
 	return (r >= 0x00 && r <= 0x1F) || r == 0x7F
 }
 
-// refuseReservedExternalIDPrefix reports ErrExternalIDInvalid when
-// normalized carries ReservedExternalIDPrefixCoordinatorProposal, unless
-// allowed is true.
+// refuseReservedExternalIDPrefix rejects namespaces owned by trusted service
+// adapters unless an internal create request explicitly allows them.
 func refuseReservedExternalIDPrefix(normalized string, allowed bool) error {
-	if allowed || !strings.HasPrefix(normalized, ReservedExternalIDPrefixCoordinatorProposal) {
+	if allowed {
 		return nil
 	}
-	return fmt.Errorf("%w: external_id may not use the reserved prefix %q",
-		ErrExternalIDInvalid, ReservedExternalIDPrefixCoordinatorProposal)
+	for _, prefix := range []string{
+		ReservedExternalIDPrefixCoordinatorProposal,
+		ReservedExternalIDPrefixQuickChatCreation,
+	} {
+		if strings.HasPrefix(normalized, prefix) {
+			return fmt.Errorf("%w: external_id may not use the reserved prefix %q", ErrExternalIDInvalid, prefix)
+		}
+	}
+	return nil
 }
 
 // normalizeRequiredExternalID is NormalizeExternalID plus a "missing" check.

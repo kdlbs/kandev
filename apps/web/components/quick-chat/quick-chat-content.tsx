@@ -37,6 +37,8 @@ type QuickChatContentProps = {
   placeholderOverride?: string;
   initialPrompt?: QuickChatInitialPrompt;
   onInitialPromptAttempted?: () => void;
+  /** The accepted Quick Chat launch owns input until its initial startup settles. */
+  startupPending?: boolean;
   /** Inserted once through `chatInputRef.insertText`, not sent. See
    *  {@link useQuickChatInitialDraft}. */
   initialDraft?: string;
@@ -151,12 +153,26 @@ function QuickChatMessageSurface({ items, panelState, taskId }: QuickChatMessage
   );
 }
 
+function isQuickChatComposerBlocked(
+  startupPending: boolean | undefined,
+  panelState: ReturnType<typeof useChatPanelState>,
+): boolean {
+  return (
+    startupPending ||
+    !panelState.session ||
+    panelState.inputMode === "unavailable" ||
+    (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
+    (panelState.planCommentMigration?.isBlocking ?? false)
+  );
+}
+
 export const QuickChatContent = memo(function QuickChatContent({
   sessionId,
   minimalToolbar,
   placeholderOverride,
   initialPrompt,
   onInitialPromptAttempted,
+  startupPending,
   initialDraft,
   transformOutgoing,
   hideStartupRows,
@@ -171,7 +187,6 @@ export const QuickChatContent = memo(function QuickChatContent({
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const activity = useCopilotActivity(activityDisplay, panelState);
   const items = useVisibleItems(activity.items, hideStartupRows);
-
   useFocusComposerOnMount(chatInputRef);
 
   useQuickChatComposerPriming({
@@ -179,11 +194,7 @@ export const QuickChatContent = memo(function QuickChatContent({
     taskId,
     initialPrompt,
     initialDraft,
-    blocked:
-      !panelState.session ||
-      panelState.inputMode === "unavailable" ||
-      (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
-      (panelState.planCommentMigration?.isBlocking ?? false),
+    blocked: isQuickChatComposerBlocked(startupPending, panelState),
     handleSubmit,
     onInitialPromptAttempted,
     chatInputRef,

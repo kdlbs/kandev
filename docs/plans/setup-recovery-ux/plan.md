@@ -13,6 +13,10 @@ legacy_specs: []
 
 # Implementation Plan: Setup recovery UX
 
+The [startup acceptance repair](../quick-chat-startup-acceptance/plan.md) extends
+retained-chat recovery to slow startup and uncertain creation responses.
+Its new work orders are pending. Existing verification results remain historical evidence.
+
 ## Overview
 
 Show imported plugin authentication requirements as actionable warnings and keep

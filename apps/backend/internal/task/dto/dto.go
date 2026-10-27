@@ -296,6 +296,9 @@ type TaskDTO struct {
 	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
 	ExternalID string `json:"external_id,omitempty"`
+	// QuickChatCreationID is the exact retry token carried by lifecycle
+	// projections for an internally keyed Quick Chat creation.
+	QuickChatCreationID string `json:"quick_chat_creation_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
 	// flag. Computed by the task repo at read time as
 	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
@@ -1210,6 +1213,7 @@ func FromTaskWithSessionInfo(
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
 		ExternalID:             task.ExternalID,
+		QuickChatCreationID:    service.QuickChatCreationIDFromExternalID(task.ExternalID),
 		IsFromOffice:           task.IsFromOffice,
 	}
 }

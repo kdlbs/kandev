@@ -296,6 +296,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// resync the tab strip so clients that missed WS events converge.
 	api.POST("/workspaces/:id/quick-chat", h.httpStartQuickChat)
 	api.GET("/workspaces/:id/quick-chats", h.httpListQuickChatSessions)
+	api.GET("/workspaces/:id/quick-chat/creations/:creation_id", h.httpGetQuickChatCreation)
 
 	// Config chat endpoint - creates ephemeral task with config-mode MCP tools
 	api.POST("/workspaces/:id/config-chat", h.httpStartConfigChat)

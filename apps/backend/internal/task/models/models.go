@@ -1159,6 +1159,10 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 // attempt identity.
 const SessionMetaKeyAgentStartAttemptID = "agent_start_attempt_id"
 
+// SessionMetaKeyQuickChatStartAttemptID identifies the request-level owner of
+// a deferred Quick Chat start until its accepted lifecycle transition settles.
+const SessionMetaKeyQuickChatStartAttemptID = "quick_chat_start_attempt_id"
+
 // SessionMetaKeyLastAgentError stores the last recoverable agent runtime
 // failure for UI surfaces that need to keep the error visible after auto-resume.
 const SessionMetaKeyLastAgentError = "last_agent_error"
