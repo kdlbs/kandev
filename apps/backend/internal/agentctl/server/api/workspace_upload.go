@@ -433,7 +433,7 @@ func (s *Server) scopedUploadPath(repo, dir, relativePath string) (string, error
 	}
 
 	joined := cleanRel
-	if strings.TrimSpace(dir) != "" {
+	if dir != "" {
 		cleanDir, err := sanitizeUploadSegment(dir, "dir")
 		if err != nil {
 			return "", err
@@ -451,8 +451,8 @@ func (s *Server) scopedUploadPath(repo, dir, relativePath string) (string, error
 // sanitizeUploadSegment validates one caller-supplied path fragment, rejecting
 // absolute paths and any traversal component.
 func sanitizeUploadSegment(raw, field string) (string, error) {
-	normalized := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
-	if normalized == "" {
+	normalized := strings.ReplaceAll(raw, "\\", "/")
+	if normalized == "" || (field == "relative_path" && strings.TrimSpace(normalized) == "") {
 		return "", fmt.Errorf("invalid path: %s is empty", field)
 	}
 	if strings.HasPrefix(normalized, "/") {

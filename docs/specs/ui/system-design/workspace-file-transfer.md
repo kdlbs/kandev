@@ -110,6 +110,15 @@ Response `200`:
 collision in one call. A path that fails containment is reported as an error rather than a conflict,
 so it never reaches the resolution dialog.
 
+The preflight and multipart upload use the same `scopedUploadPath` interpretation. Preserve
+whitespace in valid `dir` and `relative_path` components; only an exactly empty `dir` denotes the
+root. The existing upload API rejects an empty or entirely whitespace relative path, including at
+preflight. Whitespace-only folder components inside an otherwise valid path remain names. Do not
+change separator normalization, traversal and absolute-path rejection, repository scoping, or
+`resolveMutationPath` containment. Filesystem naming restrictions still apply. The checked target
+and the ordinary or replacement write target agree; keep-both derives its existing next available
+variant from that exact target. The preflight remains advisory, and publication rechecks conflicts.
+
 ### Upload routes
 
 The backend route is `POST /api/v1/task-sessions/:id/workspace/files`. It forwards a multipart form to

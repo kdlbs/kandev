@@ -77,6 +77,11 @@ folder, so that I can supply fixtures, exports, and assets without a terminal or
   A later transport failure does not imply that a completed workspace write was rolled back.
 - **AC-UI-WORKSPACE-FILE-TRANSFER-001.7:** Upload is offered only when the panel has an active task
   session. Without one, the actions are absent rather than present and failing.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-001.8:** A valid selected path and destination folder retain
+  meaningful leading and trailing whitespace in their names when checked for conflicts and written,
+  subject to the destination filesystem. An empty destination denotes the workspace root; a
+  whitespace-only destination denotes a folder with that name. An empty or entirely whitespace
+  relative file path is rejected under the existing upload API contract.
 
 ### REQ-UI-WORKSPACE-FILE-TRANSFER-004: Conflicts are resolved before anything is written
 
