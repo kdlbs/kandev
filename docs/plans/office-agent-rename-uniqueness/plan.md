@@ -20,7 +20,8 @@ and [identity design](../../specs/office/system-design/agents-01.md#workspace-ag
 own the behavior.
 
 The reviewed slice and the accepted CEO name-error precedence remediation are
-implemented and locally verified. The single sequential work order is complete.
+implemented and locally verified. Required-CI browser fixture corrections are
+included in the same work order; their limited validation is recorded below.
 
 ## Scope
 
@@ -37,14 +38,18 @@ implemented and locally verified. The single sequential work order is complete.
   another workspace, exact string semantics, and the global profile namespace.
 - Correct two existing workflowsync test fixtures exposed during required CI:
   wait for automatic sync completion before changing their next-phase inputs.
+- Correct the three repeated positional profile assumptions in the existing
+  mobile profile-deletion fixture using its exact seeded profile identity.
+- Reset the shared review-toggling fixture's seeded checkout and assert its
+  exact two-file slate before exercising the existing scroll assertions.
 
 ### Out of scope
 
 Schema/index/migration changes, concurrency admission or locking changes,
 existing-data repair, exporter workarounds, broad rename refactoring, the
 legacy `office/service` facade, production config import/sync reconciliation, execution
-profile naming, frontend or browser changes, dependency changes, and runtime
-feature flags.
+profile naming, frontend product changes, browser changes outside the named
+test fixtures, dependency changes, and runtime feature flags.
 
 ## Confirmed cause and reproduction
 
@@ -123,7 +128,8 @@ those route guards do not change.
 
 Desktop and phone save actions share this API refusal and saved state. No
 rendered, touch, scrolling, navigation, or frontend-state behavior changes, so
-no mobile layout, ASCII UI preview, or Playwright work is part of this package.
+the backend correction needs no mobile layout or UI preview. The later required-CI
+browser fixture corrections retain the existing desktop and mobile assertions.
 
 ## Public documentation impact
 
@@ -246,3 +252,53 @@ Hosted CI and review remain external delivery gates.
 Three exact failing browser cases also passed once locally with retries
 disabled: mobile Stats, mobile review toggling, and desktop review toggling.
 Those passes do not clear their required CI failures or establish their causes.
+
+### Required CI mobile profile fixture correction
+
+The mobile profile-deletion case failed repeatedly before its first UI action:
+`agents[0].profiles[0]` was undefined. The API may return an empty CLI family
+before the family that owns the seeded profile. Per-test setup guarantees and
+preserves `seedData.agentProfileId`, not a profile on every returned family.
+
+The prepared change is limited to
+`apps/web/e2e/tests/settings/mobile-agent-profile-delete.spec.ts`. A local helper
+finds the exact seeded profile across returned agents and asserts one owning
+identity. The cancel case uses that profile; the two disposable-profile cases
+use its owner and model. Existing UI actions, assertions, timeouts, and API
+ordering remain intact. Public documentation and the product contract do not
+change.
+
+The hosted failures provide the original fixture failure evidence. All three
+mobile cases passed once on 2026-10-27 (11.0s), headless with one worker and
+retries disabled, through the guarded managed runner using existing assets.
+The selection listing confirmed exactly three cases. No dependency install or
+build was repeated. This fixture correction changes no rendered mobile behavior.
+
+A separate existing pseudo-office locale setup case has a confirmed flaky
+verdict but an unknown cause. Its one-case initial-trace diagnostic is recorded
+separately and does not establish a locale, translation, or product correction.
+The unchanged desktop case passed once (5.6s), headless with one worker and
+retries disabled. Its initial trace records no locale cookie and English shell
+and boot locale on the first navigation; the reload sends
+`kandev_locale=pseudo` and receives pseudo shell and boot locale. This passing
+trace does not reveal the hosted initial failure's missing request evidence.
+
+### Required CI review fixture correction
+
+The shared review-toggling fixture now resets its seeded checkout with the
+existing helper and requires exactly its target and trailing file headers
+before the existing scroll sequence. The change is limited to
+`apps/web/e2e/tests/review/review-viewed-toggling-flow.ts`, carried byte-for-byte
+from reviewed commit `6b84f031a530bdcbdf78da42b97203df6fbd5afe`. No production
+scroll utility or shared helper implementation is included.
+
+The reviewed producer's ordered three desktop cases and one mobile case passed;
+that limited evidence is reused without replaying the cases here. Earlier
+hosted flaky verdicts remain recorded. The separate observation about marking
+multiple files remains unresolved and is not claimed fixed by this fixture
+change. No public documentation or product contract changes are needed.
+
+The final fixture delivery checks passed: documentation catalog and specification
+lint, all 24 local links, delivery coverage with no errors, exact carried-file
+identity, and the scoped diff check. Hosted CI remains a separate delivery gate;
+local fixture passes do not clear earlier hosted flaky verdicts.

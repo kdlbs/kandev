@@ -40,13 +40,18 @@ export, while valid saves continue to work.
   only to reflect actual completed implementation and verification. These
   existing specification files also contain broader draft identity material;
   do not promote their entire lifecycle status based on this narrow repair.
+- Correct the existing mobile profile-deletion fixture's three repeated
+  positional assumptions by resolving its exact seeded profile and owner.
+- Carry the reviewed shared review-toggling fixture's checkout reset and exact
+  two-file precondition, preserving its existing scroll assertions.
 
 ## Out of scope
 
 Repository/storage changes, schema/index/migration changes, concurrent-writer
 serialization, existing duplicate repair, exporter changes, the legacy
 `office/service` facade, production import/sync changes, execution-profile naming,
-frontend/locales, browser tests, dependency changes, and broad verification.
+frontend/locales, browser changes outside the named profile and review fixtures,
+dependency changes, and broad verification.
 
 ## Acceptance
 
@@ -185,6 +190,8 @@ const runtime = [
   'apps/backend/internal/office/agents/handler_name_uniqueness_test.go',
   'apps/backend/internal/workflowsync/circuit_test.go',
   'apps/backend/internal/workflowsync/service_test.go',
+  'apps/web/e2e/tests/settings/mobile-agent-profile-delete.spec.ts',
+  'apps/web/e2e/tests/review/review-viewed-toggling-flow.ts',
 ];
 const result = validateCoverage({
   changedFiles: [...documents, ...runtime].map(filename => ({ filename, status: 'modified' })),
@@ -219,6 +226,14 @@ Additional owned existing tests for required CI synchronization correction:
 - `apps/backend/internal/workflowsync/circuit_test.go`
 - `apps/backend/internal/workflowsync/service_test.go`
 
+Additional owned existing test for required CI profile fixture correction:
+
+- `apps/web/e2e/tests/settings/mobile-agent-profile-delete.spec.ts`
+
+Additional owned existing test for required CI review fixture correction:
+
+- `apps/web/e2e/tests/review/review-viewed-toggling-flow.ts`
+
 Owned design/delivery records:
 
 - `docs/specs/office/requirements/agents.md`
@@ -244,10 +259,11 @@ concurrent-write guarantee or duplicate-data repair.
 
 ## Mobile and public documentation
 
-This work changes the shared API save outcome only. Existing desktop and phone
+The product change affects the shared API save outcome only. Existing desktop and phone
 callers receive the same rejection and persisted state. No browser composition,
-frontend state, or mobile-specific interaction changes, so no Playwright or
-layout work is required. Existing public guidance already asks for unique
+frontend state, or mobile-specific interaction changes are needed. Required-CI
+fixture corrections retain existing browser assertions and need no layout work.
+Existing public guidance already asks for unique
 agent names and describes manifest export; no public docs change is needed.
 
 ## Parallelism
@@ -377,3 +393,66 @@ Results on 2026-10-27:
 
 The Office agents suite and already-passing browser selections are not replayed
 for this test-only correction. Hosted CI remains a separate delivery gate.
+
+### Required CI mobile profile fixture correction
+
+The existing mobile profile-deletion fixture assumed that the first returned
+agent owned a profile. Required CI failed repeatedly at `profile.name` before
+the deletion UI was exercised. Per-test setup instead guarantees the exact
+`seedData.agentProfileId` and removes other global test profiles; an empty
+agent family is valid API data.
+
+The prepared test-only correction resolves that ID across returned agents,
+asserts exactly one owner/profile match, and uses its owner and model for the
+two disposable-profile factories in the same file. Every existing UI action,
+assertion, selector, and timeout is preserved. No shared fixture, API ordering,
+production code, or public documentation changes are included.
+
+List the mobile project selection and require exactly three cases, then run the existing file once,
+headless, one worker, retries zero, through the guarded managed runner with
+verified existing assets:
+
+```bash
+cd apps/web
+timeout --kill-after=10s 2m pnpm e2e:raw --project=mobile-chrome e2e/tests/settings/mobile-agent-profile-delete.spec.ts --list --retries=0 --workers=1
+timeout --kill-after=10s 7m pnpm e2e:run --host --no-build --project mobile-chrome -- e2e/tests/settings/mobile-agent-profile-delete.spec.ts --retries=0 --workers=1 --reporter=line
+```
+
+On 2026-10-27, the listing confirmed exactly three cases and the edited file
+passed all three once (11.0s), headless with one worker and retries zero. The
+guarded managed runner admitted the existing assets; no build or install was
+repeated. The original hosted failures remain the failure evidence.
+
+The separate pseudo-office workspace-skills case failed its locale setup
+assertion, then passed its built-in retry. Its cause is unknown; it did not
+reach the copy scan. One exact existing desktop case with initial-attempt trace
+is diagnostic only, with no pseudo-locale or product edit. Existing
+Office and workflowsync passing suites are not repeated for this fixture fix.
+
+The exact unchanged desktop diagnostic passed once (5.6s), with one worker,
+retries zero, headless, and initial-attempt tracing enabled. Its trace records
+an English HTML shell and boot locale without the cookie, followed by a reload
+request carrying `kandev_locale=pseudo` and a pseudo HTML shell and boot locale.
+The prior hosted initial request evidence remains unavailable, so its cause
+is still unknown. No pseudo-locale source was edited.
+
+### Required CI review fixture correction
+
+Carry only `apps/web/e2e/tests/review/review-viewed-toggling-flow.ts` from reviewed
+commit `6b84f031a530bdcbdf78da42b97203df6fbd5afe`. Its SHA256 is
+`9294e777f7747b1863c3690bf44668cd1813bb630464f25a6096a80f57281610`.
+The fixture invokes the existing seeded-checkout reset and asserts exactly the
+target and trailing file headers before the unchanged scroll sequence. No
+production utility, shared helper implementation, or other source file is
+carried from that commit.
+
+Reuse the reviewed producer's limited ordered three-desktop/one-mobile passing
+results; no review-checkbox case is replayed here. Retain earlier hosted flaky
+verdicts and the unresolved observation about marking multiple files. This
+fixture correction does not claim a general product scrolling repair.
+
+Final fixture delivery checks passed on 2026-10-27: documentation catalog and
+specification lint, all 24 local links, delivery coverage without errors, exact
+carried-file identity, and the scoped diff check. The seven existing managed
+assets retain their original hashes. Hosted CI and review remain external
+delivery gates; these limited results do not erase prior hosted failures.
