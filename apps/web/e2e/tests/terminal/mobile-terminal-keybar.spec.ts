@@ -91,6 +91,23 @@ async function inlineStyleProp(loc: Locator, prop: "top" | "bottom"): Promise<st
   return loc.evaluate((el, p) => (el as HTMLElement).style[p], prop);
 }
 
+async function startReadlineShell(testPage: Page): Promise<void> {
+  await testPage.keyboard.type("/bin/bash --noprofile --norc -i");
+  await testPage.keyboard.press("Enter");
+  await testPage.keyboard.type(
+    "export TERM=xterm-256color HISTFILE=/dev/null HISTCONTROL= HISTIGNORE=; " +
+      "set -o emacs; set -o history; bind 'set enable-keypad off'; " +
+      "printf 'BASH_READY:%s\\n' \"$0\"; " +
+      'case "$-" in *i*) echo BASH_INTERACTIVE;; esac; printf \'BASH_TERM:%s\\n\' "$TERM"',
+  );
+  await testPage.keyboard.press("Enter");
+  const lines = async () =>
+    (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim());
+  await expect.poll(lines).toContain("BASH_READY:/bin/bash");
+  await expect.poll(lines).toContain("BASH_INTERACTIVE");
+  await expect.poll(lines).toContain("BASH_TERM:xterm-256color");
+}
+
 test.describe("Mobile shell application cursor navigation", () => {
   test.describe.configure({ retries: 0 });
 
@@ -151,23 +168,28 @@ test.describe("Mobile shell application cursor navigation", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
+    const { frames } = attachShellInputCapture(testPage);
     await seedTaskWithSession(testPage, apiClient, seedData, "Normal cursor control");
     await switchToTerminalPanel(testPage);
     await waitForShellReady(testPage);
     await focusTerminalForTyping(testPage);
+    await startReadlineShell(testPage);
     await startCursorProgram(testPage);
     await testPage.keyboard.press("ArrowUp");
     await expectCursorResult(testPage, "KEY_UP");
     const bar = new MobileTerminalKeybarPage(testPage);
     await testPage.keyboard.type("echo NORMAL_AX");
     await bar.tap("left");
+    await expectFrame(frames, "\x1b[D");
     await testPage.keyboard.type("B");
     await bar.tap("right");
+    await expectFrame(frames, "\x1b[C");
     await testPage.keyboard.press("Enter");
     await expect
       .poll(async () => (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim()))
       .toContain("NORMAL_ABX");
     await bar.tap("up");
+    await expectFrame(frames, "\x1b[A");
     await testPage.keyboard.type("_HISTORY");
     await testPage.keyboard.press("Enter");
     await expect
@@ -175,6 +197,7 @@ test.describe("Mobile shell application cursor navigation", () => {
       .toContain("NORMAL_ABX_HISTORY");
     await bar.tap("up");
     await bar.tap("down");
+    await expectFrame(frames, "\x1b[B");
     await testPage.keyboard.type("echo NORMAL_DONE");
     await testPage.keyboard.press("Enter");
     await expect
@@ -404,6 +427,7 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
     await waitForShellReady(testPage);
     await focusTerminalForTyping(testPage);
+    await startReadlineShell(testPage);
     await testPage.keyboard.type("echo HISTORY_PROBE_782");
     await testPage.keyboard.press("Enter");
     const lines = async () =>
