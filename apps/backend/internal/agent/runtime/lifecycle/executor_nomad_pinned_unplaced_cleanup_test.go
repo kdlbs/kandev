@@ -179,3 +179,30 @@ func TestNomadResumeKeepsPinnedRowWithAllocationHistoryQuarantined(t *testing.T)
 	}
 	assertPinnedRowRetained(t, server, *checkpoints, *releases)
 }
+
+// A purged job lists no allocations once they are garbage collected, so an
+// empty history cannot disprove an allocation the state already recorded.
+func TestNomadCleanupQuarantinesPinnedRowWithRecordedAllocationAndGCdHistory(t *testing.T) {
+	for via, wantReason := range map[string]string{
+		"drainAndSettle": nomadCleanupReasonIdentityUnrecorded,
+		"resume":         nomadCleanupReasonInterrupted,
+	} {
+		t.Run(via, func(t *testing.T) {
+			server := &pinnedUnplacedServer{}
+			c, checkpoints, releases := pinnedUnplacedCleanup(t, server)
+			c.state.Phase = nomadPhaseAllocated
+			c.state.AllocationID, c.state.AllocationCreateIndex = "alloc-1", 7
+			var err error
+			if via == "resume" {
+				c.state.Phase = nomadPhaseCleanupPending
+				err = c.resume(context.Background())
+			} else {
+				err = c.drainAndSettle(context.Background())
+			}
+			if err == nil || !strings.Contains(err.Error(), wantReason) {
+				t.Fatalf("err = %v, want retained with %s", err, wantReason)
+			}
+			assertPinnedRowRetained(t, server, *checkpoints, *releases)
+		})
+	}
+}

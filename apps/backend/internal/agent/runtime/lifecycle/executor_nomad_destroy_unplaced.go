@@ -92,9 +92,14 @@ func (c *nomadCleanup) pinnedWithoutAllocation() bool {
 
 // pinnedNeverAllocated reports a pinned job whose allocation history is
 // provably empty: no allocation ever existed, so no runtime can exist on the
-// node. An unreadable history is not proof and keeps the row fail-closed.
+// node. An unreadable history is not proof and keeps the row fail-closed, and
+// so does a recorded allocation: a purged job lists no allocations once they
+// are garbage collected, so an empty list cannot disprove a recorded one.
 func (c *nomadCleanup) pinnedNeverAllocated(ctx context.Context) bool {
 	if c.state.PlacementMode == nomad.ModePool || c.state.JobID == "" {
+		return false
+	}
+	if c.state.AllocationID != "" || c.state.AllocationCreateIndex != 0 {
 		return false
 	}
 	allocs, err := c.client.ListAllocations(ctx, c.state.Namespace, c.state.JobID)
