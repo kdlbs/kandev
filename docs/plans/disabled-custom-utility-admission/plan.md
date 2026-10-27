@@ -34,7 +34,7 @@ Independently author `TestExecuteDisabledCustomAdmission` in `apps/backend/inter
 
 ## E2E tests
 
-The externally observable API is exercised through registered HTTP and SQLite in both transport modes. No rendered UI or mobile interaction changes; browser E2E would add no distinct coverage for this backend admission boundary.
+The externally observable API is exercised through registered HTTP and SQLite in both transport modes. The hosted E2E repair isolates the review checkbox scenario's disposable seed checkout and asserts that its two intended files are the only review inputs. The existing desktop and mobile scrolling assertions remain intact; no rendered UI changes.
 
 ## Work orders
 
@@ -43,6 +43,8 @@ The externally observable API is exercised through registered HTTP and SQLite in
 ## Verification results
 
 Focused RED reproduced disabled admission in both modes and unexpected profile/route resolution. Focused GREEN and both owning Go packages passed with race detection. Changed-Go lint passed with zero issues. Catalog validation, specification lint, public-doc tests (63 passed), and public-doc validation (54 pages) passed. PR documentation coverage preflight and final diff check are recorded in the work order.
+
+The hosted review-checkbox E2E failed in both original and failed-jobs retry attempts. An ordered local run with the two preceding passthrough cases reproduced the failure: four review files were present rather than two. After resetting the disposable checkout and asserting its exact inputs, the same ordered desktop sequence passed (3 cases) and the mobile review case passed (1 case), both with one worker and zero retries. This addresses fixture isolation; the missed mark for one of two crossed sentinels in a contaminated multi-file list was observed; its internal cause remains unproven.
 
 ## Risks
 

@@ -24,6 +24,7 @@ Enforce saved custom-utility availability at the shared execution preparation bo
 - Add typed service rejection before template, profile, and dynamic routing resolution; map it to HTTP 400 without a call ID.
 - Add independent service and registered-HTTP/SQLite regression coverage for both branches and controls described in the plan; correct existing executable fixtures' enabled state where necessary.
 - Update the custom utility how-to in `docs/public/developer-tools.md` with the admission behavior.
+- Isolate the existing review-checkbox E2E scenario's disposable seed checkout and assert its two intended review files before the first scroll, addressing a hosted CI fixture interaction.
 
 ## Out of scope
 
@@ -53,11 +54,22 @@ git diff --check
 
 Pass every actually changed Go file to `lint-go-changed`, including any adjacent test file chosen instead of the listed file. The lint command's normal 3 GiB budget is separate from the Go test budget. If `scripts/run-quiet` is used, give each invocation a unique owned `KANDEV_RUN_QUIET_DIR`. Record real results and joins; do not substitute a duplicate run for a lost handle.
 
+For the CI fixture repair, from `apps/web` with the existing fresh build, run the following sequentially, with one worker and zero retries:
+
+```bash
+pnpm e2e:run --host --no-build --project chromium e2e/tests/cli-mode/passthrough-toolbar.spec.ts e2e/tests/review/review-viewed-toggling.spec.ts -- --retries=0 --grep 'supports @ prompt/file lookup chips and sends context to passthrough stdin|uploads attachments and delivers them as workspace file paths|keeps a file unchecked until scrolling back and passing it again'
+pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/review/mobile-review-viewed-toggling.spec.ts -- --retries=0 --grep 'keeps a file unchecked until scrolling back and passing it again'
+pnpm exec eslint --max-warnings 0 e2e/tests/review/review-viewed-toggling-flow.ts
+```
+
+The repo's web TypeScript configuration excludes `e2e/`; the browser runs exercise the changed TypeScript but do not provide a separate E2E typecheck.
+
 ## Files likely touched
 
 - `apps/backend/internal/utility/service/service.go`, `service_test.go`, and `admission_test.go`
 - `apps/backend/internal/utility/handlers/handlers.go`, `execute_handlers_test.go`, and `admission_test.go`
 - `docs/public/developer-tools.md`
+- `apps/web/e2e/tests/review/review-viewed-toggling-flow.ts`
 - This plan and work order for status/results; the paired requirement and design for lifecycle reconciliation.
 
 ## Dependencies
@@ -81,3 +93,5 @@ sequential
 ## Results
 
 Focused RED failed on the intended behavior: disabled utilities returned 200 in both modes and resolved profiles/routes. Focused GREEN passed, followed by both complete owning packages with `-race` (pass). Changed-Go lint passed (0 issues); `list-docs.py validate` and specification lint passed; public-doc test suite passed 63 tests and the validator passed 54 pages. Frozen pnpm installation completed once. PR documentation coverage preflight: covered, no errors. Final diff check passed.
+
+For hosted CI remediation, the saved failing ordered run contained four review inputs (two expected), establishing the new precondition's RED evidence without a repeat. The managed host runner reused fresh assets and ran the same two passthrough predecessors followed by the exact desktop review case once: 3 passed, one worker, zero retries. The exact mobile review case also passed once with one worker and zero retries. Focused ESLint and Prettier checks passed. No UI production code changed. In the contaminated diagnostic, two sentinels crossed together but only the preceding file was marked; the internal cause remains unproven and this fixture repair does not claim to resolve it. Hosted verification remains pending.
