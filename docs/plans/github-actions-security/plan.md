@@ -112,7 +112,7 @@ Delivery CI also exposed pre-existing E2E fixture defects. The fixup
 corrects the disabled-scroll baseline, final-directory readiness, and scoped
 MCP route cleanup. It also waits for drawer animation and Retry visibility
 before measurement, using the existing touch-control precision allowance.
-Product rendering and the 44px touch requirement remain unchanged. Detailed
+Those fixture corrections preserve product rendering and the 44px touch requirement. Detailed
 causal evidence and verification are recorded in the validation file.
 The review checkbox scenario also resets its disposable repository before task
 creation and swipes on the persistent header instead of replaceable code rows.
@@ -127,6 +127,14 @@ is observed. The mobile routing fixture waits for save confirmation before
 checking persisted settings. Both retain their original behavior assertions.
 The Office title-edit fixture checks the optimistic render before waiting for
 its PATCH response, then checks persistence after the successful save.
+
+Current-main integration preserves both sides of the sidebar and review-fixture
+changes. Later delivery CI exposed two product races: a late Azure assignment
+response reopened closed detail, and remote recovery could leave a duplicate
+resume stuck in `STARTING`. The fixes preserve selection ownership and restore
+only a ready, previously idle session through the existing attempt-fenced state
+transition. Canvas measurement uses the same settled-animation and 44px helper
+as other mobile controls. Validation records the deterministic regressions.
 
 ## Risks
 

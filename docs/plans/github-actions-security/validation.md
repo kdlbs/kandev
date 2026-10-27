@@ -351,3 +351,64 @@ including rollback and cross-client synchronization. No product behavior,
 timeout, retry policy, or original assertion changed.
 Full web typecheck, scoped ESLint, formatting, document checks, and diff checks
 passed. The remaining CI jobs were still pending when this fix was verified.
+
+
+## Current-main integration and product races found by CI
+
+On 2026-10-27, merge commit `5afaf501` integrated main
+`d549fa694b7d5f8e1dd0d6bade40d4e2b41e71d3`. The two conflicts were in the
+sidebar-recovery and review-checkbox fixtures. Resolution keeps main's drawer
+animation wait and exact review-file identities, plus this PR's owned Retry
+locators, canonical touch measurement, and stable native-swipe target. A fresh
+build passed all four selected mobile cases and both selected desktop cases
+with retries disabled on two CPUs.
+
+Run `40398620748` at `df6cf03ec1174183a3a233cdeea9cbdf0dd3dd9e`
+reported flaky verdicts in Canvas mobile sizing, Azure work-item browsing, and
+Kubernetes task-pod restart. The complete 118-report audit found three retry
+attempts and three first-attempt errors; the retry summary records 4,262
+first-attempt passes, three passes after retry, and 40 skipped tests.
+
+The Canvas Cancel control measured `43.99993896484375` pixels while its drawer
+was entering. Its existing responsive class requires 44 pixels for coarse
+pointers. The test now waits for finite drawer animation and uses the existing
+0.01-pixel measurement allowance in `expectTouchControl`. The detail install
+button uses that same helper. No control size or minimum target changed.
+
+The Azure failure was a product race. An assignment callback unconditionally
+selected its work item after the user had closed detail. The deterministic
+regression holds the PATCH until detail closes, then requires the updated
+assignee on the board and the continued absence of detail. It failed on the
+original code after the board update proved that the response had been applied.
+The callback now updates detail only when that same item is still selected.
+The regression passed three desktop repetitions. All four cases in the full
+mobile Azure and Canvas specs passed. All runs used two CPUs and zero retries;
+the existing drag, persistence, navigation, and mobile assertions remain.
+
+The Kubernetes backend log showed a retained runtime becoming available during
+cold resume. The duplicate launch returned `ErrExecutionAlreadyRunning` after
+writing `STARTING`; its recovered availability event had already been rejected
+because the session was no longer idle. The accepted prompt was requeued and
+never dispatched. Executor and SQLite-backed queue regressions reproduced the
+same state and missing-prompt failures without a Kubernetes cluster.
+The fix restores the previous idle state only when the recovered agent is ready
+for input, using the existing startup-attempt and state comparison. An unready
+runtime retains startup state. Cancellation, a running turn, or a newer attempt
+wins over restoration. The original Kubernetes E2E test is unchanged.
+
+Targeted executor resume/rollback, recovered-availability, and queued-prompt
+checks passed under `go test -race -trimpath -p 1 -count=1 -timeout=5m` on two
+CPUs, including the production rollback callback and exactly-once queue dispatch.
+A local Kind run was unavailable because this host has no Docker daemon; the
+fresh CI container shard remains the real-cluster verification gate.
+
+The security helper digest is unchanged. All 249 workflow/helper Python and
+Node cases, the OpenCode shell contract, and pinning of all 30 workflows passed
+on the merged tree. Zizmor 1.25.2 retains exactly the same 10 reviewed findings
+without new suppressions. These fixes enforce existing behavior; no public
+configuration, API, publication gate, timeout, or retry policy changes.
+
+Full web typecheck, scoped ESLint/formatting, pinned golangci-lint 2.9.0 for the
+two changed Go packages, document catalog/spec lint, and diff checks passed.
+Recovery fix `07ed9feb` and Azure fix `6a820eb2` passed normal commit hooks.
+Fresh exact-head CI and review evidence remain the delivery gate after push.
