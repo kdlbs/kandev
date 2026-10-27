@@ -22,6 +22,46 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .11-.15) | [Discussion reply draft settlement](#discussion-reply-draft-settlement) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .20-.23) | [Watch dialog ownership](#watch-dialog-ownership) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .16-.19) | [Pipeline job summary classification](#pipeline-job-summary-classification) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .24-.27) | [Merge API source-head compatibility](#merge-api-source-head-compatibility) |
+
+
+## Merge API source-head compatibility
+
+For AC .24-.27, `Service.mergeMRWithClient` continues validating project merge
+methods and calls the selected client; interactive workspace/expected-host
+routing and `MergeMRForAutomation` retain their existing connection selection.
+`PATClient.MergeMR` reads the single MR endpoint using the same client, full
+encoded target project path and IID immediately before the merge PUT. It uses
+the response's top-level `sha`, documented as the source branch head, as the
+merge body's `sha`. A nonempty, non-whitespace source SHA is required; an error,
+missing or whitespace-only value prevents the PUT. Do not fall back to diff,
+base, pipeline, target branch, cached task or UI values. Keep the returned
+value unchanged for GitLab to validate; do not infer a reviewed-head guarantee.
+
+`convertRawMR` currently prefers `diff_refs.head_sha` for the general MR
+projection. That diff-version value can lag the top-level head, so do not use
+`GetMR`'s projected `HeadSHA` for this write and do not change the projection's
+semantics as part of this repair. Use a small provider-local raw response read;
+no `Client` interface or UI request change is needed. A fork still addresses
+the MR in its target project, while the returned top-level SHA identifies the
+source head. The provider checks the SHA atomically during its merge. Propagate
+its error, including 409, without a second read or merge retry after the PUT;
+a future independent action remains subject to existing automation scheduling.
+
+`GLabClient` embeds `PATClient` and inherits this path. Service and automation
+callers therefore get the same guard without altering mock or noop contracts.
+Keep all existing merge request fields and error wrapping, credential selection,
+method and squash policy, and no requested source-branch removal. The extra
+scoped read is mandatory even for older hosts, and its failure is fail-closed.
+
+GitLab's [single MR](https://docs.gitlab.com/api/merge_requests/#get-single-merge-request)
+and [merge API](https://docs.gitlab.com/api/merge_requests/#merge-a-merge-request)
+document the source-head field, conditional merge `sha` and mismatch response;
+its [merge implementation](https://raw.githubusercontent.com/gitlabhq/gitlabhq/master/lib/api/merge_requests.rb)
+shows the parameter passed to merge. The scoped registered-route and provider
+contract tests in the [work order](../../../plans/gitlab-required-merge-sha/task-01-bind-merge-head.md)
+prove the actual boundary with disposable servers. This is not a live GitLab
+mutation or a new public UI contract.
 
 ## Watch dialog ownership
 
