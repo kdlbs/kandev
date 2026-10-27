@@ -2,9 +2,13 @@ import type { ApiClient } from "./api-client";
 
 export async function seededAgentProfile(apiClient: ApiClient, profileId: string) {
   const { agents } = await apiClient.listAgents();
-  for (const agent of agents) {
-    const profile = agent.profiles.find((candidate) => candidate.id === profileId);
-    if (profile) return { agent, profile };
+  const matches = agents.flatMap((agent) =>
+    agent.profiles
+      .filter((profile) => profile.id === profileId)
+      .map((profile) => ({ agent, profile })),
+  );
+  if (matches.length !== 1) {
+    throw new Error(`Seed agent profile ${profileId} must have exactly one owning agent`);
   }
-  throw new Error(`Seed agent profile ${profileId} was not found`);
+  return matches[0];
 }

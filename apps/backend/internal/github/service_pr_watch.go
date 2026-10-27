@@ -2367,7 +2367,7 @@ func (s *Service) triggerPRStatusSyncWithOptions(
 	if watch.TaskID != "" {
 		rawTaskID = watch.TaskID
 	}
-	taskID = s.reconcileTaskPROwnership(ctx, watch.SessionID, rawTaskID, watch.RepositoryID, watch.PRNumber)
+	taskID = s.resolveEffectiveAssociationTaskIDForSession(ctx, watch.SessionID, rawTaskID, watch.RepositoryID)
 	if err := s.validatePRWatchHost(ctx, watch.WorkspaceID, watch); err != nil {
 		return nil, err
 	}

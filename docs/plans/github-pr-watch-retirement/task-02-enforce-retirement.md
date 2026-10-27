@@ -302,3 +302,45 @@ runs. The revised helper passed eight mobile cases and two desktop cases
 without retries. The mobile canvas marketplace now uses the existing
 precision-aware 44-pixel touch-control assertion; it passed five retry-free
 runs after CI measured a target at 43.99994 pixels.
+
+### Rebase onto current main
+
+The branch was rebased onto a main that now carries GitHub Enterprise host
+support in the same watch code. Resolutions keep both sides.
+
+- Watch creation and ensure keep main's resource-mutation lock, selected-host
+  resolution, and attached-repository host admission, and now also check
+  retirement before reusing a canonical watch. `CreatePRWatch`'s transactional
+  insert and the resumption lifetime insert persist `github_host`.
+- The poller keeps main's operation fence, resource lock, and host validation
+  before delegating to the transactional result helpers, so retirement
+  admission and post-commit event publication still own the apply step.
+- Batched workspace sync validates each watch's host before filtering inactive
+  and retired watches, and forwards main's operation fence with the branch's
+  feedback-publication flag.
+- `SyncTaskPR` keeps main's staleness check and host admission in the
+  lock-taking prepare step; the transactional prepare/apply split from this
+  branch is unchanged.
+- On-demand status sync keeps the branch's resolve-only owner lookup because
+  the result transaction performs ownership reconciliation, and regains main's
+  host validation and expected-host context.
+- Departed-from-main test fixtures now persist the watch they act on and give
+  the fake task store the repository row that host admission reads.
+
+The failing E2E shard selected `agents[0]` and required it to own profiles, so a
+virtual family sorted first failed the test. The desktop and mobile
+profile-layout specs now resolve the seeded profile's owning agent by ID
+through `seededAgentProfile`. The shared helper keeps its exactly-one-owner
+invariant and both of its unit cases.
+
+Local validation after the rebase:
+
+- `go test -timeout=10m -trimpath -tags fts5 ./internal/github -count=1`: passed.
+- `go test -count=1 -timeout=40m ./internal/orchestrator/`: passed in 561s. The
+  default 10m package timeout expired under concurrent local load, and the
+  targeted retirement and push-association selection passed on its own.
+- `go test -timeout=2m -trimpath -tags fts5 ./internal/orchestrator -run '^(TestDetectPushAndAssociatePR|TestEnsureSessionPRWatch_MultiRepo|TestListTasksNeedingPRWatch|TestPRWatchRetirement_.*|TestResolvePRWatchBranchForWatch.*)$' -count=1`: passed.
+- `make -C apps/backend build`: passed.
+- `bash scripts/lint-go-changed` over every modified Go file: 0 issues.
+- `pnpm vitest run e2e/helpers/seeded-agent-profile.test.ts`: 2 passed.
+- Changed-file ESLint, `pnpm run e2e:sleep-ratchet`, and `pnpm exec tsc --noEmit`: passed.
