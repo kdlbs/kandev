@@ -173,6 +173,8 @@ type StoreWorkflowItem = {
   description?: string | null;
   prompt?: string;
   agent_profile_id?: string;
+  source?: string;
+  source_path?: string;
 };
 
 // Pulls fresh values from the store into the displayed/editable draft, field by field, skipping
@@ -184,6 +186,15 @@ function mergeDisplayedWorkflowFromStore(
 ): Workflow {
   const next = { ...displayed };
   let changed = false;
+
+  if (server.source !== undefined && server.source !== displayed.source) {
+    next.source = server.source;
+    changed = true;
+  }
+  if (server.source_path !== undefined && server.source_path !== displayed.source_path) {
+    next.source_path = server.source_path;
+    changed = true;
+  }
 
   if (!hasLocalDraft(displayed, saved, "name") && server.name !== displayed.name) {
     next.name = server.name;
@@ -215,13 +226,17 @@ function mergeDisplayedWorkflowFromStore(
 // The dirty-flag baseline always tracks the server's current value for every editable field —
 // unlike the displayed draft, it is never guarded by a local-draft check.
 function mergeSavedWorkflowFromServer(saved: Workflow, server: StoreWorkflowItem): Workflow {
+  const source = server.source ?? saved.source;
+  const sourcePath = server.source_path ?? saved.source_path;
   const serverAgentProfileId =
     server.agent_profile_id !== undefined ? agentProfileId(server.agent_profile_id) : undefined;
   if (
     server.name === saved.name &&
     server.description === saved.description &&
     server.prompt === saved.prompt &&
-    serverAgentProfileId === saved.agent_profile_id
+    serverAgentProfileId === saved.agent_profile_id &&
+    source === saved.source &&
+    sourcePath === saved.source_path
   ) {
     return saved;
   }
@@ -231,6 +246,8 @@ function mergeSavedWorkflowFromServer(saved: Workflow, server: StoreWorkflowItem
     description: server.description,
     prompt: server.prompt,
     agent_profile_id: serverAgentProfileId,
+    source,
+    source_path: sourcePath,
   };
 }
 
@@ -263,6 +280,8 @@ function storeItemToWorkflow(sw: StoreWorkflowItem): Workflow {
     name: sw.name,
     description: sw.description,
     prompt: sw.prompt,
+    source: sw.source,
+    source_path: sw.source_path,
     agent_profile_id:
       sw.agent_profile_id !== undefined ? agentProfileId(sw.agent_profile_id) : undefined,
     created_at: "",

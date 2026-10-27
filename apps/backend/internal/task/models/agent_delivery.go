@@ -127,40 +127,49 @@ type AgentDeliverySubmission struct {
 // AgentDeliveryEvent is the normalized event persisted in the backend inbox
 // before agentctl receives an acknowledgment.
 type AgentDeliveryEvent struct {
-	SessionID         string     `json:"session_id"`
-	IncarnationID     string     `json:"incarnation_id"`
-	HarnessGeneration int64      `json:"harness_generation"`
-	TaskID            string     `json:"-"`
-	ExecutionID       string     `json:"-"`
-	OwnerGeneration   int64      `json:"-"`
-	ExpectedStreamID  string     `json:"-"`
-	StreamID          string     `json:"stream_id"`
-	Sequence          int64      `json:"sequence"`
-	SubmissionID      string     `json:"submission_id,omitempty"`
-	EventType         string     `json:"event_type"`
-	Payload           []byte     `json:"payload"`
-	ContentHash       string     `json:"content_hash,omitempty"`
-	HashVersion       int        `json:"hash_version,omitempty"`
-	PayloadPrunedAt   *time.Time `json:"payload_pruned_at,omitempty"`
-	PayloadBytes      int64      `json:"payload_bytes"`
-	Terminal          bool       `json:"terminal,omitempty"`
-	ReceivedAt        time.Time  `json:"received_at"`
-	ProjectedAt       *time.Time `json:"projected_at,omitempty"`
+	SessionID          string     `json:"session_id"`
+	IncarnationID      string     `json:"incarnation_id"`
+	HarnessGeneration  int64      `json:"harness_generation"`
+	TaskID             string     `json:"-"`
+	ExecutionID        string     `json:"-"`
+	OwnerGeneration    int64      `json:"-"`
+	ExpectedStreamID   string     `json:"-"`
+	StreamID           string     `json:"stream_id"`
+	Sequence           int64      `json:"sequence"`
+	SubmissionID       string     `json:"submission_id,omitempty"`
+	EventType          string     `json:"event_type"`
+	Payload            []byte     `json:"payload"`
+	ContentHash        string     `json:"content_hash,omitempty"`
+	HashVersion        int        `json:"hash_version,omitempty"`
+	PayloadPrunedAt    *time.Time `json:"payload_pruned_at,omitempty"`
+	PayloadBytes       int64      `json:"payload_bytes"`
+	CanonicalMessageID string     `json:"-"`
+	Terminal           bool       `json:"terminal,omitempty"`
+	ReceivedAt         time.Time  `json:"received_at"`
+	ProjectedAt        *time.Time `json:"projected_at,omitempty"`
 }
 
 // AgentDeliveryCursor stores the two independent backend watermarks. A
 // received event is safe to acknowledge after its inbox transaction commits;
 // projection may lag and must never move the received cursor backward.
 type AgentDeliveryCursor struct {
-	SessionID         string    `json:"session_id"`
-	IncarnationID     string    `json:"incarnation_id"`
-	HarnessGeneration int64     `json:"harness_generation"`
-	StreamID          string    `json:"stream_id"`
-	ReceivedSequence  int64     `json:"received_sequence"`
-	ProjectedSequence int64     `json:"projected_sequence"`
-	RemoteHighWater   int64     `json:"remote_high_water"`
-	RetiredSequence   int64     `json:"retired_sequence"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	SessionID                      string    `json:"session_id"`
+	IncarnationID                  string    `json:"incarnation_id"`
+	HarnessGeneration              int64     `json:"harness_generation"`
+	StreamID                       string    `json:"stream_id"`
+	ReceivedSequence               int64     `json:"received_sequence"`
+	ProjectedSequence              int64     `json:"projected_sequence"`
+	MessageSegmentBoundarySequence *int64    `json:"message_segment_boundary_sequence,omitempty"`
+	RemoteHighWater                int64     `json:"remote_high_water"`
+	RetiredSequence                int64     `json:"retired_sequence"`
+	UpdatedAt                      time.Time `json:"updated_at"`
+}
+
+// CanonicalAgentDeliveryProjectionResult identifies the message committed for
+// an event and whether projection appended to an existing message.
+type CanonicalAgentDeliveryProjectionResult struct {
+	CanonicalMessageID string
+	Appended           bool
 }
 
 // AgentDeliveryEffect is a durable idempotency key for a projected workflow

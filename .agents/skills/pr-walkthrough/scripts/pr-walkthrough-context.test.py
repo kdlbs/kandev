@@ -86,23 +86,57 @@ class PRWalkthroughContextTest(unittest.TestCase):
     def manifest(self, output: Path) -> dict[str, object]:
         return json.loads((output / "manifest.json").read_text(encoding="utf-8"))
 
+    def context_file(self, output: Path, path: str) -> Path:
+        entry = next(item for item in self.manifest(output)["files"] if item["path"] == path)
+        return output / entry["context_path"]
+
+    def test_pr_instruction_names_are_data_with_unambiguous_manifest_paths(self) -> None:
+        samples = {
+            f"{directory}{name}": f"untrusted instructions from {directory}{name}\n".encode()
+            for directory in ("", "nested/")
+            for name in ("AGENTS.md", "CLAUDE.md", "CONTEXT.md", "AGENTS.md.txt")
+        }
+        for name, content in samples.items():
+            target = self.repo / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        self.git("add", ".")
+        self.git("commit", "-m", "PR instruction files")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        output = Path(self.temp.name) / "instruction-context"
+        result = self.run_context(output, head=head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((output / "head/files/AGENTS.md").exists())
+        entries = {entry["path"]: entry for entry in self.manifest(output)["files"]}
+        physical_paths = set()
+        for name, content in samples.items():
+            entry = entries[name]
+            self.assertTrue(entry["materialized"], name)
+            relative = entry["context_path"]
+            self.assertRegex(relative, r"^head/files/[0-9a-f]{40}\.txt$")
+            self.assertEqual((output / relative).read_bytes(), content)
+            physical_paths.add(relative)
+        self.assertEqual(len(physical_paths), len(samples))
+        self.assertTrue(all(path.is_file() for path in (output / "head/files").iterdir()))
+
     def test_materializes_exact_head_files_and_records_omissions(self) -> None:
         output = Path(self.temp.name) / "context"
         result = self.run_context(output)
 
         self.assertEqual(result.returncode, 0, result.stderr)
         manifest = self.manifest(output)
+        self.assertEqual(manifest["version"], 2)
         self.assertEqual(manifest["base_sha"], self.base)
         self.assertEqual(manifest["head_sha"], self.head)
         self.assertEqual(manifest["merge_base"], self.base)
         entries = {entry["path"]: entry for entry in manifest["files"]}
 
         self.assertEqual(
-            (output / "head" / "files" / "safe.txt").read_text(encoding="utf-8"),
+            self.context_file(output, "safe.txt").read_text(encoding="utf-8"),
             "head bytes\n",
         )
-        self.assertNotIn("worktree bytes", (output / "head" / "files" / "safe.txt").read_text())
-        self.assertFalse((output / "head" / "files" / "removed.txt").exists())
+        self.assertNotIn("worktree bytes", self.context_file(output, "safe.txt").read_text())
+        self.assertTrue(all("context_path" not in entry for entry in entries.values() if not entry["materialized"]))
         self.assertEqual(entries["removed.txt"]["reason"], "deleted")
         self.assertEqual(entries["binary.dat"]["reason"], "binary")
         self.assertEqual(entries["large.dat"]["reason"], "oversized")
@@ -121,10 +155,11 @@ class PRWalkthroughContextTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            (output / "head" / "files" / "safe.txt").read_text(encoding="utf-8"),
+            self.context_file(output, "safe.txt").read_text(encoding="utf-8"),
             "head bytes\n",
         )
-        self.assertFalse((output / "head" / "files" / "head-link").exists())
+        entries = {entry["path"]: entry for entry in self.manifest(output)["files"]}
+        self.assertFalse(entries["head-link"]["materialized"])
 
     def test_manifest_is_deterministic(self) -> None:
         first = Path(self.temp.name) / "first"
@@ -158,7 +193,7 @@ class PRWalkthroughContextTest(unittest.TestCase):
         self.assertLessEqual(launches.call_count, 20)
         for index in range(200):
             self.assertEqual(
-                (output / "head" / "files" / f"batch-{index:03d}.txt").read_text(),
+                self.context_file(output, f"batch-{index:03d}.txt").read_text(),
                 f"head file {index}\n",
             )
 
@@ -173,7 +208,7 @@ class PRWalkthroughContextTest(unittest.TestCase):
         result = self.run_context(output, head=head)
         self.assertEqual(result.returncode, 0, result.stderr)
         for name, content in samples.items():
-            self.assertEqual((output / "head" / "files" / name).read_bytes(), content)
+            self.assertEqual(self.context_file(output, name).read_bytes(), content)
 
     def test_partial_clone_fetches_changed_blobs_in_one_batch_without_moving_refs(self) -> None:
         for index in range(50):
@@ -205,7 +240,7 @@ class PRWalkthroughContextTest(unittest.TestCase):
         self.assertEqual(subprocess.check_output(["git", "-C", str(clone), "rev-parse", "HEAD"]).decode().strip(), head)
         self.assertFalse((clone / ".git" / "FETCH_HEAD").exists())
         for index in range(50):
-            self.assertEqual((output / "head" / "files" / f"partial-{index:03d}.txt").read_text(), f"promised file {index}\n")
+            self.assertEqual(self.context_file(output, f"partial-{index:03d}.txt").read_text(), f"promised file {index}\n")
 
     def test_rejects_invalid_shas_and_missing_merge_base(self) -> None:
         output = Path(self.temp.name) / "context"

@@ -10,6 +10,7 @@ import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { watchWs } from "../../helpers/causal-waits";
 
 async function seedTaskWithSession(
   testPage: Page,
@@ -48,6 +49,7 @@ test.describe("Mobile terminal close", () => {
     prCapture,
   }) => {
     test.setTimeout(120_000);
+    const ws = watchWs(testPage);
     const destroyPause = await pauseNextTerminalDestroy(testPage);
     await seedTaskWithSession(testPage, apiClient, seedData);
     const reactRenderErrors: string[] = [];
@@ -60,7 +62,10 @@ test.describe("Mobile terminal close", () => {
     await switchToTerminalPanel(testPage);
     await waitForShellReady(testPage);
     await testPage.getByTestId("mobile-terminals-pill").tap();
+    await waitForFiniteAnimations(testPage.getByRole("dialog", { name: "Terminals", exact: true }));
+    const created = ws.waitForResponse("user_shell.create");
     await testPage.getByTestId("mobile-add-terminal").tap();
+    await created;
 
     const rows = testPage.locator('[data-testid^="mobile-terminal-row-"]');
     await expect(rows).toHaveCount(2, { timeout: 10_000 });

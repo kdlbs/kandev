@@ -15,7 +15,10 @@ func TestContinuationSafetySnapshotTerminalEventRoundTrip(t *testing.T) {
 	execution := createTestExecution("exec-1", "task-1", "session-1")
 	execution.promptGeneration = 7
 	require.NoError(t, mgr.executionStore.Add(execution))
-	snapshot := &streams.ContinuationSafetySnapshot{Support: streams.ContinuationNativeSavedHistoryV2, PromptGeneration: 7, Known: true, CompletedTools: 2}
+	snapshot := &streams.ContinuationSafetySnapshot{
+		Support: streams.ContinuationAgentManagedToolsV3, PromptGeneration: 7, Known: true,
+		Pending: true, PermissionsResolved: true, CompletedTools: 1,
+	}
 	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "error", Error: "interrupted", PromptGeneration: 7, ContinuationSafety: snapshot})
 	bus.mu.Lock()
 	defer bus.mu.Unlock()
@@ -33,6 +36,7 @@ func TestContinuationSafetySnapshotTerminalEventRoundTrip(t *testing.T) {
 		var decoded streams.ContinuationSafetySnapshot
 		require.NoError(t, json.Unmarshal(value, &decoded))
 		require.Equal(t, *snapshot, decoded)
+		require.True(t, decoded.SafeFor(7), "the terminal event retains the V3 permission attestation")
 		return
 	}
 	t.Fatal("no agent.failed event")

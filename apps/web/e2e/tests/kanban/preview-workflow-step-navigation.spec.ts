@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectTouchControl } from "../../helpers/control-sizing";
 
 const LONG_STEP_NAME = `Awaiting review from the platform team ${"x".repeat(60)}`;
 
@@ -230,10 +232,10 @@ test.describe("Kanban preview workflow step navigation", () => {
     await expect(disclosure).toBeVisible();
     const moveButton = disclosure.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
     await expect(moveButton).toBeVisible();
-    const moveButtonBox = await moveButton.boundingBox();
-    expect(moveButtonBox).not.toBeNull();
-    if (!moveButtonBox) return;
-    expect(moveButtonBox.height).toBeGreaterThanOrEqual(44);
+    await waitForFiniteAnimations(
+      tabletTestPage.locator('[data-slot="drawer-content"][data-state="open"]'),
+    );
+    await expectTouchControl(moveButton, "workflow move action");
 
     await moveButton.tap();
 
