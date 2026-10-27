@@ -193,5 +193,7 @@ Backfill from current HEAD or workspace content and an off-by-default release to
 ## Related artifacts
 
 - [System design](../system-design/turn-changed-files.md)
+- [Subscription reconciliation design](../system-design/turn-changed-files-subscription.md)
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
+- [Subscription reconciliation plan](../../../plans/turn-changes-subscription-reconciliation/plan.md)
 - [Actor attribution](human-assignee.md)
