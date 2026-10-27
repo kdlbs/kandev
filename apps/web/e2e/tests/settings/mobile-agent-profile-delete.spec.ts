@@ -1,5 +1,17 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, type SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+
+async function seedProfileAgent(apiClient: ApiClient, seedData: SeedData) {
+  const { agents } = await apiClient.listAgents();
+  const agent = agents.find((candidate) =>
+    candidate.profiles.some((profile) => profile.id === seedData.agentProfileId),
+  );
+  expect(agent).toBeDefined();
+  const profile = agent!.profiles.find((candidate) => candidate.id === seedData.agentProfileId);
+  expect(profile).toBeDefined();
+  return { agent: agent!, profile: profile! };
+}
 
 function longProfileDeleteConflict() {
   return {
@@ -19,10 +31,9 @@ test.describe("Agent profile deletion on mobile", () => {
   test("keeps list-row deletion controls above the row link and returns focus on cancel", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { profile } = await seedProfileAgent(apiClient, seedData);
 
     await testPage.goto("/settings/agents");
 
@@ -65,11 +76,11 @@ test.describe("Agent profile deletion on mobile", () => {
     testPage,
     apiClient,
     prCapture,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const { agent, profile: seedProfile } = await seedProfileAgent(apiClient, seedData);
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Delete Me", {
-      model: agent.profiles[0].model,
+      model: seedProfile.model,
     });
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
@@ -118,13 +129,16 @@ test.describe("Agent profile deletion on mobile", () => {
     await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });
   });
 
-  test("keeps conflict actions visible with many tasks", async ({ testPage, apiClient }) => {
+  test("keeps conflict actions visible with many tasks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(60_000);
 
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
+    const { agent, profile: seedProfile } = await seedProfileAgent(apiClient, seedData);
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Overflow Profile", {
-      model: agent.profiles[0].model,
+      model: seedProfile.model,
     });
     await testPage.route(`**/api/v1/agent-profiles/${profile.id}**`, async (route) => {
       if (route.request().method() !== "DELETE") {
