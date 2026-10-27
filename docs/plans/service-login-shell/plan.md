@@ -172,8 +172,9 @@ is still required.
 
 ### PR fixup, 2026-10-27
 
-Rebased onto `main` at `f80b89ec4993d6dda5c6f69b08c6bcc0d3c40277` with no
-conflicts. The first check run for `16b3a7d3e49` failed `E2E Shard 26/28` on
+Rebased onto `main` at `af92a5f6d4e` (the base advanced once more between the
+fetch and the rebase) with no conflicts. The first check run for the previous
+head failed `E2E Shard 26/28` on
 `Task List › sort and group options are deep-linkable and persisted`
 (`apps/web/e2e/tests/task/task-list.spec.ts`): the backend reported
 `tasks_list_group` as `none` after the selection.
@@ -197,6 +198,12 @@ Verification on the rebased branch:
 - `(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-list.spec.ts)`: PASS, 9 tests.
 - `(cd apps/web && NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck)`: PASS.
 - `(cd apps/web && pnpm exec eslint app/tasks/tasks-page-client.tsx app/tasks/tasks-page-client.facet-selection.test.tsx e2e/tests/task/task-list.spec.ts)`: PASS.
+
+The base advanced again after that push. No further rebase was required: the
+changed-path sets of the base advance and this branch are disjoint, and
+`git merge-tree --write-tree <current-base> <head>` builds a conflict-free
+synthetic tree whose versions of this branch's changed files are byte-identical
+to the head.
 
 ## Risks
 
