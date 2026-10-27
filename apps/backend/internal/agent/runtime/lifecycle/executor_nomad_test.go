@@ -62,7 +62,7 @@ func TestNomadExecutorOrdinaryStopClosesOnlyMatchingLocalTransport(t *testing.T)
 	runtime := NewNomadExecutor(nil, nil, nil)
 	runtime.sessions[first.InstanceID] = connection
 	var nomadCalls atomic.Int32
-	runtime.newNomadClient = func(string, string) (*nomad.Client, error) {
+	runtime.newNomadClient = func(nomad.ProfileConfig, string) (*nomad.Client, error) {
 		nomadCalls.Add(1)
 		return nil, errors.New("unexpected Nomad call")
 	}

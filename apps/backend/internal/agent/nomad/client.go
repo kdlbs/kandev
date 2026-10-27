@@ -3,12 +3,15 @@ package nomad
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -81,25 +84,76 @@ func (c *Client) CloseIdleConnections() {
 	}
 }
 
-const loopbackIPv4 = "127.0.0.1"
+const (
+	loopbackIPv4 = "127.0.0.1"
+	schemeHTTPS  = "https"
+)
 
 func isLoopbackHost(host string) bool {
 	return host == "localhost" || host == loopbackIPv4 || host == "::1"
 }
 
-func NewClient(rawAddress, token string) (*Client, error) {
+// ClientOption customizes NewClient.
+type ClientOption func(*clientOptions)
+
+type clientOptions struct{ caFile string }
+
+// WithCAFile makes the client trust the PEM CA bundle at path, instead of the
+// system trust store, for the Nomad API. Hostname verification stays on.
+func WithCAFile(path string) ClientOption {
+	return func(o *clientOptions) { o.caFile = path }
+}
+
+// NewClientForProfile builds the API client a profile describes.
+func NewClientForProfile(profile ProfileConfig, token string) (*Client, error) {
+	var opts []ClientOption
+	if profile.CAFile != "" {
+		opts = append(opts, WithCAFile(profile.CAFile))
+	}
+	return NewClient(profile.Address, token, opts...)
+}
+
+func loadCAPool(path string) (*x509.CertPool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("ca_file %q is not readable: %w", path, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(data) {
+		return nil, fmt.Errorf("ca_file %q contains no PEM certificate", path)
+	}
+	return pool, nil
+}
+
+func NewClient(rawAddress, token string, options ...ClientOption) (*Client, error) {
+	var opts clientOptions
+	for _, option := range options {
+		option(&opts)
+	}
 	parsed, err := url.Parse(rawAddress)
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || parsed.Path != "" {
 		return nil, errors.New("nomad API address must be an origin URL without credentials, path, query, or fragment")
 	}
-	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !isLoopbackHost(parsed.Hostname())) {
+	if parsed.Scheme != schemeHTTPS && (parsed.Scheme != "http" || !isLoopbackHost(parsed.Hostname())) {
 		return nil, errors.New("nomad API requires HTTPS except for loopback development")
 	}
 	if token == "" {
 		return nil, errors.New("nomad API token is required")
 	}
+	httpTransport := http.DefaultTransport.(*http.Transport).Clone()
+	if opts.caFile != "" {
+		if parsed.Scheme != schemeHTTPS {
+			return nil, errors.New("ca_file requires an https nomad address")
+		}
+		pool, err := loadCAPool(opts.caFile)
+		if err != nil {
+			return nil, err
+		}
+		httpTransport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	}
 	transport := &http.Client{
-		Timeout: 20 * time.Second,
+		Transport: httpTransport,
+		Timeout:   20 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

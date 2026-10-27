@@ -685,6 +685,13 @@ To readmit a quarantined worker, do all three steps yourself:
 
 For a pool environment, a retained cleanup also keeps its staged job directory `<state_root>/pool/allocations/<job-id>` on the node (the bootstrap script, its environment file, the ready marker and an agentctl copy). Once step 1 has verified the runtime is absent, delete that directory too.
 
+### Nomad deployment notes
+
+- **Private CA for the Nomad API.** When the Nomad API certificate is signed by a private CA, set the optional profile field `ca_file` to the absolute, normalized path of a PEM CA bundle. Kandev then verifies the API certificate against that bundle only (hostname verification and TLS 1.2 or newer stay on) instead of the system trust store. `ca_file` is accepted only with an `https` address, applies to pinned and pool profiles, and a missing or non-PEM file fails the launch with an error naming `ca_file`.
+- **Sharing a host with another Nomad client.** A Kandev client that runs on the same host as another Nomad client needs its own `data_dir`, its own ports, and a dedicated `min_dynamic_port` and `max_dynamic_port` range.
+- **Memory ceiling.** Unless memory oversubscription is enabled on the cluster, set `memory_max_mb` equal to `memory_mb`.
+- **ACL policy.** The executor's token needs: namespace capabilities `submit-job` and `read-job`; variables `kandev/quarantine/*` with read and write; `node_pool "kandev"` read; `node` write (the executor marks a node ineligible on quarantine, which is a node-wide write, so scope the token to dedicated Kandev clients); and `operator` read. Operator readmission additionally needs variables `destroy` on `kandev/quarantine/*`.
+
 ## Lifecycle and cleanup
 
 The task environment reports `creating`, `ready`, `stopped`, or `failed`; individual execution records have finer states. Stop is deliberately not synonymous with destroy for resumable Docker, Kubernetes, and Sprites environments.

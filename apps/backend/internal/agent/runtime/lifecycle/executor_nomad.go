@@ -38,7 +38,7 @@ type NomadExecutor struct {
 
 	// Narrow seams make the launch orchestration testable without allowing a
 	// test or production caller to replace the fixed job policy.
-	newNomadClient func(string, string) (*nomad.Client, error)
+	newNomadClient func(nomad.ProfileConfig, string) (*nomad.Client, error)
 	dialSSH        func(context.Context, *SSHTarget) (*ssh.Client, error)
 	mu             sync.Mutex
 	sessions       map[string]*nomadAgentctlConnection
@@ -73,7 +73,7 @@ func NewNomadExecutor(resolver *AgentctlResolver, secretStore interface {
 		agentctlResolver: resolver,
 		secretStore:      secretStore,
 		logger:           log,
-		newNomadClient:   nomad.NewClient,
+		newNomadClient:   nomad.NewClientForProfile,
 		dialSSH:          DialSSH,
 		sessions:         make(map[string]*nomadAgentctlConnection),
 	}
@@ -210,7 +210,7 @@ func (r *NomadExecutor) newNomadAdmissionClient(ctx context.Context, profile nom
 	if err != nil {
 		return nil, err
 	}
-	client, err := r.newNomadClient(profile.Address, token)
+	client, err := r.newNomadClient(profile, token)
 	if err != nil {
 		return nil, fmt.Errorf("configure Nomad API client: %w", err)
 	}
@@ -375,7 +375,7 @@ func (r *NomadExecutor) openRetainedNomadJob(
 	if err != nil {
 		return nil, nil, err
 	}
-	client, err := r.newNomadClient(profile.Address, token)
+	client, err := r.newNomadClient(profile, token)
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure Nomad API client for retained operation: %w", err)
 	}

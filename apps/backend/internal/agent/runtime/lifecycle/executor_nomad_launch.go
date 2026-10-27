@@ -353,7 +353,7 @@ func (r *NomadExecutor) registerNomadJob(
 	if err != nil {
 		return nil, err
 	}
-	nomadClient, err := r.newNomadClient(profile.Address, token)
+	nomadClient, err := r.newNomadClient(profile, token)
 	if err != nil {
 		return nil, fmt.Errorf("configure Nomad API client: %w", err)
 	}

@@ -24,6 +24,7 @@ const (
 	keyDatacenter     = "datacenter"
 	keyPlatform       = "platform"
 	keyAllocationRoot = "allocation_root"
+	keyCAFile         = "ca_file"
 	keyMemoryMaxMB    = "memory_max_mb"
 	// WorkerPlatform is the only supported worker platform.
 	WorkerPlatform = "darwin/arm64"
@@ -35,7 +36,7 @@ var profileKeys = map[string]struct{}{
 	keyWorkspaceRoot: {}, keyAllocationRoot: {}, keyCPUMHz: {}, keyMemoryMB: {},
 	"nomad_token": {}, "disconnect_lost_after": {},
 	"node_pool": {}, "placement": {}, "pin_node_id": {}, "exclude_local": {}, "prefer_local": {},
-	"ssh_user": {}, keyMemoryMaxMB: {},
+	"ssh_user": {}, keyMemoryMaxMB: {}, keyCAFile: {},
 }
 
 // Profile modes. A profile naming node_id or ssh_target is a legacy pinned
@@ -84,6 +85,8 @@ type ProfileConfig struct {
 	CPUMHz             int
 	MemoryMB           int
 	NomadTokenSecretID string
+	// CAFile is an optional PEM CA bundle that signs the Nomad API certificate.
+	CAFile string
 	// DisconnectLostAfter is the bounded disconnect window of the native job.
 	DisconnectLostAfter time.Duration
 	// Mode is ModeLegacyPinned or ModePool.
@@ -176,7 +179,7 @@ func parseLegacyProfile(config map[string]string) (ProfileConfig, error) {
 	}
 	profile.NomadTokenSecretID = tokenRef
 	profile.Mode = ModeLegacyPinned
-	return profile, nil
+	return profile, parseCAFile(&profile, config)
 }
 
 func parseProfileSSHAndSizing(profile *ProfileConfig, config map[string]string) error {
@@ -210,12 +213,29 @@ func normalizeProfilePaths(profile *ProfileConfig) error {
 	return nil
 }
 
+// parseCAFile reads the optional ca_file; it is valid only with an https address.
+func parseCAFile(profile *ProfileConfig, config map[string]string) error {
+	raw := strings.TrimSpace(config[keyCAFile])
+	if raw == "" {
+		return nil
+	}
+	path, err := cleanAbsolutePath(raw)
+	if err != nil {
+		return fmt.Errorf("ca_file: %w", err)
+	}
+	if !strings.HasPrefix(profile.Address, "https://") {
+		return fmt.Errorf("ca_file requires an https nomad address")
+	}
+	profile.CAFile = path
+	return nil
+}
+
 func validateAddress(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return fmt.Errorf("nomad address must be an absolute HTTP(S) URL without credentials or fragment")
 	}
-	if parsed.Scheme == "https" {
+	if parsed.Scheme == schemeHTTPS {
 		return nil
 	}
 	if parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()) {
@@ -291,7 +311,7 @@ func parsePoolProfile(config map[string]string) (ProfileConfig, error) {
 		return profile, fmt.Errorf("nomad_token must be a Kandev secret reference")
 	}
 	profile.NomadTokenSecretID = tokenRef
-	return profile, nil
+	return profile, parseCAFile(&profile, config)
 }
 
 func parsePoolRequired(profile *ProfileConfig, config map[string]string) error {
