@@ -37,15 +37,16 @@ type ProfileStore interface {
 
 // Sentinel errors for agent validation.
 var (
-	ErrAgentNameRequired     = errors.New("agent name is required")
-	ErrAgentRoleInvalid      = errors.New("invalid agent role")
-	ErrAgentCEOAlreadyExists = errors.New("workspace already has a CEO agent")
-	ErrAgentCEOReportsTo     = errors.New("CEO agent must be the workspace root")
-	ErrAgentReportsToInvalid = errors.New("reports_to agent does not exist in this workspace")
-	ErrAgentReportsToSelf    = errors.New("agent cannot report to itself")
-	ErrAgentReportsToCycle   = errors.New("agent reporting structure cannot contain a cycle")
-	ErrAgentStatusTransition = errors.New("invalid status transition")
-	ErrAgentStatusStale      = errors.New("agent status changed before recovery")
+	ErrAgentNameRequired      = errors.New("agent name is required")
+	ErrAgentNameAlreadyExists = errors.New("agent name already exists")
+	ErrAgentRoleInvalid       = errors.New("invalid agent role")
+	ErrAgentCEOAlreadyExists  = errors.New("workspace already has a CEO agent")
+	ErrAgentCEOReportsTo      = errors.New("CEO agent must be the workspace root")
+	ErrAgentReportsToInvalid  = errors.New("reports_to agent does not exist in this workspace")
+	ErrAgentReportsToSelf     = errors.New("agent cannot report to itself")
+	ErrAgentReportsToCycle    = errors.New("agent reporting structure cannot contain a cycle")
+	ErrAgentStatusTransition  = errors.New("invalid status transition")
+	ErrAgentStatusStale       = errors.New("agent status changed before recovery")
 )
 
 // GovernanceSettingsReader reads workspace governance settings.
@@ -848,6 +849,9 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 	if !validRoles[agent.Role] {
 		return ErrAgentRoleInvalid
 	}
+	if err := s.validateAgentNameUnique(ctx, agent.Name, agent.WorkspaceID, ""); err != nil {
+		return err
+	}
 	if agent.Role == models.AgentRoleCEO {
 		if agent.ReportsTo != "" {
 			return ErrAgentCEOReportsTo
@@ -855,9 +859,6 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 		if s.countAgentsByRoleInWorkspace(ctx, models.AgentRoleCEO, agent.WorkspaceID, "") > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
-	}
-	if err := s.validateAgentNameUnique(ctx, agent.Name, agent.WorkspaceID, ""); err != nil {
-		return err
 	}
 	if agent.ReportsTo != "" {
 		return s.validateReportsTo(ctx, agent)
@@ -872,6 +873,9 @@ func (s *AgentService) validateAgentUpdate(ctx context.Context, agent *models.Ag
 	}
 	if !validRoles[agent.Role] {
 		return ErrAgentRoleInvalid
+	}
+	if err := s.validateAgentNameUnique(ctx, agent.Name, agent.WorkspaceID, agent.ID); err != nil {
+		return err
 	}
 	if agent.Role == models.AgentRoleCEO {
 		if agent.ReportsTo != "" {
@@ -906,7 +910,7 @@ func (s *AgentService) validateAgentNameUnique(ctx context.Context, name, worksp
 		return fmt.Errorf("check agent name uniqueness: %w", err)
 	}
 	if exists {
-		return fmt.Errorf("agent name %q already exists", name)
+		return fmt.Errorf("%w: %q", ErrAgentNameAlreadyExists, name)
 	}
 	return nil
 }

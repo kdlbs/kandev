@@ -1,6 +1,6 @@
 import path from "node:path";
 import { type Locator, type Page } from "@playwright/test";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import type { GitStatusData } from "../../../lib/types/git-events";
@@ -67,6 +67,7 @@ export function reviewViewedTogglingScenario(mobile: boolean) {
     backend,
     prCapture,
   }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Review viewed checkbox",
@@ -130,6 +131,15 @@ export function reviewViewedTogglingScenario(mobile: boolean) {
           .getByRole("checkbox");
     await expect(header).toBeVisible();
     await expect(dialog.getByTestId("review-diff-pending")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        root
+          .getByTestId("review-file-header")
+          .evaluateAll((headers) =>
+            headers.map((entry) => entry.getAttribute("data-file-path")).sort(),
+          ),
+      )
+      .toEqual([TARGET, TRAILING]);
     await expect(dialog.getByText("export const line0 = 0;", { exact: true })).toBeVisible();
     await waitForFiniteAnimations(dialog);
     await expect(checkbox).not.toBeChecked();

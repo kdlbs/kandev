@@ -1,5 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+
+async function getSeededAgentProfile(apiClient: ApiClient, profileId: string) {
+  const { agents } = await apiClient.listAgents();
+  const matches = agents.flatMap((agent) =>
+    agent.profiles
+      .filter((profile) => profile.id === profileId)
+      .map((profile) => ({ agent, profile })),
+  );
+  expect(matches, "The seeded profile must have exactly one owning agent").toHaveLength(1);
+  return matches[0]!;
+}
 
 function longProfileDeleteConflict() {
   return {
@@ -21,10 +33,7 @@ test.describe("Agent profile deletion on mobile", () => {
     apiClient,
     seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const profile = await apiClient.getAgentProfile(seedData.agentProfileId);
-    const agent = agents.find((candidate) => candidate.id === profile.agentId);
-    if (!agent) throw new Error("seed agent profile owner is missing");
+    const { profile } = await getSeededAgentProfile(apiClient, seedData.agentProfileId);
 
     await testPage.goto("/settings/agents");
 
@@ -69,12 +78,12 @@ test.describe("Agent profile deletion on mobile", () => {
     seedData,
     prCapture,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const seededProfile = await apiClient.getAgentProfile(seedData.agentProfileId);
-    const agent = agents.find((candidate) => candidate.id === seededProfile.agentId);
-    if (!agent) throw new Error("seed agent profile owner is missing");
+    const { agent, profile: seedProfile } = await getSeededAgentProfile(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Delete Me", {
-      model: seededProfile.model,
+      model: seedProfile.model,
     });
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
@@ -130,12 +139,12 @@ test.describe("Agent profile deletion on mobile", () => {
   }) => {
     test.setTimeout(60_000);
 
-    const { agents } = await apiClient.listAgents();
-    const seededProfile = await apiClient.getAgentProfile(seedData.agentProfileId);
-    const agent = agents.find((candidate) => candidate.id === seededProfile.agentId);
-    if (!agent) throw new Error("seed agent profile owner is missing");
+    const { agent, profile: seedProfile } = await getSeededAgentProfile(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const profile = await apiClient.createAgentProfile(agent.id, "Mobile Overflow Profile", {
-      model: seededProfile.model,
+      model: seedProfile.model,
     });
     await testPage.route(`**/api/v1/agent-profiles/${profile.id}**`, async (route) => {
       if (route.request().method() !== "DELETE") {
