@@ -83,8 +83,41 @@ def digests_from_state(state: dict[str, Any]) -> dict[str, Any]:
     return {"input_digest": digest, "native_job_spec_sha256": state.get("native_job_spec_sha256")}
 
 
-def compare_instance(before: dict[str, Any], after: dict[str, Any], when: str) -> None:
-    """Raises naming the first way the instance after `when` differs from the one before it."""
+PROCESS_KEYS = ("pid", "ppid", "started", "depth", "role", "cmd_sha256")
+
+
+def process_rows(tree: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(({key: row[key] for key in PROCESS_KEYS} for row in tree), key=lambda row: row["pid"])
+
+
+def tree_drift(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]]]:
+    """How the agentctl process tree changed: (problems, new processes).
+
+    The same agentctl root must still run and every earlier process must still be present. A process that is new
+    is acceptable only when it descends from that root; it is returned so the evidence can record it.
+    """
+    ident = lambda row: (row["pid"], row["started"])  # noqa: E731
+    root = next((row for row in before if row["depth"] == 0 and row["role"] == "agentctl"), None)
+    problems: list[str] = []
+    if root is None or not any(ident(row) == ident(root) and row["depth"] == 0 for row in after):
+        problems.append("the agentctl root process is not the one that ran before")
+    now = {ident(row) for row in after}
+    problems += [f"process {row['pid']} ({row['role']}) is no longer present" for row in before if ident(row) not in now]
+    known = {ident(row) for row in before}
+    by_pid = {row["pid"]: row for row in after}
+    added = [row for row in after if ident(row) not in known]
+    for row in added:
+        cursor, hops = row, 0
+        while root is not None and cursor["pid"] != root["pid"] and cursor["ppid"] in by_pid and hops < 64:
+            cursor, hops = by_pid[cursor["ppid"]], hops + 1
+        if root is None or cursor["pid"] != root["pid"]:
+            problems.append(f"new process {row['pid']} ({row['role']}) is outside the agentctl root" if row["depth"] == 0
+                            else f"new process {row['pid']} ({row['role']}) does not descend from the agentctl root")
+    return problems, added
+
+
+def compare_instance(before: dict[str, Any], after: dict[str, Any], when: str) -> list[dict[str, Any]]:
+    """Raises naming the first way the instance after `when` differs from the one before it; returns new descendants."""
     if before["jobs"] != after["jobs"]:
         raise PreflightError(f"{when} registered a different set of Nomad jobs; the instance was re-created")
     if before["nomad"] != after["nomad"]:
@@ -95,8 +128,10 @@ def compare_instance(before: dict[str, Any], after: dict[str, Any], when: str) -
         raise PreflightError(f"{when} changed the continuation digest")
     if before["fence"] != after["fence"]:
         raise PreflightError(f"{when} changed the worker fence")
-    if before["tree"] != after["tree"]:
-        raise PreflightError(f"{when} did not preserve the agentctl: the process tree changed")
+    problems, added = tree_drift(before["tree"], after["tree"])
+    if problems:
+        raise PreflightError(f"{when} did not preserve the agentctl: the process tree changed: {'; '.join(problems)}")
+    return added
 
 
 def check_outage_window() -> None:
@@ -199,7 +234,7 @@ class RecoveryScenario(pool.TwoNodeScenario):
         fence = self.r.fence()
         if fence is None:
             raise PreflightError(f"environment {env['label']} has no worker fence")
-        return {"inventory": inventory, "nomad": self.r.nomad_snapshot(inventory), "tree": wo06._ident(tree), "fence": fence,
+        return {"inventory": inventory, "nomad": self.r.nomad_snapshot(inventory), "tree": process_rows(tree), "fence": fence,
                 "digests": self.digests(env), "jobs": sorted(self.kandev_jobs())}
 
     def survival_problems(self, env: dict[str, Any], before: dict[str, Any]) -> list[str]:
@@ -211,8 +246,9 @@ class RecoveryScenario(pool.TwoNodeScenario):
                 problems.append("the Nomad job or allocation identity changed")
         except PreflightError as exc:
             problems.append(str(exc))
-        if wo06._ident(self.tree(env)) != before["tree"]:
-            problems.append("the agentctl process tree changed")
+        drift, _ = tree_drift(before["tree"], process_rows(self.tree(env)))
+        if drift:
+            problems.append(f"the agentctl process tree changed: {'; '.join(drift)}")
         if self.r.fence() != before["fence"]:
             problems.append("the worker fence changed")
         return problems
@@ -367,7 +403,7 @@ def drive_pool_pre_ready_recovery(runner: fx.Runner, cfg: dict[str, Any], ops: f
             return scn.snapshot(env, task)
 
         after = step("await-recovery", recovered)
-        step("assert-identity-preserved", lambda: compare_instance(before["instance"], after, "pre-ready recovery"))
+        new_processes = step("assert-identity-preserved", lambda: compare_instance(before["instance"], after, "pre-ready recovery"))
         layout = step("assert-workspace", lambda: scn.workspace_layout(env))
         _finish_cleanup(scn, step, guard, env, task, layout)
         cleanup = step("teardown", lambda: scn.finish({"released": [], "operator_calls": []}))
@@ -377,7 +413,7 @@ def drive_pool_pre_ready_recovery(runner: fx.Runner, cfg: dict[str, Any], ops: f
     return _report(scn, cleanup, pre_ready_recovery=True, execution_id=after["inventory"]["execution_id"],
                    continuation_digest={"before": digest, "after": after["digests"]["input_digest"], "equal": True},
                    environment_status={"before": "creating", "after": "ready"}, backend_pids={"before_crash": first["pid"], "after_restart": second["pid"]},
-                   node_attach=env["attach"])
+                   node_attach=env["attach"], new_processes=new_processes)
 
 
 # -- pool-backend-restart --------------------------------------------------------------------------------------
@@ -403,7 +439,7 @@ def drive_pool_backend_restart(runner: fx.Runner, cfg: dict[str, Any], ops: fx.O
             raise PreflightError("restarted backend reused the stopped process identity")
         tunnel_after = step("await-tunnel-after-recovery", lambda: scn.await_tunnel(env)) if tunnel else None
         after = step("snapshot-after-recovery", lambda: scn.snapshot(env, task))
-        step("assert-instance-attached", lambda: compare_instance(before, after, "backend restart recovery"))
+        new_processes = step("assert-instance-attached", lambda: compare_instance(before, after, "backend restart recovery"))
         _finish_cleanup(scn, step, guard, env, task, layout)
         step("restore-local-node-eligibility", scn.restore_pin)
         cleanup = step("teardown", lambda: scn.finish({"released": [], "operator_calls": []}))
@@ -414,7 +450,7 @@ def drive_pool_backend_restart(runner: fx.Runner, cfg: dict[str, Any], ops: fx.O
         guard.restore()
     return _report(
         scn, cleanup, backend_restart=True, node_attach=env["attach"], pinned_to_ssh=pinned["pinned"],
-        backend_pids={"before": old["pid"], "after": new["pid"]},
+        backend_pids={"before": old["pid"], "after": new["pid"]}, new_processes=new_processes,
         attached_existing_instance={"job_id": after["nomad"]["job_id"], "job_recreated": False, "allocation_id": after["nomad"]["allocation_id"],
                                     "agentctl_unchanged": True, "fence_unchanged": True, "new_jobs": []},
         tunnel={"before": tunnel_before, "after": tunnel_after, "went_down_with_backend": down} if tunnel else None)
@@ -441,13 +477,13 @@ def drive_pool_idle_outage(runner: fx.Runner, cfg: dict[str, Any], ops: fx.Ops, 
             raise PreflightError("restarted backend reused the stopped process identity")
         tunnel = step("await-tunnel-after-recovery", lambda: scn.await_tunnel(env)) if tunnel_expected else None
         after = step("snapshot-after-recovery", lambda: scn.snapshot(env, task))
-        step("assert-instance-recovered", lambda: compare_instance(before, after, "idle outage recovery"))
+        new_processes = step("assert-instance-recovered", lambda: compare_instance(before, after, "idle outage recovery"))
         _finish_cleanup(scn, step, guard, env, task, layout)
         cleanup = step("teardown", lambda: scn.finish({"released": [], "operator_calls": []}))
     finally:
         guard.restore()
     report = _report(scn, cleanup, idle_outage=True, idle_timeout=IDLE_TIMEOUT, outage=outage, instance_survived=True, tunnel=tunnel,
-                     node_attach=env["attach"], backend_pids={"before": old["pid"], "after": new["pid"]}, **idle,
+                     node_attach=env["attach"], backend_pids={"before": old["pid"], "after": new["pid"]}, new_processes=new_processes, **idle,
                      scenario_kind="idle-timeout-disabled-and-survival" if idle["idle_timeout_observed"] else "survival-only")
     if not idle["idle_timeout_observed"]:
         report["limitations"] = [*LIMITATIONS, SURVIVAL_ONLY_LIMITATION]

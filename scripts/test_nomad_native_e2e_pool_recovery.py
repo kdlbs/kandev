@@ -122,7 +122,15 @@ class Sim:
         if not self.inst["alive"]:
             return []
         pid, started = self.inst["agentctl"]
-        return [{"pid": pid, "started": started, "depth": 0, "role": "agentctl"}, {"pid": pid + 1, "started": "c", "depth": 1, "role": "child"}]
+        rows = [{"pid": pid, "ppid": 1, "started": started, "depth": 0, "role": "agentctl", "cmd_sha256": "r"},
+                {"pid": pid + 1, "ppid": pid, "started": "c", "depth": 1, "role": "child", "cmd_sha256": "c"}]
+        if self.backend_pids > 1 and self.flags.get("extra_child"):
+            rows.append({"pid": pid + 50, "ppid": pid + 1, "started": "n", "depth": 2, "role": "grandchild", "cmd_sha256": "n"})
+        if self.backend_pids > 1 and self.flags.get("extra_orphan"):
+            rows.append({"pid": 9000, "ppid": 1, "started": "o", "depth": 0, "role": "unidentified", "cmd_sha256": "o"})
+        if self.backend_pids > 1 and self.flags.get("child_gone"):
+            rows = rows[:1]
+        return rows
 
     def read_db(self, database, fn):
         meta = json.dumps(self.metadata)
@@ -266,7 +274,30 @@ class DriveBase(unittest.TestCase):
 
 
 # -- pure helpers --------------------------------------------------------------------------------------------
+PROC = {"pid": 1, "ppid": 0, "started": "t", "depth": 0, "role": "agentctl", "cmd_sha256": "r"}
+CHILD = {"pid": 2, "ppid": 1, "started": "c", "depth": 1, "role": "child", "cmd_sha256": "c"}
+
+
 class HelperTest(unittest.TestCase):
+    def test_tree_drift_accepts_new_descendants_of_the_same_agentctl_and_records_them(self):
+        new = {"pid": 7, "ppid": 2, "started": "n", "depth": 2, "role": "grandchild", "cmd_sha256": "n"}
+        problems, added = rec.tree_drift([PROC, CHILD], [PROC, CHILD, new])
+        self.assertEqual((problems, added), ([], [new]))
+        self.assertEqual(rec.tree_drift([PROC, CHILD], [PROC, CHILD]), ([], []))
+
+    def test_tree_drift_names_each_violation(self):
+        stranger = {"pid": 9, "ppid": 500, "started": "o", "depth": 0, "role": "unidentified", "cmd_sha256": "o"}
+        detached = {"pid": 8, "ppid": 77, "started": "d", "depth": 1, "role": "child", "cmd_sha256": "d"}
+        cases = {
+            "agentctl root": [{**PROC, "started": "other"}, CHILD],
+            "no longer present": [PROC],
+            "outside the agentctl": [PROC, CHILD, stranger],
+            "does not descend": [PROC, CHILD, detached],
+        }
+        for text, after in cases.items():
+            problems, _ = rec.tree_drift([PROC, CHILD], after)
+            self.assertTrue(any(text in item for item in problems), (text, problems))
+
     def test_find_key_searches_nested_objects_and_lists(self):
         self.assertEqual(rec.find_key({"a": [{"b": {"k": "7"}}]}, "k"), "7")
         self.assertIsNone(rec.find_key({"a": 1}, "k"))
@@ -278,9 +309,9 @@ class HelperTest(unittest.TestCase):
                 rec.valid_port(bad)
 
     def test_compare_names_what_changed(self):
-        base = {"inventory": {"a": 1}, "nomad": {"b": 1}, "tree": [(1, "t")], "fence": "f", "digests": {"input_digest": DIGEST}, "jobs": ["j"]}
-        rec.compare_instance(base, json.loads(json.dumps(base)) | {"tree": [(1, "t")]}, "x")
-        cases = {"jobs": (["j", "k"], "re-created"), "nomad": ({"b": 2}, "re-created"), "tree": ([(2, "t")], "process tree"),
+        base = {"inventory": {"a": 1}, "nomad": {"b": 1}, "tree": [PROC], "fence": "f", "digests": {"input_digest": DIGEST}, "jobs": ["j"]}
+        rec.compare_instance(base, json.loads(json.dumps(base)), "x")
+        cases = {"jobs": (["j", "k"], "re-created"), "nomad": ({"b": 2}, "re-created"), "tree": ([{**PROC, "pid": 2}], "process tree"),
                  "fence": ("g", "fence"), "digests": ({"input_digest": "0"}, "continuation digest"), "inventory": ({"a": 2}, "execution")}
         for key, (value, text) in cases.items():
             with self.assertRaises(PreflightError) as ctx:
@@ -460,6 +491,17 @@ class BackendRestartTest(DriveBase):
         self.assert_fails(rec.drive_pool_backend_restart, "tunnel port", no_tunnel_port=True)
         self.assertEqual(self.sim.stops, 0)
 
+    def test_extra_agentctl_descendant_after_recovery_is_recorded_not_failed(self):
+        report = self.run_it(extra_child=True)
+        self.assertEqual([item["pid"] for item in report["new_processes"]], [150])
+        self.assertTrue(report["attached_existing_instance"]["agentctl_unchanged"])
+
+    def test_vanished_process_after_recovery_fails(self):
+        self.assert_fails(rec.drive_pool_backend_restart, "no longer present", child_gone=True)
+
+    def test_new_process_outside_the_agentctl_fails(self):
+        self.assert_fails(rec.drive_pool_backend_restart, "outside the agentctl", extra_orphan=True)
+
     def test_native_launch_without_a_reverse_tunnel_skips_the_tunnel_steps(self):
         report = self.run_it(native_no_tunnel=True)
         self.assertIsNone(report["tunnel"])
@@ -562,6 +604,10 @@ class IdleOutageTest(DriveBase):
 
     def test_ssh_node_tunnel_must_return_after_recovery(self):
         self.assert_fails(rec.drive_pool_idle_outage, "tunnel", tunnel_stays_down=True)
+
+    def test_extra_agentctl_descendant_after_recovery_is_recorded_for_the_outage(self):
+        report = self.run_it(extra_child=True)
+        self.assertEqual([item["pid"] for item in report["new_processes"]], [150])
 
     def test_ssh_native_launch_without_a_reverse_tunnel_skips_the_tunnel(self):
         report = self.run_it(native_no_tunnel=True)
