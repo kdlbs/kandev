@@ -78,3 +78,12 @@ current scope excludes changes to grouping behavior.
 ## Implementation plans
 
 - [Workflow step grouping](../../../plans/task-list-workflow-step-grouping/plan.md).
+
+## Planned phone List saved-view revision
+
+The draft [phone List contract](mobile-list-saved-views.md) refines the phone
+portions of 001.1, 001.5-.7. Phone List uses its selected sidebar view's grouping,
+including None or State when that view requests it. Desktop/tablet standalone
+List retains this document's workflow-step default and legacy aliases.
+The [mobile List package](../../../plans/mobile-list-layout/plan.md) owns the
+new phone implementation. No stored grouping preference changes during planning.

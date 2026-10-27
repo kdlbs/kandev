@@ -33,6 +33,7 @@ export type SidebarGroup = {
   key: string;
   label: string;
   tasks: TaskSwitcherItem[];
+  subTasksByParentId?: Map<string, TaskSwitcherItem[]>;
   matchingCount?: number;
   isContinuation?: boolean;
 };

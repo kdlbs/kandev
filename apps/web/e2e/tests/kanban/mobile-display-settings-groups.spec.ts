@@ -83,27 +83,26 @@ test.describe("Mobile display settings groups", () => {
   });
 
   // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-003.2 AC-TASKS-LIST-ARCHIVE-FILTERS-003.5
-  test("names the List workflow and repository controls in the Filters drawer", async ({
-    testPage,
-  }) => {
+  test("names the phone List result-filter controls", async ({ testPage }) => {
     await testPage.goto("/tasks");
-    const card = await openMobileMenu(testPage);
-    await expect(card.getByTestId("mobile-display-settings-filters-toggle")).toHaveCount(0);
-    await closeMobileMenu(testPage);
-
-    const opener = testPage.getByTestId("tasks-list-filters-trigger");
+    await expect(testPage.getByTestId("mobile-list-search-row")).toHaveCount(0);
+    await testPage.getByTestId("mobile-list-search-toggle").tap();
+    const opener = testPage.getByTestId("mobile-list-result-filters");
     await expectTouchControl(opener);
     await opener.tap();
-    const drawer = testPage.getByTestId("tasks-list-filters-drawer");
+    const drawer = testPage.getByTestId("mobile-list-result-filters-drawer");
     await expect(drawer).toBeVisible();
 
-    await expect(drawer.getByTestId("tasks-list-workflow-filter")).toHaveAccessibleName("Workflow");
-    await expect(drawer.getByTestId("tasks-list-repository-filter")).toHaveAccessibleName(
-      "Repository",
-    );
-    await expectTouchControl(drawer.getByTestId("tasks-list-workflow-filter"));
-    await expectTouchControl(drawer.getByTestId("tasks-list-repository-filter"));
-    await drawer.getByTestId("tasks-list-filters-done").tap();
+    for (const [testId, label] of [
+      ["mobile-list-filter-state", "State"],
+      ["mobile-list-filter-workflow", "Workflow"],
+      ["mobile-list-filter-repository", "Repository"],
+    ]) {
+      const control = drawer.getByTestId(testId);
+      await expect(control).toHaveAccessibleName(label);
+      await expectTouchControl(control);
+    }
+    await drawer.getByTestId("mobile-list-filters-apply").tap();
     await expect(drawer).toBeHidden();
     await expect(opener).toBeFocused();
   });

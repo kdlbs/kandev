@@ -17,6 +17,8 @@ test("phone status groups and task actions remain contained in both themes", asy
   await testPage.goto("/tasks");
   await testPage.getByTestId("app-nav-trigger").tap();
   const menu = testPage.getByTestId("app-nav-sheet");
+  const tasksToggle = menu.getByTestId("mobile-navigation-tasks-toggle");
+  if ((await tasksToggle.getAttribute("aria-expanded")) !== "true") await tasksToggle.tap();
   await expectStateGroupHeaders(menu);
   for (const width of [393, 767]) {
     await testPage.setViewportSize({ width, height: 851 });
@@ -61,6 +63,8 @@ test("phone workflow groups retain hierarchy, touch controls, and child navigati
     await testPage.goto("/tasks");
     await testPage.getByTestId("app-nav-trigger").tap();
     const menu = testPage.getByTestId("app-nav-sheet");
+    const tasksToggle = menu.getByTestId("mobile-navigation-tasks-toggle");
+    if ((await tasksToggle.getAttribute("aria-expanded")) !== "true") await tasksToggle.tap();
     const group = menu.locator(
       `[data-testid="sidebar-group"][data-group-key="${seedData.startStepId}"]`,
     );

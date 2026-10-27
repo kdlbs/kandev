@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   },
   page: {
     filters: [] as SidebarTaskQuery["filters"],
+    queryFilters: null as SidebarTaskQuery["filters"] | null,
     response: null as SidebarTaskPageResponse | null,
     isLoading: false,
     error: null as string | null,
@@ -44,6 +45,7 @@ vi.mock("@/hooks/domains/kanban/use-sidebar-task-page", () => ({
   useSidebarTaskPage: vi.fn(() => ({
     ...mocks.page,
     view: { id: "view-1", group: "none", filters: mocks.page.filters },
+    queryView: mocks.page.queryFilters ? { filters: mocks.page.queryFilters } : undefined,
   })),
 }));
 
@@ -88,6 +90,43 @@ function setPageTasks(tasks: Task[]) {
   };
 }
 
+it.each([
+  {
+    name: "archived link over an active saved view",
+    savedFilters: [{ dimension: "archived", op: "is", value: false }],
+    queryFilters: [{ dimension: "archived", op: "is", value: true }],
+    tasks: [task("archived", { archived_at: "2026-09-30T10:00:00Z" })],
+    expected: ["archived"],
+  },
+  {
+    name: "all-archive link over an archived saved view",
+    savedFilters: [{ dimension: "archived", op: "is", value: true }],
+    queryFilters: [{ dimension: "archived", op: "in", value: ["false", "true"] }],
+    tasks: [task("active"), task("archived", { archived_at: "2026-09-30T10:00:00Z" })],
+    expected: ["active", "archived"],
+  },
+  {
+    name: "active link over an archived saved view",
+    savedFilters: [{ dimension: "archived", op: "is", value: true }],
+    queryFilters: [{ dimension: "archived", op: "is", value: false }],
+    tasks: [task("active")],
+    expected: ["active"],
+  },
+])(
+  "projects rows with request filters for $name",
+  ({ savedFilters, queryFilters, tasks, expected }) => {
+    mocks.page.filters = savedFilters;
+    mocks.page.queryFilters = queryFilters;
+    setPageTasks(tasks);
+
+    const { result } = renderHook(() =>
+      useWorkspaceSidebarTasks("ws-1", false, { filters: queryFilters }),
+    );
+
+    expect(result.current.allTasks.map((item) => item.id)).toEqual(expected);
+  },
+);
+
 beforeEach(() => {
   mocks.state.tasks.activeTaskId = null;
   mocks.state.taskOverview.byId = {};
@@ -102,6 +141,7 @@ beforeEach(() => {
   mocks.state.workspaceContextGeneration = 0;
   mocks.state.workspaceContextRead = undefined;
   mocks.page.filters = [];
+  mocks.page.queryFilters = null;
   mocks.page.response = null;
   mocks.page.isLoading = false;
   mocks.page.error = null;
@@ -109,6 +149,16 @@ beforeEach(() => {
 });
 
 describe("useWorkspaceSidebarTasks", () => {
+  it("uses a bounded server page for workspace search when local task coverage exists", () => {
+    const coveredTasks = [{ ...toKanbanTask(task("covered")), _workflowId: "wf-1" }];
+    vi.mocked(useSidebarStoreTasks).mockReturnValueOnce(coveredTasks);
+    const queryOverrides = { query: "needle" };
+
+    renderHook(() => useWorkspaceSidebarTasks("ws-1", false, queryOverrides));
+
+    expect(useSidebarTaskPage).toHaveBeenLastCalledWith("ws-1", true, null, queryOverrides);
+  });
+
   it("reads active command data without owning a sidebar page", () => {
     setPageTasks([task("page-a"), task("page-b")]);
     mocks.state.tasks.activeTaskId = "active";
@@ -118,8 +168,8 @@ describe("useWorkspaceSidebarTasks", () => {
 
     const { result, rerender } = renderHook(() => useWorkspaceSidebarTasks("ws-1", true));
 
-    expect(useSidebarStoreTasks).toHaveBeenLastCalledWith(null);
-    expect(useSidebarTaskPage).toHaveBeenLastCalledWith(null, false, null);
+    expect(useSidebarStoreTasks).toHaveBeenLastCalledWith(null, undefined);
+    expect(useSidebarTaskPage).toHaveBeenLastCalledWith(null, false, null, undefined);
     expect(result.current.allTasks.map((item) => item.id)).toEqual(["active"]);
     expect(result.current.allTasks[0]?.isArchived).toBe(true);
 

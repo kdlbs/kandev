@@ -107,8 +107,9 @@ for (const outcome of ["merged", "closed"] as const) {
     };
     await apiClient.mockGitHubAssociateTaskPR({ ...linked, state: "open" });
     await testPage.goto("/tasks?group=workflow_step");
+    const list = testPage.getByTestId("mobile-tasks-list-scroll");
     await expect(
-      testPage.getByTestId("tasks-list").getByText(`Phone task ${outcome}`, { exact: true }),
+      list.getByTestId("sidebar-task-item").filter({ hasText: `Phone task ${outcome}` }),
     ).toBeVisible();
     const at = new Date().toISOString();
     await apiClient.mockGitHubAssociateTaskPR({
@@ -137,8 +138,12 @@ for (const outcome of ["merged", "closed"] as const) {
       outcome === "merged" ? "COMPLETED" : "WAITING_FOR_INPUT",
     );
     await testPage.reload();
-    const section = testPage.getByTestId("tasks-list-section").filter({ hasText: target.name });
-    await expect(section.getByText(`Phone task ${outcome}`, { exact: true })).toBeVisible();
+    await expect(
+      list.getByTestId("sidebar-group-header").filter({ hasText: target.name }),
+    ).toBeVisible();
+    await expect(
+      list.getByTestId("sidebar-task-item").filter({ hasText: `Phone task ${outcome}` }),
+    ).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage, "phone PR workflow outcome");
   });
 }

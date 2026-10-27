@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import {
   seedUntrackedFileTask,
   waitForDiffText,
@@ -161,6 +162,15 @@ test("discloses renamed paths and sizes narrow fine-pointer actions", async ({
     resetTurnQaFile(seedData.repositoryPath);
     const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);
+    // The initial history load can precede task finalization, so reload it now.
+    const historyLoaded = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/api/v1/task-sessions/${sessionId}/turn-changes$`),
+      { predicate: (response) => response.status() === 200 },
+    );
+    await testPage.reload();
+    await historyLoaded;
     await assertCardTouchTargets(testPage);
     await assertTurnFileDisclosure(testPage);
     await testPage.screenshot({ path: test.info().outputPath("renamed-path-narrow.png") });
@@ -179,7 +189,6 @@ test("hides an unavailable empty capture after reload", async ({
   try {
     const { resetTurnQaFile, routeEmptyUnavailableTurn } =
       await import("./turn-changed-files-qa-helpers");
-    const { waitForHttp } = await import("../../helpers/causal-waits");
     resetTurnQaFile(seedData.repositoryPath);
     const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);

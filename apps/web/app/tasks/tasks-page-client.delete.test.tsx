@@ -4,10 +4,9 @@ import { StateProvider } from "@/components/state-provider";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 
-const { deleteTask, toast, responsive } = vi.hoisted(() => ({
+const { deleteTask, toast } = vi.hoisted(() => ({
   deleteTask: vi.fn(),
   toast: vi.fn(),
-  responsive: { isMobile: false },
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -30,9 +29,6 @@ vi.mock("@/hooks/use-kanban-display-settings", () => ({
   }),
 }));
 vi.mock("@/hooks/use-debounce", () => ({ useDebounce: (value: unknown) => value }));
-vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => responsive,
-}));
 vi.mock("@/hooks/use-task-listing-view", () => ({
   useTaskListingView: () => ({ effectiveView: "list", setView: vi.fn() }),
 }));
@@ -58,17 +54,16 @@ vi.mock("./tasks-page-content", () => ({
     </button>
   ),
 }));
-import { TasksPageClient } from "./tasks-page-client";
+import { TasksPageDesktopClient } from "./tasks-page-desktop-client";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
-describe.each([false, true])("Tasks page deletion (mobile=%s)", (isMobile) => {
+describe("Desktop Tasks page deletion", () => {
   // @covers AC-TASKS-DELETE-RECOVERY-002.8
   it("reports pending workspace cleanup after successful task deletion", async () => {
-    responsive.isMobile = isMobile;
     deleteTask.mockResolvedValue({
       workspace_cleanup: "delete",
       workspace_cleanup_pending: true,
@@ -80,7 +75,7 @@ describe.each([false, true])("Tasks page deletion (mobile=%s)", (isMobile) => {
           userSettings: { ...defaultSettingsState.userSettings, loaded: true },
         }}
       >
-        <TasksPageClient
+        <TasksPageDesktopClient
           workspaces={[]}
           initialRepositories={[]}
           initialTasks={[]}

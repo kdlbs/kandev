@@ -70,7 +70,7 @@ vi.mock("./tasks-page-content", () => ({
     </div>
   ),
 }));
-import { TasksPageClient } from "./tasks-page-client";
+import { TasksPageDesktopClient } from "./tasks-page-desktop-client";
 let capturedStore: StoreApi<AppState>;
 
 function StoreCapture() {
@@ -114,7 +114,7 @@ function renderPage(
       }}
     >
       <StoreCapture />
-      <TasksPageClient
+      <TasksPageDesktopClient
         workspaces={[]}
         initialWorkspaceId="ws1"
         initialMetadataLoaded={{ workflows: true, repositories: true }}

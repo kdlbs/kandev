@@ -106,13 +106,20 @@ workflows:
     await dialog.locator("textarea").fill(yamlContent);
 
     // Click Import button in dialog
+    // router.refresh() reloads server data for this route after the import.
+    const workflowsRefreshed = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/settings/workspaces/${seedData.workspaceId}/workflows$`),
+      { predicate: (response) => response.status() === 200 },
+    );
     const imported = waitForHttp(
       testPage,
       "POST",
       new RegExp(`/api/v1/workspaces/${seedData.workspaceId}/workflows/import$`),
     );
     await dialog.getByRole("button", { name: "Import" }).click();
-    await imported;
+    await Promise.all([imported, workflowsRefreshed]);
 
     // Dialog should close and toast should appear
     await expect(dialog).not.toBeVisible();

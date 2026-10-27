@@ -144,12 +144,15 @@ export async function assertTasksPagePendingCleanup(
   const title = "Tasks page damaged workspace";
   const { task, assertRetained } = await createDamagedDeleteTask(api, seed, title);
   await page.goto("/tasks?group=none");
-  const row = page.getByTestId("tasks-list-row").filter({ hasText: title });
-  const action = row.getByRole("button", { name: "Delete task", exact: true });
+  const mobile = (page.viewportSize()?.width ?? 1024) < 768;
+  const row = page.getByTestId(mobile ? "sidebar-task-item" : "tasks-list-row").filter({
+    hasText: title,
+  });
   if ((page.viewportSize()?.width ?? 1024) < 768) {
-    await action.tap();
+    await row.getByRole("button", { name: "Task actions", exact: true }).tap();
+    await page.getByRole("menuitem", { name: "Delete", exact: true }).tap();
   } else {
-    await action.click();
+    await row.getByRole("button", { name: "Delete task", exact: true }).click();
   }
   await deleteDamagedTaskWithPendingCleanup(page, page.getByRole("alertdialog"), task.id);
   await expect(page.getByText("Task deleted. Cleanup pending.", { exact: true })).toBeVisible();

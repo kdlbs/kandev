@@ -165,7 +165,7 @@ function buildGroupSectionProps(
   return {
     group,
     grouping: grouped.groupKey,
-    subTasksByParentId: grouped.subTasksByParentId,
+    subTasksByParentId: group.subTasksByParentId ?? grouped.subTasksByParentId,
     getNestHierarchyTasks,
     rowProps,
     pinnedSet,
@@ -238,14 +238,15 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     return (
       <>
         {loadErrorNotice}
-        {!loadError && (
-          <div
-            data-slot="task-switcher-empty-state"
-            className="px-3 py-3 text-xs text-muted-foreground"
-          >
-            {t("sidebar:noTasksYet")}
-          </div>
-        )}
+        {!loadError &&
+          (props.emptyState ?? (
+            <div
+              data-slot="task-switcher-empty-state"
+              className="px-3 py-3 text-xs text-muted-foreground"
+            >
+              {t("sidebar:noTasksYet")}
+            </div>
+          ))}
       </>
     );
   }

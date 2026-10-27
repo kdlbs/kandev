@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, memo, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { SheetHeader, SheetTitle } from "@kandev/ui/sheet";
@@ -29,10 +29,8 @@ import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import {
-  TaskSwitcherDialogs,
-  type MobileSubtaskTarget,
-} from "./session-task-switcher-sheet-dialogs";
+import type { MobileSubtaskTarget } from "./session-task-switcher-sheet-dialogs";
+import { SessionTaskSwitcherDialogHost } from "./session-task-switcher-sheet-dialog-host";
 import { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 export { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 type SessionTaskSwitcherSheetProps = {
@@ -45,6 +43,8 @@ type SessionTaskSwitcherSheetProps = {
   onCloseAutoFocus?: (event: Event) => void;
   renderInline?: (body: ReactNode) => ReactNode;
   showInlineNewTask?: boolean;
+  showViewManagementActions?: boolean;
+  initiallyExpanded?: boolean;
   selection?: TaskSheetSelectionController;
 };
 
@@ -63,6 +63,8 @@ export function useMobileTaskLinking(
     taskListHandlers,
   };
 }
+
+export type MobileTaskLinking = ReturnType<typeof useMobileTaskLinking>;
 
 function TaskSwitcherSurfaceHeader({
   workspaceId,
@@ -205,6 +207,7 @@ type TaskSwitcherSurfaceContentProps = {
   onNewTask: () => void;
   inline?: boolean;
   showInlineNewTask?: boolean;
+  showViewManagementActions?: boolean;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   onCreateSubtask: (taskId: string, taskTitle: string) => void;
@@ -244,6 +247,7 @@ function TaskSwitcherSurfaceContent({
   linking,
   inline = false,
   showInlineNewTask = true,
+  showViewManagementActions = true,
   expanded,
   onExpandedChange,
 }: TaskSwitcherSurfaceContentProps) {
@@ -305,7 +309,7 @@ function TaskSwitcherSurfaceContent({
           />
         )}
         <div className="shrink-0">
-          <SidebarFilterBar />
+          <SidebarFilterBar showViewManagementActions={showViewManagementActions} />
         </div>
         <div
           className={inline ? "p-2" : "flex-1 min-h-0 overflow-y-auto p-2"}
@@ -427,10 +431,15 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   onCloseAutoFocus,
   renderInline,
   showInlineNewTask,
+  showViewManagementActions = true,
+  initiallyExpanded = true,
   selection,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(initiallyExpanded);
+  useEffect(() => {
+    if (presentation === "drawer") setExpanded(initiallyExpanded);
+  }, [initiallyExpanded, open, presentation]);
   const opener = useTaskSheetOpener(open);
   const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
   const data = useSheetData(workspaceId);
@@ -456,50 +465,36 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     handleOpenChange,
   );
 
-  const surfaceContent = (
-    <TaskSwitcherSurfaceContent
-      open={open}
-      inline={!!renderInline}
-      showInlineNewTask={showInlineNewTask}
-      expanded={expanded}
-      onExpandedChange={setExpanded}
-      presentation={presentation}
-      workspaceId={workspaceId}
-      onOpenChange={handleOpenChange}
-      onQuickChat={handleQuickChat}
-      onCreateSubtask={handleCreateSubtask}
-      onNewTask={() => {
-        if (presentation === "drawer") handleOpenChange(false);
-        setDialogOpen(true);
-      }}
-      data={data}
-      actions={actions}
-      rename={rename}
-      edit={edit}
-      linking={linking}
-    />
-  );
-
-  const surface = renderInline ? (
-    renderInline(surfaceContent)
-  ) : (
-    <TaskPickerSurface
-      presentation={presentation}
-      workspaceId={workspaceId}
-      open={open}
-      onOpenChange={handleOpenChange}
-      onCloseAutoFocus={onCloseAutoFocus}
-      restoreFocusOnClose={!dialogOpen}
-    >
-      {surfaceContent}
-    </TaskPickerSurface>
-  );
-
   return (
     <>
-      {surface}
-      <TaskSwitcherDialogs
-        focusReturnRef={presentation === "drawer" && !autoFocusNewTasks ? opener : undefined}
+      <SessionTaskSwitcherSurface
+        open={open}
+        onOpenChange={handleOpenChange}
+        workspaceId={workspaceId}
+        presentation={presentation}
+        renderInline={renderInline}
+        onCloseAutoFocus={onCloseAutoFocus}
+        showInlineNewTask={showInlineNewTask}
+        showViewManagementActions={showViewManagementActions}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        onQuickChat={handleQuickChat}
+        onCreateSubtask={handleCreateSubtask}
+        onNewTask={() => {
+          if (presentation === "drawer") handleOpenChange(false);
+          setDialogOpen(true);
+        }}
+        dialogOpen={dialogOpen}
+        data={data}
+        actions={actions}
+        rename={rename}
+        edit={edit}
+        linking={linking}
+      />
+      <SessionTaskSwitcherDialogHost
+        presentation={presentation}
+        autoFocusNewTasks={autoFocusNewTasks}
+        opener={opener}
         dialogOpen={dialogOpen}
         onDialogOpenChange={setDialogOpen}
         workspaceId={workspaceId}
@@ -515,3 +510,84 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     </>
   );
 });
+
+function SessionTaskSwitcherSurface({
+  open,
+  onOpenChange,
+  workspaceId,
+  presentation,
+  renderInline,
+  onCloseAutoFocus,
+  showInlineNewTask,
+  showViewManagementActions,
+  expanded,
+  onExpandedChange,
+  onQuickChat,
+  onCreateSubtask,
+  onNewTask,
+  dialogOpen,
+  data,
+  actions,
+  rename,
+  edit,
+  linking,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workspaceId: string | null;
+  presentation: "sheet" | "drawer";
+  renderInline?: SessionTaskSwitcherSheetProps["renderInline"];
+  onCloseAutoFocus?: (event: Event) => void;
+  showInlineNewTask?: boolean;
+  showViewManagementActions: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onQuickChat: () => void;
+  onCreateSubtask: (taskId: string, taskTitle: string) => void;
+  onNewTask: () => void;
+  dialogOpen: boolean;
+  data: ReturnType<typeof useSheetData>;
+  actions: ReturnType<typeof useSheetActions>;
+  rename: ReturnType<typeof useMobileTaskRename>;
+  edit: ReturnType<typeof useSidebarTaskEdit>;
+  linking: ReturnType<typeof useMobileTaskLinking>;
+}) {
+  const surfaceContent = (
+    <TaskSwitcherSurfaceContent
+      open={open}
+      inline={!!renderInline}
+      showInlineNewTask={showInlineNewTask}
+      showViewManagementActions={showViewManagementActions}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+      presentation={presentation}
+      workspaceId={workspaceId}
+      onOpenChange={onOpenChange}
+      onQuickChat={onQuickChat}
+      onCreateSubtask={onCreateSubtask}
+      onNewTask={onNewTask}
+      data={data}
+      actions={actions}
+      rename={rename}
+      edit={edit}
+      linking={linking}
+    />
+  );
+
+  const surface = renderInline ? (
+    renderInline(surfaceContent)
+  ) : (
+    <TaskPickerSurface
+      presentation={presentation}
+      workspaceId={workspaceId}
+      open={open}
+      onOpenChange={onOpenChange}
+      onCloseAutoFocus={onCloseAutoFocus}
+      restoreFocusOnClose={!dialogOpen}
+    >
+      {surfaceContent}
+    </TaskPickerSurface>
+  );
+
+  return surface;
+}

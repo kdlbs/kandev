@@ -24,8 +24,14 @@ export async function expectThreadsHome(page: Page, workspaceId: string) {
   ).toBeVisible();
 }
 
-export async function expectEmptyList(page: Page) {
+export async function expectEmptyList(page: Page, mobile = false) {
   await expect(page).toHaveURL((url) => url.pathname === "/tasks");
+  if (mobile) {
+    const list = page.getByTestId("mobile-tasks-list-scroll");
+    await expect(list).toBeVisible();
+    await expect(list.getByTestId("sidebar-task-item")).toHaveCount(0);
+    return;
+  }
   await expect(
     page.getByTestId("tasks-list-view").getByText("No tasks match these filters", { exact: true }),
   ).toBeVisible();

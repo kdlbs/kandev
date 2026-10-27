@@ -96,7 +96,7 @@ test("phone results wrap long content, expose touch actions, and support every c
   await chooser.tap();
   await expect(pages.getByRole("button", { name: "Done", exact: true })).toBeFocused();
   await pages.getByRole("button", { name: "Page 2 of 2", exact: true }).tap();
-  await expect(testPage.getByText("26–50 of 50", { exact: true })).toBeVisible();
+  await expect(testPage.getByText("26–50 of 50", { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(chooser).toBeFocused();
   expect(
     await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

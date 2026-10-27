@@ -30,6 +30,7 @@ import {
   resolveTaskListingNavigation,
   type TaskListingPage,
 } from "@/lib/task-listing/view-navigation";
+import type { MobileListFacetSettings } from "@/lib/tasks/mobile-list-query";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
@@ -48,10 +49,12 @@ type KanbanHeaderProps = {
   currentPage?: TaskListingPage;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
+  onSearchClose?: () => void;
   isSearchLoading?: boolean;
   tasksListOptions?: TasksListDisplayOptions;
   taskListingControls?: ReactNode;
   mobileListingStatus?: ReactNode;
+  mobileListFacets?: MobileListFacetSettings;
 };
 
 type ViewToggleItem = {
@@ -409,9 +412,11 @@ export function KanbanHeader({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
+  onSearchClose,
   tasksListOptions,
   taskListingControls,
   mobileListingStatus,
+  mobileListFacets,
 }: KanbanHeaderProps) {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsiveBreakpoint();
@@ -430,65 +435,27 @@ export function KanbanHeader({
   const healthProps = toHeaderHealthProps(healthIndicator);
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
 
-  const renderHeader = () => {
-    if (isMobile) {
-      return (
-        <KanbanHeaderMobile
-          workspaceId={workspaceId}
-          currentPage={currentPage}
-          title={title}
-          workspaceLabel={workspaceLabel}
-          mobileListingStatus={mobileListingStatus}
-          taskListingControls={taskListingControls}
-          {...sharedSearch}
-          tasksListOptions={tasksListOptions}
-        />
-      );
-    }
-    if (isTablet) {
-      return (
-        <>
-          <TabletHeader
-            title={title}
-            workspaceLabel={workspaceLabel}
-            workspaceId={workspaceId}
-            currentPage={currentPage}
-            {...sharedSearch}
-            toggleValue={toggleValue}
-            handleViewChange={handleViewChange}
-            setMenuOpen={setMenuOpen}
-            taskListingControls={taskListingControls}
-            {...healthProps}
-          />
-          <MobileMenuSheet
-            open={isMenuOpen}
-            onOpenChange={setMenuOpen}
-            workspaceId={workspaceId}
-            currentPage={currentPage}
-            {...sharedSearch}
-            tasksListOptions={tasksListOptions}
-          />
-        </>
-      );
-    }
-    return (
-      <DesktopHeader
-        title={title}
-        workspaceLabel={workspaceLabel}
-        workspaceId={workspaceId}
-        currentPage={currentPage}
-        {...sharedSearch}
-        taskListingControls={taskListingControls}
-        toggleValue={toggleValue}
-        handleViewChange={handleViewChange}
-        {...healthProps}
-      />
-    );
-  };
-
   return (
     <>
-      {renderHeader()}
+      <HeaderForBreakpoint
+        isMobile={isMobile}
+        isTablet={isTablet}
+        workspaceId={workspaceId}
+        currentPage={currentPage}
+        title={title}
+        workspaceLabel={workspaceLabel}
+        search={sharedSearch}
+        onSearchClose={onSearchClose}
+        tasksListOptions={tasksListOptions}
+        taskListingControls={taskListingControls}
+        mobileListingStatus={mobileListingStatus}
+        mobileListFacets={mobileListFacets}
+        toggleValue={toggleValue}
+        handleViewChange={handleViewChange}
+        isMenuOpen={isMenuOpen}
+        setMenuOpen={setMenuOpen}
+        healthProps={healthProps}
+      />
       {releaseNotes.hasNotes && (
         <ReleaseNotesDialog
           open={releaseNotes.dialogOpen}
@@ -503,5 +470,105 @@ export function KanbanHeader({
         issues={healthIndicator.issues}
       />
     </>
+  );
+}
+
+type HeaderForBreakpointProps = {
+  isMobile: boolean;
+  isTablet: boolean;
+  workspaceId?: string;
+  currentPage: TaskListingPage;
+  title: string;
+  workspaceLabel: string;
+  search: {
+    searchQuery: string;
+    onSearchChange?: (query: string) => void;
+    isSearchLoading: boolean;
+  };
+  onSearchClose?: () => void;
+  tasksListOptions?: TasksListDisplayOptions;
+  taskListingControls?: ReactNode;
+  mobileListingStatus?: ReactNode;
+  mobileListFacets?: MobileListFacetSettings;
+  toggleValue: string;
+  handleViewChange: (value: string) => void;
+  isMenuOpen: boolean;
+  setMenuOpen: (open: boolean) => void;
+  healthProps: ReturnType<typeof toHeaderHealthProps>;
+};
+
+function HeaderForBreakpoint({
+  isMobile,
+  isTablet,
+  workspaceId,
+  currentPage,
+  title,
+  workspaceLabel,
+  search,
+  onSearchClose,
+  tasksListOptions,
+  taskListingControls,
+  mobileListingStatus,
+  mobileListFacets,
+  toggleValue,
+  handleViewChange,
+  isMenuOpen,
+  setMenuOpen,
+  healthProps,
+}: HeaderForBreakpointProps) {
+  if (isMobile) {
+    return (
+      <KanbanHeaderMobile
+        workspaceId={workspaceId}
+        currentPage={currentPage}
+        title={title}
+        workspaceLabel={workspaceLabel}
+        mobileListingStatus={mobileListingStatus}
+        mobileListFacets={mobileListFacets}
+        taskListingControls={taskListingControls}
+        {...search}
+        onSearchClose={onSearchClose}
+        tasksListOptions={tasksListOptions}
+      />
+    );
+  }
+  if (isTablet) {
+    return (
+      <>
+        <TabletHeader
+          title={title}
+          workspaceLabel={workspaceLabel}
+          workspaceId={workspaceId}
+          currentPage={currentPage}
+          {...search}
+          toggleValue={toggleValue}
+          handleViewChange={handleViewChange}
+          setMenuOpen={setMenuOpen}
+          taskListingControls={taskListingControls}
+          {...healthProps}
+        />
+        <MobileMenuSheet
+          open={isMenuOpen}
+          onOpenChange={setMenuOpen}
+          workspaceId={workspaceId}
+          currentPage={currentPage}
+          {...search}
+          tasksListOptions={tasksListOptions}
+        />
+      </>
+    );
+  }
+  return (
+    <DesktopHeader
+      title={title}
+      workspaceLabel={workspaceLabel}
+      workspaceId={workspaceId}
+      currentPage={currentPage}
+      {...search}
+      taskListingControls={taskListingControls}
+      toggleValue={toggleValue}
+      handleViewChange={handleViewChange}
+      {...healthProps}
+    />
   );
 }

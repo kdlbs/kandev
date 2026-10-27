@@ -82,6 +82,22 @@ func TestSidebarTaskViewQueryValidation(t *testing.T) {
 	}
 }
 
+func TestSidebarTaskViewSearchValidation(t *testing.T) {
+	query := SidebarTaskViewQuery{
+		SearchQuery: strings.Repeat("x", MaxSidebarTaskSearchBytes),
+		Sort:        SidebarTaskViewSort{Key: "updatedAt", Direction: "desc"},
+		Group:       "none", Page: 1, PageSize: MaxSidebarTaskPageSize, Locale: "en",
+	}
+	if err := query.Validate(); err != nil {
+		t.Fatalf("search at the byte limit was rejected: %v", err)
+	}
+	query.SearchQuery += "x"
+	var validation *SidebarQueryValidationError
+	if err := query.Validate(); !errors.As(err, &validation) || validation.Reason != "search_length" || validation.Limit != MaxSidebarTaskSearchBytes {
+		t.Fatalf("expected bounded search validation, got %#v (%v)", validation, err)
+	}
+}
+
 func TestSidebarTaskViewSortChainValidation(t *testing.T) {
 	base := SidebarTaskViewQuery{
 		Sort: SidebarTaskViewSort{

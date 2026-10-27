@@ -56,6 +56,10 @@ vi.mock("./mobile-menu-sheet", () => ({
   }) =>
     open ? (
       <div role="dialog">
+        <span
+          data-testid="mobile-menu-page-actions-state"
+          data-state={menuPageActionsState(pageActions)}
+        />
         {pageActions}
         {listingControls}
       </div>
@@ -92,7 +96,14 @@ const CHAT = "mobile-quick-chat-button";
 const TERMINAL = "mobile-quick-terminal-button";
 const CONTEXT = "mobile-topbar-page-context";
 const SEARCH = "mobile-search-toggle";
+const LIST_SEARCH_TOGGLE = "mobile-list-search-toggle";
 const WORKSPACE = "workspace-1";
+
+function menuPageActionsState(pageActions: ReactNode | undefined) {
+  if (pageActions === null) return "null";
+  if (pageActions === undefined) return "undefined";
+  return "node";
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
@@ -204,6 +215,11 @@ describe("shared phone listing header", () => {
     expect(context.closest("header")?.getAttribute("data-free-width")).toBe("lead");
     fireEvent.click(context);
     expect(screen.getByRole("dialog")).toBeTruthy();
+    if (currentPage === "tasks") {
+      expect(screen.getByTestId("mobile-menu-page-actions-state").getAttribute("data-state")).toBe(
+        "null",
+      );
+    }
   });
 
   it("opens Threads options from the mode title and includes its saved views", () => {
@@ -240,22 +256,39 @@ describe("shared phone listing header", () => {
     expect(screen.queryByTestId(CHAT)).toBeNull();
     expect(screen.queryByTestId(TERMINAL)).toBeNull();
   });
+});
 
+describe("phone listing header search and status", () => {
   // @covers AC-UI-MOBILE-QUICK-CHAT-TOPBAR-001.10
-  it("reveals search from the menu and clears its query on collapse", () => {
+  it("places List search before the hamburger and clears refinements on collapse", () => {
     const onSearchChange = vi.fn();
-    renderHeader({ currentPage: "tasks", searchQuery: "Alpha", onSearchChange });
-    fireEvent.click(screen.getByTestId("mobile-topbar-page-context"));
-    expect(screen.getByTestId(SEARCH).getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(screen.getByTestId(SEARCH));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    frame();
+    const onSearchClose = vi.fn();
+    renderHeader({
+      currentPage: "tasks",
+      searchQuery: "Alpha",
+      onSearchChange,
+      onSearchClose,
+    });
+    const search = screen.getByTestId(LIST_SEARCH_TOGGLE);
+    const menu = screen.getByTestId(MENU);
+    expect(search.getAttribute("aria-expanded")).toBe("false");
+    expect(search.parentElement?.lastElementChild).toBe(menu);
+    fireEvent.click(search);
+    expect(screen.getByTestId(LIST_SEARCH_TOGGLE).getAttribute("aria-expanded")).toBe("true");
+    expect(onSearchClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId(LIST_SEARCH_TOGGLE));
+    expect(onSearchClose).toHaveBeenCalledOnce();
     expect(onSearchChange).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByTestId("mobile-topbar-page-context"));
-    expect(screen.getByTestId(SEARCH).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByTestId(SEARCH));
-    frame();
-    expect(onSearchChange).toHaveBeenCalledWith("");
+    expect(screen.queryByTestId(SEARCH)).toBeNull();
+  });
+
+  it("keeps search in the listing menu on Kanban", () => {
+    renderHeader({ currentPage: "kanban", onSearchChange: vi.fn() });
+    fireEvent.click(screen.getByTestId("mobile-topbar-page-context"));
+    expect(screen.getByTestId(SEARCH)).toBeTruthy();
+    expect(screen.queryByTestId(LIST_SEARCH_TOGGLE)).toBeNull();
   });
 
   it("keeps connectivity and Quick Chat feedback on the persistent menu", () => {

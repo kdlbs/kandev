@@ -35,11 +35,13 @@ export function reconcileSidebarPage(
   if (reconciled.some((task) => task.workspaceId && task.workspaceId !== workspaceId)) return null;
   const candidates = reconciled.filter(sidebarCandidate);
   const projected = projectLocalSidebarTasks(candidates, state, workspaceId ?? "");
+  // Local overview records cannot prove membership across all workspace-search fields.
   const eligible = new Set(
     projected
       .filter(
         (task) =>
-          !Object.hasOwn(read.changes, task.id) || matchesLocalSidebarTask(task, query.filters),
+          !Object.hasOwn(read.changes, task.id) ||
+          (!query.query && matchesLocalSidebarTask(task, query.filters)),
       )
       .map((task) => task.id),
   );

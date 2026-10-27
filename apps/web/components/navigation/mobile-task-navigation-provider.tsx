@@ -35,6 +35,7 @@ type Outlet = {
   selection?: TaskSheetSelectionController | null;
   archivedState?: ReturnType<typeof useArchivedTaskState>;
   portForwarding?: PortForwardingVisibility;
+  initiallyExpanded?: boolean;
 };
 const Context = createContext<(outlet: Outlet | null) => void>(() => {});
 export const useMobileTaskNavigationOutlet = () => useContext(Context);
@@ -80,6 +81,8 @@ export function MobileTaskNavigationProvider({ children }: { children: ReactNode
                 selection={configuration.current?.selection ?? undefined}
                 presentation="drawer"
                 showInlineNewTask={showInlineNewTask}
+                showViewManagementActions={false}
+                initiallyExpanded={configuration.current?.initiallyExpanded ?? true}
                 renderInline={(body) =>
                   outlet
                     ? createPortal(

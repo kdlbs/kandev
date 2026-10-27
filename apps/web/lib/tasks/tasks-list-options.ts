@@ -128,6 +128,14 @@ export function sortTasksByFacet(
   facetKey: string,
   values: Record<string, readonly TaskListFacetValue[]>,
 ): Task[] {
+  return sortItemsByFacet(tasks, facetKey, values);
+}
+
+export function sortItemsByFacet<T extends { id: string }>(
+  tasks: T[],
+  facetKey: string,
+  values: Record<string, readonly TaskListFacetValue[]>,
+): T[] {
   return tasks
     .map((task, index) => ({
       task,

@@ -1,32 +1,20 @@
 "use client";
 
-import { useSidebarWorkspaceGuard } from "@/hooks/domains/sidebar/use-sidebar-workspace-guard";
-import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
-
 import { useRef, type ComponentProps, type RefObject } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import type { FilterClause, SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
-import {
-  SidebarViewEditor,
-  createSidebarFilterClause,
-  createSidebarViewEditorCurrent,
-} from "./sidebar-view-editor";
+import { SidebarViewEditor } from "./sidebar-view-editor";
 import { ViewHeaderRow } from "./view-manager";
 import { useTranslation } from "react-i18next";
 import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
 import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
-import {
-  useSavedTaskViewDeleteConfirmation,
-  type SavedTaskViewDeleteTarget,
-} from "@/components/confirmation/use-saved-task-view-delete-confirmation";
-import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { type SavedTaskViewDeleteTarget } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 import {
   MobileConfirmationHost,
   MobileConfirmationHostBody,
 } from "@/components/confirmation/mobile-confirmation-host";
+import { useSidebarViewEditorController } from "./use-sidebar-view-editor-controller";
 
 type Props = {
   trigger: React.ReactNode;
@@ -88,25 +76,17 @@ export function SidebarFilterPopover({
   renameRequestedViewId,
   onRenameRequestHandled,
 }: Props) {
-  const guard = useSidebarWorkspaceGuard();
   const { t } = useTranslation();
-  const views = useAppStore((s) => selectSidebarViews(s).views);
-  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const storedDraft = useAppStore((s) => selectSidebarViews(s).draft);
-  const updateDraft = guard(useAppStore((s) => s.updateSidebarDraft));
-  const saveAs = guard(useAppStore((s) => s.saveSidebarDraftAs));
-  const saveOverwrite = guard(useAppStore((s) => s.saveSidebarDraftOverwrite));
-  const discard = guard(useAppStore((s) => s.discardSidebarDraft));
-  const deleteView = guard(useAppStore((s) => s.deleteSidebarView));
-  const renameView = guard(useAppStore((s) => s.renameSidebarView));
   const { usesDesktopWorkbench, isFinePointer } = useResponsiveBreakpoint();
-  const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(views);
-  const popoverContentRef = useRef<HTMLDivElement>(null);
-  const activeView: SidebarView | undefined = views.find((view) => view.id === activeViewId);
-  const current = createSidebarViewEditorCurrent(activeView, storedDraft);
-  const hasDraft = !!storedDraft && activeView?.id === storedDraft.baseViewId;
   const usesInlineDeleteConfirmation = !usesDesktopWorkbench || !isFinePointer;
+  const controller = useSidebarViewEditorController({
+    isDrawerLayout: !usesDesktopWorkbench,
+    deleteDensity: usesInlineDeleteConfirmation ? "touch" : "compact",
+    renameRequestedViewId,
+    onRenameRequestHandled,
+  });
+  const { deletion, deleteView } = controller;
+  const popoverContentRef = useRef<HTMLDivElement>(null);
 
   const inlineDeleteConfirmation = inlineViewDeleteConfirmation({
     shouldRender: usesInlineDeleteConfirmation,
@@ -116,43 +96,10 @@ export function SidebarFilterPopover({
     onConfirm: deleteView,
   });
   const headerProps: ComponentProps<typeof ViewHeaderRow> = {
-    activeView,
-    hasDraft,
-    canDelete: views.length > 1,
-    onSaveOverwrite: saveOverwrite,
-    onSaveAs: saveAs,
-    onRename: renameView,
-    onDiscard: discard,
-    onDelete: () => {
-      if (!activeView) return;
-      deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) });
-    },
-    deleteAnchorRef: deletion.anchorRef,
-    deleteDensity: usesInlineDeleteConfirmation ? "touch" : "compact",
+    ...controller.headerProps,
     deleteConfirmation: inlineDeleteConfirmation,
-    renameRequestedViewId,
-    onRenameRequestHandled,
   };
-  const editor = (
-    <SidebarViewEditor
-      current={current}
-      isDrawerLayout={!usesDesktopWorkbench}
-      reorderScopeKey={`${workspaceId ?? ""}:${activeViewId ?? ""}`}
-      headerProps={headerProps}
-      onUpdate={updateDraft}
-      onAddFilter={() =>
-        updateDraft({ filters: [...current.filters, createSidebarFilterClause()] })
-      }
-      onChangeClause={(next: FilterClause) =>
-        updateDraft({
-          filters: current.filters.map((clause) => (clause.id === next.id ? next : clause)),
-        })
-      }
-      onRemoveClause={(id) =>
-        updateDraft({ filters: current.filters.filter((clause) => clause.id !== id) })
-      }
-    />
-  );
+  const editor = <SidebarViewEditor {...controller.editorProps} headerProps={headerProps} />;
 
   if (usesDesktopWorkbench) {
     return (

@@ -42,14 +42,19 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     const drawer = testPage.getByTestId("app-nav-sheet");
     await expect(drawer).toBeVisible();
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+    const tasksToggle = drawer.getByTestId("mobile-navigation-tasks-toggle");
+    if ((await tasksToggle.getAttribute("aria-expanded")) !== "true") await tasksToggle.tap();
     await expect(
       drawer.getByTestId("sidebar-view-chip").filter({ hasText: view.name }),
     ).toHaveAttribute("data-active", "true");
-    await expect(drawer.getByTestId("sidebar-new-view")).toBeVisible();
+    await expect(drawer.getByTestId("sidebar-new-view")).toHaveCount(0);
     await testPage.keyboard.press("Escape");
     await expect(drawer).toBeHidden();
     await expect(opener).toBeFocused();
     await opener.tap();
+    const reopenedTasksToggle = drawer.getByTestId("mobile-navigation-tasks-toggle");
+    if ((await reopenedTasksToggle.getAttribute("aria-expanded")) !== "true")
+      await reopenedTasksToggle.tap();
     await drawer.locator(`[data-task-row-id="${task.task_id}"]`).tap();
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.task_id}`));
     await testPage.goBack();
@@ -57,6 +62,8 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await expect(github.mobileMenuButton).toBeVisible();
     // The task remains selected in shared state, but GitHub has no task-only providers.
     await opener.tap();
+    const taskSection = drawer.getByTestId("mobile-navigation-tasks-toggle");
+    if ((await taskSection.getAttribute("aria-expanded")) !== "true") await taskSection.tap();
     await expect(drawer.getByTestId("sidebar-filter-bar")).toBeVisible();
     await drawer.getByTestId("mobile-new-task-button").tap();
     await expect(drawer).toBeHidden();

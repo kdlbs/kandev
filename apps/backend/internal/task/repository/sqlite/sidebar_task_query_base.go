@@ -389,6 +389,19 @@ func sidebarFilterColumn(driver, dimension string) (string, bool) {
 	return value, ok
 }
 
+func sidebarTaskSearchCondition(driver, query string) (string, []any) {
+	pattern := "%" + escapeLike(query) + "%"
+	like := dialect.Like(driver)
+	return `(t.title ` + like + ` ? ESCAPE '\'
+		OR t.description ` + like + ` ? ESCAPE '\'
+		OR EXISTS (
+			SELECT 1 FROM task_repositories search_tr
+			JOIN repositories search_r ON search_r.id = search_tr.repository_id
+			WHERE search_tr.task_id = t.id
+			AND (search_r.name ` + like + ` ? ESCAPE '\' OR search_r.local_path ` + like + ` ? ESCAPE '\')
+		))`, []any{pattern, pattern, pattern, pattern}
+}
+
 func sidebarClauseCondition(actual string, clause models.SidebarTaskViewClause) (string, []any, error) {
 	if clause.Op == "matches" || clause.Op == sidebarNotMatchesOp {
 		var value string

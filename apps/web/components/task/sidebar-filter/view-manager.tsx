@@ -31,6 +31,10 @@ type HeaderProps = {
   deleteConfirmation?: ReactNode;
   renameRequestedViewId?: string | null;
   onRenameRequestHandled?: (viewId: string) => void;
+  draftActionsPlacement?: "inline" | "external";
+  saveAsRequestId?: number | null;
+  onSaveAsRequestHandled?: (requestId: number) => void;
+  onEditingChange?: (editing: boolean) => void;
 };
 
 export function ViewHeaderRow(props: HeaderProps) {
@@ -42,6 +46,17 @@ export function ViewHeaderRow(props: HeaderProps) {
   const activeViewId = props.activeView?.id;
   const activeViewName = props.activeView?.name;
   const isEditing = mode !== "view";
+
+  useEffect(() => {
+    props.onEditingChange?.(isEditing);
+  }, [isEditing, props.onEditingChange]);
+
+  useEffect(() => {
+    if (props.saveAsRequestId == null) return;
+    setNameDraft("");
+    setMode("saveAs");
+    props.onSaveAsRequestHandled?.(props.saveAsRequestId);
+  }, [props.onSaveAsRequestHandled, props.saveAsRequestId]);
 
   function enterRename() {
     if (!props.activeView) return;
@@ -115,7 +130,12 @@ export function ViewHeaderRow(props: HeaderProps) {
               onCancel={exit}
             />
           ) : (
-            <ViewActions {...props} onRename={enterRename} onSaveAs={enterSaveAs} />
+            <ViewActions
+              {...props}
+              onRename={enterRename}
+              onSaveAs={enterSaveAs}
+              draftActionsPlacement={props.draftActionsPlacement ?? "inline"}
+            />
           )}
         </div>
       </div>
@@ -244,6 +264,7 @@ function ViewActions({
   onDelete,
   deleteAnchorRef,
   deleteDensity = "compact",
+  draftActionsPlacement = "inline",
 }: {
   activeView: SidebarView | undefined;
   hasDraft: boolean;
@@ -255,9 +276,11 @@ function ViewActions({
   onDelete: () => void;
   deleteAnchorRef?: RefObject<HTMLButtonElement | null>;
   deleteDensity?: "compact" | "touch";
+  draftActionsPlacement?: "inline" | "external";
 }) {
   const { t } = useTranslation();
   const canOverwrite = hasDraft && !!activeView;
+  if (hasDraft && draftActionsPlacement === "external") return null;
   return (
     <>
       {canOverwrite && (

@@ -792,39 +792,43 @@ Press **Cmd/Ctrl+K** and choose **Go to archived tasks** to open the current
 workspace archive. The shortcut starts with an empty search, all workflows,
 and all repositories. It keeps your saved board filters.
 
-In **List**, choose **Active**, **Archived**, or **All** above the task rows.
-Active includes completed tasks that you did not archive. Search combines with
-the workflow and repository filters. The result count and pages use that same scope.
+In desktop **List**, use the archive, workflow, and repository controls above
+the task rows. Search and filters use the same scope as the result count and
+pages. Choose **Clear filters** to remove them. This keeps the sort, grouping,
+and task-row settings.
 
-On desktop, the workflow and repository selectors sit beside **Clear filters**.
-On a phone, search stays visible. Tap **Filters** to select a workflow or
-repository in a bottom drawer. Selections apply immediately. **Done** closes
-the drawer. Sort and grouping remain in **View options**.
+On a phone, the tabs below the header show the saved views for the current
+workspace. They use the same filters and sort rules as **Tasks** in the desktop
+sidebar. Tap the **List** control to change the layout or edit the selected
+saved view. The editor includes filters, ordered sort rules, grouping, task-row
+settings, and automatic colors. Save or discard view changes in the editor.
 
-Remove a selected filter with its clear button, or choose **Clear filters** to
-clear search, workflow, and repository together. Clearing keeps the archive
-mode, sort, grouping, and row details. Opening an explicit list link keeps its
-scope through reload and browser history without changing your saved filters.
-Links to another workspace select that workspace before loading tasks. If the
-workspace lookup fails, select **Retry**. If the workspace no longer exists or
-is unavailable, select **Home** to return to your task overview.
+Tap the search icon to show the search field and **Filters** button. These
+controls temporarily narrow the selected saved view. They do not change its
+saved filters. Choose **Clear filters** to remove the temporary search and
+result filters. Opening an explicit list link keeps its scope through reload
+and browser history without changing your saved view. Links to another
+workspace select that workspace before loading tasks. If the workspace lookup
+fails, select **Retry**. If the workspace no longer exists or is unavailable,
+select **Home** to return to your task overview.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
 **Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
 different layouts. Threads shows agent conversations side by side. Kandev
 remembers the last selected view in that browser on the current device. Phones
-offer **Kanban**, **Threads**, and **List** under **View options**, with a native
-Threads deck showing one conversation at a time. A saved desktop Pipeline
-preference is kept but shown as Kanban on the phone.
+offer **Kanban**, **Threads**, and **List** in the view options, with a native Threads deck
+showing one conversation at a time. A saved desktop Pipeline preference is
+kept but shown as Kanban on the phone. The standalone desktop **List** keeps its
+own sort and grouping preferences.
 
 Kanban and List share a compact phone header showing the workspace and current
-mode. Tap the **Kanban**, **Threads**, or **List** title dropdown to open view options and change display settings, or tap the
-Kanban/List context to open the same controls. The hamburger opens app
-navigation, including the workspace picker and **Home**. In Threads, tap the
-view name to choose a saved Threads view. In Kanban, phone **Search tasks** lives
-under **View options**. Selecting it reveals and focuses the search field below
-the header. Selecting it again hides the field and clears the query. In List,
-the search field stays visible.
+mode. Tap the **Kanban**, **Threads**, or **List** control to open view options.
+The hamburger opens app navigation, including the workspace picker and
+**Home**. In Threads, tap the view name to choose a saved Threads view. In
+Kanban, **Search tasks** lives under **View options**. Selecting it reveals and
+focuses the search field below the header. Selecting it again hides the field
+and clears the query. In List, the search icon reveals the hidden search and
+temporary-filter row.
 
 Under **Settings → Preferences → Appearance → Startup Page**, choose a destination, then select **Save changes**:
 

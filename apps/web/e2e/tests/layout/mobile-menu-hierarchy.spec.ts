@@ -16,6 +16,11 @@ for (const route of ["/", "/tasks", "/threads"]) {
       "page",
     );
     const toggle = menu.getByTestId("mobile-navigation-tasks-toggle");
+    if (route === "/tasks") {
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await toggle.tap();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    }
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await menu.getByTestId("mobile-new-task-button").tap();

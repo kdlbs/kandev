@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
 import { MobileDisplayOptions } from "./mobile-display-options";
 import type { MobileDisplayOptionsProps } from "./mobile-display-options";
+import { MobileSidebarViewEditor } from "@/components/task/sidebar-filter/mobile-sidebar-view-editor";
 export type { MobileDisplayOptionsProps, MobileColumnsSection } from "./mobile-display-options";
 import {
   mobileControlClass,
@@ -31,6 +32,7 @@ import {
   mobileSectionTitleClass,
 } from "./mobile-menu-styles";
 import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
+import type { MobileListFacetSettings } from "@/lib/tasks/mobile-list-query";
 export type MobileMenuSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -44,6 +46,7 @@ export type MobileMenuSheetProps = {
   pageActions?: ReactNode;
   listingOnly?: boolean;
   listingControls?: ReactNode;
+  mobileListFacets?: MobileListFacetSettings;
 };
 
 function MobileSearchSection({
@@ -148,6 +151,7 @@ function MobileViewSection({
 function ResponsiveMenuSurface({
   isMobile,
   listingOnly,
+  isPhoneListViewOptions,
   open,
   onOpenChange,
   contentRef,
@@ -157,6 +161,7 @@ function ResponsiveMenuSurface({
 }: {
   isMobile: boolean;
   listingOnly?: boolean;
+  isPhoneListViewOptions: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contentRef: RefObject<HTMLDivElement | null>;
@@ -176,7 +181,13 @@ function ResponsiveMenuSurface({
               tabIndex={-1}
               onOpenAutoFocus={onOpenAutoFocus}
               onCloseAutoFocus={onCloseAutoFocus}
-              className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none"
+              data-testid="mobile-menu-drawer-content"
+              className={cn(
+                "outline-none",
+                isPhoneListViewOptions
+                  ? "h-auto max-h-[calc(100dvh-2rem-env(safe-area-inset-bottom,0px))] data-[vaul-drawer-direction=bottom]:inset-x-2 data-[vaul-drawer-direction=bottom]:bottom-2"
+                  : "h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))]",
+              )}
             >
               <MobileConfirmationHostBody>
                 <div
@@ -189,8 +200,15 @@ function ResponsiveMenuSurface({
                     </DrawerTitle>
                   </DrawerHeader>
                   <div
-                    data-testid="mobile-home-menu-scroll"
-                    className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom,0px)]"
+                    data-testid={
+                      isPhoneListViewOptions ? "mobile-home-menu-layout" : "mobile-home-menu-scroll"
+                    }
+                    className={cn(
+                      "min-h-0 flex-1 pb-[env(safe-area-inset-bottom,0px)]",
+                      isPhoneListViewOptions
+                        ? "flex flex-col overflow-hidden"
+                        : "overflow-y-auto overscroll-contain",
+                    )}
                   >
                     {children}
                   </div>
@@ -237,6 +255,8 @@ function MobileMenuContent({
   navControls,
   pageActions,
   listingOnly,
+  mobileListFacets,
+  currentPage,
   listingControls,
 }: Pick<
   MobileMenuSheetProps,
@@ -247,6 +267,8 @@ function MobileMenuContent({
   | "onOpenChange"
   | "pageActions"
   | "listingOnly"
+  | "mobileListFacets"
+  | "currentPage"
   | "listingControls"
 > & {
   isMobile: boolean;
@@ -257,14 +279,34 @@ function MobileMenuContent({
   displayOptions: MobileDisplayOptionsProps;
   navControls: AppNavDialogControls;
 }) {
+  if (isMobile && listingOnly && currentPage === "tasks") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col" data-testid="mobile-list-view-options-content">
+        <div className="shrink-0 px-4 pb-2 pt-3">
+          <MobileViewSection
+            viewValue={viewValue}
+            onViewChange={onViewChange}
+            showPipeline={false}
+          />
+        </div>
+        <MobileSidebarViewEditor
+          key={workspaceId ?? "no-workspace"}
+          workspaceId={workspaceId ?? null}
+          facets={mobileListFacets}
+        />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-full flex-col gap-6 p-4">
-      {pageActions ?? (
+      {pageActions === undefined ? (
         <MobileSearchSection
           searchQuery={searchQuery ?? ""}
           onSearchChange={onSearchChange}
           isSearchLoading={isSearchLoading ?? false}
         />
+      ) : (
+        pageActions
       )}
       {!listingOnly && <MobileWorkspaceSection onOpenChange={onOpenChange} />}
       <MobileViewSection
@@ -304,6 +346,7 @@ export function MobileMenuSheet({
   tasksListOptions,
   pageActions,
   listingOnly = false,
+  mobileListFacets,
   listingControls,
 }: MobileMenuSheetProps) {
   const navControls = useAppNavDialogs(() => onOpenChange(false));
@@ -322,6 +365,7 @@ export function MobileMenuSheet({
         navControls.onMenuCloseAutoFocus?.(event);
       }}
       workspaceId={workspaceId}
+      currentPage={currentPage}
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
       isSearchLoading={isSearchLoading}
@@ -331,6 +375,7 @@ export function MobileMenuSheet({
       navControls={navControls}
       pageActions={pageActions}
       listingOnly={listingOnly}
+      mobileListFacets={mobileListFacets}
       listingControls={listingControls}
     />
   );
@@ -343,11 +388,13 @@ function MobileMenuRender(
     | "onOpenChange"
     | "onCloseAutoFocus"
     | "workspaceId"
+    | "currentPage"
     | "searchQuery"
     | "onSearchChange"
     | "isSearchLoading"
     | "pageActions"
     | "listingOnly"
+    | "mobileListFacets"
     | "listingControls"
   > & {
     isMobile: boolean;
@@ -362,7 +409,13 @@ function MobileMenuRender(
   const { isMobile, navControls } = props;
   return (
     <>
-      <ResponsiveMenuSurface {...props} isMobile={isMobile}>
+      <ResponsiveMenuSurface
+        {...props}
+        isMobile={isMobile}
+        isPhoneListViewOptions={
+          isMobile && props.listingOnly === true && props.currentPage === "tasks"
+        }
+      >
         <MobileMenuContent {...props} showPipeline={!isMobile} />
       </ResponsiveMenuSurface>
       {navControls.dialogs}

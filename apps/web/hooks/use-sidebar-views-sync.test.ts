@@ -6,7 +6,7 @@ const mockToast = vi.fn();
 
 type MockState = {
   workspaces: { activeId: string };
-  sidebarViewsByWorkspace: { ws: { syncError: string | null } };
+  sidebarViewsByWorkspace: { ws: { views: unknown[]; syncError: string | null } };
   sidebarTaskPrefs: { syncError?: string | null };
   clearSidebarSyncError: (workspaceId?: string) => void;
   clearSidebarTaskPrefsSyncError: () => void;
@@ -30,7 +30,7 @@ describe("useSidebarViewsSync", () => {
     currentWorkspaceId = "ws";
     mockState = {
       workspaces: { activeId: "ws" },
-      sidebarViewsByWorkspace: { ws: { syncError: null } },
+      sidebarViewsByWorkspace: { ws: { views: [{ id: "view" }], syncError: null } },
       sidebarTaskPrefs: { syncError: null },
       clearSidebarSyncError: vi.fn(),
       clearSidebarTaskPrefsSyncError: vi.fn(),

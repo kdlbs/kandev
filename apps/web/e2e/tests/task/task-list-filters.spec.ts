@@ -350,12 +350,18 @@ test.describe("Task list display filters", () => {
         url.searchParams.get("group") === "none",
     );
     for (const [width, height] of [
-      [767, 44],
+      [767, null],
       [768, 28],
-    ]) {
+    ] as const) {
       await testPage.setViewportSize({ width, height: 900 });
-      const control = testPage.getByTestId("tasks-list-archive-archived");
-      expect(Math.abs((await control.boundingBox())!.height - height)).toBeLessThanOrEqual(1);
+      if (width < 768) {
+        // Phone List replaces the standalone List archive modes with saved-view tabs.
+        await expect(testPage.getByTestId("sidebar-view-chip-row")).toBeVisible();
+        await expect(testPage.getByTestId("tasks-list-archive-modes")).toHaveCount(0);
+      } else {
+        const control = testPage.getByTestId("tasks-list-archive-archived");
+        expect(Math.abs((await control.boundingBox())!.height - height)).toBeLessThanOrEqual(1);
+      }
       expect(
         await testPage.evaluate(
           () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

@@ -467,10 +467,21 @@ test.describe("System storage maintenance", () => {
       expect(overview.summary.go_cache).toMatchObject({ owned: true });
       expect(overview.summary.go_cache.size_bytes).toBeGreaterThan(15 * 1024 * 1024 * 1024);
 
+      const { agents } = await apiClient.listAgents();
+      const mockAgent = agents.find((agent) => agent.name === "mock-agent");
+      if (!mockAgent)
+        throw new Error(
+          `mock-agent not found (got ${agents.map((agent) => agent.name).join(", ")})`,
+        );
+      const profile = await apiClient.createAgentProfile(
+        mockAgent.id,
+        "Go cache cleanup activity profile",
+        { model: "mock-fast", auto_approve: true },
+      );
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Go cache cleanup during task activity",
-        seedData.agentProfileId,
+        profile.id,
         {
           description: "/e2e:simple-message",
           workflow_id: seedData.workflowId,

@@ -6,6 +6,7 @@ export function MobileTasksActions({
   workflowId,
   steps,
   open,
+  showFab,
   onOpenChange,
   onCreated,
 }: {
@@ -13,12 +14,15 @@ export function MobileTasksActions({
   workflowId: string | null;
   steps: MobileTaskStep[];
   open: boolean;
+  showFab: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => Promise<void>;
 }) {
   return (
     <>
-      <MobileFab onClick={() => onOpenChange(true)} />
+      <div className={showFab ? undefined : "hidden"} aria-hidden={!showFab}>
+        <MobileFab onClick={() => onOpenChange(true)} />
+      </div>
       <MobileTasksCreateDialog
         open={open}
         onOpenChange={onOpenChange}

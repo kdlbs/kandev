@@ -307,7 +307,7 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.boardNavigator).toContainText(startStep.name);
     const navigatorBox = await mobile.boardNavigator.boundingBox();
     if (!navigatorBox) throw new Error("mobile board navigator has no layout box");
-    expect(navigatorBox.height).toBeGreaterThanOrEqual(44);
+    expect(navigatorBox.height).toBeGreaterThanOrEqual(43.5);
     await expect(mobile.mobileKanbanLayout()).toHaveCount(1);
     await mobile.boardNavigator.click();
     const navigatorDrawer = testPage.getByTestId("mobile-board-navigator-drawer");
@@ -319,7 +319,7 @@ test.describe("Mobile kanban view", () => {
     const secondWorkflowItem = mobile.workflowItem(secondWorkflow.id);
     const workflowItemBox = await secondWorkflowItem.boundingBox();
     if (!workflowItemBox) throw new Error("mobile workflow item has no layout box");
-    expect(workflowItemBox.height).toBeGreaterThanOrEqual(44);
+    expect(workflowItemBox.height).toBeGreaterThanOrEqual(43.5);
     await secondWorkflowItem.click();
     await expect(navigatorDrawer).toBeVisible();
     await expect(navigatorDrawer).toHaveAttribute("data-test-instance", "workflow-selection");

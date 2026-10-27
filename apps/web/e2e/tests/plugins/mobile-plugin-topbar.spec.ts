@@ -119,7 +119,8 @@ test.describe("Mobile plugin menu actions", () => {
       await expect(menu.getByRole("textbox")).toHaveCount(0);
       await testPage.keyboard.press("Escape");
       if (route === "/tasks") {
-        const search = testPage.getByTestId("tasks-list-search");
+        await testPage.getByTestId("mobile-list-search-toggle").tap();
+        const search = testPage.getByTestId("mobile-list-search-input");
         await search.tap();
         await expect(search).toBeFocused();
         await assertNoDocumentHorizontalOverflow(testPage, "phone list search");

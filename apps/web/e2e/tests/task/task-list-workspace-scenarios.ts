@@ -17,8 +17,8 @@ async function activate(control: Locator, touch: boolean) {
 }
 
 export function taskListWorkspaceScenarios(touch: boolean) {
-  taskListPartialMetadataScenario();
-  taskListWorkspaceHistoryScenario();
+  taskListPartialMetadataScenario(touch);
+  taskListWorkspaceHistoryScenario(touch);
   // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
   test("recovers a failed workspace lookup and offers Home for an unknown workspace", async ({
     testPage,
@@ -43,22 +43,36 @@ export function taskListWorkspaceScenarios(touch: boolean) {
     await expect(testPage.getByText("private workspace diagnostic")).toHaveCount(0);
     fail = false;
     await activate(testPage.getByRole("button", { name: "Retry", exact: true }), touch);
-    await expect(testPage.getByText("No archived tasks", { exact: true })).toBeVisible();
+    if (touch) {
+      await expect(
+        testPage
+          .getByTestId("mobile-list-filter-empty-state")
+          .getByText("No tasks match these filters", { exact: true }),
+      ).toBeVisible();
+    } else {
+      await expect(testPage.getByText("No archived tasks", { exact: true })).toBeVisible();
+    }
     await navigateInSpa(testPage, "/tasks?workspace=missing&archive=archived");
     await expect(testPage.getByRole("alert")).toHaveText("Workspace not found");
-    await expect(testPage.getByTestId("tasks-list")).toHaveCount(0);
+    await expect(testPage.getByTestId(touch ? "sidebar-task-item" : "tasks-list")).toHaveCount(0);
     await assertNoDocumentHorizontalOverflow(testPage);
     await activate(testPage.getByRole("button", { name: "Home", exact: true }), touch);
     await expect(testPage).toHaveURL(`/tasks?workspace=${seedData.workspaceId}`);
-    await expect(testPage.getByTestId("tasks-list-archive-active")).toHaveAttribute(
-      "data-state",
-      "on",
-    );
+    if (touch) {
+      await expect(
+        testPage.getByTestId("sidebar-view-chip").filter({ hasText: "All tasks" }),
+      ).toHaveAttribute("data-active", "true");
+    } else {
+      await expect(testPage.getByTestId("tasks-list-archive-active")).toHaveAttribute(
+        "data-state",
+        "on",
+      );
+    }
     await expect(testPage.getByRole("alert")).toHaveCount(0);
   });
 }
 
-function taskListWorkspaceHistoryScenario() {
+function taskListWorkspaceHistoryScenario(touch: boolean) {
   // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.2 AC-TASKS-LIST-ARCHIVE-FILTERS-004.3
   test("restores each linked workspace and its filters through browser history", async ({
     testPage,
@@ -107,14 +121,22 @@ function taskListWorkspaceHistoryScenario() {
           await expect(testPage.getByTestId("tasks-list-workflow-filter")).toHaveCount(0);
           releaseMetadata?.();
         }
-        await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[index][3]]);
+        await expect(
+          testPage.getByTestId(touch ? "sidebar-task-item" : "tasks-list-row-title"),
+        ).toContainText([fixtures[index][3]]);
         expect(new URL(testPage.url()).search).toBe(new URL(links[index], testPage.url()).search);
       }
       await testPage.goBack();
-      await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[0][3]]);
+      await expect(
+        testPage.getByTestId(touch ? "sidebar-task-item" : "tasks-list-row-title"),
+      ).toContainText([fixtures[0][3]]);
       await testPage.goForward();
-      await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[1][3]]);
-      await expect(testPage.getByTestId("tasks-list-search")).toHaveValue("Portable");
+      await expect(
+        testPage.getByTestId(touch ? "sidebar-task-item" : "tasks-list-row-title"),
+      ).toContainText([fixtures[1][3]]);
+      await expect(
+        testPage.getByTestId(touch ? "mobile-list-search-input" : "tasks-list-search"),
+      ).toHaveValue("Portable");
       await assertNoDocumentHorizontalOverflow(testPage);
     } finally {
       releaseMetadata?.();
@@ -124,7 +146,7 @@ function taskListWorkspaceHistoryScenario() {
   });
 }
 
-function taskListPartialMetadataScenario() {
+function taskListPartialMetadataScenario(touch: boolean) {
   // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
   test("loads a workflow when unused repository metadata fails", async ({
     testPage,
@@ -148,9 +170,11 @@ function taskListPartialMetadataScenario() {
       testPage,
       `/tasks?workspace=${seedData.workspaceId}&archive=archived&workflow=${seedData.workflowId}&repository=all`,
     );
-    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([
-      "Partial metadata archive",
-    ]);
-    await expect(testPage.getByTestId("tasks-list-error")).toHaveCount(0);
+    await expect(
+      testPage.getByTestId(touch ? "sidebar-task-item" : "tasks-list-row-title"),
+    ).toContainText(["Partial metadata archive"]);
+    await expect(
+      testPage.getByTestId(touch ? "sidebar-task-page-load-error" : "tasks-list-error"),
+    ).toHaveCount(0);
   });
 }

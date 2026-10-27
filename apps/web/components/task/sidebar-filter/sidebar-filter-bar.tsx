@@ -25,18 +25,21 @@ function useSidebarCommands(
   views: SidebarView[],
   onOpenChange: (open: boolean) => void,
   setActiveView: (id: string) => void,
+  showViewManagementActions: boolean,
 ): CommandItem[] {
   const { t } = useTranslation();
   return useMemo<CommandItem[]>(() => {
-    const list: CommandItem[] = [
-      {
-        id: "sidebar-open-filter",
-        label: t("task:openSidebarFilters"),
-        group: "Sidebar",
-        keywords: ["filter", "sort", "group", "view", "sidebar"],
-        action: () => onOpenChange(true),
-      },
-    ];
+    const list: CommandItem[] = showViewManagementActions
+      ? [
+          {
+            id: "sidebar-open-filter",
+            label: t("task:openSidebarFilters"),
+            group: "Sidebar",
+            keywords: ["filter", "sort", "group", "view", "sidebar"],
+            action: () => onOpenChange(true),
+          },
+        ]
+      : [];
     for (const view of views) {
       list.push({
         id: `sidebar-switch-view-${view.id}`,
@@ -47,10 +50,14 @@ function useSidebarCommands(
       });
     }
     return list;
-  }, [t, onOpenChange, views, setActiveView]);
+  }, [t, onOpenChange, views, setActiveView, showViewManagementActions]);
 }
 
-export function SidebarFilterBar() {
+export function SidebarFilterBar({
+  showViewManagementActions = true,
+}: {
+  showViewManagementActions?: boolean;
+}) {
   const { t } = useTranslation();
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -65,7 +72,9 @@ export function SidebarFilterBar() {
     newViewDisabledReason,
   } = useSidebarViewPopover();
 
-  useRegisterCommands(useSidebarCommands(views, onOpenChange, setActiveView));
+  useRegisterCommands(
+    useSidebarCommands(views, onOpenChange, setActiveView, showViewManagementActions),
+  );
 
   if (!workspaceId) return null;
 
@@ -79,59 +88,63 @@ export function SidebarFilterBar() {
       className="flex h-11 shrink-0 items-center gap-1 border-b border-border/60 bg-transparent px-2 md:h-[30px] md:px-3"
     >
       <SidebarViewChips />
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className={cn(
-          "h-11 shrink-0 cursor-pointer px-2 text-[11px] md:h-7 [@media(pointer:coarse)]:min-h-11",
-          newViewDisabledReason && "cursor-not-allowed opacity-45",
-        )}
-        onClick={() => {
-          if (newViewDisabledReason) {
-            toast.info(newViewDisabledReason);
-            return;
-          }
-          if (!startNewView({ openPopover: false })) return;
-          // Radix dismisses a controlled popover opened by this outside click.
-          // Open through its registered trigger so focus and layering stay correct.
-          filterTriggerRef.current?.focus();
-          filterTriggerRef.current?.click();
-        }}
-        aria-disabled={!!newViewDisabledReason}
-        data-testid="sidebar-new-view"
-        data-disabled-reason={newViewDisabledReason ?? undefined}
-        aria-label={
-          newViewDisabledReason
-            ? t("task:newViewUnavailable", { newViewDisabledReason })
-            : t("task:newView")
-        }
-        title={newViewDisabledReason ?? undefined}
-      >
-        <IconPlus className="h-3.5 w-3.5" />
-        {t("task:newView")}
-      </Button>
-      <SidebarFilterPopover
-        key={workspaceId}
-        open={open}
-        onOpenChange={onOpenChange}
-        renameRequestedViewId={renameRequestedViewId}
-        onRenameRequestHandled={consumeRenameRequest}
-        trigger={
+      {showViewManagementActions && (
+        <>
           <Button
-            ref={filterTriggerRef}
             type="button"
             variant="ghost"
-            size="icon"
-            className="relative h-11 w-11 shrink-0 cursor-pointer md:h-7 md:w-7 [@media(pointer:coarse)]:size-11"
-            data-testid="sidebar-filter-gear"
-            aria-label={t("task:sidebarFilters")}
+            size="sm"
+            className={cn(
+              "h-11 shrink-0 cursor-pointer px-2 text-[11px] md:h-7 [@media(pointer:coarse)]:min-h-11",
+              newViewDisabledReason && "cursor-not-allowed opacity-45",
+            )}
+            onClick={() => {
+              if (newViewDisabledReason) {
+                toast.info(newViewDisabledReason);
+                return;
+              }
+              if (!startNewView({ openPopover: false })) return;
+              // Radix dismisses a controlled popover opened by this outside click.
+              // Open through its registered trigger so focus and layering stay correct.
+              filterTriggerRef.current?.focus();
+              filterTriggerRef.current?.click();
+            }}
+            aria-disabled={!!newViewDisabledReason}
+            data-testid="sidebar-new-view"
+            data-disabled-reason={newViewDisabledReason ?? undefined}
+            aria-label={
+              newViewDisabledReason
+                ? t("task:newViewUnavailable", { newViewDisabledReason })
+                : t("task:newView")
+            }
+            title={newViewDisabledReason ?? undefined}
           >
-            <IconFilter className="h-4 w-4" />
-            <SidebarFilterIndicators />
+            <IconPlus className="h-3.5 w-3.5" />
+            {t("task:newView")}
           </Button>
-        }
-      />
+          <SidebarFilterPopover
+            key={workspaceId}
+            open={open}
+            onOpenChange={onOpenChange}
+            renameRequestedViewId={renameRequestedViewId}
+            onRenameRequestHandled={consumeRenameRequest}
+            trigger={
+              <Button
+                ref={filterTriggerRef}
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="relative h-11 w-11 shrink-0 cursor-pointer md:h-7 md:w-7 [@media(pointer:coarse)]:size-11"
+                data-testid="sidebar-filter-gear"
+                aria-label={t("task:sidebarFilters")}
+              >
+                <IconFilter className="h-4 w-4" />
+                <SidebarFilterIndicators />
+              </Button>
+            }
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -72,9 +72,9 @@ test.describe("Mobile Threads Home default", () => {
       .getByRole("dialog", { name: "View options" })
       .getByRole("radio", { name: "List", exact: true })
       .tap();
-    await expectEmptyList(testPage);
+    await expectEmptyList(testPage, true);
     await testPage.reload();
-    await expectEmptyList(testPage);
+    await expectEmptyList(testPage, true);
     await mobile.mobileMenuButton.tap();
     await testPage
       .getByRole("dialog", { name: "Menu" })
@@ -115,12 +115,12 @@ test.describe("Mobile Threads Home default", () => {
     await testPage.locator('label[for="startup-page-threads"]').tap();
     await saveStartupChoice(testPage, true);
     await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
-    await expect(testPage.getByTestId("tasks-list")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-tasks-list-scroll")).toBeVisible();
     await testPage.goto(`/t/${task.id}?sessionId=${task.session_id}`);
     await expect(testPage.getByTestId("session-chat")).toBeVisible();
     await testPage.getByRole("link", { name: "Task overview", exact: true }).tap();
     await expect(testPage).toHaveURL((url) => url.pathname === "/tasks");
-    await expect(testPage.getByTestId("tasks-list")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-tasks-list-scroll")).toBeVisible();
     await testPage.goto(
       `/threads?workspace=${seedData.workspaceId}&taskId=${task.id}&sessionId=${task.session_id}`,
     );

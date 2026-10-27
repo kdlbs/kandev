@@ -1,0 +1,113 @@
+{
+  "viewport": {
+    "width": 393,
+    "height": 852
+  },
+  "document": {
+    "width": 393,
+    "height": 852,
+    "horizontalOverflow": false
+  },
+  "elements": {
+    "mobile-topbar-page-context": {
+      "x": 12,
+      "y": 5.5,
+      "width": 95.484375,
+      "height": 44,
+      "minHeight": "44px",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 42,
+      "scrollHeight": 42,
+      "centerHit": true,
+      "insideViewport": true
+    },
+    "mobile-list-search-toggle": {
+      "x": 289,
+      "y": 5.5,
+      "width": 44,
+      "height": 44,
+      "minHeight": "auto",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 42,
+      "scrollHeight": 42,
+      "centerHit": true,
+      "insideViewport": true
+    },
+    "app-nav-trigger": {
+      "x": 337,
+      "y": 5.5,
+      "width": 44,
+      "height": 44,
+      "minHeight": "auto",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 42,
+      "scrollHeight": 42,
+      "centerHit": true,
+      "insideViewport": true
+    },
+    "sidebar-view-chip-row": {
+      "x": 16,
+      "y": 56,
+      "width": 357,
+      "height": 40,
+      "minHeight": "auto",
+      "overflowX": "auto",
+      "overflowY": "auto",
+      "clientHeight": 40,
+      "scrollHeight": 40,
+      "centerHit": true,
+      "insideViewport": true
+    },
+    "mobile-list-search-row": {
+      "x": 0,
+      "y": 96,
+      "width": 393,
+      "height": 52,
+      "minHeight": "auto",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 52,
+      "scrollHeight": 52,
+      "centerHit": true,
+      "insideViewport": true
+    },
+    "mobile-tasks-list-scroll": {
+      "x": 0,
+      "y": 148,
+      "width": 393,
+      "height": 704,
+      "minHeight": "0px",
+      "overflowX": "auto",
+      "overflowY": "auto",
+      "clientHeight": 704,
+      "scrollHeight": 704,
+      "centerHit": true,
+      "insideViewport": true
+    },
+    "mobile-list-view-editor-scroll": null,
+    "app-nav-sheet": null,
+    "mobile-list-result-filters-drawer": null,
+    "mobile-list-filter-empty-state": null,
+    "mobile-list-link-scope": null,
+    "mobile-list-facet-sort": null,
+    "mobile-list-facet-group": null,
+    "mobile-menu-drawer-content": null,
+    "tasks-list-search": null,
+    "sidebar-task-item": {
+      "x": 24,
+      "y": 150,
+      "width": 345,
+      "height": 60,
+      "minHeight": "0px",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 60,
+      "scrollHeight": 60,
+      "centerHit": true,
+      "insideViewport": true
+    }
+  }
+}

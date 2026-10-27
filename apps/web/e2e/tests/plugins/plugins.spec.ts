@@ -994,16 +994,18 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     ];
     try {
       const expand = testPage.getByTestId("sidebar-navigation-expand");
-      if ((await expand.getAttribute("aria-expanded")) === "true") {
-        const collapsed = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      if (await expand.count()) {
+        if ((await expand.getAttribute("aria-expanded")) === "true") {
+          const collapsed = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+          await expand.click();
+          expect((await collapsed).ok()).toBeTruthy();
+        }
+        await expect(expand).toHaveAttribute("aria-expanded", "false");
+        const saved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
         await expand.click();
-        expect((await collapsed).ok()).toBeTruthy();
+        expect((await saved).ok()).toBeTruthy();
+        await expect(expand).toHaveAttribute("aria-expanded", "true");
       }
-      await expect(expand).toHaveAttribute("aria-expanded", "false");
-      const saved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
-      await expand.click();
-      expect((await saved).ok()).toBeTruthy();
-      await expect(expand).toHaveAttribute("aria-expanded", "true");
       await navItem.click();
       await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
 

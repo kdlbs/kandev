@@ -15,6 +15,7 @@ import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useShallow } from "zustand/react/shallow";
+import type { SidebarTaskQueryOverrides } from "./use-sidebar-page-context";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
   pendingRemovalTaskIds: ReadonlySet<string>;
@@ -275,10 +276,17 @@ function useSidebarPageTasks(
         pageEntries,
         byId,
         statusSummaryByTaskId,
-        page.view.filters,
+        page.queryView?.filters ?? page.view.filters,
         activeTaskOnly,
       ),
-    [pageEntries, statusSummaryByTaskId, byId, page.view.filters, activeTaskOnly],
+    [
+      pageEntries,
+      statusSummaryByTaskId,
+      byId,
+      page.queryView?.filters,
+      page.view.filters,
+      activeTaskOnly,
+    ],
   );
   const previousTasksRef = useRef<SidebarTask[]>([]);
   const allTasks = useMemo(() => {
@@ -298,13 +306,17 @@ function useSidebarPageTasks(
 export function useWorkspaceSidebarTasks(
   workspaceId: string | null,
   activeTaskOnly = false,
+  queryOverrides?: SidebarTaskQueryOverrides,
+  enabled = true,
 ): WorkspaceSidebarTasksResult {
   const pageWorkspaceId = activeTaskOnly ? null : workspaceId;
-  const storeTasks = useSidebarStoreTasks(pageWorkspaceId);
+  const hasWorkspaceSearch = Boolean(queryOverrides?.query);
+  const storeTasks = useSidebarStoreTasks(pageWorkspaceId, queryOverrides);
   const page = useSidebarTaskPage(
     pageWorkspaceId,
-    !activeTaskOnly && storeTasks === null,
-    storeTasks,
+    enabled && !activeTaskOnly && (storeTasks === null || hasWorkspaceSearch),
+    hasWorkspaceSearch ? null : storeTasks,
+    queryOverrides,
   );
   const taskRemoval = useAppStore((state) => state.taskRemoval);
   const { filteredWorkflows, stepsByWorkflowId, allSteps } =

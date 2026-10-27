@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { IconSearch, IconX, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { t } from "@/lib/i18n";
+import { useTranslation } from "react-i18next";
 
 interface TaskSearchInputProps {
   value: string;
@@ -14,23 +14,35 @@ interface TaskSearchInputProps {
   isLoading?: boolean;
   className?: string;
   autoFocus?: boolean;
+  inputTestId?: string;
+  clearButtonLabel?: string;
+  clearButtonClassName?: string;
 }
 
 export function TaskSearchInput({
   value,
   onChange,
-  placeholder = t("kanban:searchTasksPlaceholder"),
+  placeholder,
   debounceMs = 300,
   isLoading = false,
   className,
   autoFocus = false,
+  inputTestId,
+  clearButtonLabel,
+  clearButtonClassName,
 }: TaskSearchInputProps) {
+  const { t } = useTranslation();
+  const searchPlaceholder = placeholder ?? t("kanban:searchTasksPlaceholder");
   const [localValue, setLocalValue] = useState(value);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Sync local value when external value changes
   useEffect(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     setLocalValue(value);
   }, [value]);
 
@@ -61,10 +73,10 @@ export function TaskSearchInput({
 
   const handleClear = useCallback(() => {
     setLocalValue("");
-    onChange("");
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
+    onChange("");
   }, [onChange]);
 
   // Cleanup timeout on unmount
@@ -88,14 +100,20 @@ export function TaskSearchInput({
         type="text"
         value={localValue}
         onChange={handleChange}
-        placeholder={placeholder}
+        placeholder={searchPlaceholder}
+        aria-label={searchPlaceholder}
+        data-testid={inputTestId}
         className="pl-8 pr-8 w-full border border-border text-[16px] md:text-[16px] lg:text-xs/relaxed"
       />
       {localValue && !isLoading && (
         <button
           type="button"
           onClick={handleClear}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          aria-label={clearButtonLabel ?? t("tasks:clearSearch")}
+          className={cn(
+            "absolute right-2 top-1/2 inline-flex -translate-y-1/2 cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground",
+            clearButtonClassName,
+          )}
         >
           <IconX className="h-4 w-4" />
         </button>

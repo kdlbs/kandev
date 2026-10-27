@@ -1,128 +1,164 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForFiniteAnimations } from "../../helpers/animations";
-import { selectTaskListFilter, waitForTaskList } from "./task-list-archive-helpers";
+import { openPhoneList, waitForSidebarQuery } from "./mobile-list-helpers";
+import {
+  readPreviousSidebarViewState,
+  restoreSidebarViewState,
+} from "./sidebar-running-first-activity-sort-helpers";
 
-// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-003.2 AC-TASKS-LIST-ARCHIVE-FILTERS-003.3 AC-TASKS-LIST-ARCHIVE-FILTERS-003.5
-test("filters the phone archive in an inset drawer and clears without losing archive mode", async ({
+test("temporary phone filters apply and clear without changing the selected saved view", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
-  const baseline = (await apiClient.getUserSettings()).settings;
+  const otherWorkflow = await apiClient.createWorkflow(
+    seedData.workspaceId,
+    "Phone other workflow",
+    "simple",
+  );
+  const { steps: otherSteps } = await apiClient.listWorkflowSteps(otherWorkflow.id);
+  const primary = await apiClient.createTask(seedData.workspaceId, "Phone filter primary", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const other = await apiClient.createTask(seedData.workspaceId, "Phone filter other", {
+    workflow_id: otherWorkflow.id,
+    workflow_step_id: otherSteps[0].id,
+  });
+  const savedView = await readPreviousSidebarViewState(apiClient, seedData.workspaceId);
+
   try {
-    const other = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Phone other workflow",
-      "simple",
-    );
-    const { steps } = await apiClient.listWorkflowSteps(other.id);
-    for (const [title, workflow, step] of [
-      ["Phone archive primary", seedData.workflowId, seedData.startStepId],
-      ["Phone archive other", other.id, steps[0].id],
-    ]) {
-      const task = await apiClient.createTask(seedData.workspaceId, title, {
-        workflow_id: workflow,
-        workflow_step_id: step,
-      });
-      await apiClient.archiveTask(task.id);
-    }
-    await testPage.goto(
-      `/tasks?workspace=${seedData.workspaceId}&archive=archived&workflow=all&repository=all&group=none`,
-    );
-    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveCount(2);
-    const trigger = testPage.getByTestId("tasks-list-filters-trigger");
-    expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await openPhoneList(testPage);
+    const list = testPage.getByTestId("mobile-tasks-list-scroll");
+    const primaryRow = list.getByTestId("sidebar-task-item").filter({ hasText: primary.title });
+    const otherRow = list.getByTestId("sidebar-task-item").filter({ hasText: other.title });
+    await expect(primaryRow).toBeVisible();
+    await expect(otherRow).toBeVisible();
+    await testPage.getByTestId("mobile-list-search-toggle").tap();
+
+    const trigger = testPage.getByTestId("mobile-list-result-filters");
+    expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(40);
     await trigger.tap();
-    const drawer = testPage.getByTestId("tasks-list-filters-drawer");
+    const drawer = testPage.getByTestId("mobile-list-result-filters-drawer");
     await expect(drawer).toBeVisible();
     await waitForFiniteAnimations(drawer);
     const scrollBody = drawer.locator(".overflow-y-auto");
     await expect(scrollBody).toHaveCount(1);
     await expect(scrollBody).toHaveCSS("overscroll-behavior-y", "contain");
-    const workflowName = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
-      (w) => w.id === seedData.workflowId,
-    )!.name;
-    const selected = waitForTaskList(testPage, "archived");
-    await selectTaskListFilter(testPage, "workflow", workflowName, true);
-    await selected;
-    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([
-      "Phone archive primary",
-    ]);
-    await expect(drawer).toBeVisible();
-    for (const id of [
-      "tasks-list-workflow-filter",
-      "tasks-list-repository-filter",
-      "tasks-list-filters-done",
-    ]) {
-      expect((await testPage.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    }
-    const box = (await drawer.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(testPage.viewportSize()!.width + 1);
-    expect(box.y + box.height).toBeLessThanOrEqual(testPage.viewportSize()!.height + 1);
-    await testPage.screenshot({ path: "test-results/task-list-phone-filters.png" });
-    await testPage.getByTestId("tasks-list-filters-done").tap();
+    const drawerBox = (await drawer.boundingBox())!;
+    expect(drawerBox.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBox.x + drawerBox.width).toBeLessThanOrEqual(testPage.viewportSize()!.width + 1);
+    expect(drawerBox.y + drawerBox.height).toBeLessThanOrEqual(testPage.viewportSize()!.height + 1);
+
+    const workflows = (await apiClient.listWorkflows(seedData.workspaceId)).workflows;
+    const workflowName = workflows.find((workflow) => workflow.id === seedData.workflowId)!.name;
+    const workflowFilter = drawer.getByTestId("mobile-list-filter-workflow");
+    expect((await workflowFilter.boundingBox())!.height).toBeGreaterThanOrEqual(40);
+    await workflowFilter.tap();
+    await testPage.getByRole("option", { name: workflowName, exact: true }).tap();
+    await testPage.keyboard.press("Escape");
     await expect(drawer).toBeHidden();
+    await expect(primaryRow).toBeVisible();
+    await expect(otherRow).toBeVisible();
+    await expect(testPage.getByTestId("mobile-list-result-summary")).toHaveCount(0);
+
+    await trigger.tap();
+    const reopened = testPage.getByTestId("mobile-list-result-filters-drawer");
+    await reopened.getByTestId("mobile-list-filter-workflow").tap();
+    await testPage.getByRole("option", { name: workflowName, exact: true }).tap();
+    await reopened.getByTestId("mobile-list-filters-apply").tap();
+    await expect(reopened).toBeHidden();
     await expect(trigger).toBeFocused();
-    await expect(trigger).toContainText("(1)");
-    const all = waitForTaskList(testPage, "archived");
-    await testPage.getByRole("button", { name: "Remove workflow filter", exact: true }).tap();
-    await all;
-    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveCount(2);
-    const empty = waitForTaskList(testPage, "archived", "missing");
-    await testPage.getByTestId("tasks-list-search").fill("missing");
-    await empty;
-    await expect(testPage.getByText("No tasks match these filters", { exact: true })).toBeVisible();
-    const cleared = waitForTaskList(testPage, "archived");
-    await testPage.getByRole("button", { name: "Clear filters", exact: true }).tap();
-    await cleared;
-    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveCount(2);
-    await expect(testPage.getByTestId("tasks-list-archive-archived")).toHaveAttribute(
-      "data-state",
-      "on",
+    await expect(primaryRow).toBeVisible();
+    await expect(otherRow).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-list-temporary-filter-summary")).toContainText(
+      workflowName,
     );
-    await assertNoDocumentHorizontalOverflow(testPage);
-    await testPage.setViewportSize({ width: 900, height: 1000 });
-    expect(
-      (await testPage.getByTestId("tasks-list-workflow-filter").boundingBox())!.height,
-    ).toBeGreaterThanOrEqual(44);
+    expect(await readPreviousSidebarViewState(apiClient, seedData.workspaceId)).toEqual(savedView);
+
+    await trigger.tap();
+    const clearDrawer = testPage.getByTestId("mobile-list-result-filters-drawer");
+    await clearDrawer.getByTestId("mobile-list-filters-clear").tap();
+    await clearDrawer.getByTestId("mobile-list-filters-apply").tap();
+    await expect(primaryRow).toBeVisible();
+    await expect(otherRow).toBeVisible();
+    await expect(testPage.getByTestId("mobile-list-result-summary")).toHaveCount(0);
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
-    await apiClient.saveUserSettings({
-      workflow_filter_id: baseline.workflow_filter_id ?? "",
-      repository_ids: baseline.repository_ids ?? [],
-    });
+    await restoreSidebarViewState(apiClient, seedData.workspaceId, savedView);
   }
 });
 
-// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-003.4 AC-TASKS-LIST-ARCHIVE-FILTERS-004.4
-test("keeps a failed archive read distinct from an empty archive and retries by touch", async ({
+test("empty phone results can clear temporary refinements without changing the saved view", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const task = await apiClient.createTask(seedData.workspaceId, "Phone empty-state recovery task", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const savedView = await readPreviousSidebarViewState(apiClient, seedData.workspaceId);
+
+  try {
+    await openPhoneList(testPage);
+    await testPage.getByTestId("mobile-list-search-toggle").tap();
+    const input = testPage.getByTestId("mobile-list-search-input");
+    const searched = waitForSidebarQuery(
+      testPage,
+      (query) => query.query === "no matching phone task",
+    );
+    await input.fill("no matching phone task");
+    await searched;
+
+    const list = testPage.getByTestId("mobile-tasks-list-scroll");
+    await expect(list.getByText("No tasks match these filters", { exact: true })).toBeVisible();
+    await list.getByRole("button", { name: "Clear filters", exact: true }).tap();
+    await expect(input).toHaveValue("");
+    await expect(
+      list.getByTestId("sidebar-task-item").filter({ hasText: task.title }),
+    ).toBeVisible();
+    expect(await readPreviousSidebarViewState(apiClient, seedData.workspaceId)).toEqual(savedView);
+  } finally {
+    await restoreSidebarViewState(apiClient, seedData.workspaceId, savedView);
+  }
+});
+
+test("failed archive link reads show an error and retry without losing the link scope", async ({
   testPage,
   seedData,
 }) => {
+  await openPhoneList(testPage);
   let failed = true;
-  await testPage.route(/\/api\/v1\/workspaces\/[^/]+\/tasks(?:\?|$)/, async (route) => {
-    if (failed)
+  await testPage.route(/\/api\/v1\/workspaces\/[^/]+\/sidebar\/query(?:\?|$)/, async (route) => {
+    if (failed) {
       await route.fulfill({
         status: 503,
         contentType: "application/json",
         body: JSON.stringify({ error: "Temporarily unavailable" }),
       });
-    else await route.continue();
+    } else {
+      await route.continue();
+    }
   });
   await testPage.goto(
-    `/tasks?workspace=${seedData.workspaceId}&archive=archived&workflow=all&repository=all`,
+    `/tasks?workspace=${seedData.workspaceId}&archive=archived&workflow=all&repository=all&query=No+matching+task`,
   );
-  await expect(testPage.getByTestId("tasks-list-error")).toBeVisible();
-  await expect(testPage.getByText("No archived tasks", { exact: true })).not.toBeVisible();
+  const searchToggle = testPage.getByTestId("mobile-list-search-toggle");
+  if ((await searchToggle.getAttribute("aria-expanded")) !== "true") await searchToggle.tap();
+  await expect(testPage.getByTestId("mobile-list-link-scope")).toBeVisible();
+  await expect(testPage.getByTestId("sidebar-task-page-load-error")).toBeVisible();
+
   failed = false;
-  const retried = waitForTaskList(testPage, "archived");
-  await testPage.getByRole("button", { name: "Retry", exact: true }).tap();
-  await retried;
-  await expect(testPage.getByText("No archived tasks", { exact: true })).toBeVisible();
-  await expect(testPage.getByTestId("tasks-list-archive-archived")).toHaveAttribute(
-    "data-state",
-    "on",
+  const retried = waitForSidebarQuery(testPage, (query) =>
+    query.filters.some((filter) => filter.dimension === "archived" && filter.value === true),
   );
+  await testPage.getByRole("button", { name: "Retry", exact: true }).tap({ force: true });
+  await retried;
+  await expect(testPage.getByTestId("sidebar-task-page-load-error")).toHaveCount(0);
+  await expect(testPage.getByTestId("mobile-list-link-scope")).toBeVisible();
+  await expect(
+    testPage.getByTestId("mobile-tasks-list-scroll").getByTestId("sidebar-task-item"),
+  ).toHaveCount(0);
 });

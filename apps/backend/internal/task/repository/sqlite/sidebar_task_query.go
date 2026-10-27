@@ -196,6 +196,11 @@ func sidebarTaskCandidateSQL(
 	if err != nil {
 		return "", nil, err
 	}
+	if query.SearchQuery != "" {
+		searchSQL, searchArgs := sidebarTaskSearchCondition(driver, query.SearchQuery)
+		scopeSQL += " AND " + searchSQL
+		scopeArgs = append(scopeArgs, searchArgs...)
+	}
 	filterSQL, filterArgs, err := sidebarFilterSQL(driver, projectionFilters, false)
 	if err != nil {
 		return "", nil, err

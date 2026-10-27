@@ -394,3 +394,12 @@ logic. Use full-row semantic buttons, `aria-expanded`, `aria-controls`, stable
 content IDs, visible focus, and Enter/Space activation. Preserve Escape/back,
 focus return and nested Select behavior. Test phone geometry at the configured
 Pixel 5 size and immediately below/above the 768px phone boundary.
+
+## Planned phone List saved-view consumer
+
+The draft [phone List design](mobile-list-saved-views.md) supplies the new
+phone consumer and left options editor. It refines the phone portions of List
+search admission and grouped display controls. Wider List consumers retain
+their existing scalar preferences. The new package does not overwrite those
+values or startup selection. Its [work orders](../../../plans/mobile-list-layout/plan.md)
+own implementation and rendered comparison; existing completed plan results remain historical.

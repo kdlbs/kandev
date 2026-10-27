@@ -36,7 +36,31 @@ export function selectSidebarViews(
 ): SidebarSliceState {
   const id = workspaceId;
   if (!id) return EMPTY_SIDEBAR;
-  return state.sidebarViewsByWorkspace?.[id] ?? DEFAULT_SIDEBAR;
+  const workspace = state.sidebarViewsByWorkspace?.[id];
+  return workspace?.views.length ? workspace : DEFAULT_SIDEBAR;
+}
+
+function mapWorkspaceState(
+  wire: SidebarWorkspaceStateApi,
+  current: SidebarSliceState | undefined,
+  revision: number | null | undefined,
+): SidebarSliceState {
+  const mappedViews = wire.views.map(fromApiSidebarView).map(migrateView);
+  const views = mappedViews.length > 0 ? mappedViews : DEFAULT_SIDEBAR.views;
+  const activeViewId = views.some((view) => view.id === wire.active_view_id)
+    ? wire.active_view_id
+    : (views[0]?.id ?? "");
+  const draft =
+    mappedViews.length > 0 && wire.draft && wire.draft.base_view_id === activeViewId
+      ? migrateSidebarViewDraft(fromApiSidebarDraft(wire.draft))
+      : null;
+  return {
+    views,
+    activeViewId,
+    draft,
+    syncError: current?.syncError ?? null,
+    serverRevision: revision,
+  };
 }
 
 export function mapSidebarWorkspaces(
@@ -49,21 +73,7 @@ export function mapSidebarWorkspaces(
     Object.entries(incoming).map(([id, wire]) => {
       const order = compareUserSettingsRevisions(revision, current[id]?.serverRevision);
       if (current[id] && order !== null && order <= 0) return [id, current[id]];
-      const views = wire.views.map(fromApiSidebarView).map(migrateView);
-      const activeViewId = views.some((view) => view.id === wire.active_view_id)
-        ? wire.active_view_id
-        : (views[0]?.id ?? "");
-      const draft =
-        wire.draft && wire.draft.base_view_id === activeViewId
-          ? migrateSidebarViewDraft(fromApiSidebarDraft(wire.draft))
-          : null;
-      const server = {
-        views,
-        activeViewId,
-        draft,
-        syncError: current[id]?.syncError ?? null,
-        serverRevision: revision,
-      };
+      const server = mapWorkspaceState(wire, current[id], revision);
       if (current[id]?.syncPending)
         return [id, { ...current[id], serverRevision: revision, deferredServerState: server }];
       return [id, server];

@@ -230,6 +230,9 @@ function resetAppNavMocks() {
 }
 
 describe("AppNavSheet", () => {
+  beforeEach(resetAppNavMocks);
+  afterEach(cleanup);
+
   // @covers AC-UI-MOBILE-MENU-007.1 AC-UI-MOBILE-MENU-007.2
   it("puts quick actions before local navigation and Settings before Stats", () => {
     verifyMenuOrder();
@@ -242,6 +245,9 @@ describe("AppNavSheet", () => {
     host.rerender(<SectionsHost />);
     expect(screen.queryByRole("button", { name: "Task views" })).toBeNull();
   });
+});
+
+describe("AppNavSheet navigation", () => {
   beforeEach(resetAppNavMocks);
   afterEach(cleanup);
 
@@ -271,6 +277,14 @@ describe("AppNavSheet", () => {
     expect(screen.getByTestId("app-nav-sheet").getAttribute("data-vaul-drawer-direction")).toBe(
       "bottom",
     );
+  });
+
+  it("gives the fixed workspace picker top spacing above the navigation scroller", () => {
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    expect(
+      screen.getByTestId("mobile-navigation-workspace-section").classList.contains("pt-4"),
+    ).toBe(true);
   });
 
   // @covers AC-UI-MOBILE-MENU-001.2
@@ -312,6 +326,11 @@ describe("AppNavSheet", () => {
 
     expect(screen.getByRole("link", { name: "Home" }).getAttribute("href")).toBe(href);
   });
+});
+
+describe("AppNavSheet workspace actions", () => {
+  beforeEach(resetAppNavMocks);
+  afterEach(cleanup);
 
   it("exposes workspace actions through the shared phone navigation sheet", () => {
     let captured: unknown;

@@ -373,3 +373,12 @@ workspace switches, long translated labels, and unchanged 768px/wider compositio
 Reuse the populated isolated preview and reapply its mock seed after any restart.
 
 The [mobile plugin deduplication plan](../../../plans/mobile-plugin-deduplication/plan.md) records the September 24 toolbar selection correction.
+
+## Planned phone List presentation
+
+The draft [phone List design](mobile-list-saved-views.md) refines the List
+listing-title sheet and menu-only task presentation. It reuses the existing
+app-navigation outlet and controller lifetime. A presentation capability removes
+editing only from the contextual List menu; dedicated task pickers keep their
+existing editor. The [mobile List package](../../../plans/mobile-list-layout/plan.md)
+owns the header search icon, fixed-picker spacing, and rendered preview evidence.

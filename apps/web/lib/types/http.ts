@@ -892,10 +892,11 @@ export type ListTasksResponse = {
 };
 
 export type SidebarTaskQuery = {
+  query?: string;
   filters: Array<{
     dimension: string;
     op: string;
-    value: string | string[] | boolean;
+    value: string | string[] | boolean | boolean[];
   }>;
   sort: {
     key: string;

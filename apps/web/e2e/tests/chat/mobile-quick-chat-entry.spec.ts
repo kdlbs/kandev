@@ -180,11 +180,8 @@ test.describe("Quick Chat entry points on mobile", () => {
         url.pathname === "/tasks" && url.searchParams.get("workspace") === seedData.workspaceId
       );
     });
-    await expect(
-      testPage
-        .getByTestId("tasks-list-view")
-        .getByText("No tasks match these filters", { exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByTestId("sidebar-view-chip-row")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-tasks-list-scroll")).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

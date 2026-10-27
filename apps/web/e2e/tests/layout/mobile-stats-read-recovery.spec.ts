@@ -5,15 +5,14 @@ test("mobile Stats exposes a touch-sized retry and recovers a failed section", a
   testPage,
   seedData,
 }) => {
-  let dailyRequests = 0;
+  let allowRecovery = false;
   await testPage.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname !== `/api/v1/workspaces/${seedData.workspaceId}/stats/daily-activity`) {
       await route.continue();
       return;
     }
-    dailyRequests += 1;
-    if (dailyRequests === 1) {
+    if (!allowRecovery) {
       await route.fulfill({
         status: 503,
         headers: { "Retry-After": "300" },
@@ -40,6 +39,7 @@ test("mobile Stats exposes a touch-sized retry and recovers a failed section", a
   if (!retryBox) throw new Error("mobile Stats retry control is not visible");
   expect(retryBox.height).toBeGreaterThanOrEqual(44);
 
+  allowRecovery = true;
   const recoveredDailyRead = waitForHttp(
     testPage,
     "GET",

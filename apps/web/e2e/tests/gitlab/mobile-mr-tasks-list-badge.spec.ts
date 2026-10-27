@@ -1,9 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
-import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { openPhoneList, savePhoneWorkspaceView } from "../task/mobile-list-helpers";
+import {
+  readPreviousSidebarViewState,
+  restoreSidebarViewState,
+} from "../task/sidebar-running-first-activity-sort-helpers";
 
 const MR_IID = 4580;
 
@@ -84,33 +88,34 @@ test.describe("mobile GitLab MR badge on the /tasks list rows", () => {
   }) => {
     test.setTimeout(120_000);
     const task = await seedTaskWithPRAndMR(apiClient, seedData, "Mobile tasks list MR badge task");
+    const previousViewState = await readPreviousSidebarViewState(apiClient, seedData.workspaceId);
+    await savePhoneWorkspaceView(apiClient, seedData.workspaceId, {
+      id: `mobile-mr-badge-${Date.now()}`,
+      name: "Mobile MR badge details",
+      filters: [],
+      sort: { key: "state", direction: "asc" },
+      group: "none",
+      group_indent: true,
+      collapsed_groups: [],
+      task_row: {
+        details_enabled: true,
+        detail_order: ["relative_time", "repository", "pull_request_number"],
+        visible_details: ["relative_time", "repository", "pull_request_number"],
+        trailing: "git_changes",
+      },
+    });
 
-    // Explicit, not assumed: tasks_list_show_details is a *bool PATCH field
-    // on the backend, so an unset field in the testPage fixture's settings
-    // reset leaves whatever a previous test in this worker persisted.
-    await apiClient.saveUserSettings({ tasks_list_show_details: false });
+    try {
+      await openPhoneList(testPage);
+      const row = testPage.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+      await expect(row).toBeVisible({ timeout: 45_000 });
 
-    await testPage.goto("/tasks");
-    const row = testPage.getByTestId("tasks-list-row").filter({ hasText: task.title });
-    await expect(row).toBeVisible({ timeout: 45_000 });
-
-    // Mobile has no `display-button`; the display menu lives behind the
-    // "Open menu" drawer (see mobile-task-listing-display.spec.ts).
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    const menu = testPage.getByRole("dialog", { name: "View options" });
-    await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
-    await menu.getByText("Show task details", { exact: true }).click();
-    await testPage.keyboard.press("Escape");
-    await expect(menu).toHaveCount(0);
-
-    // Assert the companion PR badge too: seedTaskWithPRAndMR associates both,
-    // so the overflow check below is only informative when both actually
-    // rendered (a missing PR badge from a hydration race would otherwise
-    // silently narrow the layout assertion to a single-badge row).
-    await expect(row.getByTestId(`pr-task-icon-${task.id}`)).toBeVisible({ timeout: 15_000 });
-    const icon = row.getByTestId(`mr-task-icon-${task.id}`);
-    await expect(icon).toBeVisible({ timeout: 15_000 });
-
-    await assertNoDocumentHorizontalOverflow(testPage, "mobile /tasks list with MR badge");
+      // Assert both integrations rendered before checking the row for overflow.
+      await expect(row.getByTestId(`pr-task-icon-${task.id}`)).toBeVisible({ timeout: 15_000 });
+      await expect(row.getByTestId(`mr-task-icon-${task.id}`)).toBeVisible({ timeout: 15_000 });
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile /tasks list with MR badge");
+    } finally {
+      await restoreSidebarViewState(apiClient, seedData.workspaceId, previousViewState);
+    }
   });
 });

@@ -17,10 +17,21 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 vi.mock("@/components/task/mobile/session-task-switcher-sheet", () => ({
-  SessionTaskSwitcherSheet: () => {
+  SessionTaskSwitcherSheet: ({
+    showViewManagementActions,
+    initiallyExpanded,
+  }: {
+    showViewManagementActions?: boolean;
+    initiallyExpanded?: boolean;
+  }) => {
     const archived = useArchivedTaskState();
     const ports = useOptionalPortForwardingVisibility();
-    return <output>{`${archived.archivedTaskId ?? "none"}:${ports?.enabled ?? false}`}</output>;
+    return (
+      <output data-view-management-actions={String(showViewManagementActions)}>
+        {`${archived.archivedTaskId ?? "none"}:${ports?.enabled ?? false}`}
+        <span data-testid="expanded-default" data-expanded={String(initiallyExpanded)} />
+      </output>
+    );
   },
 }));
 afterEach(cleanup);
@@ -57,6 +68,8 @@ it("bridges current task context to the retained sidebar and updates it with the
     </MobileTaskNavigationProvider>,
   );
   await expect.poll(() => screen.getByRole("status").textContent).toBe("archived-first:true");
+  expect(screen.getByRole("status").getAttribute("data-view-management-actions")).toBe("false");
+  expect(screen.getByTestId("expanded-default").getAttribute("data-expanded")).toBe("true");
   host.rerender(
     <MobileTaskNavigationProvider>
       <Outlet taskId="archived-second" />

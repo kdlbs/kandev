@@ -116,3 +116,31 @@ skip, not evidence of a PostgreSQL pass.
 - [Requirements](../requirements/workspace-search.md)
 - [Archive result design](command-panel-archived-task-results.md)
 - [Board repository matching design](../../ui/system-design/board-repository-matching.md)
+
+## Phone List query adapter
+
+The draft [phone List design](../../ui/system-design/mobile-list-saved-views.md)
+adds an optional request-only `query` string to `SidebarTaskViewQuery`. This
+reuses `REQ-TASKS-WORKSPACE-SEARCH-001` for List results through another transport.
+The saved sidebar `titleMatch` clause remains title-only; no persisted search
+field or saved-view migration follows.
+
+Apply the existing four-field literal predicate in the candidate query before
+counting, complete-tree ranking, and page selection. Bind escaped values and
+retain dialect-aware LIKE/ILIKE behavior. Use repository EXISTS or equivalent
+deduplication so matching repositories cannot multiply task rows. Both the
+count and selected page use the same candidate set. Preserve authorized
+workspace scope and authenticated color preferences.
+
+The query digest and frontend query/cache identity include the optional string.
+Nonempty queries use bounded server evaluation. Existing sidebar callers omit
+the field and retain their behavior. Query validation must use a documented
+request bound consistent with workspace search and existing body limits.
+
+Task 01 in the [mobile List package](../../../plans/mobile-list-layout/plan.md)
+implemented the request-only adapter and added SQLite and PostgreSQL tests for
+searchable fields, punctuation, repository duplicates, complete-chain ordering,
+and matches after page one. SQLite tests and changed Go lint passed. PostgreSQL
+execution was skipped because `KANDEV_TEST_POSTGRES_DSN` was not set. This
+adapter does not change the earlier workspace-search correction's historical
+test results.

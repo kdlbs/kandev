@@ -1,0 +1,83 @@
+{
+  "viewport": {
+    "width": 767,
+    "height": 900
+  },
+  "pointer": {
+    "fine": true,
+    "coarse": false
+  },
+  "document": {
+    "width": 767,
+    "height": 900,
+    "horizontalOverflow": false
+  },
+  "elements": {
+    "mobile-topbar-page-context": {
+      "x": 12,
+      "y": 5.5,
+      "width": 95.484375,
+      "height": 44,
+      "minHeight": "44px",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 42,
+      "scrollHeight": 42,
+      "insideViewport": true
+    },
+    "mobile-list-search-toggle": {
+      "x": 663,
+      "y": 5.5,
+      "width": 44,
+      "height": 44,
+      "minHeight": "auto",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 42,
+      "scrollHeight": 42,
+      "insideViewport": true
+    },
+    "app-nav-trigger": {
+      "x": 711,
+      "y": 5.5,
+      "width": 44,
+      "height": 44,
+      "minHeight": "auto",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 42,
+      "scrollHeight": 42,
+      "insideViewport": true
+    },
+    "sidebar-view-chip-row": {
+      "x": 16,
+      "y": 56,
+      "width": 731,
+      "height": 40,
+      "minHeight": "auto",
+      "overflowX": "auto",
+      "overflowY": "auto",
+      "clientHeight": 40,
+      "scrollHeight": 40,
+      "insideViewport": true
+    },
+    "app-sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0,
+      "minHeight": "0px",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "clientHeight": 0,
+      "scrollHeight": 0,
+      "insideViewport": true
+    },
+    "tasks-list-search": null,
+    "tasks-list-archive-modes": null,
+    "tasks-list-sort": null,
+    "tasks-list-group": null,
+    "threads-board": null,
+    "threads-view-controls": null
+  }
+}

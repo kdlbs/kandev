@@ -44,3 +44,11 @@ the shared phone menu, replacing the Task views action and dedicated pinned
 shortcuts. Kanban/Threads/List title dropdowns open display options; Threads
 saved-view editing remains inside that surface. See REQ-UI-MOBILE-MENU-004/005
 in the unified navigation requirements for the current composition.
+
+## Planned primary phone List access
+
+The draft [phone List contract](mobile-list-saved-views.md) adds direct saved-view
+selection to primary List. It refines the List menu's editor entry in 001.1:
+that menu retains task selection, while top-left List options owns editing.
+Other task-picker presentations retain their editor and draft lifetime.
+Implementation belongs to the [mobile List package](../../../plans/mobile-list-layout/plan.md).

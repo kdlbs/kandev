@@ -24,9 +24,15 @@ const DRAG_ACTIVATION_DISTANCE = 8;
 const TOUCH_DRAG_DELAY_MS = 250;
 const TOUCH_DRAG_TOLERANCE = 5;
 
-export function SidebarViewChips() {
-  const views = useAppStore((s) => selectSidebarViews(s).views);
-  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+export function SidebarViewChips({
+  workspaceId,
+  onViewSelect,
+}: {
+  workspaceId?: string | null;
+  onViewSelect?: (viewId: string) => void;
+} = {}) {
+  const views = useAppStore((s) => selectSidebarViews(s, workspaceId).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s, workspaceId).activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
   // Use MouseSensor (not PointerSensor) deliberately: this chip row lives in an
@@ -66,7 +72,10 @@ export function SidebarViewChips() {
               key={view.id}
               view={view}
               active={view.id === activeViewId}
-              onSelect={() => setActive(view.id)}
+              onSelect={() => {
+                onViewSelect?.(view.id);
+                setActive(view.id);
+              }}
             />
           ))}
         </div>

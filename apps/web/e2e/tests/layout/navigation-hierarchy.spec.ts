@@ -379,6 +379,8 @@ test("a narrow fine-pointer window retains the complete phone menu", async ({
     await page.goto(`${backend.baseUrl}/tasks`);
     await page.getByTestId("app-nav-trigger").click();
     const menu = page.getByTestId("app-nav-sheet");
+    const tasksToggle = menu.getByTestId("mobile-navigation-tasks-toggle");
+    if ((await tasksToggle.getAttribute("aria-expanded")) !== "true") await tasksToggle.click();
     await expectTouchControl(menu.getByTestId("mobile-new-task-button"));
     await expectTouchControl(menu.getByTestId("sidebar-group-header").first());
     const action = menu

@@ -1,0 +1,41 @@
+{
+  "viewport": {
+    "width": 768,
+    "height": 900
+  },
+  "document": {
+    "width": 768,
+    "height": 900,
+    "horizontalOverflow": false
+  },
+  "elements": {
+    "mobile-topbar-page-context": null,
+    "mobile-list-search-toggle": null,
+    "app-nav-trigger": null,
+    "sidebar-view-chip-row": null,
+    "mobile-list-search-row": null,
+    "mobile-tasks-list-scroll": null,
+    "mobile-list-view-editor-scroll": null,
+    "app-nav-sheet": null,
+    "mobile-list-result-filters-drawer": null,
+    "mobile-list-filter-empty-state": null,
+    "mobile-list-link-scope": null,
+    "mobile-list-facet-sort": null,
+    "mobile-list-facet-group": null,
+    "mobile-menu-drawer-content": null,
+    "tasks-list-search": {
+      "x": 517.546875,
+      "y": 68,
+      "width": 180.84375,
+      "height": 44,
+      "minHeight": "0px",
+      "overflowX": "clip",
+      "overflowY": "clip",
+      "clientHeight": 42,
+      "scrollHeight": 42,
+      "centerHit": true,
+      "insideViewport": true
+    },
+    "sidebar-task-item": null
+  }
+}

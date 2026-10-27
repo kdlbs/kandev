@@ -11,8 +11,8 @@ export function buildMobileTaskSwitcherProps(
     collapsedSubtaskParentIds: string[];
     onToggleSubtasks: (parentTaskId: string) => void;
     onTogglePin: (taskId: string) => void;
-    onReorderGroup: (groupTaskIds: string[]) => void;
-    onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+    onReorderGroup?: (groupTaskIds: string[]) => void;
+    onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
     pinnedTaskIds: string[];
     showActivityTime: boolean;
     groupIndent: boolean;

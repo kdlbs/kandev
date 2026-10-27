@@ -308,6 +308,10 @@ for (const homeVisible of [true, false]) {
     await expect(layout.getByTestId("mobile-new-task-button")).toHaveCount(1);
     const tasks = menu.getByTestId("mobile-navigation-tasks-toggle");
     await expect(tasks).toBeVisible();
+    if ((await tasks.getAttribute("aria-expanded")) !== "true") await tasks.tap();
+    await expect(
+      menu.getByTestId("sidebar-task-item").filter({ hasText: task.title }),
+    ).toBeVisible();
     const automations = menu.getByRole("button", { name: "Automations", exact: true });
     // @covers AC-UI-MOBILE-MENU-007.2 AC-UI-SIDEBAR-CUSTOMIZATION-005.5
     expect((await automations.boundingBox())!.y).toBeLessThan((await tasks.boundingBox())!.y);

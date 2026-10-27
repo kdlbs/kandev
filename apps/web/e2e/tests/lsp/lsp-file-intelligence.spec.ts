@@ -546,15 +546,18 @@ test.describe("LSP file intelligence", () => {
     await expect.poll(() => readMonacoModelText(testPage, sourceModelUri)).toBe(originalSource);
 
     const hoverPoint = () => monacoTextPosition(testPage, sourceModelUri, "greeting0");
-    await expect.poll(hoverPoint).not.toBeNull();
-    const point = await hoverPoint();
-    if (!point) throw new Error("Kotlin greeting is not visible in the focused Monaco editor");
-    await testPage.mouse.move(point.x, point.y);
-    await expectFakeLspEvent(
-      backend,
-      (event) => event.event === "message" && event.method === "textDocument/hover",
-      "hover request",
-    );
+    await expect(async () => {
+      const point = await hoverPoint();
+      if (!point) throw new Error("Kotlin greeting is not visible in the focused Monaco editor");
+      await testPage.mouse.move(0, 0);
+      await testPage.mouse.move(point.x, point.y);
+      await expectFakeLspEvent(
+        backend,
+        (event) => event.event === "message" && event.method === "textDocument/hover",
+        "hover request",
+        1_000,
+      );
+    }).toPass({ timeout: 15_000, intervals: [250, 500, 1_000] });
     await expect(testPage.getByText("Fake Kotlin hover", { exact: true })).toBeVisible();
     await testPage.keyboard.press("Escape");
 

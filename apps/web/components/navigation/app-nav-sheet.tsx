@@ -5,7 +5,15 @@ import { MobileTaskSearchAction } from "./mobile-task-search-action";
 import { useArchivedTaskState } from "@/components/task/task-archived-context";
 import { useOptionalPortForwardingVisibility } from "@/components/task/port-forwarding-visibility-provider";
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
@@ -74,68 +82,116 @@ export function AppNavSheet(props: AppNavSheetProps) {
         }}
         trigger={<AppNavTrigger ref={opener} aria-expanded={open} />}
       >
-        {isMobile && (
-          <div className="shrink-0 px-4 pb-3">
-            <NavigationWorkspacePicker close={close} />
-          </div>
-        )}
-        <nav
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] md:gap-6"
-          onClick={(event) => closeMenuOnLinkClick(event, close)}
-        >
-          <AppNavigationMode close={close}>
-            {isMobile && <MobileTaskSearchAction closeMenu={closeMenu} />}
-            {!isMobile && renderedPageNav}
-            <AppNavSections
-              onNavigate={close}
-              phoneNavigation={isMobile}
-              omitDestinations={navigationOmissions(isMobile, omitDestinations)}
-              quickActions={
-                <NavigationQuickActions
-                  isMobile={isMobile}
-                  workspaceId={workspace?.id}
-                  returnFocusRef={opener}
-                  closeMenu={closeMenu}
-                />
-              }
-              taskNavigation={
-                isMobile ? (
-                  <MobileNavigationExtras
-                    localNav={renderedPageNav}
-                    workspaceId={workspace?.id}
-                    showTasks={open && !inOffice}
-                    close={close}
-                  />
-                ) : undefined
-              }
-              workspaceActions={
-                <>
-                  <NavigationAutomations
-                    isMobile={isMobile}
-                    open={open}
-                    inOffice={inOffice}
-                    workspaceId={workspace?.id}
-                    close={close}
-                  />
-                  <MobileWorkspaceActionsSection
-                    includePluginActions={!isMobile}
-                    collapseCanvases={isMobile}
-                  />
-                </>
-              }
-              pluginActions={pluginActions}
-              pluginWorkspaceContext={
-                isMobile
-                  ? { workspaceId: workspace?.id, workspaceLabel: workspace?.name, currentPage }
-                  : undefined
-              }
-              resources={isMobile && <NavigationMetrics open={open} />}
-              controls={isMobile ? { ...controls, openTaskViews: undefined } : controls}
-            />
-          </AppNavigationMode>
-        </nav>
+        <AppNavMenuContents
+          isMobile={isMobile}
+          open={open}
+          currentPage={currentPage}
+          inOffice={inOffice}
+          workspace={workspace}
+          renderedPageNav={renderedPageNav}
+          close={close}
+          closeMenu={closeMenu}
+          omitDestinations={omitDestinations}
+          pluginActions={pluginActions}
+          controls={controls}
+          returnFocusRef={opener}
+        />
       </AppNavSurface>
       {controls.dialogs}
+    </>
+  );
+}
+
+function AppNavMenuContents({
+  isMobile,
+  open,
+  currentPage,
+  inOffice,
+  workspace,
+  renderedPageNav,
+  close,
+  closeMenu,
+  omitDestinations,
+  pluginActions,
+  controls,
+  returnFocusRef,
+}: {
+  isMobile: boolean;
+  open: boolean;
+  currentPage: ReturnType<typeof listingPageForPath>;
+  inOffice: boolean;
+  workspace: ReturnType<typeof useActiveNavigationWorkspace>;
+  renderedPageNav: ReactNode;
+  close: () => void;
+  closeMenu: (focus?: boolean) => void;
+  omitDestinations?: string[];
+  pluginActions?: ReactNode;
+  controls: ReturnType<typeof useAppNavDialogs>;
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
+}) {
+  return (
+    <>
+      {isMobile && (
+        <div className="shrink-0 px-4 pb-3 pt-4" data-testid="mobile-navigation-workspace-section">
+          <NavigationWorkspacePicker close={close} />
+        </div>
+      )}
+      <nav
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] md:gap-6"
+        onClick={(event) => closeMenuOnLinkClick(event, close)}
+      >
+        <AppNavigationMode close={close}>
+          {isMobile && <MobileTaskSearchAction closeMenu={closeMenu} />}
+          {!isMobile && renderedPageNav}
+          <AppNavSections
+            onNavigate={close}
+            phoneNavigation={isMobile}
+            omitDestinations={navigationOmissions(isMobile, omitDestinations)}
+            quickActions={
+              <NavigationQuickActions
+                isMobile={isMobile}
+                workspaceId={workspace?.id}
+                returnFocusRef={returnFocusRef}
+                closeMenu={closeMenu}
+              />
+            }
+            taskNavigation={
+              isMobile ? (
+                <MobileNavigationExtras
+                  localNav={renderedPageNav}
+                  workspaceId={workspace?.id}
+                  showTasks={open && !inOffice}
+                  initiallyExpanded={currentPage !== "tasks"}
+                  close={close}
+                />
+              ) : undefined
+            }
+            workspaceActions={
+              <>
+                <NavigationAutomations
+                  isMobile={isMobile}
+                  open={open}
+                  inOffice={inOffice}
+                  workspaceId={workspace?.id}
+                  close={close}
+                />
+                <MobileWorkspaceActionsSection
+                  includePluginActions={!isMobile}
+                  collapseCanvases={isMobile}
+                />
+              </>
+            }
+            pluginActions={pluginActions}
+            pluginWorkspaceContext={
+              isMobile
+                ? { workspaceId: workspace?.id, workspaceLabel: workspace?.name, currentPage }
+                : undefined
+            }
+            resources={isMobile && <NavigationMetrics open={open} />}
+            controls={isMobile ? { ...controls, openTaskViews: undefined } : controls}
+          />
+        </AppNavigationMode>
+      </nav>
     </>
   );
 }
@@ -207,11 +263,13 @@ function MobileNavigationExtras({
   localNav,
   workspaceId,
   showTasks,
+  initiallyExpanded,
   close,
 }: {
   localNav: ReactNode;
   workspaceId?: string;
   showTasks: boolean;
+  initiallyExpanded: boolean;
   close: () => void;
 }) {
   const { t } = useTranslation();
@@ -223,7 +281,9 @@ function MobileNavigationExtras({
           {localNav}
         </section>
       )}
-      {showTasks && workspaceId && <MobileTaskOutlet key={workspaceId} close={close} />}
+      {showTasks && workspaceId && (
+        <MobileTaskOutlet key={workspaceId} close={close} initiallyExpanded={initiallyExpanded} />
+      )}
     </>
   );
 }
@@ -234,7 +294,13 @@ function listingPageForPath(pathname: string) {
   return "kanban";
 }
 
-function MobileTaskOutlet({ close }: { close: () => void }) {
+function MobileTaskOutlet({
+  close,
+  initiallyExpanded,
+}: {
+  close: () => void;
+  initiallyExpanded: boolean;
+}) {
   const register = useMobileTaskNavigationOutlet();
   const archivedState = useArchivedTaskState();
   const portForwarding = useOptionalPortForwardingVisibility();
@@ -258,9 +324,10 @@ function MobileTaskOutlet({ close }: { close: () => void }) {
         selection,
         archivedState,
         portForwarding,
+        initiallyExpanded,
       });
     return () => register(null);
-  }, [register, close, navigate, selection, archivedState, portForwarding]);
+  }, [register, close, navigate, selection, archivedState, portForwarding, initiallyExpanded]);
   return <section ref={element} data-testid="mobile-navigation-tasks" />;
 }
 

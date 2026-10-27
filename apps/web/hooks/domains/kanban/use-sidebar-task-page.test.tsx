@@ -161,6 +161,65 @@ beforeEach(() => {
 });
 
 describe("useSidebarTaskPage", () => {
+  it("does not admit an older workspace-search response after the query changes", async () => {
+    const requests: Array<{
+      query: SidebarTaskQuery;
+      signal: AbortSignal | undefined;
+      deferred: ReturnType<typeof deferred<SidebarTaskPageResponse>>;
+    }> = [];
+    vi.mocked(querySidebarTasks).mockImplementation((_workspaceId, query, options) => {
+      const request = deferred<SidebarTaskPageResponse>();
+      requests.push({ query, signal: options?.init?.signal ?? undefined, deferred: request });
+      return request.promise;
+    });
+    const hook = renderHook(({ query }) => useSidebarTaskPage("ws-1", true, null, { query }), {
+      initialProps: { query: "first needle" },
+    });
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    hook.rerender({ query: "second needle" });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]?.signal?.aborted).toBe(true);
+    expect(requests[1]?.query).toMatchObject({ query: "second needle", page: 1 });
+
+    await act(async () =>
+      requests[0]?.deferred.resolve({ ...response(1, false, false), total_tasks: 1 }),
+    );
+    expect(hook.result.current.response).toBeNull();
+    await act(async () =>
+      requests[1]?.deferred.resolve({ ...response(1, false, false), total_tasks: 2 }),
+    );
+    await waitFor(() => expect(hook.result.current.response?.total_tasks).toBe(2));
+  });
+
+  it("keeps phone search and result refinements in a distinct server query", async () => {
+    const sharedView = structuredClone(mocks.view);
+    const sharedSettings = structuredClone(mocks.state.userSettings);
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce({
+      ...response(1, false, true),
+      total_tasks: 101,
+      total_visible_tasks: 101,
+    });
+    const queryOverrides = {
+      query: "literal%_needle",
+      filters: [{ dimension: "state", op: "is", value: "in_progress" }],
+    };
+    const { result } = renderHook(() => useSidebarTaskPage("ws-1", true, [], queryOverrides));
+
+    await waitFor(() => expect(result.current.response?.total_tasks).toBe(101));
+    expect(querySidebarTasks).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({
+        query: "literal%_needle",
+        filters: queryOverrides.filters,
+        page: 1,
+      }),
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(mocks.view).toEqual(sharedView);
+    expect(mocks.state.userSettings).toEqual(sharedSettings);
+  });
+
   it("keeps page 2 when a task status-summary event changes ranking data", async () => {
     seedActivitySummaryEventState();
     const requests: Array<{
@@ -193,7 +252,9 @@ describe("useSidebarTaskPage", () => {
     await act(async () => requests[2]?.deferred.resolve(response(2, true, false)));
     expect(result.current.page).toBe(2);
   });
+});
 
+describe("useSidebarTaskPage request cleanup", () => {
   it("releases pending reads and drops the duplicate page when shared state takes over", async () => {
     const pending = deferred<SidebarTaskPageResponse>();
     vi.mocked(querySidebarTasks).mockResolvedValueOnce(response(1, false, false));

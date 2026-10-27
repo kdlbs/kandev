@@ -151,3 +151,18 @@ including portable workflow defaults, sorting, grouping, and row details.
 - [System design](../system-design/task-list-archive-filters.md)
 - [Implementation package](../../../plans/task-list-archive-filters/plan.md)
 - [Command-panel archived task results](command-panel-archived-task-results.md)
+
+## Phone saved-view presentation
+
+The [phone List contract](../../ui/requirements/mobile-list-saved-views.md)
+defines the current phone presentation. It refines the phone portions of 002.1,
+002.4-.5, 003.2-.3, 003.5, and 004.3:
+saved-view tabs replace fixed archive tabs; search/Filters start hidden; ordinary
+result refinements remain temporary; current control heights remain unchanged.
+Manual view/workspace changes clear temporary refinements and restore saved scope.
+
+Archive command intent, explicit-link restoration, literal matching, read safety,
+and archived-task navigation remain required. Explicit archive links use visible
+temporary scope without creating or changing a saved view. Desktop behavior
+remains governed by the criteria above. The [implementation package](../../../plans/mobile-list-layout/plan.md)
+records the work orders and acceptance evidence for this behavior.

@@ -139,6 +139,15 @@ export async function verifySelectedFilters(
   const picker = page.getByTestId("filter-value-multi-popover");
   const rows = picker.getByTestId("filter-value-multi-option");
   await expect(rows).toHaveCount(seeded.source.length);
+  await expect
+    .poll(async () => {
+      const labels = (await rows.allTextContents()).map((label) => label.trim());
+      return [
+        labels.slice(0, seeded.selected.length).sort(),
+        labels.slice(seeded.selected.length).sort(),
+      ];
+    })
+    .toEqual([[...seeded.selected].sort(), [...seeded.unselected].sort()]);
   const initialLabels = (await rows.allTextContents()).map((label) => label.trim());
   expect(initialLabels.slice(0, seeded.selected.length).sort()).toEqual(
     [...seeded.selected].sort(),

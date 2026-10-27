@@ -1,7 +1,17 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
+import { useSidebarViewEditorController } from "./use-sidebar-view-editor-controller";
 
 const responsive = vi.hoisted(() => ({
   usesDesktopWorkbench: true,
@@ -85,6 +95,7 @@ afterEach(() => {
   state.sidebarViews.views = [VIEW];
   state.sidebarViews.activeViewId = VIEW.id;
   state.sidebarViewsByWorkspace.ws = state.sidebarViews;
+  state.workspaces.activeId = "ws";
   responsive.usesDesktopWorkbench = true;
   responsive.isFinePointer = true;
   responsive.isMobile = false;
@@ -347,5 +358,19 @@ describe("SidebarFilterPopover option details", () => {
       expect(descriptionId).toBeTruthy();
       expect(screen.getByText(description, { exact: true })).toBeTruthy();
     }
+  });
+});
+
+describe("shared saved-view editor controller", () => {
+  it("binds draft updates to the workspace that created the callback", () => {
+    const { result } = renderHook(() =>
+      useSidebarViewEditorController({ isDrawerLayout: true, workspaceId: "ws" }),
+    );
+    const staleUpdate = result.current.editorProps.onUpdate;
+
+    state.workspaces.activeId = "other-workspace";
+    staleUpdate({ group: "state" });
+
+    expect(state.updateSidebarDraft).not.toHaveBeenCalled();
   });
 });

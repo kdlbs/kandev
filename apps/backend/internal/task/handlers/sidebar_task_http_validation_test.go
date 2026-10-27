@@ -20,6 +20,7 @@ func TestHTTPQuerySidebarTasksStructuredValidation(t *testing.T) {
 		{name: "malformed", body: `{"unknown":"private value"}`, reason: "malformed_query"},
 		{name: "dimension", body: `{"filters":[{"dimension":"private value","op":"is","value":"private value"}]}`, reason: "invalid_clause", index: new(int)},
 		{name: "scalar", body: `{"filters":[{"dimension":"repository","op":"is","value":"` + strings.Repeat("s", 257) + `"}]}`, reason: "scalar_length", index: new(int), limit: 256},
+		{name: "search too long", body: `{"query":"` + strings.Repeat("s", 257) + `"}`, reason: "search_length", limit: 256},
 		{name: "list", body: `{"filters":[{"dimension":"workflow","op":"in","value":[` + strings.Repeat(`"w",`, 1000) + `"w"]}]}`, reason: "list_count", index: new(int), limit: 1000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

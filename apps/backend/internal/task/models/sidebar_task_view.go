@@ -11,6 +11,7 @@ const (
 	MaxSidebarViewClauses       = 20
 	MaxSidebarViewListValues    = 1000
 	MaxSidebarViewValueBytes    = 256
+	MaxSidebarTaskSearchBytes   = 256
 	MaxSidebarViewPreferenceIDs = 10000
 	MaxSidebarViewSortRules     = 10
 )
@@ -19,6 +20,7 @@ const (
 // sidebar client. Workspace authorization is performed by the service and is
 // never inferred from this value.
 type SidebarTaskViewQuery struct {
+	SearchQuery        string                  `json:"query,omitempty"`
 	Filters            []SidebarTaskViewClause `json:"filters"`
 	Sort               SidebarTaskViewSort     `json:"sort"`
 	Group              string                  `json:"group"`
@@ -133,6 +135,9 @@ func sidebarValidationError(reason, message string, limit int) *SidebarQueryVali
 }
 
 func (q SidebarTaskViewQuery) Validate() error {
+	if len(q.SearchQuery) > MaxSidebarTaskSearchBytes {
+		return sidebarValidationError("search_length", "search query is too long", MaxSidebarTaskSearchBytes)
+	}
 	if q.Page < 1 {
 		return sidebarValidationError("page_bounds", "page must be positive", 0)
 	}

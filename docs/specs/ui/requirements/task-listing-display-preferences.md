@@ -224,3 +224,13 @@ Existing requirements 001 to 003 and their completed plans retain their scope.
 - [Single List search debounce](../../../plans/task-search-debounce/plan.md)
   owns the clarification and delivery of criteria 001.13 through 001.15.
   Existing completed preference packages retain their original scope.
+
+## Planned phone List saved-view revision
+
+The draft [phone List contract](mobile-list-saved-views.md) defines a narrower
+phone-specific revision to criteria 001.7-.11, 001.13-.15, and 004.1-.6.
+Phone List uses the selected sidebar view's row presentation and shared editor.
+Search still uses one 300ms admission window, with hidden search cleared.
+Desktop/tablet scalar List preferences and startup behavior remain unchanged.
+This is planned behavior under the [mobile List package](../../../plans/mobile-list-layout/plan.md);
+existing behavior remains authoritative until implementation.

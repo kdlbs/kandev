@@ -2171,7 +2171,7 @@
   "workspaceSourcePlacementKandevDescription": "将新增来源归入 kandev/。工作目录保持不变。",
   "workspaceSourcePlacementCurrentRoot": "在当前文件夹内",
   "workspaceSourcePlacementCurrentDescription": "在现有文件旁添加来源。工作目录保持不变。",
-  "workspaceSourcePlacementExpand": "扩展工作区根目录",
+  "workspaceSourcePlacementExpand": "展开工作区根目录",
   "workspaceSourcePlacementExpandDescription": "将代理移到任务父目录，让仓库成为同级目录。",
   "workspaceSourcePlacementExpansionUnavailable": "此选项需要显式恢复会话。",
   "workspaceSourcePlacementParentLayout": "此任务已使用父工作区。",

@@ -246,3 +246,13 @@ the full task list.
 - [Coherent mobile plugin menu](../../../plans/mobile-plugin-menu-coherence/plan.md)
 
 - [Mobile plugin deduplication](../../../plans/mobile-plugin-deduplication/plan.md)
+
+## Planned phone List controls revision
+
+The draft [phone List contract](mobile-list-saved-views.md) extends listing-title
+options and refines the List menu's embedded Tasks controls. Saved editing
+belongs in top-left List options. Search and temporary filters use the header
+search icon. The hamburger remains app navigation; from List, contextual Tasks
+starts collapsed and exposes selection without editing. Shared controller
+lifetime and unrelated phone navigation guarantees remain effective.
+See the [mobile List package](../../../plans/mobile-list-layout/plan.md).

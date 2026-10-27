@@ -99,7 +99,7 @@ vi.mock("./tasks-list-view", () => ({
   ),
 }));
 
-import { TasksPageClient } from "./tasks-page-client";
+import { TasksPageDesktopClient } from "./tasks-page-desktop-client";
 
 let testStore: ReturnType<typeof useAppStoreApi>;
 function CaptureStore() {
@@ -126,7 +126,7 @@ function page(fromBoot = true, metadataLoaded = fromBoot) {
       }}
     >
       <CaptureStore />
-      <TasksPageClient
+      <TasksPageDesktopClient
         workspaces={[]}
         initialWorkspaceId="ws1"
         initialRepositories={[{ id: "repo1", name: "Repository" } as Repository]}
@@ -189,27 +189,23 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
-describe("List search admission", () => {
+describe("Desktop List search admission", () => {
   // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.13
-  it.each([false, true])(
-    "admits the last input after one debounce window (mobile=%s)",
-    async (mobile) => {
-      controls.mobile = mobile;
-      await mount();
-      expect(controls.list).not.toHaveBeenCalled();
-      type("Alpha");
-      expect(input().value).toBe("Alpha");
-      await advance(299);
-      expect(controls.list).not.toHaveBeenCalled();
-      await advance(1);
-      expect(controls.list).toHaveBeenCalledTimes(1);
-      expect(controls.list).toHaveBeenCalledWith(
-        "ws1",
-        expect.objectContaining({ query: "Alpha", page: 1 }),
-        { init: { signal: expect.any(AbortSignal) } },
-      );
-    },
-  );
+  it("admits the last input after one debounce window", async () => {
+    await mount();
+    expect(controls.list).not.toHaveBeenCalled();
+    type("Alpha");
+    expect(input().value).toBe("Alpha");
+    await advance(299);
+    expect(controls.list).not.toHaveBeenCalled();
+    await advance(1);
+    expect(controls.list).toHaveBeenCalledTimes(1);
+    expect(controls.list).toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({ query: "Alpha", page: 1 }),
+      { init: { signal: expect.any(AbortSignal) } },
+    );
+  });
 
   it("replaces queued edits with the latest input", async () => {
     await mount();

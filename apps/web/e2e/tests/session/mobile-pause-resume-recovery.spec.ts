@@ -28,8 +28,12 @@ test.describe("mobile: pause queue recovery", () => {
     );
     const chat = session.activeChat();
 
-    await session.sendMessageViaButton("/slow 8s");
+    // Keep the active turn alive while this test creates and parks a queued prompt.
+    await session.sendMessageViaButton("/slow 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await expect(chat.getByText("Running slow response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
 
     const editor = chat.locator(".tiptap.ProseMirror");
     await typeWhileBusy(testPage, editor, "/e2e:simple-message");

@@ -74,3 +74,11 @@ It does not add pagination to Kanban columns, the full Tasks page, or the comman
 - [Sidebar disclosure continuity repair](../../../plans/sidebar-collapse-continuity/plan.md)
 
 - [Archived sidebar update freshness repair](../../../plans/archived-sidebar-update-freshness/plan.md)
+
+## Planned phone List consumer
+
+The draft [phone List contract](mobile-list-saved-views.md) extends these bounded
+query semantics to primary phone List. It intentionally refines this document's
+exclusion of the full Tasks page for that phone consumer only. Desktop standalone
+List retains its current pagination contract. The [mobile List package](../../../plans/mobile-list-layout/plan.md)
+owns coverage, query identity, and cross-page regression evidence.

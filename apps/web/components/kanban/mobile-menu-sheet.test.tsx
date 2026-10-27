@@ -48,6 +48,11 @@ vi.mock("@/lib/routing/client-router", () => ({
 vi.mock("@/components/app-sidebar/app-sidebar-workspace-picker", () => ({
   AppSidebarWorkspacePicker: () => null,
 }));
+vi.mock("@/components/task/sidebar-filter/mobile-sidebar-view-editor", () => ({
+  MobileSidebarViewEditor: ({ workspaceId }: { workspaceId: string | null }) => (
+    <div data-testid="mobile-sidebar-view-editor" data-workspace-id={workspaceId ?? "none"} />
+  ),
+}));
 // Plugins, integrations and the utility tail now come from the one shared nav
 // block, which reaches the store and the health poller — out of scope here.
 vi.mock("@/components/navigation/app-nav-sections", () => ({
@@ -60,7 +65,7 @@ vi.mock("@/components/navigation/app-nav-sections", () => ({
   }),
 }));
 vi.mock("./task-search-input", () => ({
-  TaskSearchInput: () => null,
+  TaskSearchInput: () => <input data-testid="mobile-menu-search-input" />,
 }));
 
 vi.mock("@kandev/ui/drawer", () => ({
@@ -194,6 +199,40 @@ describe("MobileMenuSheet — grouped display settings", () => {
     expect(screen.queryByTestId("mobile-display-preview-toggle")).toBeNull();
     expandGroup("list-rows");
     expect(screen.getByTestId("mobile-display-task-details-toggle")).not.toBeNull();
+  });
+});
+
+describe("MobileMenuSheet — List view options", () => {
+  it("combines layout choices with the shared editor and omits standalone List controls", () => {
+    renderSheet({ currentPage: "tasks", listingOnly: true, workspaceId: "ws-a" });
+
+    const surface = screen.getByTestId("mobile-menu-drawer-content");
+    expect(surface.className).toContain("h-auto");
+    expect(surface.className).toContain("data-[vaul-drawer-direction=bottom]:inset-x-2");
+    expect(surface.className).not.toContain("!max-h-");
+    expect(screen.getByTestId("mobile-home-menu-layout")).toBeTruthy();
+    expect(screen.getByTestId("mobile-list-view-options-content")).toBeTruthy();
+    expect(screen.getByTestId("mobile-sidebar-view-editor").getAttribute("data-workspace-id")).toBe(
+      "ws-a",
+    );
+    expect(screen.getByRole("radio", { name: "Kanban" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Threads" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "List" })).toBeTruthy();
+    expect(screen.queryByTestId("mobile-tasks-list-sort")).toBeNull();
+    expect(screen.queryByTestId("mobile-tasks-list-group")).toBeNull();
+    expect(screen.queryByTestId("mobile-display-task-details-toggle")).toBeNull();
+  });
+
+  it("omits the search action when the caller explicitly provides no page actions", () => {
+    breakpointMocks.isMobile = false;
+    renderSheet({
+      currentPage: "tasks",
+      listingOnly: true,
+      onSearchChange: vi.fn(),
+      pageActions: null,
+    });
+
+    expect(screen.queryByTestId("mobile-menu-search-input")).toBeNull();
   });
 });
 describe("MobileMenuSheet — no Steps section (relocated to the lane)", () => {

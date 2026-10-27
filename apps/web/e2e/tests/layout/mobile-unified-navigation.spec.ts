@@ -24,7 +24,13 @@ test("same menu from listings and page shells", async ({ testPage }) => {
 // @covers AC-UI-MOBILE-MENU-001.4, AC-UI-MOBILE-MENU-001.6
 test("separate listing controls preserve search behavior", async ({ testPage }) => {
   await testPage.goto("/tasks");
-  await expect(testPage.getByPlaceholder("Search tasks...")).toBeVisible();
+  const listSearch = testPage.getByTestId("mobile-list-search-toggle");
+  const searchInput = testPage.getByPlaceholder("Search tasks...");
+  await expect(searchInput).toHaveCount(0);
+  await listSearch.tap();
+  await expect(searchInput).toBeFocused();
+  await listSearch.tap();
+  await expect(searchInput).toBeHidden();
   const options = testPage.getByTestId("mobile-topbar-page-context");
   await options.tap();
   const sheet = testPage.getByRole("dialog", { name: "View options", exact: true });

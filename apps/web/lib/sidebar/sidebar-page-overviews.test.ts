@@ -83,6 +83,31 @@ it("publishes the first safe response after three soft invalidations and never c
   expect(store.getState().taskOverview.byId).toEqual({});
 });
 
+it("does not locally re-admit changed rows when workspace-search membership is server-owned", async () => {
+  const store = createAppStore({ workspaces: { activeId: "workspace", items: [] } });
+  const cache = new SidebarTaskPageCache(store);
+  const searchQuery = { ...query, query: "needle" };
+  let resolve!: (response: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const read = cache.request("workspace", searchQuery, "search-view");
+  store.setState((state) => ({
+    taskOverview: recordTaskOverviewChange(state.taskOverview, "needle-match", {
+      id: "needle-match",
+      title: "changed before response",
+    }),
+  }));
+
+  resolve(page(["needle-match"]));
+  const result = await read.promise;
+  expect(result.entries).toEqual([]);
+  expect(result.provisional).toBe(true);
+  read.release();
+});
+
 it("releases cached entity ownership on expiry while a board owner survives", async () => {
   vi.useFakeTimers();
   try {

@@ -54,17 +54,20 @@ async function seedShellTaskWithSession(
   seedData: SeedData,
   title: string,
 ): Promise<void> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
+  const { agents } = await apiClient.listAgents();
+  const mockAgent = agents.find((agent) => agent.name === "mock-agent");
+  if (!mockAgent)
+    throw new Error(`mock-agent not found (got ${agents.map((agent) => agent.name).join(", ")})`);
+  const profile = await apiClient.createAgentProfile(mockAgent.id, `${title} profile`, {
+    model: "mock-fast",
+    auto_approve: true,
+  });
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, profile.id, {
+    description: "/e2e:simple-message",
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();

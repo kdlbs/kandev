@@ -42,6 +42,7 @@ import {
 import { generateUUID } from "@/lib/utils";
 import type { AggregatedSidebarTasks } from "../task-session-sidebar-aggregate";
 import { applySidebarPageMetadata } from "../sidebar-page-metadata";
+import type { SidebarTaskQueryOverrides } from "@/hooks/domains/kanban/use-sidebar-page-context";
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -121,7 +122,11 @@ function buildSheetItems(params: {
 }
 
 // eslint-disable-next-line max-lines-per-function -- task projection and recovery status share one memoized view model
-export function useSheetData(workspaceId: string | null) {
+export function useSheetData(
+  workspaceId: string | null,
+  queryOverrides?: SidebarTaskQueryOverrides,
+  enabled = true,
+) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
     allTasks,
@@ -139,7 +144,7 @@ export function useSheetData(workspaceId: string | null) {
     workspaceContextPending,
     workspaceContextAccessDenied,
     retryWorkspaceContext,
-  } = useWorkspaceSidebarTasks(workspaceId);
+  } = useWorkspaceSidebarTasks(workspaceId, false, queryOverrides, enabled);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);

@@ -340,3 +340,11 @@ preservation. The phone check includes actual taps, overlay containment,
 Update the existing **Find and organize tasks** and **Archive, unarchive, and
 delete** sections in `docs/public/tasks-and-workflows.md` with implementation.
 Keep this guidance aligned with the shipped controls.
+
+## Planned phone query adapter
+
+The draft [phone List design](../../ui/system-design/mobile-list-saved-views.md)
+reuses the sidebar query for the new phone consumer. Explicit archive/list links
+remain local request scope and retain the archive command's all-scope intent.
+The phone adapter must not save link-derived filters or migrate standalone List
+preferences. Desktop transport and controls retain this design's existing path.

@@ -102,7 +102,12 @@ function shareGroup(
   )
     return next;
   const tasks = shareTaskArray(previous.tasks, next.tasks, priorById);
-  return tasks === previous.tasks ? previous : { ...next, tasks };
+  const subTasksByParentId = next.subTasksByParentId
+    ? shareSubtaskMap(previous.subTasksByParentId ?? new Map(), next.subTasksByParentId, priorById)
+    : undefined;
+  return tasks === previous.tasks && subTasksByParentId === previous.subTasksByParentId
+    ? previous
+    : { ...next, tasks, ...(subTasksByParentId ? { subTasksByParentId } : {}) };
 }
 
 function pageGroupLabel(group: GroupedSidebarList["groupKey"], key: string, label: string): string {

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type {
   ForegroundActivity,
   TaskOrigin,
@@ -134,6 +135,7 @@ export type TaskSwitcherProps = {
   onRetryLoad?: () => void;
   retryLabel?: string;
   totalTaskCount?: number;
+  emptyState?: ReactNode;
   showActivityTime?: boolean;
   /** Defaults on for callers which predate the saved-view preference. */
   groupIndent?: boolean;

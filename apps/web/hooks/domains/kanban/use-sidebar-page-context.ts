@@ -9,16 +9,44 @@ import {
 } from "@/lib/sidebar/sidebar-task-page-cache";
 import { normalizeLocale } from "@/lib/i18n";
 import type { SidebarTaskQuery } from "@/lib/types/http";
-import { sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
+import type { FilterClause, SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import { sidebarSortFromWire, sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
 
 const PAGE_SIZE = 100;
+export type SidebarTaskQueryOverrides = Partial<
+  Pick<SidebarTaskQuery, "filters" | "sort" | "group" | "query">
+>;
+
+export function resolveSidebarTaskView(
+  view: SidebarView,
+  overrides?: SidebarTaskQueryOverrides,
+): SidebarView {
+  if (!overrides) return view;
+  return {
+    ...view,
+    filters:
+      overrides.filters === undefined
+        ? view.filters
+        : overrides.filters.map((filter, index) => ({
+            id: `query-${index}`,
+            dimension: filter.dimension as FilterClause["dimension"],
+            op: filter.op as FilterClause["op"],
+            value: filter.value as FilterClause["value"],
+          })),
+    sort: overrides.sort === undefined ? view.sort : sidebarSortFromWire(overrides.sort),
+    group: overrides.group === undefined ? view.group : (overrides.group as SidebarView["group"]),
+    collapsedGroups: overrides.group === undefined ? view.collapsedGroups : [],
+  };
+}
+
 function buildSidebarQuery(
   view: ReturnType<typeof useEffectiveSidebarView>,
   page: number,
   locale: string,
   collapsedTaskIDs: string[],
+  textQuery?: string,
 ): SidebarTaskQuery {
-  return {
+  const query: SidebarTaskQuery = {
     filters: view.filters.map(({ dimension, op, value }) => ({ dimension, op, value })),
     sort: sidebarSortToWire(view.sort),
     group: view.group,
@@ -28,6 +56,8 @@ function buildSidebarQuery(
     page_size: PAGE_SIZE,
     locale,
   };
+  if (textQuery) query.query = textQuery;
+  return query;
 }
 
 function useSidebarViewKey(
@@ -73,7 +103,10 @@ export function sidebarContentKey(viewKey: string): string {
   return JSON.stringify(identity);
 }
 
-export function useSidebarPageContext(workspaceId: string | null) {
+export function useSidebarPageContext(
+  workspaceId: string | null,
+  queryOverrides?: SidebarTaskQueryOverrides,
+) {
   const view = useEffectiveSidebarView(workspaceId);
   const { i18n } = useTranslation();
   const contextScope = useAppStore(sidebarTaskPageScope);
@@ -92,9 +125,13 @@ export function useSidebarPageContext(workspaceId: string | null) {
   );
   const prefs = useSidebarTaskPrefs();
   const locale = normalizeLocale(i18n.resolvedLanguage ?? i18n.language);
+  const resultView = useMemo(
+    () => resolveSidebarTaskView(view, queryOverrides),
+    [view, queryOverrides?.filters, queryOverrides?.sort, queryOverrides?.group],
+  );
   const queryView = useMemo(
-    () => buildSidebarQuery(view, 1, locale, collapsedTaskIDs),
-    [view, locale, collapsedTaskIDs],
+    () => buildSidebarQuery(resultView, 1, locale, collapsedTaskIDs, queryOverrides?.query),
+    [resultView, locale, collapsedTaskIDs, queryOverrides?.query],
   );
   const viewKey = useSidebarViewKey(
     workspaceId,
@@ -103,5 +140,14 @@ export function useSidebarPageContext(workspaceId: string | null) {
     queryView,
     prefs,
   );
-  return { view, workspaceGeneration, revision, queryView, viewKey, prefs, accessDenied };
+  return {
+    view,
+    resultView,
+    workspaceGeneration,
+    revision,
+    queryView,
+    viewKey,
+    prefs,
+    accessDenied,
+  };
 }

@@ -3,7 +3,7 @@ import { cleanup, render } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 
-// AC12: TasksPageClient must hydrate both change-request providers
+// AC12: the desktop Tasks page must hydrate both change-request providers
 // unconditionally, never gated on tasksListShowDetails. Every direct import
 // of TasksPageClient is mocked so this test asserts only the wiring, not the behaviour
 // of the many unrelated hooks/components the page also renders (per the
@@ -79,7 +79,7 @@ vi.mock("./tasks-list-view", () => ({
   TasksListView: () => null,
 }));
 
-import { TasksPageClient } from "./tasks-page-client";
+import { TasksPageDesktopClient } from "./tasks-page-desktop-client";
 
 afterEach(() => {
   cleanup();
@@ -100,7 +100,7 @@ function renderPage(tasksListShowDetails: boolean) {
         },
       }}
     >
-      <TasksPageClient
+      <TasksPageDesktopClient
         workspaces={[]}
         initialWorkspaceId="ws1"
         initialMetadataLoaded={{ workflows: true, repositories: true }}

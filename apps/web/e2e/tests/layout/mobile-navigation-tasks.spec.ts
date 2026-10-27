@@ -11,6 +11,11 @@ test("shared navigation embeds the complete collapsible task sidebar", async ({
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
   });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.task_id, {
+    state: "WAITING_FOR_INPUT",
+    agentProfileId: seedData.agentProfileId,
+  });
+  await apiClient.setPrimarySession(sessionId);
   for (let index = 0; index < 5; index++) {
     await apiClient.seedTask(seedData.workspaceId, `Another sidebar task ${index}`, {
       workflow_id: seedData.workflowId,
@@ -31,8 +36,7 @@ test("shared navigation embeds the complete collapsible task sidebar", async ({
   await expect(menu.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
   await testPage.keyboard.press("Escape");
   await testPage.getByTestId("app-nav-trigger").tap();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await toggle.tap();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(menu.locator("[data-task-row-id]")).toHaveCount(6);
   expect(
     await menu
@@ -48,6 +52,30 @@ test("shared navigation embeds the complete collapsible task sidebar", async ({
   await expect(testPage).toHaveURL(new RegExp(`/t/${task.task_id}`));
   await testPage.goBack();
   await expect(testPage).toHaveURL(/\/stats$/);
+});
+
+test("List navigation keeps Tasks collapsed and hides saved-view editing actions", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const task = await apiClient.seedTask(seedData.workspaceId, "List navigation task", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  await testPage.goto("/tasks");
+  await testPage.getByTestId("app-nav-trigger").tap();
+  const menu = testPage.getByTestId("app-nav-sheet");
+  const toggle = menu.getByTestId("mobile-navigation-tasks-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.tap();
+  await expect(menu.getByText("List navigation task", { exact: true })).toBeVisible();
+  await expect(menu.getByTestId("sidebar-view-chip-row")).toBeVisible();
+  await expect(menu.getByTestId("sidebar-new-view")).toHaveCount(0);
+  await expect(menu.getByTestId("sidebar-filter-gear")).toHaveCount(0);
+  await expect(menu.getByTestId("sidebar-filter-popover")).toHaveCount(0);
+  await menu.getByText("List navigation task", { exact: true }).tap();
+  await expect(testPage).toHaveURL(new RegExp(`/t/${task.task_id}`));
 });
 
 // @covers AC-UI-MOBILE-MENU-005.1, 005.2, 005.3
