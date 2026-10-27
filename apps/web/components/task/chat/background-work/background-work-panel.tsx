@@ -39,7 +39,13 @@ export function BackgroundWorkPanel({ params }: BackgroundWorkPanelProps) {
   }, [workloads, workId]);
 
   if (selectedWorkload) {
-    return <WorkloadDetailView workload={selectedWorkload} onAction={executeAction} />;
+    return (
+      <WorkloadDetailView
+        sessionId={sessionId ?? ""}
+        workload={selectedWorkload}
+        onAction={executeAction}
+      />
+    );
   }
 
   return <WorkloadOverviewView workloads={workloads} isLoading={isLoading} />;
@@ -352,10 +358,63 @@ function WorkloadInputForm({
   );
 }
 
+function useClearedOutput(sessionId: string, workload: WorkloadRunObservation, search: string) {
+  const outputWindow = useAppStore(
+    (state) => state.backgroundWork?.outputWindowsBySessionId?.[sessionId]?.[workload.work_id],
+  );
+  const [clearAnchor, setClearAnchor] = useState<{
+    sessionId: string;
+    workId: string;
+    runId: string | undefined;
+    generation: number | undefined;
+    end: number;
+  } | null>(null);
+  const displayOutput = useMemo(() => {
+    let text = workload.output || "";
+    if (
+      clearAnchor &&
+      clearAnchor.sessionId === sessionId &&
+      clearAnchor.workId === workload.work_id &&
+      clearAnchor.runId === workload.run_id &&
+      clearAnchor.generation === outputWindow?.generation
+    ) {
+      text = text.slice(
+        Math.max(0, Math.min(text.length, clearAnchor.end - (outputWindow?.evicted ?? 0))),
+      );
+    }
+    if (!search.trim()) return text;
+    const q = search.toLowerCase();
+    return text
+      .split("\n")
+      .filter((line) => line.toLowerCase().includes(q))
+      .join("\n");
+  }, [
+    workload.output,
+    workload.work_id,
+    workload.run_id,
+    sessionId,
+    clearAnchor,
+    outputWindow,
+    search,
+  ]);
+
+  const clear = () =>
+    setClearAnchor({
+      sessionId,
+      workId: workload.work_id,
+      runId: workload.run_id,
+      generation: outputWindow?.generation,
+      end: (outputWindow?.evicted ?? 0) + (workload.output || "").length,
+    });
+  return { displayOutput, clear };
+}
+
 function WorkloadDetailView({
+  sessionId,
   workload,
   onAction,
 }: {
+  sessionId: string;
   workload: WorkloadRunObservation;
   onAction: (req: {
     action: "stop" | "interrupt" | "write_input";
@@ -367,23 +426,10 @@ function WorkloadDetailView({
   const [input, setInput] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [search, setSearch] = useState("");
-  const [clearedOffset, setClearedOffset] = useState<number>(0);
+  const { displayOutput, clear } = useClearedOutput(sessionId, workload, search);
   const [isSending, setIsSending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
-
-  const displayOutput = useMemo(() => {
-    let text = workload.output || "";
-    if (clearedOffset > 0) {
-      text = text.slice(clearedOffset);
-    }
-    if (!search.trim()) return text;
-    const q = search.toLowerCase();
-    return text
-      .split("\n")
-      .filter((line) => line.toLowerCase().includes(q))
-      .join("\n");
-  }, [workload.output, clearedOffset, search]);
 
   useEffect(() => {
     if (autoScroll && outputEndRef.current) {
@@ -430,7 +476,7 @@ function WorkloadDetailView({
           onSearchChange={setSearch}
           autoScroll={autoScroll}
           onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
-          onClear={() => setClearedOffset((workload.output || "").length)}
+          onClear={clear}
         />
 
         <WorkloadOutputViewer
