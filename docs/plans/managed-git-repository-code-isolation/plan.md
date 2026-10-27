@@ -8,6 +8,7 @@ requirements:
   - REQ-AGENTS-GITISOLATION-004
 system_design:
   - ../../specs/agents/system-design/managed-git-repository-code-isolation.md
+  - ../../specs/agents/system-design/managed-git-isolation-rollout.md
 ---
 
 # Managed Git repository-code isolation
