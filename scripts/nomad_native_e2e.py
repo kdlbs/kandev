@@ -1088,7 +1088,12 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--create-fixture", action="store_true", help="pre-ready-recovery, admission, disconnect, cleanup-positive and cleanup-negative: create a fresh fixture from a bootstrap config, crash, recover and clean up")
     cleanup = commands.add_parser("cleanup-fixture", help="stop the session of an existing created fixture through the production path and verify teardown")
     cleanup.add_argument("--fixture-root", required=True)
+    material = commands.add_parser("security-material", help="write a throwaway TLS CA, server certificate and server config fragment for the TLS plus scoped-ACL fixture mode")
+    material.add_argument("--out", required=True)
     args = parser.parse_args(argv)
+    if args.command == "security-material":
+        import nomad_native_e2e_security
+        return nomad_native_e2e_security.material_command(args.out)
     if args.command == "cleanup-fixture":
         return _fixture_module().cleanup_fixture_command(args.fixture_root)
     if args.command == "run" and args.create_fixture:

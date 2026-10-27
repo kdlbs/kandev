@@ -15,6 +15,7 @@ only callers of those mutations; neither is production cleanup.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -24,6 +25,7 @@ import re
 import shlex
 import shutil
 import signal
+import ssl
 import socket
 import sqlite3
 import stat
@@ -163,6 +165,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _NOMAD_OPENER = urllib.request.build_opener(_NoRedirect)
+_TLS_OPENERS: dict[str, urllib.request.OpenerDirector] = {}
+
+
+def configure_nomad_tls(address: str, ca_file: str) -> None:
+    """Verify the https Nomad API at `address` against the throwaway CA only (hostname checks stay on)."""
+    context = ssl.create_default_context(cafile=ca_file)
+    _TLS_OPENERS[address] = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=context))
+
+
+def clear_nomad_tls() -> None:
+    _TLS_OPENERS.clear()
+
+
+def _nomad_opener(address: str) -> urllib.request.OpenerDirector:
+    return _TLS_OPENERS.get(address, _NOMAD_OPENER)
 
 
 def _default_nomad_get(address: str, token: str, namespace: str, region: str) -> Callable[[str], Any]:
@@ -170,7 +187,7 @@ def _default_nomad_get(address: str, token: str, namespace: str, region: str) ->
         sep = "&" if "?" in path else "?"
         request = urllib.request.Request(f"{address}{path}{sep}namespace={namespace}&region={region}", method="GET", headers={"X-Nomad-Token": token, "Accept": "application/json"})
         try:
-            with _NOMAD_OPENER.open(request, timeout=10) as response:
+            with _nomad_opener(address).open(request, timeout=10) as response:
                 return json.loads(response.read())
         except urllib.error.HTTPError as exc:
             raise PreflightError(f"Nomad GET {path.split('?')[0]} failed with status {exc.code}") from None
@@ -279,7 +296,7 @@ def _default_nomad_stop(address: str, token: str, namespace: str, job_id: str) -
         raise PreflightError("refusing to end a job that does not follow the kandev-<hash> pattern")
     request = urllib.request.Request(f"{address}/v1/job/{job_id}?purge=false&namespace={namespace}", method="DELETE", headers={"X-Nomad-Token": token, "Accept": "application/json"})
     try:
-        with _NOMAD_OPENER.open(request, timeout=15) as response:
+        with _nomad_opener(address).open(request, timeout=15) as response:
             return json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as exc:
         raise PreflightError(f"Nomad DELETE failed with status {exc.code}") from None
@@ -295,7 +312,7 @@ def _default_nomad_set_eligibility(address: str, token: str, region: str, node_i
     request = urllib.request.Request(f"{address}/v1/node/{node_id}/eligibility?region={region}", data=body, method="POST",
                                      headers={"X-Nomad-Token": token, "Accept": "application/json", "Content-Type": "application/json"})
     try:
-        with _NOMAD_OPENER.open(request, timeout=15) as response:
+        with _nomad_opener(address).open(request, timeout=15) as response:
             return json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as exc:
         raise PreflightError(f"Nomad eligibility change failed with status {exc.code}") from None
@@ -358,7 +375,7 @@ def _default_nomad_delete_variable(address: str, token: str, namespace: str, pat
     quoted = urllib.parse.quote(path, safe="")
     request = urllib.request.Request(f"{address}/v1/var/{quoted}?namespace={namespace}", method="DELETE", headers={"X-Nomad-Token": token, "Accept": "application/json"})
     try:
-        with _NOMAD_OPENER.open(request, timeout=15):
+        with _nomad_opener(address).open(request, timeout=15):
             return "removed"
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -366,6 +383,43 @@ def _default_nomad_delete_variable(address: str, token: str, namespace: str, pat
         raise PreflightError(f"Nomad variable DELETE failed with status {exc.code}") from None
     except (OSError, urllib.error.URLError):
         raise PreflightError("Nomad variable DELETE is unreachable") from None
+
+
+_ACL_NAME = re.compile(r"[a-z][a-z0-9-]{0,62}")
+_ACL_ACCESSOR = re.compile(r"[A-Za-z0-9-]{1,64}")
+ACL_POLICY_NAME = "kandev-executor"
+
+
+def _acl_call(address: str, token: str, method: str, path: str, body: Any = None, tolerate_absent: bool = False) -> Any:
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(f"{address}{path}", data=data, method=method,
+                                     headers={"X-Nomad-Token": token, "Accept": "application/json", "Content-Type": "application/json"})
+    try:
+        with _nomad_opener(address).open(request, timeout=15) as response:
+            return json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        if tolerate_absent and exc.code == 404:
+            return {}
+        raise PreflightError(f"Nomad ACL {method} {path.rsplit('/', 1)[0]} failed with status {exc.code}") from None
+    except (OSError, urllib.error.URLError):
+        raise PreflightError(f"Nomad ACL {method} {path.rsplit('/', 1)[0]} is unreachable") from None
+
+
+def _default_nomad_acl_provision(address: str, token: str, policy_name: str, rules: str) -> dict[str, Any]:
+    """Management-token setup of the scoped Kandev token: the policy is written, then one client token bound to it alone."""
+    if not _ACL_NAME.fullmatch(policy_name) or policy_name == "management":
+        raise PreflightError("refusing to provision an ACL policy with an unsafe name")
+    _acl_call(address, token, "POST", f"/v1/acl/policy/{policy_name}", {"Name": policy_name, "Description": "kandev fixture executor", "Rules": rules})
+    issued = _acl_call(address, token, "POST", "/v1/acl/token", {"Name": "kandev-fixture-executor", "Type": "client", "Policies": [policy_name], "Global": False})
+    return {"secret": issued.get("SecretID"), "accessor": issued.get("AccessorID"), "policies": issued.get("Policies"), "type": issued.get("Type")}
+
+
+def _default_nomad_acl_revoke(address: str, token: str, accessor: str, policy_name: str) -> None:
+    """Management-token removal of the scoped token and its policy; already-absent objects are fine."""
+    if not _ACL_ACCESSOR.fullmatch(accessor) or not _ACL_NAME.fullmatch(policy_name) or policy_name == "management":
+        raise PreflightError("refusing to revoke an ACL object with an unsafe name")
+    _acl_call(address, token, "DELETE", f"/v1/acl/token/{accessor}", tolerate_absent=True)
+    _acl_call(address, token, "DELETE", f"/v1/acl/policy/{policy_name}", tolerate_absent=True)
 
 
 def _default_prompt(payload: dict[str, Any]) -> dict[str, Any]:
@@ -439,6 +493,8 @@ class Ops:
     process_command: Callable[[int], str | None] = _default_process_command
     signal_local: Callable[[int, str], None] = _default_signal_local
     nomad_delete_variable: Callable[[str, str, str, str], str] = _default_nomad_delete_variable
+    nomad_acl_provision: Callable[[str, str, str, str], dict[str, Any]] = _default_nomad_acl_provision
+    nomad_acl_revoke: Callable[[str, str, str, str], None] = _default_nomad_acl_revoke
     scenario_timeout: float = 300.0
     poll_interval: float = 1.0
 
@@ -674,9 +730,49 @@ class Runner:
             raise PreflightError("remote fence read failed")
         return out
 
+    # -- security mode -------------------------------------------------------------
+    def verify_security_cluster(self) -> dict[str, Any]:
+        """The management token must be a management token and the cluster must be shaped like the deployment."""
+        if self.nomad("/v1/acl/token/self").get("Type") != "management":
+            raise PreflightError("security mode: nomad.token_file must hold the ACL management token (setup, teardown and assertions only)")
+        scheduler = (self.nomad("/v1/operator/scheduler/configuration") or {}).get("SchedulerConfig") or {}
+        if scheduler.get("SchedulerAlgorithm") != "spread":
+            raise PreflightError(f"security mode: the Nomad scheduler algorithm is {scheduler.get('SchedulerAlgorithm')!r}, expected 'spread'")
+        if scheduler.get("MemoryOversubscriptionEnabled"):
+            raise PreflightError("security mode: Nomad memory oversubscription is enabled, expected off")
+        for kind, path in (("namespace", f"/v1/namespace/{bootstrap.SECURITY_NAMESPACE}"), ("node pool", f"/v1/node/pool/{bootstrap.SECURITY_NODE_POOL}")):
+            try:
+                self.nomad(path)
+            except PreflightError as exc:
+                raise PreflightError(f"security mode: the {kind} {bootstrap.SECURITY_NAMESPACE} does not exist on the Nomad server ({exc})") from None
+        return {"scheduler_algorithm": "spread", "memory_oversubscription": False, "namespace": bootstrap.SECURITY_NAMESPACE, "node_pool": bootstrap.SECURITY_NODE_POOL}
+
+    def provision_scoped_token(self, cfg: dict[str, Any]) -> str:
+        """Creates the scoped Kandev token from the policy file with the management token; Kandev receives only this one."""
+        report = self.verify_security_cluster()
+        address = self.state["nomad"]["address"]
+        issued = self.ops.nomad_acl_provision(address, self.token, ACL_POLICY_NAME, Path(cfg["security"]["acl_policy"]).read_text(encoding="utf-8"))
+        secret = issued.get("secret")
+        if issued.get("policies") != [ACL_POLICY_NAME] or issued.get("type") != "client" or not secret or secret == self.token:
+            raise PreflightError("security mode: the Kandev token is not a client token scoped to the kandev-executor policy alone")
+        self.evidence.secrets.append(secret)
+        self.save_state(scoped_token={"accessor": issued["accessor"], "policy": ACL_POLICY_NAME})
+        self.evidence.data["security"] = {**report, "tls": True, "kandev_token_policies": issued["policies"], "kandev_token_accessor": issued["accessor"]}
+        return secret
+
+    def revoke_scoped_token(self, report: dict[str, Any]) -> None:
+        """Removes the scoped token and policy once Kandev has stopped; a no-op outside security mode."""
+        scoped = self.state.get("scoped_token")
+        if not scoped:
+            return
+        self.ops.nomad_acl_revoke(self.state["nomad"]["address"], self.token, scoped["accessor"], scoped["policy"])
+        self.save_state(scoped_token=None)
+        report["scoped_token_revoked"] = True
+
     # -- create phase ----------------------------------------------------------------
     def setup_api_objects(self, cfg: dict[str, Any]) -> None:
         api = self.api
+        kandev_token = self.provision_scoped_token(cfg) if cfg.get("security") else self.token
         workspace = self._first(api("GET", "/workspaces", None).get("workspaces"), "workspace")
         workflow = self._first(api("GET", f"/workspaces/{workspace['id']}/workflows", None).get("workflows"), "workflow")
         step = self._first(api("GET", f"/workflows/{workflow['id']}/workflow/steps", None).get("steps"), "workflow step")
@@ -688,7 +784,7 @@ class Runner:
         if len(profiles) != 1:
             raise PreflightError("expected exactly one matching agent profile on the fresh fixture")
         self._redirect_git(workspace["id"], profiles[0]["id"])
-        secret = api("POST", "/secrets", {"name": "nomad-fixture-token", "value": self.token})
+        secret = api("POST", "/secrets", {"name": "nomad-fixture-token", "value": kandev_token})
         nomad = cfg["nomad"]
         token_ref = f"$kandev-secret:{secret['id']}"
         nomad_config = {
@@ -729,6 +825,8 @@ class Runner:
         for key in ("placement", "ssh_user", "memory_max_mb"):
             if key in pool:
                 config[key] = str(pool[key])
+        if cfg.get("security"):
+            config["ca_file"] = cfg["security"]["ca_file"]
         return config
 
     def create_task(self, title: str, description: str = "Nomad fixture task; no prompt is sent.") -> dict[str, str]:
@@ -855,6 +953,7 @@ class Runner:
         if daemon is not None:
             self._stop_daemon(daemon)
             report["git_daemon_pid_stopped"] = daemon["pid"]
+        self.revoke_scoped_token(report)
         (self.home / ".ssh" / "id_ed25519").unlink(missing_ok=True)
         report["ssh_identity_removed"] = True
         return report
@@ -964,6 +1063,8 @@ def run_create_fixture(config: Any, ops: Ops | None = None, out: Callable[[str],
     err = err or (lambda text: print(text, file=sys.stderr))
     try:
         cfg = bootstrap.validate_bootstrap(config, run=run, checkout_root=checkout_root)
+        if cfg.get("security"):
+            configure_nomad_tls(cfg["nomad"]["address"], cfg["security"]["ca_file"])
         if check_config is not None:
             check_config(cfg)
         token = bootstrap.read_token(Path(cfg["nomad"]["token_file"]))
@@ -981,6 +1082,8 @@ def run_create_fixture(config: Any, ops: Ops | None = None, out: Callable[[str],
     try:
         _materialize(cfg, root, port)
         state = _new_state(cfg, root, port, cfg["nomad"]["token_file"])
+        if cfg.get("security"):
+            state["security"] = {"ca_file": cfg["security"]["ca_file"]}
         if state_extra is not None:
             state.update(state_extra(cfg))
         _save_state(root, state)
@@ -1124,13 +1227,21 @@ def run_cleanup_fixture(root_text: str, ops: Ops | None = None, out: Callable[[s
     except (OSError, json.JSONDecodeError):
         evidence.data = {"status": "unknown", "steps": []}
     try:
+        if state.get("security"):
+            configure_nomad_tls(state["nomad"]["address"], state["security"]["ca_file"])
         runner = Runner(root, state, token, ops, evidence)
+        # The fixture's own processes end first, whatever state its job or session is in, so a stuck job
+        # or a failing stop never leaves a headless Kandev or git daemon behind.
+        runner.step("stop-owned-processes", runner.stop_owned_processes)
         if state.get("scenario"):
             import nomad_native_e2e_wo06 as wo06  # scenario fixtures tear down every recorded environment, not one session
             report = runner.step("cleanup-fixture", lambda: wo06.cleanup_fixture(runner))
         else:
             report = runner.step("cleanup-fixture", lambda: runner.teardown(strict_retention=False))
     except Exception as exc:
+        # The cleanup path may have restarted the backend to stop the session; nothing owned outlives a failed attempt.
+        with contextlib.suppress(Exception):
+            runner.stop_owned_processes()
         evidence.data["cleanup"] = {"status": "failed", "error": evidence.scrub(str(exc)), "finished": ops.wall()}
         evidence.save()
         err(evidence.scrub(f"cleanup-fixture failed: {exc}"))

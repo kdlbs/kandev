@@ -20,8 +20,8 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
 
+import nomad_native_e2e_bootstrap as bootstrap
 import nomad_native_e2e_fixture as fx
 import nomad_native_e2e_wo06 as wo06
 from nomad_native_e2e import PreflightError
@@ -452,9 +452,7 @@ DRIVES = {"cleanup-positive": drive_cleanup_positive, "cleanup-negative": drive_
 def check_scenario_config(cfg: dict[str, Any], scenario: str) -> None:
     if scenario not in DRIVES:
         raise PreflightError("unknown WO07 scenario")
-    parsed = urlsplit(cfg["nomad"]["address"])
-    if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
-        raise PreflightError("the cleanup scenarios mutate Nomad: nomad.address must be a loopback http address")
+    bootstrap.require_loopback_nomad(cfg, "the cleanup scenarios mutate Nomad")
 
 
 def run_scenario(config: Any, scenario: str, ops: fx.Ops | None = None, **kwargs: Any) -> int:

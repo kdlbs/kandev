@@ -9,12 +9,13 @@ production cleanup as cleanup-positive.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import sys
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
 
+import nomad_native_e2e_bootstrap as bootstrap
 import nomad_native_e2e_fixture as fx
 import nomad_native_e2e_wo06 as wo06
 import nomad_native_e2e_wo07 as wo07
@@ -163,8 +164,8 @@ class TwoNodeScenario(PoolScenario):
         want = "worktree" if env["attach"] == "local" else "checkout"
         if kind != want:
             raise PreflightError(f"environment {env['label']} on a {env['attach']} node has a {kind}, expected a {want}")
-        if kind == "worktree" and branch != f"kandev/pool/{env['environment_id']}":
-            raise PreflightError(f"the local worktree is on branch {branch!r}, expected the per-environment branch")
+        if kind == "worktree" and not re.fullmatch(rf"kandev/pool/{re.escape(env['environment_id'])}-g[0-9]+", branch):
+            raise PreflightError(f"the local worktree is on branch {branch!r}, expected the per-generation branch")
         return {"kind": kind, "branch": branch, "git_common_dir": common, "workspace": workspace}
 
     def assert_pool_cleaned(self, env: dict[str, Any], layout: dict[str, Any]) -> dict[str, Any]:
@@ -329,9 +330,7 @@ def check_scenario_config(cfg: dict[str, Any], scenario: str) -> None:
         raise PreflightError("unknown pool scenario")
     if not cfg.get("pool"):
         raise PreflightError("the pool scenarios require a pool block in the bootstrap config")
-    parsed = urlsplit(cfg["nomad"]["address"])
-    if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
-        raise PreflightError("the pool scenarios mutate Nomad: nomad.address must be a loopback http address")
+    bootstrap.require_loopback_nomad(cfg, "the pool scenarios mutate Nomad")
 
 
 def _lazy_driver(module: str, name: str) -> Callable[..., dict[str, Any]]:

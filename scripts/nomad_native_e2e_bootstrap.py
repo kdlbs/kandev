@@ -25,7 +25,10 @@ _TOP_REQUIRED = {
     "schema_version", "kandev_binary", "nomad", "ssh", "workspace_root", "allocation_root",
     "cpu_mhz", "memory_mb", "repository", "expected_file", "temp_root_parent",
 }
-_TOP_OPTIONAL = {"agent_profile_name", "partition", "pool", "ssh_client"}
+_TOP_OPTIONAL = {"agent_profile_name", "partition", "pool", "ssh_client", "security"}
+_SECURITY_KEYS = {"tls", "acl_policy", "ca_file"}
+SECURITY_NAMESPACE = "kandev"
+SECURITY_NODE_POOL = "kandev"
 _POOL_KEYS = {"node_pool", "placement", "ssh_user", "memory_max_mb", "host_identity_token_file"}
 _NOMAD_KEYS = {"address", "token_file", "namespace", "region", "datacenter", "node_id", "platform"}
 _SSH_KEYS = {"target", "port", "host_fingerprint", "identity_file"}
@@ -182,6 +185,54 @@ def validate_pool(value: Any) -> dict[str, Any]:
     return result
 
 
+def _public_regular_file(path_text: Any, label: str, max_size: int = 1 << 16) -> Path:
+    if not isinstance(path_text, str) or not os.path.isabs(path_text):
+        raise PreflightError(f"{label} must be an absolute path")
+    path = Path(path_text)
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise PreflightError(f"{label} must exist") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= max_size:
+        raise PreflightError(f"{label} must be a regular non-symlink file of a supported size")
+    return path
+
+
+def _loopback_https(address: str) -> bool:
+    parsed = urlsplit(address)
+    return parsed.scheme == "https" and parsed.hostname in ("127.0.0.1", "localhost")
+
+
+def validate_security(value: Any, nomad: dict[str, Any], pool: dict[str, Any] | None, memory_mb: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    """TLS plus scoped-ACL mode. Returns the normalized block and the pool block with memory_max_mb fixed to memory_mb."""
+    if not isinstance(value, dict) or value.keys() != _SECURITY_KEYS:
+        raise PreflightError("security must contain exactly tls, acl_policy and ca_file")
+    if value["tls"] is not True:
+        raise PreflightError("security.tls must be true")
+    if not _loopback_https(nomad["address"]):
+        raise PreflightError("security mode requires nomad.address to be a loopback https address")
+    if nomad["namespace"] != SECURITY_NAMESPACE:
+        raise PreflightError(f"security mode requires nomad.namespace {SECURITY_NAMESPACE}")
+    if pool is None or pool["node_pool"] != SECURITY_NODE_POOL:
+        raise PreflightError(f"security mode requires a pool block with node_pool {SECURITY_NODE_POOL}")
+    if pool.get("placement", "spread") != "spread":
+        raise PreflightError("security mode requires pool.placement spread")
+    if pool.get("memory_max_mb", memory_mb) != memory_mb:
+        raise PreflightError("security mode requires pool.memory_max_mb equal to memory_mb (memory oversubscription off)")
+    security = {"tls": True, "acl_policy": str(_public_regular_file(value["acl_policy"], "security.acl_policy")),
+                "ca_file": str(_public_regular_file(value["ca_file"], "security.ca_file"))}
+    return security, {**pool, "placement": "spread", "memory_max_mb": memory_mb}
+
+
+def require_loopback_nomad(cfg: dict[str, Any], what: str) -> None:
+    """Scenarios that mutate Nomad run against loopback only: http, or https when the security mode is on."""
+    parsed = urlsplit(cfg["nomad"]["address"])
+    loopback = parsed.hostname in ("127.0.0.1", "localhost", "::1")
+    if loopback and (parsed.scheme == "http" or (cfg.get("security") and parsed.scheme == "https")):
+        return
+    raise PreflightError(f"{what}: nomad.address must be a loopback http address")
+
+
 def validate_ssh_client(value: Any) -> dict[str, Any]:
     """The fixture's ssh-node Nomad client agent: pool-partition stops and continues exactly this process."""
     if not isinstance(value, dict) or value.keys() != {"pid", "config"}:
@@ -237,6 +288,10 @@ def validate_bootstrap(config: Any, run: Callable[..., Any] = subprocess.run, ch
     profile_name = config.get("agent_profile_name")
     if profile_name is not None and (not isinstance(profile_name, str) or not profile_name.strip()):
         raise PreflightError("agent_profile_name must be a non-empty string")
+    pool = validate_pool(config["pool"]) if "pool" in config else None
+    security = None
+    if "security" in config:
+        security, pool = validate_security(config["security"], {**nomad, "address": address}, pool, _positive_int(config["memory_mb"], "memory_mb"))
     return {
         "kandev_binary": str(binary), "bundle": bundle["bundle"],
         "nomad": {**nomad, "address": address, "token_file": str(token_file)},
@@ -247,6 +302,6 @@ def validate_bootstrap(config: Any, run: Callable[..., Any] = subprocess.run, ch
         "temp_root_parent": str(_temp_root_parent(config["temp_root_parent"], checkout)),
         "agent_profile_name": profile_name,
         "partition": validate_partition(config["partition"], address) if "partition" in config else None,
-        "pool": validate_pool(config["pool"]) if "pool" in config else None,
+        "pool": pool, "security": security,
         "ssh_client": validate_ssh_client(config["ssh_client"]) if "ssh_client" in config else None,
     }

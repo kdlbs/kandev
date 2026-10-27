@@ -29,8 +29,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Iterator
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
+import nomad_native_e2e_bootstrap as bootstrap
 import nomad_native_e2e_fixture as fx
 import nomad_native_e2e_pool as pool
 import nomad_native_e2e_wo06 as wo06
@@ -60,9 +61,7 @@ def check_scenario_config(cfg: dict[str, Any]) -> None:
     pool_cfg = cfg.get("pool")
     if not pool_cfg or not pool_cfg.get("host_identity_token_file"):
         raise PreflightError("pool-refusals requires a pool block with host_identity_token_file in the bootstrap config")
-    parsed = urlsplit(cfg["nomad"]["address"])
-    if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
-        raise PreflightError("pool-refusals mutates Nomad: nomad.address must be a loopback http address")
+    bootstrap.require_loopback_nomad(cfg, "pool-refusals mutates Nomad")
 
 
 class NodeMeta:
@@ -70,7 +69,7 @@ class NodeMeta:
 
     def __init__(self, address: str, token: str, region: str, opener: Any = None):
         self.address, self.token, self.region = address, token, region
-        self.opener = opener or fx._NOMAD_OPENER
+        self.opener = opener or fx._nomad_opener(address)
 
     def apply(self, node_id: str, value: str | None) -> None:
         """Set the host key metadata to value, or remove the dynamic entry so the static value shows again when None."""

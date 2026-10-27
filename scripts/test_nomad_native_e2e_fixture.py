@@ -67,6 +67,7 @@ class FakeRegistry:
         w = self.world
         record = next(item for item in w.records if item["label"] == label)
         w.events.append(result)
+        w.order.append(result)
         if not (w.stop_leaves_alive and result == "stopped"):
             w.alive.discard(record["pid"])
             w.open_ports.discard(w.record_ports.pop(record["pid"], None))
@@ -115,6 +116,8 @@ class World:
         self.backend_stop_error = None
         self.killed_groups = []
         self.ws_failure = None
+        self.ws_stop_failure = False
+        self.order = []
         self.workspace_read = {"ok": True, "contains_expected_file": True, "snapshots": []}
         self.checkout_heads = FIXTURE_HEAD + "\n"
         self.alloc_status = "running"
@@ -301,6 +304,9 @@ class World:
 
     def ws(self, payload):
         self.ws_calls.append(payload["mode"])
+        self.order.append("ws:" + payload["mode"])
+        if payload["mode"] == "session-stop" and self.ws_stop_failure:
+            raise PreflightError("fixture WebSocket driver session-stop failed")
         if payload["mode"] == "workspace-read":
             if self.ws_failure:
                 raise PreflightError("fixture WebSocket driver workspace-read failed")
@@ -998,6 +1004,35 @@ class CleanupFixtureTest(FixtureBase):
         self.assertEqual(self.world.alloc_status, "running")
         self.assertIs(evidence["cleanup"]["production_cleanup"], False)
         self.assertNotIn(TOKEN, self.everything_written())
+
+    def test_cleanup_stops_the_owned_processes_before_any_session_or_job_work(self):
+        self.world.recover_mutation = "fence"
+        self.assertEqual(self.run_flow(), 2)
+        self.world.fence = "owner:fence-content\n"
+        self.world.order.clear()
+        self.assertEqual(self.cleanup(), 0, self.err)
+        self.assertEqual(self.world.order[0], "stopped")
+        self.assertLess(self.world.order.index("stopped"), self.world.order.index("ws:session-stop"))
+        self.assertEqual(self.world.records, [])
+
+    def test_a_failing_session_stop_still_leaves_no_owned_process_behind(self):
+        self.world.recover_mutation = "fence"
+        self.assertEqual(self.run_flow(), 2)
+        self.assertTrue(self.world.records)
+        self.world.ws_stop_failure = True
+        self.assertEqual(self.cleanup(), 2)
+        self.assertEqual(self.world.records, [])
+        self.assertEqual(self.world.alive, set())
+        self.assertEqual(self.evidence()["cleanup"]["status"], "failed")
+
+    def test_cleanup_reports_a_process_that_could_not_be_stopped_and_still_attempts_the_rest(self):
+        self.world.recover_mutation = "fence"
+        self.assertEqual(self.run_flow(), 2)
+        self.world.backend_stop_error = "PID identity changed while waiting; retaining ownership record"
+        self.out.clear()
+        self.assertEqual(self.cleanup(), 2)
+        self.assertEqual([item["label"] for item in self.world.records], [fixture.PROCESS_LABEL])
+        self.assertTrue(any(line.startswith("operator cleanup:") for line in self.out))
 
     def test_cleanup_starts_the_backend_first_when_it_is_down(self):
         self.world.marker_mode = "none"

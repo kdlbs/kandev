@@ -5,6 +5,7 @@ import os
 import socket
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -173,6 +174,11 @@ class Sim(World):
                 raise PreflightError("Nomad GET /v1/var/x failed with status 404")
             if path == "/v1/jobs?prefix=kandev-":
                 return [{"ID": job} for job in self.jobs]
+            if path.startswith("/v1/node/pool/"):
+                name = path.rsplit("/", 1)[1]
+                if name in self.flags.get("missing_pools", ()):
+                    raise PreflightError(f"Nomad GET {path} failed with status 404")
+                return {"Name": name}
             parts = path.strip("/").split("/")
             if parts[:2] == ["v1", "allocation"]:
                 return json.loads(json.dumps(self.allocs[parts[2]]))
@@ -249,6 +255,8 @@ class Sim(World):
     def nomad_stop(self, address, token, namespace, job_id):
         self.stops.append((address, namespace, job_id))
         assert token == TOKEN
+        if self.flags.get("stop_raises"):
+            raise PreflightError("Nomad job stop failed")
         if self.flags.get("stop_ignored") and job_id == self.flags["stop_ignored"]:
             return {}
         env = self.jobs[job_id]["env"]
@@ -488,6 +496,38 @@ class AdmissionTest(Wo06Base):
         self.assert_failed(code, "datacenter differs", "verify-node-identity")
         self.assertEqual(sim.eligibility_calls, [])
 
+    def drive_admission_preflight(self, node_pool=None, **flags):
+        sim = self.make(**flags)
+        if node_pool:
+            sim.node["NodePool"] = node_pool
+        code = wo06.run_scenario(self.config, "admission", ops=sim.ops(), out=self.out.append, err=self.err.append,
+                                 run=lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""), checkout_root=self.checkout)
+        return code, sim
+
+    def test_pinned_node_pool_is_recorded_and_checked_to_exist(self):
+        code, sim = self.drive_admission_preflight("kandev")
+        self.assertEqual(code, 0, "\n".join(self.err))
+        self.assertEqual(self.evidence()["node"]["node_pool"], "kandev")
+        self.assertIn("/v1/node/pool/kandev", sim.nomad_paths)
+
+    def test_pinned_default_pool_needs_no_pool_lookup(self):
+        code, sim = self.drive_admission_preflight()
+        self.assertEqual(code, 0, "\n".join(self.err))
+        self.assertEqual(self.evidence()["node"]["node_pool"], "default")
+        self.assertFalse(any(path.startswith("/v1/node/pool/") for path in sim.nomad_paths))
+
+    def test_pinned_node_in_a_pool_the_server_does_not_have_fails_fast(self):
+        code, sim = self.drive_admission_preflight("kandev", missing_pools=("kandev",))
+        self.assert_failed(code, "node pool 'kandev'", "verify-node-identity")
+        self.assertIn("pending", self.evidence()["error"])
+        self.assertEqual(sim.stops, [])
+
+    def test_pool_block_that_names_another_pool_than_the_node_fails_fast(self):
+        self.config["pool"] = {"node_pool": "kandev"}
+        code, sim = self.drive_admission_preflight("default")
+        self.assert_failed(code, "pool.node_pool 'kandev'", "verify-node-identity")
+        self.assertIn("'default'", self.evidence()["error"])
+
     def test_node_platform_mismatch_is_refused(self):
         sim = self.make()
         sim.node["Attributes"]["cpu.arch"] = "arm64"
@@ -646,6 +686,21 @@ class QuarantineMarkerTest(Wo06Base):
         self.assertIn("nomad var purge", self.evidence()["error"])
         self.assertEqual(self.world.node["SchedulingEligibility"], "ineligible")
         self.assertEqual(self.world.eligibility_calls, [False])
+
+    def test_cleanup_stops_the_owned_processes_even_when_the_job_stop_fails(self):
+        self.assert_failed(self.run_scn("admission", linger=True), "still present", "release-a-operator-teardown")
+        # a run stopped mid-flight (job pending at the barrier) still owns its backend and git daemon
+        for pid, label in ((7001, fixture.PROCESS_LABEL), (7002, fixture.GIT_DAEMON_LABEL)):
+            self.world.records.append({"label": label, "pid": pid, "started_at": "t", "pgid": pid})
+            self.world.alive.add(pid)
+        self.assertEqual(len(self.world.records), 2)
+        self.world.flags.update(linger=False, stop_raises=True)
+        with mock.patch.object(wo06.Scenario, "release", side_effect=PreflightError("Nomad job stop failed")):
+            code, out, err = self.cleanup()
+        self.assertEqual(code, 2)
+        self.assertEqual(self.world.records, [])
+        self.assertEqual(self.world.alive, set())
+        self.assertEqual(self.evidence()["cleanup"]["status"], "failed")
 
     def test_cleanup_fixture_does_not_restore_while_marker_exists(self):
         self.assert_failed(self.run_scn("admission", linger=True), "still present", "release-a-operator-teardown")

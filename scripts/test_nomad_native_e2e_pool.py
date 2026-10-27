@@ -19,6 +19,12 @@ SOURCE = {
 }
 
 
+PINNED_CONFIG = {
+    "address": "https://127.0.0.1:4646", "namespace": "default", "region": "global", "datacenter": "dc1", "node_id": "n", "platform": "darwin/arm64",
+    "ssh_target": "u@h", "ssh_port": "22", "ssh_host_fingerprint": "SHA256:x", "workspace_root": "/w", "allocation_root": "/a", "cpu_mhz": "1", "memory_mb": "1",
+}
+
+
 def with_config(**updates):
     return {**SOURCE, "config": {**SOURCE["config"], **updates}}
 
@@ -29,6 +35,12 @@ class PoolPayloadTest(unittest.TestCase):
         self.assertEqual(payload["config"]["node_pool"], "kandev")
         self.assertEqual(payload["config"]["nomad_token"], SOURCE["nomad_token_ref"])
         self.assertNotIn("node_id", payload["config"])
+
+    def test_profile_payload_accepts_an_optional_ca_file_for_pool_and_pinned_profiles(self):
+        pooled = validate_profile_source(with_config(ca_file="/fx/ca.pem"))
+        self.assertEqual(build_profile_payload(pooled)["config"]["ca_file"], "/fx/ca.pem")
+        pinned = {**SOURCE, "config": {**PINNED_CONFIG, "ca_file": "/fx/ca.pem"}}
+        self.assertEqual(validate_profile_source(pinned).config["ca_file"], "/fx/ca.pem")
 
     def test_pool_profile_rejects_pinned_keys_and_missing_required(self):
         for updates in ({"node_id": "x"}, {"ssh_target": "a@b"}, {"workspace_root": "/x"}, {"bogus": "1"}):
@@ -167,12 +179,18 @@ class TwoNodeLayoutTest(unittest.TestCase):
         return {"label": "A", "attach": attach, "state_root": "/n", "environment_id": "e1"}
 
     def test_local_node_must_hold_a_worktree_on_the_environment_branch(self):
-        layout = self.scenario("worktree kandev/pool/e1 /src/.git").workspace_layout(self.env("local"))
+        layout = self.scenario("worktree kandev/pool/e1-g3 /src/.git").workspace_layout(self.env("local"))
         self.assertEqual(layout["kind"], "worktree")
         with self.assertRaises(PreflightError):
             self.scenario("checkout main /n/ws/.git").workspace_layout(self.env("local"))
         with self.assertRaises(PreflightError):
             self.scenario("worktree main /src/.git").workspace_layout(self.env("local"))
+
+    def test_stale_per_environment_branch_is_refused(self):
+        for branch in ("kandev/pool/e1", "kandev/pool/e1-g", "kandev/pool/e1-gx", "kandev/pool/e10-g1", "kandev/pool/e1-g1-x"):
+            with self.assertRaises(PreflightError, msg=branch):
+                self.scenario(f"worktree {branch} /src/.git").workspace_layout(self.env("local"))
+        self.assertEqual(self.scenario("worktree kandev/pool/e1-g12 /src/.git").workspace_layout(self.env("local"))["branch"], "kandev/pool/e1-g12")
 
     def test_ssh_node_must_hold_a_plain_checkout(self):
         self.assertEqual(self.scenario("checkout main /n/ws/.git").workspace_layout(self.env("ssh"))["kind"], "checkout")
@@ -180,12 +198,12 @@ class TwoNodeLayoutTest(unittest.TestCase):
             self.scenario("worktree kandev/pool/e1 /src/.git").workspace_layout(self.env("ssh"))
 
     def test_empty_or_failed_listing_is_refused(self):
-        for output, code in (("", 0), ("worktree kandev/pool/e1 /src/.git", 1)):
+        for output, code in (("", 0), ("worktree kandev/pool/e1-g1 /src/.git", 1)):
             with self.assertRaises(PreflightError):
                 self.scenario(output, code).workspace_layout(self.env("local"))
 
     def test_cleaned_requires_branch_and_registration_gone_for_a_worktree(self):
-        layout = {"kind": "worktree", "branch": "kandev/pool/e1", "git_common_dir": "/src/.git"}
+        layout = {"kind": "worktree", "branch": "kandev/pool/e1-g1", "git_common_dir": "/src/.git"}
         gone = self.scenario("", 1)
         gone.r.ssh = lambda cmd: (1, "") if "show-ref" in cmd else (0, "worktree /src\n")
         self.assertTrue(gone.assert_pool_cleaned(self.env("local"), layout)["branch_removed"])
@@ -356,13 +374,20 @@ class LocalNodeTreeAndLeftoversTest(unittest.TestCase):
             ws = f"{root}/workspaces/environments/env1/g1"
             for cmd in (f"git init -q -b main {src} && git -C {src} -c user.email=a@b -c user.name=a commit -q --allow-empty -m i",
                         f"mkdir -p {ws} {root}/environments/env1 {root}/pool/allocations/kandev-job1",
-                        f"git -C {src} worktree add -q -b kandev/pool/env1 {ws}/repo-main main"):
+                        f"git -C {src} worktree add -q -b kandev/pool/env1-g2 {ws}/repo-main main",
+                        f"git -C {src} branch kandev/pool/env1-g1 main",
+                        f"git -C {src} branch kandev/pool/other-g1 main"):
                 self.assertEqual(sh(cmd).returncode, 0, cmd)
             scn = wo06.Scenario.__new__(wo06.Scenario)
             scn.r = type("R", (), {"state": {}, "ssh": lambda self, c: (lambda p: (p.returncode, p.stdout))(sh(c))})()
             report = scn.remove_pool_leftovers({"label": "A", "state_root": root, "environment_id": "env1", "job_id": "kandev-job1"}, True)
             self.assertTrue(report["removed"])
-            self.assertNotEqual(sh(f"git -C {src} show-ref --verify --quiet refs/heads/kandev/pool/env1").returncode, 0)
+            self.assertEqual(report["branch_prefix"], "kandev/pool/env1-g")
+            self.assertNotIn("branch", report)
+            self.assertNotEqual(sh(f"git -C {src} show-ref --verify --quiet refs/heads/kandev/pool/env1-g2").returncode, 0)
+            # only the branch actually checked out is deleted
+            self.assertEqual(sh(f"git -C {src} show-ref --verify --quiet refs/heads/kandev/pool/env1-g1").returncode, 0)
+            self.assertEqual(sh(f"git -C {src} show-ref --verify --quiet refs/heads/kandev/pool/other-g1").returncode, 0)
             self.assertNotIn("env1", sh(f"git -C {src} worktree list --porcelain").stdout)
             self.assertFalse(os.path.exists(f"{root}/environments/env1") or os.path.exists(ws))
 
@@ -370,7 +395,7 @@ class LocalNodeTreeAndLeftoversTest(unittest.TestCase):
         scn = pool.TwoNodeScenario.__new__(pool.TwoNodeScenario)
         calls = []
         scn.focus = lambda env: calls.append("focus")
-        scn.remove_pool_leftovers = lambda env, strict: calls.append("remove") or {"removed": True, "branch": "b"}
+        scn.remove_pool_leftovers = lambda env, strict: calls.append("remove") or {"removed": True, "branch_prefix": "b"}
         scn.assert_pool_cleaned = lambda env, layout: calls.append("assert") or {"kind": layout["kind"]}
         report = scn.remove_b_leftovers({"label": "B"}, {"kind": "worktree"})
         self.assertEqual(calls, ["focus", "remove", "assert"])

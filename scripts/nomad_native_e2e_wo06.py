@@ -22,9 +22,9 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
 
 import nomad_native_e2e as base
+import nomad_native_e2e_bootstrap as bootstrap
 import nomad_native_e2e_fixture as fx
 from nomad_native_e2e import PreflightError
 
@@ -263,7 +263,20 @@ class Scenario:
             raise PreflightError("Nomad node id or datacenter differs from the bootstrap config; refusing to mutate it")
         if platform != self.cfg["nomad"]["platform"]:
             raise PreflightError("Nomad node platform differs from the bootstrap config; refusing to mutate it")
-        return {"node_id": node["ID"], "datacenter": node["Datacenter"], "platform": platform, "meta_compared": False}
+        return {"node_id": node["ID"], "datacenter": node["Datacenter"], "platform": platform, "meta_compared": False,
+                "node_pool": self.check_node_pool(node)}
+
+    def check_node_pool(self, node: dict[str, Any]) -> str:
+        """The node's pool must agree with the profile and exist on the server; otherwise a launch would stay pending."""
+        node_pool = node.get("NodePool") or "default"
+        wanted = (self.cfg.get("pool") or {}).get("node_pool")
+        if wanted and node_pool != wanted:
+            raise PreflightError(f"the fixture node is in node pool {node_pool!r} but pool.node_pool {wanted!r} is configured; "
+                                 "a launch would stay pending with no eligible node. Align pool.node_pool or the node's client node_pool")
+        if node_pool != "default" and self.get_or_none(f"/v1/node/pool/{node_pool}") is None:
+            raise PreflightError(f"the fixture node is in node pool {node_pool!r}, which does not exist on the Nomad server; "
+                                 "a launch would stay pending with no eligible node")
+        return node_pool
 
     def quarantine_marker(self) -> Any:
         """The node's quarantine Variable in the config namespace, or None when absent (404)."""
@@ -630,21 +643,23 @@ class Scenario:
 
     def remove_pool_leftovers(self, env: dict[str, Any], strict: bool) -> dict[str, Any]:
         """Operator teardown of a placed environment's node files once its job is dead: the git worktree and its
-        per-environment branch, the workspace, the fence directory and the allocation directory."""
+        per-generation branch, the workspace, the fence directory and the allocation directory."""
         root, env_id, job_id = self.pool_node_root(env), env["environment_id"], env["job_id"]
         if not root.startswith("/") or not _SAFE_ID.fullmatch(env_id) or not _SAFE_ID.fullmatch(job_id) or ".." in root:
             raise PreflightError("recorded pool paths are not safe to remove")
         ws, fence, alloc = (f"{root}/workspaces/environments/{env_id}", f"{root}/environments/{env_id}", f"{root}/pool/allocations/{job_id}")
         q = shlex.quote
-        branch = f"kandev/pool/{env_id}"
+        prefix = f"kandev/pool/{env_id}-g"
         script = (f'for d in {q(ws)}/*/*/; do [ -f "${{d}}.git" ] || continue; '
                   f'common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir) || continue; '
+                  f'b=$(git -C "$d" rev-parse --abbrev-ref HEAD); '
                   f'git -C "$d" worktree remove --force "$d"; '
-                  f'git --git-dir="$common" branch -D {q(branch)}; git --git-dir="$common" worktree prune; done; '
+                  f'case "$b" in {q(prefix)}*) git --git-dir="$common" branch -D "$b";; esac; '
+                  f'git --git-dir="$common" worktree prune; done; '
                   f'rm -rf {q(ws)} {q(fence)} {q(alloc)}')
         self.r.ssh(script)
         remaining = [path for path in (ws, fence, alloc) if self.r.ssh(f"[ -e {q(path)} ] || [ -L {q(path)} ]")[0] == 0]
-        report = {"removed": not remaining, "branch": branch}
+        report = {"removed": not remaining, "branch_prefix": prefix}
         if remaining:
             report["remaining"] = remaining
             if strict:
@@ -692,6 +707,7 @@ class Scenario:
         report["jobs"] = self.assert_jobs_ended()
         report["eligibility"] = self.restore_eligibility(strict=False)
         self.stop_processes(report)
+        self.r.revoke_scoped_token(report)
         self.r.save_state(torn_down=True)
         (self.r.home / ".ssh" / "id_ed25519").unlink(missing_ok=True)
         report["ssh_identity_removed"] = True
@@ -1042,9 +1058,7 @@ DRIVES = {"admission": drive_admission, "disconnect": drive_disconnect}
 def check_scenario_config(cfg: dict[str, Any], scenario: str) -> None:
     if scenario not in DRIVES:
         raise PreflightError("unknown WO06 scenario")
-    parsed = urlsplit(cfg["nomad"]["address"])
-    if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
-        raise PreflightError("admission and disconnect mutate Nomad: nomad.address must be a loopback http address")
+    bootstrap.require_loopback_nomad(cfg, "admission and disconnect mutate Nomad")
     if scenario == "disconnect" and not cfg.get("partition"):
         raise PreflightError("the disconnect scenario requires a partition configuration with loopback listen and upstream")
 
