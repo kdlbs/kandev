@@ -21,6 +21,10 @@ import (
 const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is a server-side issue, " +
 	"usually temporary. Try again in a moment. If it persists, check https://status.claude.com."
 
+// codexRateLimit429Message is a synthetic terminal ACP error matching the
+// Codex retry-exhaustion signature supported by the shared classifier.
+const codexRateLimit429Message = "exceeded retry limit, last status: 429 Too Many Requests"
+
 // overloadedCmdRe matches `/overloaded` or `/e2e:overloaded`, optionally
 // followed by `:N` — the number of consecutive prompts to fail with a 529
 // before recovering (default 1, so the turn self-heals on the first retry).
@@ -28,6 +32,7 @@ const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is
 // through to the red recovery banner.
 var (
 	overloadedCmdRe               = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
+	codexRateLimitCmdRe           = regexp.MustCompile(`(?i)^/(?:e2e:)?codex-rate-limit(?::(\d+))?$`)
 	changesWalkthroughPromptRefRe = regexp.MustCompile(`^@changes-walkthrough(?:\s|$)`)
 	savedPromptDeliveryBlockRe    = regexp.MustCompile(
 		regexp.QuoteMeta("<kandev-system>EXPANDED PROMPT REFERENCES:") +
@@ -125,6 +130,65 @@ func overloadedCounterPath(sid acp.SessionId) string {
 // nextOverloadedAttempt increments and returns the persisted attempt count.
 func nextOverloadedAttempt(sid acp.SessionId) int {
 	path := overloadedCounterPath(sid)
+	prev := 0
+	if raw, err := os.ReadFile(path); err == nil {
+		if n, convErr := strconv.Atoi(strings.TrimSpace(string(raw))); convErr == nil {
+			prev = n
+		}
+	}
+	next := prev + 1
+	_ = os.WriteFile(path, []byte(strconv.Itoa(next)), 0o600)
+	return next
+}
+
+// parseCodexRateLimitCmd reports whether a prompt requests the synthetic
+// terminal Codex 429 scenario and how many failures to emit before recovery.
+func parseCodexRateLimitCmd(prompt string) (failTimes int, ok bool) {
+	cmd := stripKandevSystem(strings.TrimSpace(prompt))
+	m := codexRateLimitCmdRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return 0, false
+	}
+	failTimes = 1
+	if m[1] != "" {
+		if n, err := strconv.Atoi(m[1]); err == nil && n >= 0 {
+			failTimes = n
+		}
+	}
+	return failTimes, true
+}
+
+// handleCodexRateLimit emits a prompt-time ACP RequestError for the first N
+// attempts, then returns a normal response after the existing retry owner
+// replays the prompt.
+func (a *mockAgent) handleCodexRateLimit(ctx context.Context, sid acp.SessionId, prompt string) (acp.PromptResponse, error, bool) {
+	failTimes, ok := parseCodexRateLimitCmd(prompt)
+	if !ok {
+		return acp.PromptResponse{}, nil, false
+	}
+	attempt := nextCodexRateLimitAttempt(sid)
+	if attempt <= failTimes {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: emitting synthetic Codex terminal 429 for session %s (failure %d/%d)\n",
+			os.Getpid(), sid, attempt, failTimes)
+		return acp.PromptResponse{}, &acp.RequestError{
+			Code:    -32603,
+			Message: codexRateLimit429Message,
+		}, true
+	}
+
+	_ = os.Remove(codexRateLimitCounterPath(sid))
+	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
+	e.text(fmt.Sprintf("Codex rate limit cleared after %d transient failure(s). Here is your response.", failTimes))
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+func codexRateLimitCounterPath(sid acp.SessionId) string {
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(sid))
+	return filepath.Join(os.TempDir(), "kandev-mock-codex-rate-limit-"+safe+".count")
+}
+
+func nextCodexRateLimitAttempt(sid acp.SessionId) int {
+	path := codexRateLimitCounterPath(sid)
 	prev := 0
 	if raw, err := os.ReadFile(path); err == nil {
 		if n, convErr := strconv.Atoi(strings.TrimSpace(string(raw))); convErr == nil {

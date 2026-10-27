@@ -1130,7 +1130,11 @@ Select an archived task to read its saved conversation in the current page. Arch
 
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For first-startup prompt replay and session recovery behavior, see [Sessions and review](sessions-and-review.md).
 
-If Quick Chat setup fails after a session is created, Kandev keeps the chat in your tab strip with its preparation details and safe error details so you can inspect the failure or retry. A failure before a session exists keeps your selected agent and repository choices on the setup form with an inline error and a **Retry** action.
+Quick Chat creation can take longer than the request. If the result is uncertain, the setup keeps your submitted draft and shows **Check status**. Checking status does not start another chat or send the opening message.
+
+If Kandev has not found the creation, select **Retry creation** to continue the same creation. Kandev opens only the matching conversation and shows its preparation progress. Use the recovery controls in that conversation if startup or message delivery needs attention.
+
+After a reload, Quick Chat checks the saved creation status but does not submit the request again or replay an opening message whose delivery was already attempted. If creation is incomplete and has no prepared session, Kandev keeps the draft and requires the existing delete confirmation before you discard the task.
 
 <details>
 <summary>Worktree recovery after archive</summary>

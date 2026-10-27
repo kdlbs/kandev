@@ -22,6 +22,8 @@ import { QuickChatMobileRepositoryChip } from "./quick-chat-mobile-repository-ch
 import { ConfigurationChatAction } from "./configuration-chat-action";
 import { generateUUID } from "@/lib/utils";
 import type { QuickChatSetupDraft } from "./use-quick-chat-setup-draft";
+import type { PendingQuickChatCreation } from "./quick-chat-creation";
+import { QuickChatCreationStatus } from "./quick-chat-creation-status";
 import { QuickChatAgentField, type QuickChatSetupRepositoryState } from "./quick-chat-setup-fields";
 import {
   buildOpeningPayload,
@@ -39,12 +41,18 @@ type QuickChatSetupProps = {
   configurationStarting: boolean;
   configurationError: string | null;
   quickChatError: string | null;
+  pendingCreation: PendingQuickChatCreation | null;
+  checkingCreation: boolean;
+  onCheckCreation: () => Promise<void>;
+  onRetryCreation: () => Promise<boolean>;
+  onDeleteCreation: () => Promise<void>;
   draft: QuickChatSetupDraft;
   onDraftChange: (patch: Partial<QuickChatSetupDraft>) => boolean | void;
   onStartQuickChat: (
     agentId: string,
     repositories: QuickChatRepositoryInput[],
     payload: QuickChatOpeningPayload,
+    capturedDraft: { message: string; attachments: FileAttachment[] },
   ) => Promise<boolean>;
   onStartConfigChat: (agentId: string, payload: QuickChatOpeningPayload) => Promise<boolean>;
   onKindChange: (kind: QuickChatSessionKind) => void;
@@ -236,6 +244,7 @@ function useQuickChatSetupActions(args: {
   selectedRepositories: QuickChatRepositoryInput[];
   profileEnabled: boolean;
   isStarting: boolean;
+  hasPendingCreation: boolean;
   onStartQuickChat: QuickChatSetupProps["onStartQuickChat"];
   onStartConfigChat: QuickChatSetupProps["onStartConfigChat"];
 }) {
@@ -244,6 +253,7 @@ function useQuickChatSetupActions(args: {
   const chatSubmitKey = useAppStore((state) => state.userSettings.chatSubmitKey);
   const composerSubmitDisabled =
     args.isStarting ||
+    args.hasPendingCreation ||
     !args.profileEnabled ||
     hasUnavailableAttachment(args.draft.attachments) ||
     (args.kind === "chat" &&
@@ -252,7 +262,7 @@ function useQuickChatSetupActions(args: {
   const canSubmit = promptReady && !composerSubmitDisabled;
 
   const handleSend = useCallback(async () => {
-    if (submitLock.current) return false;
+    if (submitLock.current || args.hasPendingCreation) return false;
     const message = formRef.current?.getValue() ?? args.draft.message;
     const attachments = formRef.current?.getAttachments() ?? args.draft.attachments;
     if (
@@ -276,6 +286,7 @@ function useQuickChatSetupActions(args: {
             args.draft.agentProfileId,
             args.selectedRepositories,
             payload,
+            { message, attachments },
           );
     if (!accepted) submitLock.current = false;
     return accepted;
@@ -309,6 +320,11 @@ type QuickChatSetupLayoutProps = {
   canCreateConfigurationChat: boolean;
   configurationError: string | null;
   quickChatError: string | null;
+  pendingCreation: PendingQuickChatCreation | null;
+  checkingCreation: boolean;
+  onCheckCreation: QuickChatSetupProps["onCheckCreation"];
+  onRetryCreation: QuickChatSetupProps["onRetryCreation"];
+  onDeleteCreation: QuickChatSetupProps["onDeleteCreation"];
   draft: QuickChatSetupDraft;
   profiles: AgentProfileOption[];
   repositories: QuickChatSetupRepositoryState;
@@ -395,14 +411,11 @@ function renderQuickChatComposerContext(
   return <QuickChatComposerContext {...props} />;
 }
 
-function QuickChatSetupLayout({
+function QuickChatSetupComposer({
   workspaceId,
   kind,
   canCreateConfigurationChat,
-  configurationError,
-  quickChatError,
   draft,
-  profiles,
   repositories,
   formRef,
   isStarting,
@@ -423,6 +436,74 @@ function QuickChatSetupLayout({
     (attachments: FileAttachment[]) => onDraftChange({ attachments }),
     [onDraftChange],
   );
+
+  return (
+    <TaskFormInputs
+      workspaceId={workspaceId}
+      isSessionMode
+      quickChatComposer
+      autoFocus={!usesTouchDrawer}
+      initialDescription={draft.message}
+      initialAttachments={draft.attachments}
+      onDescriptionChange={() => {}}
+      onDescriptionValueChange={handleDescriptionValueChange}
+      onAttachmentsChange={handleAttachmentsChange}
+      onKeyDown={handlePromptKeyDown}
+      descriptionValueRef={formRef}
+      disabled={isStarting}
+      composerSubmitDisabled={composerSubmitDisabled}
+      placeholder={t("task:writeAPromptForTheAgent")}
+      onComposerSubmit={handleSend}
+      toolbarLeadingActions={
+        <QuickChatAddRepositoryButton
+          kind={kind}
+          draft={draft}
+          repositories={repositories}
+          isStarting={isStarting}
+        />
+      }
+      toolbarAttachmentActions={
+        canCreateConfigurationChat && (
+          <ConfigurationChatAction
+            checked={kind === "config"}
+            disabled={isStarting}
+            onCheckedChange={(checked) => onKindChange(checked ? "config" : "chat")}
+          />
+        )
+      }
+      contextLeadingContent={renderQuickChatComposerContext({
+        workspaceId,
+        kind,
+        draft,
+        repositories,
+      })}
+      toolbarActions={
+        <QuickChatSendButton
+          disabled={!canSubmit || isStarting}
+          busy={isStarting}
+          onClick={handleSend}
+        />
+      }
+    />
+  );
+}
+
+function QuickChatSetupLayout(props: QuickChatSetupLayoutProps) {
+  const {
+    kind,
+    configurationError,
+    quickChatError,
+    pendingCreation,
+    checkingCreation,
+    onCheckCreation,
+    onRetryCreation,
+    onDeleteCreation,
+    draft,
+    profiles,
+    isStarting,
+    onDraftChange,
+  } = props;
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-popover" data-testid="quick-chat-setup">
       <div
@@ -433,54 +514,17 @@ function QuickChatSetupLayout({
           <h2 className="text-lg font-semibold" data-testid="quick-chat-introduction">
             {t("chat:quickChatIntro")}
           </h2>
-          <TaskFormInputs
-            workspaceId={workspaceId}
-            isSessionMode
-            quickChatComposer
-            autoFocus={!usesTouchDrawer}
-            initialDescription={draft.message}
-            initialAttachments={draft.attachments}
-            onDescriptionChange={() => {}}
-            onDescriptionValueChange={handleDescriptionValueChange}
-            onAttachmentsChange={handleAttachmentsChange}
-            onKeyDown={handlePromptKeyDown}
-            descriptionValueRef={formRef}
-            disabled={isStarting}
-            composerSubmitDisabled={composerSubmitDisabled}
-            placeholder={t("task:writeAPromptForTheAgent")}
-            onComposerSubmit={handleSend}
-            toolbarLeadingActions={
-              <QuickChatAddRepositoryButton
-                kind={kind}
-                draft={draft}
-                repositories={repositories}
-                isStarting={isStarting}
-              />
-            }
-            toolbarAttachmentActions={
-              canCreateConfigurationChat && (
-                <ConfigurationChatAction
-                  checked={kind === "config"}
-                  disabled={isStarting}
-                  onCheckedChange={(checked) => onKindChange(checked ? "config" : "chat")}
-                />
-              )
-            }
-            contextLeadingContent={renderQuickChatComposerContext({
-              workspaceId,
-              kind,
-              draft,
-              repositories,
-            })}
-            toolbarActions={
-              <QuickChatSendButton
-                disabled={!canSubmit || isStarting}
-                busy={isStarting}
-                onClick={handleSend}
-              />
-            }
-          />
+          <QuickChatSetupComposer {...props} />
           <QuickChatSetupError error={kind === "config" ? configurationError : quickChatError} />
+          {kind === "chat" ? (
+            <QuickChatCreationStatus
+              pending={pendingCreation}
+              checking={checkingCreation}
+              onCheck={() => void onCheckCreation()}
+              onRetry={() => void onRetryCreation()}
+              onDelete={() => void onDeleteCreation()}
+            />
+          ) : null}
           <QuickChatAgentField
             kind={kind}
             profiles={profiles}
@@ -517,6 +561,7 @@ export function QuickChatSetup(props: QuickChatSetupProps) {
     selectedRepositories: repositories.selectedRepositories,
     profileEnabled: profile.selectedProfileEnabled,
     isStarting,
+    hasPendingCreation: kind === "chat" && Boolean(props.pendingCreation),
     onStartQuickChat: props.onStartQuickChat,
     onStartConfigChat: props.onStartConfigChat,
   });
@@ -533,6 +578,11 @@ export function QuickChatSetup(props: QuickChatSetupProps) {
       canCreateConfigurationChat={props.canCreateConfigurationChat}
       configurationError={props.configurationError}
       quickChatError={props.quickChatError}
+      pendingCreation={props.pendingCreation}
+      checkingCreation={props.checkingCreation}
+      onCheckCreation={props.onCheckCreation}
+      onRetryCreation={props.onRetryCreation}
+      onDeleteCreation={props.onDeleteCreation}
       draft={props.draft}
       profiles={profile.profiles}
       repositories={repositories}

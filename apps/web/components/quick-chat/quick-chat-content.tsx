@@ -37,6 +37,8 @@ type QuickChatContentProps = {
   placeholderOverride?: string;
   initialPrompt?: QuickChatInitialPrompt;
   onInitialPromptAttempted?: () => void;
+  /** The accepted Quick Chat launch owns input until its initial startup settles. */
+  startupPending?: boolean;
   /** Inserted once through `chatInputRef.insertText`, not sent. See
    *  {@link useQuickChatInitialDraft}. */
   initialDraft?: string;
@@ -125,12 +127,52 @@ function useFocusComposerOnMount(chatInputRef: React.RefObject<ChatInputContaine
   }, [chatInputRef]);
 }
 
+type QuickChatMessageSurfaceProps = {
+  items: ReturnType<typeof useVisibleItems>;
+  panelState: ReturnType<typeof useChatPanelState>;
+  taskId: string | null;
+};
+
+function QuickChatMessageSurface({ items, panelState, taskId }: QuickChatMessageSurfaceProps) {
+  return (
+    <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
+      <MessageList
+        items={items}
+        messages={panelState.allMessages}
+        footerActionMessages={panelState.footerActionMessages}
+        permissionsByToolCallId={panelState.permissionsByToolCallId}
+        childrenByParentToolCallId={panelState.childrenByParentToolCallId}
+        taskId={taskId ?? undefined}
+        sessionId={panelState.resolvedSessionId}
+        messagesLoading={panelState.messagesLoading}
+        isWorking={panelState.isWorking}
+        sessionState={panelState.session?.state}
+        worktreePath={getSessionWorkspacePath(panelState.session)}
+      />
+    </div>
+  );
+}
+
+function isQuickChatComposerBlocked(
+  startupPending: boolean | undefined,
+  panelState: ReturnType<typeof useChatPanelState>,
+): boolean {
+  return (
+    startupPending ||
+    !panelState.session ||
+    panelState.inputMode === "unavailable" ||
+    (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
+    (panelState.planCommentMigration?.isBlocking ?? false)
+  );
+}
+
 export const QuickChatContent = memo(function QuickChatContent({
   sessionId,
   minimalToolbar,
   placeholderOverride,
   initialPrompt,
   onInitialPromptAttempted,
+  startupPending,
   initialDraft,
   transformOutgoing,
   hideStartupRows,
@@ -145,7 +187,6 @@ export const QuickChatContent = memo(function QuickChatContent({
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const activity = useCopilotActivity(activityDisplay, panelState);
   const items = useVisibleItems(activity.items, hideStartupRows);
-
   useFocusComposerOnMount(chatInputRef);
 
   useQuickChatComposerPriming({
@@ -153,11 +194,7 @@ export const QuickChatContent = memo(function QuickChatContent({
     taskId,
     initialPrompt,
     initialDraft,
-    blocked:
-      !panelState.session ||
-      panelState.inputMode === "unavailable" ||
-      (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
-      (panelState.planCommentMigration?.isBlocking ?? false),
+    blocked: isQuickChatComposerBlocked(startupPending, panelState),
     handleSubmit,
     onInitialPromptAttempted,
     chatInputRef,
@@ -183,20 +220,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         pendingClarification={pendingClarification}
         onCancel={handleCancelTurn}
       />
-      <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
-        <MessageList
-          items={items}
-          messages={panelState.allMessages}
-          permissionsByToolCallId={panelState.permissionsByToolCallId}
-          childrenByParentToolCallId={panelState.childrenByParentToolCallId}
-          taskId={taskId ?? undefined}
-          sessionId={panelState.resolvedSessionId}
-          messagesLoading={panelState.messagesLoading}
-          isWorking={panelState.isWorking}
-          sessionState={panelState.session?.state}
-          worktreePath={getSessionWorkspacePath(panelState.session)}
-        />
-      </div>
+      <QuickChatMessageSurface items={items} panelState={panelState} taskId={taskId} />
       <ClarificationPanelSection
         key={sessionId}
         pending={Boolean(pendingClarification)}

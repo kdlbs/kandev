@@ -46,6 +46,31 @@ The Office board groups tasks by status, with columns such as Todo, In Progress,
 
 The task detail brings together properties, documents, subtasks, and activity. Edit the title or description when the brief changes and use the property controls for assignee, project, priority, labels, parent, and blocker relationships.
 
+To remove a label, select its remove control in the **Labels** row. Names such
+as `area/backend` work the same as simple names. Removal persists when you
+reload the task and affects only this task's association; the workspace catalog
+entry and labels on other tasks remain available.
+
+<details>
+<summary>Task-label removal API reference</summary>
+
+Use `DELETE /api/v1/office/workspaces/:wsId/tasks/:taskId/labels?name=<encoded-name>`
+with one query-encoded name. For example, `area/backend` becomes
+`name=area%2Fbackend`; a literal `area%2Fbackend` becomes
+`name=area%252Fbackend`. Encode a literal plus as `%2B` and a space as `+` or
+`%20`. The name is decoded once and matched exactly, including stored spaces.
+
+Success returns HTTP 200 with `{"ok":true}`, including when the valid name is
+already absent from the task. Missing, empty, repeated, or malformed name
+parameters return HTTP 400 without removing labels. Existing authorization
+rules require access to the workspace and task, which must belong together.
+
+The existing `DELETE .../labels/:labelName` route remains compatible with
+single-segment names. Use the query endpoint for slash-containing names.
+Removing a task association does not delete the workspace label.
+
+</details>
+
 ![Office task detail with its brief, properties, documents, and activity area](../screenshots/office-task-detail.png)
 
 Comments are durable task discussion and can wake the relevant agent. In Work they target the primary agent; in Review or Approval the default workflow targets participants who have not yet decided. State what you want the recipient to do, such as “Address the two accessibility findings and request another review.”

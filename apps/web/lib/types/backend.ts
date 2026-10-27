@@ -136,6 +136,7 @@ export type TaskEventPayload = {
     updated_at?: string;
   }>;
   primary_session_id?: string | null;
+  quick_chat_creation_id?: string;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
