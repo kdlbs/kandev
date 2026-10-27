@@ -34,6 +34,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 
 
 - [Remote executor plugins](requirements/remote-executor-plugins.md)
+- [Remote executor plugins: native worker capabilities](requirements/remote-executor-plugin-native-workers.md)
 - [Agent survival across a backend restart](requirements/agent-survival-across-restart.md)
 - [Survived session state and capability gating](requirements/agent-survival-session-state.md)
 - [Standalone control-server ownership](requirements/standalone-control-server-ownership.md)
@@ -57,6 +58,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 
 
 - [Remote executor plugins](system-design/remote-executor-plugins.md)
+- [Remote executor plugins: native worker capabilities](system-design/remote-executor-plugin-native-workers.md)
 - [Agent survival across a backend restart Part 1](system-design/agent-survival-across-restart-01.md)
 - [Agent survival across a backend restart Part 2](system-design/agent-survival-across-restart-02.md)
 - [Agent survival across a backend restart Part 3](system-design/agent-survival-across-restart-03.md)
