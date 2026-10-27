@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,5 +198,29 @@ func TestProvisionLocalPoolWorktreesLeftoverEnvironmentBranchDoesNotBlockNextGen
 	}
 	if got := localWorktreeGit(t, filepath.Join(ws, projection[0].Destination), "rev-parse", "--abbrev-ref", "HEAD"); got != "kandev/pool/env-a-g2" {
 		t.Fatalf("worktree branch = %q", got)
+	}
+}
+
+func TestReconcileCreatedNomadRepositoriesClassifiesOnlyRealMismatchAsOperatorAction(t *testing.T) {
+	repo := localWorktreeRepo(t)
+	ws := poolWorkspace(t, "env-a", 1)
+	dest, err := remoteWorkspaceRepositoryDestination(RepoLaunchSpec{RepoName: "kandev", BaseBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	localWorktreeGit(t, repo, "worktree", "add", "-b", "kandev/pool/env-a-g1", filepath.Join(ws, dest), "main")
+	localWorktreeGit(t, filepath.Join(ws, dest), "checkout", "-q", "-b", "other")
+	info := &WorkspaceInfo{WorkspacePath: ws, WorkspaceRepositories: []WorkspaceRepositorySpec{
+		{RepositoryID: "r", RepoName: "kandev", RepositoryPath: repo, RepositoryURL: "https://example.test/k.git", BaseBranch: "main"},
+	}}
+	m := &Manager{}
+	var classed *recoveryClassError
+	if err := m.reconcileCreatedNomadRepositories(context.Background(), nil, info); !errors.As(err, &classed) || classed.class != nomadRecoveryClassOperatorAction {
+		t.Fatalf("a wrong-branch worktree must be operator_action, got %v", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := m.reconcileCreatedNomadRepositories(cancelled, nil, info); err == nil || errors.As(err, &classed) {
+		t.Fatalf("a cancelled context must stay retryable, got %v", err)
 	}
 }

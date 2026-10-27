@@ -293,6 +293,9 @@ func (m *Manager) reconcileCreatedNomadRepositories(ctx context.Context, executi
 	defer cancel()
 	repositories, err := createdNomadReconcileProjection(reconcileCtx, info)
 	if err != nil {
+		if reconcileCtx.Err() != nil {
+			return fmt.Errorf("reconcile pre-ACP Nomad repositories: %w", err)
+		}
 		return operatorActionRecoveryError(err)
 	}
 	if len(repositories) == 0 {
