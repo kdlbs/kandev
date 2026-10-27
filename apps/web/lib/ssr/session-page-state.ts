@@ -440,19 +440,33 @@ export async function fetchTaskNavigationEnrichment(
   const loadAgentList = options.store
     ? () => getAgentListResourceScope(options.store!).ensure()
     : () => listAgents({ cache: "no-store" });
-  if (!sessionId) return fetchTaskDataOnly(task, allSessionsResponse, loadAgentList, options.store);
-
-  const optionalHydration = beginOptionalHydration();
-  const { fetchTaskSession } = await import("@/lib/api");
-  const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
-    fetchTaskSession(sessionId, { cache: "no-store" }),
-  );
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
-    activeSessionResponse,
-    optionalHydration,
-    loadAgentList,
-    store: options.store,
-  });
+  let data: FetchedSessionData;
+  if (!sessionId) {
+    data = await fetchTaskDataOnly(task, allSessionsResponse, loadAgentList, options.store);
+  } else {
+    const optionalHydration = beginOptionalHydration();
+    const { fetchTaskSession } = await import("@/lib/api");
+    const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
+      fetchTaskSession(sessionId, { cache: "no-store" }),
+    );
+    data = await fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
+      activeSessionResponse,
+      optionalHydration,
+      loadAgentList,
+      store: options.store,
+    });
+  }
+  // The task shell owns selection and an already-resolved session collection.
+  return {
+    ...data,
+    initialState: {
+      ...data.initialState,
+      tasks: undefined,
+      taskSessionsByTask: identity.sessionListUnavailable
+        ? data.initialState.taskSessionsByTask
+        : undefined,
+    },
+  };
 }
 
 /**

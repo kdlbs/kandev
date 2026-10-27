@@ -300,3 +300,13 @@ reproduce those CI failures. After correction, the same project contexts plus
 the desktop search controls passed 51 checks with retries disabled, one worker,
 two CPUs, and 4 GiB memory. Helper unit tests, targeted lint, and formatting
 passed. The work order records the CI evidence and diagnostic limits.
+
+A late fourth failure exposed a product race in task-route enrichment.
+Optional hydration replayed an older task/session selection and session list
+after the task shell had accepted a prepared session. The correction restores
+`AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.7` and `.9`: optional enrichment does
+not republish navigation selection or an already-resolved session collection.
+The existing failed-list recovery and full SSR hydration paths remain intact.
+Two regressions failed before the correction. All 72 focused navigation tests,
+11 rebuilt desktop browser checks, and two phone checks passed afterward.
+The replacement head still requires CI and review verification.

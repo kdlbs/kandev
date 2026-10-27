@@ -307,3 +307,46 @@ The current-head walkthrough generation job passed on this run. Its preceding
 two timeouts remain unexplained; no generator policy or timeout was changed.
 Full CI and review fixup remains in progress until the replacement head is
 verified.
+
+## CI follow-up: late task-route enrichment (2026-10-27)
+
+The late fourth failure in run `40428275527`, shard 15/job `121951086081`,
+timed out in `workflow-automation.spec.ts` while waiting for a prepared session
+to become the active task/session. Its isolated browser case passed 1/1.
+The CI snapshot showed the task header but no selected task in its inspector.
+
+Two focused unit regressions reproduced the defect deterministically.
+`fetchTaskNavigationEnrichment` captured an earlier sessionless or existing
+identity, waited for optional resources, and returned navigation selection
+from `taskToState` plus the older session list. Hydrating this result cleared
+or replaced a session accepted during the wait. Correcting selection alone
+still failed the collection assertions: the old list removed the new session.
+
+The correction restores the existing requirements in
+`docs/specs/ui/requirements/task-navigation-responsiveness.md`, specifically
+`AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.7` and `.9`, and the essential-hydration
+boundary in its system design. Client enrichment no longer publishes task
+selection or a session collection that essential hydration already resolved.
+An initially unavailable session list retains its existing enrichment recovery.
+Full SSR entry points retain their initial selection and hydration behavior.
+
+Validation:
+
+- Both new selection/collection regressions failed before the correction.
+  They cover sessionless and existing-session identities, a newly prepared
+  session, the selected/pinned conversation, remembered selection, and the
+  current session collection while optional agents are delayed.
+- All 72 tests passed across the session-page state, bounded navigation,
+  task-route, route-recovery/workspace, and task-page-content suites.
+- Freshly built desktop browser checks passed 11/11: workflow automation,
+  automatic session creation, durable transcript ordering, and GitLab sync.
+- Phone prevent-auto-start and start-step routing checks passed 2/2 with
+  one worker, two CPUs, 4 GiB memory, and retries disabled.
+- Full web typecheck, changed-file lint, formatting, and diff checks passed.
+
+This restores existing behavior without changing navigation composition,
+backend APIs, or public documentation. No temporary logging or diagnostic
+source is included. The completed prior-head blob audit contains 118 reports,
+4,322 attempts, four retry/error attempts, 4,278 passed attempts, and 40 skipped
+attempts, with no parse errors. All four failed leaf tests have corrections;
+the replacement head still needs CI/review verification.
