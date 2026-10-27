@@ -164,7 +164,9 @@ behavior.
 
 Verification passed:
 
-- Focused frontend Vitest: 36 files and 298 tests.
+- Current-base frontend Vitest: 35 files and 285 tests across Quick Chat,
+  creation and retention APIs, changed UI stores, task lifecycle handlers, and
+  Quick Chat resync.
 - `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck`.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet`.
 - Desktop Chromium managed E2E: 8 tests passed, including startup acceptance, opening composer, and setup recovery.

@@ -108,13 +108,13 @@ Keep configuration-chat behavior compatible through focused regressions.
 
 ### Compatibility matrix
 
-| Path | Identity and transport | Result | Evidence and fallback |
-| --- | --- | --- | --- |
-| Structured ordinary chat | Creation UUID plus existing message UUID | Async startup, then one subscribed opening message | Handler/hook/E2E tests. Admission errors keep session recovery. |
-| Terminal-backed ordinary chat | Creation UUID plus retained initial-submission receipt | One backend prompt-bearing start | Handler/orchestrator tests. Interrupted inline payload blocks replay. |
-| Legacy ordinary API caller | No creation UUID, existing HTTP fields | Async startup with the same envelope. Explicit HTTP prompts retain backend delivery. | Handler compatibility tests. No guessed uncertain-response adoption. |
-| Configuration chat | Existing endpoint and admission | Current separate behavior | Existing opening-payload and configuration regressions. |
-| Missing or changed identity | Exact workspace/principal/kind/token checks | Unknown, incomplete, or explicit conflict | No other chat or automatic replacement. |
+| Path                          | Identity and transport                                 | Result                                                                               | Evidence and fallback                                                 |
+| ----------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Structured ordinary chat      | Creation UUID plus existing message UUID               | Async startup, then one subscribed opening message                                   | Handler/hook/E2E tests. Admission errors keep session recovery.       |
+| Terminal-backed ordinary chat | Creation UUID plus retained initial-submission receipt | One backend prompt-bearing start                                                     | Handler/orchestrator tests. Interrupted inline payload blocks replay. |
+| Legacy ordinary API caller    | No creation UUID, existing HTTP fields                 | Async startup with the same envelope. Explicit HTTP prompts retain backend delivery. | Handler compatibility tests. No guessed uncertain-response adoption.  |
+| Configuration chat            | Existing endpoint and admission                        | Current separate behavior                                                            | Existing opening-payload and configuration regressions.               |
+| Missing or changed identity   | Exact workspace/principal/kind/token checks            | Unknown, incomplete, or explicit conflict                                            | No other chat or automatic replacement.                               |
 
 ## ASCII UI preview
 
@@ -191,13 +191,13 @@ Viewport switches preserve the same pending identity and draft.
 
 ## Tests
 
-| Criteria | Regression evidence |
-| --- | --- |
-| Composer `.13`, recovery `.003.1` and `.003.3` | `TestQuickChatAcceptance_ReturnsBeforePreparation` behind a real server/proxy barrier. Async failure retains typed recovery. |
-| Composer `.8`, `.9`, `.13` | Terminal payload/receipt tests and `NoInitialPrompt` startup tests. One delivery owner per profile kind. |
-| Composer `.14`, `.15` | `TestQuickChatCreationIdentity` concurrency, found-before-validation, settlement, authorization, and status lookup cases. |
-| Composer `.8` through `.10`, `.14`, `.15` | Hook tests for dropped/malformed responses, WS/HTTP order, explicit retry, reload, draft generations, and deletion. |
-| Composer `.11`, `.12`, recovery `.003.2` and `.003.5` | Desktop and phone browser scenarios plus locale and type checks. |
+| Criteria                                              | Regression evidence                                                                                                          |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Composer `.13`, recovery `.003.1` and `.003.3`        | `TestQuickChatAcceptance_ReturnsBeforePreparation` behind a real server/proxy barrier. Async failure retains typed recovery. |
+| Composer `.8`, `.9`, `.13`                            | Terminal payload/receipt tests and `NoInitialPrompt` startup tests. One delivery owner per profile kind.                     |
+| Composer `.14`, `.15`                                 | `TestQuickChatCreationIdentity` concurrency, found-before-validation, settlement, authorization, and status lookup cases.    |
+| Composer `.8` through `.10`, `.14`, `.15`             | Hook tests for dropped/malformed responses, WS/HTTP order, explicit retry, reload, draft generations, and deletion.          |
+| Composer `.11`, `.12`, recovery `.003.2` and `.003.5` | Desktop and phone browser scenarios plus locale and type checks.                                                             |
 
 Use a preparation channel and HTTP completion to order the backend regression.
 Do not add a long timing assertion or a fake success handler that bypasses launch code.
@@ -259,15 +259,27 @@ Implementation results are recorded in the completed work orders below.
 - `node scripts/validate-public-docs.mjs`, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 - The public Quick Chat recovery guide was updated and validated. No commit or publication was made.
 
-### Final revalidation (2026-10-27)
+### Current-base revalidation (2026-10-27)
 
-- The focused backend regression run passed across task handlers, orchestrator, executor, SQLite, service, and backendapp. It includes the fresh deferred-start attempt-claim regression, keyed creation, typed pre-allocation rejection, authorization, and launch-failure ownership cases.
-- `bash scripts/lint-go-changed` passed for the changed Go files with zero issues. The backend fixture was built during both managed E2E runs.
-- Focused frontend Vitest passed: 36 files and 298 tests. Typecheck, `i18n:check`, and `i18n:ratchet` passed.
-- Frontend ESLint passed with zero errors; it reported 19 warnings. Prettier passed for the changed frontend TypeScript, TSX, and locale JSON files.
-- Desktop Chromium managed E2E passed: 8 tests. Phone `mobile-chrome` managed E2E passed: 4 tests. Both runs rebuilt the production Vite assets and backend fixture.
-- Public-document validation passed for 54 pages. Specification validation passed for 404 decisions and 1,742 specifications, and all specification files passed lint. `git diff --check` passed.
-- The phone recovery surface was visually inspected at the Pixel 5 viewport. No commit or publication was made.
+- Task 01 and Task 02 backend regression commands passed for handlers,
+  orchestrator, executor, service, and backendapp. The additional focused
+  backend regression run passed across handlers, orchestrator, executor,
+  SQLite, service, and backendapp, including deferred-start attempt ownership,
+  keyed creation, typed pre-allocation rejection, authorization, and stale
+  launch-failure cases.
+- `bash scripts/lint-go-changed` passed for the changed Go files with zero
+  issues. Both managed E2E runs built the backend fixture.
+- The Task 03 frontend Vitest command passed: 35 files and 285 tests. Typecheck,
+  `i18n:check`, and `i18n:ratchet` passed.
+- Changed-file frontend ESLint passed with zero warnings. Prettier passed for
+  changed frontend TypeScript, TSX, and locale JSON files.
+- Desktop Chromium managed E2E passed: 8 tests. Phone `mobile-chrome` managed
+  E2E passed: 4 tests. Both runs rebuilt the production Vite assets.
+- Public-document validation passed for 54 pages. Specification validation
+  passed for 404 decisions and 1,746 specifications, and all specification
+  files passed lint. `git diff --check` passed.
+- Desktop and phone recovery screenshots were captured, compressed, and
+  inspected with synthetic data for the PR.
 
 ## Risks
 
@@ -277,4 +289,3 @@ Implementation results are recorded in the completed work orders below.
 - Found outcomes must never repeat attachment claims, session preparation, title mutation, or dispatch.
 - Structured recovery must preserve the original client message identity and never replay on reload.
 - Shared configuration and terminal hooks require compatibility tests despite the ordinary-chat repair scope.
-- Implementation and task-defined checks are complete. The changes remain uncommitted in the shared working tree for review.
