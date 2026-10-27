@@ -270,3 +270,40 @@ both the original run and one fresh generation run. Both diagnostic artifacts
 contain an empty draft and no agent stdout; verification never ran. The cause
 is unknown. These jobs execute the trusted base workflow, independently of the
 feature code under review. Both failed artifacts were retained.
+
+## CI follow-up: clock, agent, and picker fixtures (2026-10-27)
+
+CI run `40428275527` at `0452fcdf57de` reported these failed first attempts,
+each followed by a passing retry:
+
+- Shard 9, job `121951085922`: the phone search cancellation test failed in
+  `clock.pauseAt(new Date())` with `Cannot fast-forward to the past`, before
+  checking search behavior. Both phone and desktop search fixtures now install
+  an explicit origin and pause at that origin plus 60 seconds. Their existing
+  timer advancement, cancellation, input, and result assertions remain intact.
+- Shard 11, job `121951085938`: phone profile deletion selected `agents[0]`,
+  whose profile was undefined. It now uses the existing `getMockAgent` fixture
+  helper for all three cases. Virtual or disabled families can precede the
+  mock agent and need not own executable profiles.
+- Shard 23, job `121951085960`: the worktree-to-local branch case timed out
+  after its executor option detached. The trace shows the executor picker
+  opened immediately after repository selection, without waiting for the
+  repository picker's focus restoration. This supports a focus-restoration
+  race diagnosis. The shared dialog helper and this case now wait for restored
+  repository-chip focus before opening the next picker.
+
+The original phone search spec passed 4/4 in isolation, and the original branch
+case passed 1/1. Project-specific context replay from the downloaded four-part
+shard manifests passed 10, 7, and 31 checks before changes. Thus local runs did
+not reproduce the CI failures; no deterministic local red result is claimed.
+
+After correction, those same contexts passed 10, 7, and 34 checks. The final
+context includes all three desktop search debounce cases. All replays used the
+CI runtime image, one worker, `--cpus=2 --memory=4g`, and `--retries=0`.
+The existing mock-agent helper unit tests passed 2/2. Changed-file ESLint,
+Prettier, and diff checks passed. These corrections change test fixtures only.
+
+The current-head walkthrough generation job passed on this run. Its preceding
+two timeouts remain unexplained; no generator policy or timeout was changed.
+Full CI and review fixup remains in progress until the replacement head is
+verified.

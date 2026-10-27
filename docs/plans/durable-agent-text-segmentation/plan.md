@@ -286,3 +286,17 @@ Six focused regressions failed before correction; all 53 focused tests passed
 afterward. Four GitLab browser cases and 22 lifecycle/approval/pagination cases
 passed with retries disabled. The work order records the state-boundary fixture
 corrections and the separate walkthrough-generation timeout evidence.
+
+## CI follow-up: clock, agent, and picker fixtures (2026-10-27)
+
+CI run `40428275527` at `0452fcdf57de` reported three more browser flakes.
+Search controls now install an explicit clock origin and pause at a later time.
+Mobile deletion selects the mock agent rather than the first registry family.
+Branch creation waits for repository-picker focus restoration before opening
+the executor picker. Existing product assertions and retry policy are unchanged.
+
+Local context replays passed 48 checks before correction, so they did not
+reproduce those CI failures. After correction, the same project contexts plus
+the desktop search controls passed 51 checks with retries disabled, one worker,
+two CPUs, and 4 GiB memory. Helper unit tests, targeted lint, and formatting
+passed. The work order records the CI evidence and diagnostic limits.

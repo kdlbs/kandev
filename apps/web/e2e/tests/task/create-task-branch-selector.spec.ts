@@ -304,6 +304,7 @@ test.describe("Fresh-branch flow", () => {
       .getByRole("option", { name: new RegExp(`^${escapeRe(repoName)}\\b`, "i") })
       .first()
       .click();
+    await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${escapeRe(profileName)}\\b`, "i") })
@@ -592,6 +593,7 @@ test.describe("Fresh-branch flow", () => {
         .getByRole("option", { name: new RegExp(`^${setup.repoName}\\b`, "i") })
         .first()
         .click();
+      await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
 
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await executorSelector.click();
