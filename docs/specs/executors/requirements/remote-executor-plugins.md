@@ -122,11 +122,11 @@ AC-EXECUTORS-PLUGIN-001.5 covered the initial release toggle. It is retired; the
 ## Out of scope
 
 - A production Lambda, SSH, Docker, or sandbox provider plugin.
-- Moving built-in executors into plugins or replacing their profile formats.
+- Moving built-in executors into plugins or replacing their profile formats; the native worker capabilities also leave built-ins in place.
 - Local process sandbox wrappers, arbitrary provider protocols, or a second ACP implementation.
 - Workspace sharing between sessions in the initial provider contract.
 - Automatic snapshots, workspace migration, durable event replay, or automatic renewal through replacement compute.
-- A new public tunnel service, cost dashboard, image builder, or provider marketplace publication.
+- A new public tunnel service, cost dashboard, image builder, or provider marketplace publication. Opt-in host capabilities for operator-owned workers, including a host-initiated provider tunnel, are specified in [native worker capabilities](remote-executor-plugin-native-workers.md); they add no public relay.
 
 ## Implementation plans
 
