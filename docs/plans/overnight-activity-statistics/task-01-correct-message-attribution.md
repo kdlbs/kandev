@@ -145,4 +145,13 @@ single-message deduplication, and cleanup assertions remain unchanged.
 - `pnpm --dir apps/web exec eslint
   e2e/tests/pr/mobile-ci-automation-options.spec.ts`: passed.
 - Existing backend binary, web entry point, and fixture plugin identity hashes
-  matched before and after. Hosted validation of this follow-up is pending.
+  matched before and after. The subsequent hosted run passed the conflict case.
+
+The later hosted retry failed the separate mobile sidebar page-recovery case:
+its retry button measured 43.999969 px against the exact 44 px minimum, and
+the Playwright retry passed. The cause is unknown. That case now awaits the
+existing finite-animation helper before measurement, as its neighboring case
+already does; the size, failed request, retry and recovery assertions remain
+unchanged. Both recovery cases passed with one worker, no retries and tracing
+enabled against the existing verified build; scoped ESLint passed. This local
+result does not establish the hosted failure's cause.

@@ -104,4 +104,13 @@ UI helper after prompt setup. Conflict and deduplication assertions remain.
 
 A single 13-case mobile worker prefix passed with one worker, retries disabled,
 and tracing enabled against the unchanged verified build. Scoped ESLint passed
-for the changed test. Hosted CI has not yet run this follow-up.
+for the changed test. The subsequent hosted run passed the conflict case.
+
+A later hosted E2E retry failed a different mobile sidebar recovery case when
+the retry button measured 43.999969 px against the unchanged 44 px minimum;
+the Playwright retry passed. The exact cause is unknown. The test now waits for
+finite drawer animations before measuring, matching its neighboring recovery
+case, while retaining the exact size and recovery assertions. Focused local
+verification passed both recovery cases with one worker, no retries and tracing
+enabled against the existing verified build; scoped ESLint passed. This does
+not establish the hosted failure's cause.
