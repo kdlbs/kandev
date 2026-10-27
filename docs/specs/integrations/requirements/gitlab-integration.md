@@ -91,6 +91,22 @@ belong to the [watch-dialog package](../../../plans/gitlab-watch-dialog-ownershi
 This clarification excludes persistent drafts after closure, watch-list cache
 ownership, new polling or API contracts, and changes to other integrations.
 
+
+#### Merge API source-head compatibility
+
+The existing merge action and auto-merge shall work with GitLab instances or
+groups that require a commit SHA on the merge API. The
+[repair plan](../../../plans/gitlab-required-merge-sha/plan.md) records the
+implementation and verification; unrelated criteria retain their lifecycle.
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.24:** When a valid merge is requested through the existing action or automation, Kandev shall bind the merge to the current source-head SHA obtained for that same merge request and workspace connection, including when GitLab requires the SHA. Hosts that do not require it shall remain supported.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.25:** When the source head changes between the read and merge, the provider's mismatch shall remain a failure; Kandev shall not automatically retry that merge with the newer head. Obtaining a current head does not assert that a user reviewed it.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.26:** When the source-head SHA cannot be obtained or is empty or unusable, the operation shall fail without issuing a merge write. Existing provider failures shall remain failures.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.27:** The operation shall retain its workspace, configured host and credential, full project path and MR IID, method validation, squash and message behavior, and existing source-branch removal behavior.
+
+This clarification excludes review-freshness UX, new permissions or settings,
+source-branch deletion, and changes to other GitLab features or providers.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/gitlab-integration-01.md), [part 2](../system-design/gitlab-integration-02.md).
