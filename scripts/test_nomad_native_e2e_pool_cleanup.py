@@ -93,8 +93,12 @@ class Base:
         return {"phase": row["phase"], "job_id": row["job_id"], "allocation_id": row.get("allocation_id"), "node_id": row.get("node_id"),
                 "environment_id": row.get("environment_id", ENV_ID), "generation": 1}
 
-    def api(self, method, path, body):
+    def api(self, method, path, body, headers=None):
         parts = path.split("/")
+        if method == "POST" and path == "/tasks/delete-preflight":
+            self.previews = getattr(self, "previews", {})
+            self.previews["confirm-1"] = list(body["task_ids"])
+            return {"confirmation_id": "confirm-1"}
         if method == "POST" and path == "/secrets":
             return {"id": "secret-1"}
         if method == "PATCH" and path.startswith("/executors/") and "/profiles/" in path:
@@ -103,6 +107,9 @@ class Base:
         if method == "DELETE" and path.startswith("/tasks/"):
             if self.flags.get("delete_fails"):
                 raise PreflightError("fixture API DELETE /tasks/x failed with status 500")
+            confirmation = (headers or {}).get("X-Kandev-Task-Delete-Confirmation")
+            if parts[2] not in getattr(self, "previews", {}).get(confirmation, []):
+                raise PreflightError("fixture API DELETE /tasks/x failed with status 428")
             self.deleted.add(parts[2])
             return {}
         if method == "GET" and path.startswith("/tasks/") and len(parts) == 3:

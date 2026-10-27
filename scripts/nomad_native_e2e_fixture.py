@@ -136,9 +136,9 @@ def _default_api(port: int) -> Callable[[str, str, Any], Any]:
     prefix = f"http://127.0.0.1:{port}/api/v1"
     interlock: dict[str, str] = {}
 
-    def call(method: str, path: str, body: Any = None) -> Any:
+    def call(method: str, path: str, body: Any = None, headers: dict[str, str] | None = None) -> Any:
         data = None if body is None else json.dumps(body).encode()
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        headers = {"Accept": "application/json", "Content-Type": "application/json", **(headers or {})}
         if method != "GET":
             # Settings mutations require the per-boot SPA interlock token from the boot payload.
             if "token" not in interlock:

@@ -137,8 +137,12 @@ class SettleMixin:
         return trees
 
     def delete_task(self, task: dict[str, str]) -> bool:
-        """DELETE through the Kandev API, then wait until the task is no longer served."""
-        self.r.api("DELETE", f"/tasks/{task['id']}", None)  # type: ignore[attr-defined]
+        """DELETE through the Kandev API with the deletion-preview confirmation, then wait until the task is no longer served."""
+        preview = self.r.api("POST", "/tasks/delete-preflight", {"task_ids": [task["id"]], "cascade": False})  # type: ignore[attr-defined]
+        confirmation = preview.get("confirmation_id") if isinstance(preview, dict) else None
+        if not confirmation:
+            raise PreflightError("the task deletion preview returned no confirmation id")
+        self.r.api("DELETE", f"/tasks/{task['id']}", None, headers={"X-Kandev-Task-Delete-Confirmation": confirmation})  # type: ignore[attr-defined]
 
         def gone() -> bool:
             try:
@@ -165,8 +169,8 @@ class ProfileHooks:
         base = self._config
         self.runner.pool_profile_config = lambda cfg: {**{k: v for k, v in base(cfg).items() if k not in drop}, **(add or {})}
 
-        def api(method: str, path: str, body: Any) -> Any:
-            result = self._api(method, path, body)
+        def api(method: str, path: str, body: Any, **kwargs: Any) -> Any:
+            result = self._api(method, path, body, **kwargs)
             if method == "POST" and path == "/secrets" and isinstance(result, dict) and result.get("id"):
                 self.token_ref = f"$kandev-secret:{result['id']}"
             return result
