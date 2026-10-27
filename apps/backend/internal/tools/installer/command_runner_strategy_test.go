@@ -105,7 +105,7 @@ func TestNpmStrategyUsesInjectedCommandRunner(t *testing.T) {
 	if runner.spec.Path != npmPath || runner.spec.Dir != binDir {
 		t.Fatalf("command spec = %+v, want path %q and dir %q", runner.spec, npmPath, binDir)
 	}
-	wantArgs := []string{installSubcommand, "--global=false", "--prefix", binDir, "pyright"}
+	wantArgs := []string{installSubcommand, "--global=false", "--location=project", "--prefix", binDir, "pyright"}
 	if len(runner.spec.Args) != len(wantArgs) {
 		t.Fatalf("args = %v, want %v", runner.spec.Args, wantArgs)
 	}

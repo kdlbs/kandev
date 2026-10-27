@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -47,9 +48,18 @@ func TestNpmStrategyRealNpmLocalInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("npm is required when integration test is enabled: %v", err)
 	}
+	if runtime.GOOS == windowsOS {
+		t.Skip("real npm integration does not invoke Windows npm.cmd; platform shim lookup has separate coverage")
+	}
 	taskPath := os.Getenv("PATH")
-	for _, global := range []string{"false", "true"} {
-		t.Run("global="+global, func(t *testing.T) {
+	for _, scenario := range []struct {
+		name, global, location string
+	}{
+		{name: "local", global: "false", location: "project"},
+		{name: "global-flag", global: "true", location: "project"},
+		{name: "global-location", global: "false", location: "global"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
 			root := t.TempDir()
 			fixture := filepath.Join(root, "fixture")
 			if err := os.MkdirAll(fixture, 0o755); err != nil {
@@ -65,7 +75,8 @@ func TestNpmStrategyRealNpmLocalInstall(t *testing.T) {
 				}
 			}
 			t.Setenv("PATH", t.TempDir())
-			t.Setenv("NPM_CONFIG_GLOBAL", global)
+			t.Setenv("NPM_CONFIG_GLOBAL", scenario.global)
+			t.Setenv("NPM_CONFIG_LOCATION", scenario.location)
 			const registry = "http://127.0.0.1:9/"
 			runner := &npmProcessRunner{env: map[string]string{
 				"PATH": taskPath, "NPM_CONFIG_USERCONFIG": userConfig,
@@ -76,7 +87,7 @@ func TestNpmStrategyRealNpmLocalInstall(t *testing.T) {
 			strategy := NewNpmStrategy(prefix, "fixture-server", []string{fixture}, installStrategyTestLogger(t), runner)
 			result, err := strategy.Install(context.Background())
 			if err != nil {
-				t.Fatalf("Install() under global=%s: %v", global, err)
+				t.Fatalf("Install() under global=%s location=%s: %v", scenario.global, scenario.location, err)
 			}
 			want := filepath.Join(prefix, "node_modules", ".bin", "fixture-server")
 			if result.BinaryPath != want {

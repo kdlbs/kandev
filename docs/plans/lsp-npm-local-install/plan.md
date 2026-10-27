@@ -14,8 +14,8 @@ legacy_specs: []
 
 Make the shared npm installer select local mode for its managed prefix so a
 successful TypeScript or Python server install remains discoverable when the
-task or parent environment sets npm global mode. One sequential work order
-covers the process boundary and the smallest strategy change.
+task or parent environment sets npm global mode or global location. One
+sequential work order covers the process boundary and the smallest strategy change.
 
 The supplied qualification ran the real strategy and npm offline against a
 local fixture: inherited `NPM_CONFIG_GLOBAL=true` installed into `prefix/bin`
@@ -40,9 +40,10 @@ layout mismatch, not evidence of a network or registry failure.
 
 `internal/lsp/installer/registry.go` selects `tools.NpmStrategy` for TypeScript
 and Python. In `internal/tools/installer/npm_strategy.go`, explicitly select npm
-local mode on the existing `install` command, e.g. `--global=false`, before the
-package arguments. Keep `--prefix`, `CommandSpec` and runner path, environment,
-working directory, result lookup and error handling intact. Do not alter the
+local mode on the existing `install` command with `--global=false` and
+`--location=project` before the package arguments. Keep `--prefix`,
+`CommandSpec` and runner path, environment, working directory, result lookup
+and error handling intact. Do not alter the
 caller or strip npm configuration. Existing argument-recording tests need to
 reflect the command change, but are not the regression proof.
 
@@ -52,15 +53,17 @@ reflect the command change, but are not the regression proof.
   `TestNpmStrategyRealNpmLocalInstall` in
   `apps/backend/internal/tools/installer/npm_strategy_test.go`. Execute real
   npm with a temporary, dependency-free fixture package and executable, offline
-  and with private cache/config/prefix. Cover inherited global=true and a
-  default/local control, verify returned local binary and absence of a global
+  and with private cache/config/prefix. Cover inherited global=true,
+  location=global and a local control, verify returned local binary and absence of a global
   binary, and demonstrate the inherited-global case fails before the change.
   Exercise the runner environment path with actual subprocess execution and
   assert the task-supplied npm and unrelated configuration, including registry,
   reach the process; retain the managed prefix. Never use a real registry or a
   user's global installation. An explicit integration-test opt-in may gate the
   real npm test for environments lacking Node, but the verification command
-  below must enable it and fail if npm is unavailable.
+  below must enable it and fail if npm is unavailable. Windows is explicitly
+  skipped after the npm availability check: the test does not invoke `npm.cmd`
+  through a command interpreter. Existing PATHEXT unit coverage still applies.
 - AC-PLATFORM-LSP-FILE-INTELLIGENCE-001.9: extend runner tests for nonzero and
   canceled command error propagation where not already covered, without
   replacing the real filesystem test with an argument assertion. Existing
@@ -102,3 +105,6 @@ The work order records the RED/GREEN regression and targeted checks. Public docs
   the pinned Node 24.21 runtime; CI without npm may skip only the explicitly
   gated real-process test, while the required enabled check must fail if absent.
 - Existing misplaced global-layout files are not migrated or removed.
+- Inherited `NPM_CONFIG_SAVE=false` can cause a later npm install in the shared
+  prefix to prune a previous server. This behavior predates the fix and remains;
+  changing managed manifest/save policy is outside this work package.
