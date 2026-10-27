@@ -350,3 +350,46 @@ source is included. The completed prior-head blob audit contains 118 reports,
 4,322 attempts, four retry/error attempts, 4,278 passed attempts, and 40 skipped
 attempts, with no parse errors. All four failed leaf tests have corrections;
 the replacement head still needs CI/review verification.
+
+## Conflict resolution and browser synchronization (2026-10-27)
+
+Merge commit `31b9bdbc35ab` integrates main `b66f9e3b9d4d`. The sole conflict
+was `mobile-agent-profile-delete.spec.ts`. The resolution keeps main's exact
+seeded-profile fixture and all assertions; the file leaves the PR delta.
+The merge passed 127 focused web tests, full web typecheck, and 14 browser
+checks. Compatibility with newer main `d549fa694b7d` passed 175 focused web
+tests and the overnight analytics race test. CI checked out that same merged
+tree, `24bc1a3ed995351a6c04593743a7e96253361ae9`.
+
+CI run `40481986876` then reported two flaky browser cases: mobile terminal
+close setup in shard 3 and delayed capacity cancellation in shard 21.
+The aggregate failed from those leaf failures. The complete report contains
+118 blobs, 4,282 passing attempts, 40 skipped attempts, two failed attempts,
+and two retries. The retry summary confirms exactly two flaky verdicts.
+There are no unresolved review threads at this head.
+
+The corrections synchronize test setup with the existing transport boundary:
+
+- Mobile terminal creation waits for the picker animation and the correlated
+  `user_shell.create` reply before checking the two rows.
+- Delayed capacity checks arm a session-scoped waiting-notice observer before
+  the final clock advance. They await attempt 6 before asserting its UI.
+  The observer budget starts at the final advance, after earlier retries.
+
+Unmodified local replays passed 32 shard-partition cases and 12 desktop
+capacity cases, so they did not reproduce the CI failures. A temporary
+6.5-second backend delay before writing the sixth waiting notice reproduced
+the old capacity assertion deterministically. The corrected test passed with
+that same delay and unchanged UI assertion. The diagnostic change was removed
+before rebuilding all backend fixtures for final verification.
+
+After correction, the same shard partition passed 32/32 cases. Two repeats of
+the desktop/phone capacity flows and phone terminal close passed 18/18 cases.
+These clean runs used the CI runtime image, one worker, two CPUs, 4 GiB memory,
+and retries disabled. The temporary per-test retry override was restored in
+the committed source. All 32 synchronization-helper unit tests, full web
+typecheck, targeted ESLint, formatting, and diff checks passed.
+
+These changes affect test synchronization only. Product behavior, requirements,
+public documentation, assertions, and the committed retry policy are unchanged.
+Replacement-head CI and review verification remains a delivery gate.

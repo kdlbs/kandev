@@ -310,3 +310,22 @@ The existing failed-list recovery and full SSR hydration paths remain intact.
 Two regressions failed before the correction. All 72 focused navigation tests,
 11 rebuilt desktop browser checks, and two phone checks passed afterward.
 The replacement head still requires CI and review verification.
+
+## Conflict resolution and browser synchronization (2026-10-27)
+
+Merge commit `31b9bdbc35ab` resolves the profile-deletion fixture conflict using
+main's exact seeded profile. The resolved merge and newer main `d549fa694b7d`
+passed focused compatibility checks recorded in the work order.
+
+Its CI run exposed two browser flakes during terminal creation and delayed
+capacity recovery. The test setup now waits for picker animation completion,
+the correlated terminal-create reply, and the sixth capacity waiting notice.
+The latter observer is armed immediately before the final clock advance.
+Existing assertions and retry policy remain unchanged.
+
+A temporary backend delay reproduced the old capacity assertion and passed
+with the corrected observer. Clean final browser runs passed 50/50 cases in
+the CI runtime image with one worker, two CPUs, 4 GiB memory, and retries
+disabled. Synchronization-helper tests passed 32/32; typecheck, targeted lint,
+and formatting passed. Replacement-head CI and review verification remains a
+delivery gate. The work order records the reproduction limits and full audit.
