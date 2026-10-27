@@ -280,6 +280,8 @@ jobs:
         if: always()
         env:
           GENERATE_OUTCOME: ${{ steps.generate.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           if [ "$GENERATE_OUTCOME" = "success" ]; then
@@ -292,7 +294,7 @@ jobs:
             echo
             echo "Generation did not complete (outcome: \`${GENERATE_OUTCOME:-unknown}\`). The walkthrough is best effort, so publication and linking are skipped and this job stays successful."
             echo
-            echo "Diagnostics are in the \`pr-walkthrough-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}\` artifact."
+            echo "Diagnostics are in the \`pr-walkthrough-${PR_NUMBER}-${HEAD_SHA}\` artifact."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::warning title=PR walkthrough skipped::Walkthrough generation did not complete; it is best effort and does not block this pull request."
 
