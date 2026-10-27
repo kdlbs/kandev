@@ -1356,7 +1356,7 @@ func (s *Service) claimRepositoryBranchSlot(
 // empty. Best-effort: lookup failures degrade to the next fallback.
 func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepositoryInput, repositoryID string) string {
 	if remoteURL := effectiveRemoteURL(repoInput); remoteURL != "" {
-		if _, owner, name, _, err := parseRemoteRepositoryURL(remoteURL, repoInput.Provider); err == nil {
+		if _, owner, name, _, err := parseRemoteRepositoryURL(remoteURL, effectiveRemoteProvider(repoInput)); err == nil {
 			return owner + "/" + name
 		}
 	}
@@ -1675,8 +1675,11 @@ func (s *Service) resolveRepoInputLocal(
 func (s *Service) resolveRepoInputRemote(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, baseBranch string,
 ) (string, string, bool, error) {
+	if err := s.inferEnterpriseGitHubProvider(ctx, workspaceID, &repoInput); err != nil {
+		return "", "", false, err
+	}
 	provider, owner, name, canonicalURL, parseErr := parseRemoteRepositoryURL(
-		effectiveRemoteURL(repoInput), repoInput.Provider,
+		effectiveRemoteURL(repoInput), effectiveRemoteProvider(repoInput),
 	)
 	if parseErr != nil {
 		return "", "", false, parseErr
@@ -1688,8 +1691,11 @@ func (s *Service) resolveRepoInputRemote(
 	if metadataErr != nil {
 		return "", "", false, metadataErr
 	}
+	if err := s.verifyEnterpriseGitHubOrigin(ctx, workspaceID, repoInput); err != nil {
+		return "", "", false, err
+	}
 	defaultBranch := firstNonEmpty(repoInput.DefaultBranch, repoInput.BaseBranch)
-	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil && provider == providerGitHub {
+	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil && provider == providerGitHub && remoteProviderHost(provider, canonicalURL) == githubProviderHost {
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
 	providerHost := remoteProviderHost(provider, canonicalURL)
@@ -1814,7 +1820,7 @@ func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, 
 	originHost := strings.ToLower(parsed.Host)
 	parts := strings.Split(strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/"), "/")
 	switch host {
-	case "github.com", "www.github.com":
+	case publicGitHubHostname, legacyGitHubHostname:
 		return parseGitHubRemote(host, parts, sshStyle)
 	case "gitlab.com", "www.gitlab.com":
 		return parseGitLabRemote(parsed.Scheme, strings.TrimPrefix(originHost, "www."), parts, sshStyle)
@@ -1823,6 +1829,9 @@ func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, 
 	case "ssh.dev.azure.com":
 		return parseAzureSSHRemote(parts)
 	default:
+		if strings.EqualFold(providerHint, providerGitHub) {
+			return parseEnterpriseGitHubRemote(parsed, parts, sshStyle)
+		}
 		if strings.EqualFold(providerHint, providerGitLab) &&
 			(parsed.Scheme == protocolHTTP || parsed.Scheme == protocolHTTPS) {
 			return parseGitLabRemote(parsed.Scheme, originHost, parts, false)
@@ -1856,7 +1865,11 @@ func parseGitHubRemote(host string, parts []string, sshStyle bool) (string, stri
 		return "", "", "", "", fmt.Errorf("invalid GitHub repository URL: expected github.com/owner/repo")
 	}
 	owner, name := parts[0], parts[1]
-	canonical := fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
+	webHost := host
+	if webHost == legacyGitHubHostname {
+		webHost = publicGitHubHostname
+	}
+	canonical := fmt.Sprintf("https://%s/%s/%s.git", webHost, owner, name)
 	if sshStyle {
 		canonical = fmt.Sprintf("git@%s:%s/%s.git", host, owner, name)
 	}
@@ -1889,7 +1902,7 @@ func parseGitLabRemote(scheme, host string, parts []string, sshStyle bool) (stri
 
 func remoteProviderHost(provider, remoteURL string) string {
 	if provider == providerGitHub {
-		return githubProviderHost
+		return enterpriseGitHubRemoteOrigin(remoteURL)
 	}
 	if !strings.EqualFold(provider, providerGitLab) {
 		return ""

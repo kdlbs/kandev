@@ -24,11 +24,20 @@ type fakeGitHubClients struct {
 	client github.Client
 }
 
+func (f fakeGitHubClients) BindWorkspaceGitHubHost(ctx context.Context, _, _ string) (context.Context, error) {
+	return ctx, nil
+}
+func (f fakeGitHubClients) CommitWorkspaceGitHubHost(ctx context.Context, _ string, apply func(context.Context) error) error {
+	return apply(ctx)
+}
+
 type failingGitHubClients struct {
+	fakeGitHubClients
 	err error
 }
 
 type cancellationGitHubClients struct {
+	fakeGitHubClients
 	started   chan struct{}
 	startOnce sync.Once
 	blocked   atomic.Bool
@@ -60,6 +69,7 @@ func (f failingGitHubClients) ListRepoDirectoryForWorkspace(
 }
 
 type countingGitHubClients struct {
+	fakeGitHubClients
 	mu    sync.Mutex
 	calls int
 	err   error

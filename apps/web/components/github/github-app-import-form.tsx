@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useContext, useEffect } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -24,77 +24,82 @@ import {
   type GitHubAppImportValues,
 } from "./github-app-import-fields";
 import { GitHubAppVisibilityField } from "./github-app-visibility-field";
+import { t as i18nT } from "@/lib/i18n";
 import { useTranslation } from "react-i18next";
+
+import {
+  GitHubConnectionDraftContext,
+  useConnectionFormState,
+  useConnectionRequestGuard,
+} from "./github-connection-draft";
 
 type RegistrationHook = ReturnType<typeof useGitHubAppRegistrations>;
 
 export function GitHubAppImportForm({
   workspaceId,
+  githubHost = "github.com",
   registrations,
   onImported,
 }: {
   workspaceId: string;
+  githubHost?: string;
   registrations: RegistrationHook;
   onImported: (registrationId: string) => void;
 }) {
   const { t } = useTranslation();
-  const [preparation, setPreparation] = useState<PrepareGitHubAppImportResponse | null>(null);
-  const [values, setValues] = useState(initialValues);
-  const [errors, setErrors] = useState<AppSetupErrors>({});
+  const sharedDraft = useContext(GitHubConnectionDraftContext);
+  const captureRequest = useConnectionRequestGuard(`${workspaceId}:${githubHost}`);
+  const [preparation, setPreparation] =
+    useConnectionFormState<PrepareGitHubAppImportResponse | null>("import-preparation", null);
+  const [values, setValues] = useConnectionFormState("import-values", initialValues);
+  const [errors, setErrors] = useConnectionFormState<AppSetupErrors>("import-errors", {});
   const { toast } = useToast();
   useEffect(() => {
+    if (sharedDraft) return;
     setPreparation(null);
     setValues(initialValues);
     setErrors({});
-  }, [workspaceId]);
+  }, [workspaceId, githubHost, sharedDraft]);
   const update = (name: keyof typeof values, value: string) =>
     setValues((current) => ({ ...current, [name]: value }));
-  async function prepare(event: React.FormEvent) {
-    event.preventDefault();
-    const nextErrors: AppSetupErrors = {};
-    const publicBaseUrl = normalizePublicBaseUrl(values.publicBaseUrl, nextErrors);
-    setErrors(nextErrors);
-    if (!publicBaseUrl) return;
-    try {
-      setPreparation(await registrations.prepareImport({ public_base_url: publicBaseUrl }));
-    } catch (error) {
-      showError(error, t("github:importSetupCouldNotStart"), toast);
-    }
-  }
+  const prepare = (event: React.FormEvent) =>
+    prepareAppImport(event, {
+      values,
+      githubHost,
+      registrations,
+      captureRequest,
+      setErrors,
+      setPreparation,
+      toast,
+    });
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    const isCurrent = captureRequest();
     if (!preparation) return;
-    const ownerType = values.ownerType as GitHubAppOwnerType;
-    const basics = validateRegistrationBasics({ ...values, ownerType });
+    const basics = validateRegistrationBasics(values);
     const secrets = validateImportSecrets(values);
     const nextErrors = { ...basics.errors, ...secrets.errors };
     setErrors(nextErrors);
     if (!basics.publicBaseUrl || Object.keys(nextErrors).length) return;
     try {
-      const imported = await registrations.importRegistration({
-        registration_id: preparation.registration_id,
-        display_name: basics.displayName,
-        github_host: "github.com",
-        app_id: secrets.appId,
-        client_id: values.clientId.trim(),
-        client_secret: values.clientSecret,
-        private_key: values.privateKey.trim(),
-        webhook_secret: values.webhookSecret,
-        slug: values.slug.trim(),
-        owner_login: basics.ownerLogin,
-        owner_type: ownerType,
-        visibility: values.visibility,
-        public_base_url: basics.publicBaseUrl,
-      });
+      const imported = await registrations.importRegistration(
+        importRegistrationRequest({
+          values,
+          preparation,
+          githubHost,
+          basics,
+          appId: secrets.appId,
+        }),
+      );
+      if (!isCurrent()) return;
       setValues(clearImportSecrets);
-      toast({
-        description: t("github:githubAppImportedItIsReady"),
-        variant: "success",
-      });
-      onImported(imported.id);
+      notifyImportSuccess(imported.id, onImported, toast);
     } catch (error) {
+      if (!isCurrent()) return;
       showError(error, t("github:githubAppCouldNotBeImported"), toast);
+    } finally {
+      if (isCurrent()) setValues(clearImportSecrets);
     }
   }
 
@@ -110,7 +115,7 @@ export function GitHubAppImportForm({
     );
   }
 
-  const settingsUrl = importSettingsUrl(values);
+  const settingsUrl = importSettingsUrl(values, githubHost);
   const startOver = () => {
     setPreparation(null);
     setErrors({});
@@ -227,9 +232,9 @@ function clearImportSecrets(values: GitHubAppImportValues): GitHubAppImportValue
   return { ...values, clientSecret: "", privateKey: "", webhookSecret: "" };
 }
 
-function importSettingsUrl(values: GitHubAppImportValues) {
+function importSettingsUrl(values: GitHubAppImportValues, githubHost: string) {
   if (!values.ownerLogin.trim() || !values.slug.trim()) return undefined;
-  return githubAppSettingsURL(values.ownerType, values.ownerLogin, values.slug);
+  return githubAppSettingsURL(values.ownerType, values.ownerLogin, values.slug, githubHost);
 }
 
 function showError(error: unknown, fallback: string, toast: ReturnType<typeof useToast>["toast"]) {
@@ -253,4 +258,81 @@ function Field({
       {error && <span className="block text-xs font-normal text-destructive">{error}</span>}
     </Label>
   );
+}
+
+function importRegistrationRequest({
+  values,
+  preparation,
+  githubHost,
+  basics,
+  appId,
+}: {
+  values: GitHubAppImportValues;
+  preparation: PrepareGitHubAppImportResponse;
+  githubHost: string;
+  basics: ReturnType<typeof validateRegistrationBasics>;
+  appId: number;
+}) {
+  return {
+    registration_id: preparation.registration_id,
+    display_name: basics.displayName,
+    github_host: githubHost,
+    app_id: appId,
+    client_id: values.clientId.trim(),
+    client_secret: values.clientSecret,
+    private_key: values.privateKey.trim(),
+    webhook_secret: values.webhookSecret,
+    slug: values.slug.trim(),
+    owner_login: basics.ownerLogin,
+    owner_type: values.ownerType,
+    visibility: values.visibility,
+    public_base_url: basics.publicBaseUrl!,
+  };
+}
+
+async function prepareAppImport(
+  event: React.FormEvent,
+  {
+    values,
+    githubHost,
+    registrations,
+    captureRequest,
+    setErrors,
+    setPreparation,
+    toast,
+  }: {
+    values: GitHubAppImportValues;
+    githubHost: string;
+    registrations: RegistrationHook;
+    captureRequest: () => () => boolean;
+    setErrors: (errors: AppSetupErrors) => void;
+    setPreparation: (value: PrepareGitHubAppImportResponse) => void;
+    toast: ReturnType<typeof useToast>["toast"];
+  },
+) {
+  event.preventDefault();
+  const isCurrent = captureRequest();
+  const nextErrors: AppSetupErrors = {};
+  const publicBaseUrl = normalizePublicBaseUrl(values.publicBaseUrl, nextErrors);
+  setErrors(nextErrors);
+  if (!publicBaseUrl) return;
+  try {
+    const prepared = await registrations.prepareImport({
+      public_base_url: publicBaseUrl,
+      github_host: githubHost,
+    });
+    if (isCurrent()) setPreparation(prepared);
+  } catch (error) {
+    if (!isCurrent()) return;
+    showError(error, i18nT("github:importSetupCouldNotStart"), toast);
+  }
+}
+
+function notifyImportSuccess(
+  id: string,
+  onImported: (id: string) => void,
+  toast: ReturnType<typeof useToast>["toast"],
+) {
+  toast({ description: i18nT("github:githubAppImportedItIsReady"), variant: "success" });
+  onImported(id);
 }

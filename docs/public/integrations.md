@@ -51,7 +51,7 @@ Compatibility routes under **Settings > Integrations** use the active workspace 
 
 The **Enabled** badge in Settings navigation appears only when the integration is connected and its saved workspace toggle is on. After changing a toggle, select **Save changes** to update the badge. With **Hide disabled integrations from left panel navigation** off, a disabled integration stays listed without the badge.
 
-GitHub, GitLab, Azure DevOps, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. The current GitHub integration targets `github.com`; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
+GitHub, GitLab, Azure DevOps, Jira, and Linear configuration are workspace-specific. GitHub supports one automation connection per workspace and, for App-backed workspaces, one personal identity per Kandev user and workspace. GitHub supports `github.com`, Enterprise Cloud tenant hosts such as `acme.ghe.com`, and GitHub Enterprise Server hosts; GitLab supports `gitlab.com` and self-managed origins. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
@@ -76,12 +76,33 @@ Health results are cached and periodically refreshed (normally about every 90 se
 
 Use GitHub for pull requests, issues, reviews, checks, repository discovery, task associations, and provider-triggered work. Browse it at `/github` after connecting an account.
 
+### Choose a GitHub host
+
+Each workspace connects to one GitHub host. Separate workspaces can use different hosts.
+For a PAT or App, enter the web hostname, such as `github.com`, `acme.ghe.com`, or
+`git.company.example`. HTTPS origins and explicit HTTPS ports are accepted for Enterprise
+Server. Do not enter an API URL or `/api/v3` path. The CLI option takes its host from the
+selected authenticated account.
+
+The backend must reach the host with a trusted TLS certificate. Private Enterprise Server
+hosts are supported; install your organization's CA in the backend trust store when needed.
+Remote executors need their own network access and certificate trust. Kandev does not copy
+CA configuration to executors or bypass certificate validation.
+
+Changing hosts clears the workspace's repository selection and saved host-specific searches.
+Select repositories again before using the new connection. Existing tasks, links and watches
+retain their original host and cannot use credentials from the replacement host.
+
+Personal App authorization uses PKCE on GitHub.com and Enterprise Cloud. Enterprise Server
+uses its confidential-client flow with the App client secret and single-use callback state.
+Non-expiring Enterprise Server user tokens remain usable until revoked or disconnected.
+
 ### Authenticate
 
 Open the workspace GitHub settings. **Workspace automation** offers three connection types:
 
 - **Personal access token (PAT):** Kandev validates the token before replacing the current connection and stores it in the encrypted secret store. A classic PAT needs `repo` and `read:org` for full behavior. Scope a fine-grained token to only the repositories and operations the workspace needs.
-- **GitHub CLI:** first run `gh auth login` as the operating-system user that runs the Kandev backend. Kandev lists every authenticated host/login pair and stores the selected `github.com` login, not its token. On current CLI releases it resolves that exact account with `gh auth token --hostname github.com --user <login>` and never changes the host's active account with `gh auth switch`. Older releases without structured status or `--user` remain supported when the selected account is active; make the account active or upgrade `gh` before selecting a different stored login.
+- **GitHub CLI:** first run `gh auth login` as the operating-system user that runs the Kandev backend. Kandev lists every authenticated host/login pair and stores the selected host and login, not its token. For an Enterprise account, run `gh auth login --hostname <host>` before selecting it from the existing account dropdown. On current CLI releases it resolves that exact account with `gh auth token --hostname <host> --user <login>` and never changes the host's active account with `gh auth switch`. Older releases without structured status or `--user` remain supported when the selected account is active; make the account active or upgrade `gh` before selecting a different stored login.
 - **GitHub App:** recommended for organization-managed or unattended automation. From the
   workspace, select a known registration, add an App you already own, or create one through
   GitHub's App Manifest flow, then install it on the intended account. Kandev keeps root App
@@ -185,7 +206,7 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   visible to the Kandev backend service account. Run `gh auth login` as the OS account that runs
   the backend; a login in another desktop terminal is not enough. The host bridge does not write
   global Git configuration or persist helper or token state. An explicit `GH_TOKEN` or
-  `GITHUB_TOKEN` takes precedence over stored CLI credentials. For GitHub Enterprise hosts,
+  `GITHUB_TOKEN` takes precedence over stored CLI credentials. GitHub.com and Enterprise Cloud `*.ghe.com` use those public token variables. For GitHub Enterprise Server hosts,
   `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` have the same effect. If `gh` is unavailable
   or not authenticated for a host, the task keeps its other inherited Git and SSH credentials.
   Docker, SSH, and cloud tasks use credentials configured in the executor. A CLI login authenticates
@@ -241,8 +262,7 @@ Reuse is appropriate for related workspaces that deliberately share one organiza
 identity. Create separate registrations for work and personal accounts, unrelated organizations,
 or any boundary where rotating or deleting one App must not affect the other.
 
-This feature targets `github.com`, not GitHub Enterprise Server. Before creating or importing an
-App, give Kandev a stable public HTTPS origin. GitHub must reach the callback and webhook routes
+Before creating or importing an App, select its GitHub host and give Kandev a stable public HTTPS origin. The GitHub host and the Kandev callback origin are separate settings. GitHub must reach the callback and webhook routes
 from the public internet. Guided setup rejects private, loopback, split-horizon, and plain HTTP
 origins. A local deployment needs a trusted HTTPS tunnel or reverse proxy whose hostname remains
 stable for the life of the registration.
@@ -251,7 +271,7 @@ stable for the life of the registration.
 
 1. Open the workspace's GitHub integration settings, choose **Change connection**, then choose
    **GitHub App** and **Create new App**.
-2. Choose the GitHub user or organization that will own the App, enter a registration label and
+2. Choose the GitHub host and the user or organization that will own the App, enter a registration label and
    the public Kandev origin, and review the requested permissions.
 3. Keep **Private** unless the same App must be installable outside its owner. **Public** means
    other GitHub accounts can install it. It does not publish the App to Marketplace, reveal its
@@ -272,14 +292,14 @@ Use **Add existing App** when you own a GitHub App that should follow the same c
 a Kandev-created App. The preparation step allocates a registration ID and displays exact,
 copyable settings for that pending import. It is short-lived and single-use.
 
-1. Start **Add existing App** from the workspace GitHub connection flow. Enter its owner, label,
+1. Start **Add existing App** from the workspace GitHub connection flow. Enter its GitHub host, owner, label,
    visibility, and the public Kandev origin.
 2. Open the App under the owning user's or organization's **Settings > Developer settings > GitHub
    Apps**, then apply every URL, permission, and event shown by Kandev. Add the workspace
    installation callback as the first user authorization callback and the personal identity
    callback as the second. Set the App homepage to the public Kandev origin, use JSON webhook
    delivery with SSL verification, request user authorization during installation, leave the setup
-   URL empty, and keep expiring user tokens enabled.
+   URL empty. Use expiring user tokens when the provider supports them; Enterprise Server can use non-expiring user tokens.
 3. Return before the preparation expires and provide the App ID, OAuth client ID and secret, App
    slug, webhook secret, and an RSA private key generated for that App. Treat every secret field as
    a root credential and never put it in workspace environment variables or executor profiles.

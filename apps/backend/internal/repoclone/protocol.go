@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/subproc"
 )
 
@@ -85,9 +86,12 @@ func CloneURL(provider, owner, name, protocol string) (string, error) {
 
 // CloneURLWithHost is like CloneURL but accepts an explicit host. When host
 // is non-empty (and stripped of scheme/trailing-slash), it overrides the
-// provider's default — used for self-managed GitLab. When host is empty,
+// provider's default. When host is empty,
 // behaves exactly like CloneURL.
 func CloneURLWithHost(provider, host, owner, name, protocol string) (string, error) {
+	if strings.EqualFold(provider, "github") || provider == "" {
+		return githubCloneURL(host, owner, name, protocol)
+	}
 	resolvedHost, httpsScheme, err := normalizeGitProviderHost(host)
 	if err != nil {
 		return "", err
@@ -98,6 +102,7 @@ func CloneURLWithHost(provider, host, owner, name, protocol string) (string, err
 			return "", err
 		}
 	}
+
 	if protocol == ProtocolSSH {
 		// scp-style "git@host:path" can't carry a port — when the host has
 		// one (gitlab.acme.corp:2222) fall back to the ssh:// URL form,
@@ -136,4 +141,20 @@ func providerHost(provider string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported git provider: %q", provider)
 	}
+}
+
+func githubCloneURL(rawHost, owner, name, protocol string) (string, error) {
+	if rawHost == "" {
+		rawHost = githubhost.Public().String()
+	}
+	host, err := githubhost.Parse(rawHost)
+	if err != nil {
+		return "", fmt.Errorf("invalid GitHub clone host: %w", err)
+	}
+	if protocol == ProtocolSSH {
+		// A web authority does not define an independent SSH port.
+		origin, _ := url.Parse(host.WebURL())
+		return fmt.Sprintf("git@%s:%s/%s.git", origin.Hostname(), owner, name), nil
+	}
+	return fmt.Sprintf("%s/%s/%s.git", host.WebURL(), owner, name), nil
 }

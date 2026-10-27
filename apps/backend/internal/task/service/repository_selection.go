@@ -59,11 +59,18 @@ func (s *Service) preflightRepositoryInputs(
 	ctx context.Context, workspaceID string, inputs []TaskRepositoryInput,
 ) error {
 	for index, input := range inputs {
+		if err := s.inferEnterpriseGitHubProvider(ctx, workspaceID, &input); err != nil {
+			return err
+		}
+		inputs[index] = input
 		needsInspection, err := repositorySelectionNeedsInspection(input)
 		if err != nil {
 			return err
 		}
 		if !needsInspection {
+			if err := s.verifyEnterpriseGitHubOrigin(ctx, workspaceID, input); err != nil {
+				return err
+			}
 			continue
 		}
 		if s.repositorySelectionResolver == nil {
@@ -95,7 +102,7 @@ func repositorySelectionNeedsInspection(input TaskRepositoryInput) (bool, error)
 		return true, nil
 	}
 
-	parsedProvider, _, _, _, err := parseRemoteRepositoryURL(effectiveRemoteURL(input), provider)
+	parsedProvider, _, _, _, err := parseRemoteRepositoryURL(effectiveRemoteURL(input), effectiveRemoteProvider(input))
 	if err != nil {
 		return false, NewRepositorySelectionError(RepositorySelectionErrorInvalid, nil)
 	}

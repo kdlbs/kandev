@@ -206,8 +206,9 @@ proof about the original process, so automatic recovery may leave this action
 to you. If Resume cannot verify the saved evidence, it keeps the session blocked
 and reports the cause. If the saved delivery already has a fully recorded
 terminal result, Kandev reconciles the matching stale block when the idle native
-conversation is restored. The old result remains unchanged, and no previous
-prompt is sent again.
+conversation is restored. This also applies when shutdown interrupted final
+bookkeeping after the result was saved. The old result remains unchanged, and
+no previous prompt is sent again.
 
 A resumed runtime checks delivery recovery before enabling new work. If the saved
 evidence needs explicit recovery, the Resume controls appear before you send a

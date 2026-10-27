@@ -59,6 +59,7 @@ export type GitHubAppManifest = {
 };
 
 export type StartGitHubAppManifestRequest = {
+  github_host?: string;
   workspace_id: string;
   display_name: string;
   owner_type: GitHubAppManifestOwnerType;
@@ -95,6 +96,7 @@ export type ImportGitHubAppRegistrationRequest = {
 };
 
 export type PrepareGitHubAppImportRequest = {
+  github_host?: string;
   workspace_id: string;
   public_base_url: string;
 };

@@ -1,6 +1,6 @@
 import type { AzureDevOpsBrowsePreferences } from "../../../hooks/domains/azure-devops/use-azure-devops-preferences";
 import { expect, test } from "../../fixtures/test-base";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { injectLatency, waitForHttp } from "../../helpers/causal-waits";
 
 const MOCK_STATE = {
   authenticated: true,
@@ -196,7 +196,17 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await expect(testPage.getByTestId("azure-devops-test-result")).toContainText(
     "Connected as Ada Reviewer",
   );
+  await testPage.route("**/api/v1/azure-devops/config?*", async (route) => {
+    if (route.request().method() === "POST") {
+      await injectLatency(500, "reproduce seeding before the configuration save completes");
+    }
+    await route.continue();
+  });
+  const configurationSaved = waitForHttp(testPage, "POST", /^\/api\/v1\/azure-devops\/config$/, {
+    predicate: (response) => response.ok(),
+  });
   await testPage.getByTestId("azure-devops-save-button").click();
+  await configurationSaved;
   const savedViewsSeed = await testPage.request.put(
     `/api/v1/azure-devops/views?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
     {

@@ -404,10 +404,10 @@ export function validateCreateInputs(inputs: {
 export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): string | null {
   const seen = new Map<string, string>();
   for (const row of remoteRepos) {
-    const parsed = parseGitHubAnyUrl(row.url ?? "");
+    const parsed = parseGitHubAnyUrl(row.url ?? "", row.providerHost);
     if (!parsed) continue;
     const label = `${parsed.owner}/${parsed.repo}`;
-    const key = `${label.toLowerCase()}\u0000${row.branch}`;
+    const key = `${parsed.host ?? "github.com"}/${label.toLowerCase()}\u0000${row.branch}`;
     const existing = seen.get(key);
     if (existing) return existing;
     seen.set(key, label);

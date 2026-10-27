@@ -126,6 +126,7 @@ func TestStore_MigratesLegacyRowToGitHub(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	assert.Equal(t, ProviderGitHub, cfg.Provider, "a legacy row must read as GitHub")
+	assert.Equal(t, "github.com", cfg.GitHubHost, "legacy configurations must retain their public host")
 	assert.Empty(t, cfg.ProjectPath)
 	assert.Equal(t, "acme", cfg.RepoOwner)
 	assert.Equal(t, "flows", cfg.RepoName)

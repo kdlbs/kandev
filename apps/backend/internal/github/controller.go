@@ -43,6 +43,7 @@ func NewController(svc *Service, log *logger.Logger) *Controller {
 // RegisterHTTPRoutes registers all GitHub HTTP routes.
 func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/github")
+	api.Use(c.captureExpectedGitHubHost)
 	api.GET("/status", c.httpGetStatus)
 	api.POST("/token", c.httpConfigureToken)
 	api.DELETE("/token", c.httpClearToken)
@@ -667,6 +668,10 @@ func parseRouteNumber(ctx *gin.Context, invalidMessage string) (int, bool) {
 }
 
 func handleGitHubInfoError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrGitHubHostMismatch) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "github_host_mismatch"})
+		return
+	}
 	if isGitHubNotConfiguredError(err) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "GitHub is not configured. Connect GitHub in Settings > Integrations.",
@@ -1251,6 +1256,10 @@ func parsePaginationQuery(ctx *gin.Context) (int, int) {
 
 // handleSearchError maps client errors to proper HTTP responses.
 func (c *Controller) handleSearchError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrGitHubHostMismatch) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "github_host_mismatch"})
+		return
+	}
 	if isGitHubNotConfiguredError(err) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",

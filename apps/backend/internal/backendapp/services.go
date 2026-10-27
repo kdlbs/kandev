@@ -30,6 +30,7 @@ import (
 	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
@@ -583,6 +584,7 @@ func initThirdPartyProviders(
 		return nil, fmt.Errorf("initialize github: %w", recordErr)
 	}
 	if githubSvc != nil {
+		taskSvc.SetGitHubRepositoryOriginVerifier(gitHubRepositoryOriginVerifier{connections: githubSvc})
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetComparisonTargetObserver(taskSvc)
 		githubSvc.SetPromptResolver(promptSvc)
@@ -1079,7 +1081,7 @@ func (a *githubBrokerScopeAuthorizer) authorizeGitHubRepository(
 		return err
 	}
 	if repository == nil || repository.WorkspaceID != workspaceID ||
-		!strings.EqualFold(repository.Provider, "github") || !isPublicGitHubProviderHost(repository.ProviderHost) {
+		!strings.EqualFold(repository.Provider, "github") || !isValidGitHubProviderHost(repository.ProviderHost) {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	if strings.EqualFold(repository.ProviderOwner, owner) && strings.EqualFold(repository.ProviderName, repoName) {
@@ -1096,6 +1098,10 @@ func (a *githubBrokerScopeAuthorizer) authorizeGitHubRepository(
 		ctx, workspaceID, repository, link, owner, repoName, providerID, parentProviderID, strictIdentity,
 	); handled {
 		return destinationErr
+	}
+	host, _ := githubhost.Parse(repository.ProviderHost)
+	if found && (!strings.EqualFold(binding.SourceRepository.Host, host.String())) {
+		return fmt.Errorf("contribution host does not match repository")
 	}
 	return authorizeRemoteContribution(binding, found, owner, repoName, providerID, strictIdentity)
 }
@@ -1125,8 +1131,7 @@ func (a *githubBrokerScopeAuthorizer) authorizeContributionDestination(
 	if err != nil {
 		return true, fmt.Errorf("validate contribution destination scope: %w", err)
 	}
-	if !found || destination.Provider != taskmodels.ContributionDestinationProviderGitHub ||
-		!strings.EqualFold(destination.TargetRepository.Host, "github.com") {
+	if !found || destination.Provider != taskmodels.ContributionDestinationProviderGitHub {
 		return false, nil
 	}
 	if !contributionDestinationScopeMatches(
@@ -1148,6 +1153,10 @@ func contributionDestinationScopeMatches(
 	owner, repoName, providerID, parentProviderID string,
 	strictIdentity bool,
 ) bool {
+	host, err := githubhost.Parse(repository.ProviderHost)
+	if err != nil || !strings.EqualFold(destination.SourceRepository.Host, host.String()) || !strings.EqualFold(destination.TargetRepository.Host, host.String()) {
+		return false
+	}
 	parts := strings.Split(destination.TargetRepository.Path, "/")
 	canonical := strings.TrimSpace(repository.ProviderOwner) + "/" + strings.TrimSpace(repository.ProviderName)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) ||
@@ -1197,7 +1206,7 @@ func authorizeRemoteContribution(
 	strictIdentity bool,
 ) error {
 	if !found || binding.Provider != taskmodels.RemoteContributionProviderGitHub ||
-		!binding.CollaborationAllowed || !strings.EqualFold(binding.SourceRepository.Host, "github.com") {
+		!binding.CollaborationAllowed {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	parts := strings.Split(binding.SourceRepository.Path, "/")
@@ -2611,18 +2620,7 @@ func (a codeHostBranchListerAdapter) ListRepoBranches(
 	ctx context.Context, source taskservice.RemoteBranchSource,
 ) ([]taskservice.Branch, error) {
 	if strings.EqualFold(source.Provider, "github") {
-		if a.github == nil {
-			return nil, fmt.Errorf("GitHub branch provider is unavailable")
-		}
-		remote, err := a.github.ListRepoBranchesForWorkspace(ctx, source.WorkspaceID, source.Owner, source.Name)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]taskservice.Branch, 0, len(remote))
-		for _, branch := range remote {
-			out = append(out, taskservice.Branch{Name: branch.Name, Type: codeHostRemoteBranchType})
-		}
-		return out, nil
+		return a.listGitHubRepoBranches(ctx, source)
 	}
 	if a.plugins == nil {
 		return nil, fmt.Errorf("plugin repository branch provider is unavailable")

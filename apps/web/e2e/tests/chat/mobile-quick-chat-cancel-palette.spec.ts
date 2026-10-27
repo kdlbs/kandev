@@ -3,6 +3,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForAgentMessage } from "../../helpers/session";
+import { holdCancellationSettlement } from "../../helpers/cancellation-observation";
 import {
   waitForActiveQuickChatForegroundActivity,
   waitForActiveQuickChatSupportsSteering,
@@ -39,6 +40,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     apiClient,
   }) => {
     test.setTimeout(120_000);
+    const cancellation = await holdCancellationSettlement(testPage);
     await testPage.goto("/");
     await testPage.getByTestId("app-nav-trigger").tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
@@ -64,9 +66,14 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await expect(cancel).toBeVisible();
     expect((await cancel.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 
-    await cancel.tap();
-    await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
-    await expect(cancel).toBeDisabled();
+    cancellation.arm(quickSessionId);
+    try {
+      await cancel.tap();
+      await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
+      await expect(cancel).toBeDisabled();
+    } finally {
+      cancellation.release();
+    }
     await waitForQuickChatSessionSettled(testPage, quickSessionId);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });
   });
@@ -77,6 +84,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     prCapture,
   }) => {
     test.setTimeout(120_000);
+    const cancellation = await holdCancellationSettlement(testPage);
     await testPage.goto("/");
     await testPage.getByTestId("app-nav-trigger").tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
@@ -106,9 +114,13 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await expect
       .poll(async () => (await cancelOption.boundingBox())?.height ?? 0)
       .toBeGreaterThanOrEqual(44);
-    await cancelOption.tap();
-
-    await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+    cancellation.arm(quickSessionId);
+    try {
+      await cancelOption.tap();
+      await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+    } finally {
+      cancellation.release();
+    }
     await waitForQuickChatSessionSettled(testPage, quickSessionId);
     await waitForQuickChatDirectInput(quickChat);
     await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");

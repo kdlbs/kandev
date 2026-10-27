@@ -2,6 +2,7 @@
 // the mobile- filename prefix).
 import { test, expect } from "../../fixtures/test-base";
 import { linkToCoordinatorAdd } from "../../../lib/coordinator/links";
+import { chooseIdentity } from "./guided-setup-helpers";
 
 const MIN_TOUCH_TARGET_PX = 44;
 
@@ -27,10 +28,7 @@ test.describe("Guided setup on a phone viewport", () => {
 
     await testPage.getByLabel("Name").fill("Phone Planner");
     if (await testPage.getByTestId("setup-next").isDisabled()) {
-      await testPage.getByTestId("coordinator-agent-profile-picker").click();
-      await testPage.getByRole("option").first().click();
-      await testPage.getByTestId("executor-profile-selector").first().click();
-      await testPage.getByRole("option").first().click();
+      await chooseIdentity(testPage, "Phone Planner", seedData);
     }
     await expect(testPage.getByTestId("setup-next")).toBeEnabled();
     await testPage.getByTestId("setup-next").click();
