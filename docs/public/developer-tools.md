@@ -157,6 +157,8 @@ Set a global **Default utility agent profile** by choosing an enabled, global, A
 
 You can also create a custom utility. Name, prompt, and profile are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A stale, disabled, deleted, workspace-scoped, passthrough-only, or unconfigured profile fails closed. Repair the binding in Settings before running the utility again.
 
+Disabling a custom utility blocks new calls until it is re-enabled; calls already admitted continue.
+
 Utility calls run as ephemeral processes on the Kandev backend host. Kandev resolves one profile snapshot at call start, records its profile ID with the call, and applies its permissions without asking for interactive approval. If the profile does not auto-approve a permission request, the call is rejected promptly. Profile edits affect the next call; an in-flight call keeps its snapshot.
 
 ### Configuration Chat

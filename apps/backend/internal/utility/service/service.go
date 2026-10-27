@@ -21,6 +21,7 @@ import (
 
 var (
 	ErrAgentNotFound       = errors.New("utility agent not found")
+	ErrAgentDisabled       = errors.New("utility agent is disabled")
 	ErrInvalidAgent        = errors.New("invalid utility agent")
 	ErrCallNotFound        = errors.New("utility agent call not found")
 	ErrBuiltinAgent        = errors.New("cannot modify built-in agent")
@@ -371,6 +372,9 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 	agent, err := s.repo.GetAgentByID(ctx, utilityID)
 	if err != nil {
 		return nil, ErrAgentNotFound
+	}
+	if !agent.Builtin && !agent.Enabled {
+		return nil, ErrAgentDisabled
 	}
 
 	// Resolve template
