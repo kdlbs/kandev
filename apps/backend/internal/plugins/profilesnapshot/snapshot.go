@@ -8,7 +8,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // Capability names that switch on the additive snapshot fields.

@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // orderedTunnelOperations records tunnel closes in the same event list as the

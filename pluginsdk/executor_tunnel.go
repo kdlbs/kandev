@@ -3,7 +3,7 @@ package pluginsdk
 import (
 	"context"
 
-	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 )
 
 // MaxExecutorTunnelFrameBytes is the largest data payload of one tunnel frame.
