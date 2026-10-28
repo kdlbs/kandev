@@ -99,6 +99,89 @@ Confirm actual changed TS files before lint; include any additional changed owne
 
 Results: rendered CodeMirror RED collected one selected test and failed on the disabled external item; the corrected real opener reached the HTTP-domain boundary with omitted worktree ID. The two affected suites passed 12 tests, scoped ESLint passed on the three changed TS files, and the 6144 MiB canonical typecheck passed. Current staged ratchet, documentation and normal-hook results are recorded in the delivery checkpoint.
 
+## Required CI remediation: complete
+
+E2E Shard 23/28 on synthetic merge `89d32b81112ed0dc572543a9d6dfd3dba229ac63` (base `67c25d4a136f2e80a50f8b3753ff7bb2471da6bb`, head `e458236dd8b07377daea8a9f240ccc2e5b851e72`) failed the update-notification test in all four CI attempts with `browserContext.addCookies: Invalid URL`. The actual retry trace records the cookie URL as the relative `/settings/preferences/appearance`. Its embedded test source is byte-identical to that base file (SHA-256 `3308715d1c81c2746c23ad31ead9b304d9c57f0ca38135c4b90c738fc688e41d`): the helper takes `(page, url, frontendUrl)` while that one caller passes `(page, backend.frontendUrl, screen.url)`. This is a test argument-contract mismatch in the actual base checkout, not a native-editor routing failure or a proven infrastructure flake. CI evidence: run `40610650072`, job `122570054581`, 50 passed and one failed in its process.
+
+The following is the **complete** affected-file diff from the frozen candidate file to base `67c25d4`, before the correction. Blank context-line prefixes are omitted for whitespace hygiene. It is shown to prevent applying the new argument order against the candidate's old helper by itself:
+
+```diff
+diff --git a/candidate-pseudo-coverage.spec.ts b/base-67c25d4-pseudo-coverage.spec.ts
+index 881c69395e..fad1fc5d07 100644
+--- a/candidate-pseudo-coverage.spec.ts
++++ b/base-67c25d4-pseudo-coverage.spec.ts
+@@ -498,11 +498,17 @@ const ALLOWED = [
+  */
+ const ACCENTED = /[À-ɏ]/;
+
+-async function activatePseudo(page: Page, frontendUrl: string, url: string) {
+-  // Seed the locale before the first document request. The Go shell uses this
+-  // cookie to set both <html lang> and the boot payload.
+-  await page.context().addCookies([{ name: "kandev_locale", value: "pseudo", url: frontendUrl }]);
+-  await page.goto(new URL(url, frontendUrl).href);
++async function activatePseudo(page: Page, url: string, frontendUrl: string) {
++  // Seed the locale before the first document request: the Go shell reads this
++  // cookie to set <html lang> and the boot payload.
++  await page
++    .context()
++    .addCookies([{ name: "kandev_locale", value: "pseudo", url: frontendUrl, sameSite: "Lax" }]);
++  const initialResponse = await page.goto(url);
++  if (!initialResponse) throw new Error("Pseudo-locale navigation returned no response");
++  expect(initialResponse.ok()).toBe(true);
++  const initialHeaders = await initialResponse.request().allHeaders();
++  expect(initialHeaders.cookie ?? "").toMatch(/(?:^|;\s*)kandev_locale=pseudo(?:;|$)/);
+   // `<html lang>` proves the SHELL is on the pseudo locale and nothing more: the
+   // Go shell writes it from the cookie, so it is already correct in the HTML the
+   // browser parses, before any script has run. Every stronger fact — the route
+@@ -874,7 +880,7 @@ test.describe("i18n pseudo-locale coverage", () => {
+       if (!screen) throw new Error("The secrets screen is missing");
+       const secret = await apiClient.createSecret(name, "synthetic-pseudo-test-value");
+       try {
+-        await activatePseudo(testPage, backend.frontendUrl, screen.url);
++        await activatePseudo(testPage, screen.url, backend.frontendUrl);
+         await waitForScreen(testPage, screen);
+         await waitForTransientLoadingToFinish(testPage);
+         const row = testPage.getByTestId(`secret-row-${secret.id}`);
+@@ -916,7 +922,7 @@ test.describe("i18n pseudo-locale coverage", () => {
+
+   for (const screen of SCREENS) {
+     test(`no un-externalized copy on ${screen.name}`, async ({ testPage, apiClient, backend }) => {
+-      await activatePseudo(testPage, backend.frontendUrl, screen.url);
++      await activatePseudo(testPage, screen.url, backend.frontendUrl);
+       await waitForScreen(testPage, screen);
+       await waitForTransientLoadingToFinish(testPage);
+
+@@ -976,7 +982,7 @@ test.describe("i18n pseudo-locale coverage", () => {
+     const appearance = SCREENS.find((screen) => screen.url === "/settings/preferences/appearance");
+     if (!appearance) throw new Error("the appearance screen is no longer in SCREENS");
+
+-    await activatePseudo(testPage, backend.frontendUrl, appearance.url);
++    await activatePseudo(testPage, appearance.url, backend.frontendUrl);
+     await waitForScreen(testPage, appearance);
+     await waitForTransientLoadingToFinish(testPage);
+
+```
+
+After separate authorization and exclusive HEAVY, reconcile only `apps/web/e2e/tests/i18n/pseudo-coverage.spec.ts` to the actual base file above, preserving its helper, first-request cookie assertions and already-updated callers. Against that base-shaped file, make the sole missed notification call:
+
+```diff
+-    await activatePseudo(testPage, backend.frontendUrl, screen.url);
++    await activatePseudo(testPage, new URL(screen.url, backend.frontendUrl).href, backend.frontendUrl);
+```
+
+The absolute appearance URL is the navigation argument; `backend.frontendUrl` is the cookie URL. Before using the pinned base source, check the current target base and the file's exact content; if it changed, stop and reconcile with ROOT rather than overwriting newer work. No whole-branch rebase, generic i18n/parser changes, helper refactor, new companion tests, or unrelated correction is authorized by this work order.
+
+Run a fresh managed build and exactly the failed Chromium case, one worker and zero retries, then its E2E-file lint and sleep ratchet. The earlier capture build predates the current production correction and is not a valid `--no-build` basis. From the repository root with the previously pinned toolchain on PATH:
+
+```bash
+(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/i18n/pseudo-coverage.spec.ts -- --grep 'localizes a Kandev update notification received from the backend' --retries=0)
+(cd apps/web && pnpm exec eslint --max-warnings 0 e2e/tests/i18n/pseudo-coverage.spec.ts)
+```
+
+Verify one test actually collected and passed, retain and join each native handle, and record exits, counts, fixture cleanup and the exact checked source. Stage the owned test and this work order before the E2E sleep ratchet, current full-PR documentation coverage, catalog/spec/diff checks and normal hooks without bypass. The test lives under `e2e`, which `apps/web/tsconfig.json` explicitly excludes; this correction changes no typed production code, so do not repeat the full web typecheck already passed for the actual product correction. Preserve the earlier capture assets and evidence limits. No CI retry or observer renewal follows automatically.
+
+Result: reconciled the test file to base `67c25d4` and changed only the notification call against that base. A fresh managed host Chromium run collected the exact case with one worker and zero retries and passed it (1 passed); the cookie, navigation and localized-notification assertions executed. Scoped E2E ESLint passed. The normal Prettier hook reformatted the shared call and rejected the first commit; a `prettier-ignore` directive preserves the explicitly required identical call line for the parallel correction. The two existing PR screenshots and manifest were backed up before the runner and restored with matching SHA-256 hashes. No web typecheck or broad suite replay was performed.
+
 ## Files likely touched
 
 - `apps/web/components/review/review-diff-toolbar.tsx` and new rendered test.
