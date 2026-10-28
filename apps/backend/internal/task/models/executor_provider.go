@@ -90,6 +90,11 @@ type ExecutorProviderCapabilityRequirement struct {
 // not agree.
 var ErrExecutorCapabilityMismatch = errors.New("capability_mismatch")
 
+// ErrExecutorConflict is the stable `conflict` refusal of a provider response
+// that carries a field of a capability it did not declare, or a workspace
+// descriptor that differs from the one recorded for the environment generation.
+var ErrExecutorConflict = errors.New("conflict")
+
 // ErrExecutorStateTooLarge is the host-originated `state_too_large` refusal for
 // provider state above its budget or an envelope above its cap. A provider
 // cannot return it.

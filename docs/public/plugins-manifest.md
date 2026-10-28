@@ -411,6 +411,22 @@ check as a field error with the code `too_short`, `too_long`, or
 typed values and secret store IDs, and its profile (public config plus secret
 IDs) is limited to 4096 bytes.
 
+A provider opts in to newer host behavior with `requires_host_capabilities`, a
+list of `{name, version}` entries from the host capability registry. The host
+records the negotiated set, as `name@version`, when it admits an environment,
+and later attach, recovery, and cleanup follow that record instead of the
+installed manifest. A provider response that carries a field belonging to a
+capability the provider did not declare is rejected with `conflict`.
+
+With `workspace_descriptor`, every provision and attach response must carry a
+`workspace_path` and `workspace_identity`. The path is validated against the
+environment platform (an absolute POSIX path for Linux and macOS, a
+drive-letter path for Windows) and is never read or created on the backend host.
+The identity is 1 to 128 characters from `[A-Za-z0-9._:-]`. The host records the
+pair before first use and rejects any later response that changes it. Two
+active environments of one installation cannot share a normalized path or an
+identity. Without the capability the workspace path stays `/workspace`.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.

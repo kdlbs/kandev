@@ -130,10 +130,14 @@ func (r *PluginRemoteExecutor) acceptRecoveredPluginExecutorResource(
 	if err := rejectSecretInProviderState(state.profile.SecretValues, resource); err != nil {
 		return nil, false, err
 	}
+	descriptor, err := resolvePluginExecutorWorkspace(state.inventory.NegotiatedCapabilities, state.inventory.WorkspaceDescriptor, resource)
+	if err != nil {
+		return nil, false, err
+	}
+	state.inventory.WorkspaceDescriptor = descriptor
 	if state.inventory.Resource != nil && state.inventory.Resource.GetResourceHandle() != resource.GetResourceHandle() {
 		return nil, false, errors.New("provider recovery returned a different resource handle")
 	}
-	var err error
 	state.inventory.Resource = resource
 	state.inventory.StateVersion = resource.GetStateVersion()
 	state.inventory.Platform = resource.GetPlatform()
@@ -161,6 +165,9 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 		return nil, fmt.Errorf("plugin executor inventory phase %q cannot be attached", state.inventory.Phase)
 	}
 	if err := validatePluginExecutorResourceForProvider(state.profile.Provider, state.resource); err != nil {
+		return nil, err
+	}
+	if _, err := resolvePluginExecutorWorkspace(state.inventory.NegotiatedCapabilities, state.inventory.WorkspaceDescriptor, state.resource); err != nil {
 		return nil, err
 	}
 	if record.TransientAuthToken == "" {
@@ -249,6 +256,9 @@ func (r *PluginRemoteExecutor) attachAndVerifyRecoveredPluginExecutor(
 	if err := validatePluginExecutorResourceForProvider(state.profile.Provider, attachedResource); err != nil {
 		return nil, nil, false, err
 	}
+	if _, err := resolvePluginExecutorWorkspace(state.inventory.NegotiatedCapabilities, state.inventory.WorkspaceDescriptor, attachedResource); err != nil {
+		return nil, nil, false, err
+	}
 	if attachedResource.GetResourceHandle() != resource.GetResourceHandle() || attachedResource.GetStateVersion() != resource.GetStateVersion() {
 		return nil, nil, false, errors.New("provider attachment changed the recorded resource identity")
 	}
@@ -325,7 +335,7 @@ func (r *PluginRemoteExecutor) readRecoveredAgentctlInstance(
 	}
 	if info == nil || info.ID != record.AgentExecutionID || info.TaskID != record.TaskID ||
 		info.SessionID != record.SessionID || info.Port < 1 || uint32(info.Port) != state.inventory.InstancePort ||
-		strings.TrimSpace(info.WorkspacePath) == "" {
+		strings.TrimSpace(info.WorkspacePath) == "" || info.WorkspacePath != state.inventory.workspacePath() {
 		return nil, errors.New("authenticated plugin agentctl instance metadata does not match persisted owner")
 	}
 	return info, nil
@@ -597,10 +607,14 @@ func (r *PluginRemoteExecutor) recordRecoveredCleanupResource(
 	if err := rejectSecretInProviderState(profile.SecretValues, resource); err != nil {
 		return nil, false, err
 	}
+	descriptor, err := resolvePluginExecutorWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, resource)
+	if err != nil {
+		return nil, false, err
+	}
+	inventory.WorkspaceDescriptor = descriptor
 	inventory.Resource = resource
 	inventory.StateVersion = resource.GetStateVersion()
 	inventory.Platform = resource.GetPlatform()
-	var err error
 	inventory.ExpiresAt, err = pluginExecutorEarlierExpiry(inventory.ExpiresAt, resource.GetExpiresAt())
 	if err != nil {
 		return nil, false, err

@@ -15311,8 +15311,12 @@ type ExecutorResourceDescriptor struct {
 	ExpiresAt      string                        `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	Retention      string                        `protobuf:"bytes,6,opt,name=retention,proto3" json:"retention,omitempty"`
 	StateVersion   uint32                        `protobuf:"varint,7,opt,name=state_version,json=stateVersion,proto3" json:"state_version,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// workspace_path and workspace_identity are set only by a provider that
+	// declared the workspace_descriptor capability.
+	WorkspacePath     string `protobuf:"bytes,8,opt,name=workspace_path,json=workspacePath,proto3" json:"workspace_path,omitempty"`
+	WorkspaceIdentity string `protobuf:"bytes,9,opt,name=workspace_identity,json=workspaceIdentity,proto3" json:"workspace_identity,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ExecutorResourceDescriptor) Reset() {
@@ -15392,6 +15396,20 @@ func (x *ExecutorResourceDescriptor) GetStateVersion() uint32 {
 		return x.StateVersion
 	}
 	return 0
+}
+
+func (x *ExecutorResourceDescriptor) GetWorkspacePath() string {
+	if x != nil {
+		return x.WorkspacePath
+	}
+	return ""
+}
+
+func (x *ExecutorResourceDescriptor) GetWorkspaceIdentity() string {
+	if x != nil {
+		return x.WorkspaceIdentity
+	}
+	return ""
 }
 
 // ExecutorHostCapability is one row of the host capability registry offered
@@ -25685,7 +25703,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\apreview\x18\x05 \x01(\bR\apreview\x12\x1a\n" +
 	"\breattach\x18\x06 \x01(\bR\breattach\x12\x1c\n" +
 	"\tretention\x18\a \x01(\tR\tretention\x128\n" +
-	"\x18maximum_lifetime_seconds\x18\b \x01(\x04R\x16maximumLifetimeSeconds\"\xb6\x02\n" +
+	"\x18maximum_lifetime_seconds\x18\b \x01(\x04R\x16maximumLifetimeSeconds\"\x8c\x03\n" +
 	"\x1aExecutorResourceDescriptor\x12'\n" +
 	"\x0fresource_handle\x18\x01 \x01(\tR\x0eresourceHandle\x12\x1d\n" +
 	"\n" +
@@ -25695,7 +25713,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\tR\texpiresAt\x12\x1c\n" +
 	"\tretention\x18\x06 \x01(\tR\tretention\x12#\n" +
-	"\rstate_version\x18\a \x01(\rR\fstateVersion\"\x93\x01\n" +
+	"\rstate_version\x18\a \x01(\rR\fstateVersion\x12%\n" +
+	"\x0eworkspace_path\x18\b \x01(\tR\rworkspacePath\x12-\n" +
+	"\x12workspace_identity\x18\t \x01(\tR\x11workspaceIdentity\"\x93\x01\n" +
 	"\x16ExecutorHostCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
 	"\vmin_version\x18\x02 \x01(\rR\n" +

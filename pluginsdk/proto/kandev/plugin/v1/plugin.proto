@@ -1898,6 +1898,10 @@ message ExecutorResourceDescriptor {
   string expires_at = 5;
   string retention = 6;
   uint32 state_version = 7;
+  // workspace_path and workspace_identity are set only by a provider that
+  // declared the workspace_descriptor capability.
+  string workspace_path = 8;
+  string workspace_identity = 9;
 }
 
 // ExecutorHostCapability is one row of the host capability registry offered
