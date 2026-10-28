@@ -47,6 +47,8 @@ func (s *Service) ListExecutorProviders(ctx context.Context) ([]models.ExecutorP
 				Key:                    declared.Key,
 				ContractVersion:        declared.ContractVersion,
 				SupportedStateVersions: append([]int(nil), declared.SupportedStateVersions...),
+				RequiredCapabilities:   providerCapabilityRequirements(declared),
+				StateBudgetBytes:       declared.StateBudgetBytes,
 				DisplayName:            declared.DisplayName,
 				Description:            declared.Description,
 				LocalizedMessages:      localizedMessages,
@@ -344,4 +346,16 @@ func (s *Service) observeExecutorCapabilities(pluginID string, remote *pluginsdk
 		return err
 	}
 	return s.capabilityGate.observe(capabilityKeyFor(record, remote, declaration.Key), declaration.HostCapabilityRequirements(), response)
+}
+
+func providerCapabilityRequirements(declared manifest.ExecutorProvider) []models.ExecutorProviderCapabilityRequirement {
+	requirements := declared.HostCapabilityRequirements()
+	if len(requirements) == 0 {
+		return nil
+	}
+	out := make([]models.ExecutorProviderCapabilityRequirement, len(requirements))
+	for i, requirement := range requirements {
+		out[i] = models.ExecutorProviderCapabilityRequirement{Name: requirement.Name, Version: requirement.Version}
+	}
+	return out
 }

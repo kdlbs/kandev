@@ -91,6 +91,9 @@ func (r *PluginRemoteExecutor) loadRetainedPluginExecutor(ctx context.Context, r
 	if err := validatePluginExecutorResourceForProvider(provider, inventory.Resource); err != nil {
 		return nil, err
 	}
+	if err := r.confirmRetainedPluginExecutorCapabilities(ctx, inventory, profile); err != nil {
+		return nil, err
+	}
 	token := req.AuthToken
 	if token == "" {
 		token = record.TransientAuthToken

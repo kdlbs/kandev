@@ -107,6 +107,7 @@ type pluginExecutorInventory struct {
 	ContractVersion        int                                   `json:"contract_version"`
 	SupportedStateVersions []int                                 `json:"supported_state_versions"`
 	StateVersion           uint32                                `json:"state_version,omitempty"`
+	NegotiatedCapabilities []string                              `json:"negotiated_capabilities,omitempty"`
 	ProfileID              string                                `json:"profile_id"`
 	ProfileConfig          map[string]string                     `json:"profile_config,omitempty"`
 	SecretReferences       map[string]string                     `json:"secret_references,omitempty"`
@@ -220,6 +221,9 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	if err := r.rejectExpiredPluginExecutorEnvironment(ctx, req.TaskEnvironmentID, profile.OwnershipGeneration); err != nil {
 		return nil, err
 	}
+	if err := r.confirmPluginExecutorCapabilities(ctx, profile); err != nil {
+		return nil, err
+	}
 	operationID := strings.TrimSpace(req.InstanceID)
 	digest, err := pluginExecutorInputDigest(profile)
 	if err != nil {
@@ -247,6 +251,7 @@ func pluginExecutorLaunchInventory(req *ExecutorCreateRequest, profile models.Ex
 		EnvironmentID:          req.TaskEnvironmentID,
 		ContractVersion:        profile.Provider.ContractVersion,
 		SupportedStateVersions: append([]int(nil), profile.Provider.SupportedStateVersions...),
+		NegotiatedCapabilities: negotiatedCapabilities(profile.Provider),
 		ProfileID:              profile.ProfileID, ProfileConfig: clonePluginExecutorStringMap(profile.Config),
 		SecretReferences: clonePluginExecutorStringMap(profile.SecretReferences),
 		OperationID:      operationID, InputDigest: digest, RuntimeIdentity: req.InstanceID, Phase: pluginExecutorPhaseAllocating,
@@ -285,6 +290,10 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 	launch.inventory.ExpiresAt = resource.GetExpiresAt()
 	launch.inventory.Capabilities = intersectPluginExecutorCapabilities(launch.profile.Provider.Capabilities, resource.GetCapabilities(), resource.GetRetention())
 	launch.inventory.Phase = pluginExecutorPhaseProvisioned
+	if err := checkPluginExecutorEnvelopeBudget(launch.inventory, pluginExecutorStateBudget(launch.profile.Provider)); err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"state_budget", err)
+	}
 	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"provision_checkpoint", err)
@@ -576,6 +585,9 @@ func pluginExecutorRetentionRank(retention string) int {
 }
 
 func checkpointPluginExecutor(ctx context.Context, req *ExecutorCreateRequest, inventory pluginExecutorInventory) error {
+	if err := checkPluginExecutorEnvelopeBudget(inventory, pluginExecutorMaxStateBudget); err != nil {
+		return err
+	}
 	data, err := json.Marshal(inventory)
 	if err != nil || len(data) > pluginExecutorInventoryMaxBytes {
 		return errors.New("plugin executor inventory exceeds the 32 KiB limit")
@@ -698,14 +710,18 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 			zap.String("session_id", req.SessionID),
 			zap.String("cause_type", fmt.Sprintf("%T", cause)))
 	}
+	retained := resource
+	if errors.Is(cause, models.ErrExecutorStateTooLarge) {
+		retained = fixedSizePluginExecutorResource(resource)
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	claim, claimErr := r.acquirePluginExecutorCleanupClaim(cleanupCtx, req.TaskID, req.SessionID, inventory)
 	if claimErr != nil {
-		inventory.Resource = resource
+		inventory.Resource = retained
 		inventory.Phase = pluginExecutorPhaseCleanupPending
 		_ = checkpointPluginExecutor(cleanupCtx, req, inventory)
-		return errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained")
+		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained"))
 	}
 	defer r.releasePluginExecutorCleanupClaim(claim)
 	cleanupCtx = recoveryclaim.WithClaim(cleanupCtx, claim)
@@ -715,7 +731,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		Context: cleanupContext, Resource: resource, CleanupReason: pluginExecutorCleanupReasonLaunch, CleanupClaim: claim.OperationID,
 	})
 	if err == nil && response != nil && response.GetConfirmedAbsent() {
-		inventory.Resource = resource
+		inventory.Resource = retained
 		inventory.Phase = pluginExecutorPhaseAbsent
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
 			return fmt.Errorf("remote launch failed and absence checkpoint failed: %w", checkpointErr)
@@ -723,15 +739,15 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if releaseErr := req.ReleaseRuntimeInventory(cleanupCtx); releaseErr != nil {
 			return fmt.Errorf("remote launch failed and inventory release failed: %w", releaseErr)
 		}
-		return errors.New("plugin executor launch failed; allocated resource was removed")
+		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; allocated resource was removed"))
 	}
-	inventory.Resource = resource
+	inventory.Resource = retained
 	inventory.Phase = pluginExecutorPhaseCleanupPending
 	if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
 		return fmt.Errorf("remote launch failed and cleanup inventory checkpoint failed: %w", checkpointErr)
 	}
 	r.logger.Warn("plugin executor cleanup remains pending", zap.String("execution_id", req.InstanceID))
-	return errors.New("plugin executor launch failed; resource cleanup remains pending")
+	return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; resource cleanup remains pending"))
 }
 
 func pluginExecutorProviderError(providerErr *pluginsdk.ExecutorProviderError) error {
