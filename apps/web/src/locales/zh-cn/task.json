@@ -1901,6 +1901,7 @@
   "tasksAffected_other": "影响 {{count}} 个任务",
   "tcpPortsWithActiveListenersInside": "远程执行器内有活动监听器的 TCP 端口。点击刷新以重新扫描。",
   "technicalDetails": "技术详情",
+  "jumpToLatestOutput": "跳至最新输出",
   "terminal": "终端",
   "terminalCount_one": "{{count}} 个终端",
   "terminalCount_other": "{{count}} 个终端",

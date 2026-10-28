@@ -1902,6 +1902,7 @@
   "tasksAffected_other": "{{count}} tarefas afetadas",
   "tcpPortsWithActiveListenersInside": "Portas TCP com processos à escuta dentro do executor remoto. Clique em atualizar para voltar a analisar.",
   "technicalDetails": "Detalhes técnicos",
+  "jumpToLatestOutput": "Ir para a saída mais recente",
   "terminal": "Terminal",
   "terminalCount_one": "{{count}} terminal",
   "terminalCount_other": "{{count}} terminais",

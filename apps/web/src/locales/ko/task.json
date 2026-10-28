@@ -1957,6 +1957,7 @@
   "tasksAffected_other": "영향받는 작업 {{count}}개",
   "tcpPortsWithActiveListenersInside": "원격 실행기 내부에 활성 리스너가 있는 TCP 포트. 새로 고침을 클릭하여 다시 검사하세요.",
   "technicalDetails": "기술 세부 정보",
+  "jumpToLatestOutput": "최신 출력으로 이동",
   "terminal": "터미널",
   "terminalCount_one": "터미널 {{count}}개",
   "terminalCount_other": "터미널 {{count}}개",
