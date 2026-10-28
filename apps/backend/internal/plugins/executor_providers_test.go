@@ -104,3 +104,36 @@ func TestPluginExecutorContractProbeRequiresCompleteProvider(t *testing.T) {
 		t.Fatalf("missing provider contract error = %v, want unavailable", err)
 	}
 }
+
+func TestContractProbeSendsTheRegistryAndPassesEachResponseToTheObserver(t *testing.T) {
+	record := &store.Record{
+		Manifest: manifest.Manifest{
+			ID: "example-provider", Capabilities: manifest.Capabilities{ExecutorProvider: true},
+			ExecutorProviders: []manifest.ExecutorProvider{{
+				Key: "lambda", ContractVersion: manifest.CurrentExecutorProviderContractVersion,
+				RequiresHostCapabilities: []manifest.HostCapabilityRequirement{{Name: "workspace_descriptor", Version: 1}},
+			}},
+		},
+		InstallationID: "installation-1",
+	}
+	probe := &executorProviderProbe{response: &pluginsdk.ValidateExecutorProfileResponse{}}
+	gate := &capabilityGate{}
+	observe := func(provider *manifest.ExecutorProvider, response *pluginsdk.ValidateExecutorProfileResponse) error {
+		return gate.observe(capabilityGateKey{installationID: "installation-1", providerKey: provider.Key, process: probe},
+			provider.HostCapabilityRequirements(), response)
+	}
+	err := validateExecutorProviderContractsObserving(context.Background(), record, probe, observe)
+	if !errors.Is(err, ErrExecutorCapabilityMismatch) {
+		t.Fatalf("a provider that requires a capability and echoes none must be rejected at activation, got %v", err)
+	}
+	if len(probe.request.GetHostCapabilities()) != 16 {
+		t.Fatalf("probe carried %d registry rows, want 16", len(probe.request.GetHostCapabilities()))
+	}
+	probe.response = &pluginsdk.ValidateExecutorProfileResponse{
+		ImplementedCapabilities: []*pluginsdk.ExecutorCapabilityVersion{{Name: "workspace_descriptor", Version: 1}},
+	}
+	gate = &capabilityGate{}
+	if err := validateExecutorProviderContractsObserving(context.Background(), record, probe, observe); err != nil {
+		t.Fatalf("a matching echo must pass: %v", err)
+	}
+}

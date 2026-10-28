@@ -107,6 +107,7 @@ func (s *Service) ValidateExecutorProviderProfile(ctx context.Context, executorI
 			Profile: &pluginsdk.ExecutorProfileSnapshot{
 				ProfileId: profile.ProfileID, Config: profile.Config, SecretValues: profile.SecretValues,
 			},
+			HostCapabilities: hostCapabilityRows(),
 		})
 		if callErr != nil {
 			return fmt.Errorf("%w: provider profile validation failed", ErrExecutorProviderUnavailable)
@@ -123,7 +124,7 @@ func (s *Service) ValidateExecutorProviderProfile(ctx context.Context, executorI
 		if response.Error != nil {
 			return fmt.Errorf("%w: provider rejected profile with code %q", ErrExecutorProviderUnavailable, response.Error.Code)
 		}
-		return nil
+		return s.observeExecutorCapabilities(selected.PluginID, remote, declaration, response)
 	})
 	return fieldErrors, err
 }
@@ -242,25 +243,43 @@ func validateExecutorProviderAdmission(record *store.Record, key string) (*manif
 }
 
 func validateExecutorProviderContracts(ctx context.Context, record *store.Record, probe executorProviderContractProbe) error {
+	return validateExecutorProviderContractsObserving(ctx, record, probe, nil)
+}
+
+// validateExecutorProviderContractsObserving probes every declared provider
+// and passes each response to observe, which checks the capability echo.
+func validateExecutorProviderContractsObserving(
+	ctx context.Context,
+	record *store.Record,
+	probe executorProviderContractProbe,
+	observe func(*manifest.ExecutorProvider, *pluginsdk.ValidateExecutorProfileResponse) error,
+) error {
 	if record == nil || len(record.ExecutorProviders) == 0 {
 		return nil
 	}
 	if !record.Capabilities.ExecutorProvider || probe == nil {
 		return fmt.Errorf("%w: provider contract is unavailable", ErrExecutorProviderUnavailable)
 	}
-	for _, provider := range record.ExecutorProviders {
+	for index := range record.ExecutorProviders {
+		provider := &record.ExecutorProviders[index]
 		response, err := probe.ValidateExecutorProfile(ctx, &pluginsdk.ValidateExecutorProfileRequest{
 			Context: &pluginsdk.ExecutorProviderRequestContext{
 				PluginId: record.ID, InstallationId: record.InstallationID, ProviderKey: provider.Key,
 				ContractVersion: int32(provider.ContractVersion),
 			},
-			Profile: &pluginsdk.ExecutorProfileSnapshot{Config: map[string]string{}},
+			Profile:          &pluginsdk.ExecutorProfileSnapshot{Config: map[string]string{}},
+			HostCapabilities: hostCapabilityRows(),
 		})
 		if err != nil {
 			return fmt.Errorf("%w: plugin does not implement the complete executor provider contract", ErrExecutorProviderUnavailable)
 		}
 		if response == nil {
 			return fmt.Errorf("%w: plugin returned an empty executor provider response", ErrExecutorProviderUnavailable)
+		}
+		if observe != nil {
+			if err := observe(provider, response); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -312,5 +331,17 @@ func (s *Service) validateExecutorProviderRuntime(ctx context.Context, record *s
 	if !ok || remote == nil {
 		return fmt.Errorf("%w: plugin process is not running", ErrExecutorProviderUnavailable)
 	}
-	return validateExecutorProviderContracts(ctx, record, remote)
+	return validateExecutorProviderContractsObserving(ctx, record, remote, func(provider *manifest.ExecutorProvider, response *pluginsdk.ValidateExecutorProfileResponse) error {
+		return s.observeExecutorCapabilities(record.ID, remote, provider, response)
+	})
+}
+
+// observeExecutorCapabilities records the capability echo of a profile
+// validation response for the running process and installed generation.
+func (s *Service) observeExecutorCapabilities(pluginID string, remote *pluginsdk.RemotePlugin, declaration *manifest.ExecutorProvider, response *pluginsdk.ValidateExecutorProfileResponse) error {
+	record, err := s.Get(pluginID)
+	if err != nil {
+		return err
+	}
+	return s.capabilityGate.observe(capabilityKeyFor(record, remote, declaration.Key), declaration.HostCapabilityRequirements(), response)
 }
