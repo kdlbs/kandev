@@ -43,6 +43,9 @@ var logOutput io.Writer = os.Stderr
 type mcpServerDef struct {
 	URL  string `json:"url"`
 	Type string `json:"type"`
+	// Headers are sent with every request to the server, e.g. the Authorization
+	// header of an instance that guards its MCP routes.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // mcpServers holds MCP server definitions from --mcp-config.

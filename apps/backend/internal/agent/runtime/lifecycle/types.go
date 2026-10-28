@@ -257,6 +257,9 @@ type AgentExecution struct {
 	standalonePort       int    // Port of the standalone execution
 	runtimeEpoch         uint64 // Local agentctl generation that owns this execution
 	standaloneHostPID    int    // Local agentctl process that created this execution
+	// noBrokerRelay is set when the instance was created without an upstream
+	// broker URL, so its Git credential relay route does not exist.
+	noBrokerRelay bool
 
 	// IsPassthrough captures the session's mode as decided at session-creation
 	// time (TaskSession.IsPassthrough snapshot). StartAgentProcess uses this

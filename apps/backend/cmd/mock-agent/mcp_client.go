@@ -51,7 +51,7 @@ func getMCPClientForServersCtx(ctx context.Context, serverName string, sessionSe
 		return c, nil
 	}
 
-	c, err := mcpclient.NewSSEMCPClient(srv.URL)
+	c, err := mcpclient.NewSSEMCPClient(srv.URL, mcpclient.WithHeaders(srv.Headers))
 	if err != nil {
 		return nil, fmt.Errorf("create SSE client for %s: %w", serverName, err)
 	}
@@ -191,7 +191,7 @@ func registerACPMcpServers(servers []acp.McpServer) map[string]mcpServerDef {
 	registered := make(map[string]mcpServerDef)
 	for _, s := range servers {
 		if s.Sse != nil && s.Sse.Name != "" && s.Sse.Url != "" {
-			registered[s.Sse.Name] = mcpServerDef{URL: s.Sse.Url, Type: "sse"}
+			registered[s.Sse.Name] = mcpServerDef{URL: s.Sse.Url, Type: "sse", Headers: acpHeaders(s.Sse.Headers)}
 		}
 	}
 
@@ -205,6 +205,17 @@ func registerACPMcpServers(servers []acp.McpServer) map[string]mcpServerDef {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent: registered ACP MCP server %s at %s\n", name, server.URL)
 	}
 	return registered
+}
+
+func acpHeaders(headers []acp.HttpHeader) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for _, h := range headers {
+		out[h.Name] = h.Value
+	}
+	return out
 }
 
 func cloneMCPServerDefs(defs map[string]mcpServerDef) map[string]mcpServerDef {

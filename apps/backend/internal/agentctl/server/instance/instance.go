@@ -5,10 +5,12 @@ package instance
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -64,6 +66,9 @@ type Instance struct {
 
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string
+
+	// sessionMCP is the instance's in-memory MCP token holder.
+	sessionMCP *config.SessionMCPToken
 
 	// manager is the process manager handling the agent subprocess (unexported)
 	manager processManager
@@ -238,6 +243,19 @@ type CreateRequest struct {
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
+
+	// SessionMCPToken is the per-instance MCP bearer token. It is held in
+	// memory only and never logged.
+	SessionMCPToken string `json:"session_mcp_token,omitempty"`
+
+	// BrokerUpstreamURL is the backend Git credential broker URL the instance
+	// relays to. Empty for remote executors and instances without a relay.
+	BrokerUpstreamURL string `json:"credential_broker_upstream_url,omitempty"`
+}
+
+// String redacts the session token.
+func (r CreateRequest) String() string {
+	return fmt.Sprintf("CreateRequest{ID:%s}", r.ID)
 }
 
 // CreateResponse contains the result of creating a new agent instance.
@@ -343,4 +361,16 @@ func (i *Instance) setStatus(status string) {
 	i.statusMu.Lock()
 	i.Status = status
 	i.statusMu.Unlock()
+}
+
+// MCPTokenFingerprint is the fingerprint of the token the instance currently
+// holds, or "" when it holds none.
+func (i *Instance) MCPTokenFingerprint() string {
+	return i.sessionMCP.Fingerprint()
+}
+
+// RevokeMCPToken clears the instance's in-memory token, so every MCP route
+// answers as unconfigured.
+func (i *Instance) RevokeMCPToken() {
+	i.sessionMCP.Revoke()
 }

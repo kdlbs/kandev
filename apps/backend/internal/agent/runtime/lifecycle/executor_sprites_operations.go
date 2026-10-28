@@ -490,6 +490,8 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 		McpMode:                    req.McpMode,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
+		SessionMCPToken:            req.SessionMCPToken,
+		BrokerUpstreamURL:          req.BrokerUpstreamURL,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKillFromReq(req),
 		StripEnv:                   stripEnvFromReq(req),

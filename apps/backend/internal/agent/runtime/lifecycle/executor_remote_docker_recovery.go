@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/common/logger"
 	"strings"
 	"sync"
 
@@ -117,7 +118,7 @@ func (r *RemoteDockerExecutor) attachRemoteDockerRecord(
 		client.Close()
 		return nil, nil, RecoveryOutcomeUnknown
 	}
-	return buildRemoteDockerRecoveredInstance(r, req, containerID, info, token, client), client, ""
+	return buildRemoteDockerRecoveredInstance(r, req, containerID, session.endpoints, info, token, client), client, ""
 }
 
 func verifyLiveRemoteDockerContainer(
@@ -256,6 +257,7 @@ func buildRemoteDockerRecoveredInstance(
 	r *RemoteDockerExecutor,
 	req *ExecutorCreateRequest,
 	containerID string,
+	endpoints containerEndpointResolver,
 	info *agentctl.InstanceInfo,
 	token string,
 	client *agentctl.Client,
@@ -270,7 +272,45 @@ func buildRemoteDockerRecoveredInstance(
 		Metadata: cloneKubernetesMetadata(req.Metadata), Env: cloneStringMap(info.Env),
 		WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
 		ProviderSessionID:    info.ProviderSessionID, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
+		tokenControl: remoteDockerTokenControl{
+			logger: r.logger, endpoints: endpoints, containerID: containerID, authToken: token,
+		},
 	}
+}
+
+// remoteDockerTokenControl reaches the container's control server with a
+// short-lived client per call; the recovery client is closed once adoption ends.
+type remoteDockerTokenControl struct {
+	logger      *logger.Logger
+	endpoints   containerEndpointResolver
+	containerID string
+	authToken   string
+}
+
+func (c remoteDockerTokenControl) client(ctx context.Context) (*agentctl.ControlClient, error) {
+	host, port, err := c.endpoints.Resolve(ctx, c.containerID, AgentCtlPort, "")
+	if err != nil {
+		return nil, err
+	}
+	return agentctl.NewControlClient(host, port, c.logger, agentctl.WithControlAuthToken(c.authToken)), nil
+}
+
+func (c remoteDockerTokenControl) DeleteInstanceMatching(ctx context.Context, instanceID, fingerprint string) error {
+	ctl, err := c.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer ctl.Close()
+	return ctl.DeleteInstanceMatching(ctx, instanceID, fingerprint)
+}
+
+func (c remoteDockerTokenControl) RevokeMCPToken(ctx context.Context, instanceID string) error {
+	ctl, err := c.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer ctl.Close()
+	return ctl.RevokeMCPToken(ctx, instanceID)
 }
 
 func remoteDockerRecoveryRequest(record *models.ExecutorRunning) (*ExecutorCreateRequest, string, bool) {

@@ -943,7 +943,7 @@ func (m *Manager) createExecutionWithMode(
 		return nil, err
 	}
 
-	runtimeInstance, err := inputs.runtime.CreateInstance(launchCtx, inputs.preparation.request)
+	runtimeInstance, err := m.createInstanceWithSessionMCP(launchCtx, inputs.runtime, inputs.preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
@@ -1289,6 +1289,7 @@ func (m *Manager) initializeCreatedExecution(
 ) *AgentExecution {
 	execution := runtimeInstance.ToAgentExecution(preparation.request)
 	execution.RuntimeName = rt.Name()
+	execution.noBrokerRelay = preparation.request.BrokerUpstreamURL == ""
 	// Set before executionStore.Add: once the execution is registered, a
 	// concurrent EnsurePassthroughExecution can reach it, and it must never
 	// observe a half-initialised resume intent.

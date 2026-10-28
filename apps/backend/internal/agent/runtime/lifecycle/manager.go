@@ -42,6 +42,10 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
+	// codexProbe overrides the Codex version probe in tests.
+	codexProbe codexProbeFunc
+	// sessionMCPPolicy gates the per-session MCP token and Git broker relay.
+	sessionMCPPolicy      SessionMCPPolicy
 	registry              *registry.Registry
 	eventBus              bus.EventBus
 	credsMgr              CredentialsManager

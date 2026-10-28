@@ -42,7 +42,7 @@ func (m *Manager) validateManagedMCPProfile() error {
 func (m *Manager) canonicalManagedMCPServers() []types.McpServer {
 	servers := make([]types.McpServer, 0, 2)
 	for _, server := range m.cfg.McpServers {
-		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || len(server.Headers) != 0 {
+		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || !m.cfg.SessionMCP.MatchesHeaders(server.Headers) {
 			continue
 		}
 		wantURL := ""
@@ -57,7 +57,7 @@ func (m *Manager) canonicalManagedMCPServers() []types.McpServer {
 		if server.URL != wantURL {
 			continue
 		}
-		servers = append(servers, types.McpServer{Name: injectedKandevMCPServerName, Type: server.Type, URL: wantURL})
+		servers = append(servers, types.McpServer{Name: injectedKandevMCPServerName, Type: server.Type, URL: wantURL, Headers: server.Headers})
 	}
 	return servers
 }
@@ -81,7 +81,7 @@ func (m *Manager) adapterMCPServers() ([]adapter.McpServerConfig, error) {
 	}
 	out := make([]adapter.McpServerConfig, len(servers))
 	for i, server := range servers {
-		out[i] = adapter.McpServerConfig{Name: server.Name, URL: server.URL, Type: server.Type}
+		out[i] = adapter.McpServerConfig{Name: server.Name, URL: server.URL, Type: server.Type, Headers: server.Headers}
 	}
 	return out, nil
 }

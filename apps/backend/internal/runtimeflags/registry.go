@@ -289,6 +289,24 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.sessionMcpToken",
+			EnvVar:      "KANDEV_FEATURES_SESSION_MCP_TOKEN",
+			Kind:        KindFeature,
+			Label:       "Per-session MCP token and Git broker relay",
+			Description: "Requires a per-session token on each agent's Kandev MCP routes and routes the Git credential broker through the session's own agentctl.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Changes every launch, recovery and agent MCP configuration. Retained sessions relaunch on the first restart with it on. " +
+				"Agents whose MCP carrier is not verified (Cursor, Pi, custom TUI agents with a file strategy) and Kubernetes and SSH retained instances fail to launch. " +
+				"Update operator-pinned agentctl images first.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.SessionMCPToken },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.SessionMCPToken = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.coordinator",
 			EnvVar:      "KANDEV_FEATURES_COORDINATOR",
 			Kind:        KindFeature,

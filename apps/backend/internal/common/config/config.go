@@ -570,6 +570,12 @@ type FeaturesConfig struct {
 	// an adoption handshake, which is untested there).
 	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
 
+	// SessionMCPToken makes each agentctl instance authenticate its agent MCP
+	// routes with a per-instance token and relays the Git credential broker
+	// through the instance. Off in every embedded profile; with it off the
+	// backend launches instances exactly as it did without the capability.
+	SessionMCPToken bool `mapstructure:"session_mcp_token" json:"sessionMcpToken"`
+
 	// Coordinator gates workspace coordinators: a per-workspace agent
 	// configuration whose copilot conversation proposes ordinary, unstarted
 	// tasks for a human to approve. Off in prod/dev until the feature is

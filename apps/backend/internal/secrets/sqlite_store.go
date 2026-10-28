@@ -70,6 +70,9 @@ func (s *sqliteStore) initSchema() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
+	if err := s.initSessionKeySchema(); err != nil {
+		return err
+	}
 	// Existing databases: CREATE TABLE IF NOT EXISTS is a no-op, so the
 	// column must also be added via an idempotent migration (ADR 0027).
 	migrate := db.NewRequiredMigrateLogger(s.db, nil)

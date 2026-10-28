@@ -180,6 +180,11 @@ func provideLifecycleManager(
 	registerKubernetesPreparer(preparerRegistry, log)
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStores.runtime)
+	sessionMCPPolicy := sessionMCPPolicyFromConfig(cfg)
+	lifecycleMgr.SetSessionMCPPolicy(sessionMCPPolicy)
+	if err := wireSessionMCPKey(sessionMCPPolicy, standaloneExec, lifecycleMgr, secretStores.runtime, log); err != nil {
+		return nil, err
+	}
 	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
 		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
 	}
@@ -549,4 +554,42 @@ func credentialFilePath(cfg *config.Config) string {
 		return strings.TrimSpace(cfg.Credentials.File)
 	}
 	return strings.TrimSpace(os.Getenv("KANDEV_CREDENTIALS_FILE"))
+}
+
+// sessionMCPPolicyFromConfig builds the per-session MCP token policy from the
+// runtime flag. It is the single place the config field is read.
+func sessionMCPPolicyFromConfig(cfg *config.Config) lifecycle.SessionMCPPolicy {
+	return lifecycle.NewSessionMCPPolicy(cfg.Features.SessionMCPToken)
+}
+
+// wireSessionMCPKey makes the MCP token signing key usable before recovery
+// runs: it is created or repaired here, and adoption only ever reads it. With
+// the policy disabled nothing is read or created. With it enabled, a runtime
+// secret store that cannot hold the key stops startup rather than leaving
+// sessions unauthenticated.
+func wireSessionMCPKey(
+	policy lifecycle.SessionMCPPolicy,
+	standalone *lifecycle.StandaloneExecutor,
+	mgr *lifecycle.Manager,
+	store secrets.SecretStore,
+	log *logger.Logger,
+) error {
+	if !policy.Enabled() {
+		return nil
+	}
+	keys, ok := store.(secrets.SessionKeyStore)
+	if !ok {
+		return errors.New("features.sessionMcpToken is enabled but the runtime secret store cannot hold the MCP token signing key")
+	}
+	standalone.SetSessionKeyReader(func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return keys.SessionMCPKey(ctx)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := mgr.EnsureSessionMCPKey(ctx); err != nil {
+		log.Error("mcp_token_key_unavailable: could not prepare the MCP token signing key; launches will be refused", zap.Error(err))
+	}
+	return nil
 }
