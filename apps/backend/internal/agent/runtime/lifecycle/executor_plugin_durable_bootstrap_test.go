@@ -452,6 +452,7 @@ func TestCleanupThatLosesTheClaimRaceIsRecordedAndRunAfterRelease(t *testing.T) 
 	resource := &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-race", StateJson: `{"resource":"one"}`, Platform: "linux-amd64", StateVersion: 1}
 	runtime, operations, store := claimSettlementRuntime(t, "provisioned", nil, resource)
 	store.claimErr = recoveryclaim.ErrBusy
+	store.checkpointErr = recoveryclaim.ErrBusy
 
 	err := destroyClaimEnvironment(runtime)
 	require.Error(t, err)
@@ -462,6 +463,7 @@ func TestCleanupThatLosesTheClaimRaceIsRecordedAndRunAfterRelease(t *testing.T) 
 	require.Equal(t, "provisioned", inventory.Phase)
 
 	store.claimErr = nil
+	store.checkpointErr = nil
 	store.record.TransientAuthToken = ""
 	instances, err := runtime.RecoverInstances(context.Background(), []*models.ExecutorRunning{store.record})
 	require.NoError(t, err)

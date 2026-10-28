@@ -108,6 +108,21 @@ func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ c
 	return nil
 }
 
+// RecordPluginExecutorCleanupRequested ignores checkpointErr and claimErr: the
+// real write does not wait on the environment claim.
+func (f *pluginExecutorInventoryStoreFake) RecordPluginExecutorCleanupRequested(_ context.Context, _, executionID string) error {
+	if f.record == nil || f.record.AgentExecutionID != executionID {
+		return models.ErrExecutionRotated
+	}
+	inventory, err := decodePluginExecutorInventory(f.record.Metadata)
+	if err != nil {
+		return err
+	}
+	inventory.CleanupRequested = true
+	f.record.Metadata = map[string]interface{}{MetadataKeyPluginExecutor: inventory}
+	return nil
+}
+
 func (f *pluginExecutorInventoryStoreFake) DeletePluginExecutorInventoryIfCurrent(_ context.Context, sessionID, executionID string, generation int64) error {
 	if f.record == nil || f.record.SessionID != sessionID {
 		return models.ErrExecutorRunningNotFound

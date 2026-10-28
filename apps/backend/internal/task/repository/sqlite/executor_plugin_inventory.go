@@ -345,6 +345,11 @@ func readPluginExecutorInventoryForUpdate(ctx context.Context, tx *sqlx.Tx, sess
 	return executionID, metadata, updatedAt, nil
 }
 
+// pluginAuthTokenSecretMetadataKey names the stored reference to the agentctl
+// auth-token secret. A checkpoint that adds it must make it durable, because
+// recovery reads the token through it; one that omits it leaves it in place.
+const pluginAuthTokenSecretMetadataKey = "env_secret_id_AGENTCTL_AUTH_TOKEN"
+
 func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface{}) (map[string]interface{}, error) {
 	merged := make(map[string]interface{}, len(current)+1)
 	for key, value := range current {
@@ -363,6 +368,9 @@ func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface
 		return nil, errors.New("plugin executor checkpoint envelope is invalid")
 	}
 	merged["plugin_executor"] = normalized
+	if ref, ok := incoming[pluginAuthTokenSecretMetadataKey].(string); ok && ref != "" {
+		merged[pluginAuthTokenSecretMetadataKey] = ref
+	}
 	return merged, nil
 }
 
