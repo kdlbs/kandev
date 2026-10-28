@@ -17,7 +17,7 @@ vi.mock("@/lib/api", () => ({
   fetchTaskByExternalId: (...args: unknown[]) => lookupMock(...args),
 }));
 
-import { useTaskCreationRecovery } from "./task-create-dialog-recovery";
+import { isRecoverySubmitBlocked, useTaskCreationRecovery } from "./task-create-dialog-recovery";
 
 const ARGS = {
   enabled: true,
@@ -289,5 +289,56 @@ describe("useTaskCreationRecovery read-only operations", () => {
       await result.current.hydrateTask(result.current.receipt!);
     });
     expect(result.current.receipt?.state).toBe("unavailable");
+  });
+});
+
+describe("isRecoverySubmitBlocked", () => {
+  it("blocks ordinary submission only after a receipt leaves submitting", () => {
+    const base = createTaskCreationReceipt({
+      scope: { userId: "user-1", workspaceId: "ws-1", draftId: "task" },
+      payload: payload(),
+      runtimeId: "runtime-1",
+    });
+    expect(isRecoverySubmitBlocked(null)).toBe(false);
+    expect(isRecoverySubmitBlocked({ ...base, state: "submitting" })).toBe(false);
+    expect(isRecoverySubmitBlocked({ ...base, state: "unknown" })).toBe(true);
+    expect(isRecoverySubmitBlocked({ ...base, state: "accepted" })).toBe(true);
+  });
+});
+
+describe("lookup misses preserve a known task state", () => {
+  it("keeps accepted and unavailable states while marking uncertainty", () => {
+    const { result } = renderHook(() => useTaskCreationRecovery(ARGS));
+    let started: ReturnType<typeof result.current.beginSubmission>;
+    act(() => {
+      started = result.current.beginSubmission(payload());
+    });
+    let accepted: ReturnType<typeof result.current.applyCreateResult>;
+    act(() => {
+      accepted = result.current.applyCreateResult(started!.receipt, {
+        kind: "accepted",
+        taskId: "task-1",
+        taskSessionId: "session-1",
+        queuedForStepId: null,
+      });
+    });
+    let missed: ReturnType<typeof result.current.applyLookupMiss> = null;
+    act(() => {
+      missed = result.current.applyLookupMiss(accepted!);
+    });
+    expect(missed).toMatchObject({ state: "accepted", taskId: "task-1", everUncertain: true });
+
+    let unavailable: ReturnType<typeof result.current.applyCreateResult>;
+    act(() => {
+      unavailable = result.current.applyCreateResult(missed!, {
+        kind: "unknown",
+        taskId: "task-1",
+      });
+    });
+    let missedAgain: ReturnType<typeof result.current.applyLookupMiss> = null;
+    act(() => {
+      missedAgain = result.current.applyLookupMiss(unavailable!);
+    });
+    expect(missedAgain).toMatchObject({ state: "unknown", taskId: "task-1" });
   });
 });

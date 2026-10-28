@@ -1,4 +1,4 @@
-import { expect, type Page, type Route } from "@playwright/test";
+import { expect, type Locator, type Page, type Route } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -47,16 +47,21 @@ export async function openMobileCreateDialog(page: Page) {
   return dialog;
 }
 
-export async function selectRecoveryWorkflow(
-  dialog: ReturnType<Page["getByTestId"]>,
-  workflowId: string,
-) {
+export async function selectRecoveryWorkflow(dialog: Locator, workflowId: string) {
   const trigger = dialog.getByTestId("workflow-selector-trigger");
-  if (await trigger.isVisible()) {
-    await trigger.click();
-    await dialog.getByTestId(`workflow-option-select-${workflowId}`).click();
-    await expect(dialog.getByTestId("workflow-selector-popover")).toHaveCount(0);
-  }
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await dialog.getByTestId(`workflow-option-select-${workflowId}`).click();
+  await expect(dialog.getByTestId("workflow-selector-popover")).toHaveCount(0);
+}
+
+/** Waits for the dialog's data-driven selectors before the default readiness gate. */
+export async function expectCreateReady(dialog: Locator) {
+  await expect(dialog.getByTestId("workflow-selector-trigger")).toBeVisible();
+  await expect(dialog.getByTestId("agent-profile-selector")).toBeVisible();
+  await expect(dialog.getByTestId("executor-profile-selector")).toBeVisible();
+  await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+  await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled();
 }
 
 export async function fillRecoveryDraft(

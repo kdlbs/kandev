@@ -15,7 +15,10 @@ import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
-import { useTaskCreationRecovery } from "@/components/task-create-dialog-recovery";
+import {
+  isRecoverySubmitBlocked,
+  useTaskCreationRecovery,
+} from "@/components/task-create-dialog-recovery";
 import { resolveTaskCreationDraftId } from "@/lib/task-creation-receipt";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -575,13 +578,14 @@ export function useTaskCreateDialogSetup(
     mcpSelectionEditor: mcp.editor,
     initialWorkspaceLayout,
   });
+  const recoveryBlocksSubmit = isRecoverySubmitBlocked(submitHandlers.recovery?.receipt);
   const { guardedHandleSubmit, handleKeyDown } = useDialogSubmitShortcut(
     submitHandlers.handleSubmit,
     resolvedProps.submitBlockedReason ??
       savedBaseSubmitBlockedReason ??
       workflowAgentOverridesBlockedReason ??
       data.executorOwnershipBlockedReason,
-    !isTaskStarted && computed.noCompatibleAgent,
+    recoveryBlocksSubmit || (!isTaskStarted && computed.noCompatibleAgent),
   );
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);

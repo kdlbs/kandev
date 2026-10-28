@@ -285,6 +285,15 @@ For a Worktree task with one initial repository, **Advanced settings** includes 
 
    On mobile, **Plan mode** and **Create only** provide the same behavior as the two non-primary actions.
 
+When you choose **Remote**, Kandev can reuse an available matching checkout.
+If a previously registered local checkout folder was deleted, it uses another
+available source or creates a managed clone. The original local registration
+and its existing task associations remain unchanged; selecting that local
+repository explicitly still requires its checkout to be available. If an
+existing local checkout's origin no longer matches the selected remote,
+Kandev reports a validation error. Correct its origin or select it explicitly
+as a local repository.
+
 ### Recover an uncertain task creation
 
 A connection interruption can hide the result of **Start task**, **Start task in plan mode**, or **Create without starting agent**. The task can exist even when the dialog reports an error. Do not submit the same work again.
@@ -301,15 +310,6 @@ An unconfirmed submission keeps its earlier values and start mode. A later error
 If **Check status** reports that creation is still in progress, open the task and wait. Recovery does not start or repair the task. If the task is no longer available, select **Close** and create a new task only when the work is still required.
 
 Phones show the same actions in the dialog footer. The status and actions stay above the safe area while the draft scrolls.
-
-When you choose **Remote**, Kandev can reuse an available matching checkout.
-If a previously registered local checkout folder was deleted, it uses another
-available source or creates a managed clone. The original local registration
-and its existing task associations remain unchanged; selecting that local
-repository explicitly still requires its checkout to be available. If an
-existing local checkout's origin no longer matches the selected remote,
-Kandev reports a validation error. Correct its origin or select it explicitly
-as a local repository.
 
 ### Reduce downloads for a large remote repository
 

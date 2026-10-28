@@ -70,6 +70,7 @@ A versioned receipt contains:
 | `version`, `submissionId`, `externalId` | Decoder version and immutable identity. |
 | `userId`, `workspaceId`, `draftId` | Browser owner, workspace, and draft binding. |
 | `payload` | Captured normalized creation values, including original start intent. |
+| `draftTitle` | The form title at submission, including an auto-generated title omitted from the request. |
 | `state` | `submitting`, `unknown`, `incomplete`, `accepted`, or `unavailable`. |
 | `everUncertain` | Sticky evidence that an earlier attempt can still finish. |
 | `taskId`, `creationComplete` | Exact observed server identity and settlement. |
@@ -115,6 +116,8 @@ Check status calls the existing read-only route:
 Validate the returned workspace, external ID, task ID, and settlement field.
 Both workspace and external ID are required; a response that omits either is a mismatch.
 Once observed, `taskId` cannot change within a receipt, and a previously verified ID survives later malformed data.
+A lookup miss or read failure preserves the last observed accepted, incomplete, or unavailable state;
+only a submission without an observed task becomes unknown.
 A mismatched response leaves recovery unresolved and never selects a similar task.
 Do not resolve through workflow snapshots, titles, profiles, repositories, or recency.
 
@@ -198,8 +201,9 @@ Record `taskId` and accepted creation state before invoking `onSuccess`, clearin
 recording last-used settings, changing plan mode, or navigating.
 Keep presentation errors separate from creation errors after that point.
 An Open task action uses the recorded task and the existing navigation path.
-When the live draft differs from the submitted snapshot, including attachment identity,
-acceptance records the task but does not run callbacks, clear the draft, close, or navigate.
+When the live draft differs from the submitted snapshot, including an auto-generated title,
+description, or attachment identity, acceptance records the task but does not run callbacks,
+clear the draft, close, or navigate.
 Opening a task whose creation is not accepted adds a `creation=pending` route marker; the task page
 then suppresses automatic session ensure so inspection cannot race the original create owner.
 Explicit user start controls remain available.

@@ -29,6 +29,8 @@ export type TaskCreationReceipt = {
   userId: string | null;
   workspaceId: string;
   draftId: string;
+  /** The form title at submission, including an auto-generated title. */
+  draftTitle?: string;
   payload: CreateTaskParams;
   state: TaskCreationReceiptState;
   /** Sticky proof that an earlier attempt can still finish after any miss. */
@@ -99,6 +101,7 @@ export function createTaskCreationReceipt(input: {
   scope: TaskCreationScope;
   payload: CreateTaskParams;
   runtimeId: string | null;
+  draftTitle?: string;
 }): TaskCreationReceipt {
   const submissionId = generateUUID();
   const payload: CreateTaskParams = {
@@ -112,6 +115,7 @@ export function createTaskCreationReceipt(input: {
     userId: input.scope.userId,
     workspaceId: input.scope.workspaceId,
     draftId: input.scope.draftId,
+    draftTitle: input.draftTitle,
     payload,
     state: "submitting",
     everUncertain: false,
@@ -180,6 +184,7 @@ export function parseTaskCreationReceipt(value: unknown): TaskCreationReceipt | 
   ) {
     return null;
   }
+  if (value.draftTitle !== undefined && typeof value.draftTitle !== "string") return null;
   if (!isRecord(value.payload)) return null;
   if (typeof value.everUncertain !== "boolean" || typeof value.replayable !== "boolean") {
     return null;

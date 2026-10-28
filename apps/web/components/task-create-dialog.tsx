@@ -55,6 +55,7 @@ import {
   TaskCreateDialogRecoveryFooter,
   TaskCreateDialogRecoveryPanel,
 } from "@/components/task-create-dialog-recovery-panel";
+import { isRecoverySubmitBlocked } from "@/components/task-create-dialog-recovery";
 
 export type { TaskCreateDialogProps } from "@/components/task-create-dialog-types";
 
@@ -409,9 +410,7 @@ function TaskCreateDialogContent(props: TaskCreateDialogProps) {
     { preserveQueuedLastUsedOnClose },
   );
   const { guardedHandleSubmit } = setup;
-  const recoveryActive = Boolean(
-    setup.recovery?.receipt && setup.recovery.receipt.state !== "submitting",
-  );
+  const recoveryActive = isRecoverySubmitBlocked(setup.recovery?.receipt ?? null);
   const focusReturn = useTaskCreateFocusReturn(props, setup.isCreateMode);
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useTaskCreateDialogQueuedSettingsCloseReset(

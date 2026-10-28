@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   push: vi.fn(),
   freshConsent: vi.fn(),
+  ensureConsent: vi.fn(),
   repositoriesPayload: vi.fn(),
 }));
 
@@ -67,7 +68,7 @@ vi.mock("@/components/task-create-dialog-fresh-branch-consent", () => ({
   },
   useFreshBranchConsent: () => ({
     pendingDiscard: null,
-    ensureFreshBranchConsent: async () => [],
+    ensureFreshBranchConsent: (...args: unknown[]) => mocks.ensureConsent(...args),
     confirmForDirtyFiles: (...args: unknown[]) => mocks.freshConsent(...args),
     createTaskWithFreshBranchRetry: vi.fn(),
   }),
@@ -77,7 +78,7 @@ vi.mock("@/components/task-create-dialog-helpers", () => ({
   buildCreateTaskPayload: (args: Record<string, unknown>) => ({
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    title: args.trimmedTitle,
+    ...(args.autoTitle ? { auto_title: true } : { title: args.trimmedTitle }),
     description: args.trimmedDescription,
     state: args.withAgent ? "IN_PROGRESS" : "CREATED",
     start_agent: args.withAgent || undefined,
@@ -263,6 +264,8 @@ beforeEach(() => {
   mocks.toast.mockReset();
   mocks.push.mockReset();
   mocks.freshConsent.mockReset();
+  mocks.ensureConsent.mockReset();
+  mocks.ensureConsent.mockResolvedValue([]);
   mocks.repositoriesPayload.mockReset();
   mocks.repositoriesPayload.mockReturnValue([]);
   mocks.lookup.mockRejectedValue(notFound());
@@ -623,6 +626,34 @@ describe("native recovery owner fencing", () => {
     expect(result.current.recovery.receipt?.taskId).toBe("task-1");
   });
 
+  it("does not publish a receipt after close/reopen during branch consent", async () => {
+    let resolveConsent!: (value: string[]) => void;
+    mocks.ensureConsent.mockReturnValue(
+      new Promise((resolve) => {
+        resolveConsent = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(
+      (props: WiredProps) => useWired(props.deps, props.recovery),
+      { initialProps: { deps: {}, recovery: {} } },
+    );
+
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.handlers.handleSubmit(SUBMIT_EVENT);
+      await Promise.resolve();
+    });
+    rerender({ deps: {}, recovery: { open: false } });
+    rerender({ deps: {}, recovery: { open: true } });
+    await act(async () => {
+      resolveConsent([]);
+      await pending;
+    });
+
+    expect(mocks.createTask).not.toHaveBeenCalled();
+    expect(result.current.recovery.receipt).toBeNull();
+  });
+
   it("does not POST a retry after the owner scope changes during lookup", async () => {
     mocks.createTask.mockRejectedValueOnce(new Error(LOST_RESPONSE));
     let resolveLookup!: (value: unknown) => void;
@@ -719,6 +750,45 @@ describe("newer draft preservation during accepted handoff", () => {
     });
     return result;
   }
+
+  it("treats an unchanged auto-generated title as matching the submission", async () => {
+    mocks.createTask.mockResolvedValue(createdResponse());
+    const { result } = renderHook(() => useWired({ autoTitle: true }));
+
+    await act(async () => {
+      await result.current.handlers.handleSubmit(SUBMIT_EVENT);
+    });
+
+    expect(mocks.onSuccess).toHaveBeenCalledTimes(1);
+    expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+    expect(mocks.clearDraft).toHaveBeenCalled();
+  });
+
+  it("keeps a title edit open when auto-generated titles are enabled", async () => {
+    let resolveCreate!: (value: ReturnType<typeof createdResponse>) => void;
+    mocks.createTask.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(() => useWired({ autoTitle: true }));
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.handlers.handleSubmit(SUBMIT_EVENT);
+      await Promise.resolve();
+    });
+    currentTitle = "Edited auto title";
+    rerender();
+    await act(async () => {
+      resolveCreate(createdResponse());
+      await pending;
+    });
+
+    expect(mocks.onSuccess).not.toHaveBeenCalled();
+    expect(mocks.onOpenChange).not.toHaveBeenCalled();
+    expect(mocks.clearDraft).not.toHaveBeenCalled();
+    expect(result.current.recovery.receipt?.state).toBe("accepted");
+  });
 
   it("keeps a title-only edit open with Open task", async () => {
     const result = await submitWithNewerDraft(() => {

@@ -1,5 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import { useRegularMode } from "../../helpers/regular-mode";
 import {
   RECOVERY_CHECK,
@@ -8,6 +8,7 @@ import {
   RECOVERY_RETRY,
   RECOVERY_STATUS,
   expectNoOpeningPrompt,
+  expectCreateReady,
   expectOneRecoveryTask,
   expectOpeningPrompt,
   fillRecoveryDraft,
@@ -21,8 +22,6 @@ import {
 } from "./task-create-recovery-helpers";
 
 useRegularMode();
-
-const CREATE_RESPONSE_TIMEOUT = 30_000;
 
 function uniqueTitle(testInfo: { workerIndex: number; repeatEachIndex: number }, label: string) {
   return `Recovery ${label} ${testInfo.workerIndex}-${testInfo.repeatEachIndex}-${Date.now()}`;
@@ -51,7 +50,7 @@ test.describe("native task creation recovery", () => {
     await selectRecoveryWorkflow(dialog, workflowId);
     await fillRecoveryDraft(dialog, title, prompt);
     const start = dialog.getByTestId("submit-start-agent");
-    await expect(start).toBeEnabled({ timeout: CREATE_RESPONSE_TIMEOUT });
+    await expectCreateReady(dialog);
 
     const firstPost = testPage.waitForResponse(
       (response) =>
@@ -80,13 +79,15 @@ test.describe("native task creation recovery", () => {
       (request) =>
         request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/tasks",
     );
+    const retryResponse = waitForHttp(testPage, "POST", /^\/api\/v1\/tasks$/);
     await dialog.getByTestId(RECOVERY_RETRY).click();
     await lookup;
     const retried = await retryPost;
+    await retryResponse;
     const retriedBody = retried.postDataJSON() as { external_id?: string };
     expect(retriedBody.external_id).toBe(captured[0]!.external_id);
 
-    await expect(dialog).toBeHidden({ timeout: CREATE_RESPONSE_TIMEOUT });
+    await expect(dialog).toBeHidden();
     expect(captured).toHaveLength(2);
     expect(captured[1]!.id).toBe(captured[0]!.id);
     expect(captured[1]!.external_id).toBe(captured[0]!.external_id);
@@ -113,9 +114,8 @@ test.describe("native task creation recovery", () => {
     const dialog = await openDesktopCreateDialog(testPage);
     await selectRecoveryWorkflow(dialog, workflowId);
     await fillRecoveryDraft(dialog, title, prompt);
-    const start = dialog.getByTestId("submit-start-agent");
-    await expect(start).toBeEnabled({ timeout: CREATE_RESPONSE_TIMEOUT });
-    await start.click();
+    await expectCreateReady(dialog);
+    await dialog.getByTestId("submit-start-agent").click();
     await expect(dialog.getByTestId(RECOVERY_STATUS)).toBeVisible();
     expect(captured).toHaveLength(1);
 
@@ -133,13 +133,20 @@ test.describe("native task creation recovery", () => {
     await expect(reopened.getByTestId(RECOVERY_CLOSE)).toBeVisible();
     expect(postCount, "restoration must not submit a create request").toBe(1);
 
+    const statusLookup = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && response.url().includes("/tasks/by-external-id"),
+    );
     await reopened.getByTestId(RECOVERY_CHECK).click();
+    await statusLookup;
     await expect(reopened.getByTestId(RECOVERY_STATUS)).toContainText("This task was created.");
     await expect(reopened.getByTestId(RECOVERY_OPEN)).toBeVisible();
     expect(postCount, "status lookup must not submit a create request").toBe(1);
 
+    const taskRead = waitForHttp(testPage, "GET", /^\/api\/v1\/tasks\/[^/]+$/);
     await reopened.getByTestId(RECOVERY_OPEN).click();
-    await expect(reopened).toBeHidden({ timeout: CREATE_RESPONSE_TIMEOUT });
+    await taskRead;
+    await expect(reopened).toBeHidden();
     expect(postCount, "opening the recovered task must not create another").toBe(1);
     await expectOneRecoveryTask(apiClient, seedData.workspaceId, title, captured[0]!.id);
   });
@@ -163,16 +170,20 @@ test.describe("native task creation recovery", () => {
     const dialog = await openDesktopCreateDialog(testPage);
     await selectRecoveryWorkflow(dialog, workflowId);
     await fillRecoveryDraft(dialog, title, prompt);
-    const start = dialog.getByTestId("submit-start-agent");
-    await expect(start).toBeEnabled({ timeout: CREATE_RESPONSE_TIMEOUT });
-    await start.click();
+    await expectCreateReady(dialog);
+    await dialog.getByTestId("submit-start-agent").click();
     await expect(dialog.getByTestId(RECOVERY_STATUS)).toBeVisible();
 
     await expectOneRecoveryTask(apiClient, seedData.workspaceId, title, captured[0]!.id);
     const sessionsBefore = (await apiClient.listTaskSessions(captured[0]!.id)).sessions.length;
 
     const projection = await installIncompleteLookupProjection(testPage);
+    const incompleteLookup = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && response.url().includes("/tasks/by-external-id"),
+    );
     await dialog.getByTestId(RECOVERY_CHECK).click();
+    await incompleteLookup;
     await expect(dialog.getByTestId(RECOVERY_STATUS)).toContainText(
       "This task exists. Creation is still in progress.",
     );
@@ -182,8 +193,13 @@ test.describe("native task creation recovery", () => {
     );
 
     projection.restore();
+    const settledLookup = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && response.url().includes("/tasks/by-external-id"),
+    );
     await dialog.getByTestId(RECOVERY_CHECK).click();
-    await expect(dialog).toBeHidden({ timeout: CREATE_RESPONSE_TIMEOUT });
+    await settledLookup;
+    await expect(dialog).toBeHidden();
     expect(captured).toHaveLength(1);
     expect((await apiClient.listTaskSessions(captured[0]!.id)).sessions.length).toBe(
       sessionsBefore,
@@ -210,15 +226,16 @@ test.describe("native task creation recovery", () => {
     const dialog = await openDesktopCreateDialog(testPage);
     await selectRecoveryWorkflow(dialog, workflowId);
     await fillRecoveryDraft(dialog, title, prompt);
-    const start = dialog.getByTestId("submit-start-agent");
-    await expect(start).toBeEnabled({ timeout: CREATE_RESPONSE_TIMEOUT });
+    await expectCreateReady(dialog);
     await dialog.getByTestId("submit-start-agent-chevron").click();
     await testPage.getByTestId("submit-create-without-agent").click();
     await expect(dialog.getByTestId(RECOVERY_STATUS)).toBeVisible();
     expect(captured).toHaveLength(1);
 
+    const retryResponse = waitForHttp(testPage, "POST", /^\/api\/v1\/tasks$/);
     await dialog.getByTestId(RECOVERY_RETRY).click();
-    await expect(dialog).toBeHidden({ timeout: CREATE_RESPONSE_TIMEOUT });
+    await retryResponse;
+    await expect(dialog).toBeHidden();
     expect(captured).toHaveLength(2);
     expect(captured[1]!.id).toBe(captured[0]!.id);
     expect(captured[1]!.external_id).toBe(captured[0]!.external_id);

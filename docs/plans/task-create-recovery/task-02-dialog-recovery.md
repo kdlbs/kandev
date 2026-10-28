@@ -169,8 +169,9 @@ Completed on 2026-10-28.
 - Close preserves an unresolved receipt, and a same-tab reload restores it without creating anything.
 - Added copy for `en`, `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja`, and `ko`.
 - `components/task-create-dialog-creation-retry.test.tsx` proves lost-response retry, same-tick admission, independent identities, captured values, throwing callbacks, sticky uncertainty, rejection evidence, incomplete settlement, Open task, and missing-session hydration.
-- Focused Vitest suites: 11 files and 187 tests passed, including the task-page creation-pending helper suite.
+- Focused Vitest suites: 11 files and 192 tests passed, including the task-page creation-pending helper suite.
 - `(cd apps/web && pnpm run typecheck)`: passed.
 - `(cd apps/web && pnpm exec eslint ...)`: passed.
 - `(cd apps/web && pnpm run i18n:check)` and `i18n:ratchet`: passed.
-- Remediation: every async continuation carries an owner/open-cycle generation and rechecks it after lookup, consent, hydration, and response awaits. Closing or changing scope lets a late result update only its own retained receipt. In-memory receipts survive close and reopen when storage fails. Accepted handoff compares the live title, description, and attachment descriptors and leaves newer drafts open with Open task. Incomplete or unknown tasks open behind the `creation=pending` read-only gate. Stale branch-policy failures refresh policy choices while preserving sticky uncertainty.
+- Remediation: every async continuation captures an owner/open-cycle generation before its first await and rechecks it after lookup, consent, hydration, and response awaits. Closing or changing scope lets a late result update only its own retained receipt. In-memory receipts survive close and reopen when storage fails. Accepted handoff compares the live auto-title, description, and attachment descriptors and leaves newer drafts open with Open task. Incomplete or unknown tasks open behind the `creation=pending` read-only gate. Stale branch-policy failures refresh policy choices while preserving sticky uncertainty. Lookup misses preserve an already observed task state.
+- Fixup review split receipt storage, owner fencing, resolution, handoff, and native recovery into smaller modules; the new functions meet the frontend limits without new complexity exemptions.

@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import {
@@ -7,6 +8,7 @@ import {
   RECOVERY_OPEN,
   RECOVERY_RETRY,
   RECOVERY_STATUS,
+  expectCreateReady,
   expectOneRecoveryTask,
   expectOpeningPrompt,
   fillRecoveryDraft,
@@ -37,9 +39,8 @@ test("phone keeps one native task through a lost response with reachable recover
   const dialog = await openMobileCreateDialog(testPage);
   await selectRecoveryWorkflow(dialog, workflowId);
   await fillRecoveryDraft(dialog, title, prompt);
-  const start = dialog.getByTestId("submit-start-agent");
-  await expect(start).toBeEnabled({ timeout: 30_000 });
-  await start.click();
+  await expectCreateReady(dialog);
+  await dialog.getByTestId("submit-start-agent").click();
   await expect(dialog.getByTestId(RECOVERY_STATUS)).toBeVisible();
 
   const check = dialog.getByTestId(RECOVERY_CHECK);
@@ -87,13 +88,15 @@ test("phone keeps one native task through a lost response with reachable recover
   await expect(reopened.getByTestId(RECOVERY_STATUS)).toBeVisible();
   expect(postCount, "phone restoration must not create another task").toBe(1);
 
+  const retryResponse = waitForHttp(testPage, "POST", /^\/api\/v1\/tasks$/);
   await reopened.getByTestId(RECOVERY_RETRY).click();
+  await retryResponse;
   await expect(reopened.getByTestId(RECOVERY_STATUS)).toContainText("This task was created.");
   await expect(reopened.getByTestId(RECOVERY_OPEN)).toBeVisible();
   expect(postCount).toBe(2);
 
   await reopened.getByTestId(RECOVERY_OPEN).click();
-  await expect(reopened).toBeHidden({ timeout: 30_000 });
+  await expect(reopened).toBeHidden();
   await expectOneRecoveryTask(apiClient, seedData.workspaceId, title, captured[0]!.id);
   await expectOpeningPrompt(apiClient, captured[0]!.id, prompt);
 });

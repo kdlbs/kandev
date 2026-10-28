@@ -287,8 +287,9 @@ Implementation checks on 2026-10-28:
 
 - `(cd apps/backend && go test ./internal/task/handlers -count=1)`: passed.
 - `bash scripts/lint-go-changed` on the three changed Go files: 0 issues.
-- Focused Vitest suites for receipt, recovery, creation retry, dialog, API transport, and the creation-pending task-page helper: passed, 11 files and 187 tests.
-- Remediation review covered owner-generation fencing, in-memory retention on storage failure, live draft and attachment comparison, the incomplete-task read-only route gate, stale branch-policy recovery, and foreign create-response rejection.
+- Focused Vitest suites for receipt, recovery, creation retry, dialog, API transport, and the creation-pending task-page helper: passed, 11 files and 192 tests.
+- Remediation review covered owner-generation fencing before the first await, in-memory retention on storage failure, auto-title-aware live draft comparison, the incomplete-task read-only route gate, stale branch-policy recovery, state-preserving lookup misses, and foreign create-response rejection.
+- Fixup review split receipt storage, owner fencing, resolution, handoff, and native recovery into smaller modules so the new functions meet the frontend limits without new complexity exemptions.
 - `(cd apps/web && pnpm run typecheck)`: passed.
 - Focused ESLint on the changed web modules: passed.
 - `(cd apps/web && pnpm run i18n:check)` and `i18n:ratchet`: passed for all seven locales and the pseudo catalog.
