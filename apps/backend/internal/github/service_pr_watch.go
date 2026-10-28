@@ -1140,19 +1140,24 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 		if len(allWatches) == 0 {
 			return
 		}
-		if _, err := s.SyncWorkspaceWatchesBatched(syncCtx, workspaceID, allWatches); err != nil {
+		outcome := s.syncWorkspaceWatchesBatched(syncCtx, workspaceID, allWatches, false, false)
+		if outcome.Err != nil {
 			// Batched fetch failed (noop client, auth blip, GraphQL error).
 			// Classify the failure before fallback. Authentication and rate
 			// failures are workspace-wide, so another provider call cannot
 			// improve the result and would consume the same exhausted budget.
 			s.logger.Debug("batched workspace PR sync failed; falling back per-task",
-				zap.Int("watches", len(allWatches)), zap.Error(err))
-			if !prWatchBatchFallbackAllowed(err) {
+				zap.Int("watches", len(allWatches)), zap.Error(outcome.Err))
+			if !prWatchBatchFallbackAllowed(outcome.Err) {
 				s.logger.Debug("skipping workspace PR fallback after provider admission failure",
-					zap.String("workspace_id", workspaceID), zap.Error(err))
+					zap.String("workspace_id", workspaceID), zap.Error(outcome.Err))
 				return
 			}
-			if fallbackErr := s.refreshWatchesPerWatch(syncCtx, workspaceID, allWatches); fallbackErr != nil {
+			fallbackWatches := prWatchPendingWatches(outcome.Pending)
+			if len(fallbackWatches) == 0 {
+				fallbackWatches = allWatches
+			}
+			if fallbackErr := s.refreshWatchesPerWatch(syncCtx, workspaceID, fallbackWatches); fallbackErr != nil {
 				s.logger.Debug("workspace PR fallback stopped after provider admission failure",
 					zap.String("workspace_id", workspaceID), zap.Error(fallbackErr))
 			}
@@ -2089,10 +2094,30 @@ func (s *Service) runBatchedOrPerWatchSync(
 		return s.store.ListTaskPRsByTask(ctx, taskID)
 	}
 	workspaceID := watches[0].WorkspaceID
-	if _, batchErr := s.syncWorkspaceWatchesBatched(ctx, workspaceID, watches, explicitRefresh, false); batchErr != nil {
+	outcome := s.syncWorkspaceWatchesBatched(ctx, workspaceID, watches, explicitRefresh, false)
+	if outcome.Err != nil {
+		if !prWatchBatchFallbackAllowed(outcome.Err) {
+			// Local admission deferral is not a provider observation, and an
+			// authentication or rate boundary cannot be improved by a second
+			// transport. Keep completed rows and report the pending result
+			// without another provider attempt.
+			s.logger.Debug("batched PR sync incomplete; skipping per-watch fallback",
+				zap.String("task_id", taskID),
+				zap.Bool("deferred", outcome.Deferred != nil),
+				zap.Error(outcome.Err))
+			prs, listErr := s.store.ListTaskPRsByTask(ctx, taskID)
+			if listErr != nil {
+				return nil, outcome.Err
+			}
+			return prs, outcome.Err
+		}
 		s.logger.Debug("batched PR sync failed; falling back to per-watch",
-			zap.String("task_id", taskID), zap.Error(batchErr))
-		return s.triggerPRSyncAllPerWatch(ctx, taskID, watches, explicitRefresh)
+			zap.String("task_id", taskID), zap.Error(outcome.Err))
+		fallbackWatches := prWatchPendingWatches(outcome.Pending)
+		if len(fallbackWatches) == 0 {
+			fallbackWatches = watches
+		}
+		return s.triggerPRSyncAllPerWatch(ctx, taskID, fallbackWatches, explicitRefresh)
 	}
 	// Batched path applied all DB updates inline; reload so the WS caller
 	// sees the freshest TaskPR rows.

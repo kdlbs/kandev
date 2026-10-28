@@ -156,29 +156,37 @@ func TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral(t *
 	searching := []*PRWatch{{Owner: "o", Repo: "r", Branch: "feat"}}
 	ctx := pollerContext(context.Background())
 
-	if _, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false); err == nil {
+	statuses, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false)
+	if err == nil {
 		t.Fatal("first mixed batch succeeded, want branch admission deferral")
-	} else {
-		var deferred *AdmissionDeferredError
-		if !errors.As(err, &deferred) {
-			t.Fatalf("first mixed batch error = %v, want admission deferral", err)
-		}
+	}
+	var deferred *AdmissionDeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("first mixed batch error = %v, want admission deferral", err)
 	}
 	if exec.prQueries != 1 || exec.branchQueries != 1 {
 		t.Fatalf("first mixed batch queries = PR %d, branch %d; want one each", exec.prQueries, exec.branchQueries)
 	}
+	if !statuses.numberedComplete || statuses.searchingComplete {
+		t.Fatalf("phase completion = numbered %v searching %v, want only numbered complete",
+			statuses.numberedComplete, statuses.searchingComplete)
+	}
+	if statuses.byKey[prStatusCacheKey("o", "r", 42)] == nil {
+		t.Fatal("completed numbered phase was withheld by the deferred branch phase")
+	}
 
-	statuses, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false)
+	// Resume only the unfinished phase, exactly as the monitor continuation does.
+	resumed, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", nil, searching, false)
 	if err != nil {
 		t.Fatalf("resume mixed batch: %v", err)
 	}
 	if exec.prQueries != 1 || exec.branchQueries != 2 {
 		t.Fatalf("resumed mixed batch queries = PR %d, branch %d; want numbered preserved and branch retried", exec.prQueries, exec.branchQueries)
 	}
-	if statuses.byKey[prStatusCacheKey("o", "r", 42)] == nil {
-		t.Fatal("resumed mixed batch omitted numbered result")
+	if !resumed.searchingComplete {
+		t.Fatal("resumed batch did not complete the searching phase")
 	}
-	if statuses.byKey[graphqlBranchKey("o", "r", "feat")] == nil {
+	if resumed.byKey[graphqlBranchKey("o", "r", "feat")] == nil {
 		t.Fatal("resumed mixed batch omitted searching result")
 	}
 }
