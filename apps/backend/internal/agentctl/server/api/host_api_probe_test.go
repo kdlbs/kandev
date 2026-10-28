@@ -119,3 +119,16 @@ func TestProbeHostAPIRequiresTheControlCredential(t *testing.T) {
 		t.Fatalf("an unauthenticated probe reached the target: %v", seen)
 	}
 }
+
+func TestProbeHostAPIFailsClosedWithoutConfiguredCredential(t *testing.T) {
+	var seen []string
+	target := newHostAPITarget(t, "probe-token", &seen)
+	_, client, _ := newRuntimeDrainTestClient(t, "runtime-a", "")
+
+	if err := client.ProbeHostAPI(context.Background(), target.URL, "probe-token"); err == nil {
+		t.Fatal("a probe without a configured control credential succeeded")
+	}
+	if len(seen) != 0 {
+		t.Fatalf("the unauthenticated probe reached the target: %v", seen)
+	}
+}

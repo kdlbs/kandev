@@ -1,6 +1,6 @@
 # ADR-2026-09-26-remote-executor-plugin-boundary: Remote executor plugin boundary
 
-**Status:** accepted
+**Status:** accepted, amended by [Native worker capabilities for executor plugins](2026-10-28-executor-plugin-native-worker-decisions.md) (provider-side workspace materialization, host-tunnel leases)
 **Date:** 2026-09-26
 **Area:** backend, frontend, protocol
 
