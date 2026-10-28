@@ -73,6 +73,7 @@ func (s *Service) beginExecutorProviderDispatch(ctx context.Context, pluginID st
 // dispatch lease and cancels the contexts of calls already admitted. The
 // lifecycle caller then takes the exclusive dispatch lock to drain them.
 func (s *Service) closeExecutorProviderAdmission(pluginID string) {
+	s.closeExecutorTunnelsForPlugin(pluginID)
 	s.executorProviderOpMu.Lock()
 	if s.executorProviderAdmissionClosed == nil {
 		s.executorProviderAdmissionClosed = make(map[string]bool)

@@ -707,6 +707,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 		Context: operationContext, Resource: resource, CleanupReason: reason, CleanupClaim: claim.OperationID,
 	}
 	drain.applyTo(request)
+	r.closePluginExecutorTunnels(operationContext)
 	response, err := r.operations.DestroyExecutorEnvironment(destroyCtx, request)
 	cancelDestroy()
 	record, inventory, resource = r.refreshAfterClaimCheckpoints(claimedCtx, record, inventory, resource)

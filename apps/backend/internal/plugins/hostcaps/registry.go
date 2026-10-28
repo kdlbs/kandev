@@ -44,12 +44,14 @@ func (p RetiredPair) Key() string { return p.Name + "@" + strconv.Itoa(p.Version
 const (
 	firstRelease       = "0.99.0"
 	destroyCheckpoints = "destroy_checkpoints"
+	// TunnelTransport is the capability that lets a provider return a host_tunnel lease.
+	TunnelTransport = "tunnel_transport"
 )
 
 var registry = []Entry{
 	{Name: "workspace_descriptor", Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "repository_intent", Min: 1, Max: 1, IntroducedIn: firstRelease},
-	{Name: "tunnel_transport", Min: 1, Max: 1, IntroducedIn: firstRelease},
+	{Name: TunnelTransport, Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "api_url_forward", Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "drain_receipt", Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: destroyCheckpoints, Min: 1, Max: 1, IntroducedIn: firstRelease},

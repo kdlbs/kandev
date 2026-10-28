@@ -477,6 +477,21 @@ twice within 10 seconds. If the host does not see its token arrive, the launch
 is rolled back and the environment is cleaned up with the cleanup reason
 `api_unreachable`.
 
+A connection lease has a `transport`: `https` (the default) or `host_tunnel`.
+A provider may return `host_tunnel` only if its manifest requires the
+`tunnel_transport` capability, and the lease then carries no `base_url`. Kandev
+opens each stream to the provider itself, bound to the installation,
+environment, ownership generation and one port (the agent runtime control port
+or the recorded instance port; any other port is refused before a stream
+opens). The provider acknowledges each stream before any request byte is sent;
+a stream that is not acknowledged within 15 seconds closes as unavailable.
+agentctl HTTP and WebSocket traffic, including the embedded editor and preview
+proxies, uses these streams. A plugin restart, disable, a newer ownership
+generation, a cancel or environment release closes them; the next request
+gets a new lease and stream, and a mutating HTTP request is not replayed. An
+environment may hold at most 64 open streams across both ports, in frames of
+at most 64 KiB; the 65th open fails as `rate_limited`.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.

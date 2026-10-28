@@ -36,6 +36,7 @@ const (
 	Plugin_InspectExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/InspectExecutorEnvironment"
 	Plugin_ResolveExecutorConnection_FullMethodName    = "/kandev.plugin.v1.Plugin/ResolveExecutorConnection"
 	Plugin_DestroyExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/DestroyExecutorEnvironment"
+	Plugin_OpenExecutorTunnel_FullMethodName           = "/kandev.plugin.v1.Plugin/OpenExecutorTunnel"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -75,6 +76,11 @@ type PluginClient interface {
 	InspectExecutorEnvironment(ctx context.Context, in *InspectExecutorEnvironmentRequest, opts ...grpc.CallOption) (*InspectExecutorEnvironmentResponse, error)
 	ResolveExecutorConnection(ctx context.Context, in *ResolveExecutorConnectionRequest, opts ...grpc.CallOption) (*ResolveExecutorConnectionResponse, error)
 	DestroyExecutorEnvironment(ctx context.Context, in *DestroyExecutorEnvironmentRequest, opts ...grpc.CallOption) (*DestroyExecutorEnvironmentResponse, error)
+	// OpenExecutorTunnel is a host-opened byte stream to one port of an
+	// environment. Only a provider that requires the tunnel_transport capability
+	// is called. The first frame is the header; the provider answers with exactly
+	// one ack before any data flows.
+	OpenExecutorTunnel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ExecutorTunnelFrame, ExecutorTunnelFrame], error)
 }
 
 type pluginClient struct {
@@ -255,6 +261,19 @@ func (c *pluginClient) DestroyExecutorEnvironment(ctx context.Context, in *Destr
 	return out, nil
 }
 
+func (c *pluginClient) OpenExecutorTunnel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ExecutorTunnelFrame, ExecutorTunnelFrame], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Plugin_ServiceDesc.Streams[0], Plugin_OpenExecutorTunnel_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ExecutorTunnelFrame, ExecutorTunnelFrame]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Plugin_OpenExecutorTunnelClient = grpc.BidiStreamingClient[ExecutorTunnelFrame, ExecutorTunnelFrame]
+
 // PluginServer is the server API for Plugin service.
 // All implementations must embed UnimplementedPluginServer
 // for forward compatibility.
@@ -292,6 +311,11 @@ type PluginServer interface {
 	InspectExecutorEnvironment(context.Context, *InspectExecutorEnvironmentRequest) (*InspectExecutorEnvironmentResponse, error)
 	ResolveExecutorConnection(context.Context, *ResolveExecutorConnectionRequest) (*ResolveExecutorConnectionResponse, error)
 	DestroyExecutorEnvironment(context.Context, *DestroyExecutorEnvironmentRequest) (*DestroyExecutorEnvironmentResponse, error)
+	// OpenExecutorTunnel is a host-opened byte stream to one port of an
+	// environment. Only a provider that requires the tunnel_transport capability
+	// is called. The first frame is the header; the provider answers with exactly
+	// one ack before any data flows.
+	OpenExecutorTunnel(grpc.BidiStreamingServer[ExecutorTunnelFrame, ExecutorTunnelFrame]) error
 	mustEmbedUnimplementedPluginServer()
 }
 
@@ -352,6 +376,9 @@ func (UnimplementedPluginServer) ResolveExecutorConnection(context.Context, *Res
 }
 func (UnimplementedPluginServer) DestroyExecutorEnvironment(context.Context, *DestroyExecutorEnvironmentRequest) (*DestroyExecutorEnvironmentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DestroyExecutorEnvironment not implemented")
+}
+func (UnimplementedPluginServer) OpenExecutorTunnel(grpc.BidiStreamingServer[ExecutorTunnelFrame, ExecutorTunnelFrame]) error {
+	return status.Errorf(codes.Unimplemented, "method OpenExecutorTunnel not implemented")
 }
 func (UnimplementedPluginServer) mustEmbedUnimplementedPluginServer() {}
 func (UnimplementedPluginServer) testEmbeddedByValue()                {}
@@ -680,6 +707,13 @@ func _Plugin_DestroyExecutorEnvironment_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Plugin_OpenExecutorTunnel_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(PluginServer).OpenExecutorTunnel(&grpc.GenericServerStream[ExecutorTunnelFrame, ExecutorTunnelFrame]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Plugin_OpenExecutorTunnelServer = grpc.BidiStreamingServer[ExecutorTunnelFrame, ExecutorTunnelFrame]
+
 // Plugin_ServiceDesc is the grpc.ServiceDesc for Plugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -756,7 +790,14 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Plugin_DestroyExecutorEnvironment_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "OpenExecutorTunnel",
+			Handler:       _Plugin_OpenExecutorTunnel_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "kandev/plugin/v1/plugin.proto",
 }
 

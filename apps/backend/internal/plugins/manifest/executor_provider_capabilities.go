@@ -196,6 +196,12 @@ func validateLaunchPolicyIDs(prefix string, provider *ExecutorProvider) []error 
 	return errs
 }
 
+// RequiresHostCapability reports whether the provider's manifest requires the
+// named host capability.
+func (p *ExecutorProvider) RequiresHostCapability(name string) bool {
+	return declaresCapability(p, name)
+}
+
 func declaresCapability(provider *ExecutorProvider, name string) bool {
 	for _, req := range provider.RequiresHostCapabilities {
 		if req.Name == name {

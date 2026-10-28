@@ -40,6 +40,11 @@ service Plugin {
   rpc InspectExecutorEnvironment(InspectExecutorEnvironmentRequest) returns (InspectExecutorEnvironmentResponse);
   rpc ResolveExecutorConnection(ResolveExecutorConnectionRequest) returns (ResolveExecutorConnectionResponse);
   rpc DestroyExecutorEnvironment(DestroyExecutorEnvironmentRequest) returns (DestroyExecutorEnvironmentResponse);
+  // OpenExecutorTunnel is a host-opened byte stream to one port of an
+  // environment. Only a provider that requires the tunnel_transport capability
+  // is called. The first frame is the header; the provider answers with exactly
+  // one ack before any data flows.
+  rpc OpenExecutorTunnel(stream ExecutorTunnelFrame) returns (stream ExecutorTunnelFrame);
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
@@ -1993,6 +1998,40 @@ message ExecutorConnectionLease {
   repeated string websocket_subprotocols = 4;
   string expires_at = 5;
   string generation = 6;
+  // transport is https (the default when empty) or host_tunnel. A host_tunnel
+  // lease carries no base_url and is valid only for a provider that requires
+  // the tunnel_transport capability.
+  string transport = 7;
+}
+
+// ExecutorTunnelFrame is one message of an executor tunnel stream. The host
+// sends a header first; the provider answers with one ack; data frames carry at
+// most 64 KiB; a close without an error code is an orderly half-close.
+message ExecutorTunnelFrame {
+  oneof kind {
+    ExecutorTunnelHeader header = 1;
+    ExecutorTunnelAck ack = 2;
+    bytes data = 3;
+    ExecutorTunnelClose close = 4;
+  }
+}
+
+message ExecutorTunnelHeader {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  // port is the control port or the recorded instance port of the environment.
+  uint32 port = 3;
+  // binding_nonce identifies this stream binding; the provider echoes it in the ack.
+  string binding_nonce = 4;
+}
+
+message ExecutorTunnelAck {
+  string binding_nonce = 1;
+}
+
+message ExecutorTunnelClose {
+  // error_code is empty for a half-close; otherwise a stable provider error code.
+  string error_code = 1;
 }
 
 message ResolveExecutorConnectionResponse {
