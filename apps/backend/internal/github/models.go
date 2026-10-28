@@ -616,6 +616,7 @@ type PRWatch struct {
 	LastCommentAt   *time.Time `json:"last_comment_at,omitempty" db:"last_comment_at"`
 	LastCheckStatus string     `json:"last_check_status" db:"last_check_status"`
 	LastReviewState string     `json:"last_review_state" db:"last_review_state"`
+	RetiredAt       *time.Time `json:"retired_at,omitempty" db:"retired_at"`
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }

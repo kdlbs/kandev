@@ -415,7 +415,7 @@ export function AzureDevOpsBoard({
                     onMove: board.moveItem,
                     onItemUpdated: (item) => {
                       board.mergeItem(item);
-                      setEditing(item);
+                      setEditing((current) => (current?.id === item.id ? item : current));
                       if (isMobile) {
                         presentation.columnPreference.setSelectedColumn(item.columnId);
                       }

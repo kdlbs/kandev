@@ -10,7 +10,7 @@ import (
 
 const agentDeliveryReceiptQuery = `SELECT session_id, incarnation_id, harness_generation, submission_id,
 	event_type, payload, terminal, projected_at, content_hash, hash_version,
-	payload_pruned_at, payload_bytes
+	payload_pruned_at, payload_bytes, canonical_message_id
 	FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?`
 
 type agentDeliveryReceiptStatementCache struct {

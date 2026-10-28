@@ -149,7 +149,7 @@ func wsDeleteByID(deleteFn func(ctx context.Context, id string) error) func(ctx 
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgIDRequired, nil)
 		}
 		if err := deleteFn(ctx, id); err != nil {
-			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) || errors.Is(err, ErrPRWatchNotFound) {
 				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "watch not found", nil)
 			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)

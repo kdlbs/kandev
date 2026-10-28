@@ -3304,6 +3304,7 @@ export class ApiClient {
     workflowStepId: string,
     agentProfileId: string,
     opts?: {
+      executor_profile_id?: string;
       repos?: Array<{ owner: string; name: string }>;
       prompt?: string;
       review_scope?: string;
@@ -3316,6 +3317,7 @@ export class ApiClient {
       workflow_id: workflowId,
       workflow_step_id: workflowStepId,
       agent_profile_id: agentProfileId,
+      ...(opts?.executor_profile_id ? { executor_profile_id: opts.executor_profile_id } : {}),
       repos: opts?.repos ?? [],
       prompt: opts?.prompt ?? "",
       review_scope: opts?.review_scope ?? "user_and_teams",

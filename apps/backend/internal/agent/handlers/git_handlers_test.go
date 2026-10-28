@@ -18,6 +18,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -26,6 +27,40 @@ type mockExecutionLookup struct {
 	executions map[string]*lifecycle.AgentExecution
 	// ensureErr allows tests to inject specific errors from GetOrEnsureExecution
 	ensureErr error
+}
+
+func TestWsGitReads_MissingSession(t *testing.T) {
+	lookup := &mockExecutionLookup{ensureErr: fmt.Errorf("lookup: %w", models.ErrTaskSessionNotFound)}
+	h := NewGitHandlers(lookup, nil, newTestLogger())
+	for _, tc := range []struct {
+		name   string
+		action string
+		handle func(context.Context, *ws.Message) (*ws.Message, error)
+	}{
+		{"commits", ws.ActionSessionGitCommits, h.wsGitCommits},
+		{"diff", ws.ActionSessionCumulativeDiff, h.wsCumulativeDiff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, err := ws.NewRequest("request-1", tc.action, map[string]string{"session_id": "deleted"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := tc.handle(context.Background(), msg)
+			if err != nil {
+				t.Fatalf("missing session should return a protocol error: %v", err)
+			}
+			if resp == nil || resp.Type != ws.MessageTypeError || resp.ID != msg.ID {
+				t.Fatalf("unexpected response: %#v", resp)
+			}
+			var payload ws.ErrorPayload
+			if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Code != ws.ErrorCodeNotFound {
+				t.Fatalf("error code = %q, want NOT_FOUND", payload.Code)
+			}
+		})
+	}
 }
 
 // blockingExecutionLookup is a counted, blocking ExecutionLookup used by the

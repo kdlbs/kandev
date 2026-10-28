@@ -136,6 +136,9 @@ func TestPRWatchMigration_SkipsSQLiteTableRebuildForPostgres(t *testing.T) {
 func TestPRWatchMigration_PostgresDriverDeduplicatesRowsWithoutTableRebuild(t *testing.T) {
 	db := openLegacyGitHubDB(t)
 	ctx := context.Background()
+	if _, err := db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN retired_at DATETIME`); err != nil {
+		t.Fatalf("add current watch column to direct migration fixture: %v", err)
+	}
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	seedLegacyPRWatch(t, db, &PRWatch{
 		ID: "watch-a", SessionID: "session-a", TaskID: "task-1",

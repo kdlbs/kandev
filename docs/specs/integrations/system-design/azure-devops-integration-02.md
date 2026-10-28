@@ -101,6 +101,10 @@ team or board context. Detail opened from a board may additionally show the
 board column/split controls. Detail opened from search does not guess a board
 and therefore exposes assignment only.
 
+A completed board-detail mutation updates the board snapshot. It updates the
+open detail selection only when the same work item is still selected. A late
+response must not reopen a closed detail or replace a newer selection.
+
 Work-item detail exposes sanitized description plus normalized planning fields
 when Azure returns any of Effort, Story Points, Size, Remaining Work, Original
 Estimate, or Completed Work. Discussion uses Azure's paginated work-item

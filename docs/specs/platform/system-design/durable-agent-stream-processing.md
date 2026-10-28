@@ -8,6 +8,7 @@ requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007
+  - REQ-PLATFORM-DURABLE-AGENT-SEGMENTATION-001
 ---
 
 # Durable agent stream processing
@@ -18,6 +19,10 @@ The parent design retains identity, admission, executor storage, and rollout own
 The [streaming repair package](../../../plans/durable-agent-stream-repair/plan.md) owns the remaining streaming and capacity corrections.
 The earlier implementation results do not establish completion of this repair.
 Existing requirements remain authoritative; this section specifies their implementation details.
+
+The [durable text segmentation package](../../../plans/durable-agent-text-segmentation/plan.md)
+implements [REQ-PLATFORM-DURABLE-AGENT-SEGMENTATION-001](../requirements/durable-agent-text-segmentation.md)
+under [the segment identity decision](../../../decisions/2026-10-26-durable-agent-text-segment-identity.md).
 
 ### Journal batching
 
@@ -47,6 +52,58 @@ Every original event retains its sequence and effect identity.
 Tool, permission, terminal, turn, and owner changes flush the preceding batch.
 Canonical message changes and projected cursor advancement commit atomically.
 Notification follows successful projection and does not depend on HTTP acknowledgment success.
+
+### Canonical text segments
+
+The backend SQL delivery cursor owns the committed text-segment boundary. It
+stores the sequence of the latest projected top-level tool call. Projection
+updates that sequence in the same transaction as the tool event and projected
+cursor. A tool call with a parent ID and a tool update do not advance it.
+Every projection route that commits a top-level tool event, including normal
+`ProjectAgentDeliveryEvent`, retained replay, and canonical shell-start
+projection, updates the boundary in that transaction. A mixed projection batch
+applies boundaries in event sequence order.
+
+For an ID-less assistant message chunk, canonical projection combines its
+stable base identity, built from the existing stream and turn or submission
+scope, with the committed boundary sequence. Chunks before the next top-level
+tool call therefore share one canonical message ID. Keep base and resolved
+identity distinct: retries and reconnects derive only from the base, never
+from an already-resolved ID. Do not mutate caller-owned event payloads before
+the transaction commits. Reasoning messages and messages with a native protocol
+ID keep their existing identity rules. The `canonical_message_id` inbox column
+is the authoritative committed projection ID. The projector persists it in the
+same transaction as the event's reconstructable payload metadata and returns
+that exact committed value to the notification path. `canonical_message_id` is
+projection-only metadata; transport identity and payload hash comparisons
+exclude it, and duplicate admission preserves the column value.
+
+Payload compaction changes the payload, pruning timestamp, hash, and byte count
+without changing `canonical_message_id`. For a projected row created before
+the column existed, an empty column may fall back to the exact ID in an
+unpruned stored payload. If that payload has already been pruned, duplicate
+projection returns an empty ID and suppresses notification. It does not infer
+an ID from incoming reconstructed metadata or the current segment boundary,
+rewrite a transcript row, or notify a row that cannot be identified. This
+fallback applies only while the inbox receipt still exists. Whole-row receipt
+retirement deletes the column with the receipt, advances `retired_sequence`,
+and retains the existing expired-replay rejection semantics.
+
+An unprojected retained event resolves its canonical ID from the SQL cursor in
+sequence order. Projection persists that resolved ID with the event and message
+effect before advancing the cursor, then exposes the result only after commit.
+An already projected event returns its stored column value and is not rewritten.
+The inbox ID, boundary, and message effect commit atomically, so restart,
+duplicate delivery, and partial batch retries cannot advance them independently.
+Add the boundary column as nullable for pre-existing streams. On their first
+projection after upgrade, initialize a NULL boundary once from the then-current
+projected sequence, or from the current sequence if that event is itself a
+top-level tool call. New streams initialize the boundary to zero. Later reopen,
+owner/generation changes, and cursor updates preserve a non-NULL boundary. This
+can begin a fresh text segment after upgrade when earlier boundary evidence was
+pruned; it never changes an existing projected transcript row. Initialization,
+message effect, resolved event identity, boundary, and projected cursor commit
+atomically.
 
 This repair retains the current projection-before-acknowledgment rule.
 A cumulative ACK scheduler has at most one in-flight request per stream.

@@ -21,16 +21,17 @@ export function TaskNavigationReadFeedback({
       role="status"
       aria-live="polite"
       aria-busy={recovery.retrying}
-      className="absolute left-3 right-3 top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.5rem)] z-30 flex min-w-0 flex-col gap-2 rounded-lg border bg-popover px-3 py-2 text-sm shadow-md md:left-auto md:top-14 md:max-w-sm md:flex-row md:items-center"
+      className="flex w-full min-w-0 flex-col gap-2 border-b bg-muted/50 px-3 py-2 text-sm md:flex-row md:items-center md:justify-between"
       data-testid="task-read-recovery-notice"
     >
-      <span className="min-w-0 text-muted-foreground">
-        {t("common:taskReadRefreshFailureNotice")}
-        {recovery.retrying && <span className="block">{t("task:retrying")}</span>}
+      <span className="flex min-w-0 flex-col gap-0.5 text-muted-foreground">
+        <span>{t("common:taskReadRefreshFailureNotice")}</span>
+        {recovery.retrying ? <span>{t("task:retrying")}</span> : null}
       </span>
       <Button
         size="default"
-        className="max-md:w-full"
+        variant="outline"
+        className="max-md:h-11 max-md:w-full pointer-coarse:h-11"
         disabled={recovery.retrying}
         onClick={recovery.onRetry}
         data-testid="task-read-retry"

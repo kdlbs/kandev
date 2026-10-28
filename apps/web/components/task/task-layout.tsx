@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useState } from "react";
-import { QuestionImageDraftProvider } from "./chat/question-image-draft-context";
+import { ClarificationDraftProvider } from "./chat/clarification-draft-context";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
@@ -64,9 +64,9 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
   }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
-      <QuestionImageDraftProvider taskId={props.taskId ?? null}>
+      <ClarificationDraftProvider taskId={props.taskId ?? null}>
         <ResponsiveTaskLayout {...props} />
-      </QuestionImageDraftProvider>
+      </ClarificationDraftProvider>
       <ResponsiveTaskPicker
         key={pickerWorkspaceId}
         workspaceId={props.workspaceId}

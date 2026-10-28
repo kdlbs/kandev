@@ -6,9 +6,23 @@ import type { CumulativeDiff, SessionCommit } from "@/lib/state/slices/session-r
 import { renderSessionRead } from "./session-read-test-helpers";
 import { useSessionCommits } from "./use-session-commits";
 import { invalidateCumulativeDiffCache, useCumulativeDiff } from "./use-cumulative-diff";
+import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
+import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 
 const COMMITS_ACTION = "session.git.commits";
 const DIFF_ACTION = "session.cumulative_diff";
+const DELETED_TASK = "deleted-task";
+const TASK_DELETED = "task.deleted";
+
+function taskSession(id: string, taskId: string): TaskSession {
+  return {
+    id: toSessionId(id),
+    task_id: toTaskId(taskId),
+    state: "WAITING_FOR_INPUT",
+    started_at: "2026-10-27T10:00:00Z",
+    updated_at: "2026-10-27T10:00:00Z",
+  };
+}
 
 type Request = { id: string; action: string; payload: { session_id: string } };
 
@@ -29,6 +43,14 @@ class GitReadSocket {
   respond(action: string, payload: unknown, type = "response") {
     const request = this.sent.findLast((entry) => entry.action === action);
     if (!request) throw new Error(`No request for ${action}`);
+    this.onmessage?.({ data: JSON.stringify({ type, id: request.id, payload }) });
+  }
+
+  respondFor(action: string, sessionId: string, payload: unknown, type = "response") {
+    const request = this.sent.findLast(
+      (entry) => entry.action === action && entry.payload.session_id === sessionId,
+    );
+    if (!request) throw new Error(`No request for ${action} and ${sessionId}`);
     this.onmessage?.({ data: JSON.stringify({ type, id: request.id, payload }) });
   }
 
@@ -72,6 +94,137 @@ afterEach(() => {
   client.disconnect();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+describe("deleted task Git reads", () => {
+  it("does not restart reads when a deleted session is mounted again", async () => {
+    const { result, rerender } = renderSessionRead(
+      (sessionId: string | null) => useCumulativeDiff(sessionId),
+      "session" as string | null,
+      (store) => {
+        store.setState((state) => ({
+          taskSessions: {
+            ...state.taskSessions,
+            items: { session: taskSession("session", DELETED_TASK) },
+          },
+        }));
+      },
+    );
+    act(() => {
+      const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
+      handler({
+        type: "notification",
+        action: TASK_DELETED,
+        payload: { task_id: DELETED_TASK },
+      } as Parameters<typeof handler>[0]);
+    });
+    rerender(null);
+    rerender("session");
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(
+      GitReadSocket.instance.sent.filter((request) => request.payload.session_id === "session"),
+    ).toHaveLength(1);
+  });
+
+  it("preserves a sibling commit read when the deleted session owned the shared environment", async () => {
+    const { result } = renderSessionRead(
+      () => ({ kept: useSessionCommits("other"), deleted: useSessionCommits("session") }),
+      undefined,
+      (store) => {
+        store.setState((state) => ({
+          environmentIdBySessionId: { session: "environment", other: "environment" },
+          taskSessions: {
+            ...state.taskSessions,
+            items: { session: taskSession("session", DELETED_TASK) },
+          },
+        }));
+      },
+    );
+    act(() => {
+      const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
+      handler({
+        type: "notification",
+        action: TASK_DELETED,
+        payload: { task_id: DELETED_TASK },
+      } as Parameters<typeof handler>[0]);
+    });
+    await act(async () => {
+      GitReadSocket.instance.respondFor(COMMITS_ACTION, "other", { commits: [commit] });
+      GitReadSocket.instance.respondFor(COMMITS_ACTION, "session", { commits: [] });
+    });
+    expect(result.current.value.kept.commits).toEqual([commit]);
+  });
+});
+
+describe("deleted task Git read recovery", () => {
+  it("discards a deleted session's late result while a shared-environment session continues", async () => {
+    const { result } = renderSessionRead(
+      () => ({ deleted: useCumulativeDiff("session"), kept: useCumulativeDiff("other") }),
+      undefined,
+      (store) => {
+        store.setState((state) => ({
+          environmentIdBySessionId: { session: "environment", other: "environment" },
+          taskSessions: {
+            ...state.taskSessions,
+            items: {
+              session: taskSession("session", DELETED_TASK),
+              other: taskSession("other", "kept-task"),
+            },
+          },
+        }));
+      },
+    );
+    act(() => {
+      const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
+      handler({
+        type: "notification",
+        action: TASK_DELETED,
+        payload: { task_id: DELETED_TASK },
+      } as Parameters<typeof handler>[0]);
+    });
+    await act(async () => {
+      GitReadSocket.instance.respondFor(DIFF_ACTION, "session", { cumulative_diff: diff });
+      GitReadSocket.instance.respondFor(DIFF_ACTION, "other", { cumulative_diff: diff });
+    });
+    expect(result.current.value.deleted.diff).toBeNull();
+    expect(result.current.value.kept.diff).toEqual(diff);
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(
+      GitReadSocket.instance.sent.filter((request) => request.payload.session_id === "session"),
+    ).toHaveLength(1);
+  });
+
+  it.each(["mapped", "fallback"])(
+    "stops retries when a task is deleted with a %s session binding",
+    async (binding) => {
+      const { result } = renderSessionRead(
+        () => useGitReads(),
+        undefined,
+        (store) => {
+          store.setState((state) => ({
+            taskSessions: {
+              ...state.taskSessions,
+              items: { session: taskSession("session", DELETED_TASK) },
+            },
+            ...(binding === "fallback" ? { environmentIdBySessionId: {} } : {}),
+          }));
+        },
+      );
+      await act(async () => rejectReads("INTERNAL_ERROR"));
+      act(() => {
+        const handler = registerTasksHandlers(result.current.store)[TASK_DELETED]!;
+        handler({
+          type: "notification",
+          action: TASK_DELETED,
+          payload: { task_id: DELETED_TASK },
+        } as Parameters<typeof handler>[0]);
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(
+        GitReadSocket.instance.sent.filter((request) => request.payload.session_id === "session"),
+      ).toHaveLength(2);
+    },
+  );
 });
 
 describe("slow Changes panel Git reads", () => {

@@ -14,6 +14,9 @@ owners:
 The CI automation system defines base-controlled GitHub Actions behavior for
 contributor pull requests. It owns the trust gates for AI review, preview
 deployment, and pull request walkthrough generation.
+It also owns executable-input and credential boundaries for publication
+workflows. The [release system](../release/README.md) retains release channel,
+artifact, signing, and backfill semantics.
 
 ## Ownership
 

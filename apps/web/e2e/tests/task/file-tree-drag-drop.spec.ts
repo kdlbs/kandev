@@ -8,6 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { FileTreePage } from "../../pages/file-tree-page";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { watchWs } from "../../helpers/causal-waits";
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 
 // DnD in file-browser.tsx uses native HTML5 drag events (dragstart, dragover,
 // drop) keyed off React's onDragStart/Over/Drop. Playwright's locator.dragTo()
@@ -98,9 +99,17 @@ async function setupTask({
     )
     .toBe(true);
 
+  if (!task.session_id) throw new Error("Expected a session for the file tree task");
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    `${taskTitle} initial turn finished`,
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
+  await waitForSessionGitHydration(testPage, task.session_id);
   await session.clickTab("Files");
   return { session, workspacePath, sessionId: task.session_id };
 }
@@ -303,6 +312,23 @@ test.describe("File tree drag and drop", () => {
       { session_id: sessionId, old_path: "src", new_path: "dest/src" },
     ]);
     expect(replies.get(requests[0].id)?.payload.success).toBe(true);
+    // Wait for Git to report the complete move before returning to Files.
+    // Partial status updates can activate Changes again while the move settles.
+    await expect
+      .poll(() =>
+        testPage.evaluate((sid) => {
+          const state = Reflect.get(window, "__KANDEV_E2E_STORE__").getState();
+          const env = state.environmentIdBySessionId[sid] ?? sid;
+          const statuses = Object.values(state.gitStatus.byEnvironmentRepo[env] ?? {}) as Array<{
+            files?: Record<string, unknown>;
+          }>;
+          const paths = statuses.flatMap((status) => Object.keys(status.files ?? {}));
+          return ["src/a.txt", "src/sub/keep.txt", "dest/src/a.txt", "dest/src/sub/keep.txt"].every(
+            (path) => paths.includes(path),
+          );
+        }, sessionId!),
+      )
+      .toBe(true);
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible();
     await expect(session.changesFileRow("dest/src/a.txt")).toBeVisible();
@@ -312,7 +338,7 @@ test.describe("File tree drag and drop", () => {
     await session.fileTreeNode("dest/src").click();
     await expect(session.fileTreeNode("dest/src/a.txt")).toBeVisible();
     await session.fileTreeNode("dest/src/sub").click();
-    await expect(session.fileTreeNode("dest/src/sub/keep.txt")).toBeVisible();
+    await session.fileTree.waitForFileTreeNode("dest/src/sub/keep.txt");
     await expect(session.fileTreeNode("dest/a.txt")).toHaveCount(0);
   });
 

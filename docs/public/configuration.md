@@ -245,6 +245,8 @@ Environment values override YAML. These values do not configure the agentctl jou
 
 `batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
 
+If a batch exceeds its SQL deadline, subsequent attempts halve that cleanup phase's candidate ceiling, down to one. Other phases keep their limits. A new worker starts from the configured ceilings. Deadline failures still use retry backoff; this adjustment does not change retention eligibility, byte limits or transaction deadlines.
+
 Automatic cleanup preserves canonical history and unresolved recovery evidence.
 Grace controls eligible raw payload removal. Replay age and event count bound recent duplicate receipts.
 Safety checks apply at every configured value. Protected data has no forced expiry.

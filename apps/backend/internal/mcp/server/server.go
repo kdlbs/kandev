@@ -1392,10 +1392,11 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
 	)
+	s.registerListExecutorsTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_executor_profiles_kandev",
-			mcp.WithDescription("List all profiles for an executor. Use this to find available executor_profile_ids for create_task_kandev. Standard executor IDs: exec-local (standalone process), exec-worktree (git worktree), exec-local-docker (Docker container), exec-sprites (cloud)."),
-			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID (e.g. exec-local, exec-worktree, exec-local-docker, exec-sprites)")),
+			mcp.WithDescription("List profiles for the specified executor. Call list_executors_kandev first to discover visible executors and their profiles, including custom executor IDs. A returned profile ID can be selected with executor_profile_id in create_task_kandev."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID returned by list_executors_kandev")),
 		),
 		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
 	)
@@ -1986,7 +1987,7 @@ const askUserQuestionOutputSchema = `{
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 options with labels and descriptions. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Call only when required input cannot be inferred. Returns answers keyed by question id, with selected_option (ID) and selected_label (exact option label) for a matched selection. A rejected bundle includes rejected=true and may include reject_reason.`),
+			mcp.WithDescription(`Ask the user 1-4 related questions; wait for all answers. Each needs a prompt and 2-6 labeled, described options. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it; keep questions and options self-contained. Returns answers by question ID with selected_option ID and selected_label for matches. Rejections include rejected=true and may include reject_reason.`),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
 			mcp.WithArray(questionsArg, mcp.Required(),
@@ -1995,9 +1996,9 @@ func (s *Server) registerInteractionTools() {
 				mcp.MaxItems(4),
 				mcp.Items(buildOperatorQuestionSchemaItem()),
 			),
-			mcp.WithString("context", mcp.Description("Optional single block of shared background information. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
+			mcp.WithString("context", mcp.Description("Optional single block of shared background. Aim for 1-3 short sentences or brief bullets (about 100 words or fewer). Put full reports, logs, and repeated conversation outside the tool call, before it. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
 			mcp.WithArray(contextParagraphsArg,
-				mcp.Description("Optional shared background as separate paragraphs. Preferred for multiline context; when non-empty, overrides context and is joined with blank lines."),
+				mcp.Description("Optional shared background split into paragraphs. Aim for 1-3 short sentences or brief bullets (about 100 words or fewer). Put full reports, logs, and repeated conversation outside the tool call, before it. Preferred for multiline context; when non-empty, overrides context and is joined with blank lines."),
 				mcp.Items(map[string]any{"type": "string"}),
 			),
 		),

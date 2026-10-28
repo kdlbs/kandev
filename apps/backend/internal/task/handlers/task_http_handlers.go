@@ -226,8 +226,17 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	includeEphemeral := c.Query("include_ephemeral") == queryValueTrue
 	onlyEphemeral := c.Query("only_ephemeral") == queryValueTrue
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
+	commandPanelVisible := c.Query("command_panel_visible") == queryValueTrue
+	if commandPanelVisible && (workflowID == "" || query != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "command panel listing requires a workflow and empty query"})
+		return
+	}
 
-	tasks, total, err := h.service.ListTasksByWorkspaceWithArchiveMode(
+	listTasks := h.service.ListTasksByWorkspaceWithArchiveMode
+	if commandPanelVisible {
+		listTasks = h.service.ListTasksByWorkspaceForCommandPanel
+	}
+	tasks, total, err := listTasks(
 		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived,
 	)
 	if err != nil {

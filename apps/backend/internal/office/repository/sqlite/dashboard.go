@@ -98,12 +98,12 @@ func (r *Repository) QueryRecentTasks(ctx context.Context, workspaceID string, l
 
 // LiveSessionRow is a raw row from the recent-sessions query for live runs.
 type LiveSessionRow struct {
-	ID          string  `db:"id"`
-	TaskID      string  `db:"task_id"`
-	AgentExecID string  `db:"agent_execution_id"`
-	State       string  `db:"state"`
-	StartedAt   string  `db:"started_at"`
-	CompletedAt *string `db:"completed_at"`
+	ID             string  `db:"id"`
+	TaskID         string  `db:"task_id"`
+	AgentProfileID string  `db:"agent_profile_id"`
+	State          string  `db:"state"`
+	StartedAt      string  `db:"started_at"`
+	CompletedAt    *string `db:"completed_at"`
 }
 
 // QueryRecentSessions returns the n most recent task sessions for a workspace,
@@ -113,7 +113,7 @@ func (r *Repository) QueryRecentSessions(ctx context.Context, workspaceID string
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT ts.id,
 		       ts.task_id,
-		       COALESCE(ts.agent_execution_id,'') as agent_execution_id,
+		       COALESCE(ts.agent_profile_id,'') as agent_profile_id,
 		       COALESCE(ts.state,'') as state,
 		       ts.started_at,
 		       ts.completed_at
@@ -162,8 +162,7 @@ func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]TaskTit
 }
 
 // AgentSessionRow is a raw row from the per-agent recent-sessions query.
-// Mirrors LiveSessionRow but adds the agent_profile_id column so callers
-// can group rows by agent without re-querying.
+// Extends LiveSessionRow with the update time used by per-agent summaries.
 type AgentSessionRow struct {
 	ID             string  `db:"id"`
 	TaskID         string  `db:"task_id"`

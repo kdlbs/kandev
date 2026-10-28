@@ -22,50 +22,51 @@ const (
 
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
-	"simple-message":            scenarioSimpleMessage,
-	"read-and-edit":             scenarioReadAndEdit,
-	"permission-flow":           scenarioPermissionFlow,
-	toolKeyError:                scenarioError,
-	"subagent":                  scenarioSubagent,
-	"all-tools":                 scenarioAllTools,
-	"multi-turn":                scenarioMultiTurn,
-	"diff-expansion-setup":      scenarioDiffExpansionSetup,
-	"diff-update-setup":         scenarioDiffUpdateSetup,
-	"diff-update-modify":        scenarioDiffUpdateModify,
-	"diff-update-streaming":     scenarioDiffUpdateStreaming,
-	"multi-file-setup":          scenarioMultiFileSetup,
-	"multi-file-modify":         scenarioMultiFileModify,
-	"untracked-file-setup":      scenarioUntrackedFileSetup,
-	"untracked-file-modify":     scenarioUntrackedFileModify,
-	"clarification":             scenarioClarification,
-	"clarification-no-other":    scenarioClarificationNoOther,
-	"clarification-markdown":    scenarioClarificationMarkdown,
-	"clarification-multi":       scenarioClarificationMulti,
-	"clarification-timeout":     scenarioClarificationTimeout,
-	"multi-permission":          scenarioMultiPermission,
-	"kandev-mcp-permission":     scenarioKandevMCPPermission,
-	"review-cumulative-setup":   scenarioReviewCumulativeSetup,
-	"walkthrough-setup":         scenarioWalkthroughSetup,
-	"walkthrough-basic":         scenarioWalkthroughBasic,
-	"walkthrough-reemit":        scenarioWalkthroughReemit,
-	"walkthrough-reemit-second": scenarioWalkthroughReemitSecond,
-	"symlink-file-setup":        scenarioSymlinkFileSetup,
-	"markdown-table":            scenarioMarkdownTable,
-	"empty-turn":                scenarioEmptyTurn,
-	"push-current-branch":       scenarioPushCurrentBranch,
-	"steer-fold-setup":          scenarioSteerFoldSetup,
-	"steer-defer-setup":         scenarioSteerDeferSetup,
-	"saved-prompt-delivery":     scenarioSavedPromptDelivery,
-	"response-retry":            scenarioResponseRetry,
-	"goal-active":               scenarioGoalActive,
-	"goal-complete":             scenarioGoalComplete,
-	"goal-clear":                scenarioGoalClear,
-	"goal-long":                 scenarioGoalLong,
-	"git-commit-permission":     scenarioGitCommitPermission,
-	"large-search":              scenarioLargeSearch,
-	"large-search-overflow":     scenarioLargeSearchOverflow,
-	"oversized-output":          scenarioOversizedOutput,
-	"oversized-output-hold":     scenarioOversizedOutputHold,
+	"simple-message":                   scenarioSimpleMessage,
+	"read-and-edit":                    scenarioReadAndEdit,
+	"permission-flow":                  scenarioPermissionFlow,
+	toolKeyError:                       scenarioError,
+	"subagent":                         scenarioSubagent,
+	"all-tools":                        scenarioAllTools,
+	"multi-turn":                       scenarioMultiTurn,
+	"diff-expansion-setup":             scenarioDiffExpansionSetup,
+	"diff-update-setup":                scenarioDiffUpdateSetup,
+	"diff-update-modify":               scenarioDiffUpdateModify,
+	"diff-update-streaming":            scenarioDiffUpdateStreaming,
+	"multi-file-setup":                 scenarioMultiFileSetup,
+	"multi-file-modify":                scenarioMultiFileModify,
+	"untracked-file-setup":             scenarioUntrackedFileSetup,
+	"untracked-file-modify":            scenarioUntrackedFileModify,
+	"clarification":                    scenarioClarification,
+	"clarification-no-other":           scenarioClarificationNoOther,
+	"clarification-markdown":           scenarioClarificationMarkdown,
+	"clarification-context-paragraphs": scenarioClarificationContextParagraphs,
+	"clarification-multi":              scenarioClarificationMulti,
+	"clarification-timeout":            scenarioClarificationTimeout,
+	"multi-permission":                 scenarioMultiPermission,
+	"kandev-mcp-permission":            scenarioKandevMCPPermission,
+	"review-cumulative-setup":          scenarioReviewCumulativeSetup,
+	"walkthrough-setup":                scenarioWalkthroughSetup,
+	"walkthrough-basic":                scenarioWalkthroughBasic,
+	"walkthrough-reemit":               scenarioWalkthroughReemit,
+	"walkthrough-reemit-second":        scenarioWalkthroughReemitSecond,
+	"symlink-file-setup":               scenarioSymlinkFileSetup,
+	"markdown-table":                   scenarioMarkdownTable,
+	"empty-turn":                       scenarioEmptyTurn,
+	"push-current-branch":              scenarioPushCurrentBranch,
+	"steer-fold-setup":                 scenarioSteerFoldSetup,
+	"steer-defer-setup":                scenarioSteerDeferSetup,
+	"saved-prompt-delivery":            scenarioSavedPromptDelivery,
+	"response-retry":                   scenarioResponseRetry,
+	"goal-active":                      scenarioGoalActive,
+	"goal-complete":                    scenarioGoalComplete,
+	"goal-clear":                       scenarioGoalClear,
+	"goal-long":                        scenarioGoalLong,
+	"git-commit-permission":            scenarioGitCommitPermission,
+	"large-search":                     scenarioLargeSearch,
+	"large-search-overflow":            scenarioLargeSearchOverflow,
+	"oversized-output":                 scenarioOversizedOutput,
+	"oversized-output-hold":            scenarioOversizedOutputHold,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -399,6 +400,145 @@ func scenarioAllToolsEditBash(e *emitter, editFile fileInfo) {
 	} else {
 		e.completeTool(bashID, map[string]any{"output": "Permission denied"})
 		e.text("Bash denied.")
+	}
+}
+
+// MCP argument keys used by the clarification scenarios. Pulled out so goconst
+// stays happy when the same string would otherwise repeat across both helpers.
+const (
+	clarificationOptionsKey = "options"
+	clarificationLabelKey   = "label"
+	clarificationDescKey    = "description"
+	clarificationPromptKey  = "prompt"
+	clarificationIDKey      = "id"
+	clarificationTitleKey   = "title"
+	clarificationCustomText = "allow_custom_text"
+)
+
+func mockOption(label, description string) map[string]any {
+	return map[string]any{clarificationLabelKey: label, clarificationDescKey: description}
+}
+
+// clarificationQuestionArgs returns the MCP arguments for a single-question
+// clarification call. Used by the simplest e2e scenario where a one-question
+// bundle exercises the same code path as multi-question.
+func clarificationQuestionArgs() map[string]any {
+	return map[string]any{
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "db",
+				clarificationPromptKey: "Which database should we use for this project?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Relational database with strong consistency"),
+					mockOption("MongoDB", "Document database for flexible schemas"),
+					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+		},
+	}
+}
+
+func clarificationNoOtherQuestionArgs() map[string]any {
+	return map[string]any{
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:      "mode",
+				clarificationPromptKey:  "Choose a mode",
+				clarificationCustomText: false,
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Fast", "Prioritize quick completion"),
+					mockOption("Safe", "Prioritize additional checks"),
+				},
+			},
+		},
+	}
+}
+
+// clarificationMarkdownQuestionArgs keeps a permanent real-protocol fixture
+// for the lightweight Markdown supported by clarification question fields.
+func clarificationMarkdownQuestionArgs() map[string]any {
+	return map[string]any{
+		"context": "**Shared deployment context.** Compare recovery, ownership, and migration before choosing a storage mode.\n\n" +
+			"Read the [context guide](https://example.com/context).\n\n" +
+			"| Platform | Migration Window | Recovery Time | Owner | Region |\n" +
+			"| --- | --- | --- | --- | --- |\n" +
+			"| PostgreSQL | 4 hours | 20 minutes | Platform | eu-west |\n\n" +
+			strings.Repeat("Review migration effort, recovery time, and operational ownership with the deployment team. ", 18),
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:    "markdown",
+				clarificationTitleKey: "Use `DB`",
+				clarificationPromptKey: "Choose **one** storage mode:\n\n" +
+					"1. Prefer reliability\n2. Prefer speed\n\n" +
+					"Read [storage guidance](https://example.com/storage).",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("`Postgres` [docs](https://example.com/postgres)", "Best for **production** workloads"),
+					mockOption("SQLite", "Best for *local* work"),
+				},
+			},
+		},
+	}
+}
+
+func clarificationContextParagraphsQuestionArgs() map[string]any {
+	return map[string]any{
+		"context_paragraphs": []string{
+			"**Shared deployment context.** The database must support safe migration and clear ownership.",
+			"Read the [context guide](https://example.com/context) before choosing.",
+			"| Platform | Migration Window | Recovery Time | Owner | Region |\n" +
+				"| --- | --- | --- | --- | --- |\n" +
+				"| PostgreSQL | 4 hours | 20 minutes | Platform | eu-west |",
+			strings.Repeat("Review migration effort, recovery time, and operational ownership with the deployment team. ", 18),
+		},
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "context-paragraphs",
+				clarificationPromptKey: "Which storage mode should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Managed relational storage"),
+					mockOption("SQLite", "Embedded local storage"),
+				},
+			},
+		},
+	}
+}
+
+// clarificationMultiQuestionArgs returns the MCP arguments for a 3-question
+// clarification bundle that exercises the multi-question UI flow.
+func clarificationMultiQuestionArgs() map[string]any {
+	return map[string]any{
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:     "db",
+				clarificationPromptKey: "Which database should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("PostgreSQL", "Relational database with strong consistency"),
+					mockOption("MongoDB", "Document database for flexible schemas"),
+					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+			{
+				clarificationIDKey:     "language",
+				clarificationPromptKey: "Which language should we use?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Go", "Strong typing, fast compile"),
+					mockOption("TypeScript", "Familiar to the team"),
+					mockOption("Rust", "Best for systems work"),
+				},
+			},
+			{
+				clarificationIDKey:     "deploy",
+				clarificationPromptKey: "How should we deploy?",
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Docker", "Containerized deploy"),
+					mockOption("Bare metal", "Run directly on hosts"),
+				},
+			},
+		},
+		"context_paragraphs": []string{
+			"Picking the foundational stack.",
+			"Answer all three so we can move forward.",
+		},
 	}
 }
 

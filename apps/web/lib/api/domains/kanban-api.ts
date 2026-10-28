@@ -568,6 +568,7 @@ export async function listTasksByWorkspace(
     query?: string;
     includeArchived?: boolean;
     onlyArchived?: boolean;
+    commandPanelVisible?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -581,6 +582,7 @@ export async function listTasksByWorkspace(
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
   if (params.onlyArchived) url.searchParams.set("only_archived", "true");
+  if (params.commandPanelVisible) url.searchParams.set("command_panel_visible", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 const GITLAB_PROJECT = "platform/kandev";
 
@@ -53,67 +54,26 @@ test.describe("GitLab workflow sync", () => {
     const status = testPage.getByTestId("workflow-sync-status");
     await expect(status).toBeVisible();
 
-    // A successful sync that changed something calls the router's refresh(),
-    // which in this SPA is a literal window.location.reload() — a real
-    // browser navigation, not a React re-render. Start waiting for the load
-    // event before the click that triggers it (not after), otherwise a fast
-    // reload can complete before the wait begins, or a locator can be
-    // evaluated mid-navigation and throw "Execution context was destroyed".
-    await Promise.all([
-      testPage.waitForLoadState("load"),
-      status.getByTestId("workflow-sync-now").click(),
-    ]);
+    const initialSync = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/sync?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    );
+    expect(initialSync.ok).toBe(true);
 
-    // Post-reload hydration: wait for a stable element before touching the
-    // DOM further. The "Workflow sync completed" toast itself is transient
-    // and can auto-dismiss before an assertion runs, so it isn't checked
-    // directly — the durable signal is the synced workflow card below.
-    await expect(page.addWorkflowButton).toBeVisible();
-
-    // The workflow list's own data fetch can still be in flight for a
-    // moment after the reload finishes loading. findWorkflowCard is a
-    // one-shot scan with its own internal 500ms-per-card timeout, which is
-    // both too slow to poll with directly and (worse) can independently
-    // disagree with a check done a moment earlier under different timing.
-    // Poll for the card's own data-testid directly in one evaluateAll, so
-    // there is exactly one source of truth for "is it there yet" — no
-    // separate re-check afterward that could race against this one.
-    let cardTestId: string | null = null;
+    let importedWorkflowId = "";
     await expect
       .poll(
         async () => {
-          try {
-            cardTestId = await testPage
-              .locator('[data-testid^="workflow-card-"]')
-              .evaluateAll((elements, targetName) => {
-                for (const element of elements) {
-                  const input = element.querySelector("input");
-                  if (input && (input as HTMLInputElement).value === targetName) {
-                    return element.getAttribute("data-testid");
-                  }
-                }
-                return null;
-              }, "GitLab Synced Workflow");
-          } catch (err) {
-            // expect.poll does not retry on a thrown exception, only on a
-            // value mismatch — so a transient "Execution context was
-            // destroyed" (the reload's own document swap still settling,
-            // which addWorkflowButton above can observe a moment before
-            // evaluateAll's very next call does) must be swallowed here as
-            // "not found yet" rather than aborting the whole poll on its
-            // first tick. Any other error is a real failure and propagates.
-            if (err instanceof Error && err.message.includes("Execution context was destroyed")) {
-              return null;
-            }
-            throw err;
-          }
-          return cardTestId;
+          const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+          const imported = workflows.find((workflow) => workflow.name === "GitLab Synced Workflow");
+          if (imported) importedWorkflowId = imported.id;
+          return imported;
         },
-        { message: "waiting for the synced workflow card to render", timeout: 15_000 },
+        { message: "waiting for the imported workflow", timeout: 15_000 },
       )
-      .not.toBeNull();
+      .toMatchObject({ source: "github" });
 
-    const card = testPage.getByTestId(cardTestId!);
+    const card = page.workflowCard(importedWorkflowId);
     await expect(card).toBeVisible();
     await expect(card.getByText("Open")).toBeVisible();
     await expect(card.getByText("Closed")).toBeVisible();
@@ -123,6 +83,12 @@ test.describe("GitLab workflow sync", () => {
     // revert a user's in-UI edit.
     const descriptionInput = card.getByLabel("Description", { exact: true });
     await expect(descriptionInput).toHaveValue(SYNCED_WORKFLOW_DESCRIPTION);
+    await expect(descriptionInput).toBeDisabled();
+
+    const syncResponse = waitForHttp(testPage, "POST", /^\/api\/v1\/workflow-sync\/sync$/);
+    await status.getByTestId("workflow-sync-now").click();
+    const response = await syncResponse;
+    expect((await response.json()).result.unchanged).toBe(true);
     await expect(descriptionInput).toBeDisabled();
   });
 

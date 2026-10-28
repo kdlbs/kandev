@@ -70,6 +70,7 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-004.2:** When inspecting command output, users shall have ANSI-color-safe text rendering, search within retained output, pause/resume auto-scroll, and local clear. Clear shall not stop the process or delete durable conversation history.
 - **AC-AGENTS-BACKGROUND-WORK-004.3:** When child summaries, tool activity, or reasoning summaries are exposed by the provider, the shared viewer shall reuse their normalized transcript representation; unavailable private reasoning shall not be inferred or promised.
 - **AC-AGENTS-BACKGROUND-WORK-004.4:** When usage can be attributed to a child, the viewer shall use the existing accounting source, distinguish reported/estimated/unavailable values, and avoid adding the same measurement to parent and child totals twice.
+- **AC-AGENTS-BACKGROUND-WORK-004.5:** After a user clears a command output view, subsequent retained output for that workload and run shall appear, including while its bounded output window rolls. Repeated clears hide output through the latest clear; a clear in one view shall not hide output for another session, workload, or run.
 
 ### REQ-AGENTS-BACKGROUND-WORK-005: Desktop and phone experience
 

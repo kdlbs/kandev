@@ -36,6 +36,7 @@ Kandev currently treats every transition to a session's generic `WAITING_FOR_INP
 - **AC-PLATFORM-NOTIFICATIONS-001.13:** When the Linux System provider uses `notify-send`, the selected notification title and body shall reach that transport as literal operands even when either resembles a command option. Ordinary text remains unchanged.
 - **AC-PLATFORM-NOTIFICATIONS-001.14:** The Linux System provider shall retain its configured timeout and icon behavior, report command failures to its caller, and honor cancellation of an in-flight command.
 - **AC-PLATFORM-NOTIFICATIONS-001.15:** In mock E2E mode, System delivery shall remain suppressed without invoking an operating-system notification command.
+- **AC-PLATFORM-NOTIFICATIONS-001.16:** A Local Kandev update notification with a known release version shall display its title and body in the selected application locale, including native delivery. The displayed copy shall identify the release version and shall not depend on English text supplied by the backend.
 
 ## Migrated source detail
 
@@ -265,6 +266,7 @@ Notification bodies contain the task title but not the question text.
 
 ## Implementation Plan
 
+- [Localized update notifications](../../../plans/localized-update-notifications/plan.md), with the [Local update notification design](../system-design/localized-update-notifications.md).
 - [Linux notification operand boundary](../../../plans/linux-notification-operands/plan.md), with the [System transport design](../system-design/linux-notification-operands.md).
 - [Notification window focus](../../../plans/notification-window-focus/plan.md), with the focused [Local notification attention design](../system-design/local-notification-attention.md).
 - [Notification Save draft preservation](../../../plans/notification-save-drafts/plan.md)

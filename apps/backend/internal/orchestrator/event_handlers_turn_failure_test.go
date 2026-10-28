@@ -56,6 +56,31 @@ func TestAgentTurnFailedSettlesDurableErrorWithoutStoppingRuntime(t *testing.T) 
 	agentMgr.mu.Unlock()
 }
 
+func TestAgentTurnFailedPersistsAttestedContinuationRefusalReason(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+	svc.beginPromptAttempt("s1", "execution-1", 7, false)
+	data := retainedTurnFailureData()
+	data.AgentID = "cursor-acp"
+	data.ErrorMessage = realPeerDisconnected
+	data.ProviderError = nil
+	data.ContinuationSafety = &streams.ContinuationSafetySnapshot{
+		Support: streams.ContinuationNativeSavedHistoryV2, Known: true, Pending: true, PromptGeneration: 7,
+	}
+
+	svc.handleAgentTurnFailed(ctx, data)
+
+	require.Len(t, mc.sessionMessages, 1)
+	require.Equal(t, recoveryDispositionRefused, mc.sessionMessages[0].metadata["recovery_disposition"])
+	require.Equal(t, "unsafe_work", mc.sessionMessages[0].metadata["recovery_reason"])
+	require.Equal(t, 0, mc.sessionMessages[0].metadata["attempts_started"])
+}
+
 func TestRetainedFailedDeliveryRecordsNoSuccessWorkflowOutcome(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newServiceWithRealRepo(t)

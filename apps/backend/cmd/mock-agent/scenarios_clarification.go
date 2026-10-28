@@ -94,3 +94,15 @@ func scenarioClarificationTimeout(e *emitter) {
 	fixedDelay(50)
 	e.text(fmt.Sprintf("You answered: %s", result))
 }
+
+func scenarioClarificationContextParagraphs(e *emitter) {
+	fixedDelay(100)
+	e.text("Let me ask a storage question with shared context paragraphs.")
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationContextParagraphsQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}

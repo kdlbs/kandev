@@ -16,7 +16,7 @@ HELPER = REPO_ROOT / ".github" / "scripts" / "claude-read-pr-file.py"
 
 
 class ClaudeReadPrFileTest(unittest.TestCase):
-    def run_helper(self, path: str) -> subprocess.CompletedProcess[str]:
+    def run_helper(self, path: str, *, pinned_head: str | None = None) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_gh = Path(temp_dir) / "gh"
             head_sha = "a" * 40
@@ -70,6 +70,9 @@ class ClaudeReadPrFileTest(unittest.TestCase):
             )
             fake_gh.chmod(0o755)
             env = os.environ.copy()
+            env.pop("CLAUDE_REVIEW_HEAD_SHA", None)
+            if pinned_head is not None:
+                env["CLAUDE_REVIEW_HEAD_SHA"] = pinned_head
             env.update(
                 {
                     "CLAUDE_REVIEW_PR_NUMBER": "2109",
@@ -90,6 +93,23 @@ class ClaudeReadPrFileTest(unittest.TestCase):
 
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("const reviewed = true;\n", result.stdout)
+
+    # @covers AC-CI-ACTIONS-SECURITY-001.2
+    def test_automatic_reader_rejects_a_head_that_advanced(self) -> None:
+        result = self.run_helper("apps/web/demo file.ts", pinned_head="b" * 40)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("head changed", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_automatic_reader_accepts_matching_pinned_head(self) -> None:
+        result = self.run_helper("apps/web/demo file.ts", pinned_head="a" * 40)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "const reviewed = true;\n")
+
+    def test_automatic_reader_rejects_malformed_pinned_head(self) -> None:
+        result = self.run_helper("apps/web/demo file.ts", pinned_head="../other")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("CLAUDE_REVIEW_HEAD_SHA", result.stderr)
 
     def test_rejects_paths_outside_the_repository(self) -> None:
         result = self.run_helper("../runner-secret")

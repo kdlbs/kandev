@@ -446,23 +446,11 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
+    // Capture the owned reading position before submission can temporarily clamp it.
+    const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
     const marker = "New content while disabled at bottom on mobile";
     await session.sendMessageViaButton(`e2e:delay(1500)\ne2e:message("${marker}")`);
     await expect(activeChat.getByText("e2e:delay(1500)", { exact: false })).toBeVisible();
-    // Capture only after the submitted prompt's scroll position is stable.
-    // The delayed response leaves time for the user's message row to settle.
-    const frozenScrollTop = await list.evaluate(async (el) => {
-      let previous = el.scrollTop;
-      let stableFrames = 0;
-      for (let frame = 0; frame < 30; frame++) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const current = el.scrollTop;
-        stableFrames = Math.abs(current - previous) <= 0.5 ? stableFrames + 1 : 0;
-        previous = current;
-        if (stableFrames === 3) return current;
-      }
-      throw new Error("transcript scroll position did not settle after prompt submission");
-    });
     const markerMessages = activeChat.getByText(marker, { exact: false });
     const promptMarkerCount = await markerMessages.count();
     expect(promptMarkerCount).toBeGreaterThan(0);

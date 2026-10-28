@@ -683,7 +683,8 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     );
     const message = clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 });
     const metadata = message.metadata as ClarificationRequestMetadata;
-    metadata.context = "Keep `context` literal";
+    metadata.context =
+      "Keep **context** readable.\n\n| Signal | Value |\n| --- | --- |\n| Ready | yes |\n\n[Context guide](https://example.com/context)";
     metadata.question = {
       id: "q1",
       title: "Use `fast` mode",
@@ -715,8 +716,15 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     expect(optionDescription.querySelector("strong")?.textContent).toBe("small");
 
     const context = screen.getByTestId("clarification-context");
-    expect(context.textContent).toBe("Keep `context` literal");
-    expect(context.querySelector("code")).toBeNull();
+    expect(context.querySelector("strong")?.textContent).toBe("context");
+    expect(context.querySelector("table")?.textContent).toContain("Ready");
+    const contextGuide = context.querySelector<HTMLAnchorElement>(
+      'a[href="https://example.com/context"]',
+    );
+    expect(contextGuide?.target).toBe("_blank");
+
+    fireEvent.click(contextGuide!);
+    expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(optionLabel.querySelector("code")!);
 

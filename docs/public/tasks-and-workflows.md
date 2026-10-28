@@ -67,8 +67,10 @@ stop that tunnel. **Other ports** lists detected and manually added ports that
 you can start forwarding. Each group sorts by target port number.
 
 A proxy URL is also available for each listed port. A proxy link alone does not
-mean a dedicated tunnel is active. Starting a tunnel moves the port to the top
-group; stopping it keeps the port available to restart during that session visit.
+mean a dedicated tunnel is active. Dedicated tunnel URLs use HTTP on the returned
+port; proxy URLs use the configured backend URL and its scheme. Starting a tunnel
+moves the port to the top group; stopping it keeps the port available to restart
+during that session visit.
 Closing the port manager leaves active tunnels running.
 Reopening refreshes detected ports and current tunnel state while preserving
 your unfinished manual-port entry. Use **Refresh** to check for new listening
@@ -677,22 +679,40 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
-For a supported interactive task, Kandev can continue an unfinished request
-in the same live conversation after the normal retry delay when the model is
-at capacity and at least one tool has a confirmed result. Kandev keeps those
-actions in the conversation and asks the agent to continue without repeating
-them. This does not guarantee exactly-once execution. Eligible capacity recovery
-uses up to 11 additional attempts within 30 minutes, with waits increasing from
-5 seconds to at most 5 minutes. The inline notice shows the attempt count, next
-retry, recovery deadline, and **Cancel** action. Sending a new message, changing
-the session configuration, or cancelling stops pending recovery. A backend
-restart also stops automatic recovery; it does not restore the retry schedule.
-The deadline prevents another retry but does not interrupt a turn already running.
-Kandev leaves the
-error for you to handle when a tool or permission is still pending, an outcome
-is uncertain, background work is unaccounted for, the provider does not
-support live continuation, or the runtime is no longer usable. The composer
-remains available for a new message.
+## Recover from provider errors
+
+### Connection loss
+
+After a recognized connection loss, Kandev can continue an unfinished request
+on the same live Cursor runtime when conversation evidence is valid. A
+foreground tool can remain pending after its permission is resolved. Cursor
+inspects this pending work and chooses what to do next. Kandev sends a hidden
+`continue` prompt. It does not resend the original prompt or replay pending tool
+calls. Cursor can repeat an action, so this policy does not promise exactly-once
+effects. Failed, cancelled, unknown, or background tool work still requires
+your review. If the runtime is unavailable or evidence is incomplete, Kandev
+leaves the session waiting for you. A new message, a session change, **Cancel**,
+or a backend restart stops pending automatic recovery.
+
+### Model capacity
+
+For interactive tasks, Kandev retries a model-capacity error when the runtime
+supports live continuation and at least one tool has a confirmed result. Kandev
+keeps confirmed actions in the conversation. It asks the agent to continue
+without repeating those actions. This does not guarantee exactly-once effects.
+
+Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
+from 5 seconds to a maximum of 5 minutes. The inline notice shows the attempt
+count, next retry, deadline, and **Cancel** action. A new message, a session
+configuration change, or **Cancel** stops pending recovery. A backend restart
+also stops automatic recovery. It does not restore the retry schedule. The
+deadline does not stop a turn that is already running.
+
+Kandev leaves a model-capacity error for you to handle when a tool or permission
+is pending, an outcome is uncertain, background work is unaccounted for, the
+provider does not support live continuation, or the runtime is unavailable.
+The composer stays available for a new message. These limits apply to capacity
+recovery. Connection-loss recovery uses the normal short retry policy.
 
 ## Answer clarification questions
 
@@ -1194,6 +1214,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 
 ## Troubleshooting
 
+- **A task shows as temporarily unavailable:** Kandev retries the task and session reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. If recovery stops, select **Retry**, or use **Back to task overview**. Task details that already appeared stay visible while a refresh retries.
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.

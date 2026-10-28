@@ -187,6 +187,16 @@ a recoverable preparing result; they cannot provision replacements independently
 A pod/container restart invalidates all affected per-instance clients; refresh
 projects the same physical generation while each session reconnects independently.
 
+If remote recovery attaches an idle agent after a resume has claimed `STARTING`,
+the duplicate launch must restore the previously observed `WAITING_FOR_INPUT`
+state before dispatch. Restoration requires current prompt readiness and the
+same startup-attempt identity and state. It must preserve a newer attempt,
+cancellation, or running turn, and must not clean up the recovered runtime.
+An unready agent keeps its existing startup lifecycle.
+If a newer owner wins the state comparison, retain the already-running error
+classification so the caller checks the current session's prompt eligibility.
+It must not convert that ownership change into a failed-launch transition.
+
 Migration is additive and non-destructive. At first use, adopt legacy inventory
 only when all relevant retained rows agree on one exact pod/PVC identity, matching
 canonical task/environment ownership, and available encrypted control credentials.

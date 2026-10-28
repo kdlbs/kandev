@@ -66,6 +66,9 @@ jobs:
       - name: Test preview environment workflow contract
         run: python3 .github/scripts/preview-env-workflow-contract_test.py
 
+      - name: Test automatic review input isolation
+        run: python3 .github/scripts/automatic-review-inputs_test.py
+
       - name: Test OpenCode code review workflow contract
         run: python3 .github/scripts/opencode-code-review-workflow-contract_test.py
 
@@ -90,6 +93,9 @@ jobs:
           python3 .github/scripts/discord-release-content_test.py
           python3 .github/scripts/announce-discord-release_test.py
           python3 .github/scripts/announce-discord-release-workflow-contract_test.py
+
+      - name: Test image publication workflow contract
+        run: python3 .github/scripts/image-publication-workflow-contract_test.py
 
       - name: Test release workflow contract
         run: python3 .github/scripts/release-workflow-contract_test.py
