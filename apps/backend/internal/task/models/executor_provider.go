@@ -1,9 +1,11 @@
 package models
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 )
 
@@ -93,6 +95,19 @@ var ErrExecutorCapabilityMismatch = errors.New("capability_mismatch")
 // cannot return it.
 var ErrExecutorStateTooLarge = errors.New("state_too_large")
 
+// ErrExecutorSecretInState is the `secret_in_state` refusal of a provider
+// response whose state contains the exact bytes of a secret value revealed for
+// the call that produced it.
+var ErrExecutorSecretInState = errors.New("secret_in_state")
+
+// ErrExecutorProfileInvalidType is the `invalid_type` refusal of a stored profile
+// value that does not parse as its schema type, raised before any provider call.
+var ErrExecutorProfileInvalidType = errors.New("invalid_type")
+
+// ErrExecutorProfileTooLarge is the host-originated `profile_too_large` refusal
+// of a profile whose provider-facing config and secret IDs exceed the budget.
+var ErrExecutorProfileTooLarge = errors.New("profile_too_large")
+
 // ExecutorProviderCapabilities is the provider's manifest capability ceiling.
 type ExecutorProviderCapabilities struct {
 	Terminal            bool   `json:"terminal"`
@@ -129,6 +144,8 @@ type ExecutorProviderProfile struct {
 	ProfileID    string
 	Config       map[string]string
 	SecretValues map[string]string
+	// SecretReferences maps a secret property to the store ID that holds it.
+	SecretReferences map[string]string
 }
 
 // ExecutorProviderLaunchProfile is a transient, host-authorized snapshot used
@@ -148,4 +165,31 @@ type ExecutorProviderLaunchProfile struct {
 type ExecutorProviderCatalog interface {
 	ListExecutorProviders(context.Context) ([]ExecutorProvider, error)
 	ValidateExecutorProviderProfile(context.Context, string, ExecutorProviderProfile) ([]ExecutorProviderFieldError, error)
+}
+
+// ExecutorProfileContractBudgetBytes bounds the provider-facing profile config
+// plus the secret store IDs that the host records for a provider that declares
+// a capability.
+const ExecutorProfileContractBudgetBytes = 4096
+
+// ExecutorProfileContractBytes is the one measure used at profile save, launch
+// and resume: the compact JSON length of the provider-facing config object
+// (sorted keys, no HTML escaping) plus the compact JSON array of the secret
+// store IDs. A nil or empty ID list contributes nothing.
+func ExecutorProfileContractBytes(publicConfig map[string]string, secretIDs []string) int {
+	total := compactJSONLength(publicConfig)
+	if len(secretIDs) > 0 {
+		total += compactJSONLength(secretIDs)
+	}
+	return total
+}
+
+func compactJSONLength(value any) int {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return 0
+	}
+	return buffer.Len() - 1 // Encode appends a newline
 }

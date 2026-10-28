@@ -267,9 +267,13 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 	if err != nil {
 		return nil, errors.New("plugin executor bootstrap could not be encoded")
 	}
+	snapshot, err := pluginExecutorProfileSnapshot(launch.profile, launch.inventory.NegotiatedCapabilities)
+	if err != nil {
+		return nil, err
+	}
 	provisioned, err := r.operations.ProvisionExecutorEnvironment(ctx, &pluginsdk.ProvisionExecutorEnvironmentRequest{
 		Context:       launch.operationContext,
-		Profile:       &pluginsdk.ExecutorProfileSnapshot{ProfileId: launch.profile.ProfileID, Config: launch.profile.Config, SecretValues: launch.profile.SecretValues},
+		Profile:       snapshot,
 		BootstrapJson: string(bootstrap),
 	})
 	if err != nil || provisioned == nil || provisioned.GetResource() == nil || provisioned.GetResource().GetResourceHandle() == "" {
@@ -283,6 +287,10 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 	if err := validatePluginExecutorResourceForProvider(launch.profile.Provider, resource); err != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"resource_descriptor", err)
+	}
+	if err := rejectSecretInProviderState(launch.profile.SecretValues, resource); err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"secret_in_state", err)
 	}
 	launch.inventory.Resource = resource
 	launch.inventory.StateVersion = resource.GetStateVersion()
@@ -656,10 +664,12 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 	inventory pluginExecutorInventory,
 	provisionErr error,
 ) error {
-	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{
-		Context: operationContext,
-		Profile: &pluginsdk.ExecutorProfileSnapshot{ProfileId: profile.ProfileID, Config: profile.Config, SecretValues: profile.SecretValues},
-	})
+	snapshot, snapshotErr := pluginExecutorProfileSnapshot(profile, inventory.NegotiatedCapabilities)
+	var recovery *pluginsdk.RecoverExecutorOperationResponse
+	err := snapshotErr
+	if snapshotErr == nil {
+		recovery, err = r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{Context: operationContext, Profile: snapshot})
+	}
 	if err != nil || recovery == nil || recovery.GetOutcome() == pluginExecutorStateUnknown {
 		inventory.Phase = pluginExecutorPhaseCleanupPending
 		_ = checkpointPluginExecutor(ctx, req, inventory)
@@ -711,7 +721,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 			zap.String("cause_type", fmt.Sprintf("%T", cause)))
 	}
 	retained := resource
-	if errors.Is(cause, models.ErrExecutorStateTooLarge) {
+	if errors.Is(cause, models.ErrExecutorStateTooLarge) || errors.Is(cause, models.ErrExecutorSecretInState) {
 		retained = fixedSizePluginExecutorResource(resource)
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)

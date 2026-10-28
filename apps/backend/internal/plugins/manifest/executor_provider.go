@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/plugins/profileschema"
 )
 
 const (
@@ -232,7 +234,7 @@ func validateExecutorSchemaRequired(prefix string, raw any, properties map[strin
 
 func validateExecutorSchemaProperty(prefix string, property map[string]any, allowSecrets bool) error {
 	for key := range property {
-		if key != executorSchemaTypeKeyword && key != executorSchemaTitleKeyword && key != "description" && key != "enum" && key != "secret" && key != "format" && key != "minimum" && key != "maximum" {
+		if !executorSchemaPropertyKeyword(key, allowSecrets) {
 			return fmt.Errorf("%s contains unsupported schema keyword %q", prefix, key)
 		}
 	}
@@ -249,7 +251,25 @@ func validateExecutorSchemaProperty(prefix string, property map[string]any, allo
 	if err := validateExecutorSchemaNumericBounds(prefix, property, typeName); err != nil {
 		return err
 	}
+	if allowSecrets {
+		if _, err := profileschema.ParseProperty(property); err != nil {
+			return fmt.Errorf("%s: %w", prefix, err)
+		}
+	}
 	return nil
+}
+
+// executorSchemaPropertyKeyword reports whether a property keyword is allowed.
+// The profile schema (the one that may carry secrets) additionally accepts the
+// default, length, and pattern keywords; the resource state schema stays closed.
+func executorSchemaPropertyKeyword(key string, profileSchema bool) bool {
+	switch key {
+	case executorSchemaTypeKeyword, executorSchemaTitleKeyword, "description", "enum", "secret", "format", "minimum", "maximum":
+		return true
+	case "default", "minLength", "maxLength", "pattern":
+		return profileSchema
+	}
+	return false
 }
 
 func validateExecutorSchemaNumericBounds(prefix string, property map[string]any, typeName string) error {

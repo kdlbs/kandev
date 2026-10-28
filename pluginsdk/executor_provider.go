@@ -374,3 +374,10 @@ func (v *executorArtifactStreamValidator) complete() bool {
 func artifactChunkMetadata(chunk *pluginv1.ExecutorRuntimeArtifactChunk) string {
 	return fmt.Sprintf("%s\x00%s\x00%d\x00%s", chunk.GetArtifactId(), chunk.GetVersion(), chunk.GetTotalSizeBytes(), chunk.GetSha256())
 }
+
+type ExecutorConfigValue = pluginv1.ExecutorConfigValue
+type ExecutorConfigValue_BoolValue = pluginv1.ExecutorConfigValue_BoolValue
+type ExecutorConfigValue_IntValue = pluginv1.ExecutorConfigValue_IntValue
+type ExecutorConfigValue_DoubleValue = pluginv1.ExecutorConfigValue_DoubleValue
+type ExecutorConfigValue_StringValue = pluginv1.ExecutorConfigValue_StringValue
+type ExecutorSecretRef = pluginv1.ExecutorSecretRef

@@ -129,7 +129,7 @@ func fixedSizePluginExecutorResource(resource *pluginsdk.ExecutorResourceDescrip
 // withPluginExecutorLaunchCode keeps a host-originated stable code visible
 // through the generic launch-failure wording.
 func withPluginExecutorLaunchCode(cause, failure error) error {
-	for _, code := range []error{models.ErrExecutorStateTooLarge, models.ErrExecutorCapabilityMismatch} {
+	for _, code := range []error{models.ErrExecutorStateTooLarge, models.ErrExecutorCapabilityMismatch, models.ErrExecutorSecretInState} {
 		if errors.Is(cause, code) {
 			return fmt.Errorf("%w: %v", code, failure)
 		}

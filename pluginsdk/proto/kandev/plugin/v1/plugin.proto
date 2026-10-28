@@ -1843,6 +1843,27 @@ message ExecutorProfileSnapshot {
   // Secret values are transient and scoped to this operation/profile. Never
   // place them in profile snapshots, checkpoints, or persisted provider state.
   map<string, string> secret_values = 3;
+  // Typed copies of the non-secret config values, present only for a provider
+  // that requires the typed_profile_values capability. The string config stays
+  // canonical and both forms are derived from one validated value.
+  map<string, ExecutorConfigValue> typed_config = 4;
+  // Opaque secret store IDs for declared secret properties that hold a value,
+  // present only for a provider that requires the secret_references capability.
+  // A reference is non-secret and names the secret that secret_values carries.
+  map<string, ExecutorSecretRef> secret_refs = 5;
+}
+
+message ExecutorConfigValue {
+  oneof value {
+    bool bool_value = 1;
+    int64 int_value = 2;
+    double double_value = 3;
+    string string_value = 4;
+  }
+}
+
+message ExecutorSecretRef {
+  string id = 1;
 }
 
 message ExecutorProviderFieldError {

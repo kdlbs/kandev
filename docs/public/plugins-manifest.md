@@ -401,6 +401,16 @@ fields, must be finite numbers, and `minimum` cannot exceed `maximum`. Each
 schema is limited to 64 KiB. State versions must be unique positive integers.
 The manifest can declare at most 16 providers.
 
+Profile schema fields (not the resource-state schema) can also set `default`,
+`minLength`, `maxLength`, and `pattern` on `string` fields (`default` also
+applies to the other scalar types). Lengths count Unicode code points. A
+`pattern` is an RE2 expression that must match the whole value. The host
+applies a default when the stored value is absent and reports a failed
+check as a field error with the code `too_short`, `too_long`, or
+`pattern_mismatch`. A provider that declares host capabilities also receives
+typed values and secret store IDs, and its profile (public config plus secret
+IDs) is limited to 4096 bytes.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.
