@@ -128,6 +128,7 @@ const (
 	ActionSessionRecover                  = "session.recover"
 	ActionSessionWorkspaceRecoveryGet     = "session.workspace_recovery.get"
 	ActionSessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
+	ActionSessionRuntimeStorageChanged    = "task_session.runtime_storage_changed"
 	ActionSessionResetContext             = "session.reset_context"
 	ActionSessionStop                     = "session.stop"
 	ActionSessionDelete                   = "session.delete"

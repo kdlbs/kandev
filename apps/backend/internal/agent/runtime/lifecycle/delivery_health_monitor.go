@@ -7,6 +7,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
 
@@ -14,6 +15,12 @@ const (
 	defaultDeliveryHealthProbeInterval = 2 * time.Second
 	defaultDeliveryHealthProbeTimeout  = 2 * time.Second
 	defaultDeliveryHealthCooldown      = 10 * time.Second
+	defaultRuntimeStorageProbeInterval = 30 * time.Second
+	defaultRuntimeStorageConcurrency   = 4
+	deliveryGuardedHealthState         = "guarded"
+	deliveryStorageErrorHealthState    = "storage_error"
+	deliveryCancellingHealthState      = "cancelling"
+	deliveryCancellationFailedState    = "cancellation_failed"
 )
 
 // deliveryStreamAttachment fences one attached updates-stream connection. A
@@ -44,10 +51,14 @@ func (a *deliveryStreamAttachment) isClosed() bool {
 type deliveryHealthOwner struct {
 	execution        *AgentExecution
 	probe            func(context.Context) (*agentctl.StatusResponse, error)
+	runtimeStorage   func(context.Context) (*streams.RuntimeStorageSnapshot, error)
+	applyStorage     func(context.Context, RuntimeStorageProbeResult)
+	applyPressure    func(context.Context, RuntimeStoragePressure)
 	current          func() bool
 	reconcile        func(context.Context) DeliveryReconciliationResult
 	submission       func() string
 	promptGeneration func() uint64
+	attachment       *deliveryStreamAttachment
 }
 
 // monitorDeliveryHealth observes authenticated delivery health independently
@@ -66,8 +77,13 @@ func (sm *StreamManager) monitorDeliveryHealth(ctx context.Context, owner delive
 	if cooldown <= 0 {
 		cooldown = defaultDeliveryHealthCooldown
 	}
+	storageInterval := sm.runtimeStorageProbeInterval
+	if storageInterval <= 0 {
+		storageInterval = defaultRuntimeStorageProbeInterval
+	}
 	state := &deliveryHealthProbeState{}
 	first := true
+	nextStorage := time.Time{}
 	for {
 		if ctx.Err() != nil {
 			return
@@ -80,6 +96,11 @@ func (sm *StreamManager) monitorDeliveryHealth(ctx context.Context, owner delive
 			return
 		}
 		sm.probeDeliveryHealth(ctx, owner, timeout, cooldown, state)
+		now := sm.deliveryHealthNow()
+		if nextStorage.IsZero() || !now.Before(nextStorage) {
+			sm.probeRuntimeStorage(ctx, owner, timeout)
+			nextStorage = now.Add(storageInterval)
+		}
 	}
 }
 
@@ -146,6 +167,12 @@ func (sm *StreamManager) probeDeliveryHealth(
 		sm.logger.Debug("delivery health probe unavailable",
 			zap.String("execution_id", owner.execution.ID), zap.Error(err))
 		return
+	}
+	if !owner.current() || owner.submission() != submissionID {
+		return
+	}
+	if owner.applyPressure != nil {
+		owner.applyPressure(ctx, runtimeStoragePressureFromStatus(owner, status, submissionID, promptGeneration))
 	}
 	reason := deliveryPressureRecoveryReason(status)
 	if reason == "" {
@@ -236,8 +263,19 @@ func (sm *StreamManager) deliveryHealthOwnerFor(
 	attachment *deliveryStreamAttachment,
 ) deliveryHealthOwner {
 	return deliveryHealthOwner{
-		execution: execution,
-		probe:     client.GetStatus,
+		execution:      execution,
+		probe:          client.GetStatus,
+		runtimeStorage: client.RuntimeStorage,
+		applyStorage: func(ctx context.Context, result RuntimeStorageProbeResult) {
+			if sm.onRuntimeStorageProbe != nil {
+				sm.onRuntimeStorageProbe(ctx, execution, result)
+			}
+		},
+		applyPressure: func(ctx context.Context, pressure RuntimeStoragePressure) {
+			if sm.onRuntimeStoragePressure != nil {
+				sm.onRuntimeStoragePressure(ctx, execution, pressure)
+			}
+		},
 		current: func() bool {
 			if execution == nil || attachment.isClosed() {
 				return false
@@ -258,6 +296,7 @@ func (sm *StreamManager) deliveryHealthOwnerFor(
 		},
 		submission:       func() string { return currentDeliverySubmissionID(execution) },
 		promptGeneration: execution.promptGenerationSnapshot,
+		attachment:       attachment,
 	}
 }
 
@@ -286,4 +325,81 @@ func (sm *StreamManager) waitDeliveryHealth(ctx context.Context, interval time.D
 	case <-sm.stopCh:
 		return false
 	}
+}
+
+// probeRuntimeStorage performs one bounded advisory request and applies the
+// result only while this stream still owns the execution. It never refreshes
+// journal pressure and never blocks prompt admission.
+func (sm *StreamManager) probeRuntimeStorage(
+	ctx context.Context,
+	owner deliveryHealthOwner,
+	timeout time.Duration,
+) {
+	if owner.runtimeStorage == nil || owner.applyStorage == nil {
+		return
+	}
+	if sm.runtimeStorageSlots != nil {
+		select {
+		case sm.runtimeStorageSlots <- struct{}{}:
+			defer func() { <-sm.runtimeStorageSlots }()
+		case <-ctx.Done():
+			return
+		}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	snapshot, err := owner.runtimeStorage(probeCtx)
+	cancel()
+	if !owner.current() {
+		return
+	}
+	result := RuntimeStorageProbeResult{Available: false}
+	if err == nil && snapshot != nil && !snapshot.Unavailable && snapshot.Filesystem != nil {
+		total := snapshot.Filesystem.TotalBytes
+		available := snapshot.Filesystem.AvailableBytes
+		result = RuntimeStorageProbeResult{
+			Available:      true,
+			StorageKind:    snapshot.StorageKind,
+			TotalBytes:     &total,
+			AvailableBytes: &available,
+			ObservedAt:     snapshot.Filesystem.ObservedAt,
+			Generation:     owner.execution.DeliveryHarnessGeneration,
+			attachment:     owner.attachment,
+		}
+	}
+	owner.applyStorage(ctx, result)
+}
+
+func deliveryStateIndicatesStoragePressure(state string) bool {
+	switch state {
+	case deliveryGuardedHealthState, deliveryFailedHealthState, deliveryStorageErrorHealthState,
+		deliveryInterruptedHealthState, deliveryCancellingHealthState, deliveryCancellationFailedState:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeStoragePressureFromStatus(
+	owner deliveryHealthOwner,
+	status *agentctl.StatusResponse,
+	submissionID string,
+	promptGeneration uint64,
+) RuntimeStoragePressure {
+	capacity := status.DeliveryHealth.Capacity
+	failure := status.DeliveryHealth.Failure
+	pressure := RuntimeStoragePressure{
+		WritePressure: status.DeliveryHealth.ProducerPaused ||
+			capacity.Guarded ||
+			failure != nil ||
+			deliveryStateIndicatesStoragePressure(status.DeliveryHealth.State),
+		ProducerPaused: status.DeliveryHealth.ProducerPaused,
+		DeliveryState:  status.DeliveryHealth.State,
+		Generation:     owner.execution.DeliveryHarnessGeneration,
+		attachment:     owner.attachment,
+	}
+	if failure != nil && failure.Storage != nil &&
+		deliveryFailureCorrelates(owner, failure, submissionID, promptGeneration) {
+		pressure.FailureStorage = modelStorageDiagnostic(failure.Storage)
+	}
+	return pressure
 }

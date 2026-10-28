@@ -75,14 +75,18 @@ func (p *EventPublisher) publishAgentEventWithTerminalEvent(
 		return
 	}
 	payload := newAgentEventPayloadWithTurnIDAndEvidence(execution, terminal.TurnID, evidence)
-	copyDeliveryTerminalIdentity(&payload, terminal)
+	copyDeliveryTerminalIdentity(&payload, terminal, execution)
 	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
 		payload.AttemptID = attemptID
 	}
 	_ = p.publishAgentEventPayload(ctx, eventType, payload)
 }
 
-func copyDeliveryTerminalIdentity(payload *AgentEventPayload, terminal *streams.AgentEvent) {
+func copyDeliveryTerminalIdentity(
+	payload *AgentEventPayload,
+	terminal *streams.AgentEvent,
+	execution *AgentExecution,
+) {
 	if payload == nil || terminal == nil {
 		return
 	}
@@ -91,6 +95,7 @@ func copyDeliveryTerminalIdentity(payload *AgentEventPayload, terminal *streams.
 	payload.DeliveryHarnessGeneration = terminal.DeliveryHarnessGeneration
 	payload.DeliverySequence = terminal.DeliverySequence
 	payload.DeliverySubmissionID = terminal.DeliverySubmissionID
+	copyTerminalStorageIdentity(payload, terminal, execution)
 	payload.DeliveryOutcome = string(models.DeliverySubmissionCompleted)
 	if isError, _ := terminal.Data["is_error"].(bool); isError {
 		payload.DeliveryOutcome = string(models.DeliverySubmissionFailed)

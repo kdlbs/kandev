@@ -629,6 +629,7 @@ func (h *TaskHandlers) taskSessionDTOWithPendingActions(
 		}
 	}
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
+	dto.EnrichRuntimeStorageHealth(&result, h.runtimeStorageHealth)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
 	if session != nil && session.TaskEnvironmentID != "" {
 		operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
@@ -2881,6 +2882,7 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 			}
 		}
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichRuntimeStorageHealth(&sessionDTO, h.runtimeStorageHealth)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
 			operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(c.Request.Context(), item.Session.TaskEnvironmentID)

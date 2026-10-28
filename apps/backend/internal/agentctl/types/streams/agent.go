@@ -331,6 +331,10 @@ type AgentEvent struct {
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`
 
+	// Storage carries host-owned storage evidence for this error. It is never
+	// populated from provider prose or tool output.
+	Storage *DeliveryStorageDiagnostic `json:"storage,omitempty"`
+
 	// ProviderError contains a validated, sanitized provider diagnostic for a
 	// terminal error. Raw stderr never crosses this boundary.
 	ProviderError *ProviderError `json:"provider_error,omitempty"`

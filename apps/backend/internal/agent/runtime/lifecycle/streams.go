@@ -54,6 +54,10 @@ type StreamManager struct {
 	deliveryHealthProbeInterval    time.Duration
 	deliveryHealthProbeTimeout     time.Duration
 	deliveryHealthRecoveryCooldown time.Duration
+	runtimeStorageProbeInterval    time.Duration
+	runtimeStorageSlots            chan struct{}
+	onRuntimeStorageProbe          func(context.Context, *AgentExecution, RuntimeStorageProbeResult)
+	onRuntimeStoragePressure       func(context.Context, *AgentExecution, RuntimeStoragePressure)
 	deliveryAttachments            sync.Map
 	isExecutionCurrent             func(*AgentExecution) bool
 	onDeliveryReconciliationPhase  func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
@@ -194,6 +198,7 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler 
 		deliveryHealthProbeInterval:    defaultDeliveryHealthProbeInterval,
 		deliveryHealthProbeTimeout:     defaultDeliveryHealthProbeTimeout,
 		deliveryHealthRecoveryCooldown: defaultDeliveryHealthCooldown,
+		runtimeStorageSlots:            make(chan struct{}, defaultRuntimeStorageConcurrency),
 	}
 }
 

@@ -40,6 +40,7 @@ func (m *Manager) recordDeliveryWriteFailure(err error, update adapter.AgentEven
 	revision := m.deliveryFailureRevision.Add(1)
 	snapshot := &agenttypes.DeliveryFailureSnapshot{
 		Reason:            classifyDeliveryFailure(err),
+		Storage:           streams.DeliveryStorageDiagnosticFromError(err),
 		ProcessGeneration: m.ProcessGeneration(),
 		SessionID:         sessionID,
 		IncarnationID:     incarnationID,

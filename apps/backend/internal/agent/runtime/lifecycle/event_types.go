@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
@@ -66,6 +67,9 @@ type AgentEventPayload struct {
 	// correlate the diagnostic even when the stream subscription is delayed.
 	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
 	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
+	// Storage is the immutable host-owned storage evidence captured at the
+	// terminal failure boundary. It never contains provider prose.
+	Storage *models.AgentErrorStorage `json:"storage,omitempty"`
 }
 
 // PromptAttemptEvidence is the immutable lifecycle snapshot attached to a

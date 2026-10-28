@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -122,6 +123,7 @@ func (s *Server) setupRoutes() {
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
+		api.GET("/runtime/storage", s.handleRuntimeStorage)
 		api.GET("/info", s.handleInfo)
 		api.GET("/system/metrics", s.handleSystemMetrics)
 
@@ -420,16 +422,19 @@ func (s *Server) handleSetPluginTools(c *gin.Context) {
 
 // Status response
 type StatusResponse struct {
-	DeliveryHealth process.DeliveryHealth `json:"delivery_health"`
-	AgentStatus    string                 `json:"agent_status"`
-	ProcessInfo    map[string]interface{} `json:"process_info"`
-	Uptime         string                 `json:"uptime,omitempty"`
+	DeliveryHealth process.DeliveryHealth          `json:"delivery_health"`
+	RuntimeStorage *streams.RuntimeStorageSnapshot `json:"runtime_storage,omitempty"`
+	AgentStatus    string                          `json:"agent_status"`
+	ProcessInfo    map[string]interface{}          `json:"process_info"`
+	Uptime         string                          `json:"uptime,omitempty"`
 }
 
 func (s *Server) handleStatus(c *gin.Context) {
+	runtimeStorage := s.procMgr.CachedRuntimeStorage()
 	c.JSON(http.StatusOK, StatusResponse{
 		AgentStatus:    string(s.procMgr.Status()),
 		DeliveryHealth: s.procMgr.DeliveryHealth(),
+		RuntimeStorage: runtimeStorage,
 		ProcessInfo:    s.procMgr.GetProcessInfo(),
 	})
 }

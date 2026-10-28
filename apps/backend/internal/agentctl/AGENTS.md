@@ -5,7 +5,7 @@ Scoped guidance for `apps/backend/internal/agentctl/`. Higher-level backend arch
 ## API Groups
 
 agentctl exposes these route groups (see `server/api/`):
-- `/health`, `/info`, `/status` - Health and status
+- `/health`, `/info`, `/status`, `/runtime/storage` - Health, status, and the read-only executor filesystem advisory
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming

@@ -1317,6 +1317,7 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 				message,
 				req.PromptGeneration,
 				providerError,
+				streams.DeliveryStorageDiagnosticFromError(err),
 			)
 		}
 	}()
@@ -1374,7 +1375,8 @@ func (s *Server) admitDurablePrompt(
 		Payload:           payload,
 	})
 	if err != nil {
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "prompt submission could not be admitted", nil)
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+			"prompt submission could not be admitted", promptErrorDetails(err))
 		return "", resp
 	}
 	s.procMgr.TrackDeliverySubmission(submission.ID, req.PromptGeneration)

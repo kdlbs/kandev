@@ -141,6 +141,7 @@ func buildSessionDataProvider(
 	taskRepo *sqliterepo.Repository,
 	lifecycleMgr *lifecycle.Manager,
 	cancellationProvider taskdto.CancellationPendingProvider,
+	runtimeStorageProvider taskdto.RuntimeStorageHealthProvider,
 	log *logger.Logger,
 ) func(context.Context, string) ([]*ws.Message, error) {
 	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
@@ -150,7 +151,9 @@ func buildSessionDataProvider(
 		}
 
 		var result []*ws.Message
-		result = appendSessionStateMessageWithCancellation(sessionID, session, cancellationProvider, result)
+		result = appendSessionStateMessageWithCancellation(
+			sessionID, session, cancellationProvider, runtimeStorageProvider, result,
+		)
 		result = appendAgentctlStatusMessage(ctx, lifecycleMgr, sessionID, result, log)
 		result = appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, result, log)
 		result = appendContextWindowMessage(sessionID, session, result)
@@ -446,7 +449,7 @@ func appendAgentctlStatusMessage(
 // (page reload, task switch, WS reconnect) can seed environmentIdBySessionId
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
-	return appendSessionStateMessageWithCancellation(sessionID, session, nil, result)
+	return appendSessionStateMessageWithCancellation(sessionID, session, nil, nil, result)
 }
 
 func cancellationPendingSnapshot(
@@ -463,6 +466,7 @@ func appendSessionStateMessageWithCancellation(
 	sessionID string,
 	session *models.TaskSession,
 	cancellationProvider taskdto.CancellationPendingProvider,
+	runtimeStorageProvider taskdto.RuntimeStorageHealthProvider,
 	result []*ws.Message,
 ) []*ws.Message {
 	payload := map[string]interface{}{
@@ -478,6 +482,11 @@ func appendSessionStateMessageWithCancellation(
 		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)
 		payload["cancellation_pending"] = pending
 		payload["cancellation_revision"] = revision
+	}
+	if runtimeStorageProvider != nil {
+		if health := runtimeStorageProvider.RuntimeStorageHealth(sessionID); health != nil {
+			payload["runtime_storage_health"] = health
+		}
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)

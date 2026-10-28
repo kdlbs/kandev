@@ -50,6 +50,7 @@ type TurnChangeTerminal = lifecycle.TurnChangeTerminal
 type TurnChangeCheckpointClient = lifecycle.TurnChangeCheckpointClient
 type TurnChangeCaptureHandler = lifecycle.TurnChangeCaptureHandler
 type TurnChangeSummaryProcessor = lifecycle.TurnChangeSummaryProcessor
+type RuntimeStorageObservation = lifecycle.RuntimeStorageObservation
 
 const (
 	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive

@@ -20,6 +20,8 @@ import {
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
+import { mergeRuntimeStorageHealth } from "@/lib/session-delivery-storage";
+import type { RuntimeStorageHealth } from "@/lib/types/http";
 import {
   captureActiveTurnWindowObservation,
   mergeTurnRows,
@@ -579,12 +581,14 @@ function hydrateTaskSessions(
   const incomingItems = incoming.items ?? {};
   const items = { ...incomingItems };
   const previousCursors = new Map<string, string | undefined>();
+  const previousStorage = new Map<string, RuntimeStorageHealth | null | undefined>();
 
   for (const [sessionId, session] of Object.entries(incomingItems)) {
     const existing = draft.taskSessions.items[sessionId];
     const requestEpoch = requestEpochs?.[sessionId];
     const currentEpoch = draft.taskSessions.readCursorEpochBySession?.[sessionId] ?? 0;
     previousCursors.set(sessionId, existing?.last_read_message_id);
+    previousStorage.set(sessionId, existing?.runtime_storage_health);
     if (existing && hasNewerReadCursor(currentEpoch, requestEpoch)) {
       items[sessionId] = {
         ...session,
@@ -594,12 +598,26 @@ function hydrateTaskSessions(
   }
 
   deepMerge(draft.taskSessions, { ...incoming, items });
+  applyHydratedRuntimeStorage(draft, previousStorage);
 
   for (const [sessionId, previousCursor] of previousCursors) {
     if (draft.taskSessions.items[sessionId]?.last_read_message_id !== previousCursor) {
       const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
       epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
     }
+  }
+}
+
+function applyHydratedRuntimeStorage(
+  draft: Draft<AppState>,
+  previousStorage: ReadonlyMap<string, RuntimeStorageHealth | null | undefined>,
+): void {
+  for (const [sessionId, storage] of previousStorage) {
+    const merged = draft.taskSessions.items[sessionId];
+    if (!merged) continue;
+    const chosen = mergeRuntimeStorageHealth(storage, merged.runtime_storage_health);
+    if (chosen) merged.runtime_storage_health = chosen;
+    else delete merged.runtime_storage_health;
   }
 }
 
@@ -617,7 +635,11 @@ function hydrateTaskSessionsByTask(
           ? draft.taskSessions.items[session.id]
           : undefined;
         return canonical
-          ? { ...session, last_read_message_id: canonical.last_read_message_id }
+          ? {
+              ...session,
+              last_read_message_id: canonical.last_read_message_id,
+              runtime_storage_health: canonical.runtime_storage_health,
+            }
           : session;
       }),
     ]),

@@ -71,6 +71,9 @@ func (p bootSessionRuntimeFixture) ParkedSnapshot(id string) (bool, uint64) {
 	return p[id].parked, p[id].parkedRevision
 }
 func (p bootSessionRuntimeFixture) ParkedEpoch() uint64 { return 42 }
+func (p bootSessionRuntimeFixture) RuntimeStorageHealth(string) *dto.RuntimeStorageHealthDTO {
+	return nil
+}
 
 func TestBootTaskDetailCompactRuntimeStates(t *testing.T) {
 	fixture := newJourneyReadFixture(t, 1)

@@ -340,7 +340,7 @@ func (m *Manager) claimPromptCompletion(
 		current.Status = v1.AgentStatusReady
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
-		copyDeliveryTerminalIdentity(&claim.readyPayload, event)
+		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
 		// The Office cause belongs to the launch's first turn. Preserve it on
 		// that completion event, then clear it so later user turns on this
 		// session cannot inherit stale run causation.
@@ -516,7 +516,7 @@ func (m *Manager) retainPromptFailureRuntime(
 		current.ErrorMessage = ""
 		current.promptSettlementGeneration = event.PromptGeneration
 		payload = newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence)
-		copyDeliveryTerminalIdentity(&payload, event)
+		copyDeliveryTerminalIdentity(&payload, event, current)
 		payload.ErrorMessage = extractErrorMessage(event)
 		payload.PromptFailureDisposition = event.PromptFailureDisposition
 		if event.AttemptID != "" {

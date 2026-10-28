@@ -606,7 +606,8 @@ func prepareAppendEvents(events []Event, maxEventBytes int64) error {
 			return fmt.Errorf("event stream, session, and type are required")
 		}
 		if len(event.Payload) > int(maxEventBytes) {
-			return fmt.Errorf("%w: %d bytes exceeds %d", ErrEventTooLarge, len(event.Payload), maxEventBytes)
+			return NewStorageError(StorageReasonEventTooLarge, ErrEventTooLarge,
+				WithEventBytes(int64(len(event.Payload))), withLimitBytes(maxEventBytes))
 		}
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = time.Now().UTC()
@@ -699,20 +700,31 @@ func validateAppendCapacity(j *Journal, stream Stream, journalBytes, eventBytes 
 	journalLimit := logicalLimit(j.config.MaxJournalBytes, j.config.ReserveBytes)
 	if !terminal {
 		if streamLimit > 0 && stream.Bytes+eventBytes > streamLimit {
-			return ErrStreamFull
+			return NewStorageError(StorageReasonStreamLimitReached, ErrStreamFull,
+				storageLimitMeasurements(stream.Bytes, streamLimit, eventBytes))
 		}
 		if journalLimit > 0 && journalBytes+eventBytes > journalLimit {
-			return ErrJournalFull
+			return NewStorageError(StorageReasonJournalLimitReached, ErrJournalFull,
+				storageLimitMeasurements(journalBytes, journalLimit, eventBytes))
 		}
 		return nil
 	}
 	if j.config.MaxStreamBytes > 0 && stream.Bytes+eventBytes > j.config.MaxStreamBytes {
-		return ErrStreamFull
+		return NewStorageError(StorageReasonStreamLimitReached, ErrStreamFull,
+			storageLimitMeasurements(stream.Bytes, j.config.MaxStreamBytes, eventBytes))
 	}
 	if j.config.MaxJournalBytes > 0 && journalBytes+eventBytes > j.config.MaxJournalBytes {
-		return ErrJournalFull
+		return NewStorageError(StorageReasonJournalLimitReached, ErrJournalFull,
+			storageLimitMeasurements(journalBytes, j.config.MaxJournalBytes, eventBytes))
 	}
 	return nil
+}
+
+func storageLimitMeasurements(retained, limit, eventBytes int64) func(*StorageError) {
+	return func(e *StorageError) {
+		WithLogicalMeasurements(retained, limit)(e)
+		WithEventBytes(eventBytes)(e)
+	}
 }
 
 func logicalLimit(maxBytes, reserveBytes int64) int64 {

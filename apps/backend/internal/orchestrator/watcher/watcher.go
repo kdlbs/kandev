@@ -75,12 +75,13 @@ type AgentEventData struct {
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
-	DynamicRouteAttempt         bool   `json:"dynamic_route_attempt,omitempty"`
-	EvidenceKnown               bool   `json:"evidence_known,omitempty"`
-	OutputObserved              bool   `json:"output_observed,omitempty"`
-	EffectObserved              bool   `json:"effect_observed,omitempty"`
-	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
-	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
+	DynamicRouteAttempt         bool                      `json:"dynamic_route_attempt,omitempty"`
+	EvidenceKnown               bool                      `json:"evidence_known,omitempty"`
+	OutputObserved              bool                      `json:"output_observed,omitempty"`
+	EffectObserved              bool                      `json:"effect_observed,omitempty"`
+	ProviderDiagnosticCandidate bool                      `json:"provider_diagnostic_candidate,omitempty"`
+	ProviderDiagnosticText      string                    `json:"provider_diagnostic_text,omitempty"`
+	Storage                     *models.AgentErrorStorage `json:"storage,omitempty"`
 	// UserInitiated marks a failure event raised by an explicit user action
 	// (cancelling the transient retry loop) rather than the agent itself
 	// failing. Set only at CancelTransientRetry's call site; every other
@@ -537,6 +538,7 @@ func (w *Watcher) createAgentEventHandler(handler func(ctx context.Context, data
 			return nil // Don't return error to continue processing other events
 		}
 
+		data = withDeliveryStorageCause(data)
 		w.logger.Debug("Handling agent event",
 			zap.String("event_type", event.Type),
 			zap.String("task_id", data.TaskID),
