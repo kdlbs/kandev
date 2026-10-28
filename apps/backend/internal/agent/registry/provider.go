@@ -51,11 +51,16 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
 			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_COPILOT"), "true") {
 			// Browser coverage needs a disposable Copilot settings identity.
-			// The E2E fixture intercepts plugin discovery, so this registration
-			// does not require a native Copilot install or authentication.
-			if err := reg.Register(agents.NewCopilotACP()); err != nil {
+			// Use the mock ACP peer so capability probes and accidental task
+			// launches never require a native Copilot install or authentication.
+			copilot := agents.NewMockAgentWithID(agents.CopilotACPAgentID, "Copilot", "Copilot")
+			// Keep the disposable identity out of the default-profile seed,
+			// which selects the first launchable profile by display order.
+			copilot.SetDisplayOrder(1000)
+			if err := reg.Register(copilot); err != nil {
 				return nil, nil, err
 			}
+			configureMockAgent(reg, agents.CopilotACPAgentID, log)
 		}
 		configureMockAgent(reg, "mock-agent", log)
 		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
