@@ -90,3 +90,20 @@ func (p *fakeProvider) data(b []byte) {
 func (p *fakeProvider) closeFrame(code string) {
 	p.toHost <- &pluginsdk.ExecutorTunnelFrame{Kind: &pluginv1.ExecutorTunnelFrame_Close{Close: &pluginsdk.ExecutorTunnelClose{ErrorCode: code}}}
 }
+
+// newTestRegistry returns a registry whose open tunnels are closed when the
+// test ends, so no pump goroutine outlives it.
+func newTestRegistry(t *testing.T) *Registry {
+	t.Helper()
+	registry := NewRegistry()
+	t.Cleanup(func() {
+		registry.mu.Lock()
+		var doomed []*tunnel
+		for _, env := range registry.envs {
+			doomed = append(doomed, collect(env)...)
+		}
+		registry.mu.Unlock()
+		closeAll(doomed, reasonCancel)
+	})
+	return registry
+}

@@ -16,3 +16,8 @@ func TestPluginExecutorClaimCheckpointRacePostgres(t *testing.T) {
 	repo, second := newDescriptorPostgresRepos(t)
 	exerciseClaimCheckpointRace(t, repo, second, seedDescriptorEnvironmentPostgres)
 }
+
+func TestReacquiredClaimStartsAFreshSequencePostgres(t *testing.T) {
+	repo, _ := newDescriptorPostgresRepos(t)
+	exerciseReacquiredClaimStartsAFreshSequence(t, repo, seedDescriptorEnvironmentPostgres)
+}

@@ -145,15 +145,13 @@ func (r *PluginRemoteExecutor) drainBeforePluginDestroy(
 	return record, persisted, decision, nil
 }
 
-// storedPluginDrainDecision returns the outcome recorded for this claim. A
-// drained outcome counts only when its receipt id matches the one this claim
-// would have produced.
+// storedPluginDrainDecision returns the receipt recorded for this claim. Only
+// a drained outcome whose receipt id matches the one this claim would have
+// produced is reused; any other outcome is drained again, which a sealed
+// runtime answers idempotently.
 func storedPluginDrainDecision(inventory pluginExecutorInventory, claimOperationID string) (pluginDrainDecision, bool) {
-	if inventory.DrainClaim != claimOperationID || inventory.DrainOutcome == "" {
+	if inventory.DrainClaim != claimOperationID || inventory.DrainOutcome != pluginDrainOutcomeDrained {
 		return pluginDrainDecision{}, false
-	}
-	if inventory.DrainOutcome != pluginDrainOutcomeDrained {
-		return pluginDrainDecision{outcome: inventory.DrainOutcome}, true
 	}
 	if inventory.DrainReceiptID != pluginDrainReceiptID(inventory, claimOperationID) {
 		return pluginDrainDecision{}, false
@@ -203,8 +201,7 @@ func classifyPluginDrainFailure(err error) string {
 	}
 	var rejected *agentctl.RuntimeDrainRejectedError
 	if errors.As(err, &rejected) {
-		switch rejected.StatusCode {
-		case http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict:
+		if rejected.StatusCode == http.StatusPreconditionFailed {
 			return pluginDrainOutcomeUnreachable
 		}
 	}

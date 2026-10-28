@@ -72,22 +72,18 @@ func lockPluginStateReadability(ctx context.Context, tx *sqlx.Tx, driverName, in
 // version. Terminal phases are exempt so cleanup of an unreadable record is
 // never blocked.
 func (r *Repository) checkPluginStateWritable(ctx context.Context, tx *sqlx.Tx, running *models.ExecutorRunning) error {
-	envelope, _ := running.Metadata[pluginExecutorEnvelopeKey].(map[string]interface{})
-	installationID, _ := envelope["installation_id"].(string)
-	providerKey, _ := envelope["provider_key"].(string)
-	version := pluginEnvelopeStateVersion(envelope["state_version"])
-	phase, _ := envelope["phase"].(string)
-	if installationID == "" || version == 0 || pluginExecutorPhaseTerminal(phase) {
+	view := decodePluginEnvelopeView(running.Metadata)
+	if view.InstallationID == "" || view.StateVersion == 0 || pluginExecutorPhaseTerminal(view.Phase) {
 		return nil
 	}
 	check := r.pluginStateWritableChecker()
 	if check == nil {
 		return nil
 	}
-	if err := lockPluginStateReadability(ctx, tx, r.db.DriverName(), installationID); err != nil {
+	if err := lockPluginStateReadability(ctx, tx, r.db.DriverName(), view.InstallationID); err != nil {
 		return err
 	}
-	return check(ctx, installationID, providerKey, version)
+	return check(ctx, view.InstallationID, view.ProviderKey, view.StateVersion)
 }
 
 const (
@@ -107,24 +103,4 @@ func pluginExecutorPhaseTerminal(phase string) bool {
 		return true
 	}
 	return false
-}
-
-func pluginEnvelopeStateVersion(value interface{}) uint32 {
-	switch typed := value.(type) {
-	case uint32:
-		return typed
-	case int:
-		if typed > 0 {
-			return uint32(typed)
-		}
-	case int64:
-		if typed > 0 {
-			return uint32(typed)
-		}
-	case float64:
-		if typed > 0 {
-			return uint32(typed)
-		}
-	}
-	return 0
 }

@@ -19,6 +19,8 @@ const pluginWorkspaceDescriptorLockNamespace = "plugin_workspace_descriptor:"
 type pluginEnvelopeView struct {
 	Phase          string                          `json:"phase"`
 	InstallationID string                          `json:"installation_id"`
+	ProviderKey    string                          `json:"provider_key"`
+	StateVersion   uint32                          `json:"state_version"`
 	EnvironmentID  string                          `json:"environment_id"`
 	Platform       string                          `json:"platform"`
 	Descriptor     *workspacedescriptor.Descriptor `json:"workspace_descriptor"`

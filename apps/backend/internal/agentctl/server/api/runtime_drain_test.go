@@ -89,8 +89,10 @@ func TestRuntimeSealAndDrainRequiresCurrentCredentialAndExactIdentity(t *testing
 	}
 	client.SetAuthToken(rotation.Credential)
 	req.ExpectedServerIdentity = "runtime-b"
-	if _, err := client.SealAndDrainRuntime(t.Context(), req); err == nil {
-		t.Fatal("wrong ServerIdentity accepted")
+	_, mismatchErr := client.SealAndDrainRuntime(t.Context(), req)
+	var rejected *agentctl.RuntimeDrainRejectedError
+	if !errors.As(mismatchErr, &rejected) || rejected.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("wrong ServerIdentity = %v, want a 412 rejection distinct from an in-progress drain", mismatchErr)
 	}
 }
 
