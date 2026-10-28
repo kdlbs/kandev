@@ -39,6 +39,7 @@ L: ~600 source, ~1000 test lines including web and Playwright.
 
 ## In scope
 
+- `placement_deadline_seconds` from profile validation (60 to 86400, default 600) is copied into the pending state; `pending_placement` requires `provision_refusal`; cancel RPC error is retried to the deadline then recovery destroy; cancel-first ends `placement_cancelled`, completion-first leaves a ready environment and an ordinary Stop. Failure copy under `executors:pluginFailure.<code>` with an icon beside the text.
 - `PollExecutorPlacement` and `CancelExecutorPlacement`; `placement` fields in the envelope; per-operation poller and deadline.
 - Cancel under the claim with `cancelled` or `already_placed`; no ready publication after cancelling is committed.
 - Status label with reason and phase in the web app, localized in the seven catalogs, with a Playwright spec on the fixture.
@@ -54,6 +55,7 @@ L: ~600 source, ~1000 test lines including web and Playwright.
 
 ## Failing-first tests
 
+- Cancel call errors or times out: stays cancelling, retried, cancelled only after the provider reply or confirmed absence. Completion first: task reported stopped, not cancelled.
 - Queued launch cancelled while placement completes (barrier e2e; sqlite and PostgreSQL race).
 - Restart while pending resumes polling without a second environment.
 - Deadline with a fake clock (synctest); a pending response without the capability is `conflict`.

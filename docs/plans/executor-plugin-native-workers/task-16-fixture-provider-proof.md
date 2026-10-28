@@ -47,15 +47,16 @@ system_design:
 
 ## Summary
 
-Extend cmd/plugin-fixture to declare every capability behind configuration and run one conformance test through the managed plugin process covering each capability and barrier, with no Nomad, network, or credentials.
+Extend cmd/plugin-fixture to declare every capability behind configuration and run one conformance test through the managed plugin process covering each capability and barrier, with no vendor, cluster, network, or credentials.
 
 ## Size
 
-M: ~250 source, ~400 test lines.
+M: ~300 source, ~650 test lines, including one Playwright spec.
 
 ## In scope
 
-- Extend cmd/plugin-fixture to declare every capability behind configuration and run one conformance test through the managed plugin process covering each capability and barrier, with no Nomad, network, or credentials.
+- One parametrized Playwright spec triggers each remaining host-originated failure code (`capability_mismatch`, `executor_migrating`, `admission_denied`, `admission_unavailable`, `launch_policy_unenforced`, `bootstrap_consumed`, `repository_inventory_mismatch`, `state_too_large`, `api_unreachable`, `placement_failed`, `placement_timeout`) through the fixture and asserts localized text with an icon, using the pseudo-locale.
+- Extend cmd/plugin-fixture to declare every capability behind configuration and run one conformance test through the managed plugin process covering each capability and barrier, with no vendor, cluster, network, or credentials.
 
 ## Out of scope
 
@@ -83,7 +84,7 @@ make -C apps/backend e2e-plugin-package
 ```
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ## Likely files and risks

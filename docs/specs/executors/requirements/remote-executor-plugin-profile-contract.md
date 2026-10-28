@@ -20,7 +20,7 @@ refer to a secret without holding its value. This document closes those gaps as 
 
 - **Schema keyword:** A key on a profile property in the manifest `profile_schema`.
 - **Typed value:** A profile value carried as a boolean, integer, number, or string rather than a string.
-- **Secret reference:** An opaque, non-secret identifier and version for a stored secret field value.
+- **Secret reference:** An opaque, non-secret identifier of a stored secret field value.
 
 ## Requirements
 
@@ -55,9 +55,9 @@ refer to a secret without holding its value. This document closes those gaps as 
 
 #### Acceptance criteria
 
-- **AC-EXECUTORS-PLUGIN-PROFILE-003.1:** When a provider requires `secret_references`, each operation that carries a profile snapshot shall also carry `secret_refs`, mapping each declared secret property that has a stored value to an opaque reference ID and an integer version. The values shall still be sent only in `secret_values`.
-- **AC-EXECUTORS-PLUGIN-PROFILE-003.2:** Reference IDs and versions are non-secret. The host may record at most 16 of them in the plugin inventory at allocation so recovery and destroy can name the same secret. The host shall never record a value.
-- **AC-EXECUTORS-PLUGIN-PROFILE-003.3:** Rotating a secret shall change its version and keep its ID. Recovery shall receive the current value under the recorded ID in `secret_values`, and the host shall reject a recovery whose recorded ID no longer exists with a named reason and without a provider call.
+- **AC-EXECUTORS-PLUGIN-PROFILE-003.1:** When a provider requires `secret_references`, each operation that carries a profile snapshot shall also carry `secret_refs`, mapping each declared secret property that has a stored value to an opaque reference ID. The ID is the stored secret's identifier that the profile already records. The values shall still be sent only in `secret_values`.
+- **AC-EXECUTORS-PLUGIN-PROFILE-003.2:** Reference IDs are non-secret. The host shall record, in the existing `secret_references` field of the plugin inventory, the property and ID pairs that it already records at allocation (at most 16), so recovery and destroy name the same secret. The host shall never record a value.
+- **AC-EXECUTORS-PLUGIN-PROFILE-003.3:** Replacing a secret stores a new secret and a new ID; an environment keeps referencing the ID it was allocated with, and the existing retention rule keeps that secret while the environment is retained. Recovery shall send the value of the recorded ID in `secret_values`, so a provider sees a changed ID only on a new allocation. The host shall reject a recovery whose recorded ID no longer exists with a named reason and without a provider call.
 - **AC-EXECUTORS-PLUGIN-PROFILE-003.4:** A reference shall exist only for a property the manifest declares secret, for the same profile, and shall never be sent for a property without a stored value.
 - **AC-EXECUTORS-PLUGIN-PROFILE-003.5:** No value shall appear in a reference, error, log, checkpoint, state, or event, and a provider that returns a value-bearing field in state shall be rejected by the closed state schema.
 

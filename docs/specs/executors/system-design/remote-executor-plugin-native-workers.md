@@ -49,11 +49,11 @@ and migration in the [operations design](remote-executor-plugin-operations-migra
 | --- | --- | --- |
 | D1 (confirmed) | Host-owned dialer: a bidirectional gRPC `OpenExecutorTunnel` stream bound to installation, environment, generation, and port, for control traffic. Reverse direction uses a provider-forwarded API URL. | Relaxing HTTPS or loopback checks (a) weakens validation for every provider and cannot express SSH; a plugin loopback listener (b) opens an unauthenticated port on the backend host and races the port allocator. A host-initiated stream keeps identity binding, cancellation, and generation fencing in core. |
 | D2 (confirmed) | Ship both preparation modes. `core` stays the default; `provider` is added in the same release through repository intent, with the extensible contract of REQ-EXECUTORS-PLUGIN-PREPARATION-001 so a mirror, sparse checkout, or pull-request checkout needs no further core change. | The first release must keep a local-worktree checkout for a local node. Core clone alone would change that observable behavior. The PLAN suggested deferring only if the assertion could change; it cannot cheaply. |
-| D3 (confirmed) | Keep built-in native executor code until the plugin passes its live scenarios. Never both on one environment. | Removing it first strands retained inventory. Confirmed by the owner; migration is the drain-based operation in the operations design. |
+| D3 (confirmed) | Keep built-in executor code (and the fork's native executor, which is not on main) until the plugin passes its live scenarios; those scenarios live in the vendor plugin repository and no host behavior depends on them. Never both on one environment. | Removing it first strands retained inventory. Confirmed by the owner; migration is the drain-based operation in the operations design. |
 | D4 | One ledger in core (`executors_running` envelope plus existing recovery claims); no provider database authority. | The base design owns inventory. Dialect tests for every new SQL path. |
 | D5 | This document and its requirements amend the executor spec before code. | Contract change precedes build. |
 | D6 (confirmed) | Provider SDK stays a pinned-reference dependency for v1; do not publish a module yet. | No second external plugin exists to justify a versioning commitment. Revisit then. |
-| D7 | Nomad-like provider state stays in `state_json` under the 32 KiB cap. The fixture proves a representative 12 KiB state. The cap is raised only if a real provider cannot fit. | Avoids a second state channel. |
+| D7 | A worker-pool provider's state stays in `state_json` under the 32 KiB envelope cap, at most 12288 bytes of it. The fixture proves a representative 12 KiB state. The cap is raised only if a real provider cannot fit. | Avoids a second state channel. |
 | D8 | A vendor harness lives in the vendor plugin repository; only the generic crash barrier lives here. | Keeps vendor names out of core. |
 
 ## Capability negotiation
@@ -79,7 +79,7 @@ Validation runs in `validatePluginExecutorResourceForProvider`, so provision, at
 The envelope gains `workspace_path`, `workspace_identity`, and `workspace_preparation`. The constant
 `pluginExecutorWorkspacePath` remains the value for non-declaring providers. `createPluginAgentctlInstance`,
 `finishPluginExecutorLaunch`, and the recovery builder read the recorded path from the envelope.
-Descriptor immutability is enforced in the same envelope-revision CAS that guards checkpoints: a candidate whose path
+The path is normalized and checked for uniqueness among the installation's non-terminal environments inside the descriptor write (AC 002.7). Descriptor immutability is enforced in the same envelope-revision CAS that guards checkpoints: a candidate whose path
 or identity differs from a non-empty recorded value for that generation fails before the write.
 
 ## Repository intent
@@ -101,8 +101,10 @@ Launch admission rejects managed Git credentials with `provider` preparation bef
 
 **New** RPC `OpenExecutorTunnel(stream ExecutorTunnelFrame) returns (stream ExecutorTunnelFrame)` on the plugin service
 and the optional SDK interface `ExecutorTunnelPlugin`. The first frame is a header (context, port, binding nonce);
-the provider answers with an acknowledgement frame; subsequent frames carry at most 64 KiB of bytes, half-close, or an
-error code. The host is always the opener.
+the provider answers with exactly one acknowledgement frame; subsequent frames carry at most 64 KiB of bytes, half-close, or an
+error code. The host is always the opener. Frame rules: data from either side before the acknowledgement, a second acknowledgement, or an oversized frame ends the stream as
+protocol error (reported unavailable); either side may half-close and the stream ends when both have, or on an error frame or context end; each call is one gRPC stream and
+there is no application stream ID to reuse; an acknowledgement arriving after the 15 s timeout is ignored because the stream is already closed. The 64-stream admission is a compare-and-increment under the registry mutex.
 
 **New** lease field `transport`. For `host_tunnel` the endpoint validator is bypassed only for the scheme and loopback
 checks, `base_url` must be empty, and header rules still apply. `agentctl` builds a `net.Conn` through a
@@ -119,8 +121,10 @@ tunnel dialer from the same resolver. Authentication to agentctl stays the host-
 For `provider_forwarded` the launch path replaces `validatePluginRuntimeAPIURL` with a check that the backend's API
 base URL is known. The bootstrap JSON gains `host_api_url` (the backend's own listener, loopback allowed) and
 `idle_timeout_seconds`. The provider arranges worker-side reachability (for example a reverse forward) and starts
-agentctl with the worker-local URL. The existing authenticated callback probe is the sole reachability proof; it rolls
-back provisioning when it fails. No listener is added.
+agentctl with the worker-local URL. No listener is added. The reachability proof is a **new** probe, since main has only the agentctl `Health` call, which proves the host-to-worker path: the host
+registers a one-use probe token (random, in memory, 60 s, bound to the environment) on a **new** route `GET /api/v1/runtime/ping` that answers 204 to a matching
+token header, then asks agentctl through the control transport (**new** route `POST /runtime/probe-host-api` with the URL and token) to request it. Two attempts, two
+seconds apart, 10 seconds in total; a failure rolls provisioning back with the cleanup reason `api_unreachable`.
 
 ## Drain receipt
 
@@ -130,28 +134,30 @@ runtime identity and claim) stops accepting work, stops managed process groups, 
 same claim returns the stored receipt. Lifecycle adds `drainBeforePluginDestroy` ahead of
 `destroyPluginExecutorRecord`: under the cleanup claim it calls drain with a 60 s deadline, writes the host-only
 `drain_receipt` checkpoint (CAS), then calls destroy with **new** `DestroyExecutorEnvironmentRequest.drain_receipt`
-and `drain_outcome`. Failed-launch rollback before a runtime exists records `not_attempted`. The destroy deadline is
+and `drain_outcome`. Outcome mapping: a receipt is `drained`; a refused connection or identity mismatch is `unreachable`; a lost reply or the 60 s deadline is `uncertain`; a failed-launch rollback before a runtime exists is `not_attempted`. A successor claim re-runs the drain (agentctl returns a fresh receipt for an already sealed runtime) and a replayed destroy under the same claim carries the stored outcome. The destroy deadline is
 `destroy_timeout_seconds`. For declaring providers the bootstrap's `idle_timeout_seconds` is 0, mapped to
 `KANDEV_ACP_IDLE_TIMEOUT` disabled in the agentctl startup config.
 
 ## Destroy and recover checkpoints
 
 `pluginExecutorCallbackRequest` today matches only an active launch. It gains a claim-scoped path: the request context
-**new** field `claim_token` must match the active cleanup claim or recovery claim row (`internal/task/recoveryclaim`)
+must match the active cleanup claim or recovery claim row (`internal/task/recoveryclaim`; main identifies a claim by its environment and
+`claim.OperationID`, which destroy requests already send as `cleanup_claim`, so no claim token is added)
 for the same environment, owner, generation, and operation, and the dispatch generation must be current. Phases
-`cleanup_progress` and `recovery_progress` join the allowed set when the snapshot has `destroy_checkpoints`; a phase
-rank table enforces monotonic order. The write is the existing `CheckpointPluginExecutorInventory` CAS, so two callbacks
+`cleanup_progress` and `recovery_progress` join the allowed set when the snapshot has `destroy_checkpoints`; each claim type accepts only its own phase,
+and a provider `sequence` per claim (new additive field, strictly increasing; an equal sequence with an equal digest is an idempotent success) enforces order. The write is the existing `CheckpointPluginExecutorInventory` CAS, so two callbacks
 at one revision serialize to one winner. Settlement requires `confirmed_absent` and a successful latest checkpoint.
 
 ## Durable bootstrap and ready publication
 
 The nonce and the agentctl token are stored as secret references in `executors_running.metadata`, using the existing
-`MetadataKeyAuthTokenSecret` pattern and a **new** `MetadataKeyBootstrapNonceSecret`, via the runtime secret store;
+`MetadataKeyAuthTokenSecret` and the existing `MetadataKeyBootstrapNonceSecret` (`manager_execution.go`, today written for container launches and read by `revealRuntimeSecret`); no key is added. Plugin
+rows carry the nonce key only for `durable_bootstrap`, the generic resume and reuse paths shall not copy it to another session's row, and the secret is deleted when the record settles;
 the nonce reference is persisted before `ProvisionExecutorEnvironment`, the token reference before
 `createPluginAgentctlInstance`. Reads go through `revealRuntimeSecret`. Recovery replaces the `incomplete_bootstrap`
 branch in `attachRecoveredPluginExecutor` for `durable_bootstrap`: reveal the nonce, handshake, adopt or create the
-instance after verifying owner, workspace path, and port, then publish. A handshake rejected as consumed ends in cleanup
-with reason `bootstrap_consumed`.
+instance after verifying owner, workspace path, and port, then publish. A repeated handshake that agentctl accepts continues to readiness; one it rejects as consumed ends in cleanup
+with reason `bootstrap_consumed`. The envelope records `handshake_started` before each handshake.
 
 Publication is a single repository method `PublishRecoveredTaskEnvironment` that, under the recovery claim, verifies
 operation, task, session, environment owner and generation, runtime identity, descriptor, and repository inventory and
@@ -162,7 +168,8 @@ it accepts verified evidence and carries no provider data.
 
 `lifecycle/crash_barrier.go` defines the closed barrier names and `armBarrier(name, mode)`; the arming route sits under
 `/api/v1/e2e/` and is mounted only when `KANDEV_E2E_MOCK=true`, like the child-kill route. Barrier calls in production
-paths are a single cheap lookup that returns immediately when none is armed. `cmd/plugin-fixture` gains every
+paths are a single cheap lookup that returns immediately when none is armed. The closed names are `after_side_effect`, `after_drain`, `after_handshake`, `before_publish`, `after_destroy_confirm`,
+`after_placement_persist`, `before_placement_commit`, `after_cancel_mark`, and `after_migration_step`; the first caller to reach an armed name fires it, and arming an armed name returns `conflict`. `cmd/plugin-fixture` gains every
 capability behind fixture configuration and a local in-process tunnel target, and its conformance test runs each
 capability and barrier through the managed plugin process.
 
@@ -171,19 +178,20 @@ capability and barrier through the managed plugin process.
 Proto fields are additive; the manifest keys default to current behavior. The host mixed-version matrix: new host with
 old plugin (no declaration, unchanged), old host with new plugin (fails the capability check before activation),
 new host with upgraded plugin and retained old environments (snapshot governs). Rollback to a plugin without a
-capability while retained environments hold it makes that provider unavailable for them, not absent.
+capability while retained environments hold it is allowed and makes that provider unavailable for them, not absent; a rollback that would strand a recorded
+state version is rejected (versioning design, AC CAPABILITY-003.3).
 
 ## Data model
 
 No new table and no DDL migration. The `plugin_executor` envelope in `executors_running.metadata` gains fields:
 `negotiated_capabilities`, `provider_state_version`, `workspace_path`, `workspace_identity`, `workspace_preparation`, `repositories`, `drain_outcome`,
-`drain_receipt_id`. The envelope stays under 32 KiB; with 32 repositories at about 200 bytes the inventory fits, and an
-oversize write is rejected as `invalid_config`. Secret references add metadata keys, not columns. Publication touches
+`drain_receipt_id`. The envelope stays under 32 KiB through the per-field maxima and the 20480-byte host reserve of the [versioning design](remote-executor-plugin-capability-versioning.md#state-budget); an
+oversize write is rejected as `state_too_large`. The workspace path is stored once, in the envelope. `repositories` persists `id`, `relative_path`, and `head_commit` only. Secret references add metadata keys, not columns. Publication touches
 the existing task environment and repository projection rows.
 
 - **SQLite:** the single immediate-mode writer serializes checkpoints and publication; every new method runs in one transaction.
-- **PostgreSQL:** each read-modify-write takes `pg_advisory_xact_lock(hashtextextended(namespace||environment_id, 0))`
-  before its first read, with namespaces `plugin_checkpoint` and `plugin_publish`; checkpoint keeps the revision CAS.
+- **PostgreSQL:** each read-modify-write of the envelope takes `pg_advisory_xact_lock(hashtextextended('plugin_inventory:'||environment_id, 0))`
+  before its first read. One namespace covers checkpoint, publication, drain, owner, placement, and descriptor writes, so no two mutations of one row can hold different keys; checkpoint keeps the revision CAS. The workspace uniqueness check additionally takes `'plugin_workspace:'||installation_id` first, always in that order.
 - Both dialects run the new race tests; PostgreSQL ones are gated on `KANDEV_TEST_POSTGRES_DSN`.
 - Replay: no schema change, so the replayable-migration tests are unaffected; envelope decode tolerates old rows (absent fields).
 
@@ -204,7 +212,9 @@ Each test is written first, fails against current main, and names its AC with `@
 | Crash before ready publication (007.3) | recovery publishes once; repeat is a no-op | barrier e2e; sqlite and PostgreSQL |
 | Archive racing recovery (007.6) | one claim, loser no-ops | sqlite and PostgreSQL race |
 | Plugin restart with open tunnel (004.7) | streams close, new lease, same environment | fixture over the process boundary |
+| Duplicate or late acknowledgement, data before acknowledgement, 65th open (004.3, 004.8) | stream closed as unavailable; 65th open `rate_limited`, others unaffected | tunnel unit with fake provider |
 | Cancel during stream open (004.3, 004.6) | no bytes before ack, stream closed, count zero | tunnel unit with fake provider |
+| Two environments of one installation record one normalized path (002.7) | second commit gets `conflict`, resource cleaned | sqlite and PostgreSQL race |
 | Provider returns an undeclared field (001.6) | `conflict`, resource cleaned | lifecycle unit |
 | Descriptor changed on attach (002.4) | `conflict`, session not started | lifecycle unit |
 

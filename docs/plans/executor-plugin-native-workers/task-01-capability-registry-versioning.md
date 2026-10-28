@@ -60,6 +60,9 @@ M: ~650 source, ~1000 test lines. Built first; every later order is a registry e
 
 ## In scope
 
+- Map onto the existing state-version mechanism (`supported_state_versions`, `state_version`, `validateExecutorProviderUpgradeInventory`); `state_schema` is a second spelling expanded by the validator, never both.
+- Host-field budget table (`hostFieldBudget`, sum at most 20480), `state_budget_bytes` 1024 to 12288 default 8192, the host-originated code `state_too_large`, and the fixed-size cleanup write.
+- Per-installation lock shared by admission and activation (`plugin_state_readability:`), and the echo captured per (installation, dispatch generation) with a validation run when a generation has none.
 - Registry package, manifest validator, host constant comparison at install, upgrade, and enable.
 - Additive `host_capabilities` and `implemented_capabilities` fields; `capability_mismatch` availability.
 - `checkCapabilityAgreement` in `validateLaunch`; `negotiated_capabilities` and `provider_state_version` in the envelope.
@@ -76,11 +79,14 @@ M: ~650 source, ~1000 test lines. Built first; every later order is a registry e
 
 ## Failing-first tests
 
+- Combined worst-case envelope at the maximum budget (12288) and at the default (8192) marshals to at most 32768 bytes; a 97-byte relative path or 37-byte repository ID is rejected `state_too_large`.
+- Plugin restart then launch with no validation yet: one validation runs; a provider declaring nothing still launches. Two differing echoes of one generation: `capability_mismatch`.
+- Manifest with both `state_schema` and `supported_state_versions`: rejected. Attach response with a raised state version: rejected.
 - Validator table: unknown, duplicate, zero or non-integer version, version outside range, missing dependency (fails: syntax absent).
 - Provider echo differs from the manifest: unavailable with `capability_mismatch`; no echo: treated as declaring none.
 - Allocation gate runs before the first provider call on first launch, delayed launch, and resume (call-site enumeration test).
 - Upgrade activation racing a launch that records an old state version (injected ordering; sqlite and PostgreSQL).
-- Retired pair removed or reused: golden-file test fails. A record with only the old `required_capabilities` key decodes as version 1.
+- Retired pair removed or reused: golden-file test fails. A record with only the existing `capabilities` and `state_version` keys decodes as the empty negotiated set.
 - Existing fixture conformance test passes unmodified.
 - Manifest `min_kandev_version` below a capability's release: install rejected. State above budget and the combined worst-case envelope: `state_too_large`, resource cleaned.
 

@@ -32,6 +32,7 @@ M: ~250 source, ~500 test lines.
 
 ## In scope
 
+- Use the claim's operation ID (already sent as `cleanup_claim`) to bind callbacks; add the additive `sequence` field; one advisory namespace `plugin_inventory:` for every envelope write, with `plugin_workspace:` taken first where both apply.
 - Let a provider checkpoint during cleanup and recovery under the existing claims, with claim, generation, dispatch, and revision fencing and monotonic phases.
 
 ## Out of scope
@@ -45,6 +46,7 @@ M: ~250 source, ~500 test lines.
 
 ## Failing-first tests
 
+- A callback carrying the cleanup claim's operation ID and a stale or equal `sequence`: stale rejected, equal with an equal digest an idempotent success, equal with a different digest `conflict`; a cleanup claim writing `recovery_progress` is rejected; malformed phase or missing sequence is `invalid_config`. No claim token is added.
 - Delayed writer after a successor claim is rejected (fails: callbacks only match an active launch).
 - Two checkpoints at one revision: one winner, one `conflict`, SQLite and PostgreSQL under -race.
 - Phase regression rejected.
@@ -56,7 +58,7 @@ M: ~250 source, ~500 test lines.
 Run from the repository root:
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ```bash
@@ -64,7 +66,7 @@ go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
 ```
 
 ```bash
-KANDEV_TEST_POSTGRES_DSN=<disposable dsn> go test -race ./internal/task/repository/sqlite -run PluginExecutor -count=1  # from apps/backend
+(cd apps/backend && go test -race ./internal/task/repository/sqlite -run PluginExecutor -count=1)   # PostgreSQL tests run when KANDEV_TEST_POSTGRES_DSN is exported
 ```
 
 ## Likely files and risks

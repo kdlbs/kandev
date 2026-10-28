@@ -32,6 +32,7 @@ L: ~500 source, ~900 test lines.
 
 ## In scope
 
+- Reuse `MetadataKeyBootstrapNonceSecret` (no new key); write it only for `durable_bootstrap`, keep generic resume and reuse paths from copying it, delete the secret when the record settles; record `handshake_started` before each handshake.
 - Persist bootstrap nonce and authorization as secret references, resume the handshake after a restart, and add the generic guarded creating-to-ready publication under the recovery claim.
 
 ## Out of scope
@@ -45,6 +46,7 @@ L: ~500 source, ~900 test lines.
 
 ## Failing-first tests
 
+- Repeated handshake accepted by agentctl continues to readiness; rejected as consumed ends in `bootstrap_consumed`; the nonce key is not copied onto another session's row.
 - Crash before token persist: `bootstrap_consumed` cleanup, no duplicate, no ready (fails: `incomplete_bootstrap` destroy only).
 - No provision call before the nonce reference is persisted (ordering test).
 - Secrets absent from envelope, checkpoint, progress, logs (seeded-secret scan).
@@ -57,7 +59,7 @@ L: ~500 source, ~900 test lines.
 Run from the repository root:
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ```bash
