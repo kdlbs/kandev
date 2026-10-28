@@ -729,7 +729,9 @@ change the accepted chart or table.
 File bytes do not persist. Image file cards expand and load automatically when
 they appear in the conversation. Select **Hide preview** to collapse an image
 and **Preview** to reopen it. Click or tap the image to inspect it in a larger
-dialog, as with image attachments. Close the dialog to return to the preview.
+dialog, as with image attachments. Select **Actual size** to inspect image
+details and scroll within the dialog; select **Fit** to see the whole image
+again. Close the dialog to return to the preview. Each opening starts in Fit.
 To start image cards collapsed, turn off **Show image previews by default** in
 **Settings > Preferences > Appearance** and select **Save changes**. This
 preference is saved on this device and applies when a card has no retained

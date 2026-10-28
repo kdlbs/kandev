@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useCallback, type ReactNode } from "react";
+import { memo, useState, useCallback, useRef, type ReactNode } from "react";
 import { IconFile, IconLoader2, IconPhoto, IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -21,6 +21,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
   const { t } = useTranslation("chat");
   const { isFinePointer } = useResponsiveBreakpoint();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const chipRef = useRef<HTMLDivElement>(null);
   // A restored or oversized ready image has no inline preview; the authorized
   // content URL keeps the thumbnail and larger viewer available.
   const previewSrc =
@@ -142,19 +143,29 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
 
   return (
     <>
-      <ContextChip
-        kind="image"
-        label={item.label}
-        thumbnail={deliveryMode === "prompt" ? previewSrc : undefined}
-        leadingIcon={leadingIcon}
-        preview={preview}
-        onClick={previewSrc ? handleClick : undefined}
-        onRemove={item.onRemove}
-      />
+      <div ref={chipRef} className="contents">
+        <ContextChip
+          kind="image"
+          label={item.label}
+          thumbnail={deliveryMode === "prompt" ? previewSrc : undefined}
+          leadingIcon={leadingIcon}
+          preview={preview}
+          onClick={previewSrc ? handleClick : undefined}
+          onRemove={item.onRemove}
+        />
+      </div>
       {previewSrc && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent
             aria-describedby={undefined}
+            showCloseButton={false}
+            onCloseAutoFocus={(event) => {
+              const opener = chipRef.current?.querySelector("button");
+              if (opener) {
+                event.preventDefault();
+                opener.focus();
+              }
+            }}
             className={IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME}
           >
             <ImagePreviewContent src={previewSrc} alt={t("chat:attachmentPreviewFullAlt")} />

@@ -580,6 +580,10 @@ Task-session chat uploads files to the task's workspace. It also works when you 
 
 During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
 
+Open an image attachment or composer image to inspect it. The preview starts in
+**Fit**; select **Actual size** and scroll within the image to see fine detail.
+Select **Fit** to return to the whole image.
+
 Creating a fresh local branch is available only with the local executor. If the checkout is dirty, Kandev lists the affected paths and requires explicit consent before discarding those local changes. If another path becomes dirty after the warning, creation fails with a conflict and asks for consent again. Save or commit work before approving this operation.
 
 </details>
