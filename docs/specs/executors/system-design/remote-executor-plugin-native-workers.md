@@ -40,30 +40,32 @@ cleanup admission. The provider keeps placement, worker transport, provider fenc
 
 ## Decisions
 
-Owner-level decisions D1, D2, D3, and D6 are recommendations pending owner confirmation in the Spec step; the
-build step does not start on them until the plan records the answer. The others are settled here.
+The owner confirmed D1, D2, D3, and D6 on 2026-10-28; the others are settled here. The capability registry, negotiation, and
+versioning are specified first in the [versioning design](remote-executor-plugin-capability-versioning.md); shared environments, admission,
+and placement in the [shared design](remote-executor-plugin-shared-admission-placement.md); operations, launch policy, preparation hints,
+and migration in the [operations design](remote-executor-plugin-operations-migration.md).
 
 | # | Decision | Rationale |
 | --- | --- | --- |
-| D1 | Host-owned dialer: a bidirectional gRPC `OpenExecutorTunnel` stream bound to installation, environment, generation, and port, for control traffic. Reverse direction uses a provider-forwarded API URL. | Relaxing HTTPS or loopback checks (a) weakens validation for every provider and cannot express SSH; a plugin loopback listener (b) opens an unauthenticated port on the backend host and races the port allocator. A host-initiated stream keeps identity binding, cancellation, and generation fencing in core. |
-| D2 | Ship both preparation modes. `core` stays the default; `provider` is added in the same release through repository intent. | The first release must keep a local-worktree checkout for a local node. Core clone alone would change that observable behavior. The PLAN suggested deferring only if the assertion could change; it cannot cheaply. |
-| D3 | Keep built-in native executor code until the plugin passes its live scenarios. Never both on one environment. | Removing it first strands retained inventory. Needs maintainer confirmation in writing. |
+| D1 (confirmed) | Host-owned dialer: a bidirectional gRPC `OpenExecutorTunnel` stream bound to installation, environment, generation, and port, for control traffic. Reverse direction uses a provider-forwarded API URL. | Relaxing HTTPS or loopback checks (a) weakens validation for every provider and cannot express SSH; a plugin loopback listener (b) opens an unauthenticated port on the backend host and races the port allocator. A host-initiated stream keeps identity binding, cancellation, and generation fencing in core. |
+| D2 (confirmed) | Ship both preparation modes. `core` stays the default; `provider` is added in the same release through repository intent, with the extensible contract of REQ-EXECUTORS-PLUGIN-PREPARATION-001 so a mirror, sparse checkout, or pull-request checkout needs no further core change. | The first release must keep a local-worktree checkout for a local node. Core clone alone would change that observable behavior. The PLAN suggested deferring only if the assertion could change; it cannot cheaply. |
+| D3 (confirmed) | Keep built-in native executor code until the plugin passes its live scenarios. Never both on one environment. | Removing it first strands retained inventory. Confirmed by the owner; migration is the drain-based operation in the operations design. |
 | D4 | One ledger in core (`executors_running` envelope plus existing recovery claims); no provider database authority. | The base design owns inventory. Dialect tests for every new SQL path. |
 | D5 | This document and its requirements amend the executor spec before code. | Contract change precedes build. |
-| D6 | Provider SDK stays a pinned-reference dependency for v1; do not publish a module yet. | No second external plugin exists to justify a versioning commitment. Revisit then. |
+| D6 (confirmed) | Provider SDK stays a pinned-reference dependency for v1; do not publish a module yet. | No second external plugin exists to justify a versioning commitment. Revisit then. |
 | D7 | Nomad-like provider state stays in `state_json` under the 32 KiB cap. The fixture proves a representative 12 KiB state. The cap is raised only if a real provider cannot fit. | Avoids a second state channel. |
 | D8 | A vendor harness lives in the vendor plugin repository; only the generic crash barrier lives here. | Keeps vendor names out of core. |
 
 ## Capability negotiation
 
 **New** manifest keys under each `executor_providers[]` entry, validated in `internal/plugins/manifest/executor_provider.go`:
-`requires_host_capabilities` (closed set), `workspace_preparation` (`core`|`provider`), `runtime_api_url`
+`requires_host_capabilities` (a list of `{name, version}` from the registry in the versioning design), `workspace_preparation` (`core`|`provider`), `runtime_api_url`
 (`host_public`|`provider_forwarded`), and `destroy_timeout_seconds` (30 to 300). The host exports its implemented set
 as a constant beside `CurrentExecutorProviderContractVersion`; install, upgrade, and enable compare the two before
 activation. Cross-field rules: `workspace_preparation: provider` requires `repository_intent` and `workspace_descriptor`;
 `runtime_api_url: provider_forwarded` requires `api_url_forward`; `destroy_timeout_seconds` over 30 requires `drain_receipt`.
 
-The admitted allocation writes `required_capabilities` (sorted, deduplicated) into the plugin envelope. Every later
+The admitted allocation writes `negotiated_capabilities` (sorted `name@version`, see the versioning design) into the plugin envelope. Every later
 decision (recovery, attach, destroy, lease validation, response validation) reads the envelope. A response field
 without its capability is `conflict` (AC-EXECUTORS-NATIVE-WORKER-001.6). A host lacking a snapshot capability maps the
 provider to `unavailable` through the existing availability path, never `absent`.
@@ -174,7 +176,7 @@ capability while retained environments hold it makes that provider unavailable f
 ## Data model
 
 No new table and no DDL migration. The `plugin_executor` envelope in `executors_running.metadata` gains fields:
-`required_capabilities`, `workspace_path`, `workspace_identity`, `workspace_preparation`, `repositories`, `drain_outcome`,
+`negotiated_capabilities`, `provider_state_version`, `workspace_path`, `workspace_identity`, `workspace_preparation`, `repositories`, `drain_outcome`,
 `drain_receipt_id`. The envelope stays under 32 KiB; with 32 repositories at about 200 bytes the inventory fits, and an
 oversize write is rejected as `invalid_config`. Secret references add metadata keys, not columns. Publication touches
 the existing task environment and repository projection rows.
@@ -229,4 +231,4 @@ none of this is an isolation claim.
 - [Remote executor plugin boundary](../../../decisions/2026-09-26-remote-executor-plugin-boundary.md)
 - [Cleanup inventory](../../../decisions/0025-runtime-cleanup-uses-executors-running.md)
 - [Ownership generations](../../../decisions/2026-09-04-generation-fenced-task-environment-ownership.md)
-- ADR for D1, D2, D3, D6 to be recorded once the owner answers (work order 00).
+- ADR for D1, D2, D3, D6 and the medium-term decisions (work order 00).
