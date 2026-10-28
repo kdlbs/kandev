@@ -48,6 +48,15 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 		_ = reg.Register(agents.NewDynamicAgent())
 		_ = reg.Register(agents.NewMockAgent())
 		_ = reg.Register(agents.NewCodexAppServer(false))
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
+			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_COPILOT"), "true") {
+			// Browser coverage needs a disposable Copilot settings identity.
+			// The E2E fixture intercepts plugin discovery, so this registration
+			// does not require a native Copilot install or authentication.
+			if err := reg.Register(agents.NewCopilotACP()); err != nil {
+				return nil, nil, err
+			}
+		}
 		configureMockAgent(reg, "mock-agent", log)
 		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
 			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_AUGGIE"), "true") {

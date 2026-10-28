@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -53,7 +54,13 @@ type Manager struct {
 	mcpStateRepo          mcpconfig.SessionMCPSelectionStateRepository
 	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
 	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
-	logger                *logger.Logger
+	// copilotPlugins is the bounded native inventory runner. Tests inject a
+	// fake so plugin resolution never requires an installed Copilot runtime.
+	copilotPlugins copilotplugins.Runner
+	// passthroughRunnerOverride is a test seam for the interactive process
+	// boundary. Production always resolves the executor-backed runner.
+	passthroughRunnerOverride executionPassthroughRunner
+	logger                    *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -341,6 +348,12 @@ type Manager struct {
 // tests inject a fake so they never mutate a developer's Cursor account.
 func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPCommandRunner) {
 	m.cursorNativeMCPRunner = runner
+}
+
+// SetCopilotPluginRunner installs the bounded runner used to resolve Copilot
+// plugin directories for new local processes. Production uses the exec runner.
+func (m *Manager) SetCopilotPluginRunner(runner copilotplugins.Runner) {
+	m.copilotPlugins = runner
 }
 
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.

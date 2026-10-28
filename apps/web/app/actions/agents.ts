@@ -16,6 +16,10 @@ import type { PermissionKey } from "@/lib/agent-permissions";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import type { AgentMcpDiscoveryResponse } from "@/lib/types/agent-mcp-discovery";
+import type {
+  CopilotPluginDiscoveryRequest,
+  CopilotPluginDiscoveryResponse,
+} from "@/lib/types/copilot-plugin-discovery";
 import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 
 type ProfilePermissions = Record<PermissionKey, boolean>;
@@ -53,6 +57,21 @@ function agentSettingsRequest<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function listAgentDiscoveryAction(): Promise<ListAgentDiscoveryResponse> {
   return agentSettingsRequest<ListAgentDiscoveryResponse>(`${apiBaseUrl}/api/v1/agents/discovery`);
+}
+
+export async function getCopilotPluginDiscoveryAction(
+  agentId: string,
+  payload: CopilotPluginDiscoveryRequest,
+  signal?: AbortSignal,
+): Promise<CopilotPluginDiscoveryResponse> {
+  return agentSettingsRequest<CopilotPluginDiscoveryResponse>(
+    `${apiBaseUrl}/api/v1/agents/${encodeURIComponent(agentId)}/plugin-discovery`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal: signal ?? AbortSignal.timeout(30_000),
+    },
+  );
 }
 
 export async function getAgentMcpDiscoveryAction(
@@ -95,6 +114,7 @@ export async function createAgentAction(payload: {
       cursor_plugins_mcp_enabled?: boolean;
       mcp_selection_mode?: MCPSelectionMode;
       mcp_selected_servers?: string[];
+      copilot_selected_plugins?: string[];
       cli_flags?: CLIFlag[];
       command_prefix?: string;
       env_vars?: ProfileEnvVar[];
@@ -144,6 +164,7 @@ export async function createAgentProfileAction(
     cursor_plugins_mcp_enabled?: boolean;
     mcp_selection_mode?: MCPSelectionMode;
     mcp_selected_servers?: string[];
+    copilot_selected_plugins?: string[];
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     provider_kind?: string;
@@ -181,6 +202,7 @@ export async function updateAgentProfileAction(
     cursor_plugins_mcp_enabled?: boolean;
     mcp_selection_mode?: MCPSelectionMode;
     mcp_selected_servers?: string[];
+    copilot_selected_plugins?: string[];
     enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
@@ -330,6 +352,7 @@ export type CommandPreviewRequest = {
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  copilot_selected_plugins?: string[];
 };
 
 export type CommandPreviewResponse = {
@@ -341,6 +364,9 @@ export type CommandPreviewResponse = {
    * bridge, not the agent CLI it wraps.
    */
   flag_destination?: "agent_cli" | "acp_bridge";
+  deferred_plugin_ids?: string[];
+  deferred_plugin_count?: number;
+  command_incomplete?: boolean;
 };
 
 export async function previewAgentCommandAction(

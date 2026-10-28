@@ -184,6 +184,14 @@ mocks:
     dev:  "true"
     e2e:  "only"
 
+  # Register a disposable Copilot settings identity for browser coverage.
+  # Plugin discovery is intercepted by the E2E fixture; no native install or
+  # authentication is required.
+  KANDEV_E2E_MOCK_COPILOT:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+
   # Mount the /api/v1/_test/* test-harness routes. Hard-gated off in
   # production — never enable on a public backend.
   KANDEV_E2E_MOCK:

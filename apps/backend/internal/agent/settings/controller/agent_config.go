@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
@@ -196,11 +197,12 @@ func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting)
 
 // CommandPreviewRequest contains the draft settings for command preview
 type CommandPreviewRequest struct {
-	Model              string
-	PermissionSettings map[string]bool
-	CLIPassthrough     bool
-	CLIFlags           []dto.CLIFlagDTO
-	CommandPrefix      string
+	Model                  string
+	PermissionSettings     map[string]bool
+	CLIPassthrough         bool
+	CLIFlags               []dto.CLIFlagDTO
+	CommandPrefix          string
+	CopilotSelectedPlugins []string
 }
 
 // PreviewAgentCommand generates a preview of the CLI command that will be executed
@@ -219,6 +221,22 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// Tolerate malformed entries silently — the preview is informational.
 	cliFlagTokens, _ := cliflags.Resolve(cliFlagsFromDTO(req.CLIFlags))
 
+	copilotPlugins, err := previewCopilotPlugins(agentName, req.CopilotSelectedPlugins)
+	if err != nil {
+		return nil, err
+	}
+	var copilotBase agents.Command
+	if agentName == agents.CopilotACPAgentID && len(copilotPlugins) > 0 {
+		spec := agents.NewCopilotACP().ManagedNPMRuntime()
+		version, versionErr := c.activeRuntimeVersion(ctx, agentName, spec.Package)
+		if versionErr != nil {
+			return nil, fmt.Errorf("resolve active managed runtime version: %w", versionErr)
+		}
+		if version == "" {
+			version = spec.DefaultVersionOrPinned()
+		}
+		copilotBase = spec.InteractiveCommand(version)
+	}
 	// Passthrough: BuildPassthroughCommand emits permission flags via Settings()
 	// and appends resolved profile CLI flags, matching manager_passthrough.go.
 	// ACP: mirror lifecycle.CommandBuilder.BuildCommand by appending CLIFlagTokens
@@ -229,6 +247,7 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			Model:            req.Model,
 			PermissionValues: req.PermissionSettings,
 			CLIFlagTokens:    cliFlagTokens,
+			BaseCommand:      copilotBase,
 		})
 	} else {
 		managedRuntimeVersion := ""
@@ -247,7 +266,7 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			Model:                 req.Model,
 			PermissionValues:      req.PermissionSettings,
 			CLIFlagTokens:         cliFlagTokens,
-			PreferNativeBinary:    previewPrefersNativeBinary(agentConfig),
+			PreferNativeBinary:    len(copilotPlugins) == 0 && previewPrefersNativeBinary(agentConfig),
 			ManagedRuntimeVersion: managedRuntimeVersion,
 		})
 		if len(cliFlagTokens) > 0 {
@@ -267,11 +286,28 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		flagDestination = dto.FlagDestinationAgentCLI
 	}
 	return &dto.CommandPreviewResponse{
-		Supported:       true,
-		Command:         cmd.Args(),
-		CommandString:   buildCommandString(cmd.Args()),
-		FlagDestination: flagDestination,
+		Supported:           true,
+		Command:             cmd.Args(),
+		CommandString:       buildCommandString(cmd.Args()),
+		FlagDestination:     flagDestination,
+		DeferredPluginIDs:   copilotPlugins,
+		DeferredPluginCount: len(copilotPlugins),
+		CommandIncomplete:   len(copilotPlugins) > 0,
 	}, nil
+}
+
+func previewCopilotPlugins(agentName string, selection []string) ([]string, error) {
+	if len(selection) == 0 {
+		return nil, nil
+	}
+	if agentName != agents.CopilotACPAgentID {
+		return nil, fmt.Errorf("copilot_selected_plugins requires a concrete Copilot profile")
+	}
+	normalized, err := copilotplugins.NormalizeSelection(selection)
+	if err != nil {
+		return nil, fmt.Errorf("copilot_selected_plugins is invalid: %w", err)
+	}
+	return normalized, nil
 }
 
 // previewPrefersNativeBinary reports whether the command preview should show a

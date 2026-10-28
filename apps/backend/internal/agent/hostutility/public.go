@@ -49,6 +49,10 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
+	profileContext := ProfileProbeContext{
+		Env: env, CLIFlags: cliFlags, CommandPrefix: prefix,
+		CopilotSelectedPlugins: append([]string{}, profile.CopilotSelectedPlugins...),
+	}
 	var gatewayAuth *acpprovider.GatewayAuth
 	var providerKeyEnvVar, providerKey string
 	if profile.ProviderKind == settingsmodels.ProviderKindOpenAICompatible {
@@ -72,6 +76,13 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		return nil, err
 	}
 	defer release()
+	pluginFlags, err := m.profileCopilotPluginFlags(ctx, profile.AgentID, profileContext, inst.workDir, command.Args())
+	if err != nil {
+		return nil, err
+	}
+	if pluginFlags != nil {
+		cliFlags = pluginFlags
+	}
 	cfg := inferenceConfigForHostUtility(ia)
 	resolved := m.resolveModel(profile.AgentID, profile.Model, ia)
 	autoApprove := profile.AutoApprove

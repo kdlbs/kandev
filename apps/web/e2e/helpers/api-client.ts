@@ -936,6 +936,7 @@ export class ApiClient {
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+      copilot_selected_plugins?: string[];
     },
   ): Promise<AgentProfile> {
     const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
@@ -951,6 +952,7 @@ export class ApiClient {
       cli_flags: opts.cli_flags,
       command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
+      copilot_selected_plugins: opts.copilot_selected_plugins,
     });
     return normalizeAgentProfile(response);
   }
@@ -1024,6 +1026,7 @@ export class ApiClient {
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+      copilot_selected_plugins?: string[];
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);

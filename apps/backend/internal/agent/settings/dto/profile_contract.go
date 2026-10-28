@@ -1,8 +1,12 @@
 package dto
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 )
 
 // ProfileCreateRequest is the shared wire contract for HTTP and MCP profile
@@ -30,6 +34,7 @@ type ProfileCreateRequest struct {
 	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
 	MCPSelectionMode        *string                 `json:"mcp_selection_mode,omitempty"`
 	MCPSelectedServers      *[]string               `json:"mcp_selected_servers,omitempty"`
+	CopilotSelectedPlugins  OptionalStringList      `json:"copilot_selected_plugins,omitempty"`
 	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
@@ -61,6 +66,7 @@ type ProfileUpdateRequest struct {
 	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
 	MCPSelectionMode        *string                 `json:"mcp_selection_mode,omitempty"`
 	MCPSelectedServers      *[]string               `json:"mcp_selected_servers,omitempty"`
+	CopilotSelectedPlugins  OptionalStringList      `json:"copilot_selected_plugins,omitempty"`
 	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 	Force                   bool                    `json:"force,omitempty"`
 }
@@ -72,14 +78,62 @@ func (r ProfileCreateRequest) Validate() error {
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	return ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers)
+	if err := ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers); err != nil {
+		return err
+	}
+	return ValidateCopilotPluginSelection(r.CopilotSelectedPlugins)
 }
 
 func (r ProfileUpdateRequest) Validate() error {
 	if strings.TrimSpace(r.ID) == "" {
 		return fmt.Errorf("id is required")
 	}
-	return ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers)
+	if err := ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers); err != nil {
+		return err
+	}
+	return ValidateCopilotPluginSelection(r.CopilotSelectedPlugins)
+}
+
+// OptionalStringList distinguishes an omitted JSON field from an explicit
+// empty list. JSON null is invalid for Copilot plugin selections.
+type OptionalStringList struct {
+	Set   bool
+	Value []string
+}
+
+// UnmarshalJSON implements the supplied-field contract for plugin selections.
+func (o *OptionalStringList) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return fmt.Errorf("copilot_selected_plugins cannot be null")
+	}
+	var values []string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return fmt.Errorf("copilot_selected_plugins must be an array of strings: %w", err)
+	}
+	o.Set = true
+	o.Value = values
+	return nil
+}
+
+// Pointer returns a copy in the controller's supplied-field representation.
+func (o OptionalStringList) Pointer() *[]string {
+	if !o.Set {
+		return nil
+	}
+	values := append([]string{}, o.Value...)
+	return &values
+}
+
+// ValidateCopilotPluginSelection checks count, byte bounds, canonical
+// identities, and duplicate set semantics.
+func ValidateCopilotPluginSelection(selection OptionalStringList) error {
+	if !selection.Set {
+		return nil
+	}
+	if err := copilotplugins.ValidateSelection(selection.Value); err != nil {
+		return fmt.Errorf("copilot_selected_plugins is invalid: %w", err)
+	}
+	return nil
 }
 
 const (
@@ -148,6 +202,7 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "cursor_plugins_mcp_enabled", JSONType: "boolean", Support: "read_write", Description: "Import local Cursor plugin MCP servers. Defaults to true for new profiles."},
 		{Path: "mcp_selection_mode", JSONType: "string", Support: "read_write", Description: "Choose all enabled imported MCP servers or only selected native server identities."},
 		{Path: "mcp_selected_servers", JSONType: "array", Support: "read_write", Description: "Exact native MCP server identities selected for automatic preparation.", Replacement: true},
+		{Path: "copilot_selected_plugins", JSONType: "array", Support: "read_write", Description: "Stable Copilot plugin identities loaded natively by new local/worktree processes. Omitted updates preserve the committed selection; an explicit empty list clears it.", Replacement: true},
 		{Path: "dynamic", JSONType: "object", Support: "read_write", Description: "Versioned dynamic routing document.", Replacement: true},
 	}
 }

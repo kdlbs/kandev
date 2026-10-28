@@ -172,6 +172,8 @@ export type AgentProfile = {
   mcpSelectionMode?: MCPSelectionMode;
   /** Exact native MCP server IDs selected when mcpSelectionMode is selected. */
   mcpSelectedServers?: string[];
+  /** Stable Copilot plugin identities loaded by new local/worktree processes. */
+  copilotSelectedPlugins?: string[];
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep running and the profile stays editable in settings.
@@ -264,6 +266,7 @@ export type AgentProfilePayload = {
   cursor_plugins_mcp_enabled?: boolean;
   mcp_selection_mode?: MCPSelectionMode;
   mcp_selected_servers?: string[];
+  copilot_selected_plugins?: string[];
   enabled?: boolean;
   user_modified?: boolean;
   created_at: string;
