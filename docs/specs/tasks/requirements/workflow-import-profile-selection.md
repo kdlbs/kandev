@@ -71,7 +71,8 @@ Name selection is the shared prerequisite for browser and noninteractive one-tim
 
 This change covers explicit step profiles in manual browser imports of supported workflow exports.
 The shared name-selection rule also covers the raw-YAML API and MCP imports.
-Their profile matching and failure contracts otherwise retain their behavior.
+Their profile matching and failure contracts otherwise retain their behavior,
+subject to the option-aware descriptor in [portable workflow profile matching](workflow-portable-profile-matching.md).
 The browser uses an explicit selection submission contract.
 Workflow-default profiles, review-action profiles, conditional session rules, and unattended workflow sync retain their existing behavior.
 Inline profile creation, profile configuration changes, runtime model fallback, and automatic replacement selection are outside this capability.

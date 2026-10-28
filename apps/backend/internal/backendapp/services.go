@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -550,6 +551,7 @@ func wireTaskWorkflowCrossReferences(
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetAgentProfileLookup(buildAgentProfileLookup(repos))
 	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 }
 
@@ -2528,10 +2530,15 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 		if err != nil || profile == nil {
 			return nil
 		}
+		options := maps.Clone(profile.ConfigOptions)
+		if options == nil {
+			options = map[string]string{}
+		}
 		return &wfmodels.AgentProfilePortable{
-			AgentName: profile.AgentDisplayName,
-			Model:     profile.Model,
-			Mode:      profile.Mode,
+			AgentName:     profile.AgentDisplayName,
+			Model:         profile.Model,
+			Mode:          profile.Mode,
+			ConfigOptions: &options,
 		}
 	}
 }
