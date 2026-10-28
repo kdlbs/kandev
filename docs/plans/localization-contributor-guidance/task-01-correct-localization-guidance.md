@@ -136,3 +136,8 @@ the key, non-JSX, parity, and sweep implementations. The ROOT qualification
 reported repository-root `pnpm run i18n:check` failing with
 `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND` and the web-scoped command passing; this
 documentation-only correction does not need a synthetic failing test.
+
+Review remediation: `eslint.i18n.config.mjs` applies the focused preview to
+caller-supplied paths, independent of `i18nGuardFiles`. Corrected the two system
+design statements to match. `python3 scripts/list-docs.py validate`,
+`python3 scripts/lint-spec-files.py --all`, and `git diff --check` exited 0.
