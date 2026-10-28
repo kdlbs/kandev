@@ -72,6 +72,18 @@ A provider declaring none keeps today's behavior, including the rejection of wor
 - **AC-EXECUTORS-PLUGIN-PLACEMENT-001.7:** After a backend or plugin restart the host shall resume polling the persisted operation and shall neither allocate a second environment nor lose the pending state.
 - **AC-EXECUTORS-PLUGIN-PLACEMENT-001.8:** A provider not requiring `pending_placement` shall keep the current synchronous launch and deadline, and a pending response from it shall be rejected as `conflict`.
 
+### REQ-EXECUTORS-PLUGIN-PLACEMENT-002: Refused provision releases the record
+
+**Intent:** A provision the provider refused, with nothing allocated, does not leave a record that only recovery can release.
+
+#### Acceptance criteria
+
+- **AC-EXECUTORS-PLUGIN-PLACEMENT-002.1:** When a provider requires `provision_refusal`, a provision response can carry `refused` with `nothing_allocated`, and a reason from `capacity_refused`, `admission_refused`, `policy_refused`, or `invalid_request`.
+- **AC-EXECUTORS-PLUGIN-PLACEMENT-002.2:** The host shall accept the refusal only when no checkpoint and no provider state for the operation was recorded. It shall then, in one write, record the refusal, settle the environment absent, and release the admission reservation, without running recovery.
+- **AC-EXECUTORS-PLUGIN-PLACEMENT-002.3:** A refusal for an operation that has a recorded checkpoint or state shall be rejected as `conflict`, and recovery shall run as for any failed provision.
+- **AC-EXECUTORS-PLUGIN-PLACEMENT-002.4:** A lost reply, a timeout, or a response error shall never be read as a refusal. Only recovery or destroy can say that a resource is absent.
+- **AC-EXECUTORS-PLUGIN-PLACEMENT-002.5:** The task shall show the refusal reason as a distinct outcome, and a provider not requiring the capability shall keep today's behavior.
+
 ## Out of scope
 
 - Resizing a live environment, preemption, and cross-provider failover.

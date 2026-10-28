@@ -30,12 +30,15 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-CAPABILITY-002.3
   - AC-EXECUTORS-PLUGIN-CAPABILITY-002.4
   - AC-EXECUTORS-PLUGIN-CAPABILITY-002.5
+  - AC-EXECUTORS-PLUGIN-CAPABILITY-002.6
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.1
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.2
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.3
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.4
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.5
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.6
+  - AC-EXECUTORS-PLUGIN-CAPABILITY-003.7
+  - AC-EXECUTORS-PLUGIN-CAPABILITY-003.8
   - AC-EXECUTORS-PLUGIN-CAPABILITY-004.1
   - AC-EXECUTORS-PLUGIN-CAPABILITY-004.2
   - AC-EXECUTORS-PLUGIN-CAPABILITY-004.3
@@ -49,11 +52,11 @@ system_design:
 
 ## Summary
 
-Add the `hostcaps` registry, the `{name, version}` manifest syntax, dependency closure, the profile-validation echo, the allocation gate, the inventory snapshot, `state_schema`, the upgrade and rollback readability check, and the deprecation and retired-pair rules. Contract version stays 1.
+Add the `hostcaps` registry, the `{name, version}` manifest syntax, dependency closure, the profile-validation echo, the allocation gate, the inventory snapshot, `state_schema`, the upgrade and rollback readability check, and the deprecation and retired-pair rules, the `min_kandev_version` rule, and the state budget with `state_too_large`. Contract version stays 1.
 
 ## Size
 
-M: ~550 source, ~900 test lines. Built first; every later order is a registry entry.
+M: ~650 source, ~1000 test lines. Built first; every later order is a registry entry.
 
 ## In scope
 
@@ -79,6 +82,7 @@ M: ~550 source, ~900 test lines. Built first; every later order is a registry en
 - Upgrade activation racing a launch that records an old state version (injected ordering; sqlite and PostgreSQL).
 - Retired pair removed or reused: golden-file test fails. A record with only the old `required_capabilities` key decodes as version 1.
 - Existing fixture conformance test passes unmodified.
+- Manifest `min_kandev_version` below a capability's release: install rejected. State above budget and the combined worst-case envelope: `state_too_large`, resource cleaned.
 
 ## Verification
 

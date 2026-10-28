@@ -5,6 +5,7 @@ requirements:
   - REQ-EXECUTORS-PLUGIN-SHARED-001
   - REQ-EXECUTORS-PLUGIN-ADMISSION-001
   - REQ-EXECUTORS-PLUGIN-PLACEMENT-001
+  - REQ-EXECUTORS-PLUGIN-PLACEMENT-002
 ---
 
 # Remote executor plugins: shared environments, admission, and placement system design
@@ -23,6 +24,7 @@ admission; the provider keeps placement, queueing, and worker choice.
 | REQ-EXECUTORS-PLUGIN-SHARED-001 | Shared environments |
 | REQ-EXECUTORS-PLUGIN-ADMISSION-001 | Admission context and hook |
 | REQ-EXECUTORS-PLUGIN-PLACEMENT-001 | Pending placement |
+| REQ-EXECUTORS-PLUGIN-PLACEMENT-002 | Refused provision |
 
 ## Shared environments
 
@@ -86,6 +88,14 @@ each with its own user-visible message; none releases the admission reservation 
 cancel. All copy goes through `t()` in the seven catalogs. Playwright covers queued, cancel while queued, and refused, with the
 fixture provider.
 
+## Refused provision
+
+With `provision_refusal` in the snapshot, `ProvisionExecutorEnvironmentResponse` may carry additive `refusal {reason, nothing_allocated}`.
+`settleRefusedProvision` runs in one transaction: it checks that the operation has no checkpoint and no provider state, writes the
+refusal reason, settles the record absent, and releases the reservation once. The write is guarded by the operation's revision, so a
+concurrent cancel or archive cannot double-release. Any other error path is unchanged: a failed or lost provision runs recovery, and only
+recovery or destroy can confirm absence (AC 002.4). The refusal is a distinct failure code in the task view.
+
 ## Data model
 
 No new table and no DDL. Envelope fields: `owners`, `share_epoch`, `closing`, `admission_scope`, `reservation`,
@@ -108,6 +118,9 @@ count query reads the rows by scope; a scope index is not added, and the count i
 | Queued launch cancelled while placement completes (PLACEMENT 001.5) | one commit wins; no allocation remains; never ready | barrier e2e over the fixture; sqlite and PostgreSQL race |
 | Restart while pending (001.7) | polling resumes; no second environment | barrier e2e |
 | Deadline passes while a poll is in flight (001.2) | `placement_timeout`, destroy of anything late-placed | lifecycle unit with a fake clock (synctest) |
+| Refusal racing a cancel or archive (PLACEMENT 002.2) | one transaction wins; reservation released once; record absent or cancelled, never retained | sqlite and PostgreSQL race |
+| Refusal after a checkpoint was recorded (002.3) | `conflict`; recovery runs | lifecycle unit |
+| Lost reply or timeout on provision (002.4) | treated as failure, never as refusal; recovery decides | lifecycle unit with fault-injecting client |
 | Pending response from a provider without the capability (001.8) | `conflict`, cleanup | lifecycle unit |
 
 Each test is written first and fails on main. Remaining ACs are table tests (label rules, class checks, owner caps) and the

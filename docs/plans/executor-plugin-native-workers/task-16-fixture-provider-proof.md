@@ -5,8 +5,12 @@ status: pending
 wave: 10
 depends_on:
   - "15"
+  - "17"
 plan: "plan.md"
 requirements:
+  - REQ-EXECUTORS-PLUGIN-PROFILE-003
+  - REQ-EXECUTORS-PLUGIN-PLACEMENT-002
+  - REQ-EXECUTORS-PLUGIN-CAPABILITY-003
   - REQ-EXECUTORS-NATIVE-WORKER-008
   - REQ-EXECUTORS-PLUGIN-CAPABILITY-002
   - REQ-EXECUTORS-PLUGIN-SHARED-001
@@ -28,11 +32,15 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-LAUNCHPOLICY-001.4
   - AC-EXECUTORS-PLUGIN-PREPARATION-001.4
   - AC-EXECUTORS-PLUGIN-MIGRATION-001.4
+  - AC-EXECUTORS-PLUGIN-PROFILE-003.3
+  - AC-EXECUTORS-PLUGIN-PLACEMENT-002.4
+  - AC-EXECUTORS-PLUGIN-CAPABILITY-003.7
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
   - ../../specs/executors/system-design/remote-executor-plugin-capability-versioning.md
   - ../../specs/executors/system-design/remote-executor-plugin-shared-admission-placement.md
   - ../../specs/executors/system-design/remote-executor-plugin-operations-migration.md
+  - ../../specs/executors/system-design/remote-executor-plugin-profile-contract.md
 ---
 
 # Task 16: Fixture provider proving every capability (R8, M1-M8)
@@ -55,7 +63,7 @@ M: ~250 source, ~400 test lines.
 
 ## Acceptance
 
-- The conformance test exercises tunnel, descriptor, intent, drain, destroy checkpoints, durable bootstrap, each barrier, and one proof per medium-term item: negotiation mismatch (M7), two-owner release (M1), admission racing resume (M2), queued launch cancelled during placement (M3), status, event, and maintenance reads (M4), required launch policy without a wrapper (M5), two unseen preparation strategies (M6), and freeze then rollback (M8).
+- The conformance test exercises tunnel, descriptor, intent, drain, destroy checkpoints, durable bootstrap, each barrier, and one proof per medium-term item: negotiation mismatch (M7), two-owner release (M1), admission racing resume (M2), queued launch cancelled during placement (M3), status, event, and maintenance reads (M4), required launch policy without a wrapper (M5), two unseen preparation strategies (M6), freeze then rollback (M8), secret rotation before recovery, a provision refusal that settles without recovery, and a 12 KiB representative state with the combined worst-case envelope.
 - The unchanged legacy conformance test still passes.
 
 ## Failing-first tests
