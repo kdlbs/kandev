@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -1273,6 +1272,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Position:                              body.Position,
 		Metadata:                              metadata,
 		MCPServerIDs:                          body.MCPServerIDs,
+		Attachments:                           body.Attachments,
 		DeferredLaunch:                        deferredLaunch,
 		RecordAgentProfileRecentUse:           true,
 		PlanMode:                              body.PlanMode,
@@ -1288,40 +1288,26 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		InitialWorkspaceLayout:                body.InitialWorkspaceLayout,
 	})
 	if err != nil {
+		if respondTaskCreateAttachmentError(c, err) {
+			return
+		}
 		handleNotFound(c, h.logger, err, "task not created")
 		return
 	}
 	// Both Found outcomes have no side effects: skip every post-create step
-	// below (attachment claim, workspace-policy attach, fresh-branch commit,
-	// session prepare/start, last-used recording, PR association) and return
-	// the existing task as-is. This is the data-loss guard's REST twin — the
+	// below (workspace-policy attach, fresh-branch commit, session
+	// prepare/start, last-used recording, PR association) and return the
+	// existing task as-is. This is the data-loss guard's REST twin — the
 	// steps below assume a task this request just created, and running them
-	// against someone else's task would misapply attachments/policy meant for
-	// the retry payload to a task that never asked for them.
+	// against someone else's task would misapply policy or repository work
+	// meant for the retry payload to a task that never asked for them.
+	// Creation attachments follow the same rule: the insert transaction never
+	// claims a retry upload for an existing task.
 	if result.Outcome != service.CreateTaskOutcomeCreated {
 		c.JSON(http.StatusOK, foundCreateTaskResponse(result))
 		return
 	}
 	task := result.Task
-	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
-		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
-		defer cancel()
-		if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
-			h.logger.Warn("failed to roll back task after attachment claim", zap.String("task_id", task.ID), zap.Error(deleteErr))
-		}
-		switch {
-		case errors.Is(err, service.ErrAttachmentTooLarge):
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
-		case errors.Is(err, service.ErrAttachmentForbidden), errors.Is(err, service.ErrAttachmentNotFound), errors.Is(err, service.ErrAttachmentClaimConflict):
-			c.JSON(http.StatusNotFound, gin.H{"error": "attachment not found"})
-		case errors.Is(err, service.ErrAttachmentInvalid), errors.Is(err, service.ErrAttachmentTotalTooLarge), errors.Is(err, service.ErrTooManyAttachments):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		default:
-			h.logger.Error("failed to claim task attachments", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to claim task attachments"})
-		}
-		return
-	}
 
 	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
 		return
@@ -1382,6 +1368,26 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+// respondTaskCreateAttachmentError maps a creation-attachment rejection to its
+// HTTP response. It reports false for errors that are not attachment failures.
+func respondTaskCreateAttachmentError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, service.ErrAttachmentTooLarge):
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrAttachmentForbidden),
+		errors.Is(err, service.ErrAttachmentNotFound),
+		errors.Is(err, service.ErrAttachmentClaimConflict):
+		c.JSON(http.StatusNotFound, gin.H{"error": "attachment not found"})
+	case errors.Is(err, service.ErrAttachmentInvalid),
+		errors.Is(err, service.ErrAttachmentTotalTooLarge),
+		errors.Is(err, service.ErrTooManyAttachments):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	default:
+		return false
+	}
+	return true
 }
 
 // foundCreateTaskResponse builds the response for either Found outcome: the

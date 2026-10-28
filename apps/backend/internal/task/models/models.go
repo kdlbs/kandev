@@ -1640,6 +1640,21 @@ type Task struct {
 	// tasks always come back false. UI callers gate office-only surfaces on
 	// this (e.g. the "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+
+	// CreationAttachmentClaim carries the authenticated file-backed set that
+	// must be claimed in the same transaction as this task row. It is internal
+	// insertion input: public metadata can never populate it.
+	CreationAttachmentClaim *TaskCreationAttachmentClaim `json:"-"`
+}
+
+// TaskCreationAttachmentClaim is the ordered, authenticated creation
+// attachment set admitted with a task insert. Only identity, ownership, and
+// order live here; canonical metadata and bytes stay in the attachment
+// registry.
+type TaskCreationAttachmentClaim struct {
+	OwnerID     string
+	WorkspaceID string
+	IDs         []string
 }
 
 const (

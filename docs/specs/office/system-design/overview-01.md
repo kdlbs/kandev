@@ -3,6 +3,7 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-OVERVIEW-001
+  - REQ-OFFICE-TASK-CREATION-001
 created: 2026-04-25
 owners:
   - cfl
@@ -18,6 +19,7 @@ This design preserves the technical source detail for `REQ-OFFICE-OVERVIEW-001` 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-OVERVIEW-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-TASK-CREATION-001` | [New task dialog](#new-task-dialog) |
 
 ## Migrated source detail
 
@@ -74,8 +76,32 @@ This spec is the top-level entry point for Office. It covers the workspace model
 ### New task dialog
 
 - Modal triggered by "+ New Task" (from the tasks list or sidebar).
-- Fields: title (auto-expanding textarea), quick selector row "For [Assignee] in [Project]" with an overflow menu to add Reviewer and Approver, markdown description, bottom-bar chips (Status default Todo, Priority, Upload, more options), footer (Discard Draft | Create Task).
+- Fields: title, the "For [Assignee] in [Project]" selector row, an attachment-aware
+  description composer, Status and Priority chips, and the Discard Draft / Create Task footer.
 - Drafts auto-save to localStorage. When creating from a parent task context, a "sub-task of KAN-X" badge is shown.
+
+`NewTaskDialog` composes `NewTaskSelectorRow` and `NewTaskBottomBar` under
+`apps/web/app/office/components/`. `NewTaskBottomBar` contains the status and
+priority pickers. Both call the supplied `onUpdate` callback.
+
+The shared `TaskFormInputs` composer replaces the plain description textarea.
+Its working Attach files action replaces the Upload placeholder.
+`NewTaskBottomBar` retains the two property pickers and omits the empty overflow.
+The [task creation attachment design](../../tasks/system-design/task-creation-attachments.md)
+owns the complete composer, draft, claim, preview, and scheduler-delivery path.
+
+`useIssueDraft` retains Office field storage and supplies workspace/parent draft
+identity to the shared composer adapter. `NewTaskDialog.handleCreate` retains
+submission feedback and the existing Office creation fields.
+The attachment design defines the added descriptors and submission guard.
+
+Desktop and phone retain the same creation entry points. Phone uses one bounded
+form with a scrolling body and reachable footer. Existing property pickers
+retain their short Popover lists. Attachment details use the shared touch Drawer.
+The task design owns this feature's full responsive composition and test map.
+
+The [delivery plan](../../../plans/office-new-task-supported-controls/plan.md)
+records the backend, composer, and public-documentation work.
 
 ### Relationship to existing kandev features
 

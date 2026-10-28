@@ -63,8 +63,9 @@ test("mobile Office task creation only shows supported assignee controls", async
 
   const dialog = testPage.getByTestId("office-new-issue-dialog");
   await expect(dialog).toBeVisible({ timeout: 10_000 });
-  await dialog.locator("button:has(svg.tabler-icon-dots-vertical)").first().tap();
-  await expect(dialog.getByRole("menuitem", { name: /reviewer|approver/i })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Attach files" })).toBeVisible();
+  await expect(dialog.locator("button:has(svg.tabler-icon-dots-vertical)")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Upload", exact: true })).toHaveCount(0);
 
   await dialog.getByPlaceholder("Task title").fill(taskTitle);
   await dialog.getByRole("button", { name: "Project" }).tap();

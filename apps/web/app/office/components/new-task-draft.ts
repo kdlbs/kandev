@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { clampTaskTitleInput } from "@/lib/task-title";
 import type { TaskPriority } from "@/lib/types/http";
+import type { StoredFileAttachment } from "@/lib/stored-chat-draft-attachments";
 
 export type IssueDraft = {
   title: string;
@@ -11,6 +12,8 @@ export type IssueDraft = {
   projectId: string;
   status: string;
   priority: TaskPriority;
+  /** Ready staged descriptors only; file bytes never enter browser storage. */
+  attachments?: StoredFileAttachment[];
 };
 
 const EMPTY_DRAFT: IssueDraft = {
@@ -20,6 +23,7 @@ const EMPTY_DRAFT: IssueDraft = {
   projectId: "",
   status: "todo",
   priority: "medium",
+  attachments: [],
 };
 
 function draftKey(workspaceId: string | null, parentTaskId?: string) {
@@ -41,7 +45,11 @@ export function useIssueDraft(
       const stored = localStorage.getItem(key);
       if (stored) {
         const parsed = JSON.parse(stored) as IssueDraft;
-        return { ...parsed, title: clampTaskTitleInput(parsed.title ?? "") };
+        return {
+          ...parsed,
+          title: clampTaskTitleInput(parsed.title ?? ""),
+          attachments: Array.isArray(parsed.attachments) ? parsed.attachments : [],
+        };
       }
     } catch {
       // ignore
