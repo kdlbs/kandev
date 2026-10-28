@@ -53,7 +53,7 @@ M: ~300 source, ~650 test lines, including one Playwright spec.
 
 ## In scope
 
-- One parametrized Playwright spec triggers each remaining host-originated failure code (`capability_mismatch`, `missing_capability`, `admission_denied` including `scope_full`, `admission_unavailable`, `launch_policy_unsupported`, `launch_policy_unenforced`, `secret_reference_missing`, `secret_in_state`, `bootstrap_consumed`, `repository_inventory_mismatch`, `state_too_large`, `api_unreachable`, `placement_failed`, `placement_timeout`, `placement_cancel_pending`, `unknown_resource_class`, each refusal reason) through the fixture and asserts localized text with an icon, using the pseudo-locale.
+- One parametrized Playwright spec triggers each remaining host-originated failure code (`capability_mismatch`, `missing_capability`, `admission_denied` including `scope_full`, `admission_unavailable`, `launch_policy_unsupported`, `launch_policy_unenforced`, `secret_reference_missing`, `secret_in_state`, `bootstrap_consumed`, `repository_inventory_mismatch`, `state_too_large`, `api_unreachable`, `placement_failed`, `placement_timeout`, `placement_cancel_pending`, each refusal reason) through the fixture and asserts localized text with an icon, using the pseudo-locale.
 - Extend cmd/plugin-fixture to declare every capability behind configuration and run one conformance test through the managed plugin process covering each capability and barrier, with no vendor, cluster, network, or credentials.
 
 ## Out of scope
