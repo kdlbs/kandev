@@ -75,6 +75,7 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"tasks.deliveryRetention.batchRows":        {},
 	"tasks.deliveryRetention.batchBytes":       {},
 	"credentials.file":                         {},
+	"providerErrors.catalogFile":               {},
 	"limits.ghMaxConcurrent":                   {},
 	"limits.gitMaxConcurrent":                  {},
 	"limits.lspMaxConnections":                 {},
@@ -313,6 +314,9 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	if !yamlKeys["credentials.file"] {
 		cfg.Credentials.File = ""
 	}
+	if !yamlKeys["providerErrors.catalogFile"] {
+		cfg.ProviderErrors.CatalogFile = ""
+	}
 	setDefaultInt("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8)
 	setDefaultInt("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12)
 	setDefaultInt("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8)
@@ -352,6 +356,7 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyDurationEnv("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute, envSnapshot, sources)
 	applyDurationEnv("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour, envSnapshot, sources)
 	applyStringEnvAllowEmpty("credentials.file", &cfg.Credentials.File, envSnapshot, sources)
+	applyStringEnvAllowEmpty("providerErrors.catalogFile", &cfg.ProviderErrors.CatalogFile, envSnapshot, sources)
 	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, envSnapshot, sources)
 	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, envSnapshot, sources)
 	applyPositiveIntEnv("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8, envSnapshot, sources)

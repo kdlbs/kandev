@@ -152,6 +152,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS", class: "catalog"},
 		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES", class: "catalog"},
 		{envVar: "KANDEV_CREDENTIALS_FILE", class: "catalog"},
+		{envVar: "KANDEV_PROVIDER_ERRORS_CATALOG_FILE", class: "catalog"},
 		{envVar: "KANDEV_GH_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_GIT_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_LSP_MAX_CONNECTIONS", class: "catalog"},

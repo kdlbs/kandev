@@ -122,6 +122,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "tasks.deliveryRetention.batchRows", EnvVars: []string{"KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS"}, Owner: "task delivery retention", Default: "200"},
 	{Key: "tasks.deliveryRetention.batchBytes", EnvVars: []string{"KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES"}, Owner: "task delivery retention", Default: "4194304"},
 	{Key: "credentials.file", EnvVars: []string{"KANDEV_CREDENTIALS_FILE"}, Owner: "credentials", Default: ""},
+	{Key: "providerErrors.catalogFile", EnvVars: []string{"KANDEV_PROVIDER_ERRORS_CATALOG_FILE"}, Owner: "provider error routing", Default: "", Description: "Optional local JSON or YAML provider-error rule catalog, loaded once at startup. A relative path resolves against the selected config file directory."},
 	{Key: "limits.ghMaxConcurrent", EnvVars: []string{"KANDEV_GH_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "8"},
 	{Key: "limits.gitMaxConcurrent", EnvVars: []string{"KANDEV_GIT_MAX_CONCURRENT"}, Owner: "subprocess admission", Default: "12"},
 	{Key: "limits.lspMaxConnections", EnvVars: []string{"KANDEV_LSP_MAX_CONNECTIONS"}, Owner: "LSP gateway", Default: "8", Description: "Maximum active LSP server leases, including leases detached from a browser."},

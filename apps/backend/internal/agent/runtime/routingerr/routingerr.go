@@ -266,6 +266,9 @@ func classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
+	if e := classifyExternalCatalog(in, excerpt); e != nil {
+		return applyInvariants(e)
+	}
 	if e := classifyKeywordContext(in, excerpt); e != nil {
 		return applyInvariants(e)
 	}

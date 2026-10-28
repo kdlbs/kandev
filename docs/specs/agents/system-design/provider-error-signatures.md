@@ -6,6 +6,7 @@ requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003
 ---
 
 # Provider Error Signature Classification System Design
@@ -183,10 +184,6 @@ The returned mid-turn action is a classification recommendation only. Existing
 continuation admission is unchanged; generic post-output retry or candidate
 continuation is not implemented by this extension.
 
-The minimal future catalog seam is the existing deterministic classifier:
-known rules stay before `classifyKeywordContext`; loading and export remain
-separate work. No loader or new rule DSL is implemented.
-
 Typed process-start and ACP-initialization failures may separate their own
 matching lifecycle wrapper after the original classification remains unknown.
 Both the complete wrapped diagnostic and the inner diagnostic remain bounded.
@@ -225,3 +222,31 @@ This addition creates no new classification code, public field, or retry owner.
 
 The [implementation package](../../../plans/opencode-capacity-retry/plan.md)
 delivers the positive fixture, collision negatives, and reset-hint bounds.
+
+## Operator rule catalog
+
+Requirement 003 adds `providerErrors.catalogFile` to the typed startup
+catalog (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`, environment over YAML, empty
+default). Startup resolves a relative path against the selected config file
+directory, loads the file once through `routingerr/externalcatalog`, and
+installs the immutable result with `routingerr.SetExternalCatalog`. A rejected
+file installs nothing and logs one warning with the `LoadError` reason, rule
+index, rule id and field.
+
+`externalcatalog` owns the version 1 document, strict JSON/YAML decoding,
+validation and first-match evaluation. It does not import the classifier;
+`routingerr.ExternalCatalogVocabulary` supplies the accepted codes,
+confidences and phases. The package README is the field reference.
+
+`classifyExternalCatalog` runs after the runtime-environment rules and before
+`classifyKeywordContext`. Patterns read the same sanitized excerpt as built-in
+rules. Terms reuse the requirement 002 diagnostic envelope and normalization,
+so quoted or negated text has no terms. Term and context rules need
+`KeywordContext.Enabled` and `Diagnostic`. For an eligible diagnostic the
+match builds a `KeywordDecision` from the code's group, then applies the
+rule's scope, backoff and `until_model_change`; `applyKeywordReset` keeps the
+observed and free-daily reset handling. Without eligibility only code and
+confidence apply, so dynamic circuits use their legacy behavior. Account and
+tier context is filled during the orchestrator refinement pass, which keeps
+the original code; a rule that depends on them can refine scope but cannot
+admit a new code.

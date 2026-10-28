@@ -1,13 +1,14 @@
-# External provider-error catalog (draft)
+# External provider-error catalog
 
-Status: draft format contract for the loader in this package. The classifier
-is not wired to it yet; the configuration key, the call site, and the
-provider-error-signatures specification are added in a later change. Until
-then a catalog file has no effect.
+Format reference for the operator catalog named by the `providerErrors.catalogFile`
+startup setting (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`). Requirement and design:
+`docs/specs/agents/{requirements,system-design}/provider-error-signatures.md`
+(REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003).
 
 ## Behavior
 
-- No configured path: no file I/O, built-in rules only.
+- No configured path: no file I/O, built-in rules only. A relative path
+  resolves against the directory of the selected config file.
 - A configured file is read once, decoded, validated, and compiled into an
   immutable ordered rule set. Any error rejects the whole file; built-in rules
   stay in effect and no rule from the file is applied.
@@ -60,11 +61,17 @@ values; a missing observed value never matches), `freeDaily` and
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `code` | string | yes | An existing provider-routing code accepted by the classifier. Codes that hold until an owner releases them are not accepted. |
+| `code` | string | yes | One of `auth_required`, `missing_credentials`, `subscription_required`, `quota_limited`, `rate_limited`, `network_unavailable`, `provider_unavailable`, `provider_overloaded`, `model_capacity`, `model_unavailable`, `provider_not_configured`, `provider_resource_exhausted`. Codes that hold until an owner releases them are not accepted. |
 | `confidence` | string | yes | `high`, `medium`, or `low`. |
 | `scope` | string | no | `path_model` (default), `model`, or `account`. Widening applies only to an eligible diagnostic that carries the model or account id; otherwise `path_model`. |
 | `backoff` | Go duration | no | Positive duration, for example `10m`. Omitted keeps the classifier default. |
 | `reset` | string | no | `inherit` (default: observed reset hints as today), `free_daily` (requires `match.context.freeDaily: true`), or `until_model_change` (requires `code: model_unavailable` and `httpStatus: [404]`). |
+
+`scope`, `backoff`, and `reset` take effect only while the keyword and context
+classification (`features.providerKeywordContext`) is enabled for a provider
+diagnostic; otherwise only `code` and `confidence` apply. Account and tier
+context is known only when Kandev refines an already classified failure, so a
+rule that depends on them can narrow or widen scope but cannot change the code.
 
 Class, retryability, fallback permission, and recovery actions are derived by
 the classifier from `code`; a catalog cannot set them.

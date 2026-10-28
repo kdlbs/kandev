@@ -33,6 +33,7 @@ type Config struct {
 	Server                 ServerConfig                 `mapstructure:"server"`
 	Tasks                  TasksConfig                  `mapstructure:"tasks"`
 	Credentials            CredentialsConfig            `mapstructure:"credentials"`
+	ProviderErrors         ProviderErrorsConfig         `mapstructure:"providerErrors"`
 	Limits                 LimitsConfig                 `mapstructure:"limits"`
 	MessageQueue           MessageQueueConfig           `mapstructure:"messageQueue"`
 	Agentctl               AgentctlConfig               `mapstructure:"agentctl"`
@@ -81,6 +82,13 @@ type DeliveryRetentionConfig struct {
 // CredentialsConfig contains operator-managed credential file settings.
 type CredentialsConfig struct {
 	File string `mapstructure:"file"`
+}
+
+// ProviderErrorsConfig contains operator-managed provider-error settings.
+type ProviderErrorsConfig struct {
+	// CatalogFile is an optional local JSON or YAML rule catalog loaded once
+	// at startup. Empty keeps the built-in rules only.
+	CatalogFile string `mapstructure:"catalogFile"`
 }
 
 // ExecutorsConfig contains executor-related startup settings.

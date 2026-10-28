@@ -726,6 +726,17 @@ Explicit reset hints control suspension expiry. Model-scoped failures do not
 suspend unrelated models. Account-wide limits require a proven current launch
 credential binding; unknown bindings retain narrower scope.
 
+Operators can add provider-error rules from a local JSON or YAML file with the
+`providerErrors.catalogFile` startup setting (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`).
+A relative path resolves against the directory of the selected `config.yaml`.
+Kandev reads the file once at startup; restart to apply changes. Built-in rules
+always run first, and catalog rules run in file order before the keyword and
+context classification. Rules that use keyword terms or invocation context, and
+any requested scope, backoff or reset, take effect only while this classifier
+is enabled. An invalid file is ignored as a whole and logged with its reason; Kandev
+keeps the built-in rules. See the catalog format reference in
+`apps/backend/internal/agent/runtime/routingerr/externalcatalog/README.md`.
+
 ### Host probes and executor model catalogs
 
 The model list shown while editing a profile comes from a host probe. It is an

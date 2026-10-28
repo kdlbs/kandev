@@ -4,6 +4,7 @@ status: in_progress
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 legacy_specs: []
@@ -75,3 +76,9 @@ scope, line-opening evidence, sanitized excerpts, typed/normalized precedence,
 and existing credit/payment/quota ordering. Do not duplicate the already
 submitted shared catalogue or context-length work. The original-source reproduction and focused candidate race result are recorded
 in task 02; hosted CI and combined unmerged-source validation remain separate.
+
+## Operator rule catalog follow-up
+
+[Task 03](task-03-operator-rule-catalog.md) implements requirement 003 on top of
+the keyword/context [task 02](task-02-keyword-context.md): a startup-loaded local JSON/YAML catalog evaluated after built-in rules
+and before the keyword/context fallback. Unset keeps the built-in behavior.
