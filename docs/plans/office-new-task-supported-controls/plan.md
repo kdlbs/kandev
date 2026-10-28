@@ -239,8 +239,7 @@ These views cover `AC-TASKS-CREATION-ATTACHMENTS-001.1` through `.9` and
 | Office `.1`-.3 | Empty dots absent, real Attach files present, existing property/create/error/assignee/source regressions retained |
 
 New exact test names and files appear in the work orders.
-Existing evidence is limited to source tracing and the removed original diagnostic.
-Product tests have not yet run for this revised scope.
+Execution results are recorded in "Verification results" below.
 
 ## E2E tests
 

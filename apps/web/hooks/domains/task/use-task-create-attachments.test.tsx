@@ -244,6 +244,46 @@ describe("useTaskCreateAttachments", () => {
     expect(result.current.attachments).toHaveLength(0);
   });
 
+  it("blocks removal and retry while submission is frozen", async () => {
+    uploadAttachment.mockResolvedValue(uploadedDescriptor());
+    const { result } = renderHook(() => useTaskCreateAttachments({ workspaceId: WORKSPACE_ID }), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.addFiles([textFile()]);
+    });
+    await waitFor(() => expect(result.current.attachments[0]?.uploadStatus).toBe("ready"));
+    const id = result.current.attachments[0].id;
+
+    act(() => result.current.setAccepting(false));
+    act(() => result.current.handleRemoveAttachment(id));
+    act(() => result.current.handleRetryAttachment(id));
+    expect(result.current.attachments).toHaveLength(1);
+    expect(deleteAttachment).not.toHaveBeenCalled();
+  });
+
+  it("rejects late upload results after the owner unmounts", async () => {
+    let resolveUpload: (value: ReturnType<typeof uploadedDescriptor>) => void = () => undefined;
+    uploadAttachment.mockReturnValue(
+      new Promise((resolve) => {
+        resolveUpload = resolve;
+      }),
+    );
+    const { result, unmount } = renderHook(
+      () => useTaskCreateAttachments({ workspaceId: WORKSPACE_ID, invalidateOnUnmount: true }),
+      { wrapper },
+    );
+    await act(async () => {
+      await result.current.addFiles([textFile()]);
+    });
+    await waitFor(() => expect(result.current.attachments[0]?.uploadStatus).toBe("uploading"));
+    unmount();
+    await act(async () => {
+      resolveUpload(uploadedDescriptor("late-unmounted"));
+    });
+    await waitFor(() => expect(deleteAttachment).toHaveBeenCalledWith("late-unmounted"));
+  });
+
   it("stops accepting new files when submission freezes the composer", async () => {
     uploadAttachment.mockResolvedValue(uploadedDescriptor());
     const { result } = renderHook(() => useTaskCreateAttachments({ workspaceId: WORKSPACE_ID }), {
@@ -355,13 +395,40 @@ describe("restoreTaskCreateAttachments", () => {
     expect(attachmentSubmissionBlocker(restored)).toBe("failed");
   });
 
+  it("rejects malformed and normalized-invalid expiry values", () => {
+    const restored = restoreTaskCreateAttachments([
+      {
+        id: "stored-bad",
+        attachmentId: "attachment-bad",
+        expiresAt: "not-a-date",
+        mimeType: TEXT_MIME,
+        fileName: "bad.txt",
+        size: 1,
+        isImage: false,
+        deliveryMode: "path",
+      },
+      {
+        id: "stored-normalized",
+        attachmentId: "attachment-normalized",
+        expiresAt: "2026-02-30T10:00:00Z",
+        mimeType: TEXT_MIME,
+        fileName: "normalized.txt",
+        size: 1,
+        isImage: false,
+        deliveryMode: "path",
+      },
+    ]);
+    expect(restored.map((attachment) => attachment.uploadStatus)).toEqual(["failed", "failed"]);
+    expect(attachmentSubmissionBlocker(restored)).toBe("failed");
+  });
+
   it("restores legacy inline bytes without persisting them", () => {
     const data = btoa("hello");
     const restored = restoreTaskCreateAttachments([
       {
         id: "stored-3",
         data,
-        mimeType: "text/plain",
+        mimeType: TEXT_MIME,
         fileName: "legacy.txt",
         size: 5,
         isImage: false,

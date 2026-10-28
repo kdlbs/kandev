@@ -30,9 +30,20 @@ Changing the project's sources later does not change existing task attachments. 
 
 ![Office New Task dialog with attachment chips, a Customer portal project selected, and the Create Task action](../screenshots/office-new-task.png)
 
-You can attach up to 10 files. Each file can be at most 100 MiB, and the set can total at most 100 MiB. Supported image types use the same preview behavior as the Kanban task composer. Other files show their metadata and are delivered as files, not rendered in the browser.
+Attachment limits:
 
-A file shows its upload state. If an upload fails, retry it or remove it. Create stays disabled while a file is uploading, failed, or expired. Removing the problem file enables Create again and does not remove ready files. Closing the dialog keeps a draft with its ready attachments. Discard removes the draft and its staged files.
+- Up to 10 files.
+- At most 100 MiB per file and 100 MiB in total.
+
+Previews: supported image types use the same preview behavior as the Kanban task composer. Other files show their metadata and are delivered as files, not rendered in the browser.
+
+Upload states:
+
+- Each file shows its upload state. If an upload fails, retry it or remove it.
+- Create stays disabled while a file is uploading, failed, or expired.
+- Removing the problem file enables Create again. Ready files stay attached.
+
+Closing the dialog keeps a draft with its ready attachments. Discard removes the draft and its staged files.
 
 For example, “Add account recovery” should explain expired-link behavior, successful reset behavior, and the tests you expect. “Improve the portal” leaves the result and stopping point unclear.
 

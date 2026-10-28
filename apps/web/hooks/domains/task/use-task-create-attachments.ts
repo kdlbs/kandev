@@ -19,7 +19,16 @@ import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment
 import { ApiError } from "@/lib/api/client";
 import { restoreAttachmentPreview } from "@/lib/local-storage";
 import type { StoredFileAttachment } from "@/lib/stored-chat-draft-attachments";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { t } from "@/lib/i18n";
+
+const NANOSECONDS_PER_MILLISECOND = BigInt(1_000_000);
+
+function attachmentExpired(expiresAt: string | undefined): boolean {
+  if (!expiresAt) return false;
+  const parsed = parseTurnTimestamp(expiresAt);
+  return parsed === null || parsed <= BigInt(Date.now()) * NANOSECONDS_PER_MILLISECOND;
+}
 
 /** Adds processed attachments while preserving the shared count/size limits. */
 export function acceptAttachmentsWithinLimits(
@@ -72,6 +81,7 @@ export type TaskCreateAttachmentController = {
   attachments: FileAttachment[];
   isDragging: boolean;
   isProcessing: boolean;
+  isAccepting: boolean;
   setIsDragging: (dragging: boolean) => void;
   addFiles: (files: File[], issue?: ImagePasteIssue) => Promise<void>;
   handleRemoveAttachment: (id: string) => void;
@@ -86,6 +96,8 @@ type Options = {
   workspaceId: string | null | undefined;
   /** False disables processing for the unused internal controller. */
   enabled?: boolean;
+  /** Invalidates in-flight work when a keyed owner unmounts. */
+  invalidateOnUnmount?: boolean;
   initialAttachments?: FileAttachment[];
   onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void;
@@ -96,6 +108,7 @@ type Options = {
 export function useTaskCreateAttachments({
   workspaceId,
   enabled = true,
+  invalidateOnUnmount = false,
   initialAttachments = [],
   onPendingAttachmentUploadsChange,
   onAttachmentsChange,
@@ -107,6 +120,7 @@ export function useTaskCreateAttachments({
   const [processingCount, setProcessingCount] = useState(0);
   const generationRef = useRef(0);
   const acceptingRef = useRef(true);
+  const [isAccepting, setIsAccepting] = useState(true);
   const initialNotifiedRef = useRef(false);
 
   const publishAttachments = useCallback(
@@ -241,6 +255,7 @@ export function useTaskCreateAttachments({
 
   const handleRemoveAttachment = useCallback(
     (id: string) => {
+      if (!acceptingRef.current) return;
       const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
       const next = attachmentsRef.current.filter((att) => att.id !== id);
       attachmentsRef.current = next;
@@ -270,6 +285,7 @@ export function useTaskCreateAttachments({
 
   const handleRetryAttachment = useCallback(
     (id: string) => {
+      if (!acceptingRef.current) return;
       const attachment = attachmentsRef.current.find((item) => item.id === id);
       if (attachment) void uploadPendingAttachment(attachment);
     },
@@ -284,12 +300,23 @@ export function useTaskCreateAttachments({
 
   const setAccepting = useCallback((accepting: boolean) => {
     acceptingRef.current = accepting;
+    setIsAccepting(accepting);
   }, []);
+
+  useEffect(() => {
+    if (!invalidateOnUnmount) return;
+    return () => {
+      // A late upload result from an unmounted owner must not be adopted.
+      generationRef.current += 1;
+      acceptingRef.current = false;
+    };
+  }, [invalidateOnUnmount]);
 
   return {
     attachments,
     isDragging,
     isProcessing: processingCount > 0,
+    isAccepting,
     setIsDragging,
     addFiles,
     handleRemoveAttachment,
@@ -305,10 +332,9 @@ export function attachmentSubmissionBlocker(
   isProcessing = false,
 ): "uploading" | "failed" | null {
   if (isProcessing) return "uploading";
-  const now = Date.now();
   for (const attachment of attachments) {
     if (attachment.uploadStatus === "failed") return "failed";
-    if (attachment.expiresAt && Date.parse(attachment.expiresAt) <= now) return "failed";
+    if (attachmentExpired(attachment.expiresAt)) return "failed";
     if (
       attachment.uploadStatus === "pending" ||
       attachment.uploadStatus === "uploading" ||
@@ -330,8 +356,7 @@ export function restoreTaskCreateAttachments(
   for (const item of stored) {
     const attachment = restoreAttachmentPreview(item);
     if (attachment.attachmentId) {
-      const expired =
-        attachment.expiresAt !== undefined && Date.parse(attachment.expiresAt) <= Date.now();
+      const expired = attachmentExpired(attachment.expiresAt);
       restored.push({
         ...attachment,
         uploadStatus: expired ? "failed" : "ready",

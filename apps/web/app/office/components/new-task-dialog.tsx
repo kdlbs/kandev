@@ -165,6 +165,7 @@ function NewTaskDialogSession({
   const attachmentController = useTaskCreateAttachments({
     workspaceId,
     initialAttachments,
+    invalidateOnUnmount: true,
     onAttachmentsChange: persistAttachments,
   });
   const attachmentBlocker = attachmentSubmissionBlocker(

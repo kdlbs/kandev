@@ -503,30 +503,39 @@ function useAttachmentHandlers(
   return { handlePaste, handleDragOver, handleDragLeave, handleDrop };
 }
 
+function areAttachmentsMutable(controller?: TaskCreateAttachmentController): boolean {
+  return controller ? controller.isAccepting : true;
+}
+
 function toContextItems(
   attachments: FileAttachment[],
+  mutable: boolean,
   onRemove: (id: string) => void,
   onRetry: (id: string) => void,
 ): ContextItem[] {
-  return attachments.map((att) =>
-    att.isImage
+  return attachments.map((att) => {
+    const controls = mutable
+      ? {
+          onRemove: () => onRemove(att.id),
+          ...(att.file ? { onRetry: () => onRetry(att.id) } : {}),
+        }
+      : {};
+    return att.isImage
       ? ({
           kind: "image" as const,
           id: `image:${att.id}`,
           label: t("task:imageWithSize", { bytes: formatBytes(att.size) }),
           attachment: att,
-          onRemove: () => onRemove(att.id),
-          onRetry: () => onRetry(att.id),
+          ...controls,
         } as ImageContextItem)
       : ({
           kind: "file-attachment" as const,
           id: `file:${att.id}`,
           label: att.fileName,
           attachment: att,
-          onRemove: () => onRemove(att.id),
-          onRetry: () => onRetry(att.id),
-        } as FileAttachmentContextItem),
-  );
+          ...controls,
+        } as FileAttachmentContextItem);
+  });
 }
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
@@ -1035,9 +1044,16 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     addFiles,
     setIsDragging,
   );
+  const attachmentsMutable = areAttachmentsMutable(attachmentController);
   const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment, handleRetryAttachment),
-    [attachments, handleRemoveAttachment, handleRetryAttachment],
+    () =>
+      toContextItems(
+        attachments,
+        attachmentsMutable,
+        handleRemoveAttachment,
+        handleRetryAttachment,
+      ),
+    [attachments, attachmentsMutable, handleRemoveAttachment, handleRetryAttachment],
   );
   const { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor } =
     useDescriptionInput({

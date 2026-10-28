@@ -38,6 +38,8 @@ export function useIssueDraft(
 ) {
   const key = draftKey(workspaceId, parentTaskId);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftRef = useRef<IssueDraft | null>(null);
+  const skipFlushRef = useRef(false);
 
   const [draft, setDraft] = useState<IssueDraft>(() => {
     if (typeof window === "undefined") return { ...EMPTY_DRAFT, ...defaults };
@@ -61,8 +63,11 @@ export function useIssueDraft(
     };
   });
 
+  draftRef.current = draft;
+
   // Debounced save to localStorage
   useEffect(() => {
+    if (skipFlushRef.current) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       try {
@@ -76,12 +81,29 @@ export function useIssueDraft(
     };
   }, [draft, key]);
 
-  const updateDraft = useCallback(
-    (patch: Partial<IssueDraft>) => setDraft((prev) => ({ ...prev, ...patch })),
-    [],
+  // A keyed session can unmount between debounced writes (workspace or parent
+  // switch). Flush the outgoing owner once so recent edits are not lost.
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (skipFlushRef.current || draftRef.current === null) return;
+      try {
+        localStorage.setItem(key, JSON.stringify(draftRef.current));
+      } catch {
+        // ignore quota errors
+      }
+    },
+    [key],
   );
 
+  const updateDraft = useCallback((patch: Partial<IssueDraft>) => {
+    skipFlushRef.current = false;
+    setDraft((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   const clearDraft = useCallback(() => {
+    skipFlushRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
     setDraft({ ...EMPTY_DRAFT });
     try {
       localStorage.removeItem(key);

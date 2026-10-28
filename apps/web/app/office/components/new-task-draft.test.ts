@@ -60,6 +60,25 @@ describe("useIssueDraft attachments", () => {
     expect(result.current.draft.attachments).toEqual([]);
   });
 
+  it("flushes the outgoing draft before a keyed owner switch unmounts it", () => {
+    const { result, unmount } = renderHook(() => useIssueDraft(WORKSPACE_ID));
+    act(() =>
+      result.current.updateDraft({ title: "Latest edit", attachments: [STORED_ATTACHMENT] }),
+    );
+    unmount();
+    const saved = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    expect(saved.title).toBe("Latest edit");
+    expect(saved.attachments).toEqual([STORED_ATTACHMENT]);
+  });
+
+  it("does not repopulate a discarded draft after unmount", () => {
+    const { result, unmount } = renderHook(() => useIssueDraft(WORKSPACE_ID));
+    act(() => result.current.updateDraft({ title: "Discarded" }));
+    act(() => result.current.clearDraft());
+    unmount();
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
   it("persists ready descriptors and clears them on discard", () => {
     const { result } = renderHook(() => useIssueDraft(WORKSPACE_ID));
     act(() => result.current.updateDraft({ title: "Draft", attachments: [STORED_ATTACHMENT] }));

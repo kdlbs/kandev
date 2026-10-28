@@ -20,6 +20,7 @@ vi.mock("@/lib/api/domains/attachment-api", async (importOriginal) => {
 const WORKSPACE_ID = "workspace-office-attachments";
 const CREATE_BUTTON = "new-task-create-button";
 const TITLE_PLACEHOLDER = "Task title";
+const RETRY_BUTTON = "attachment-upload-retry";
 
 function Harness() {
   const store = useAppStoreApi();
@@ -138,8 +139,8 @@ describe("Office New Task attachments", () => {
     expect(createTask).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText("notes.txt"));
-    await waitFor(() => expect(screen.getByTestId("attachment-upload-retry")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("attachment-upload-retry"));
+    await waitFor(() => expect(screen.getByTestId(RETRY_BUTTON)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(RETRY_BUTTON));
     await waitFor(() =>
       expect((screen.getByTestId(CREATE_BUTTON) as HTMLButtonElement).disabled).toBe(false),
     );
@@ -171,6 +172,8 @@ describe("Office New Task attachments", () => {
     });
     expect(uploadAttachment).toHaveBeenCalledTimes(uploadsBefore);
     expect(screen.queryByText("late.txt")).toBeNull();
+    expect(screen.queryAllByTestId("context-chip-remove")).toHaveLength(0);
+    expect(screen.queryByTestId(RETRY_BUTTON)).toBeNull();
     const discard = screen.getByRole("button", { name: "Discard Draft" }) as HTMLButtonElement;
     expect(discard.disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -211,5 +214,7 @@ describe("Office New Task attachments", () => {
     renderDialog();
     expect(screen.getByText("expired.txt")).toBeTruthy();
     expect((screen.getByTestId(CREATE_BUTTON) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText("expired.txt"));
+    expect(screen.queryByTestId(RETRY_BUTTON)).toBeNull();
   });
 });
