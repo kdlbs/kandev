@@ -21,7 +21,9 @@ After session-subscription readiness, revalidate the newest history page so an
 update between an initial read and registration cannot be lost. An earlier
 in-flight page must settle before that read starts. Revision-aware merging
 preserves newer live updates when a page arrives late. Revalidate after
-reconnection and release the subscription with its consumer. Transcript
+reconnection or client replacement and release the subscription with its consumer.
+A client installed while connection status is unchanged still acquires a lease.
+Background completion can update local error state only for its active consumer. Transcript
 consumers subscribe only while their session detail is active, and reconcile
 when it becomes active again. Offline reads remain available.
 

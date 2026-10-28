@@ -38,7 +38,10 @@ import {
 import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
-import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
+import {
+  isStaleSessionStateEvent,
+  sessionStateConfirmsAgentctlExecutionReady,
+} from "@/lib/session-state";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 import {
@@ -561,7 +564,7 @@ function seedHydrationSettledBoundaries(
 ): void {
   seedSettledSessionBoundaries(
     draft.turns.settledBoundaryBySession,
-    Object.values(taskSessions?.items ?? {}),
+    Object.keys(taskSessions?.items ?? {}).map((id) => draft.taskSessions.items[id]),
   );
 }
 
@@ -578,26 +581,14 @@ function hydrateTaskSessions(
   incoming: NonNullable<HydrationState["taskSessions"]>,
   requestEpochs: Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined,
 ): void {
-  const incomingItems = incoming.items ?? {};
-  const items = { ...incomingItems };
   const previousCursors = new Map<string, string | undefined>();
   const previousStorage = new Map<string, RuntimeStorageHealth | null | undefined>();
   const incomingStorage = new Map<string, RuntimeStorageHealth | null | undefined>();
-
-  for (const [sessionId, session] of Object.entries(incomingItems)) {
-    const existing = draft.taskSessions.items[sessionId];
-    const requestEpoch = requestEpochs?.[sessionId];
-    const currentEpoch = draft.taskSessions.readCursorEpochBySession?.[sessionId] ?? 0;
-    previousCursors.set(sessionId, existing?.last_read_message_id);
-    previousStorage.set(sessionId, existing?.runtime_storage_health);
-    incomingStorage.set(sessionId, session.runtime_storage_health);
-    if (existing && hasNewerReadCursor(currentEpoch, requestEpoch)) {
-      items[sessionId] = {
-        ...session,
-        last_read_message_id: existing.last_read_message_id,
-      };
-    }
-  }
+  const items = prepareHydratedSessionItems(draft, incoming.items ?? {}, requestEpochs, {
+    previousCursors,
+    previousStorage,
+    incomingStorage,
+  });
 
   deepMerge(draft.taskSessions, { ...incoming, items });
   applyHydratedRuntimeStorage(draft, previousStorage, incomingStorage);
@@ -608,6 +599,38 @@ function hydrateTaskSessions(
       epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
     }
   }
+}
+
+function prepareHydratedSessionItems(
+  draft: Draft<AppState>,
+  incomingItems: NonNullable<HydrationState["taskSessions"]>["items"],
+  requestEpochs: Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined,
+  state: {
+    previousCursors: Map<string, string | undefined>;
+    previousStorage: Map<string, RuntimeStorageHealth | null | undefined>;
+    incomingStorage: Map<string, RuntimeStorageHealth | null | undefined>;
+  },
+): NonNullable<HydrationState["taskSessions"]>["items"] {
+  const items = { ...incomingItems };
+  for (const [sessionId, session] of Object.entries(incomingItems)) {
+    const existing = draft.taskSessions.items[sessionId];
+    if (isStaleSessionStateEvent(existing, session.updated_at)) {
+      delete items[sessionId];
+      continue;
+    }
+    const requestEpoch = requestEpochs?.[sessionId];
+    const currentEpoch = draft.taskSessions.readCursorEpochBySession?.[sessionId] ?? 0;
+    state.previousCursors.set(sessionId, existing?.last_read_message_id);
+    state.previousStorage.set(sessionId, existing?.runtime_storage_health);
+    state.incomingStorage.set(sessionId, session.runtime_storage_health);
+    if (existing && hasNewerReadCursor(currentEpoch, requestEpoch)) {
+      items[sessionId] = {
+        ...session,
+        last_read_message_id: existing.last_read_message_id,
+      };
+    }
+  }
+  return items;
 }
 
 function applyHydratedRuntimeStorage(
@@ -634,15 +657,11 @@ function hydrateTaskSessionsByTask(
     Object.entries(incoming.itemsByTaskId ?? {}).map(([taskId, sessions]) => [
       taskId,
       sessions.map((session) => {
-        const canonical = hydratedSessionIds.has(session.id)
-          ? draft.taskSessions.items[session.id]
-          : undefined;
-        return canonical
-          ? {
-              ...session,
-              last_read_message_id: canonical.last_read_message_id,
-              runtime_storage_health: canonical.runtime_storage_health,
-            }
+        const canonical = draft.taskSessions.items[session.id];
+        return canonical &&
+          (hydratedSessionIds.has(session.id) ||
+            isStaleSessionStateEvent(canonical, session.updated_at))
+          ? canonical
           : session;
       }),
     ]),

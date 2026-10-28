@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import type { Route } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
@@ -347,17 +348,53 @@ test("mobile board opens a focused column editor without horizontal overflow", a
   await expect(testPage.getByTestId("azure-work-item-detail-comments")).toContainText(
     "Discussion from Azure",
   );
-  await testPage.getByTestId("azure-work-item-assign-current-user").click();
+  const assign = testPage.getByTestId("azure-work-item-assign-current-user");
+  await assign.click();
+  await expect(assign).toBeEnabled();
   await testPage.getByTestId("azure-work-item-column").click();
   await testPage.getByRole("option", { name: "Active" }).click();
   await testPage.getByTestId("azure-work-item-column-done").click();
   await testPage.getByRole("option", { name: "Done" }).click();
-  await testPage.getByRole("button", { name: "Move" }).click();
-  await testPage.getByTestId("azure-work-item-detail-close").click();
-  await testPage.getByTestId("azure-board-column-picker").click();
-  await testPage.getByTestId("azure-board-column-option-active").click();
-  await expect(testPage.getByText("Handle token rotation")).toBeVisible();
-
+  let releaseMove!: () => void;
+  let observeMove!: () => void;
+  const heldMove = new Promise<void>((resolve) => {
+    releaseMove = resolve;
+  });
+  const moveReached = new Promise<void>((resolve) => {
+    observeMove = resolve;
+  });
+  const movePattern = "**/azure-devops/boards/*/work-items/101?**";
+  const holdMove = async (route: Route) => {
+    if (route.request().method() !== "PATCH") {
+      await route.fallback();
+      return;
+    }
+    const response = await route.fetch();
+    observeMove();
+    await heldMove;
+    await route.fulfill({ response });
+  };
+  await testPage.route(movePattern, holdMove);
+  const moveResponse = testPage.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname.endsWith("/work-items/101"),
+  );
+  try {
+    await testPage.getByRole("button", { name: "Move" }).click();
+    await moveReached;
+    await testPage.getByTestId("azure-work-item-detail-close").click();
+    await expect(testPage.getByTestId("azure-work-item-detail")).toHaveCount(0);
+    releaseMove();
+    expect((await moveResponse).ok()).toBe(true);
+    await testPage.getByTestId("azure-board-column-picker").click();
+    await testPage.getByTestId("azure-board-column-option-active").click();
+    await expect(testPage.getByText("Handle token rotation")).toBeVisible();
+    await expect(testPage.getByTestId("azure-work-item-detail")).toHaveCount(0);
+  } finally {
+    releaseMove();
+    await testPage.unroute(movePattern, holdMove);
+  }
   await testPage.getByTestId("azure-devops-work-items-mode").click();
   await testPage.getByTestId("azure-devops-mobile-filter-button").click();
   await testPage.getByTestId("azure-devops-search-button-mobile").click();

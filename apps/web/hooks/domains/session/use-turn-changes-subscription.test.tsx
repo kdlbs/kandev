@@ -222,3 +222,40 @@ it("recovers an initial history error after subscription readiness", async () =>
   expect(result.current.changes.error).toBeNull();
   expect(result.current.changes.loading).toBe(false);
 });
+
+it("reconciles client installation and replacement without a connection-status change", async () => {
+  setWebSocketClient(null);
+  const first = deferred<void>();
+  const second = deferred<void>();
+  const unsubscribeFirst = vi.fn();
+  const unsubscribeSecond = vi.fn();
+  const subscribeFirst = vi.fn(() => ({ ready: first.promise, unsubscribe: unsubscribeFirst }));
+  const subscribeSecond = vi.fn(() => ({ ready: second.promise, unsubscribe: unsubscribeSecond }));
+  api.list
+    .mockResolvedValueOnce(page(1))
+    .mockResolvedValueOnce(page(2))
+    .mockResolvedValueOnce(page(3));
+  const { result, unmount } = renderHook(
+    () => ({ changes: useSessionTurnChanges("session-1"), store: useAppStoreApi() }),
+    { wrapper },
+  );
+  await waitFor(() => expect(api.list).toHaveBeenCalledTimes(1));
+  act(() =>
+    setWebSocketClient({ subscribeSessionWithReady: subscribeFirst } as unknown as WebSocketClient),
+  );
+  await waitFor(() => expect(subscribeFirst).toHaveBeenCalledWith("session-1"));
+  await act(async () => first.resolve());
+  await waitFor(() => expect(result.current.changes.summaries[0]?.revision).toBe(2));
+  act(() =>
+    setWebSocketClient({
+      subscribeSessionWithReady: subscribeSecond,
+    } as unknown as WebSocketClient),
+  );
+  expect(unsubscribeFirst).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(subscribeSecond).toHaveBeenCalledWith("session-1"));
+  await act(async () => second.resolve());
+  await waitFor(() => expect(result.current.changes.summaries[0]?.revision).toBe(3));
+  expect(result.current.store.getState().connection.status).toBe("connected");
+  unmount();
+  expect(unsubscribeSecond).toHaveBeenCalledTimes(1);
+});

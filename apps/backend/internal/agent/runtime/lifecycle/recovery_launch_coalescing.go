@@ -20,6 +20,7 @@ func (m *Manager) coalesceSessionLaunch(ctx context.Context, req *LaunchRequest)
 		activityLease.SetKind(activity.KindExecutionPreparing)
 		return m.launchInternal(sharedCtx, req)
 	}
+	recoveryLaunch := req.RecoveryAction != "" || req.CandidateExecutionID != ""
 	for attempt := 0; attempt < 3; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -28,7 +29,7 @@ func (m *Manager) coalesceSessionLaunch(ctx context.Context, req *LaunchRequest)
 		// Workspace readers share the infrastructure slot but cannot admit an
 		// unresolved session. Recovery must run its own admission after such a
 		// reader fails, while retaining serialization with concurrent launches.
-		if ownsAttempt.Load() || req.RecoveryAction == "" || !errors.Is(err, ErrSessionRecoveryRequired) {
+		if ownsAttempt.Load() || !recoveryLaunch || !errors.Is(err, ErrSessionRecoveryRequired) {
 			return value, err
 		}
 	}

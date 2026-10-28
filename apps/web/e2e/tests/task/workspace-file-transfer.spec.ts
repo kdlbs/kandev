@@ -8,6 +8,8 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 
+test.use({ trace: "retain-on-failure" });
+
 /**
  * End-to-end coverage for workspace file transfer.
  *

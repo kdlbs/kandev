@@ -165,7 +165,8 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         for suite in ("settings", "persistence"):
             warmup = step_block(self.workflow, "Compile Windows " + suite + " test packages")
             self.assertIn("if: matrix.suite == '" + suite + "'", warmup)
-            self.assertIn("timeout-minutes: 10", warmup)
+            compile_budget = 20 if suite == "persistence" else 10
+            self.assertIn(f"timeout-minutes: {compile_budget}", warmup)
             self.assertIn("GOMAXPROCS: '2'", warmup)
             self.assertIn("GOMEMLIMIT: 2GiB", warmup)
             self.assertIn("go test -trimpath -tags fts5 -race -p=2 -run '^$' -count=1 -timeout=30s", warmup)

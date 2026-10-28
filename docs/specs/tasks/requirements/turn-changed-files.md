@@ -114,6 +114,8 @@ The card does not claim exclusive agent authorship.
 - **AC-TASKS-TURN-CHANGES-004.7:** Missing repositories, comparison failures, truncated enumeration, and missing required content shall prevent a fully ready label.
   Available entries shall remain usable with explicit partial completeness.
 
+- **AC-TASKS-TURN-CHANGES-004.8:** A capture that finalizes while a user opens or reconnects to its session shall appear without a manual reload.
+
 ### REQ-TASKS-TURN-CHANGES-005: Transcript card
 
 **Intent:** Readers can inspect each terminal turn without opening collapsed tools.

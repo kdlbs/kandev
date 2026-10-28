@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/repoclone"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
 )
 

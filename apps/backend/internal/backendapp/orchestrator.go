@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/authz"
 	automationpkg "github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -424,20 +425,24 @@ func githubPRBaseFromPR(pr *githubpkg.PR, owner, repo string, number int, checko
 		return taskmodels.PRBase{}, err
 	}
 	headOwner, headName := strings.TrimSpace(pr.HeadRepoOwner), strings.TrimSpace(pr.HeadRepoName)
+	host, err := githubPRBaseHost(pr.GitHubHost)
+	if err != nil {
+		return taskmodels.PRBase{}, err
+	}
 	candidate := taskmodels.ComparisonTargetCandidate{
 		Provider:         taskmodels.ComparisonTargetProviderGitHub,
 		Kind:             taskmodels.ComparisonTargetKindPullRequest,
 		Number:           number,
 		HeadBranch:       pr.HeadBranch,
 		TargetBranch:     pr.BaseBranch,
-		HeadRepository:   githubComparisonRepository(headOwner, headName, pr.HeadRepoID),
-		TargetRepository: githubComparisonRepository(owner, repo, pr.BaseRepoID),
+		HeadRepository:   githubComparisonRepository(host, headOwner, headName, pr.HeadRepoID),
+		TargetRepository: githubComparisonRepository(host, owner, repo, pr.BaseRepoID),
 	}
 	target, err := candidate.Build()
 	if err != nil {
 		return taskmodels.PRBase{}, fmt.Errorf("validate GitHub PR base identity: %w", err)
 	}
-	base := taskmodels.PRBase{Target: target, OID: pr.BaseSHA}
+	base := taskmodels.PRBase{Target: target, OID: pr.BaseSHA, HeadRepositoryNodeID: strings.TrimSpace(pr.HeadRepoNodeID)}
 	if err := base.Validate(); err != nil {
 		return taskmodels.PRBase{}, err
 	}
@@ -539,14 +544,27 @@ func splitGitHubRepositoryPath(path string) (string, string, bool) {
 	return parts[0], parts[1], true
 }
 
-func githubComparisonRepository(owner, repo string, id int64) taskmodels.ComparisonTargetRepository {
+// githubPRBaseHost returns the host the PR was fetched from. An unstamped PR
+// keeps the legacy github.com meaning.
+func githubPRBaseHost(raw string) (githubhost.Host, error) {
+	if strings.TrimSpace(raw) == "" {
+		return githubhost.Public(), nil
+	}
+	host, err := githubhost.Parse(raw)
+	if err != nil {
+		return githubhost.Host{}, fmt.Errorf("GitHub PR host is invalid: %w", err)
+	}
+	return host, nil
+}
+
+func githubComparisonRepository(host githubhost.Host, owner, repo string, id int64) taskmodels.ComparisonTargetRepository {
 	providerID := ""
 	if id > 0 {
 		providerID = strconv.FormatInt(id, 10)
 	}
 	return taskmodels.ComparisonTargetRepository{
-		Host: "github.com", Path: owner + "/" + repo, ProviderID: providerID,
-		RemoteURL: fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
+		Host: host.String(), Path: owner + "/" + repo, ProviderID: providerID,
+		RemoteURL: fmt.Sprintf("%s/%s/%s.git", host.WebURL(), owner, repo),
 	}
 }
 

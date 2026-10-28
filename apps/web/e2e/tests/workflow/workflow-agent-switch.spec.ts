@@ -270,7 +270,12 @@ async function runProfileSessionLifecycleScenario(
         );
         if (!primaryA || primaryA.state !== "WAITING_FOR_INPUT") return false;
         const { turns } = await apiClient.listSessionTurns(primaryA.id);
-        return turns.some((turn) => !priorATurnIds.has(turn.id) && Boolean(turn.completed_at));
+        return turns.some(
+          (turn) =>
+            !priorATurnIds.has(turn.id) &&
+            turn.metadata?.lifecycle_only !== true &&
+            Boolean(turn.completed_at),
+        );
       },
       { timeout: 30_000 },
     )

@@ -177,3 +177,17 @@ and one slow-restore browser test each on desktop and phone. The documentation
 coverage evaluator, catalog validation, and specification lint also passed.
 Remote checks and review resolution remain pending until the remediation commit
 is pushed.
+
+## Healthy-sibling setup diagnostics (2026-10-27)
+
+PR #4534 head `0bbebdcf6afa` failed before the restore assertions: the healthy
+sibling reached FAILED instead of WAITING_FOR_INPUT. The failed attempt has no
+trace. Retained log errors are not bound to that sibling, so they do not prove
+its startup cause. Five local repetitions completed successfully: three before
+a host interruption and two after it. The interrupted fourth attempt is not a
+completed result. No startup budget, action, assertion, or product logic changes.
+
+Retain first-failure traces and attach the sibling session plus both backend
+log sources before cleanup, including failures outside the inner restore block.
+Attachment errors cannot replace the original test failure. The original CI
+cause remains unresolved until a retained failure supplies that evidence.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAzureDevOpsMutationOwner } from "./use-azure-devops-mutation-owner";
 import {
   getAzureDevOpsWorkItemDetail,
   listAzureDevOpsWorkItemComments,
@@ -65,6 +66,29 @@ export function useAzureDevOpsWorkItemDetail(
   const [state, setState] = useState<DetailState>(EMPTY_STATE);
   const generation = useRef(0);
   const key = `${workspaceId ?? ""}:${projectId}:${initialItem?.id ?? ""}`;
+  const beginOwner = useAzureDevOpsMutationOwner(key, enabled);
+  const beginMutation = useCallback(() => {
+    const isCurrent = beginOwner();
+    return {
+      isCurrent,
+      mergeItem: (item: AzureDevOpsWorkItem) => {
+        if (!isCurrent()) return;
+        setState((previous) => {
+          if (
+            !isCurrent() ||
+            !previous.item ||
+            previous.item.id !== item.id ||
+            previous.item.revision > item.revision
+          )
+            return previous;
+          return {
+            ...previous,
+            item: { ...previous.item, ...item, planningFields: previous.item.planningFields ?? [] },
+          };
+        });
+      },
+    };
+  }, [beginOwner]);
 
   const loadDetail = useCallback(async () => {
     if (!workspaceId || !projectId || !initialItem) return;
@@ -173,6 +197,8 @@ export function useAzureDevOpsWorkItemDetail(
   const updateAssignee = useCallback(
     async (assigneeAction: "assign_current_user" | "unassign") => {
       if (!workspaceId || !projectId || !state.item) return null;
+      const mutation = beginMutation();
+      if (!mutation.isCurrent()) return null;
       const updated = await updateAzureDevOpsWorkItemAssignment(
         workspaceId,
         projectId,
@@ -180,23 +206,11 @@ export function useAzureDevOpsWorkItemDetail(
         { revision: state.item.revision, assigneeAction },
         { cache: "no-store" },
       );
-      setState((previous) => ({
-        ...previous,
-        item: previous.item ? { ...previous.item, ...updated } : previous.item,
-      }));
+      mutation.mergeItem(updated);
       return updated;
     },
-    [projectId, state.item, workspaceId],
+    [beginMutation, projectId, state.item, workspaceId],
   );
-
-  const mergeItem = useCallback((item: AzureDevOpsWorkItem) => {
-    setState((previous) => ({
-      ...previous,
-      item: previous.item
-        ? { ...previous.item, ...item, planningFields: previous.item.planningFields ?? [] }
-        : { ...item, planningFields: [] },
-    }));
-  }, []);
 
   return {
     ...state,
@@ -205,6 +219,6 @@ export function useAzureDevOpsWorkItemDetail(
     loadOlderComments: () =>
       state.continuationToken ? void loadComments(state.continuationToken) : undefined,
     updateAssignee,
-    mergeItem,
+    beginMutation,
   };
 }

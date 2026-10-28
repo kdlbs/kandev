@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func TestPluginExecutorResourceStateMatchesProviderSchema(t *testing.T) {

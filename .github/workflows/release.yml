@@ -392,6 +392,24 @@ jobs:
             exit 1
           fi
 
+      - name: Validate plugin SDK release intent
+        if: ${{ !inputs.desktop_validation_only }}
+        env:
+          NEXT: ${{ steps.compute.outputs.version }}
+          BACKFILL_TAG: ${{ inputs.backfill_tag }}
+          SDK_SCOPE_OWNERSHIP_CONFIRMED: ${{ vars.SDK_SCOPE_OWNERSHIP_CONFIRMED }}
+          CURRENT_REF: ${{ github.ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" != true ] && [ "$CURRENT_REF" != refs/heads/main ]; then
+            echo "Stable SDK releases and backfills must be dispatched from main." >&2
+            exit 1
+          fi
+          args=(--preflight --host-version "$NEXT")
+          if [ -n "$BACKFILL_TAG" ]; then args+=(--ref "refs/tags/$BACKFILL_TAG"); fi
+          node scripts/release/plugin-sdk.mjs "${args[@]}"
+
       - name: Bump version + generate CHANGELOG (in working tree)
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
@@ -427,6 +445,7 @@ jobs:
           }
           fs.writeFileSync(cargoLockPath, cargoLock.replace(packageBlock, `$1${next}$2`));
           NODE
+          node scripts/release/plugin-sdk.mjs --stamp --host-version "$NEXT"
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
@@ -445,7 +464,7 @@ jobs:
           MSG="release: publish $NEXT"
 
           git checkout -b "$BRANCH"
-          git add apps/cli/package.json apps/desktop/package.json apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md apps/pnpm-lock.yaml
+          git add apps/cli/package.json apps/desktop/package.json apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md apps/pnpm-lock.yaml pluginsdk/sdk-release.json apps/packages/plugin-sdk/sdk-release.json
           git commit -m "$MSG"
           # If a previous run pushed this branch but failed before the merge
           # landed, the remote branch still exists. Delete it so the push
@@ -936,7 +955,9 @@ jobs:
       - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+          cache-dependency-path: |
+            apps/backend/go.sum
+            pluginsdk/go.sum
       - name: Guard agentctl dependency graph
         if: ${{ needs.nightly-prepare.result == 'success' || needs.prepare.outputs.compact_runtime_contract == 'true' }}
         run: bash scripts/check-agentctl-deps.sh
@@ -1084,7 +1105,9 @@ jobs:
       - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+          cache-dependency-path: |
+            apps/backend/go.sum
+            pluginsdk/go.sum
       - name: Guard agentctl dependency graph
         if: ${{ needs.nightly-prepare.result == 'success' || needs.prepare.outputs.compact_runtime_contract == 'true' }}
         run: bash scripts/check-agentctl-deps.sh
@@ -3194,9 +3217,143 @@ jobs:
             "${RELEASE_VERSION}" \
             "${RELEASE_TAG}"
 
+  prepare-plugin-sdk:
+    name: Prepare signed plugin SDK
+    needs: [prepare, publish-release]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' && needs.publish-release.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+      SDK_SCOPE_OWNERSHIP_CONFIRMED: ${{ vars.SDK_SCOPE_OWNERSHIP_CONFIRMED }}
+      SDK_FIRST_PUBLISH_OIDC_READY: ${{ vars.SDK_FIRST_PUBLISH_OIDC_READY }}
+      SDK_HOST_TAG: ${{ needs.prepare.outputs.tag }}
+      SDK_WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Load SDK control-plane helpers from the workflow revision
+        run: |
+          set -euo pipefail
+          [[ "$SDK_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin "$SDK_WORKFLOW_SHA"
+          git checkout "$SDK_WORKFLOW_SHA" -- scripts/release scripts/pluginsdk apps/packages/plugin-sdk/test/packed-consumer.node.mjs
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify original SDK source and packaging tools
+        id: sdk_tools
+        run: bash scripts/release/publish-plugin-sdk.sh --mode tools --host-tag "$SDK_HOST_TAG"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: ${{ steps.sdk_tools.outputs.node }}
+          package-manager-cache: false
+      - name: Install original npm version
+        env:
+          SDK_NPM_VERSION: ${{ steps.sdk_tools.outputs.npm }}
+        run: npm install --global --ignore-scripts "npm@$SDK_NPM_VERSION"
+      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
+        with:
+          go-version-file: pluginsdk/go.mod
+          cache: false
+      - name: Import SDK signing key
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_tag_gpgsign: true
+      - name: Configure SDK tag identity
+        run: |
+          git config user.name "kandev release bot"
+          git config user.email "release-bot@kandev"
+      - name: Retain tested candidate and sign SDK tag
+        run: bash scripts/release/publish-plugin-sdk.sh --mode prepare --host-tag "$SDK_HOST_TAG"
+
+  publish-plugin-sdk:
+    name: Publish and verify public plugin SDK
+    needs: [prepare, publish-release, prepare-plugin-sdk]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' && needs.publish-release.result == 'success' && needs.prepare-plugin-sdk.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+      SDK_SCOPE_OWNERSHIP_CONFIRMED: ${{ vars.SDK_SCOPE_OWNERSHIP_CONFIRMED }}
+      SDK_FIRST_PUBLISH_OIDC_READY: ${{ vars.SDK_FIRST_PUBLISH_OIDC_READY }}
+      SDK_HOST_TAG: ${{ needs.prepare.outputs.tag }}
+      SDK_WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Load SDK control-plane helpers from the workflow revision
+        run: |
+          set -euo pipefail
+          [[ "$SDK_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin "$SDK_WORKFLOW_SHA"
+          git checkout "$SDK_WORKFLOW_SHA" -- scripts/release scripts/pluginsdk apps/packages/plugin-sdk/test/packed-consumer.node.mjs
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify original SDK source and packaging tools
+        id: sdk_tools
+        run: bash scripts/release/publish-plugin-sdk.sh --mode tools --host-tag "$SDK_HOST_TAG"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: ${{ steps.sdk_tools.outputs.node }}
+          package-manager-cache: false
+      - name: Install original npm version
+        env:
+          SDK_NPM_VERSION: ${{ steps.sdk_tools.outputs.npm }}
+        run: npm install --global --ignore-scripts "npm@$SDK_NPM_VERSION"
+      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
+        with:
+          go-version-file: pluginsdk/go.mod
+          cache: false
+      - name: Publish exact candidate and verify both public consumers
+        run: bash scripts/release/publish-plugin-sdk.sh --mode publish --host-tag "$SDK_HOST_TAG"
+
+  stable-complete:
+    name: Verify Stable publication completion
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket, publish-plugin-sdk]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require every Stable publication
+        env:
+          COMPLETE: ${{ needs.prepare.result == 'success' && needs.publish-release.result == 'success' && needs.publish-npm.result == 'success' && needs.update-homebrew-tap.result == 'success' && needs.update-scoop-bucket.result == 'success' && needs.publish-plugin-sdk.result == 'success' }}
+        run: test "$COMPLETE" = true
+
   notify-contributors:
     name: Notify release contributors
-    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket, publish-plugin-sdk, stable-complete]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -3208,7 +3365,9 @@ jobs:
         needs.publish-release.result == 'success' &&
         needs.publish-npm.result == 'success' &&
         needs.update-homebrew-tap.result == 'success' &&
-        needs.update-scoop-bucket.result == 'success'
+        needs.update-scoop-bucket.result == 'success' &&
+        needs.publish-plugin-sdk.result == 'success' &&
+        needs.stable-complete.result == 'success'
       }}
     uses: ./.github/workflows/notify-release-contributors.yml
     with:
@@ -3220,7 +3379,7 @@ jobs:
 
   announce-discord:
     name: Announce release on Discord
-    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket, publish-plugin-sdk, stable-complete]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -3232,6 +3391,8 @@ jobs:
         needs.publish-npm.result == 'success' &&
         needs.update-homebrew-tap.result == 'success' &&
         needs.update-scoop-bucket.result == 'success' &&
+        needs.publish-plugin-sdk.result == 'success' &&
+        needs.stable-complete.result == 'success' &&
         inputs.backfill_tag == '' &&
         github.run_attempt == 1
       }}
@@ -3245,7 +3406,7 @@ jobs:
 
   discord-recovery-notice:
     name: Discord recovery required
-    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket, publish-plugin-sdk, stable-complete]
     if: >-
       ${{ !cancelled() &&
         github.event_name == 'workflow_dispatch' &&
@@ -3257,6 +3418,8 @@ jobs:
         needs.publish-npm.result == 'success' &&
         needs.update-homebrew-tap.result == 'success' &&
         needs.update-scoop-bucket.result == 'success' &&
+        needs.publish-plugin-sdk.result == 'success' &&
+        needs.stable-complete.result == 'success' &&
         (inputs.backfill_tag != '' || github.run_attempt > 1)
       }}
     runs-on: ubuntu-latest

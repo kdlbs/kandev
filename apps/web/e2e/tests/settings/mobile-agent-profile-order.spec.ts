@@ -3,6 +3,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { settledBoundingBox } from "../../helpers/settled-box";
 import { profileRow, restoreProfileOrder } from "./agent-profile-order-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 async function getScrollTop(anchor: Locator) {
   return anchor.evaluate((element) => {
     let current = element.parentElement;

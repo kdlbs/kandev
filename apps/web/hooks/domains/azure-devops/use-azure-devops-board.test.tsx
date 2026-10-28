@@ -174,3 +174,90 @@ describe("useAzureDevOpsBoard updates", () => {
     });
   });
 });
+
+it.each(["success", "failure"])(
+  "keeps a new board scope after an old mutation %s",
+  async (outcome) => {
+    apiMocks.teams.mockResolvedValue({ teams: [{ id: teamId, name: "Team" }] });
+    apiMocks.boards.mockResolvedValue({ boards: [{ id: boardId, name: "Board" }] });
+    const nextSnapshot = {
+      ...boardSnapshot,
+      items: [{ ...boardSnapshot.items[0], title: "New workspace" }],
+    };
+    apiMocks.snapshot.mockResolvedValueOnce(boardSnapshot).mockResolvedValue(nextSnapshot);
+    const update = deferred<(typeof boardSnapshot.items)[number]>();
+    apiMocks.update.mockReturnValue(update.promise);
+    const { result, rerender } = renderHook(
+      ({ workspace }) => useAzureDevOpsBoard(workspace, projectId),
+      { initialProps: { workspace: workspaceId } },
+    );
+    await waitFor(() => expect(result.current.snapshot?.items).toHaveLength(2));
+    let pending!: ReturnType<typeof result.current.moveItem>;
+    act(() => {
+      pending = result.current.moveItem(result.current.snapshot!.items[0], "done");
+    });
+    rerender({ workspace: "workspace-b" });
+    await waitFor(() => expect(result.current.snapshot?.items[0].title).toBe("New workspace"));
+    await act(async () => {
+      if (outcome === "success")
+        update.resolve({ ...boardSnapshot.items[0], revision: 2, columnId: "done" });
+      else update.reject(new Error("Old workspace failure"));
+      await expect(pending).resolves.toBeUndefined();
+    });
+    expect(result.current.snapshot).toEqual(nextSnapshot);
+    expect(result.current.error).toBeNull();
+  },
+);
+
+it("commits board assignment through the existing revision-guarded update", async () => {
+  apiMocks.teams.mockResolvedValue({ teams: [{ id: teamId, name: "Team" }] });
+  apiMocks.boards.mockResolvedValue({ boards: [{ id: boardId, name: "Board" }] });
+  apiMocks.snapshot.mockResolvedValue(boardSnapshot);
+  const assigned = { ...boardSnapshot.items[0], revision: 2, assignedTo: "Ada" };
+  apiMocks.update.mockResolvedValue(assigned);
+  const { result } = renderHook(() => useAzureDevOpsBoard(workspaceId, projectId));
+  await waitFor(() => expect(result.current.snapshot?.items).toHaveLength(2));
+  await act(async () => {
+    await expect(
+      result.current.updateAssignee(result.current.snapshot!.items[0], "assign_current_user"),
+    ).resolves.toEqual(assigned);
+  });
+  expect(result.current.snapshot?.items[0]).toEqual(assigned);
+  expect(apiMocks.update).toHaveBeenCalledWith(workspaceId, projectId, teamId, boardId, 1, {
+    revision: 1,
+    assigneeAction: "assign_current_user",
+  });
+});
+
+it("keeps a newer confirmed revision when an earlier response arrives last", async () => {
+  const original = { ...boardSnapshot.items[0], revision: 7, state: "Active", type: "Task" };
+  apiMocks.teams.mockResolvedValue({ teams: [{ id: teamId, name: "Team" }] });
+  apiMocks.boards.mockResolvedValue({ boards: [{ id: boardId, name: "Board" }] });
+  apiMocks.snapshot.mockResolvedValue({ ...boardSnapshot, items: [original] });
+  const earlier = deferred<typeof original>();
+  const later = deferred<typeof original>();
+  apiMocks.update.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(later.promise);
+  const { result } = renderHook(() => useAzureDevOpsBoard(workspaceId, projectId));
+  await waitFor(() => expect(result.current.snapshot?.items[0].revision).toBe(7));
+  let pendingEarlier!: ReturnType<typeof result.current.moveItem>;
+  let pendingLater!: ReturnType<typeof result.current.updateAssignee>;
+  act(() => {
+    pendingEarlier = result.current.moveItem(original, "done");
+    pendingLater = result.current.updateAssignee(
+      { ...original, revision: 8 },
+      "assign_current_user",
+    );
+  });
+  await act(async () => {
+    later.resolve({ ...original, revision: 9, title: "Newer confirmed" });
+    await pendingLater;
+  });
+  await act(async () => {
+    earlier.resolve({ ...original, revision: 8, title: "Earlier response" });
+    await pendingEarlier;
+  });
+  expect(result.current.snapshot?.items[0]).toMatchObject({
+    revision: 9,
+    title: "Newer confirmed",
+  });
+});

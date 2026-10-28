@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 var (

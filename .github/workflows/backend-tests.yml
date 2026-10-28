@@ -80,11 +80,20 @@ jobs:
           light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
           standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
 
+      - name: Check SDK CI selection
+        run: python3 .github/scripts/plugin-sdk-ci-contract_test.py
+
       - name: Detect relevant changes
         id: detect
         env:
           PATTERNS: |
             apps/backend/**
+            apps/packages/plugin-sdk/**
+            pluginsdk/**
+            scripts/pluginsdk/**
+            scripts/release/*plugin-sdk*
+            scripts/release/sdk-*
+            .github/scripts/plugin-sdk-ci-contract_test.py
             apps/web/lib/settings-discovery/contract.generated.json
             apps/web/lib/settings-discovery/profile-contract.generated.json
             scripts/settings-contract-ci.test.mjs
@@ -157,6 +166,60 @@ jobs:
             echo "sidebar_resources=false" >> "$GITHUB_OUTPUT"
           fi
 
+  sdk_builder:
+    name: Plugin SDK Docker builder
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Build the host with the standalone SDK layout
+        run: docker build --target go-builder -f e2e.Dockerfile -t kandev-sdk-go-builder-check .
+
+  sdk_package:
+    name: Plugin SDK packed consumer
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Read packaging tool versions
+        id: tools
+        run: node -e 'const c=require("./scripts/pluginsdk/pack-config.json"); console.log("node="+c.node); console.log("npm="+c.npm)' >> "$GITHUB_OUTPUT"
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: ${{ steps.tools.outputs.node }}
+          package-manager-cache: false
+      - name: Install pinned npm
+        env:
+          NPM_VERSION: ${{ steps.tools.outputs.npm }}
+        run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+      - name: Set up Go for the combined consumer
+        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
+        with:
+          go-version-file: pluginsdk/go.mod
+          cache: false
+      - name: Check the standalone npm artifact
+        run: |
+          node scripts/pluginsdk/sync-record.mjs --check
+          node scripts/release/plugin-sdk.mjs --check
+          node --test scripts/pluginsdk/sync-record.test.mjs scripts/pluginsdk/pack-candidate.test.mjs scripts/pluginsdk/npm-workspace.test.mjs scripts/pluginsdk/public-trust.test.mjs scripts/release/plugin-sdk.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-*.test.mjs
+          node scripts/pluginsdk/consumer-smoke.mjs --mode local
+
   static_checks:
     name: Backend Static Checks
     needs: changes
@@ -164,7 +227,8 @@ jobs:
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Include cold builds, SDK consumers, the 15-minute lint budget, and cache cleanup.
+    timeout-minutes: 30
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
@@ -268,6 +332,20 @@ jobs:
           echo "BASE_SHA=${BASE_SHA}" >> "$GITHUB_ENV"
           echo "Base SHA: ${BASE_SHA}"
 
+      - name: Check SDK artifacts and clean consumers
+        working-directory: ${{ github.workspace }}
+        run: |
+          node --test scripts/pluginsdk/consumer-smoke.test.mjs scripts/pluginsdk/check-proto-generation.test.mjs
+          node scripts/pluginsdk/check-proto-generation.mjs
+          node scripts/pluginsdk/consumer-smoke.mjs --mode local --backend-only
+
+      - name: Test standalone plugin SDK
+        working-directory: pluginsdk
+        run: |
+          go test -trimpath -race ./...
+          go vet ./...
+          golangci-lint run --config ../apps/backend/.golangci.yml ./...
+
       - name: Check gofmt
         shell: bash
         run: |
@@ -331,6 +409,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          # The runtime compatibility test builds the pinned pre-extraction SDK.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Mark workspace safe for git
@@ -571,6 +651,8 @@ jobs:
     needs:
       - changes
       - static_checks
+      - sdk_builder
+      - sdk_package
       - test_shards
       - repository_tests
       - test_ambient_env
@@ -587,6 +669,8 @@ jobs:
           RUNNER_PLAN: ${{ needs.changes.outputs.plan }}
           RUN_REQUIRED: ${{ needs.changes.outputs.run }}
           SIDEBAR_REQUIRED: ${{ needs.changes.outputs.sidebar_resources }}
+          SDK_PACKAGE_RESULT: ${{ needs.sdk_package.result }}
+          SDK_BUILDER_RESULT: ${{ needs.sdk_builder.result }}
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
           REPOSITORY_TESTS_RESULT: ${{ needs.repository_tests.result }}
@@ -608,6 +692,8 @@ jobs:
           expected=skipped
           if [[ "${RUN_REQUIRED}" == "true" ]]; then expected=success; fi
           for entry in \
+            "sdk_package:${SDK_PACKAGE_RESULT}" \
+            "sdk_builder:${SDK_BUILDER_RESULT}" \
             "static_checks:${STATIC_CHECKS_RESULT}" \
             "test_shards:${TEST_SHARDS_RESULT}" \
             "repository_tests:${REPOSITORY_TESTS_RESULT}" \
@@ -809,7 +895,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-sidebar-resources-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          key: go-sidebar-resources-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum', 'pluginsdk/go.mod', 'pluginsdk/go.sum') }}
           restore-keys: |
             go-sidebar-resources-${{ runner.os }}-
       - name: Measure isolated native memory and pooled retention
@@ -856,7 +942,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: go-sidebar-resources-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          key: go-sidebar-resources-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum', 'pluginsdk/go.mod', 'pluginsdk/go.sum') }}
 
   postgres-18:
     name: Backend Postgres 18
@@ -1006,7 +1092,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.windows_go_cache.outputs.modulePath }}
-          key: go-windows-modules-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          key: go-windows-modules-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum', 'pluginsdk/go.mod', 'pluginsdk/go.sum') }}
 
       - name: Cache Windows compiled packages
         id: windows_build_cache
@@ -1014,9 +1100,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.windows_go_cache.outputs.path }}
-          key: go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-${{ steps.windows_go_cache.outputs.day }}
+          key: go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum', 'pluginsdk/go.mod', 'pluginsdk/go.sum') }}-${{ steps.windows_go_cache.outputs.day }}
           restore-keys: |
-            go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-
+            go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum', 'pluginsdk/go.mod', 'pluginsdk/go.sum') }}-
 
       - name: Compile Windows settings test packages
         if: matrix.suite == 'settings'
@@ -1030,7 +1116,8 @@ jobs:
 
       - name: Compile Windows persistence test packages
         if: matrix.suite == 'persistence'
-        timeout-minutes: 10
+        # Cold race compilation can exceed ten minutes before tests start.
+        timeout-minutes: 20
         env:
           GOMAXPROCS: '2'
           GOMEMLIMIT: 2GiB

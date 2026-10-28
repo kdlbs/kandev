@@ -151,3 +151,7 @@ require (
 )
 
 replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261026214240-48a57e4292e8
+
+require github.com/kdlbs/kandev/pluginsdk v0.1.0
+
+replace github.com/kdlbs/kandev/pluginsdk => ../../pluginsdk

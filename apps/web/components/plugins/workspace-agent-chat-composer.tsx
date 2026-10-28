@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
-import type { PluginManagedConversationInputIntent } from "@kandev/plugin-sdk";
+import type { PluginManagedConversationInputIntent } from "@kdlbs/plugin-sdk";
 import { createManagedConversationInputIntent } from "@/lib/plugins/managed-conversation";
 
 export type WorkspaceAgentChatComposerState = {

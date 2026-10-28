@@ -8,6 +8,8 @@ import {
   waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 const GOAL_OBJECTIVE_FRAGMENT = "Coordinate contributor PR reviews";
 const GOAL_CONTINUATION_COPY = "The agent may continue automatically between replies.";
 

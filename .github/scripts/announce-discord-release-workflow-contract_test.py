@@ -19,7 +19,7 @@ class DiscordWorkflowTest(unittest.TestCase):
     # @covers AC-RELEASE-DISCORD-001.1, AC-RELEASE-DISCORD-001.2, AC-RELEASE-DISCORD-001.4
     def test_automatic_delivery_requires_complete_normal_publication(self):
         block = job(RELEASE, 'announce-discord')
-        dependencies = ['prepare', 'publish-release', 'publish-npm', 'update-homebrew-tap', 'update-scoop-bucket']
+        dependencies = ['prepare', 'publish-release', 'publish-npm', 'update-homebrew-tap', 'update-scoop-bucket', 'publish-plugin-sdk', 'stable-complete']
         self.assertIn('needs: [' + ', '.join(dependencies) + ']', block)
         condition = re.search(r'if: >-\s*\$\{\{(.*?)\}\}', block, re.S)
         self.assertIsNotNone(condition)
@@ -86,7 +86,10 @@ class DiscordWorkflowTest(unittest.TestCase):
                 self.assertIn('path: ${{ runner.temp }}/discord-release', block)
         self.assertNotIn(': write', WORKFLOW)
         self.assertIn('contents: read', WORKFLOW)
-        self.assertIn('Discord recovery required', job(RELEASE, 'discord-recovery-notice'))
+        recovery = job(RELEASE, 'discord-recovery-notice')
+        self.assertIn('Discord recovery required', recovery)
+        for name in ('publish-plugin-sdk', 'stable-complete'):
+            self.assertIn(f"needs.{name}.result == 'success'", recovery)
 
     def test_all_script_tests_registered_in_ci_and_local_target(self):
         for filename in ('.github/workflows/lint-action-pinning.yml', 'Makefile'):

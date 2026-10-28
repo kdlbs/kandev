@@ -21,6 +21,7 @@ acceptance_criteria:
   - AC-TASKS-TURN-CHANGES-002.9
   - AC-TASKS-TURN-CHANGES-004.1
   - AC-TASKS-TURN-CHANGES-004.7
+  - AC-TASKS-TURN-CHANGES-004.8
   - AC-TASKS-TURN-CHANGES-005.1
   - AC-TASKS-TURN-CHANGES-005.2
   - AC-TASKS-TURN-CHANGES-005.3
@@ -129,3 +130,26 @@ Implemented the final-reply card, collapsed repository tree, explicit historical
 ### Review follow-up (2026-10-08)
 
 Archived tasks route historical targets before live-workspace guards. The desktop historical surface has Current, Latest captured, and exact Turn N scopes; Latest pins to a change-set ID. Repository and folder counts identify loaded versus authoritative totals; rows expose change kind/mode and accessible status, and duplicate file paths are disambiguated by checkout. Failure/partial/overlap states are visible. Focused frontend tests passed, and the desktop historical-turn E2E passed after reload and scope switching.
+
+
+## Subscription handoff correction
+
+CI exposed a pending history snapshot loaded before the session subscription.
+Conversation backfill restored the completed turn, but changed-files history
+kept the pre-subscription snapshot. Reuse the shared subscription-ready lease
+and refresh history after acknowledgment, including reconnect. Await any earlier
+first-page read before the new snapshot so deduplication cannot reuse stale data.
+Release the lease and skip obsolete refreshes on session change or unmount.
+This applies equally to desktop cards and the existing phone diff drawer;
+composition, geometry, and capture policy do not change.
+
+Validate the hook with controlled readiness and pending HTTP promises. The
+pending-to-terminal, overlapping-read, and unmount regressions failed before
+correction. Run the existing desktop/mobile historical-diff scenarios against a
+fresh web build and preserve their card, exact-turn, drawer, and focus assertions.
+
+Results: all 12 focused unit cases, final typecheck, and changed-file lint pass.
+The session-switch error regression fails before its ownership guard. Desktop
+passes four existing cases and mobile passes three, using a fresh production
+build with retries disabled. The secondary reviewer reports no actionable issue.
+The parent SDK PR retains responsibility for new-head CI.

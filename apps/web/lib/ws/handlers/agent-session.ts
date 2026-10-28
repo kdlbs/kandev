@@ -1,7 +1,6 @@
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
-import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { AppState } from "@/lib/state/store";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -24,7 +23,10 @@ import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fiel
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
-import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
+import {
+  isStaleSessionStateEvent,
+  sessionStateConfirmsAgentctlExecutionReady,
+} from "@/lib/session-state";
 import { isSessionRestartPending } from "@/lib/session/session-restart-state";
 import {
   sanitizeWorkspaceRestorationDetails,
@@ -220,20 +222,6 @@ export function pickPrimarySessionReplacement(
       .find((t) => t.id === taskId);
   const primary = task?.primarySessionId ?? null;
   return primary && primary !== retiredSessionId ? primary : null;
-}
-
-/** Ignore subscribe snapshots that were read before a newer state landed. */
-export function isStaleSessionStateEvent(
-  existing: { updated_at?: string } | null | undefined,
-  payloadUpdatedAt: string | undefined,
-): boolean {
-  if (!payloadUpdatedAt || !existing?.updated_at) return false;
-  const payloadTime = parseStrictRfc3339Timestamp(payloadUpdatedAt);
-  const existingTime = parseStrictRfc3339Timestamp(existing.updated_at);
-  if (payloadTime === null || existingTime === null) return false;
-  // Strict less-than: equal timestamps are treated as not-stale so identical
-  // events upsert idempotently rather than being silently dropped.
-  return payloadTime < existingTime;
 }
 
 // Fields carried onto the update object verbatim whenever the payload defines

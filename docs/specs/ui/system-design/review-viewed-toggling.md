@@ -56,12 +56,16 @@ one CSS pixel of rounding; layout changes cannot borrow earlier input.
 Intersection observations refresh the current geometry baseline without marking.
 This avoids comparing an older observer snapshot against a later touch-scroll
 position. Remove the listener and disconnect the observer together on cleanup.
-Preserve `useReviewScrollAnchor` navigation suppression. The interaction hook
-also admits touch input at pointer-down anywhere inside the scroller. Chromium
-can scroll a touch gesture on the compositor without delivering `touchmove`.
-Touch contact authorizes a subsequent certified scroll crossing; it never marks
-a file by itself. Mouse and pen clicks on descendants do not release suppression.
-Existing wheel, keyboard, and direct-root pointer input continue to work.
+Preserve `useReviewDiffScrollInteraction` and `useReviewScrollAnchor` navigation
+suppression. Input cancellation first restores the previous suppression value
+and cancels the queued anchor frame. Then wheel/touch movement, scroll keys,
+a pointer press on the scroll root, and touch contact anywhere inside the
+scroller explicitly allow automatic marking. That explicit input must win over
+the cancelled restoration's saved value. Chromium can scroll a touch gesture
+on the compositor without delivering `touchmove`; touch contact only permits
+a subsequent certified crossing and never marks by itself. Mouse and pen
+presses on descendants cancel stale restoration without allowing marking.
+Unrelated keys do neither. This changes no crossing geometry or eligibility gate.
 
 ## Shared state, identity, and persistence
 

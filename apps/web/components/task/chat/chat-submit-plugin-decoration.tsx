@@ -13,7 +13,7 @@ const SLOT = "chat-submit-decoration";
 /**
  * Re-exported for co-located consumers; the canonical declaration lives in
  * `lib/plugins/types.ts` next to the other slot contracts, and is pinned to
- * the `@kandev/plugin-sdk` export of the same name by `sdk-contract.test.ts`.
+ * the `@kdlbs/plugin-sdk` export of the same name by `sdk-contract.test.ts`.
  */
 export type { ChatSubmitDecorationSlotProps };
 

@@ -170,7 +170,15 @@ function AgentGoalPopover({
 }: AgentGoalPopoverProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverTrigger
+        asChild
+        onClick={(event) => {
+          event.preventDefault();
+          setOpen(true);
+        }}
+      >
+        {children}
+      </PopoverTrigger>
       <PopoverContent
         id={detailsId}
         data-testid="agent-goal-popover"

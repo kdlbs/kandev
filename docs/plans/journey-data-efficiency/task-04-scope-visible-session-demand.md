@@ -124,3 +124,25 @@ Frontend CI exposed legacy fixtures for session activation and turn hydration. T
 Loaded membership refreshes through the shared compact read owner when live events add or remove a session. Inactive siblings retain current model labels without rich session effects. Phone repository pickers use refreshed compact membership.
 
 The real phone submit target stays mounted through readiness changes. A real-tooltip unit regression fails before the correction; phone recovery validation uses native taps without diagnostic listeners.
+
+## Changed-files readiness lease correction
+
+SDK PR CI exposed an integration regression: a new changed-files readiness
+lease kept all eight mounted sibling chats subscribed. The existing browser
+assertion failed on all four attempts. Forward canonical `detailActive` through
+the transcript and historical-diff call chains. Persistent Dockview diff tabs
+use existing panel visibility; visible previews and mobile surfaces retain
+explicit demand. Preserve independent initial HTTP history/pagination behavior.
+
+Validate hidden/revealed/hidden lease ownership, unchanged initial HTTP loading,
+both Dockview renderers and historical routing. Keep the eight-tab browser
+assertions for keyboard switches, drafts, reconnect, splits, and viewport
+transitions. Re-run desktop/mobile historical changed-files flows to retain
+the subscription-gap correction.
+
+Validation results: the hidden-demand hook regression failed before the gate.
+The final ownership/native-transcript unit run passes 127 cases. Both Dockview
+renderers and historical forwarding preserve visibility. The unchanged
+8-sibling browser case passes keyboard selection, drafts, reconnect, splits,
+and responsive transitions against the final build. The phone visible-demand
+case and both viewport historical-diff suites pass with retries disabled.

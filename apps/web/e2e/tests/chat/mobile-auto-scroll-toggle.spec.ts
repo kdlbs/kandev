@@ -8,6 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 import { waitForStableActiveSession } from "../../helpers/session-store";
 import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
 import { watchOlderMessageRequests } from "./message-pagination-helpers";
+import { mockTurnGate } from "../../helpers/mock-turn-gate";
 
 const MOBILE_END_TOLERANCE_PX = 10;
 
@@ -417,6 +418,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const session = await seedOverflowingTask(
       testPage,
@@ -446,34 +448,48 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
-    // Capture the owned reading position before submission can temporarily clamp it.
     const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
     const marker = "New content while disabled at bottom on mobile";
-    await session.sendMessageViaButton(`e2e:delay(1500)\ne2e:message("${marker}")`);
-    await expect(activeChat.getByText("e2e:delay(1500)", { exact: false })).toBeVisible();
-    const markerMessages = activeChat.getByText(marker, { exact: false });
-    const promptMarkerCount = await markerMessages.count();
-    expect(promptMarkerCount).toBeGreaterThan(0);
-    await expect
-      .poll(() => markerMessages.count(), {
+    const gate = mockTurnGate(backend.tmpDir, marker);
+    try {
+      await session.sendMessageViaButton(gate.prompt);
+      await expect(
+        activeChat.getByText("Queue blocking turn started", { exact: true }),
+      ).toBeVisible();
+      // Hold the response until the submitted prompt's scroll position settles.
+      await list.evaluate(async (el) => {
+        let previous = el.scrollTop;
+        let stableFrames = 0;
+        for (let frame = 0; frame < 30; frame++) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const current = el.scrollTop;
+          stableFrames = Math.abs(current - previous) <= 0.5 ? stableFrames + 1 : 0;
+          previous = current;
+          if (stableFrames === 3) return current;
+        }
+        throw new Error("transcript scroll position did not settle after prompt submission");
+      });
+      const markerMessages = activeChat.getByText(marker, { exact: false });
+      await expect(markerMessages).toHaveCount(1);
+      await gate.release();
+      await expect(markerMessages).toHaveCount(2, { timeout: 15_000 });
+      await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
         timeout: 15_000,
-        message: "Waiting for the delayed assistant response after the submitted prompt",
-      })
-      .toBeGreaterThan(promptMarkerCount);
-    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
-      timeout: 15_000,
-    });
+      });
 
-    await expect
-      .poll(
-        async () =>
-          list.evaluate(
-            (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
-            frozenScrollTop,
-          ),
-        { timeout: 2_000 },
-      )
-      .toBeLessThanOrEqual(2);
+      await expect
+        .poll(
+          async () =>
+            list.evaluate(
+              (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
+              frozenScrollTop,
+            ),
+          { timeout: 2_000 },
+        )
+        .toBeLessThanOrEqual(2);
+    } finally {
+      await gate.release();
+    }
   });
 
   test("follows a live turn from the bottom, then pauses after a small upward touch", async ({

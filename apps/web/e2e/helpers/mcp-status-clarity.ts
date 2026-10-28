@@ -9,6 +9,7 @@ import type { MCPSessionApplyState } from "../../lib/types/http-mcp";
 import { expectMCPSectionHierarchy } from "./mcp-customization-hierarchy";
 import { expectMCPInheritanceBadges } from "./mcp-inheritance-badges";
 import { expectMCPCustomizationScrolling } from "./mcp-customization-scrolling";
+import { waitForHttp } from "./causal-waits";
 
 const HEADLINES: Record<MCPSessionApplyState, string> = {
   applied: "Setup up to date",
@@ -214,12 +215,12 @@ async function checkSavedReports(
 ) {
   const trigger = page.getByTestId("mcp-status-trigger");
   const explorer = page.getByTestId("mcp-server-explorer");
-  // Keep one route installed while polling and page reloads change scenarios.
+  // Controlled application reports cover states this mock cannot naturally emit.
+  let reportState: MCPSessionApplyState = "pending_idle";
   const url = `**/api/v1/task-sessions/${sessionId}/mcp-selections*`;
-  let currentState: MCPSessionApplyState = "pending_idle";
   const handler = async (route: Route) => {
     if (route.request().method() !== "GET") return route.continue();
-    const apply_state = currentState;
+    const apply_state = reportState;
     const response = await route.fetch();
     const body = await response.json();
     body.mcp_state = {
@@ -227,13 +228,28 @@ async function checkSavedReports(
       applied_revision: apply_state === "applied" ? 3 : 1,
       apply_state,
     };
-    await route.fulfill({ response, json: body });
+    await route.fulfill({
+      response,
+      json: body,
+      headers: { ...response.headers(), "x-kandev-e2e-report": apply_state },
+    });
   };
   await page.route(url, handler);
   try {
     for (const apply_state of ["pending_idle", "deferred_restart", "failed", "applied"] as const) {
-      currentState = apply_state;
+      reportState = apply_state;
+      const reportReceived = waitForHttp(
+        page,
+        "GET",
+        new RegExp(`/api/v1/task-sessions/${sessionId}/mcp-selections$`),
+        {
+          // Reload can discard an older response body before it can be read.
+          predicate: (response) =>
+            response.ok() && response.headers()["x-kandev-e2e-report"] === apply_state,
+        },
+      );
       await page.reload();
+      await reportReceived;
       await session.waitForLoad();
       if (!mobile) {
         await page.mouse.move(0, 0);

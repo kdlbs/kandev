@@ -199,3 +199,29 @@ Verification passed:
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
 - Desktop goal E2E: 3 tests passed. Mobile goal E2E: 1 test passed after the final trigger refactor.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, public-doc validation, and `git diff --check` passed.
+
+
+### Desktop trigger click correction (2026-10-26)
+
+CI run 40264984865 cannot find the goal popover after clicking its Quick Chat
+trigger. The first failed attempt lacks a trace; five unchanged local runs
+pass, so exact original event ordering is not proven. A controlled component
+regression exposes a concrete contract violation: hover or keyboard focus
+opens the details, then the default primitive click toggles them closed.
+
+Implement the existing AC-AGENTS-GOAL-VISIBILITY-001.3 at the desktop popover
+trigger: click explicitly opens and consumes the primitive's default toggle.
+Keep the native phone drawer, read-only goal data, Escape/outside dismissal,
+and focus return. Add hover-then-click and focus-then-click component cases;
+require their RED/GREEN evidence and desktop/phone goal E2E checks. Do not
+replace the existing Quick Chat click assertion with hover or retry it.
+
+
+Both hover-then-click and focus-then-click regressions fail against the old
+primitive toggle and pass with explicit desktop opening. All 15 goal/status
+unit cases, all three desktop goal browser cases, both phone goal browser
+cases, full typecheck, and changed-file lint pass. Browser runs disable retries.
+The five original Quick Chat repetitions also pass unchanged; retain that
+uncertainty separately from the deterministic contract violation. Independent
+read-only review finds no remaining issue. No goal data/provider request or
+phone trigger behavior changes.

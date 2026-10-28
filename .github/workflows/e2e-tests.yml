@@ -86,6 +86,9 @@ jobs:
         env:
           PATTERNS: |
             apps/backend/**
+            pluginsdk/**
+            scripts/pluginsdk/**
+            .github/scripts/plugin-sdk-ci-contract_test.py
             apps/desktop/**
             apps/web/**
             apps/packages/**
@@ -1269,7 +1272,9 @@ jobs:
         uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+          cache-dependency-path: |
+            apps/backend/go.sum
+            pluginsdk/go.sum
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"

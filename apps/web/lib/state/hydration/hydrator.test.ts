@@ -1061,7 +1061,8 @@ it("marks an absent inactive session after ordinary turn hydration", () => {
 });
 
 describe("hydrateState — runtime storage snapshots", () => {
-  const localRuntime = localRuntime;
+  const localRuntime = "local_runtime";
+  const timestamp = "2026-10-27T10:00:00Z";
   it("clears blocked pressure when a recovered snapshot omits pressure fields", () => {
     const sessionId = "storage-session";
     const taskId = "storage-task";

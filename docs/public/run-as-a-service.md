@@ -155,7 +155,7 @@ Then open `http://127.0.0.1:38429` locally. For private phone access, follow [Mo
 kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--shell <bash|zsh|path|none>] [--no-boot-start]
 kandev service uninstall [--system]
 kandev service start|stop|restart|status [--system]
-kandev service logs [-f] [--system]
+kandev service logs [-f|--follow] [--system] [--lines N|-n N]
 kandev service config [--system]
 ```
 
@@ -166,7 +166,7 @@ kandev service config [--system]
 - `--home-dir <path>` records `KANDEV_HOME_DIR` in the unit. For a user service with no flag, the installer first honors its own `KANDEV_HOME_DIR` environment, then falls back to `~/.kandev`; system mode defaults to `/var/lib/kandev`.
 - `--shell <bash|zsh|path>` opts a macOS user LaunchAgent into non-interactive login initialization. It is not supported on Linux or with `--system`. `--shell=none` resets an existing selection.
 - On Linux, `--no-boot-start` starts the service now without enabling the unit, but it does not disable a unit that was already enabled. Disable it explicitly when necessary. On macOS the generated plist has `RunAtLoad=false` but also `KeepAlive=true`; the installer stores it in launchd's normal discovery path, bootstraps and enables it, then kick-starts it. That combination does not provide a dependable “never start at login/boot” guarantee; manage future loading explicitly with launchd if that distinction matters.
-- `-f` or `--follow` follows logs.
+- `-f` or `--follow` follows logs. `--lines N`, `--lines=N`, or `-n N` selects a decimal count from 0 to 1000000; the default is 200. On macOS the count applies separately to each output and error file.
 - `--port <port>` is accepted by the installer, but the current native launcher writes it as `KANDEV_SERVER_PORT` and then replaces that value during startup. Do not rely on this flag to choose the listener. Without an explicit launcher port, Kandev tries `38429` and chooses a free random port in `10000–60000` if needed; find the actual URL in the logs. This is a current implementation limitation.
 
 `config` is diagnostic but deliberately small: it prints the OS manager, selected user/system mode, Kandev home, and unit/plist path. It does not prove that the service is installed or active and does not print all unit environment entries.
@@ -258,7 +258,8 @@ kandev service stop
 kandev service restart
 kandev service status
 kandev service logs          # last 200 lines
-kandev service logs --follow
+kandev service logs --lines 1000
+kandev service logs -n 0 --follow  # follow new output only
 ```
 
 Add `--system` to every command for a system service and invoke it with sufficient privilege. Linux log commands use journald. macOS log commands tail the two files under the Kandev home computed by that invocation, rather than reading the installed plist. If installation used a custom home, repeat `--home-dir <path>` (or the same `KANDEV_HOME_DIR`) with `service logs`; also repeat it with `service config` if that diagnostic should print the installed home.

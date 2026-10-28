@@ -60,6 +60,8 @@ async function mockTaskPatchFailure(testPage: Page, taskId: string) {
   );
 }
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("task title and description editing", () => {
   test("editing the title renders the trimmed value and persists it", async ({
     testPage,
@@ -74,15 +76,16 @@ test.describe("task title and description editing", () => {
     await testPage.getByTestId("office-task-title").dblclick();
     const input = testPage.getByTestId("office-task-title-input");
     await input.fill("  Renamed via inline edit  ");
-    const titleSaved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/tasks/${task.id}$`));
+    const saved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/tasks/${task.id}$`));
     await input.press("Enter");
 
     // AC-3: renders the trimmed draft immediately and closes the editor.
     await expect(testPage.getByTestId("office-task-title-input")).toHaveCount(0);
     await expect(testPage.getByTestId("office-task-title")).toHaveText("Renamed via inline edit");
 
+    // The rendered title is optimistic; persistence requires the completed save.
+    expect((await saved).ok()).toBeTruthy();
     // AC-26: persisted, and only the title field changed.
-    expect((await titleSaved).ok()).toBe(true);
     const persisted = (await apiClient.getTask(task.id)) as unknown as Record<string, unknown>;
     expect(persisted.title).toBe("Renamed via inline edit");
   });

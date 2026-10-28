@@ -87,8 +87,8 @@ current contract and points readers to:
 - Frontend pair: `docs/plans/plugins/PLUGIN-API.md` and
   `apps/web/lib/plugins/types.ts`.
 - Concrete frontend Host exports: `apps/web/lib/plugins/host-api.ts`.
-- Backend author API: `apps/backend/pkg/pluginsdk`.
-- Wire API: `apps/backend/proto/kandev/plugin/v1/plugin.proto`.
+- Backend author API: `pluginsdk`.
+- Wire API: `pluginsdk/proto/kandev/plugin/v1/plugin.proto`.
 - Manifest model and semantics: `apps/backend/internal/plugins/manifest`.
 - Package integrity and install semantics:
   `apps/backend/internal/plugins/pkgtar`.
