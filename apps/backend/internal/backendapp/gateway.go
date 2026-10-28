@@ -438,8 +438,10 @@ func provideGateway(
 	}
 	notificationSvc := notificationservice.NewService(
 		notificationRepo, notificationTasks, gateway.Hub, log, notificationAuthEnforced(authSvc))
+	configureWebPush(notificationSvc, notificationRepo, log)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
+		subscribeSessionAttentionNotifications(eventBus, notificationSvc, log)
 		_, err = eventBus.Subscribe(events.TurnCompleted, func(ctx context.Context, event *bus.Event) error {
 			data, ok := event.Data.(map[string]interface{})
 			if !ok {
