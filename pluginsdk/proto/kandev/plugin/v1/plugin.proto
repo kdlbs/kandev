@@ -2016,6 +2016,9 @@ message CheckpointExecutorResourceRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorResourceDescriptor resource = 2;
   string phase = 3;
+  // sequence orders the checkpoints of one cleanup or recovery claim; it is
+  // required (at least 1) for the cleanup_progress and recovery_progress phases.
+  uint64 sequence = 4;
 }
 
 message CheckpointExecutorResourceResponse {

@@ -781,6 +781,7 @@ func startAgentInfrastructure(
 	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
+		lifecycleMgr.SetPluginExecutorClaimStore(repos.Task)
 		lifecycleMgr.SetPluginRuntimeAPIURL(pluginRuntimeAPIURL(cfg))
 		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
 		repos.Task.SetPluginStateWritableChecker(services.Plugins.CheckExecutorStateWritable)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/db/dialect"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
@@ -57,7 +58,7 @@ func (r *Repository) WithPluginStateReadabilityLock(ctx context.Context, install
 }
 
 func lockPluginStateReadability(ctx context.Context, tx *sqlx.Tx, driverName, installationID string) error {
-	if driverName != "pgx" {
+	if !dialect.IsPostgres(driverName) {
 		return nil
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, pluginStateReadabilityLockNamespace+installationID)
@@ -90,9 +91,14 @@ func (r *Repository) checkPluginStateWritable(ctx context.Context, tx *sqlx.Tx, 
 }
 
 const (
-	pluginPhaseAbsent         = "absent"
-	pluginPhaseCleanupPending = "cleanup_pending"
-	pluginPhaseExpired        = "expired"
+	pluginPhaseAbsent          = "absent"
+	pluginPhaseArtifactStaging = "artifact_staging"
+	pluginPhaseBootstrapping   = "bootstrapping"
+	pluginPhaseProvisioned     = "provisioned"
+	pluginPhaseReady           = "ready"
+	pluginPhaseAllocating      = "allocating"
+	pluginPhaseCleanupPending  = "cleanup_pending"
+	pluginPhaseExpired         = "expired"
 )
 
 func pluginExecutorPhaseTerminal(phase string) bool {

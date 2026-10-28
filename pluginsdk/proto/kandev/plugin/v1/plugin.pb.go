@@ -16446,10 +16446,13 @@ func (x *DestroyExecutorEnvironmentResponse) GetError() *ExecutorProviderError {
 }
 
 type CheckpointExecutorResourceRequest struct {
-	state         protoimpl.MessageState          `protogen:"open.v1"`
-	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	Resource      *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
-	Phase         string                          `protobuf:"bytes,3,opt,name=phase,proto3" json:"phase,omitempty"`
+	state    protoimpl.MessageState          `protogen:"open.v1"`
+	Context  *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Resource *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	Phase    string                          `protobuf:"bytes,3,opt,name=phase,proto3" json:"phase,omitempty"`
+	// sequence orders the checkpoints of one cleanup or recovery claim; it is
+	// required (at least 1) for the cleanup_progress and recovery_progress phases.
+	Sequence      uint64 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -16503,6 +16506,13 @@ func (x *CheckpointExecutorResourceRequest) GetPhase() string {
 		return x.Phase
 	}
 	return ""
+}
+
+func (x *CheckpointExecutorResourceRequest) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
 }
 
 type CheckpointExecutorResourceResponse struct {
@@ -25796,11 +25806,12 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\rcleanup_claim\x18\x04 \x01(\tR\fcleanupClaim\"\x8e\x01\n" +
 	"\"DestroyExecutorEnvironmentResponse\x12)\n" +
 	"\x10confirmed_absent\x18\x01 \x01(\bR\x0fconfirmedAbsent\x12=\n" +
-	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xcf\x01\n" +
+	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xeb\x01\n" +
 	"!CheckpointExecutorResourceRequest\x12J\n" +
 	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12H\n" +
 	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12\x14\n" +
-	"\x05phase\x18\x03 \x01(\tR\x05phase\"@\n" +
+	"\x05phase\x18\x03 \x01(\tR\x05phase\x12\x1a\n" +
+	"\bsequence\x18\x04 \x01(\x04R\bsequence\"@\n" +
 	"\"CheckpointExecutorResourceResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\"\xb5\x01\n" +
 	"\x1dReportExecutorProgressRequest\x12J\n" +

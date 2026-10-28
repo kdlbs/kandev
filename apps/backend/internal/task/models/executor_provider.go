@@ -95,6 +95,15 @@ var ErrExecutorCapabilityMismatch = errors.New("capability_mismatch")
 // descriptor that differs from the one recorded for the environment generation.
 var ErrExecutorConflict = errors.New("conflict")
 
+// ErrExecutorInvalidConfig is the stable `invalid_config` refusal of a provider
+// callback whose shape is malformed: an unknown phase, a phase of the other
+// claim kind, or a missing sequence.
+var ErrExecutorInvalidConfig = errors.New("invalid_config")
+
+// ErrExecutorClaimNotFound is the stable `not_found` refusal of a provider
+// callback that names no active claim for its environment.
+var ErrExecutorClaimNotFound = errors.New("not_found")
+
 // ErrExecutorStateTooLarge is the host-originated `state_too_large` refusal for
 // provider state above its budget or an envelope above its cap. A provider
 // cannot return it.
@@ -197,4 +206,21 @@ func compactJSONLength(value any) int {
 		return 0
 	}
 	return buffer.Len() - 1 // Encode appends a newline
+}
+
+const (
+	// PluginClaimKindCleanup and PluginClaimKindRecovery name the two claim
+	// kinds a provider checkpoint can be scoped to.
+	PluginClaimKindCleanup  = "cleanup"
+	PluginClaimKindRecovery = "recovery"
+)
+
+// PluginExecutorClaimCheckpoint binds one provider checkpoint to the active
+// claim it was issued under. Sequence and Digest are the provider's ordering
+// token and the digest of the checkpoint payload.
+type PluginExecutorClaimCheckpoint struct {
+	Claim    *TaskEnvironmentRecoveryClaim
+	Kind     string
+	Sequence uint64
+	Digest   string
 }

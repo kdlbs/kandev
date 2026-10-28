@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/db/dialect"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -89,7 +90,7 @@ func (r *Repository) checkPluginWorkspaceUnique(ctx context.Context, tx *sqlx.Tx
 }
 
 func lockPluginWorkspaceDescriptors(ctx context.Context, tx *sqlx.Tx, driverName, installationID string) error {
-	if driverName != "pgx" {
+	if !dialect.IsPostgres(driverName) {
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, pluginWorkspaceDescriptorLockNamespace+installationID); err != nil {

@@ -689,7 +689,8 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	response, err := r.operations.DestroyExecutorEnvironment(claimedCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: operationContext, Resource: resource, CleanupReason: reason, CleanupClaim: claim.OperationID,
 	})
-	if err != nil || response == nil || response.GetError() != nil || !response.GetConfirmedAbsent() {
+	record, inventory, resource = r.refreshAfterClaimCheckpoints(claimedCtx, record, inventory, resource)
+	if err != nil || response == nil || response.GetError() != nil || !response.GetConfirmedAbsent() || !latestPluginExecutorClaimCheckpointPersisted(inventory, claim) {
 		inventory.Resource = resource
 		inventory.Phase = pluginExecutorPhaseCleanupPending
 		if checkpointErr := r.checkpointPluginExecutorRecord(claimedCtx, record, inventory); checkpointErr != nil {
@@ -721,7 +722,7 @@ func (r *PluginRemoteExecutor) acquirePluginExecutorCleanupClaim(
 	request := models.TaskEnvironmentRecoveryClaimRequest{
 		TaskEnvironmentID: inventory.EnvironmentID, OwnerTaskID: taskID,
 		OwnershipGeneration: inventory.EnvironmentGeneration, SessionID: sessionID,
-		OperationID: inventory.OperationID + ":cleanup", ExecutorType: string(models.ExecutorTypePluginRemote),
+		OperationID: pluginExecutorClaimOperationID(inventory.OperationID, models.PluginClaimKindCleanup), ExecutorType: string(models.ExecutorTypePluginRemote),
 		AllowCurrentSessionRuntime: true,
 	}
 	if job, ok := recoveryclaim.TaskCleanupJobFromContext(ctx); ok && job.TaskID == taskID {
@@ -739,4 +740,41 @@ func (r *PluginRemoteExecutor) releasePluginExecutorCleanupClaim(claim *models.T
 	if err := r.inventoryStore.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim); err != nil {
 		r.logger.Warn("plugin executor cleanup claim release failed", zap.String("operation_id", claim.OperationID), zap.Error(err))
 	}
+}
+
+// refreshAfterClaimCheckpoints reloads the record after a destroy call for a
+// provider that checkpoints under the claim, so later writes carry the revision
+// those checkpoints produced and a retained cleanup keeps the latest
+// checkpointed resource. Other providers keep the state the call started from.
+func (r *PluginRemoteExecutor) refreshAfterClaimCheckpoints(
+	ctx context.Context,
+	record *models.ExecutorRunning,
+	inventory pluginExecutorInventory,
+	resource *pluginsdk.ExecutorResourceDescriptor,
+) (*models.ExecutorRunning, pluginExecutorInventory, *pluginsdk.ExecutorResourceDescriptor) {
+	if !negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDestroyCheckpoints) {
+		return record, inventory, resource
+	}
+	current, err := r.currentPluginExecutorRecord(ctx, record.SessionID, record.AgentExecutionID)
+	if err != nil {
+		return record, inventory, resource
+	}
+	latest, err := decodePluginExecutorInventory(current.Metadata)
+	if err != nil || latest.EnvironmentID != inventory.EnvironmentID || latest.EnvironmentGeneration != inventory.EnvironmentGeneration {
+		return record, inventory, resource
+	}
+	if latest.Resource != nil && latest.Resource.GetResourceHandle() == resource.GetResourceHandle() {
+		resource = latest.Resource
+	}
+	return current, latest, resource
+}
+
+// latestPluginExecutorClaimCheckpointPersisted reports whether a provider that
+// declared destroy_checkpoints has at least one accepted checkpoint recorded
+// for this claim. Confirmed absence without one is never settled.
+func latestPluginExecutorClaimCheckpointPersisted(inventory pluginExecutorInventory, claim *models.TaskEnvironmentRecoveryClaim) bool {
+	if !negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDestroyCheckpoints) {
+		return true
+	}
+	return inventory.Claim != nil && inventory.Claim.OperationID == claim.OperationID && inventory.Claim.Sequence >= 1
 }

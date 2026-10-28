@@ -427,6 +427,18 @@ pair before first use and rejects any later response that changes it. Two
 active environments of one installation cannot share a normalized path or an
 identity. Without the capability the workspace path stays `/workspace`.
 
+With `destroy_checkpoints`, a provider can call `CheckpointExecutorResource`
+while Kandev holds a cleanup or recovery claim for its environment. A cleanup
+claim accepts only the phase `cleanup_progress` and a recovery claim only
+`recovery_progress`. Every such call carries a `sequence` of at least 1 that
+rises with each call for that claim. Repeating the last sequence with the same
+payload succeeds without a write; a lower sequence or a different payload at the
+same sequence is `conflict`, a missing sequence or a phase of the other claim
+kind is `invalid_config`, and a call that names no active claim is `not_found`.
+Kandev treats an environment as absent only when the provider confirms absence
+and at least one checkpoint of that claim was stored, so a provider must
+checkpoint before it reports `confirmed_absent`.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.
