@@ -146,8 +146,15 @@ Implemented on 2026-10-27.
   agentctl wire shape that omits it keeps the existing verified/parked
   semantics, while explicitly unverified OpenCode launches cannot attest live
   activity.
+- Every prompt-ending path settles retained unverified launches: success before
+  the complete event, error returns through a deferred settlement, and user
+  cancellation before the generic cancelled-tool sweep.
+- Claude ACP shell, subagent, and Monitor producers publish an explicit
+  inspect-only capability declaration instead of relying on a read-time
+  fallback for metadata or controls.
 - An additive `task_session_background_work.capabilities` column stores the
-  adapter's declaration (with a boot-time migration and schema-replay test).
+  adapter's declaration (created for fresh databases and added for existing
+  databases by the migration stage, with a schema-replay test).
   HTTP/WS hydration reads it, applies state-based action availability, and
   falls back to inspect-only when no declaration exists. This is the
   documented persistence change the plan allowed for a discovered gap.

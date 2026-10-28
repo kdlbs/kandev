@@ -404,6 +404,23 @@ schema migration, live Codex child interrupt availability, state-gated action
 availability after terminal/unknown transitions, and the phone retained exit
 status.
 
+The PR fixup round additionally:
+
+- Settled retained OpenCode launches on prompt error and user cancellation
+  before the generic cancelled-tool sweep, with a cancel-path regression.
+- Moved the additive capability column into the repository's migration stage
+  and kept the fresh-table declaration.
+- Declared explicit inspect-only capabilities for Claude ACP shell, subagent,
+  and Monitor producers, with producer regressions.
+- Removed the remaining acceptance-criteria reference from a production
+  comment.
+- Fixed two merged-base E2E test defects exposed by CI: the pseudo-locale call
+  passed its URL arguments in the wrong order, and the duplicate-prompt toast
+  assertion was not scoped to its error toast.
+- Dispositioned every review thread: three Greptile findings fixed, one
+  CodeRabbit finding fixed, and the production-default finding rejected with
+  the accepted Task 07 rollout rationale.
+
 Remaining verification gates: the Task 02 packaged-CLI wire proof, the
 Docker/SSH/Kubernetes containers suite, and any claim of automatic follow-up
 delivery.
