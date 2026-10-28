@@ -2900,5 +2900,19 @@
   "questionImageInvalid": "This image is damaged or has an unsupported format.",
   "questionImageTooLarge": "This image exceeds the preview size limit.",
   "questionImageUnavailable": "Image unavailable. You can still answer the question.",
-  "questionImageRetry": "Retry"
+  "questionImageRetry": "Retry",
+  "taskCreationUnconfirmedTitle": "Task creation is unconfirmed.",
+  "taskCreationUnconfirmedDescription": "Retry uses the earlier submission. Changes stay in this draft.",
+  "taskCreationIncompleteTitle": "This task exists. Creation is still in progress.",
+  "taskCreationIncompleteDescription": "Recovery will not start or repair it. Open the task to inspect it.",
+  "taskCreationAcceptedTitle": "This task was created.",
+  "taskCreationAcceptedDescription": "Open it to continue. Your newer edits stay in this draft.",
+  "taskCreationUnavailableTitle": "This task is no longer available.",
+  "taskCreationUnavailableDescription": "Recovery will not create a replacement.",
+  "taskCreationStorageUnavailable": "Recovery cannot survive a reload until browser storage works.",
+  "taskCreationRetryUnavailable": "This submission cannot be resent because its attachment contents are no longer available. Check status instead.",
+  "taskCreationBusy": "Checking task creation status.",
+  "taskCreationCheckStatus": "Check status",
+  "taskCreationRetrySubmission": "Retry submission",
+  "taskCreationOpenTask": "Open task"
 }

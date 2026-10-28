@@ -28,6 +28,18 @@ export type TaskTopbarRepository = {
   browserUrl: string | null;
 };
 
+export const CREATION_PENDING_SEARCH_PARAM = "creation";
+export const CREATION_PENDING_SEARCH_VALUE = "pending";
+
+/**
+ * A recovered task is opened with this marker while its original creation
+ * owner may still be preparing its session. The task page must inspect it
+ * without running the normal automatic ensure path.
+ */
+export function isCreationPendingSearch(searchParams: URLSearchParams): boolean {
+  return searchParams.get(CREATION_PENDING_SEARCH_PARAM) === CREATION_PENDING_SEARCH_VALUE;
+}
+
 export function selectWorkspaceRepositories(
   itemsByWorkspaceId: Record<string, Repository[]>,
   workspaceId: string | null | undefined,

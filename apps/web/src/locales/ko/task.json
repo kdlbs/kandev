@@ -2900,5 +2900,19 @@
   "questionImageInvalid": "이미지가 손상되었거나 지원하지 않는 형식입니다.",
   "questionImageTooLarge": "이미지가 미리보기 크기 제한을 초과합니다.",
   "questionImageUnavailable": "이미지를 사용할 수 없습니다. 질문에는 계속 답변할 수 있습니다.",
-  "questionImageRetry": "다시 시도"
+  "questionImageRetry": "다시 시도",
+  "taskCreationUnconfirmedTitle": "작업 생성이 확인되지 않았습니다.",
+  "taskCreationUnconfirmedDescription": "재시도는 이전 제출을 사용합니다. 변경 내용은 이 초안에 남습니다.",
+  "taskCreationIncompleteTitle": "이 작업은 존재합니다. 생성이 아직 진행 중입니다.",
+  "taskCreationIncompleteDescription": "복구는 작업을 시작하거나 복구하지 않습니다. 작업을 열어 확인하세요.",
+  "taskCreationAcceptedTitle": "이 작업이 생성되었습니다.",
+  "taskCreationAcceptedDescription": "계속하려면 여세요. 최신 편집 내용은 이 초안에 남습니다.",
+  "taskCreationUnavailableTitle": "이 작업은 더 이상 사용할 수 없습니다.",
+  "taskCreationUnavailableDescription": "복구는 대체 작업을 만들지 않습니다.",
+  "taskCreationStorageUnavailable": "브라우저 저장소가 작동할 때까지 복구 상태는 새로고침 후 유지되지 않습니다.",
+  "taskCreationRetryUnavailable": "첨부 파일 내용을 더 이상 사용할 수 없어 이 제출을 다시 보낼 수 없습니다. 대신 상태를 확인하세요.",
+  "taskCreationBusy": "작업 생성 상태를 확인하는 중입니다.",
+  "taskCreationCheckStatus": "상태 확인",
+  "taskCreationRetrySubmission": "제출 재시도",
+  "taskCreationOpenTask": "작업 열기"
 }

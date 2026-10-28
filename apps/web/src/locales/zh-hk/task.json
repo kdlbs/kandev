@@ -2900,5 +2900,19 @@
   "questionImageInvalid": "此圖像已損壞或格式不受支援。",
   "questionImageTooLarge": "此圖像超過預覽大小限制。",
   "questionImageUnavailable": "圖像不可用。您仍可回答問題。",
-  "questionImageRetry": "重試"
+  "questionImageRetry": "重試",
+  "taskCreationUnconfirmedTitle": "任務建立狀態未確認。",
+  "taskCreationUnconfirmedDescription": "重試會使用之前的提交。更改保留在此草稿中。",
+  "taskCreationIncompleteTitle": "此任務已存在。建立仍在進行中。",
+  "taskCreationIncompleteDescription": "恢復不會啓動或修復它。開啟任務以檢查。",
+  "taskCreationAcceptedTitle": "此任務已建立。",
+  "taskCreationAcceptedDescription": "開啟任務以繼續。較新的編輯保留在此草稿中。",
+  "taskCreationUnavailableTitle": "此任務已不可用。",
+  "taskCreationUnavailableDescription": "恢復不會建立替代任務。",
+  "taskCreationStorageUnavailable": "在瀏覽器存儲正常工作之前，恢復狀態無法在重新載入後保留。",
+  "taskCreationRetryUnavailable": "此提交無法重新傳送，因為其附件內容已不可用。請改為檢查狀態。",
+  "taskCreationBusy": "正在檢查任務建立狀態。",
+  "taskCreationCheckStatus": "檢查狀態",
+  "taskCreationRetrySubmission": "重試提交",
+  "taskCreationOpenTask": "開啟任務"
 }

@@ -2900,5 +2900,19 @@
   "questionImageInvalid": "Ţĥĩś ĩḿàĝē ĩś ďàḿàĝēď ōŕ ĥàś àń ũńśũƥƥōŕţēď ƒōŕḿàţ.",
   "questionImageTooLarge": "Ţĥĩś ĩḿàĝē ēxćēēďś ţĥē ƥŕēvĩēŵ śĩźē ĺĩḿĩţ.",
   "questionImageUnavailable": "Ĩḿàĝē ũńàvàĩĺàƀĺē. Ŷōũ ćàń śţĩĺĺ àńśŵēŕ ţĥē qũēśţĩōń.",
-  "questionImageRetry": "Ŕēţŕŷ"
+  "questionImageRetry": "Ŕēţŕŷ",
+  "taskCreationUnconfirmedTitle": "Ţàśķ ćŕēàţĩōń ĩś ũńćōńƒĩŕḿēď.",
+  "taskCreationUnconfirmedDescription": "Ŕēţŕŷ ũśēś ţĥē ēàŕĺĩēŕ śũƀḿĩśśĩōń. Ćĥàńĝēś śţàŷ ĩń ţĥĩś ďŕàƒţ.",
+  "taskCreationIncompleteTitle": "Ţĥĩś ţàśķ ēxĩśţś. Ćŕēàţĩōń ĩś śţĩĺĺ ĩń ƥŕōĝŕēśś.",
+  "taskCreationIncompleteDescription": "Ŕēćōvēŕŷ ŵĩĺĺ ńōţ śţàŕţ ōŕ ŕēƥàĩŕ ĩţ. Ōƥēń ţĥē ţàśķ ţō ĩńśƥēćţ ĩţ.",
+  "taskCreationAcceptedTitle": "Ţĥĩś ţàśķ ŵàś ćŕēàţēď.",
+  "taskCreationAcceptedDescription": "Ōƥēń ĩţ ţō ćōńţĩńũē. Ŷōũŕ ńēŵēŕ ēďĩţś śţàŷ ĩń ţĥĩś ďŕàƒţ.",
+  "taskCreationUnavailableTitle": "Ţĥĩś ţàśķ ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē.",
+  "taskCreationUnavailableDescription": "Ŕēćōvēŕŷ ŵĩĺĺ ńōţ ćŕēàţē à ŕēƥĺàćēḿēńţ.",
+  "taskCreationStorageUnavailable": "Ŕēćōvēŕŷ ćàńńōţ śũŕvĩvē à ŕēĺōàď ũńţĩĺ ƀŕōŵśēŕ śţōŕàĝē ŵōŕķś.",
+  "taskCreationRetryUnavailable": "Ţĥĩś śũƀḿĩśśĩōń ćàńńōţ ƀē ŕēśēńţ ƀēćàũśē ĩţś àţţàćĥḿēńţ ćōńţēńţś àŕē ńō ĺōńĝēŕ àvàĩĺàƀĺē. Ćĥēćķ śţàţũś ĩńśţēàď.",
+  "taskCreationBusy": "Ćĥēćķĩńĝ ţàśķ ćŕēàţĩōń śţàţũś.",
+  "taskCreationCheckStatus": "Ćĥēćķ śţàţũś",
+  "taskCreationRetrySubmission": "Ŕēţŕŷ śũƀḿĩśśĩōń",
+  "taskCreationOpenTask": "Ōƥēń ţàśķ"
 }

@@ -51,6 +51,10 @@ import {
 } from "./task-create-dialog-task-created";
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
+import {
+  TaskCreateDialogRecoveryFooter,
+  TaskCreateDialogRecoveryPanel,
+} from "@/components/task-create-dialog-recovery-panel";
 
 export type { TaskCreateDialogProps } from "@/components/task-create-dialog-types";
 
@@ -347,6 +351,36 @@ function useTaskCreateDialogQueuedSettingsCloseReset(
   }, [open, preserveRef, resetHandledRef, reset]);
 }
 
+function TaskCreateFooterSlot({
+  setup,
+  props,
+  recoveryActive,
+  pendingAttachmentReason,
+}: {
+  setup: ReturnType<typeof useTaskCreateDialogSetup>;
+  props: TaskCreateDialogProps;
+  recoveryActive: boolean;
+  pendingAttachmentReason: string | null;
+}) {
+  return (
+    <>
+      {recoveryActive ? <TaskCreateDialogRecoveryPanel recovery={setup.recovery} /> : null}
+      <DialogFooter
+        className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2"
+        data-testid="task-create-dialog-footer"
+      >
+        {recoveryActive ? (
+          <TaskCreateDialogRecoveryFooter recovery={setup.recovery} />
+        ) : (
+          <TaskCreateDialogFooter
+            {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
+          />
+        )}
+      </DialogFooter>
+    </>
+  );
+}
+
 function TaskCreateDialogContent(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
   const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
@@ -375,6 +409,9 @@ function TaskCreateDialogContent(props: TaskCreateDialogProps) {
     { preserveQueuedLastUsedOnClose },
   );
   const { guardedHandleSubmit } = setup;
+  const recoveryActive = Boolean(
+    setup.recovery?.receipt && setup.recovery.receipt.state !== "submitting",
+  );
   const focusReturn = useTaskCreateFocusReturn(props, setup.isCreateMode);
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useTaskCreateDialogQueuedSettingsCloseReset(
@@ -392,10 +429,10 @@ function TaskCreateDialogContent(props: TaskCreateDialogProps) {
     buildDialogFooterProps(setup, props, pendingAttachmentReason),
   );
   const handleComposerSubmit = useCallback(() => {
-    if (nativeSubmitDisabled) return false;
+    if (nativeSubmitDisabled || recoveryActive) return false;
     guardedHandleSubmit(PROGRAMMATIC_SUBMIT_EVENT);
     return true;
-  }, [guardedHandleSubmit, nativeSubmitDisabled]);
+  }, [guardedHandleSubmit, nativeSubmitDisabled, recoveryActive]);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
@@ -430,14 +467,12 @@ function TaskCreateDialogContent(props: TaskCreateDialogProps) {
                 {...buildDialogFormBodyProps(setup, props)}
                 onComposerSubmit={handleComposerSubmit}
               />
-              <DialogFooter
-                className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2"
-                data-testid="task-create-dialog-footer"
-              >
-                <TaskCreateDialogFooter
-                  {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
-                />
-              </DialogFooter>
+              <TaskCreateFooterSlot
+                setup={setup}
+                props={props}
+                recoveryActive={recoveryActive}
+                pendingAttachmentReason={pendingAttachmentReason}
+              />
             </form>
             <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
           </TaskCreateDialogTaskCreatedContext.Provider>

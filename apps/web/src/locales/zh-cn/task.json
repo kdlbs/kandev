@@ -2900,5 +2900,19 @@
   "questionImageInvalid": "此图像已损坏或格式不受支持。",
   "questionImageTooLarge": "此图像超过预览大小限制。",
   "questionImageUnavailable": "图像不可用。您仍可回答问题。",
-  "questionImageRetry": "重试"
+  "questionImageRetry": "重试",
+  "taskCreationUnconfirmedTitle": "任务创建状态未确认。",
+  "taskCreationUnconfirmedDescription": "重试会使用之前的提交。更改保留在此草稿中。",
+  "taskCreationIncompleteTitle": "此任务已存在。创建仍在进行中。",
+  "taskCreationIncompleteDescription": "恢复不会启动或修复它。打开任务以检查。",
+  "taskCreationAcceptedTitle": "此任务已创建。",
+  "taskCreationAcceptedDescription": "打开任务以继续。较新的编辑保留在此草稿中。",
+  "taskCreationUnavailableTitle": "此任务已不可用。",
+  "taskCreationUnavailableDescription": "恢复不会创建替代任务。",
+  "taskCreationStorageUnavailable": "在浏览器存储正常工作之前，恢复状态无法在重新加载后保留。",
+  "taskCreationRetryUnavailable": "此提交无法重新发送，因为其附件内容已不可用。请改为检查状态。",
+  "taskCreationBusy": "正在检查任务创建状态。",
+  "taskCreationCheckStatus": "检查状态",
+  "taskCreationRetrySubmission": "重试提交",
+  "taskCreationOpenTask": "打开任务"
 }

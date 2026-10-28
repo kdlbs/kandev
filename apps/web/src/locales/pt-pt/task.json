@@ -2900,5 +2900,19 @@
   "questionImageInvalid": "Esta imagem está danificada ou tem um formato não suportado.",
   "questionImageTooLarge": "Esta imagem excede o limite de tamanho da pré-visualização.",
   "questionImageUnavailable": "Imagem indisponível. Pode continuar a responder à pergunta.",
-  "questionImageRetry": "Tentar novamente"
+  "questionImageRetry": "Tentar novamente",
+  "taskCreationUnconfirmedTitle": "A criação da tarefa não está confirmada.",
+  "taskCreationUnconfirmedDescription": "A nova tentativa usa o envio anterior. As alterações ficam neste rascunho.",
+  "taskCreationIncompleteTitle": "Esta tarefa existe. A criação ainda está em curso.",
+  "taskCreationIncompleteDescription": "A recuperação não a inicia nem repara. Abra a tarefa para a inspecionar.",
+  "taskCreationAcceptedTitle": "Esta tarefa foi criada.",
+  "taskCreationAcceptedDescription": "Abra-a para continuar. As suas edições mais recentes ficam neste rascunho.",
+  "taskCreationUnavailableTitle": "Esta tarefa já não está disponível.",
+  "taskCreationUnavailableDescription": "A recuperação não cria uma substituição.",
+  "taskCreationStorageUnavailable": "A recuperação não sobrevive a uma recarga enquanto o armazenamento do navegador não funcionar.",
+  "taskCreationRetryUnavailable": "Este envio não pode ser reenviado porque o conteúdo dos anexos já não está disponível. Verifique o estado.",
+  "taskCreationBusy": "A verificar o estado da criação da tarefa.",
+  "taskCreationCheckStatus": "Verificar estado",
+  "taskCreationRetrySubmission": "Tentar novamente o envio",
+  "taskCreationOpenTask": "Abrir tarefa"
 }
