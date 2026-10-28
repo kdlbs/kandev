@@ -22,6 +22,11 @@ const (
 	RuntimeAPIURLHostPublic        = "host_public"
 	RuntimeAPIURLProviderForwarded = "provider_forwarded"
 
+	// WorkspacePreparationCore and WorkspacePreparationProvider are the two
+	// values of a provider's workspace_preparation.
+	WorkspacePreparationCore     = "core"
+	WorkspacePreparationProvider = "provider"
+
 	// DefaultExecutorDestroyTimeoutSeconds is the destroy deadline; a provider
 	// that requires drain_receipt can raise it up to MaxExecutorDestroyTimeoutSeconds.
 	DefaultExecutorDestroyTimeoutSeconds = 30
@@ -95,6 +100,7 @@ func (m *Manifest) validateHostCapabilities(prefix string, provider *ExecutorPro
 	errs = append(errs, validateStateBudget(prefix, provider)...)
 	errs = append(errs, validateDestroyTimeout(prefix, provider)...)
 	errs = append(errs, validateRuntimeAPIURL(prefix, provider)...)
+	errs = append(errs, validateWorkspacePreparation(prefix, provider)...)
 	errs = append(errs, validateLaunchPolicyIDs(prefix, provider)...)
 	return errs
 }
@@ -168,6 +174,21 @@ func validateRuntimeAPIURL(prefix string, provider *ExecutorProvider) []error {
 		}
 	default:
 		return []error{fmt.Errorf("%s.runtime_api_url must be %s or %s", prefix, RuntimeAPIURLHostPublic, RuntimeAPIURLProviderForwarded)}
+	}
+	return nil
+}
+
+func validateWorkspacePreparation(prefix string, provider *ExecutorProvider) []error {
+	switch provider.WorkspacePreparation {
+	case "":
+		provider.WorkspacePreparation = WorkspacePreparationCore
+	case WorkspacePreparationCore:
+	case WorkspacePreparationProvider:
+		if !declaresCapability(provider, "repository_intent") || !declaresCapability(provider, "workspace_descriptor") {
+			return []error{fmt.Errorf("%s.workspace_preparation provider requires the repository_intent and workspace_descriptor capabilities", prefix)}
+		}
+	default:
+		return []error{fmt.Errorf("%s.workspace_preparation must be %s or %s", prefix, WorkspacePreparationCore, WorkspacePreparationProvider)}
 	}
 	return nil
 }

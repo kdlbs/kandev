@@ -159,3 +159,54 @@ func cleanSegments(parts, prefix []string) ([]string, error) {
 func isDriveLetter(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
+
+// Within reports whether path lies inside root, or is root. path is either
+// absolute in the platform's form or relative to root; a dot segment, a control
+// character, or another drive or tree is never inside. Like the rest of the
+// package it compares text only and never touches a filesystem.
+func Within(platform, root, path string) bool {
+	rootParts, err := segments(platform, root)
+	if err != nil {
+		return false
+	}
+	pathParts, err := resolveBelow(platform, rootParts, path)
+	if err != nil || len(pathParts) < len(rootParts) {
+		return false
+	}
+	caseless := false
+	if kind, _ := platformForm(platform); kind == formWindows {
+		caseless = true
+	}
+	for i, part := range rootParts {
+		if caseless && !strings.EqualFold(part, pathParts[i]) || !caseless && part != pathParts[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveBelow returns the segments of path, treating a relative path as a
+// child of root.
+func resolveBelow(platform string, rootParts []string, path string) ([]string, error) {
+	if absolute, err := segments(platform, path); err == nil {
+		return absolute, nil
+	}
+	if path == "" || len(path) > maxPathBytes || path[0] == '/' || path[0] == '\\' || strings.ContainsRune(path, ':') {
+		return nil, errors.New("repository path is not relative")
+	}
+	for i := 0; i < len(path); i++ {
+		if path[i] < 0x20 || path[i] == 0x7f {
+			return nil, errors.New("repository path contains a control character")
+		}
+	}
+	parts, err := cleanSegments(strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' && platformIsWindows(platform) }), nil)
+	if err != nil {
+		return nil, err
+	}
+	return append(append([]string(nil), rootParts...), parts...), nil
+}
+
+func platformIsWindows(platform string) bool {
+	kind, _ := platformForm(platform)
+	return kind == formWindows
+}

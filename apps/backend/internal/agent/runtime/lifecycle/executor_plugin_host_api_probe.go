@@ -73,8 +73,11 @@ func (r *PluginRemoteExecutor) probeForwardedHostAPI(ctx context.Context, launch
 // probe names its own, every other failed stage reports the generic launch
 // reason.
 func launchCleanupReason(stage string) string {
-	if stage == cleanupReasonAPIUnreachable {
+	switch stage {
+	case cleanupReasonAPIUnreachable:
 		return cleanupReasonAPIUnreachable
+	case cleanupStageRepositoryInventory:
+		return cleanupReasonRepositoryInventoryMismatch
 	}
 	return pluginExecutorCleanupReasonLaunch
 }

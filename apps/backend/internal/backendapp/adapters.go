@@ -586,6 +586,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
 	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
+			Position:                   r.Position,
 			TaskRepositoryID:           r.TaskRepositoryID,
 			RepositoryID:               r.RepositoryID,
 			RepositoryPath:             r.RepositoryPath,

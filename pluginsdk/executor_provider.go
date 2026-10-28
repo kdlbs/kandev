@@ -23,6 +23,8 @@ type ExecutorProviderCapabilities = pluginv1.ExecutorProviderCapabilities
 type ExecutorHostCapability = pluginv1.ExecutorHostCapability
 type ExecutorCapabilityVersion = pluginv1.ExecutorCapabilityVersion
 type ExecutorResourceDescriptor = pluginv1.ExecutorResourceDescriptor
+type ExecutorRepositoryIntent = pluginv1.ExecutorRepositoryIntent
+type ExecutorRepositoryState = pluginv1.ExecutorRepositoryState
 type ExecutorConnectionLease = pluginv1.ExecutorConnectionLease
 type ExecutorRuntimeArtifactChunk = pluginv1.ExecutorRuntimeArtifactChunk
 

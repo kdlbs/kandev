@@ -56,6 +56,10 @@ const (
 
 type PluginExecutorLaunch struct {
 	Profile models.ExecutorProviderLaunchProfile
+	// Repositories and PlainEnv feed the provider's repository intent and
+	// agent_env; they are read only when the provider requires that capability.
+	Repositories []PluginRepositorySource
+	PlainEnv     map[string]string
 }
 
 type PluginExecutorProviderOperations interface {
@@ -127,6 +131,8 @@ type pluginExecutorInventory struct {
 	StateVersion           uint32                                `json:"state_version,omitempty"`
 	NegotiatedCapabilities []string                              `json:"negotiated_capabilities,omitempty"`
 	WorkspaceDescriptor    *workspacedescriptor.Descriptor       `json:"workspace_descriptor,omitempty"`
+	WorkspacePreparation   string                                `json:"workspace_preparation,omitempty"`
+	Repositories           []pluginExecutorRepository            `json:"repositories,omitempty"`
 	ProfileID              string                                `json:"profile_id"`
 	ProfileConfig          map[string]string                     `json:"profile_config,omitempty"`
 	SecretReferences       map[string]string                     `json:"secret_references,omitempty"`
@@ -235,6 +241,8 @@ type pluginExecutorLaunchState struct {
 	hostAPIURL       string
 	nonce            string
 	inventory        pluginExecutorInventory
+	intent           []*pluginsdk.ExecutorRepositoryIntent
+	agentEnv         map[string]string
 }
 
 func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, req *ExecutorCreateRequest) (*pluginExecutorLaunchState, error) {
@@ -252,8 +260,12 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	if err := r.confirmPluginExecutorCapabilities(ctx, profile); err != nil {
 		return nil, err
 	}
+	intent, agentEnv, err := pluginRepositoryHandoff(req, profile.Provider)
+	if err != nil {
+		return nil, err
+	}
 	operationID := strings.TrimSpace(req.InstanceID)
-	digest, err := pluginExecutorInputDigest(profile)
+	digest, err := pluginExecutorInputDigestWith(profile, intent, agentEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -275,6 +287,7 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	return &pluginExecutorLaunchState{
 		request: req, profile: profile, operationContext: operationContext,
 		apiURL: apiURL, hostAPIURL: hostAPIURL, nonce: nonce, inventory: inventory,
+		intent: intent, agentEnv: agentEnv,
 	}, nil
 }
 
@@ -286,6 +299,7 @@ func pluginExecutorLaunchInventory(req *ExecutorCreateRequest, profile models.Ex
 		ContractVersion:        profile.Provider.ContractVersion,
 		SupportedStateVersions: append([]int(nil), profile.Provider.SupportedStateVersions...),
 		NegotiatedCapabilities: negotiatedCapabilities(profile.Provider),
+		WorkspacePreparation:   pluginWorkspacePreparationMode(profile.Provider),
 		ProfileID:              profile.ProfileID, ProfileConfig: clonePluginExecutorStringMap(profile.Config),
 		SecretReferences: clonePluginExecutorStringMap(profile.SecretReferences),
 		OperationID:      operationID, InputDigest: digest, RuntimeIdentity: req.InstanceID, Phase: pluginExecutorPhaseAllocating,
@@ -327,6 +341,8 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 		Context:       launch.operationContext,
 		Profile:       snapshot,
 		BootstrapJson: bootstrap,
+		Repositories:  launch.intent,
+		AgentEnv:      launch.agentEnv,
 	})
 	if err != nil || provisioned == nil || provisioned.GetResource() == nil || provisioned.GetResource().GetResourceHandle() == "" {
 		return nil, r.recoverOrRetainFailedProvision(ctx, launch.request, launch.operationContext, launch.profile, launch.inventory, err)
@@ -350,7 +366,13 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 			"workspace_descriptor", err)
 	}
 	launch.inventory.WorkspaceDescriptor = descriptor
-	launch.inventory.Resource = resource
+	repositories, err := checkPluginExecutorRepositories(launch.inventory, descriptor, resource, launch.intent)
+	if err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			cleanupStageRepositoryInventory, err)
+	}
+	launch.inventory.Repositories = repositories
+	launch.inventory.Resource = withoutPluginExecutorRepositories(resource)
 	launch.inventory.StateVersion = resource.GetStateVersion()
 	launch.inventory.Platform = resource.GetPlatform()
 	launch.inventory.ExpiresAt = resource.GetExpiresAt()
@@ -578,12 +600,28 @@ func validatePluginRuntimeAPIURL(raw string) (string, error) {
 }
 
 func pluginExecutorInputDigest(profile models.ExecutorProviderLaunchProfile) (string, error) {
+	return pluginExecutorInputDigestWith(profile, nil, nil)
+}
+
+// pluginExecutorInputDigestWith also covers the repository intent and agent
+// environment; both are omitted when empty so a launch without them keeps the
+// digest it always had.
+func pluginExecutorInputDigestWith(profile models.ExecutorProviderLaunchProfile, intent []*pluginsdk.ExecutorRepositoryIntent, agentEnv map[string]string) (string, error) {
+	type repository struct {
+		ID, Locator, Branch, BaseBranch, CheckoutRef string
+	}
+	var repositories []repository
+	for _, entry := range intent {
+		repositories = append(repositories, repository{entry.GetId(), entry.GetLocator(), entry.GetBranch(), entry.GetBaseBranch(), entry.GetCheckoutRef()})
+	}
 	data, err := json.Marshal(struct {
 		ProviderIdentity string            `json:"provider_identity"`
 		ProfileID        string            `json:"profile_id"`
 		Config           map[string]string `json:"config"`
 		SecretReferences map[string]string `json:"secret_references"`
-	}{profile.Provider.Identity, profile.ProfileID, profile.Config, profile.SecretReferences})
+		Repositories     []repository      `json:"repositories,omitempty"`
+		AgentEnv         map[string]string `json:"agent_env,omitempty"`
+	}{profile.Provider.Identity, profile.ProfileID, profile.Config, profile.SecretReferences, repositories, agentEnv})
 	if err != nil {
 		return "", errors.New("plugin executor profile snapshot could not be hashed")
 	}

@@ -691,6 +691,9 @@ type WorkspaceFolderSpec struct {
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
+	// Position is the repository's task position, carried so a provider-prepared
+	// workspace can order its repositories.
+	Position                *int
 	TaskRepositoryID        string
 	RepositoryID            string
 	RepositoryPath          string
