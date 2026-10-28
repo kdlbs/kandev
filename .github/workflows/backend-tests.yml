@@ -1116,7 +1116,8 @@ jobs:
 
       - name: Compile Windows persistence test packages
         if: matrix.suite == 'persistence'
-        timeout-minutes: 10
+        # Cold race compilation can exceed ten minutes before tests start.
+        timeout-minutes: 20
         env:
           GOMAXPROCS: '2'
           GOMEMLIMIT: 2GiB

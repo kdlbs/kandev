@@ -1605,3 +1605,14 @@ Normal merge hooks and push follow. Historical head c3fa104f6907 had 95 passing
 checks; those results do not certify the new integrated head. Fresh GitHub
 checks must pass before the operator merges. NOTIFICATION_GUIDE.md remains
 uncommitted. SDK release code and protected publication contracts are unchanged.
+
+
+### 2026-10-28 Windows CI compilation fixup
+
+Current-head backend job `122779656390` reaches its ten-minute Windows
+persistence compilation cap after five package binaries compile. Its module
+and build caches both miss. The compiler is cancelled before selected tests
+start. The correction changes only that compilation allowance to twenty
+minutes; test deadlines, selections and required failure propagation remain.
+The owning CI completion design and task-16 work order record the evidence
+and validation. Fresh hosted Windows CI remains required before merge.
