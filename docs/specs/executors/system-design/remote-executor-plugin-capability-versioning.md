@@ -55,14 +55,14 @@ rules from the native design (preparation mode, API URL mode, destroy timeout) s
    (installation, dispatch generation). A second echo of the same generation that differs from the first, or an echo that differs from the manifest, marks the
    provider `unavailable` with reason `capability_mismatch` until the generation changes (AC 002.2). An absent or empty echo is
    treated as declaring none (AC 002.4). After a plugin restart the new generation has no echo, so the gate in step 3 runs one
-   profile validation first; a provider that declares nothing keeps launching. Concurrent validations of one generation compare equal and the first accepted echo stays.
+   profile validation first, with a 10 second deadline; a provider that declares nothing keeps launching. Concurrent first validations of one generation share one call (single-flight per installation and generation) and the first accepted echo stays. A validation that errors, times out, or returns `unavailable` is not an empty echo: nothing is cached, the launch is refused as `unavailable` with no allocation, and the next launch tries again (no negative cache). The echo is stored per (installation, generation, provider key), and each is compared with the declaration of its own `executor_providers[]` entry.
 3. **Allocation gate:** `checkCapabilityAgreement` runs first in `validateLaunch`, before the admission hook and before any
    provider call, on first launch, delayed launch, and resume. It compares manifest, registry, and the in-memory echo (AC 002.3). Only the manifest-and-registry half is a pure
    function (AC 002.5); `checkStateWritable` runs in the same step and is described under Data model.
 
 ## Snapshot
 
-At admission the host writes `negotiated_capabilities` (sorted `name@version` strings) and `provider_state_version` into the
+At admission the host writes `negotiated_capabilities` (sorted `name@version` strings) and the existing `state_version` into the
 `plugin_executor` envelope, in the same position as the existing `capabilities` key, which keeps its meaning. A record without `negotiated_capabilities` reads as the empty set (AC 003.6). Recovery, attach, destroy, lease
 validation, and response validation read the snapshot. A host that no longer supports a recorded version maps the
 provider to `unavailable` for that environment through the existing availability path (AC 003.5).
@@ -87,14 +87,14 @@ enforced where it is written, so the reserve cannot be exceeded by data the prov
 | --- | --- |
 | existing fields, with `profile_config` plus `secret_references` at most 4096 together (checked at profile validation) | 5888 |
 | workspace descriptor (`workspace_path` at most 1024, identity 128, preparation, platform), stored once in the envelope; the resource descriptor copy is stripped before persisting | 1792 |
-| `negotiated_capabilities`, `provider_state_version` | 1024 |
+| `negotiated_capabilities`, `state_version`, `profile_snapshot_digest` (64) | 1024 |
 | `repositories`: 32 entries of `id` (at most 36), `relative_path` (at most 96), `head_commit` (at most 64) only; the branch is verified but not stored | 8192 |
 | `owners` (16 entries) and share fields | 2048 |
 | `placement`, `admission`, drain fields, `authority`, `launch_policy` outcome | 1536 |
 
 The maxima sum to exactly 20480. The budget table lives in code (`hostFieldBudget`), and a unit test asserts that its sum is at most 20480. A relative path over 96 bytes or an `id` over 36 bytes in a provider response
 is rejected with `state_too_large` before persisting. Default `state_budget_bytes` is 8192; the maximum 12288 plus the 20480 reserve equals the cap.
-The state is measured on its JSON-escaped form, because escaping can inflate it up to six times for control characters.
+Every maximum in the table is counted on the marshaled, JSON-escaped form of the field, including key names and separators, because escaping inflates `&`, `<`, `>`, and control characters up to six times; the per-entry limits on `repositories` apply to the escaped value of `id`, `relative_path`, and `head_commit` (a value whose escaped form exceeds its limit is rejected with `state_too_large`). At 32 entries and the entry limits (36, 96, 64) the field is at most 7872 bytes with keys and fits its 8192 maximum. The state is measured on its JSON-escaped form for the same reason.
 
 The code for every rejection is `state_too_large`. It is a host-originated failure code, not a member of the closed provider error set
 (`invalid_config`, `denied`, `unsupported`, `not_found`, `expired`, `conflict`, `unavailable`, `rate_limited`, `cleanup_pending`): a provider cannot return
@@ -116,8 +116,8 @@ releases. Retirement moves the pair to `Retired`; a manifest requiring it fails 
 ## Data model
 
 No new table and no DDL. The envelope field `negotiated_capabilities` is added and `state_version` is reused as the provider state version; decode tolerates
-absence. The readability count scans `executors_running` rows of executor type `plugin_remote` that are not terminal, filters by installation, and reads the
-envelope's `state_version` (SQLite `json_extract(metadata, '$.plugin_executor.state_version')`, PostgreSQL `(metadata::jsonb -> 'plugin_executor' ->> 'state_version')`); no index is
+absence. The readability count scans `executors_running` rows whose `runtime` column is `plugin_remote` (the `executors_running` table has no executor-type column; the same predicate as `ListExecutorsRunningPluginRemote`), filters by the envelope's installation, includes every row not yet confirmed destroyed (rows in `creating`, pending placement, and retained phases count too), and reads the
+envelope's `state_version`, falling back to the highest entry of `supported_state_versions`, and to 1 when both are absent (SQLite `json_extract(metadata, '$.plugin_executor.state_version')`, PostgreSQL `(metadata::jsonb -> 'plugin_executor' ->> 'state_version')`); no index is
 added because the scan is bounded by active and retained plugin environments.
 
 **Fence between activation and launch.** `checkStateWritable` runs in the admission write that creates the envelope and re-reads the installation's current readable list. Both the admission

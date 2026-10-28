@@ -80,6 +80,10 @@ task 16 is the cross-capability conformance run and the public documentation pas
 
 The native implementation lives on the contributor fork `nova28/kandev`, branch `feature/nomad-native-executor`, head `f0c3b0ab18` (fork PR 10). It is a source for ports (agentctl seal-and-drain, the launch-wrapper node-policy files `node_policy.go`, `node_policy_unix.go`, and `node_policy_other.go`) and is never merged. If it is unavailable, the work order writes the code from its design section. This is the only place in the plan that names it.
 
+## Build step
+
+The Build step keeps this one card and builds every work order in the order above (M7 first). Generic code comes from the closed upstream PR, preserved on the fork branch `feature/nomad-native-executor`, by cherry-pick: the agentctl drain, the crash barrier and guarded ready publication, the cleanup claim, and the local-worktree helpers only; nothing Nomad-specific. Record each cherry-picked hash and each deviation under "Build record" in this file, and give each new SQL path a SQLite and a PostgreSQL test.
+
 ## Release slices
 
 Each slice is shippable alone, keeps contract version 1, and ends with its fixture additions and a conformance run, so a later slice never changes an earlier one. A requirement of an unshipped slice stays `draft`.
@@ -88,7 +92,7 @@ Each slice is shippable alone, keeps contract version 1, and ends with its fixtu
 2. Shared environments, admission, and pending placement: 09, 10, 11.
 3. Operations, launch policy, and preparation hints: 12, 13, 14.
 4. Migration and coexistence: 15.
-5. Fixture proof and public documentation: 16 runs after each slice for that slice's capabilities and once at the end for the cross-capability pass.
+5. Fixture proof and public documentation: 16 depends on 15 and 17, so it runs once after slices 1 to 4 for the cross-capability pass; each earlier slice ships with its own fixture additions and conformance run.
 
 ## Scope
 

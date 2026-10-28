@@ -34,7 +34,7 @@ capability in the snapshot, it routes to **new** `attachSharedOwner`; otherwise 
 
 **Owner set.** Envelope fields `owners` (at most 16 entries `{owner_id, epoch}`), `share_epoch`, and `closing`. Every attach or release is one revision-checked write that bumps `share_epoch`. An attach is admitted only for the same owning principal, workspace, installation, profile, workspace identity, and repository set, and only when the environment is `ready` and not `closing`; the principal rule follows the [per-user ownership](per-user-ownership.md) design and refuses cross-principal sharing (answered by the owner on 2026-10-28: same principal only).
 
-**Rows.** `executors_running.session_id` is unique, so an environment with several owners spans several rows. The holder row (created with the environment) carries the owner set and `share_epoch`; each other owner's row carries `holder_row` and its own `instance_port`. An attach is one transaction: CAS the holder envelope (append owner, bump epoch) and insert the owner's row. A release is one transaction: CAS the holder (remove owner, bump epoch; if the set is empty also set `closing`) and delete or settle the owner's row; a holder whose own owner left stays as a record row until the set is empty. Releases come only from archive, delete, reset, and failed launch (AC 001.10), never from Stop.
+**Rows.** `executors_running.session_id` is unique, so an environment with several owners spans several rows. The holder row (created with the environment) carries the owner set and `share_epoch`; each other owner's row carries `holder_row` and its own `instance_port`. An attach is one transaction: CAS the holder envelope (append owner, bump epoch) and insert the owner's row. A release is one transaction: CAS the holder (remove owner, bump epoch; if the set is empty also set `closing`), release that owner's reservation once, and delete the owner's row. When the released owner is the holder's own, the holder row stays as the record and its `session_id` is re-keyed to `holder:`+environment ID in the same transaction (AC 001.11), so the session can launch again; the delete cascades skip rows with that prefix and the last release deletes the row. Owner rows and re-keyed holder rows carry a complete `plugin_executor` envelope, so `retainedExecutorProviderInventory` and the cleanup and recovery sweeps count each as a plugin row of the installation. An attach writes its owner row with phase `attaching` and the recovery pass releases an `attaching` owner that has no instance (AC 001.14). Candidates for a reuse request are ordered by holder `created_at` ascending, then `id` in byte order (AC 001.15). Each owner holds its own admission reservation (AC 001.13). Releases come only from archive, delete, reset, and failed launch (AC 001.10), never from Stop.
 
 **Release.** `releaseOwner` removes the entry and bumps the epoch in one CAS. If the set became empty it sets `closing` in the
 same write and starts the existing cleanup under a cleanup claim (`recoveryclaim`, keyed by the holder's task environment, with the releasing operation's ID). A release that loses the revision CAS re-reads and retries up to three times, then returns `conflict`; the cleanup sweep re-issues it. A release of an absent owner is a no-op, so replays are safe. Destroy carries `owner_count: 0` and the host refuses to
@@ -42,7 +42,7 @@ call destroy while any owner remains (AC 001.9). Per-owner instances: each owner
 released with the owner (AC 001.7); the control and instance port set of the tunnel grows to the recorded ports.
 
 **Fence.** Provider calls after an attach or release carry `{ownership_generation, share_epoch}`; the provider rejects a stale
-pair (the pair is already part of idempotency inputs, so retries stay safe). A provider declares `sharing_supported` and
+pair, which surfaces as `conflict` with no same-call retry (AC 001.12). A provider declares `sharing_supported` and
 `max_owners` in profile validation, and the host uses the lower cap (AC 001.8).
 
 **Provider guarantees** (documented in the authoring guide, asserted by the fixture): stable `workspace_identity` for the
@@ -56,11 +56,11 @@ and `Release(ctx, ReservationID)`. A `Decision` is allow, deny with a stable rea
 `Release` only informs the hook after the host released (best effort, failures logged). The default implementation allows everything with an empty scope (no reservation) and is used for providers that do not require
 `admission_context`. The hook runs from **new** `admitLaunch`, which `validateLaunch` calls after the capability gate and before any provider allocation call, from
 the first-launch, delayed-launch, and resume paths (one shared function, so a path cannot skip it; a test enumerates the callers of `validateLaunch`). Recovery of an already admitted environment does not call it.
-The order is fixed: capability gate (pure), label validation, `Admit` outside any transaction with a 5 s deadline, then one transaction that takes the scope lock, counts, and writes the reservation with the operation.
+Inputs: the resource class, priority, project and step IDs come from the sources of AC 001.10; the provider's `resource_classes` and `default_resource_class` are read from profile validation and the profile property `resource_class` is a normal schema property. The order is fixed: capability gate (pure), label validation, `Admit` outside any transaction with a 5 s deadline, then one transaction that takes the scope lock, counts, and writes the reservation with the operation.
 
 **Atomicity.** The reservation is inserted in the same transaction that creates the operation record, keyed by an
 `admission_scope` string (workspace, user, or project scope named by the hook and validated by the host as `[a-z0-9._:/-]{1,128}`). SQLite's immediate-mode writer serializes it.
-PostgreSQL takes `pg_advisory_xact_lock(hashtextextended('plugin_admission:'||scope, 0))`, a key derived by the host from the validated scope, before reading the count of live reservations. A new launch over the limit is `admission_denied` (`scope_full`). A reservation
+PostgreSQL takes `pg_advisory_xact_lock(hashtextextended('plugin_admission:'||scope, 0))`, a key derived by the host from the validated scope, before reading the count of live reservations. A new launch over the limit, or a limit of zero or less, is `admission_denied` (`scope_full`). A reservation
 is released exactly once by a `released` flag in the same write as the transition (terminal failure, destroy confirmation,
 cancel). Hook failure fails closed with `admission_unavailable` (AC 001.6).
 
@@ -86,6 +86,10 @@ completion first leaves a ready environment and the stop is an ordinary Stop tha
 If `CancelExecutorPlacement` errors or times out, the operation stays `cancelling`, the host retries with backoff to the placement deadline, then runs the recovery destroy by operation;
 `cancelled` is reported only after the provider says so or a destroy confirms absence (AC 001.4).
 
+**Continuation.** On a `placed` poll result the poller, holding the operation claim, runs the existing `finishPluginExecutorLaunch` path from the persisted operation: handshake with the stored nonce, instance creation, and the agent start with the prompt already stored on the session, so no user action is needed (AC 001.11). The session stays `STARTING` with the pending-placement label until ready. The nonce is stored with an expiry of `deadline_at` + 600 s.
+
+**Closed values and polling.** The reason codes, phases, position, and zero-interval rules are AC 001.10; the localized keys are `executors:pluginPlacement.<phase>` and `executors:pluginPlacement.reason.<code>`, with `unknown` for any other phase. The poller registry (`map[operationID]` under a mutex, compare-and-set on creation) gives one loop per operation per process (AC 001.12); poll errors retry at the interval, `not_found` and `denied` end as `placement_failed` plus the recovery destroy, and cancel retries back off 2 s doubling to 30 s.
+
 **Outcomes.** `capacity_refused`, `placement_failed`, and `placement_timeout` are distinct values of the existing failure code,
 each with its own user-visible message; none releases the admission reservation twice.
 
@@ -105,8 +109,8 @@ recovery or destroy can confirm absence (AC 002.4). The refusal is a distinct fa
 
 ## Data model
 
-No new table and no DDL. Envelope fields: `owners`, `share_epoch`, `closing`, `admission_scope`, `reservation`,
-`applied_resource_class`, `placement` (`state`, `reason`, `next_poll_at`, `deadline_at`, `phase`). They stay inside the per-field maxima of the [versioning design](remote-executor-plugin-capability-versioning.md#state-budget)
+No new table and no DDL. A `holder:` `session_id` value is data in the existing column. Envelope fields: `owners`, `share_epoch`, `closing`, `admission_scope`, `reservation`,
+`applied_resource_class`, `holder_row`, `role` (`holder` or `owner`), `phase` `attaching`, `placement` (`state`, `reason`, `next_poll_at`, `deadline_at`, `phase`). They stay inside the per-field maxima of the [versioning design](remote-executor-plugin-capability-versioning.md#state-budget)
 (owners 2048 bytes; placement, admission, and drain together 1536; labels are never stored). The reservation lives in the envelope of the same environment row, so its
 count query reads the rows by scope; a scope index is not added, and the count is bounded by the active environments of one scope.
 
@@ -132,6 +136,14 @@ count query reads the rows by scope; a scope index is not added, and the count i
 | Refusal after a checkpoint was recorded (002.3) | `conflict`; recovery runs | lifecycle unit |
 | Lost reply or timeout on provision (002.4) | treated as failure, never as refusal; recovery decides | lifecycle unit with fault-injecting client |
 | Pending response from a provider without the capability (001.8) | `conflict`, cleanup | lifecycle unit |
+| Holder owner released while others remain, then its session launches again (SHARED 001.11) | holder row re-keyed; the new launch inserts its own owner row with no `session_id` collision; the last release deletes the record row | sqlite and PostgreSQL |
+| Task delete of the holder's task while owners remain (001.11) | owner released first; record row survives the cascade until the last release | store unit |
+| Uninstall or upgrade with owner and re-keyed rows present (001.11) | rows counted once as retained inventory of the installation | guard unit |
+| Attach commits, backend dies before the instance exists (001.14) | recovery releases the `attaching` owner and its reservation once | barrier e2e; sqlite and PostgreSQL |
+| In-flight provider call carries an epoch that another attach advanced (001.12) | `conflict`; no write over the newer epoch | fixture conformance |
+| Attach for a non-last owner release, then destroy (001.13) | each owner's reservation released once at its own release | lifecycle unit |
+| Poll returns `not_found`, `unavailable`, zero interval (PLACEMENT 001.12, 001.10) | `placement_failed` plus recovery destroy; retry to the deadline; 5 s default | lifecycle unit with fake clock |
+| Placement completes after a restart (001.11) | launch continues from the persisted operation and the agent starts with the stored prompt | barrier e2e (`after_placement_persist`) |
 
 Each test is written first and fails on main. Remaining ACs are table tests (label rules, class checks, owner caps) and the
 Playwright spec.
