@@ -1569,6 +1569,8 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
+	// Position is the repository's task position; nil when none is recorded.
+	Position           *int
 	TaskRepositoryID   string
 	RepositoryID       string
 	RepositoryPath     string

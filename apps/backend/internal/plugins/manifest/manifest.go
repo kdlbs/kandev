@@ -187,6 +187,10 @@ type ExecutorProvider struct {
 	// RuntimeAPIURL is how the worker reaches the Kandev API: host_public (the
 	// default) or provider_forwarded, which requires api_url_forward.
 	RuntimeAPIURL string `yaml:"runtime_api_url,omitempty" json:"runtime_api_url,omitempty"`
+	// WorkspacePreparation is who materializes repositories: core (the
+	// default, through agentctl) or provider, which requires repository_intent
+	// and workspace_descriptor.
+	WorkspacePreparation string `yaml:"workspace_preparation,omitempty" json:"workspace_preparation,omitempty"`
 	// RequiresHostCapabilities lists the opt-in host capabilities this
 	// provider needs, each pinned to one version of the host registry.
 	RequiresHostCapabilities []HostCapabilityRequirement  `yaml:"requires_host_capabilities,omitempty" json:"requires_host_capabilities,omitempty"`

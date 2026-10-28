@@ -262,6 +262,9 @@ func (r *PluginRemoteExecutor) attachAndVerifyRecoveredPluginExecutor(
 	if _, err := resolvePluginExecutorWorkspace(state.inventory.NegotiatedCapabilities, state.inventory.WorkspaceDescriptor, attachedResource); err != nil {
 		return nil, nil, false, err
 	}
+	if err := verifyRecoveredPluginExecutorRepositories(state.inventory, attachedResource); err != nil {
+		return nil, nil, false, err
+	}
 	if attachedResource.GetResourceHandle() != resource.GetResourceHandle() || attachedResource.GetStateVersion() != resource.GetStateVersion() {
 		return nil, nil, false, errors.New("provider attachment changed the recorded resource identity")
 	}

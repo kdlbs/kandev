@@ -37,7 +37,7 @@ var hostFieldBudget = []hostFieldGroup{
 		"last_inspection_state", "revision", "generation", "environment_generation", "resource",
 	}},
 	{name: "workspace_descriptor", max: 1792, keys: []string{"workspace_descriptor"}},
-	{name: "negotiation", max: 1024, keys: []string{"negotiated_capabilities", "state_version", "profile_snapshot_digest"}},
+	{name: "negotiation", max: 1024, keys: []string{"negotiated_capabilities", "state_version", "profile_snapshot_digest", "workspace_preparation"}},
 	{name: "repositories", max: 8192, keys: []string{"repositories"}},
 	{name: "headroom", max: 2048, keys: nil},
 	{name: "coordination", max: 1536, keys: []string{

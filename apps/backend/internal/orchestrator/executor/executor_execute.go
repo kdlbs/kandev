@@ -2944,7 +2944,9 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	branchPlans := buildRepoBranchPlans(allRepos)
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
+		position := info.Position
 		spec := RepoSpec{
+			Position:                   &position,
 			TaskRepositoryID:           info.TaskRepositoryID,
 			RepositoryID:               info.RepositoryID,
 			RepositoryPath:             info.RepositoryPath,

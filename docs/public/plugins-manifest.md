@@ -492,6 +492,32 @@ gets a new lease and stream, and a mutating HTTP request is not replayed. An
 environment may hold at most 64 open streams across both ports, in frames of
 at most 64 KiB; the 65th open fails as `rate_limited`.
 
+The executor provider key `workspace_preparation` is `core` (the default) or
+`provider`. With `core`, Kandev materializes repositories through the agent
+runtime as it always has. With `provider`, the manifest must also require
+`repository_intent` and `workspace_descriptor`, the provider prepares the
+repositories inside the workspace path, and Kandev neither clones nor fetches
+into that workspace. The mode is fixed when the environment is allocated and
+reused on recovery. A provider that requires `repository_intent` receives, in
+the provision request, one intent entry per repository (ID, a locator without
+credentials, branch, base branch and checkout ref; unset values are empty
+strings), ordered by repository position and then ID, at most 32 entries and
+2048 bytes per locator, plus an `agent_env` map of non-secret entries (at most
+64 entries and 16 KiB: the profile's plain environment variables and a fixed
+set of `KANDEV_*`, `LANG`, `LC_ALL` and `TZ` names; any name containing
+`TOKEN`, `SECRET`, `PASSWORD`, `KEY` or `CREDENTIAL`, and every managed
+credential, is dropped). A set over a limit fails the launch as
+`invalid_config`. The intent is part of the operation input digest, so the same
+operation ID with a changed intent returns `conflict`. For a provider-prepared
+workspace the provider reports each repository's ID, a path inside the
+workspace, branch and head commit; Kandev requires the reported set to equal
+the intent (no missing, extra or duplicate entry), paths inside the workspace,
+full head commits and the approved branch, and otherwise cleans up with the
+cleanup reason `repository_inventory_mismatch`. Recovery re-checks the set,
+path containment and commit format. A launch that selects managed Git
+credentials is rejected before allocation when the provider prepares the
+workspace: provider preparation uses executor-owned credentials only.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.

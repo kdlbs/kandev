@@ -276,6 +276,7 @@ func (r *PluginRemoteExecutor) publishRecoveredPluginExecutor(ctx context.Contex
 		Claim: claim, SessionID: record.SessionID, EnvironmentID: state.inventory.EnvironmentID,
 		OperationID: state.inventory.OperationID, RuntimeIdentity: pluginExecutorRuntimeIdentity(state.inventory, record.AgentExecutionID),
 		OwnershipGeneration: state.inventory.EnvironmentGeneration, ExpectedRevision: current.Revision,
+		Repos: publishedPluginExecutorRepos(current),
 	})
 	return err
 }

@@ -52,6 +52,7 @@ func (s *Service) ListExecutorProviders(ctx context.Context) ([]models.ExecutorP
 				StateBudgetBytes:       declared.StateBudgetBytes,
 				DestroyTimeoutSeconds:  declared.DestroyTimeoutSeconds,
 				RuntimeAPIURL:          declared.RuntimeAPIURL,
+				WorkspacePreparation:   declared.WorkspacePreparation,
 				DisplayName:            declared.DisplayName,
 				Description:            declared.Description,
 				LocalizedMessages:      localizedMessages,

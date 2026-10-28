@@ -1907,6 +1907,29 @@ message ExecutorResourceDescriptor {
   // declared the workspace_descriptor capability.
   string workspace_path = 8;
   string workspace_identity = 9;
+  // repositories is set only by a provider with workspace_preparation
+  // provider: the repositories it prepared inside workspace_path.
+  repeated ExecutorRepositoryState repositories = 10;
+}
+
+// ExecutorRepositoryIntent is one repository the host approved for a
+// provider-prepared workspace. The locator never carries a credential.
+message ExecutorRepositoryIntent {
+  string id = 1;
+  string locator = 2;
+  string branch = 3;
+  string base_branch = 4;
+  string checkout_ref = 5;
+}
+
+// ExecutorRepositoryState is what a provider reports for one repository it
+// prepared: a path inside workspace_path, the checked-out branch and the head
+// commit.
+message ExecutorRepositoryState {
+  string id = 1;
+  string path = 2;
+  string branch = 3;
+  string head_commit = 4;
 }
 
 // ExecutorHostCapability is one row of the host capability registry offered
@@ -1942,6 +1965,10 @@ message ProvisionExecutorEnvironmentRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorProfileSnapshot profile = 2;
   string bootstrap_json = 3;
+  // repositories and agent_env are sent only to a provider that requires the
+  // repository_intent capability.
+  repeated ExecutorRepositoryIntent repositories = 4;
+  map<string, string> agent_env = 5;
 }
 
 message ProvisionExecutorEnvironmentResponse {
