@@ -20,6 +20,12 @@ const (
 // refuses every URL that is not the ping route, so it cannot be used to
 // reach another service from the worker.
 func (m *ControlServer) handleHostAPIProbe(c *gin.Context) {
+	// Control auth permits unauthenticated local use when no credential was
+	// configured. The probe makes an outbound request, so it requires one.
+	if m.credentials.Latest() == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{errKey: "host API probe requires control credentials"})
+		return
+	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxHostAPIProbeBytes)
 	var req agentctltypes.HostAPIProbeRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Token == "" || !isHostAPIPingURL(req.URL) {
