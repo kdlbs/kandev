@@ -12,6 +12,7 @@ const (
 	CommandRun   Command = "run"
 	CommandStart Command = "start"
 	CommandDev   Command = "dev"
+	flagJSON             = "--json"
 )
 
 type Options struct {
@@ -21,6 +22,7 @@ type Options struct {
 	Verbose     bool
 	Debug       bool
 	ShowVersion bool
+	VersionJSON bool
 	Headless    bool
 	ShowHelp    bool
 }
@@ -44,6 +46,9 @@ func parseArgs(argv []string) (Options, error) {
 	}
 	if opts.WebPort != 0 && opts.Command != CommandDev {
 		return opts, ParseError{Message: "--web-internal-port only applies to dev mode"}
+	}
+	if opts.VersionJSON && !opts.ShowVersion {
+		return opts, ParseError{Message: "--json requires --version"}
 	}
 	return opts, nil
 }
@@ -86,6 +91,8 @@ func parseBooleanFlag(arg string, opts *Options) bool {
 		opts.ShowHelp = true
 	case "--version", "-V":
 		opts.ShowVersion = true
+	case flagJSON:
+		opts.VersionJSON = true
 	case "--verbose", "-v":
 		opts.Verbose = true
 	case "--debug":

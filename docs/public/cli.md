@@ -196,7 +196,14 @@ kandev service <action> [service options]
 | `--verbose`, `-v`            | Show backend info output.                                                                                                                           |
 | `--debug`                    | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
 | `--version`, `-V`            | Print the native runtime version.                                                                                                                   |
+| `--json`                     | With `--version` or `-V`, print build identity as JSON.                                                                                            |
 | `--help`, `-h`, `help`       | Print help.                                                                                                                                         |
+
+Use `kandev --version --json` to print one JSON object: `version` matches plain
+`--version`, `commit` identifies the source revision, and `build_time` is the
+build timestamp. An unstamped build uses `dev` for an empty version and
+`unknown` for missing commit or build time stamps. This command does not start
+Kandev.
 
 These commands and options describe the installed native launcher. Unknown arguments fail with exit status 2. In particular, the npm and Homebrew release entrypoints currently invoke that native launcher, which does **not** support `dev`, `--dev`, `--runtime-version`, `--web-internal-port`, or the removed `--web-port` spelling. The source-checkout development launcher has a separate contract described below.
 
