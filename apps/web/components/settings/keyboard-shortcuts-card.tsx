@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconAlertTriangle, IconRotate, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -72,6 +72,10 @@ export function ShortcutRecorder({
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!recording) return;
+      if (e.target instanceof HTMLElement && e.target.dataset.shortcutFilter === "true") {
+        setRecording(false);
+        return;
+      }
       if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return;
       if (shortcutId.startsWith("integration:") && isFocusTraversalKey(e)) {
         setRecording(false);
@@ -389,9 +393,12 @@ function ShortcutFilter({
   onQueryChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="mb-3 flex min-w-0 items-center gap-2">
       <Input
+        ref={inputRef}
+        data-shortcut-filter="true"
         value={query}
         onChange={(event) => onQueryChange(event.target.value)}
         placeholder={t("common:searchEllipsis")}
@@ -403,7 +410,10 @@ function ShortcutFilter({
           variant="ghost"
           size="icon"
           className={controlSizingClassName("icon", "shrink-0 cursor-pointer")}
-          onClick={() => onQueryChange("")}
+          onClick={() => {
+            onQueryChange("");
+            inputRef.current?.focus();
+          }}
           aria-label={t("tasks:clearSearch")}
           title={t("tasks:clearSearch")}
         >

@@ -181,8 +181,9 @@ mobile UI language and control-sizing references.
 - Frozen workspace install passed with pnpm 9.15.9. The first attempt failed
   before installation because PATH selected Node's Corepack pnpm 12.4.2;
   placing the pinned pnpm first resolved it.
-- Mounted-card RED failed because the search textbox was absent; GREEN passed
-  12 tests. Focused lint passed. Typecheck passed with an 8 GiB Node heap after
+- Mounted-card RED failed because the search textbox was absent; GREEN passed.
+  Review remediation added two focus regressions: both failed before the fix;
+  the final component suite passed 14 tests. Focused lint passed. Typecheck passed with an 8 GiB Node heap after
   the default 4 GiB heap exhausted. i18n check and ratchet, public-doc tests and
   validator, specification catalog and lint tests/linter, and diff check passed.
 - Backend/delivery fixture, web E2E and plugin package builds passed at the
@@ -198,3 +199,8 @@ mobile UI language and control-sizing references.
 - Fresh open-PR inventory covered 131 PRs and 188 file pages. Only three public
   document overlaps appeared; their inspected patches affected other sections.
   Repeat the inventory before publication if it becomes stale.
+
+- Review remediation yields filter keystrokes from an active recorder and
+  restores search focus after clear. Rebuilt web assets and reran the existing
+  two Chromium and one mobile-chrome scenarios with real typing and clear focus;
+  all passed. Fresh desktop and phone captures were inspected.

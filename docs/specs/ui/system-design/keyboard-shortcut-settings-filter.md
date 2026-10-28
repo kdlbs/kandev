@@ -36,9 +36,11 @@ registrations update naturally. Preserve their original relative ordering.
 plugin entries, and overrides, and derive its core entries independently of the
 visible lists. Apply the query only to rendered rows, never to conflict inputs or
 the override map. The input and clear handlers set only local query state; existing
-record, reset, clear, and parent `onChange` paths remain unchanged. Unmounting a
-filtered recorder must not discard an already recorded route draft. Do not infer
-that an active recorder survives being hidden; ordinary recorder cleanup applies.
+record, reset, clear, and parent `onChange` paths remain unchanged. When the filter receives a key event while a recorder is active, the recorder
+ends capture and yields that event to the input without modifying an override.
+Clearing the query restores focus to the input. Unmounting a filtered recorder
+must not discard an already recorded route draft; ordinary recorder cleanup
+applies.
 
 Use shared `Input` and `Button`, existing `settings:searchShortcuts`,
 `settings:noMatchingShortcuts`, and suitable existing common search/clear copy.
