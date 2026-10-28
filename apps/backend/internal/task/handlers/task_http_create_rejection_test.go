@@ -108,3 +108,24 @@ func TestHandleTaskCreateFailure_StaleBranchPolicyCarriesRejection(t *testing.T)
 	assert.Equal(t, true, resp["creation_rejected"])
 	assert.Equal(t, service.BranchPolicyStaleErrorCode, resp["error_code"])
 }
+
+// TestHandleTaskCreateFailure_RepositoryProviderUnavailableCarriesRejection
+// keeps a typed provider-unavailable reference failure correctable: the
+// request was rejected before allocation even though its HTTP status is 503.
+func TestHandleTaskCreateFailure_RepositoryProviderUnavailableCarriesRejection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	err := &service.PreAllocationTaskCreateError{
+		Cause: &service.RepositorySelectionError{Code: service.RepositorySelectionErrorUnavailable},
+	}
+	require.True(t, isPreAllocationCreateRejection(err))
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	handleTaskCreateFailure(c, newTestLogger(t), err)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, "body: %s", rec.Body.String())
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, true, resp["creation_rejected"])
+	assert.Equal(t, string(service.RepositorySelectionErrorUnavailable), resp["error_code"])
+}

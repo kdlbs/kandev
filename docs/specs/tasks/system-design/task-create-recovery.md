@@ -143,6 +143,8 @@ Safe evidence includes handler validation before `Service.CreateTask` and typed
 `PreAllocationTaskCreateError` for an allowlisted validation or reference failure.
 A stale branch policy is one allowlisted rejection: its `branch_policy_stale` code is
 preserved, the browser refreshes policy choices, and only a first unresolved attempt retires.
+A typed repository-provider unavailable reference failure is also pre-allocation, so its
+existing 503 status and `repository_selection_unavailable` code carry the marker.
 Use the existing marker rather than inferring allocation from an error message.
 Generic 4xx, database errors, request cancellation, and post-create failures carry no marker.
 An attachment, fresh-branch, session-prepare, or settlement error after allocation is not a rejection.

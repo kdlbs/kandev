@@ -54,10 +54,7 @@ func isPreAllocationCreateRejection(err error) bool {
 		return true
 	}
 	var selectionErr *service.RepositorySelectionError
-	if errors.As(err, &selectionErr) {
-		return selectionErr.Code != service.RepositorySelectionErrorUnavailable
-	}
-	return false
+	return errors.As(err, &selectionErr)
 }
 
 // handleTaskCreateFailure writes the response for a create request that
