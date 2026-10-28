@@ -77,7 +77,7 @@ git diff --check
 
 - `apps/web/components/quick-chat/quick-chat-delete-dialog.tsx` and its test
 - `apps/web/components/quick-chat/quick-chat-modal.tsx`, `use-quick-chat-modal.ts`, `use-quick-chat-close-actions.ts` and related tests
-- `apps/web/components/quick-chat/quick-chat-creation-status.tsx`, `use-quick-chat-creation.ts` and related tests
+- `apps/web/components/quick-chat/quick-chat-creation-status.tsx`, `use-quick-chat-creation.ts`, `use-quick-chat-agent-selection.ts` and related tests
 - `apps/web/lib/api/task-delete-errors.ts` for preview conflict classification
 - `apps/web/components/task/task-delete-confirm-dialog.tsx` if shared confirmation reuse needs an adapter
 - `apps/web/e2e/tests/chat/quick-chat.spec.ts`, `mobile-quick-chat-repository.spec.ts`
@@ -104,10 +104,13 @@ Sequential.
 
 ## Results
 
-Completed. The focused Vitest suite passed (91 tests); the task deletion
+Completed. The focused Vitest suite passed (92 tests); the task deletion
 service tests, TypeScript check with a 7 GiB Node heap, changed-file ESLint,
 localization checks, public-doc validation, and specification checks passed.
 The desktop and phone E2E scenarios passed against a fresh production build;
 the phone geometry assertion waits for dialog animations to settle. The first
 typecheck exceeded Node's default heap and the first phone geometry rerun
 measured during animation; both passed after those issues were addressed.
+The review correction exercised the actual setup-error reporter with stale
+preview and dirty-worktree failures; the focused suite, desktop/phone E2E,
+typecheck, localization ratchet, and changed-file lint passed again.

@@ -8,6 +8,10 @@ import {
   type QuickChatRepositoryInput,
 } from "@/lib/api/domains/workspace-api";
 import { ApiError } from "@/lib/api/client";
+import {
+  isTaskDeleteDirtyWorktreeError,
+  isTaskDeletePreviewOutdatedError,
+} from "@/lib/api/task-delete-errors";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import type { QuickChatOpeningPayload } from "@/lib/state/slices/ui/types";
@@ -195,7 +199,13 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   const { pendingAgentId, setPendingAgentId, setupError, setSetupError, latestRequestId, reset } =
     requestState;
   const reportSetupError = useCallback(
-    (error: unknown) => setSetupError(setQuickChatSetupError(error) ?? t("chat:unknownError")),
+    (error: unknown) => {
+      if (isTaskDeletePreviewOutdatedError(error))
+        return setSetupError(t("task:deletePreflightError"));
+      if (isTaskDeleteDirtyWorktreeError(error))
+        return setSetupError(t("task:deleteDirtyWorktreeDescription"));
+      setSetupError(setQuickChatSetupError(error) ?? t("chat:unknownError"));
+    },
     [setSetupError, t],
   );
 

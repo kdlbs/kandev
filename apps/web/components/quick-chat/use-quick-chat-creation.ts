@@ -4,12 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useAppStore } from "@/components/state-provider";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import { ApiError } from "@/lib/api/client";
-import {
-  isTaskDeleteDirtyWorktreeError,
-  isTaskDeletePreviewOutdatedError,
-} from "@/lib/api/task-delete-errors";
 import { deleteTask, type DeleteTaskParams } from "@/lib/api/domains/kanban-api";
-import { i18n } from "@/lib/i18n";
 import {
   getQuickChatCreation,
   type QuickChatCreationStatusResponse,
@@ -310,14 +305,6 @@ function restoreAcceptedDraft(sessionId: string, pending: PendingQuickChatCreati
   setChatDraftAttachments(sessionId, toQuickChatDraftAttachments(pending.attachments));
 }
 
-function quickChatDeletionError(error: unknown): unknown {
-  if (isTaskDeletePreviewOutdatedError(error))
-    return new Error(i18n.t("task:deletePreflightError"));
-  return isTaskDeleteDirtyWorktreeError(error)
-    ? new Error(i18n.t("task:deleteDirtyWorktreeDescription"))
-    : error;
-}
-
 function useQuickChatCreationSubmission(
   args: QuickChatCreationArgs,
   check: (pending?: PendingQuickChatCreation) => Promise<void>,
@@ -411,7 +398,7 @@ function useQuickChatCreationSubmission(
         await deleteTask(pending.taskId, options);
         clearPendingCreation(pending.creationId);
       } catch (error) {
-        quickChat.reportSetupError(quickChatDeletionError(error));
+        quickChat.reportSetupError(error);
       }
     },
     [clearPendingCreation, pendingCreation, quickChat],

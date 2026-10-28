@@ -29,6 +29,7 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
 }));
 
 import { useQuickChatCreation } from "./use-quick-chat-creation";
+import { useAgentSelection } from "./use-quick-chat-agent-selection";
 import { useQuickChatSetupDraft } from "./use-quick-chat-setup-draft";
 
 const WORKSPACE_ID = "workspace-creation";
@@ -54,7 +55,9 @@ function makeQuickChat(isOpen = true) {
   };
 }
 
-function useCreationHarness(quickChat = makeQuickChat()) {
+function useCreationHarness(
+  quickChat: Parameters<typeof useQuickChatCreation>[0]["quickChat"] = makeQuickChat(),
+) {
   const setupDraft = useQuickChatSetupDraft(WORKSPACE_ID, USER_ID);
   const creation = useQuickChatCreation({
     workspaceId: WORKSPACE_ID,
@@ -508,8 +511,30 @@ it("keeps the receipt and reports a deletion failure", async () => {
   expect(reportSetupError).toHaveBeenCalledWith(expect.any(ApiError));
 });
 
-it("keeps the receipt and explains how to retry an outdated preview", async () => {
-  const { result } = renderHook(() => useCreationHarness());
+it.each([
+  [
+    "outdated preview",
+    new ApiError("task deletion preview is no longer current", 409, {
+      error: "task deletion preview is no longer current",
+    }),
+    "Try again",
+  ],
+  [
+    "dirty worktree",
+    new ApiError("task worktree contains local changes", 409, {
+      error_code: "task_delete_dirty_worktree",
+    }),
+    "select discard",
+  ],
+])("keeps the receipt and explains how to retry a %s", async (_case, failure, expected) => {
+  const { result } = renderHook(() => {
+    const reporter = useAgentSelection(WORKSPACE_ID, {} as Parameters<typeof useAgentSelection>[1]);
+    const harness = useCreationHarness({
+      ...makeQuickChat(),
+      reportSetupError: reporter.reportSetupError,
+    });
+    return { ...harness, setupError: reporter.setupError };
+  });
   act(() =>
     result.current.setupDraft.beginPendingCreation(openingPayload("Keep this chat"), "agent-1", []),
   );
@@ -517,16 +542,10 @@ it("keeps the receipt and explains how to retry an outdated preview", async () =
   act(() =>
     result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: DELETE_TASK_ID }),
   );
-  deleteTask.mockRejectedValueOnce(
-    new ApiError("task deletion preview is no longer current", 409, {
-      error: "task deletion preview is no longer current",
-    }),
-  );
+  deleteTask.mockRejectedValueOnce(failure);
   await act(async () => result.current.creation.remove({ confirmationId: "expired" }));
   expect(result.current.setupDraft.pendingCreation).toMatchObject({
     creationId: pending.creationId,
   });
-  expect(reportSetupError).toHaveBeenCalledWith(
-    expect.objectContaining({ message: expect.stringContaining("Try again") }),
-  );
+  expect(result.current.setupError).toContain(expected);
 });
