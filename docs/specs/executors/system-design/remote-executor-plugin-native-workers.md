@@ -41,8 +41,8 @@ cleanup admission. The provider keeps placement, worker transport, provider fenc
 ## Decisions
 
 The owner confirmed D1, D2, D3, and D6 on 2026-10-28; the others are settled here. The capability registry, negotiation, and
-versioning are specified first in the [versioning design](remote-executor-plugin-capability-versioning.md); shared environments, admission,
-and placement in the [shared design](remote-executor-plugin-shared-admission-placement.md); operations, launch policy, preparation hints,
+versioning are specified first in the [versioning design](remote-executor-plugin-capability-versioning.md); admission
+and placement in the [admission design](remote-executor-plugin-admission.md); operations, launch policy, preparation hints,
 and migration in the [operations design](remote-executor-plugin-operations-migration.md).
 
 | # | Decision | Rationale |
@@ -111,7 +111,7 @@ checks, `base_url` must be empty, and header rules still apply. `agentctl` build
 dialer use it with a synthetic authority that is never resolved. The dialer checks the requested port against
 `{control port, recorded instance port}` before opening a stream, writes nothing before the acknowledgement, and
 closes the stream when the request context ends. A tunnel registry keyed by installation, environment, generation
-counts streams (limit 64 per environment across all owners and ports) and closes all on dispatch generation change, disable, plugin exit, or environment release. A shared-environment attach or release neither closes nor re-binds other owners' streams or leases (`share_epoch` is not part of a stream binding); a release closes only the streams on the released owner's recorded port, and the provider-side fence of the shared design covers provider calls only.
+counts streams (limit 64 per environment across its control and instance ports) and closes all on dispatch generation change, disable, plugin exit, or environment release. A provider call that leaves the ownership generation unchanged neither closes nor re-binds streams or leases.
 Gateway `vscode_proxy.go`, `port_proxy.go`, and `port_tunnel.go` already obtain the lease transport; they take the
 tunnel dialer from the same resolver. Authentication to agentctl stays the host-applied bearer token.
 

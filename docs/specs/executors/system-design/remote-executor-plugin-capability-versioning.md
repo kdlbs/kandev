@@ -13,7 +13,7 @@ requirements:
 ## Purpose and boundaries
 
 One registry, one negotiation point, one pinned snapshot. This design is built first: every other capability in the
-[native worker design](remote-executor-plugin-native-workers.md), the [shared, admission, and placement design](remote-executor-plugin-shared-admission-placement.md),
+[native worker design](remote-executor-plugin-native-workers.md), the [admission and placement design](remote-executor-plugin-admission.md),
 and the [operations and migration design](remote-executor-plugin-operations-migration.md) is a registry entry. Names
 marked **new** do not describe existing APIs. The base [plugin design](remote-executor-plugins.md) keeps the RPCs,
 leases, and inventory; the provider contract version stays 1.
@@ -40,8 +40,7 @@ golden file) and fails on removal or reuse, mirroring the runtime-flag retired i
 
 `requires_host_capabilities` becomes a list of `{name, version}` objects in `executor_providers[]`, validated in
 `internal/plugins/manifest/executor_provider.go`. Rules: closed names, no duplicates, integer version in the registry
-range, dependency closure (`provider_maintenance` needs `provider_operations`; `workspace_sharing` needs
-`workspace_descriptor`; `pending_placement` needs `destroy_checkpoints`, `provision_refusal`, and `durable_bootstrap` (a queued launch outlives the backend process, so its bootstrap nonce must be persisted); `launch_policy` needs `workspace_descriptor`;
+range, dependency closure (`provider_maintenance` needs `provider_operations`; `pending_placement` needs `destroy_checkpoints`, `provision_refusal`, and `durable_bootstrap` (a queued launch outlives the backend process, so its bootstrap nonce must be persisted); `launch_policy` needs `workspace_descriptor`;
 `preparation_hints` needs `repository_intent`; `typed_profile_values` and `secret_references` need none; `provision_refusal` needs `destroy_checkpoints`). `state_schema` is `{current, min_readable}`, absent meaning `1/1`. `min_kandev_version` must be at least the highest `introduced_in` release among the declared capabilities (AC 002.6); the existing generic minimum-version check then makes an older host refuse the package with a clear message. Cross-field
 rules from the native design (preparation mode, API URL mode, destroy timeout) stay and consult the same registry.
 
@@ -85,11 +84,11 @@ enforced where it is written, so the reserve cannot be exceeded by data the prov
 
 | Host field | Maximum (bytes) |
 | --- | --- |
-| existing fields, with `profile_config` plus `secret_references` at most 4096 together (checked at profile save and launch validation as the field error `profile_too_large`, AC PROFILE 001.8) | 5888 |
+| existing fields, with `profile_config` (all provider-facing keys including the document-set keys of AC PROFILE 001.8) plus `secret_references` at most 4096 together (checked at profile save and launch validation as the field error `profile_too_large`, AC PROFILE 001.8) | 5888 |
 | workspace descriptor (`workspace_path` at most 1024, identity 128, preparation, platform), stored once in the envelope; the resource descriptor copy is stripped before persisting | 1792 |
 | `negotiated_capabilities`, `state_version`, `profile_snapshot_digest` (64) | 1024 |
 | `repositories`: 32 entries of `id` (at most 36), `relative_path` (at most 96), `head_commit` (at most 64) only; the branch is verified but not stored | 8192 |
-| `owners` (16 entries) and share fields (`share_epoch`, `closing`, `holder_row`, `role`, `owner_phase`) | 2048 |
+| unallocated headroom (no field is written here; reserved so that a later capability, such as the deferred shared environments, does not move the cap) | 2048 |
 | `placement`, `admission` (`admission_scope`, `reservation`, `applied_resource_class`), drain fields, `authority`, `launch_policy` outcome, claim fields (kind, last sequence, digest), `cleanup_requested`, `handshake_started`, `phase` | 1536 |
 
 The maxima sum to exactly 20480. Every envelope field the host writes has an entry in `hostFieldBudget` (a test fails when a field has no entry); `supported_state_versions` is capped at 16 entries inside the first row, and the strategy label of AC PREPARATION 001.3 is stored once as `preparation_strategy` (at most 64 bytes) inside the workspace descriptor row. A checkpoint's provider state replaces the recorded state and is measured against `state_budget_bytes` exactly like a provision response (`state_too_large` otherwise). The budget table lives in code (`hostFieldBudget`), and a unit test asserts that its sum is at most 20480. A relative path over 96 bytes or an `id` over 36 bytes in a provider response

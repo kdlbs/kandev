@@ -4,7 +4,7 @@ title: "Launch and resume admission context (M2)"
 status: pending
 wave: 6
 depends_on:
-  - "09"
+  - "08"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-PLUGIN-ADMISSION-001
@@ -20,7 +20,7 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.9
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.10
 system_design:
-  - ../../specs/executors/system-design/remote-executor-plugin-shared-admission-placement.md
+  - ../../specs/executors/system-design/remote-executor-plugin-admission.md
 ---
 
 # Task 10: Launch and resume admission context (M2)
