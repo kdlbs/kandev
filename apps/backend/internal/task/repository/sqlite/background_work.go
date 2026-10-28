@@ -10,7 +10,6 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -146,27 +145,8 @@ func (r *Repository) initBackgroundWorkSchema() error {
 	if dialect.IsPostgres(r.db.DriverName()) {
 		schema = postgresBackgroundWorkSchema
 	}
-	if _, err := r.db.Exec(schema); err != nil {
-		return err
-	}
-	// Capability declarations are adapter evidence consumed by the read path.
-	// The CREATE TABLE above only helps fresh databases; existing rows and
-	// tables need the additive migration.
-	exists, err := db.ColumnExistsContext(
-		r.migrationContext(), r.db, "task_session_background_work", "capabilities",
-	)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		if err := r.migrate.Apply(
-			"task_session_background_work.capabilities",
-			`ALTER TABLE task_session_background_work ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`,
-		); err != nil {
-			return err
-		}
-	}
-	return r.migrate.Err()
+	_, err := r.db.Exec(schema)
+	return err
 }
 
 func (r *Repository) UpsertBackgroundWorkload(ctx context.Context, workload *models.BackgroundWorkload) error {

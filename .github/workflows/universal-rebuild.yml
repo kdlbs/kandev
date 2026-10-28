@@ -47,6 +47,8 @@ jobs:
       STAGING_IMAGE: ghcr.io/kdlbs/kandev:universal-staging-weekly-${{ github.run_id }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Compute date tag
         id: date
@@ -109,9 +111,11 @@ jobs:
       # Promote: metadata-only retag from staging to the user-facing tags.
       # If any earlier step fails, the previous :universal stays in place.
       - name: Promote staging to final tags
+        env:
+          DATE_TAG: ${{ steps.date.outputs.tag }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "ghcr.io/kdlbs/kandev:universal" \
-            --tag "ghcr.io/kdlbs/kandev:universal-weekly-${{ steps.date.outputs.tag }}" \
+            --tag "ghcr.io/kdlbs/kandev:universal-weekly-${DATE_TAG}" \
             "$STAGING_IMAGE"

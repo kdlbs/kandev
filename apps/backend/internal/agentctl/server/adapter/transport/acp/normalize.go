@@ -323,6 +323,9 @@ func isEmptyGenericInputValue(v any) bool {
 func stampBackgroundShellWork(agentID string, payload *streams.NormalizedPayload) {
 	if backgroundlaunch.RecognizesDetachedLaunch(agentID, payload) {
 		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
+		// ACP shell producers expose launch identity only: no output stream and
+		// no process controls are available through this transport.
+		payload.SetBackgroundWorkCapabilities(streams.InspectionOnlyWorkloadCapabilities())
 	}
 }
 
@@ -698,6 +701,7 @@ func stampSubagentBackgroundWork(payload *streams.NormalizedPayload, agentID str
 		detached,
 		ended,
 	)
+	payload.SetBackgroundWorkCapabilities(streams.InspectionOnlyWorkloadCapabilities())
 }
 
 func subagentStatusTerminal(status string) bool {

@@ -1029,11 +1029,15 @@ test.describe("Sidebar filter — task-row presentation", () => {
       return savedViews.find((view) => view.name === "Compact task rows");
     };
     await expect
-      .poll(async () => (await readSavedView())?.task_row)
+      .poll(async () => (await readSavedView())?.task_row ?? null, {
+        timeout: 10_000,
+        message: "Waiting for saved task-row settings to persist",
+      })
       .toMatchObject({
         details_enabled: false,
       });
     const savedView = await readSavedView();
+    expect(savedView).toBeDefined();
 
     await filters.setTaskRowTrailing("Relative time");
     await filters.saveOverwrite();

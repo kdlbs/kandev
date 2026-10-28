@@ -161,7 +161,7 @@ function agentCards(
   const orphans: AgentCard[] = orphanedAgents(installedAgents, savedAgents)
     .filter((agent) => agent.name !== DYNAMIC_AGENT_NAME)
     .map((agent) => ({
-      key: agent.id,
+      key: agent.name,
       agent: {
         name: agent.name,
         supports_mcp: agent.supports_mcp,

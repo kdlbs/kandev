@@ -272,3 +272,11 @@ existing handling. This package adds no independent retry loop.
 See [the implementation plan](../../../plans/watch-task-cleanup/plan.md).
 Use deterministic clock tests for exact 2-hour and 24-hour boundaries,
 restart, mixed groups, passive reads, explicit refresh, and fallback fairness.
+
+## Explicit retirement admission
+
+[Watch retirement](github-pr-watch-retirement.md) precedes adaptive scheduling and provider admission.
+Only active members contribute to shared-target scheduling or receive provider results.
+Explicit refresh bypasses idle timing only. It does not reactivate a retired watch.
+The completed polling-efficiency package remains historical evidence.
+The [retirement package](../../../plans/github-pr-watch-retirement/plan.md) owns this additional admission boundary.

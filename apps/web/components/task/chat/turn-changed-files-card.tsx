@@ -2,13 +2,9 @@
 
 import { memo, useEffect, useMemo, useState } from "react";
 import { Button } from "@kandev/ui/button";
-import {
-  IconChevronDown,
-  IconChevronRight,
-  IconFile,
-  IconFolder,
-  IconFolderOpen,
-} from "@tabler/icons-react";
+import { LineStat } from "@/components/diff-stat";
+import { FileIcon } from "@/components/ui/file-icon";
+import { IconChevronDown, IconChevronRight, IconFolder, IconFolderOpen } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useTurnChangeFiles } from "@/hooks/domains/session/use-turn-change-files";
 import { buildTurnChangeTree, summarizeTurnChangeTreeFolder } from "@/lib/turn-changes/tree";
@@ -49,6 +45,13 @@ function kindLabel(file: TurnFileChange, t: (key: string) => string): string {
   };
   return t(`task:${keyByKind[file.kind] ?? "turnChangesKindModified"}`);
 }
+
+const KIND_COLOR_CLASS: Record<string, string> = {
+  added: "text-emerald-600",
+  deleted: "text-rose-600",
+  modified: "text-amber-600",
+  renamed: "text-purple-600",
+};
 
 function targetForFile(
   sessionId: string,
@@ -95,7 +98,7 @@ function FolderRows({
     <div>
       <button
         type="button"
-        className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        className="flex min-h-7 w-full min-w-0 flex-wrap cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         style={{ paddingInlineStart: `${12 + Math.min(depth, 3) * 16}px` }}
         aria-expanded={isExpanded}
         onClick={() => onToggle(`${repositoryChangeId}:${folder.path}`)}
@@ -118,12 +121,10 @@ function FolderRows({
           <IconFolder className="size-4 shrink-0 text-muted-foreground" />
         )}
         <span className="min-w-0 flex-1 truncate">{folder.name}/</span>
-        <span className="shrink-0 text-muted-foreground">
+        <span className="ml-auto shrink-0 text-muted-foreground">
           {t("task:turnChangesLoadedFileCount", { count: totals.loadedFiles })}
         </span>
-        <span className="shrink-0 text-muted-foreground">
-          +{totals.addedLines} -{totals.deletedLines}
-        </span>
+        <LineStat added={totals.addedLines} removed={totals.deletedLines} className="shrink-0" />
         {totals.unknownCountFiles > 0 && (
           <span className="shrink-0 text-muted-foreground">
             {t("task:turnChangesUnknownCount", { count: totals.unknownCountFiles })}
@@ -172,10 +173,19 @@ function FileRow({
   onOpen: () => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
+  const counts = fileCounts(file);
+  const statusContent =
+    file.binary || !counts ? (
+      <span className="min-w-0 [overflow-wrap:anywhere] text-muted-foreground">
+        {statusLabel(file, t)}
+      </span>
+    ) : (
+      <LineStat added={counts.added} removed={counts.deleted} className="shrink-0" />
+    );
   return (
     <button
       type="button"
-      className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      className="flex min-h-7 w-full min-w-0 flex-wrap cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
       style={{ paddingInlineStart: `${12 + Math.min(depth, 3) * 16}px` }}
       onClick={onOpen}
       aria-label={t("task:turnChangesFileAccessibleLabel", {
@@ -190,8 +200,12 @@ function FileRow({
       title={file.path}
       data-turn-file-change-id={file.id}
     >
-      <IconFile className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="min-w-0 flex-1 py-1">
+      <FileIcon
+        filePath={file.path}
+        className="flex-shrink-0"
+        style={{ width: "14px", height: "14px" }}
+      />
+      <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">
         <span className="block truncate">{file.path.split("/").at(-1) || file.path}</span>
         {file.old_path && (
           <span className="block truncate text-muted-foreground">
@@ -199,8 +213,14 @@ function FileRow({
           </span>
         )}
       </span>
-      <span className="shrink-0 text-muted-foreground">{kindLabel(file, t)}</span>
-      <span className="shrink-0 text-muted-foreground">{statusLabel(file, t)}</span>
+      <span className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span
+          className={`min-w-0 [overflow-wrap:anywhere] ${KIND_COLOR_CLASS[file.kind] ?? "text-muted-foreground"}`}
+        >
+          {kindLabel(file, t)}
+        </span>
+        {statusContent}
+      </span>
       {file.old_mode && file.new_mode && file.old_mode !== file.new_mode && (
         <span className="sr-only">
           {t("task:turnChangesModeStatus", { oldMode: file.old_mode, newMode: file.new_mode })}
@@ -265,49 +285,51 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   };
 
   return (
-    <section
-      className="mt-2 overflow-hidden rounded-lg border border-border/70 bg-card/70 text-card-foreground"
-      data-testid="turn-changed-files-card"
-      data-change-set-id={summary.id}
-      data-fallback-anchor={summary.fallback_anchor}
-    >
-      <TurnChangesCardHeader
-        summary={summary}
-        allExpanded={allExpanded}
-        hasRows={hasRows}
-        hasFolders={tree.some((repository) => repository.folders.length > 0) || tree.length > 1}
-        isExpired={isExpired}
-        isPending={isPending}
-        isUnavailable={isUnavailable}
-        onToggleAll={toggleAll}
-        onOpenDiff={() => onOpenDiff({ sessionId, changeSetId: summary.id })}
-      />
-      <TurnChangesAvailability
-        isExpired={isExpired}
-        isPending={isPending}
-        isUnavailable={isUnavailable}
-        loading={loading}
-        hasRows={hasRows}
-        hasError={Boolean(error)}
-      />
-      {Boolean(error) && <RetryFilesButton onClick={() => void retry()} />}
-      <RepositoryRows
-        sessionId={sessionId}
-        summary={summary}
-        tree={tree}
-        filesByRepository={filesByRepository}
-        fileTotalsByRepository={fileTotalsByRepository}
-        expanded={expanded}
-        onToggle={toggleExpanded}
-        onOpenDiff={onOpenDiff}
-      />
-      {hasMore && !isExpired && (
-        <LoadMoreButton loading={loading} onClick={() => void loadMore()} />
-      )}
-      {(summary.overlap_intervals?.length ?? 0) > 0 && (
-        <CardNotice role="status" text={t("task:turnChangesSharedCheckout")} />
-      )}
-    </section>
+    <div className="pb-4">
+      <section
+        className="mt-2 overflow-hidden rounded-lg border border-border/70 bg-card/70 text-card-foreground"
+        data-testid="turn-changed-files-card"
+        data-change-set-id={summary.id}
+        data-fallback-anchor={summary.fallback_anchor}
+      >
+        <TurnChangesCardHeader
+          summary={summary}
+          allExpanded={allExpanded}
+          hasRows={hasRows}
+          hasFolders={tree.some((repository) => repository.folders.length > 0) || tree.length > 1}
+          isExpired={isExpired}
+          isPending={isPending}
+          isUnavailable={isUnavailable}
+          onToggleAll={toggleAll}
+          onOpenDiff={() => onOpenDiff({ sessionId, changeSetId: summary.id })}
+        />
+        <TurnChangesAvailability
+          isExpired={isExpired}
+          isPending={isPending}
+          isUnavailable={isUnavailable}
+          loading={loading}
+          hasRows={hasRows}
+          hasError={Boolean(error)}
+        />
+        {Boolean(error) && <RetryFilesButton onClick={() => void retry()} />}
+        <RepositoryRows
+          sessionId={sessionId}
+          summary={summary}
+          tree={tree}
+          filesByRepository={filesByRepository}
+          fileTotalsByRepository={fileTotalsByRepository}
+          expanded={expanded}
+          onToggle={toggleExpanded}
+          onOpenDiff={onOpenDiff}
+        />
+        {hasMore && !isExpired && (
+          <LoadMoreButton loading={loading} onClick={() => void loadMore()} />
+        )}
+        {(summary.overlap_intervals?.length ?? 0) > 0 && (
+          <CardNotice role="status" text={t("task:turnChangesSharedCheckout")} />
+        )}
+      </section>
+    </div>
   );
 });
 
@@ -410,11 +432,8 @@ function TurnChangesCardCounts({
       <span className="font-medium">
         {t("task:turnChangesFileCount", { count: summary.file_count })}
       </span>
-      {summary.added_lines != null && (
-        <span className="text-emerald-700 dark:text-emerald-400">+{summary.added_lines}</span>
-      )}
-      {summary.deleted_lines != null && (
-        <span className="text-red-700 dark:text-red-400">-{summary.deleted_lines}</span>
+      {(summary.added_lines != null || summary.deleted_lines != null) && (
+        <LineStat added={summary.added_lines} removed={summary.deleted_lines} />
       )}
       {summary.binary_file_count > 0 && (
         <span className="text-muted-foreground">
@@ -509,7 +528,7 @@ function RepositoryRows({
       <div key={repository.id} className="border-b border-border/40 last:border-b-0">
         <button
           type="button"
-          className="flex min-h-7 w-full cursor-pointer items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="flex min-h-7 w-full min-w-0 flex-wrap cursor-pointer items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           aria-expanded={isExpanded}
           onClick={() => onToggle(repository.id)}
         >
@@ -519,7 +538,7 @@ function RepositoryRows({
             <IconChevronRight className="size-3.5" />
           )}
           <span className="min-w-0 flex-1 truncate">{repository.label}</span>
-          <span className="text-muted-foreground">{repositoryCount}</span>
+          <span className="ml-auto shrink-0 text-muted-foreground">{repositoryCount}</span>
           {repositoryState && repositoryState !== "ready" && (
             <span className="text-amber-700 dark:text-amber-400">
               {t("task:turnChangesRepositoryStatus", {

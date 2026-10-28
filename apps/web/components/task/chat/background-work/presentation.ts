@@ -50,9 +50,12 @@ export function workloadKindLabelKey(kind: WorkloadKind): string {
   }
 }
 
-/** A distinct label for a missing output surface; never rendered as empty logs. */
-export function workloadOutputUnavailableKey(workload: WorkloadRunObservation): string | null {
-  if (workload.output) return null;
+/**
+ * The label to show when no output is displayed. A readable surface with
+ * nothing to show (for example after a local clear) uses the live-unavailable
+ * copy; an inspect-only surface names the limitation.
+ */
+export function workloadOutputUnavailableKey(workload: WorkloadRunObservation): string {
   if (!hasReadableOutput(workload.capabilities)) return "task:backgroundOutputUnavailable";
   return "task:liveOutputUnavailable";
 }

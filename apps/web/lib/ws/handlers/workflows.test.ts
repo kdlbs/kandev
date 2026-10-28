@@ -4,7 +4,14 @@ import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap, WorkflowPayload } from "@/lib/types/backend";
 import { registerWorkflowsHandlers } from "./workflows";
 
-type WorkflowItem = { id: string; workspaceId: string; name: string; hidden?: boolean };
+type WorkflowItem = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  hidden?: boolean;
+  source?: string;
+  source_path?: string;
+};
 
 const MESSAGE_TIMESTAMP = "2026-01-01T00:00:00Z";
 const REVIEW_STEP_ID = "step-1";
@@ -86,6 +93,38 @@ function stepDeletedMessage(
     timestamp: MESSAGE_TIMESTAMP,
   };
 }
+
+describe("workflow provenance", () => {
+  const synced = { source: "github", source_path: ".kandev/workflows/review.yaml" };
+  const workflow = { id: "wf-1", workspaceId: "ws-1", name: "Review" };
+
+  it.each(["created", "updated"] as const)("retains provenance from workflow.%s", (event) => {
+    const store = makeStore(event === "created" ? [] : [workflow], null);
+    const handlers = registerWorkflowsHandlers(store);
+    const payload = { id: workflow.id, workspace_id: "ws-1", name: workflow.name, ...synced };
+    if (event === "created") handlers["workflow.created"]?.(createdMessage(payload));
+    else handlers["workflow.updated"]?.(updatedMessage(payload));
+    expect(store.getState().workflows.items[0]).toMatchObject(synced);
+  });
+
+  it("releases provenance when sync is removed", () => {
+    const store = makeStore([{ ...workflow, ...synced }], null);
+    const handlers = registerWorkflowsHandlers(store);
+    const manual = { source: "manual", source_path: "" };
+    handlers["workflow.updated"]?.(
+      updatedMessage({ id: workflow.id, workspace_id: "ws-1", name: workflow.name, ...manual }),
+    );
+    expect(store.getState().workflows.items[0]).toMatchObject(manual);
+  });
+
+  it("preserves provenance when a payload omits it", () => {
+    const store = makeStore([{ ...workflow, ...synced }], null);
+    registerWorkflowsHandlers(store)["workflow.updated"]?.(
+      updatedMessage({ id: workflow.id, workspace_id: "ws-1", name: "Renamed" }),
+    );
+    expect(store.getState().workflows.items[0]).toMatchObject(synced);
+  });
+});
 
 describe("workflow.created handler — preserves user filter", () => {
   it("does not promote a new workflow when activeId is null ('All Workflows')", () => {

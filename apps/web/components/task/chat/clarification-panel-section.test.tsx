@@ -10,6 +10,10 @@ import {
 } from "@/lib/types/http";
 import { ClarificationPanelSection } from "./clarification-panel-section";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import {
+  ComposerDisclosureContext,
+  type ComposerDisclosureContextValue,
+} from "./composer-disclosure";
 
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "https://api.test" }),
@@ -69,7 +73,17 @@ function clarMessage(opts: {
   };
 }
 
-function renderSection(pending: boolean, messages: Message[], maxHeightVh = 50) {
+function setTestRect(element: HTMLElement, top: number, height: number) {
+  element.getBoundingClientRect = () =>
+    ({ top, bottom: top + height, left: 0, right: 800, width: 800, height }) as DOMRect;
+}
+
+function renderSection(
+  pending: boolean,
+  messages: Message[],
+  initialMaxHeightVh = 50,
+  host: { allocationRef?: React.RefObject<HTMLElement | null>; reservedHeightPx?: number } = {},
+) {
   const scopeRef = createRef<HTMLDivElement>();
   const onResolved = vi.fn();
   const utils = render(
@@ -79,14 +93,40 @@ function renderSection(pending: boolean, messages: Message[], maxHeightVh = 50) 
         messages={messages}
         onResolved={onResolved}
         shortcutScopeRef={scopeRef}
-        maxHeightVh={maxHeightVh}
+        initialMaxHeightVh={initialMaxHeightVh}
+        allocationRef={host.allocationRef}
+        reservedHeightPx={host.reservedHeightPx}
       />
     </div>,
   );
   return { ...utils, scopeRef, onResolved };
 }
 
+function renderThreadSection(messages: Message[], allocation: HTMLElement) {
+  const scopeRef = createRef<HTMLDivElement>();
+  const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+  const disclosure = {
+    clarificationAllocationRef: allocationRef,
+    clarificationReservedHeightPx: 0,
+  } as ComposerDisclosureContextValue;
+  const utils = render(
+    <ComposerDisclosureContext.Provider value={disclosure}>
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationPanelSection
+          pending
+          messages={messages}
+          onResolved={vi.fn()}
+          shortcutScopeRef={scopeRef}
+          initialMaxHeightVh={50}
+        />
+      </div>
+    </ComposerDisclosureContext.Provider>,
+  );
+  return { ...utils, scopeRef };
+}
+
 beforeEach(() => {
+  Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: 1000 });
   fetchMock.mockReset();
   imageMocks.fetch.mockReset();
   mockUpdateMessage.mockReset();
@@ -243,7 +283,7 @@ describe("ClarificationPanelSection — collapse affordance", () => {
           messages={bundleB}
           onResolved={vi.fn()}
           shortcutScopeRef={scopeRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
         />
       </div>,
     );
@@ -339,25 +379,118 @@ describe("ClarificationPanelSection — submitting feedback", () => {
   });
 });
 
-describe("ClarificationPanelSection — per-surface max-height cap", () => {
-  it("renders the CSS max-height from the maxHeightVh prop instead of a hardcoded value", () => {
+describe("ClarificationPanelSection — per-surface initial height cap", () => {
+  it("renders the initial cap as pixels before the host budget is expanded", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
     renderSection(true, messages, 50);
 
     const container = screen.getByTestId(CONTAINER_TESTID);
-    expect(container.style.maxHeight).toBe("50vh");
+    expect(container.style.maxHeight).toBe("500px");
   });
 
-  it("a different surface's maxHeightVh renders a different cap (e.g. Quick Chat's 35vh)", () => {
+  it("keeps a different surface's initial ratio (e.g. Quick Chat's 35vh)", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
     renderSection(true, messages, 35);
 
     const container = screen.getByTestId(CONTAINER_TESTID);
-    expect(container.style.maxHeight).toBe("35vh");
+    expect(container.style.maxHeight).toBe("350px");
+  });
+
+  it("expands to measured host space and resets to content sizing without losing an answer draft", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const container = screen.getByTestId(CONTAINER_TESTID);
+    const input = screen.getByTestId("clarification-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Keep this answer." } });
+
+    const expand = screen.getByTestId("clarification-panel-expand") as HTMLButtonElement;
+    expect(expand.disabled).toBe(false);
+    fireEvent.click(expand);
+
+    expect(container.style.height).toBe("1000px");
+    expect(container.style.maxHeight).toBe("1000px");
+    expect(input.value).toBe("Keep this answer.");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("clarification-panel-reset"));
+
+    expect(container.style.height).toBe("");
+    expect(container.style.maxHeight).toBe("500px");
+    expect(input.value).toBe("Keep this answer.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("disables Expand when the host has no unreserved space", () => {
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 100);
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef, reservedHeightPx: 100 });
+
+    expect((screen.getByTestId("clarification-panel-expand") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByTestId(CONTAINER_TESTID).getAttribute("data-host-max-height")).toBe("0");
+    expect((screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement).style.minHeight).toBe("0px");
+  });
+
+  it("keeps the viewport fallback minimum while its host allocation is unavailable", () => {
+    const allocation = document.createElement("div");
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef });
+
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    expect(container.dataset.hostMaxHeight).toBe("");
+    expect(container.style.minHeight).toBe("120px");
+  });
+
+  it("uses a non-Threads host budget below the normal panel minimum", () => {
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 150);
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef, reservedHeightPx: 100 });
+
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    expect(container.dataset.hostMaxHeight).toBe("50");
+    expect(container.style.maxHeight).toBe("50px");
+    expect(container.style.minHeight).toBe("50px");
+  });
+
+  it("omits manual height while Threads uses the footer scroll fallback", async () => {
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 800);
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderThreadSection(messages, allocation);
+
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    fireEvent.click(screen.getByTestId("clarification-panel-expand"));
+    expect(container.style.height).toBe("800px");
+
+    setTestRect(allocation, 0, 50);
+    act(() => window.dispatchEvent(new Event("resize")));
+    await waitFor(() => expect(container.dataset.hostMaxHeight).toBe("50"));
+
+    expect(container.dataset.scrollOwner).toBe("thread-footer");
+    expect(container.style.height).toBe("");
   });
 });
 
@@ -437,7 +570,7 @@ describe("ClarificationPanelSection — dragged height does not survive a bundle
           messages={bundleB}
           onResolved={vi.fn()}
           shortcutScopeRef={scopeRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
         />
       </div>,
     );
@@ -472,7 +605,7 @@ describe("ClarificationPanelSection — onOutcome forwarding (AC .39)", () => {
           onResolved={vi.fn()}
           onOutcome={onOutcome}
           shortcutScopeRef={scopeRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
         />
       </div>,
     );

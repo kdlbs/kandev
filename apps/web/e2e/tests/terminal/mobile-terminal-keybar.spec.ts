@@ -14,9 +14,11 @@ import { MobileTerminalKeybarPage } from "../../pages/mobile-terminal-keybar-pag
 import { attachShellInputCapture, type ShellInputFrame } from "../../helpers/ws-capture";
 import {
   focusTerminalForTyping,
+  readTerminalBuffer,
   switchToTerminalPanel,
   waitForShellReady,
 } from "./mobile-terminal-helpers";
+import { expectCursorResult, startCursorProgram } from "./terminal-cursor-test-helpers";
 
 async function seedTaskWithSession(
   testPage: Page,
@@ -88,6 +90,121 @@ async function expectFrame(
 async function inlineStyleProp(loc: Locator, prop: "top" | "bottom"): Promise<string> {
   return loc.evaluate((el, p) => (el as HTMLElement).style[p], prop);
 }
+
+async function startReadlineShell(testPage: Page): Promise<void> {
+  await testPage.keyboard.type("/bin/bash --noprofile --norc -i");
+  await testPage.keyboard.press("Enter");
+  await testPage.keyboard.type(
+    "export TERM=xterm-256color HISTFILE=/dev/null HISTCONTROL= HISTIGNORE=; " +
+      "set -o emacs; set -o history; bind 'set enable-keypad off'; " +
+      "printf 'BASH_READY:%s\\n' \"$0\"; " +
+      'case "$-" in *i*) echo BASH_INTERACTIVE;; esac; printf \'BASH_TERM:%s\\n\' "$TERM"',
+  );
+  await testPage.keyboard.press("Enter");
+  const lines = async () =>
+    (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim());
+  await expect.poll(lines).toContain("BASH_READY:/bin/bash");
+  await expect.poll(lines).toContain("BASH_INTERACTIVE");
+  await expect.poll(lines).toContain("BASH_TERM:xterm-256color");
+}
+
+test.describe("Mobile shell application cursor navigation", () => {
+  test.describe.configure({ retries: 0 });
+
+  for (const [id, key] of [
+    ["up", "KEY_UP"],
+    ["down", "KEY_DOWN"],
+    ["left", "KEY_LEFT"],
+    ["right", "KEY_RIGHT"],
+  ] as const) {
+    test(`application cursor keybar ${id}`, async ({ testPage, apiClient, seedData }) => {
+      test.setTimeout(90_000);
+      await seedTaskWithSession(testPage, apiClient, seedData, `Application cursor ${id}`);
+      await switchToTerminalPanel(testPage);
+      await waitForShellReady(testPage);
+      await focusTerminalForTyping(testPage);
+      await startCursorProgram(testPage);
+      const button = new MobileTerminalKeybarPage(testPage).key(id);
+      await button.scrollIntoViewIfNeeded();
+      const bounds = await button.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.width).toBeGreaterThanOrEqual(44);
+      expect(bounds!.height).toBeGreaterThanOrEqual(44);
+      expect(
+        await button.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+          return hit === element || element.contains(hit);
+        }),
+      ).toBe(true);
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      await button.tap();
+      await expectCursorResult(testPage, key);
+    });
+  }
+
+  test("application cursor keybar native ArrowUp control", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await seedTaskWithSession(testPage, apiClient, seedData, "Application native control");
+    await switchToTerminalPanel(testPage);
+    await waitForShellReady(testPage);
+    await focusTerminalForTyping(testPage);
+    await startCursorProgram(testPage);
+    await testPage.keyboard.press("ArrowUp");
+    await expectCursorResult(testPage, "KEY_UP");
+  });
+
+  test("normal cursor keybar shell line editing after application mode", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const { frames } = attachShellInputCapture(testPage);
+    await seedTaskWithSession(testPage, apiClient, seedData, "Normal cursor control");
+    await switchToTerminalPanel(testPage);
+    await waitForShellReady(testPage);
+    await focusTerminalForTyping(testPage);
+    await startReadlineShell(testPage);
+    await startCursorProgram(testPage);
+    await testPage.keyboard.press("ArrowUp");
+    await expectCursorResult(testPage, "KEY_UP");
+    const bar = new MobileTerminalKeybarPage(testPage);
+    await testPage.keyboard.type("echo NORMAL_AX");
+    await bar.tap("left");
+    await expectFrame(frames, "\x1b[D");
+    await testPage.keyboard.type("B");
+    await bar.tap("right");
+    await expectFrame(frames, "\x1b[C");
+    await testPage.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim()))
+      .toContain("NORMAL_ABX");
+    await bar.tap("up");
+    await expectFrame(frames, "\x1b[A");
+    await testPage.keyboard.type("_HISTORY");
+    await testPage.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim()))
+      .toContain("NORMAL_ABX_HISTORY");
+    await bar.tap("up");
+    await bar.tap("down");
+    await expectFrame(frames, "\x1b[B");
+    await testPage.keyboard.type("echo NORMAL_DONE");
+    await testPage.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim()))
+      .toContain("NORMAL_DONE");
+  });
+});
 
 test.describe("Mobile terminal key-bar — user flows", () => {
   test.describe.configure({ retries: 1 });
@@ -303,17 +420,24 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const { frames } = attachShellInputCapture(testPage);
     await seedTaskWithSession(testPage, apiClient, seedData, "Keybar arrow up");
     await switchToTerminalPanel(testPage);
 
     const keybar = new MobileTerminalKeybarPage(testPage);
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
     await waitForShellReady(testPage);
+    await focusTerminalForTyping(testPage);
+    await startReadlineShell(testPage);
+    await testPage.keyboard.type("echo HISTORY_PROBE_782");
+    await testPage.keyboard.press("Enter");
+    const lines = async () =>
+      (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim());
+    await expect.poll(lines).toContain("HISTORY_PROBE_782");
 
     await keybar.tap("up");
-
-    await expectFrame(frames, "\x1b[A");
+    await testPage.keyboard.type("_SUFFIX");
+    await testPage.keyboard.press("Enter");
+    await expect.poll(lines).toContain("HISTORY_PROBE_782_SUFFIX");
   });
 
   test("user taps Esc — sends \\x1b (vim-style insert-mode exit)", async ({

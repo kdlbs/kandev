@@ -12,6 +12,16 @@ const (
 	BackgroundWorkKindMonitor  BackgroundWorkKind = "monitor"
 )
 
+// InspectionOnlyWorkloadCapabilities is the declaration for a workload an
+// adapter can list but cannot stream or control. Producers should publish it
+// explicitly so the read path does not have to infer a surface.
+func InspectionOnlyWorkloadCapabilities() WorkloadCapabilities {
+	return WorkloadCapabilities{
+		Discovery: "events_only",
+		Output:    "none",
+	}
+}
+
 // BackgroundWorkPayload is typed adapter attestation that Kandev recognizes
 // this workload's launch and terminal lifecycle.
 type BackgroundWorkPayload struct {

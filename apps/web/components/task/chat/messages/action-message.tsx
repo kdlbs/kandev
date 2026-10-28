@@ -31,6 +31,7 @@ import {
 import { GitPushErrorDismissAction } from "./git-push-error-dismiss-button";
 import {
   interruptionRecoveryKey,
+  retainedTurnAttemptsKey,
   retainedTurnRecoveryKey,
   retryNoticeVisible,
 } from "./interruption-recovery-feedback";
@@ -277,12 +278,24 @@ function settledFailureMetadata(metadata: ActionMeta | undefined, recoveryAction
 
 function RetainedTurnRecoveryFeedback({ metadata }: { metadata: ActionMeta | undefined }) {
   const { t } = useTranslation();
-  const key = retainedTurnRecoveryKey(metadata ?? {});
+  const recoveryMetadata = metadata ?? {};
+  const key = retainedTurnRecoveryKey(recoveryMetadata);
+  const attemptsKey = retainedTurnAttemptsKey(recoveryMetadata);
   if (!key) return null;
   return (
-    <p className="mt-1 text-xs text-muted-foreground" data-testid="retained-turn-recovery-feedback">
-      {t(key, { count: metadata?.attempts_started })}
-    </p>
+    <div data-testid="retained-turn-recovery-feedback">
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t(key, { count: metadata?.attempts_started })}
+      </p>
+      {attemptsKey && (
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid="retained-turn-recovery-attempts"
+        >
+          {t(attemptsKey, { count: metadata?.attempts_started })}
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -141,6 +141,10 @@ func (a *Adapter) sendPrompt(
 			zap.Int("context_length", len(pendingContext)))
 	}
 	a.beginPromptTurn(sessionID)
+	// Every prompt-ending path must close the honest inspection window for a
+	// launch whose provider ends delivery with this prompt. Success settles
+	// before the complete event below; this covers error and cancel returns.
+	defer a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 
@@ -219,6 +223,13 @@ func (a *Adapter) sendPrompt(
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
 		notificationsDrained := a.syncNotifQueue()
 		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
+			if a.dialect.continuationSupportForError != nil {
+				if support := a.dialect.continuationSupportForError(err); support != "" {
+					turn.evidenceMu.Lock()
+					turn.continuationSupportOverride = support
+					turn.evidenceMu.Unlock()
+				}
+			}
 			// Recognized interruptions follow queued output regardless of continuation eligibility.
 			snapshot := a.continuationSafetySnapshot(turn)
 			a.cancelAsyncTurnComplete(sessionID)
@@ -641,6 +652,9 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 
 	a.logger.Info("cancelling session", zap.String("session_id", sessionID))
 
+	// Settle retained launches whose provider cannot report a later outcome
+	// before the generic cancel sweep can turn them into cancelled tools.
+	a.prepareSessionCancel(sessionID)
 	// Mark all active tool calls as cancelled before sending cancel to agent.
 	a.cancelActiveToolCalls(sessionID)
 
@@ -685,6 +699,13 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 // terminated even though the SDK keeps streaming its real tool_call_update
 // when the subagent finishes seconds later. Leaving the entry in
 // activeToolCalls lets that authoritative terminal update land naturally.
+// prepareSessionCancel settles launches whose provider ends delivery with the
+// session. It runs before the generic cancel sweep so an identified launch
+// becomes unknown instead of a cancelled tool with running background work.
+func (a *Adapter) prepareSessionCancel(sessionID string) {
+	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
+}
+
 func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	a.cancelActiveToolCallsPreservingHandoff(sessionID, false)
 }

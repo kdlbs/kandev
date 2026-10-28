@@ -22,6 +22,73 @@ import {
 
 let original: ThreadPresentationSettings;
 
+for (const layout of ["grid", "columns"] as const) {
+  test(`expands a required question within the ${layout} tile budget and retains the transcript floor`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    await testPage.setViewportSize({ width: 1366, height: 1100 });
+    const { task } = await seedLongThreadQuestion(apiClient, seedData);
+    await seedThreadPresentation(apiClient, { layout, autoHideComposer: true });
+    await testPage.goto(`/threads?taskId=${task.id}`);
+
+    const board = testPage.getByTestId("threads-board");
+    const tile = testPage.getByTestId(`thread-column-${task.id}`);
+    const container = tile.getByTestId("clarification-overlay-container");
+    const transcript = tile.locator(".chat-message-list");
+    await expect(board).toHaveAttribute("data-layout", layout);
+    await expect(tile.getByTestId("clarification-option")).toHaveCount(3, {
+      timeout: 30_000,
+    });
+    await expect(container).toBeVisible();
+    await expect
+      .poll(() => transcript.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeGreaterThanOrEqual(79);
+
+    const geometry = await container.evaluate((element) => ({
+      hostMax: Number((element as HTMLElement).dataset.hostMaxHeight),
+      maxHeight: Number.parseFloat((element as HTMLElement).style.maxHeight),
+      viewportHeight: window.innerHeight,
+    }));
+    const initialCap = Math.round(geometry.viewportHeight * 0.5);
+    expect(geometry.hostMax).toBeGreaterThan(0);
+    expect(geometry.maxHeight).toBe(Math.min(initialCap, geometry.hostMax));
+    const expand = tile.getByTestId("clarification-panel-expand");
+    const reset = tile.getByTestId("clarification-panel-reset");
+    if (geometry.hostMax > initialCap) {
+      await expect(expand).toBeEnabled();
+      await expand.click();
+      await expect(container).toHaveCSS("height", `${geometry.hostMax}px`);
+      await expect(container).toHaveCSS("max-height", `${geometry.hostMax}px`);
+      await expect(reset).toBeEnabled();
+    } else {
+      await expect(expand).toBeDisabled();
+      await expect(container).toHaveCSS("max-height", `${geometry.hostMax}px`);
+      await expect(reset).toBeDisabled();
+    }
+    await expect
+      .poll(() => transcript.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeGreaterThanOrEqual(79);
+    await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
+    await testInfo.attach(`threads-${layout}-clarification-expanded.png`, {
+      body: await testPage.screenshot(),
+      contentType: "image/png",
+    });
+
+    if (geometry.hostMax > initialCap) {
+      await reset.click();
+      await expect
+        .poll(() => container.evaluate((el) => (el as HTMLElement).style.height))
+        .toBe("");
+    }
+    await expect
+      .poll(() => transcript.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeGreaterThanOrEqual(79);
+  });
+}
+
 for (const zoom of [1, 0.9]) {
   for (const autoHideComposer of [false, true]) {
     // @covers AC-UI-THREADS-DECK-005.5, AC-UI-THREADS-DECK-005.6, AC-UI-THREADS-DECK-004.1

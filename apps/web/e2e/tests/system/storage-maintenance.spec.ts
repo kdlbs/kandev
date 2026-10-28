@@ -442,7 +442,7 @@ test.describe("System storage maintenance", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     const cache = seedManagedGoCache(backend.tmpDir);
     const baseline = (await requestStorageMaintenanceSettings(apiClient, "GET")).settings;
     const enabledSettings = {

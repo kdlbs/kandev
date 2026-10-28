@@ -330,3 +330,52 @@ func TestOpenCodeBackgroundLaunchNeedsBothObservations(t *testing.T) {
 		t.Fatalf("expected the correlated launch, got %+v ok=%v", launch, ok)
 	}
 }
+
+// TestOpenCodePrepareSessionCancelSettlesBeforeCancelledSweep pins the cancel
+// path: a confirmed launch becomes unknown instead of a cancelled tool that
+// still claims live background work.
+func TestOpenCodePrepareSessionCancelSettlesBeforeCancelledSweep(t *testing.T) {
+	a := openCodeBackgroundAdapter(t, true)
+	call, update := openCodeLaunchFrames("call-ci", "shell-ci", "gh pr checks --watch")
+	require.NotNil(t, a.convertToolCallUpdate("ses-oc", call))
+	require.NotNil(t, a.convertToolCallResultUpdate("ses-oc", update))
+	drainEvents(a)
+
+	a.prepareSessionCancel("ses-oc")
+	a.cancelActiveToolCalls("ses-oc")
+
+	events := drainEvents(a)
+	require.Len(t, events, 1)
+	require.Equal(t, streams.EventTypeBackgroundWorkUpdated, events[0].Type)
+	require.Equal(t, streams.RunStateUnknown, events[0].BackgroundWork.State)
+	require.Equal(t, "call-ci", events[0].BackgroundWork.SourceCallID)
+	for _, ev := range events {
+		require.NotEqual(t, toolStatusCancelled, ev.ToolStatus,
+			"a settled launch must not be reported as a cancelled tool")
+	}
+}
+
+// TestACPInspectionOnlyProducersDeclareCapabilities pins that Claude ACP shell
+// and subagent producers publish their explicit inspect-only contract instead
+// of relying on a read-time fallback.
+func TestACPInspectionOnlyProducersDeclareCapabilities(t *testing.T) {
+	n := NewNormalizer(claudeAgentID)
+	shell := n.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "sleep 30", "run_in_background": true},
+	})
+	require.NotNil(t, shell)
+	work := shell.BackgroundWork()
+	require.NotNil(t, work)
+	require.NotNil(t, work.Capabilities)
+	require.Equal(t, "events_only", work.Capabilities.Discovery)
+	require.Equal(t, "none", work.Capabilities.Output)
+	require.Empty(t, work.Capabilities.Actions)
+
+	subagent := streams.NewSubagentTask("Investigate", "do it", "general-purpose")
+	stampSubagentBackgroundWork(subagent, claudeAgentID)
+	require.NotNil(t, subagent.BackgroundWork())
+	require.NotNil(t, subagent.BackgroundWork().Capabilities)
+	require.Equal(t, "none", subagent.BackgroundWork().Capabilities.Output)
+	require.Empty(t, subagent.BackgroundWork().Capabilities.Actions)
+}

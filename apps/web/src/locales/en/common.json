@@ -423,7 +423,7 @@
   "tasks": "Tasks",
   "taskReadRefreshFailureNotice": "Task details could not be refreshed. Your current view is still available.",
   "taskReadTemporarilyUnavailable": "Task temporarily unavailable",
-  "taskReadTemporarilyUnavailableDescription": "We could not load this task. Check your connection and try again.",
+  "taskReadTemporarilyUnavailableDescription": "Kandev could not load this task right now. Try again in a moment.",
   "taskStateBlocked": "Blocked",
   "taskStateCancelled": "Cancelled",
   "taskStateCompleted": "Completed",

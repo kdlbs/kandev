@@ -61,6 +61,9 @@ func TestBackgroundWorkCapabilitiesColumnMigratesLegacyTable(t *testing.T) {
 	if err := repo.initBackgroundWorkSchema(); err != nil {
 		t.Fatalf("replay background schema: %v", err)
 	}
+	if err := repo.runMigrations(context.Background()); err != nil {
+		t.Fatalf("replay migrations: %v", err)
+	}
 }
 
 // TestBackgroundWorkCapabilitiesPersistence pins that a recorded declaration

@@ -10,6 +10,7 @@ import (
 // session state, serialization, and event delivery.
 type acpDialect struct {
 	continuationSupport         streams.ContinuationSupport
+	continuationSupportForError func(error) streams.ContinuationSupport
 	capacityContinuationSupport streams.CapacityContinuationSupport
 	continuationError           func(error) bool
 	retainedApplicationErr      func(error) bool

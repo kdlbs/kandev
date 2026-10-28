@@ -277,7 +277,7 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 		workspaceID := workspaceIDs[(start+i)%len(workspaceIDs)]
 		workspaceWatches := byWorkspace[workspaceID]
 		incCanonicalPollRequests(len(workspaceWatches))
-		workspaceResults, err := p.service.SyncWorkspaceWatchesBatched(ctx, workspaceID, workspaceWatches)
+		workspaceResults, err := p.service.SyncWorkspaceWatchesBatchedForPoller(ctx, workspaceID, workspaceWatches)
 		// A client without GraphQL support deliberately falls back to the
 		// per-watch REST path below. It is not an authentication failure, so
 		// it must not open the workspace circuit and filter that fallback out.
@@ -323,6 +323,9 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 
 func (p *Poller) publishBatchedPRWatchResults(ctx context.Context, results []PRWatchSyncResult) {
 	for _, r := range results {
+		if r.FeedbackPublished {
+			continue
+		}
 		if !r.Found || r.Status == nil {
 			continue
 		}
@@ -551,7 +554,7 @@ func (p *Poller) checkSinglePRWatchWithError(ctx context.Context, watch *PRWatch
 		return p.detectPRForWatchWithError(ctx, watch)
 	}
 
-	status, hasNew, err := p.service.CheckPRWatchForWorkspace(ctx, watch)
+	status, _, err := p.service.CheckPRWatchForWorkspace(ctx, watch)
 	p.circuits.recordError(watch.WorkspaceID, err, time.Now().UTC())
 	if err != nil {
 		p.logger.Debug("failed to check PR watch",
@@ -561,12 +564,10 @@ func (p *Poller) checkSinglePRWatchWithError(ctx context.Context, watch *PRWatch
 	if status == nil {
 		return nil
 	}
-	return p.applyPRStatusForWatch(ctx, watch, status, hasNew)
+	return p.applyPRStatusForWatch(ctx, watch, status)
 }
 
-func (p *Poller) applyPRStatusForWatch(
-	ctx context.Context, watch *PRWatch, status *PRStatus, hasNew bool,
-) error {
+func (p *Poller) applyPRStatusForWatch(ctx context.Context, watch *PRWatch, status *PRStatus) error {
 	if watch == nil || status == nil {
 		return nil
 	}
@@ -584,58 +585,13 @@ func (p *Poller) applyPRStatusForWatch(
 		return err
 	}
 
-	// A numbered watch found its PR before this fix existed (or before the
-	// discovering session's own group redirect took effect) keeps the
-	// observing member's task_id forever — watches are never re-pointed once
-	// they have a PR (see apps/backend/CLAUDE.md's "PR status sync coverage").
-	// Resolve the effective owner here, the same way associatePRWithTask does
-	// for the association write, so the background poller keeps syncing the
-	// owner's github_task_prs row instead of silently updating nothing.
-	effectiveTaskID := p.service.reconcileTaskPROwnership(
-		ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber,
-	)
-
-	// Always sync latest PR state to the task-PR record.
-	if syncErr := p.service.SyncTaskPR(ctx, effectiveTaskID, status); syncErr != nil {
-		p.logger.Error("failed to sync task PR",
-			zap.String("task_id", effectiveTaskID), zap.Error(syncErr))
-		return nil // Keep watch so the next cycle can retry
-	}
-	// When the tracked PR is merged or closed, reset the watch back to the
-	// "searching" state (pr_number=0) rather than deleting it. This lets the
-	// poller discover a follow-up PR opened on the same branch (e.g. the user
-	// closes #1 and opens #2 as a replacement) without requiring manual
-	// intervention. The watch is only deleted when its owning session is gone.
-	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
-		p.publishPRStatusEvent(ctx, watch, effectiveTaskID, status)
-		hold, holdErr := p.service.ShouldHoldTerminalPRWatch(
-			ctx, effectiveTaskID, watch.RepositoryID, watch.PRNumber, status.PR.State,
-		)
-		if holdErr != nil {
-			p.logger.Warn("failed to check terminal PR automation",
-				zap.String("task_id", effectiveTaskID), zap.Error(holdErr))
-			return nil
-		}
-		if hold {
-			return nil
-		}
-		if resetErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); resetErr != nil {
-			p.logger.Error("failed to reset completed PR watch",
-				zap.String("id", watch.ID), zap.Error(resetErr))
-		} else {
-			p.logger.Info("reset PR watch after PR completion",
-				zap.String("id", watch.ID),
-				zap.String("state", status.PR.State),
-				zap.Int("pr_number", watch.PRNumber))
-		}
+	_, _, err := p.service.applyPRWatchStatusResult(ctx, watch, status, time.Now().UTC(), true)
+	if errors.Is(err, ErrPRWatchRetired) || errors.Is(err, ErrPRWatchNotFound) {
 		return nil
 	}
-
-	if !hasNew {
-		return nil
+	if err != nil {
+		p.logger.Error("failed to apply PR watch result", zap.String("id", watch.ID), zap.Error(err))
 	}
-
-	p.publishPRStatusEvent(ctx, watch, effectiveTaskID, status)
 	return nil
 }
 
@@ -659,7 +615,7 @@ func (p *Poller) checkPRWatchGroupWithError(ctx context.Context, watches []*PRWa
 		return nil
 	}
 
-	status, hasNew, err := p.service.CheckPRWatchForWorkspace(ctx, representative)
+	status, _, err := p.service.CheckPRWatchForWorkspace(ctx, representative)
 	p.circuits.recordError(representative.WorkspaceID, err, time.Now().UTC())
 	if err != nil {
 		p.logger.Debug("failed to check shared PR watch target",
@@ -669,12 +625,8 @@ func (p *Poller) checkPRWatchGroupWithError(ctx context.Context, watches []*PRWa
 	if status == nil {
 		return nil
 	}
-	for index, watch := range watches {
-		watchHasNew := hasNew
-		if index > 0 {
-			watchHasNew, _ = p.service.applyPRWatchStatus(ctx, watch, status)
-		}
-		if err := p.applyPRStatusForWatch(ctx, watch, status, watchHasNew); err != nil {
+	for _, watch := range watches {
+		if err := p.applyPRStatusForWatch(ctx, watch, status); err != nil {
 			return err
 		}
 	}
@@ -722,46 +674,17 @@ func (p *Poller) applyDetectedPR(ctx context.Context, watch *PRWatch, pr *PR) {
 		return
 	}
 
-	// Update last_checked_at regardless of result
-	now := time.Now().UTC()
-	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", "")
-
-	if pr == nil {
+	_, promoted, err := p.service.applyPRWatchDiscoveryResult(ctx, watch, pr, time.Now().UTC())
+	if err != nil {
+		if !errors.Is(err, ErrPRWatchRetired) && !errors.Is(err, ErrPRWatchNotFound) {
+			p.logger.Error("failed to apply detected PR result", zap.String("watch_id", watch.ID), zap.Error(err))
+		}
 		return
 	}
-
-	if rebindErr := p.service.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
-		p.logger.Error("failed to rebind PR watch to detected repository",
-			zap.String("watch_id", watch.ID),
-			zap.Int("pr_number", pr.Number),
-			zap.Error(rebindErr))
-		return
+	if promoted {
+		p.logger.Info("detected PR for session branch",
+			zap.String("watch_id", watch.ID), zap.String("branch", watch.Branch), zap.Int("pr_number", pr.Number))
 	}
-
-	// Found a PR — update the watch and create association
-	if updateErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); updateErr != nil {
-		p.logger.Error("failed to update PR watch with detected PR",
-			zap.String("watch_id", watch.ID),
-			zap.Int("pr_number", pr.Number),
-			zap.Error(updateErr))
-		return
-	}
-
-	if _, assocErr := p.service.associatePRWithTaskForSession(
-		ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, pr,
-		false, false, TaskPRSourceWatch,
-	); assocErr != nil {
-		p.logger.Error("failed to associate detected PR with task",
-			zap.String("task_id", watch.TaskID),
-			zap.Int("pr_number", pr.Number),
-			zap.Error(assocErr))
-		return
-	}
-
-	p.logger.Info("detected PR for session branch",
-		zap.String("watch_id", watch.ID),
-		zap.String("branch", watch.Branch),
-		zap.Int("pr_number", pr.Number))
 }
 
 func (p *Poller) publishPRStatusEvent(ctx context.Context, watch *PRWatch, taskID string, status *PRStatus) {
@@ -823,7 +746,7 @@ func (p *Poller) reconcileWatches(ctx context.Context) {
 	for _, task := range tasks {
 		if _, ensureErr := p.service.EnsurePRWatchForWorkspace(
 			ctx, task.WorkspaceID, task.SessionID, task.TaskID, task.RepositoryID, task.Owner, task.Repo, task.Branch,
-		); ensureErr != nil {
+		); ensureErr != nil && !errors.Is(ensureErr, ErrPRWatchRetired) {
 			p.logger.Error("failed to ensure PR watch",
 				zap.String("session_id", task.SessionID), zap.Error(ensureErr))
 		}

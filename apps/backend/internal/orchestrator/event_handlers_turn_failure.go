@@ -157,6 +157,10 @@ func (s *Service) settleRetainedTurnFailure(
 	) == routingerr.DecisionShortRetry {
 		data.RecoveryDisposition = recoveryDispositionRefused
 	}
+	recoveryReason := ""
+	if data.RecoveryDisposition == recoveryDispositionRefused {
+		recoveryReason = s.continuationRefusalReason(ctx, data)
+	}
 
 	failedTurnID, err := s.markRetainedFailureTurn(ctx, data)
 	if err != nil {
@@ -175,7 +179,7 @@ func (s *Service) settleRetainedTurnFailure(
 			zap.String("turn_id", failedTurnID), zap.Error(err))
 		return false
 	}
-	if err := s.persistRetainedTurnFailureMessage(ctx, data, failedTurnID); err != nil {
+	if err := s.persistRetainedTurnFailureMessage(ctx, data, failedTurnID, recoveryReason); err != nil {
 		s.logger.Warn("failed to persist retained provider turn failure",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
 			zap.String("turn_id", failedTurnID), zap.Error(err))
@@ -281,6 +285,7 @@ func (s *Service) persistRetainedTurnFailureMessage(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	turnID string,
+	recoveryReason string,
 ) error {
 	if s.messageCreator == nil {
 		return fmt.Errorf("turn failure message creator is unavailable")
@@ -304,6 +309,9 @@ func (s *Service) persistRetainedTurnFailureMessage(
 	}
 	if data.RecoveryDisposition != "" {
 		metadata["recovery_disposition"] = data.RecoveryDisposition
+	}
+	if data.RecoveryDisposition == recoveryDispositionRefused && recoveryReason != "" {
+		metadata["recovery_reason"] = recoveryReason
 	}
 	if turnID != "" {
 		metadata["turn_id"] = turnID

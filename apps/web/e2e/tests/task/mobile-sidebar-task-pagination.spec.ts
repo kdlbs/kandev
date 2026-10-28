@@ -2,6 +2,7 @@ import { exerciseSidebarViewReuse } from "./sidebar-view-reuse-fixtures";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import { waitForCascadeArchiveCleanup } from "../../helpers/session-resume-recovery";
 import {
   archiveSidebarPaginationTasks,
   seedSidebarPaginationTasks,
@@ -11,6 +12,7 @@ test("phone sidebar pages 101 matching tasks and preserves the active chat", asy
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
   test.setTimeout(120_000);
   const token = `Mobile sidebar page ${Date.now()}`;
@@ -63,9 +65,11 @@ test("phone sidebar pages 101 matching tasks and preserves the active chat", asy
   await apiClient.archiveTask(matchingTaskIds[1]);
   await expect(rows).toHaveCount(99, { timeout: 20_000 });
   await expect(controls).toBeHidden();
+  await waitForCascadeArchiveCleanup(backend.tmpDir, matchingTaskIds[1]);
   await apiClient.unarchiveTask(matchingTaskIds[1]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeHidden();
+  await waitForCascadeArchiveCleanup(backend.tmpDir, matchingTaskIds[0]);
   await apiClient.unarchiveTask(matchingTaskIds[0]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeVisible();

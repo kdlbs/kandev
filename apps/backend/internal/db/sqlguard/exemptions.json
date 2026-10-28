@@ -92,7 +92,6 @@
     {"file": "internal/office/repository/sqlite/loop_health.go", "symbol": "CountEligibleTriggers", "rule": "boolean-integer", "reason": "The Office SQLite schema stores trigger enabled as an INTEGER flag"},
     {"file": "internal/office/repository/sqlite/loop_health.go", "symbol": "ListOverdueOrStrandedTriggers", "rule": "boolean-integer", "reason": "The Office SQLite schema stores trigger enabled as an INTEGER flag"},
     {"file": "internal/office/repository/sqlite/tasks.go", "symbol": "hasFTSTable", "rule": "sqlite-catalog", "reason": "SQLite-only FTS inspection"},
-    {"file": "internal/office/repository/sqlite/tasks.go", "symbol": "ListUnstartedTasks", "rule": "sqlite-date-function", "reason": "The Office repository is explicitly SQLite-only"},
     {"file": "internal/orchestrator/messagequeue/repository_sqlite.go", "symbol": "NewSQLiteRepository", "rule": "sqlite-catalog", "reason": "The SQLite message queue repository is explicitly SQLite-only"},
     {"file": "internal/persistence/meta.go", "symbol": "hasUserTables", "rule": "sqlite-catalog", "reason": "This helper inspects a SQLite database candidate"},
     {"file": "internal/persistence/provider.go", "symbol": "provideSQLite", "rule": "sqlite-catalog", "reason": "SQLite-only database cleanup runs PRAGMA optimize before close"},

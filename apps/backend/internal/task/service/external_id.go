@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/quickchatidentity"
 )
@@ -118,6 +119,28 @@ func (s *Service) GetTaskByExternalID(ctx context.Context, workspaceID, rawExter
 	}
 	s.hydrateTaskRelations(ctx, task)
 	return task, nil
+}
+
+// FindTaskByExternalIDForCreate resolves the existing-task short circuit from
+// CreateTask without creating a task. It uses the same task-write authorization
+// as CreateTask so callers can validate new-task-only input after identity
+// recovery without requiring a separate workspace-read permission.
+func (s *Service) FindTaskByExternalIDForCreate(ctx context.Context, workspaceID, rawExternalID string) (*models.Task, bool, error) {
+	if err := s.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeTaskWrite); err != nil {
+		return nil, false, err
+	}
+	externalID, err := NormalizeExternalID(rawExternalID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := refuseReservedExternalIDPrefix(externalID, false); err != nil {
+		return nil, false, err
+	}
+	found, result, err := s.findTaskByExternalIDIfPresent(ctx, workspaceID, externalID)
+	if err != nil {
+		return nil, false, err
+	}
+	return result.Task, found, nil
 }
 
 // ReleaseTaskExternalID is the REST release route's service-level

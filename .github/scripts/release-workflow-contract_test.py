@@ -5,6 +5,7 @@ import fnmatch
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -98,6 +99,115 @@ def step_run_script(block: str) -> str:
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    # @covers AC-CI-ACTIONS-SECURITY-002.1
+    def test_publication_metadata_stays_in_arguments_without_shell_execution(self):
+        cases = (
+            ("docker-universal-manifest", "Promote staging to final tags"),
+            ("publish-release", "Generate and verify updater manifest"),
+            ("publish-npm", "Publish npm packages"),
+            ("publish-npm-nightly", "Publish npm nightly packages"),
+            ("update-homebrew-tap", "Update Homebrew tap formula"),
+            ("update-scoop-bucket", "Update Scoop bucket"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            log = root / "calls.jsonl"
+            stub = tools / "stub"
+            stub.write_text(
+                "#!/usr/bin/env python3\nimport json,os,sys\n"
+                "with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "if sys.argv[1:2] == ['show']: print('2026-10-26T00:00:00Z')\n"
+            )
+            stub.chmod(0o755)
+            for name in ("git", "node", "bash"):
+                (tools / name).symlink_to(stub)
+            assets = root / "dist/release-assets"
+            assets.mkdir(parents=True)
+            (assets / "latest.json").write_text("{}")
+            payload = "v1.2.3$(touch marker)`touch marker`\"'\nwith space"
+            env = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "CALLS": str(log),
+                   "RELEASE_TAG": payload, "RELEASE_VERSION": payload, "NIGHTLY_VERSION": payload,
+                   "GITHUB_REPOSITORY": "fixture/repository", "AMD64_REF": "sha256:amd64", "ARM64_REF": "sha256:arm64",
+                   "NIGHTLY_BASELINE": "1.2.3", "NIGHTLY_AT_START": "", "NIGHTLY_TAGS_AT_START": ""}
+            for job, step in cases:
+                with self.subTest(job=job):
+                    log.unlink(missing_ok=True)
+                    script = step_run_script(job_step_block(job, step))
+                    script = re.sub(r"\$\{\{ needs\.[\w-]+\.outputs\.(?:tag|version) \}\}", payload, script)
+                    script = script.replace("${{ github.repository }}", "fixture/repository")
+                    result = subprocess.run(
+                        [shutil.which("bash"), "-c", script], env=env,
+                        text=True, cwd=root, capture_output=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((root / "marker").exists())
+                    calls = [json.loads(line) for line in log.read_text().splitlines()]
+                    self.assertTrue(any(payload in arg for call in calls for arg in call), calls)
+
+    # @covers AC-CI-ACTIONS-SECURITY-002.2
+    def test_every_release_checkout_disables_credential_persistence(self):
+        checkouts = list(re.finditer(r"(?m)^      - uses: actions/checkout@", WORKFLOW))
+        self.assertGreater(len(checkouts), 6)
+        for checkout in checkouts:
+            suffix = WORKFLOW[checkout.start():]
+            end = re.search(r"(?m)^      - |^  [\w-]+:", suffix[1:])
+            block = suffix if end is None else suffix[:end.start() + 1]
+            self.assertIn("persist-credentials: false", block)
+
+    def test_release_pushes_use_only_command_scoped_git_authentication(self):
+        for name in ("Create release PR", "Create and push signed release tag"):
+            block = step_block(name)
+            self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", block)
+            script = step_run_script(block)
+            self.assertIn("credential.helper=", script)
+            self.assertIn("credential.helper=!gh auth git-credential", script)
+            self.assertNotIn("git config credential", script)
+            self.assertNotIn("gh auth setup-git", script)
+
+    def test_authenticated_pushes_preserve_branch_creation_and_tag_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            log = root / "git-calls"
+            git = tools / "git"
+            git.write_text(
+                "#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\n"
+                "args=sys.argv[1:]\n"
+                "with open(os.environ['CALLS'],'a') as f: f.write(json.dumps(args)+'\\n')\n"
+                "if 'push' in args:\n"
+                " assert args[:4] == ['-c','credential.helper=','-c','credential.helper=!gh auth git-credential']\n"
+                " assert os.environ.get('GH_TOKEN') == 'fixture-token'\n"
+                " if args[-1:] == ['v1.2.3']:\n"
+                "  marker=Path('tag-attempted')\n"
+                "  if not marker.exists(): marker.touch(); sys.exit(1)\n"
+                "if args[:2] == ['rev-parse','HEAD']: print('a'*40)\n"
+            )
+            git.chmod(0o755)
+            gh = tools / "gh"
+            gh.write_text("#!/usr/bin/env python3\nprint('https://github.com/fixture/repo/pull/1')\n")
+            gh.chmod(0o755)
+            sleep = tools / "sleep"
+            sleep.write_text("#!/usr/bin/env python3\n")
+            sleep.chmod(0o755)
+            for name in ("Create release PR", "Create and push signed release tag"):
+                block = step_block(name)
+                env = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "CALLS": str(log),
+                       "NEXT": "1.2.3", "TAG": "v1.2.3", "GITHUB_OUTPUT": str(root / "outputs")}
+                env.pop("GH_TOKEN", None)
+                if "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in block:
+                    env["GH_TOKEN"] = "fixture-token"
+                result = subprocess.run([shutil.which("bash"), "-c", step_run_script(block)], env=env,
+                                        text=True, cwd=root, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            pushes = [call[call.index("push") + 1:] for call in calls if "push" in call]
+            self.assertEqual(pushes, [["origin", "--delete", "release/v1.2.3"],
+                                     ["-u", "origin", "release/v1.2.3"],
+                                     ["origin", "v1.2.3"], ["origin", "v1.2.3"]])
+
     def test_browser_demo_is_optional_only_for_legacy_tags_and_absent_on_nightly(self):
         job = job_block("build-web")
         self.assertIn("browser_demo: ${{ steps.demo_support.outputs.available }}", job)
@@ -784,7 +894,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("fetch-depth: 0", nightly)
         self.assertIn("pattern: bundle-*", nightly)
         self.assertIn("merge-multiple: true", nightly)
-        self.assertIn('--version "${{ needs.nightly-prepare.outputs.version }}"', nightly)
+        self.assertIn('NIGHTLY_VERSION: ${{ needs.nightly-prepare.outputs.version }}', nightly)
+        self.assertIn('--version "${NIGHTLY_VERSION}"', nightly)
         self.assertIn('--assets-dir dist/nightly-assets', nightly)
         publish = step_block("Publish npm nightly packages")
         self.assertIn("bash scripts/release/nightly-release.sh publish", publish)
@@ -798,9 +909,11 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("npm-view-version.sh", publish)
         self.assertNotIn("publish-npm.sh", publish)
 
-        self.assertIn('--version "${{ needs.prepare.outputs.version }}"', stable)
+        self.assertIn('RELEASE_VERSION: ${{ needs.prepare.outputs.version }}', stable)
+        self.assertIn('--version "${RELEASE_VERSION}"', stable)
         self.assertIn('--dist-tag latest', stable)
-        self.assertIn('--release-tag "${{ needs.prepare.outputs.tag }}"', stable)
+        self.assertIn('RELEASE_TAG: ${{ needs.prepare.outputs.tag }}', stable)
+        self.assertIn('--release-tag "${RELEASE_TAG}"', stable)
 
         self.assertIn('elif [[ "$DIST_TAG" == "latest" && -z "$RELEASE_TAG" ]]', PUBLISH_NPM)
         self.assertIn(
@@ -821,8 +934,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             scoop,
         )
         self.assertIn("bash scripts/release/update-scoop-bucket.sh", scoop)
-        self.assertIn('"${{ needs.prepare.outputs.version }}"', scoop)
-        self.assertIn('"${{ needs.prepare.outputs.tag }}"', scoop)
+        self.assertIn('RELEASE_VERSION: ${{ needs.prepare.outputs.version }}', scoop)
+        self.assertIn('"${RELEASE_VERSION}"', scoop)
+        self.assertIn('RELEASE_TAG: ${{ needs.prepare.outputs.tag }}', scoop)
+        self.assertIn('"${RELEASE_TAG}"', scoop)
         self.assertIn("!inputs.dry_run", scoop)
         self.assertIn("!inputs.desktop_validation_only", scoop)
         self.assertNotIn("inputs.backfill_tag == ''", scoop)
@@ -1008,7 +1123,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('git tag -s "$TAG" -m "release: $NEXT"', tag)
         self.assertIn('git tag -v "$TAG"', tag)
         self.assertLess(tag.index('git tag -s "$TAG"'), tag.index('git tag -v "$TAG"'))
-        self.assertLess(tag.index('git tag -v "$TAG"'), tag.index('git push origin "$TAG"'))
+        self.assertLess(tag.index('git tag -v "$TAG"'), tag.index('push origin "$TAG"'))
         self.assertNotIn('git tag -a "$TAG"', tag)
 
         self.assertLess(prepare.index(preflight_public_key), prepare.index(preflight))
@@ -1508,7 +1623,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("gh api", detect)
         self.assertIn("$RUNNER_TEMP/updater-signing-ready.sh", detect)
         self.assertIn(
-            "scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}",
+            "scripts/release/updater-signing-ready.sh?ref=${GITHUB_WORKFLOW_SHA}",
             detect,
         )
         self.assertIn('if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]', detect)
@@ -1525,7 +1640,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", block)
             self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", block)
             self.assertIn(
-                "scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}",
+                "scripts/release/verify-desktop-assets.sh?ref=${GITHUB_WORKFLOW_SHA}",
                 block,
             )
             self.assertIn("DESKTOP_ASSET_VERIFIER=$helper", block)
@@ -1543,7 +1658,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("git show -s --format=%cI", generate)
         self.assertRegex(
             generate,
-            r"needs\.prepare\.outputs\.tag \}\}\^\{commit\}",
+            r'"\$\{RELEASE_TAG\}\^\{commit\}"',
         )
 
     def test_macos_signed_build_selects_app_bundle_for_updater(self) -> None:
@@ -1623,7 +1738,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         helper = step_block("Prepare macOS desktop diagnostics helper")
         self.assertIn("continue-on-error: true", helper)
-        self.assertIn("github.workflow_sha", helper)
+        self.assertIn("${GITHUB_WORKFLOW_SHA}", helper)
         self.assertIn("DESKTOP_DIAGNOSTICS_SCRIPT=$helper", helper)
 
         collect = step_block("Collect macOS desktop diagnostics")

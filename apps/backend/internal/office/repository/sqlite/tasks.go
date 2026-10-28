@@ -1158,6 +1158,18 @@ func (r *Repository) ListUnstartedTasks(
 	ctx context.Context, lookbackHours int, limit int, excludedTaskIDs ...string,
 ) ([]*UnstartedTaskRow, error) {
 	var rows []*UnstartedTaskRow
+	driver := r.ro.DriverName()
+	// The lookback placeholder is cast to INTEGER so Postgres does not infer
+	// it as text from the || concatenation (pgx then refuses to encode the
+	// int argument), and the run payload lookup goes through the dialect
+	// helper because json_extract does not exist on Postgres (#4741).
+	// created_at is a naive TIMESTAMP holding UTC; on Postgres it is pinned to
+	// UTC before comparing with NOW() so a non-UTC session time zone does not
+	// shift the window. SQLite keeps its existing comparison.
+	createdAt := "t.created_at"
+	if dialect.IsPostgres(driver) {
+		createdAt = dialect.NaiveUTCTimestampOf(driver, createdAt)
+	}
 	query := `
 		SELECT t.id,
 		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
@@ -1167,10 +1179,10 @@ func (r *Repository) ListUnstartedTasks(
 		  AND ` + taskrepo.IsFromOfficePredicate("t") + `
 		  AND ` + RunnerProjection("t") + ` != ''
 		  AND t.archived_at IS NULL` + andNotAutomationOriginT + `
-		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
+		  AND ` + createdAt + ` >= ` + dialect.NowMinusHours(driver, "CAST(? AS INTEGER)") + `
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
-		      WHERE json_extract(w.payload, '$.task_id') = t.id
+		      WHERE ` + dialect.JSONExtract(driver, "w.payload", "task_id") + ` = t.id
 		        AND w.status IN ('queued', 'claimed', 'finished')
 		  )
 	`

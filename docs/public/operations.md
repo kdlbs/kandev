@@ -586,6 +586,8 @@ Protected backlog and canonical history can continue to grow. Retention is not a
 Cleanup starts when the background worker starts, without an initial delay.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
 Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
+
+After a batch deadline, that phase retries with half as many candidates, down to one, within the same row, byte and time ceilings. The `agent_delivery.retention.batch_failed` log records the phase, candidate limits and repository error. A failed batch is rolled back and remains a failure in the pass snapshot; successful batches in other phases do not imply that its payloads were removed.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
@@ -970,6 +972,15 @@ Before any update, finish or stop active sessions, create and export a database 
   service flags, and restart; the UI never applies it.
 - Unmanaged CLI: run `brew upgrade kandev`, `scoop update kandev`, or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
+
+For a macOS user service with login-shell initialization enabled, an ordinary
+reinstall without `--shell` and a supported Apply update preserve the saved
+selection. Use `kandev service install --shell=none` to return to direct startup.
+If the service was installed with a custom `--home-dir`, repeat its existing
+path in the reset command, for example:
+`kandev service install --home-dir /path/to/existing/kandev-home --shell=none`.
+See [Run as a service](run-as-a-service.md#optional-macos-login-initialization)
+for shell startup behavior and recovery.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 
 After restart, verify `/ready`, **System > About**, **System > Status**, the database page, and one non-destructive agent session. Kandev does not perform automatic binary or database rollback. If rollback is necessary, restore a compatible pre-upgrade database and matching application release together.

@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../helpers/animations";
 
 /** Focused page object for agent-profile controls in the New Session dialog. */
 export class NewSessionDialogPage {
@@ -37,6 +38,7 @@ export class NewSessionDialogPage {
     } else {
       await selector.click();
     }
+    await waitForFiniteAnimations(this.page.getByRole("listbox", { name: "Suggestions" }));
     const option = this.agentOptions().filter({ hasText: profileName });
     if (touch) {
       await option.tap();

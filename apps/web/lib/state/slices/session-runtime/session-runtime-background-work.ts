@@ -1,19 +1,11 @@
 import type { SessionRuntimeSlice } from "./types";
+import type { ImmerSet } from "./session-runtime-slice";
+import { buildBackgroundOutputActions, reconcileOutputWindows } from "./background-output-window";
 import {
   applyWorkloadActionAvailability,
   hasCapabilityDeclaration,
 } from "@/lib/background-work/capabilities";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
-
-export type BackgroundWorkSet = (
-  recipe: (draft: {
-    backgroundWork: {
-      workloadsBySessionId: Record<string, WorkloadRunObservation[]>;
-      activeWorkIdBySessionId: Record<string, string | null>;
-      loadingBySessionId: Record<string, boolean>;
-    };
-  }) => void,
-) => void;
 
 function isTerminalRunState(s?: string) {
   return s === "completed" || s === "failed" || s === "interrupted" || s === "ended";
@@ -36,7 +28,7 @@ function mergeWorkloadCapabilities(
   return applyWorkloadActionAvailability(declaration, incoming.state);
 }
 
-function buildBackgroundWorkLoadActions(set: BackgroundWorkSet) {
+function buildBackgroundWorkLoadActions(set: ImmerSet) {
   return {
     setBackgroundWorkloads: (
       sessionId: string,
@@ -68,6 +60,7 @@ function buildBackgroundWorkLoadActions(set: BackgroundWorkSet) {
           }
           return { ...incoming, capabilities: mergeWorkloadCapabilities(existing, incoming) };
         });
+        reconcileOutputWindows(draft.backgroundWork, sessionId, existingList, merged);
         draft.backgroundWork.workloadsBySessionId[sessionId] = merged;
         draft.backgroundWork.loadingBySessionId[sessionId] = false;
       }),
@@ -77,6 +70,7 @@ function buildBackgroundWorkLoadActions(set: BackgroundWorkSet) {
     ) =>
       set((draft) => {
         const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
+        const previous = [...list];
         const idx = list.findIndex((w) => w.work_id === workload.work_id);
         if (idx >= 0) {
           const existing = list[idx]!;
@@ -98,45 +92,12 @@ function buildBackgroundWorkLoadActions(set: BackgroundWorkSet) {
             capabilities: applyWorkloadActionAvailability(workload.capabilities, workload.state),
           });
         }
+        reconcileOutputWindows(draft.backgroundWork, sessionId, previous, list);
         draft.backgroundWork.workloadsBySessionId[sessionId] = list;
-      }),
-  };
-}
-
-function buildBackgroundWorkOutputActions(set: BackgroundWorkSet) {
-  return {
-    appendBackgroundWorkloadOutput: (
-      sessionId: string,
-      chunk: Parameters<SessionRuntimeSlice["appendBackgroundWorkloadOutput"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const workload = list.find((w) => w.work_id === chunk.work_id);
-        if (workload && chunk.chunk) {
-          const currentOutput = workload.output || "";
-          const newOutput = currentOutput + chunk.chunk;
-          const maxLen = 200 * 1024;
-          if (newOutput.length > maxLen) {
-            workload.output = newOutput.slice(newOutput.length - maxLen);
-            workload.output_truncated = true;
-          } else {
-            workload.output = newOutput;
-          }
-          workload.output_offset = chunk.offset;
-          if (chunk.truncated) {
-            workload.output_truncated = true;
-          }
-        }
       }),
     setActiveBackgroundWorkload: (sessionId: string, workId: string) =>
       set((draft) => {
         draft.backgroundWork.activeWorkIdBySessionId[sessionId] = workId;
-      }),
-    clearBackgroundWork: (sessionId: string) =>
-      set((draft) => {
-        delete draft.backgroundWork.workloadsBySessionId[sessionId];
-        delete draft.backgroundWork.activeWorkIdBySessionId[sessionId];
-        delete draft.backgroundWork.loadingBySessionId[sessionId];
       }),
     setBackgroundWorkLoading: (sessionId: string, loading: boolean) =>
       set((draft) => {
@@ -146,9 +107,9 @@ function buildBackgroundWorkOutputActions(set: BackgroundWorkSet) {
 }
 
 /** Background-work store actions. */
-export function buildBackgroundWorkActions(set: BackgroundWorkSet) {
+export function buildBackgroundWorkActions(set: ImmerSet) {
   return {
+    ...buildBackgroundOutputActions(set),
     ...buildBackgroundWorkLoadActions(set),
-    ...buildBackgroundWorkOutputActions(set),
   };
 }

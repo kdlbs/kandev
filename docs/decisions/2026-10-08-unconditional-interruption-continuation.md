@@ -21,6 +21,11 @@ for those safety checks.
 
 ## Decision
 
+The [October 26 pending-tool decision](2026-10-26-cursor-pending-tool-continuation.md)
+amends the pending foreground tool exclusion for retained Cursor transport
+failures. Other exclusions and the original-prompt replay fence remain in force.
+
+
 Make supported interruption continuation normal recovery in prod, dev, and e2e,
 including managed and standalone agentctl. Remove the live
 `features.providerInterruptionContinuation` /

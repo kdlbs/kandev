@@ -52,6 +52,7 @@ test("mobile Stats exposes a touch-sized retry and recovers a failed section", a
     new RegExp(`^/api/v1/workspaces/${seedData.workspaceId}/stats/daily-activity$`),
     { predicate: (response) => response.ok() },
   );
+  await expect(retry).toBeEnabled();
   dailyAvailable = true;
   await retry.tap();
   await recoveredDailyRead;

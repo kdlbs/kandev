@@ -17,17 +17,16 @@ import { useTranslation } from "react-i18next";
 import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { useBackgroundWork } from "@/hooks/domains/session/use-background-work";
+import { useClearedOutput } from "@/hooks/domains/session/use-cleared-background-output";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
-import { cn } from "@/lib/utils";
 import { canRunWorkloadAction, hasReadableOutput } from "@/lib/background-work/capabilities";
 import {
   workloadExitStatusKey,
   workloadKindLabelKey,
   workloadOutputUnavailableKey,
-  workloadStateBadgeVariant,
-  workloadStateLabelKey,
 } from "./presentation";
+import { WorkloadStateBadge } from "./workload-state-badge";
 
 export type BackgroundWorkPanelProps = {
   panelId: string;
@@ -47,7 +46,13 @@ export function BackgroundWorkPanel({ params }: BackgroundWorkPanelProps) {
   }, [workloads, workId]);
 
   if (selectedWorkload) {
-    return <WorkloadDetailView workload={selectedWorkload} onAction={executeAction} />;
+    return (
+      <WorkloadDetailView
+        sessionId={sessionId ?? ""}
+        workload={selectedWorkload}
+        onAction={executeAction}
+      />
+    );
   }
 
   return <WorkloadOverviewView workloads={workloads} isLoading={isLoading} />;
@@ -182,23 +187,6 @@ function WorkloadCard({ workload }: { workload: WorkloadRunObservation }) {
   );
 }
 
-function WorkloadStateBadge({ workload }: { workload: WorkloadRunObservation }) {
-  const { t } = useTranslation();
-  return (
-    <Badge
-      variant={workloadStateBadgeVariant(workload.state)}
-      className={cn(
-        "text-[10px]",
-        workload.state === "running" && "bg-primary text-primary-foreground",
-      )}
-      data-testid={`background-work-state-${workload.work_id}`}
-      data-state={workload.state}
-    >
-      {t(workloadStateLabelKey(workload.state))}
-    </Badge>
-  );
-}
-
 function WorkloadDetailHeader({
   workload,
   onInterrupt,
@@ -288,9 +276,7 @@ function WorkloadOutputViewer({
       {workload.output_truncated && (
         <div className="mb-2 text-[10px] text-amber-400">[{t("task:earlierOutputTruncated")}]</div>
       )}
-      <pre className="whitespace-pre-wrap break-all">
-        {displayOutput || (unavailableKey ? t(unavailableKey) : "")}
-      </pre>
+      <pre className="whitespace-pre-wrap break-all">{displayOutput || t(unavailableKey)}</pre>
       <div ref={outputEndRef} />
     </div>
   );
@@ -376,9 +362,11 @@ function WorkloadInputForm({
 }
 
 function WorkloadDetailView({
+  sessionId,
   workload,
   onAction,
 }: {
+  sessionId: string;
   workload: WorkloadRunObservation;
   onAction: (req: {
     action: "stop" | "interrupt" | "write_input";
@@ -390,25 +378,12 @@ function WorkloadDetailView({
   const [input, setInput] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [search, setSearch] = useState("");
-  const [clearedOffset, setClearedOffset] = useState<number>(0);
+  const { displayOutput, clear } = useClearedOutput(sessionId, workload, search);
   const [isSending, setIsSending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
 
   const outputAvailable = hasReadableOutput(workload.capabilities);
-  const displayOutput = useMemo(() => {
-    let text = workload.output || "";
-    if (clearedOffset > 0) {
-      text = text.slice(clearedOffset);
-    }
-    if (!search.trim()) return text;
-    const q = search.toLowerCase();
-    return text
-      .split("\n")
-      .filter((line) => line.toLowerCase().includes(q))
-      .join("\n");
-  }, [workload.output, clearedOffset, search]);
-
   useEffect(() => {
     if (autoScroll && outputEndRef.current) {
       outputEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -455,7 +430,7 @@ function WorkloadDetailView({
             onSearchChange={setSearch}
             autoScroll={autoScroll}
             onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
-            onClear={() => setClearedOffset((workload.output || "").length)}
+            onClear={clear}
           />
         )}
 

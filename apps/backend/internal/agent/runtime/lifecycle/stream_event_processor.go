@@ -238,14 +238,14 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		}
 		return nil
 	}
-	event, canonicalProjected, err := sm.projectCanonicalAgentEvent(
+	event, canonicalProjected, notify, err := sm.projectCanonicalAgentEvent(
 		ctx, execution, prepared.event, prepared.durableEvent, delivery, client,
 		!prepared.skipAcknowledgement,
 	)
 	if err != nil {
 		return fmt.Errorf("canonical agent event projection: %w", err)
 	}
-	if !prepared.skipCallback {
+	if notify && !prepared.skipCallback {
 		sm.notifyAgentEvent(execution, event, startupGeneration)
 	}
 	if prepared.durableEvent == nil || canonicalProjected {

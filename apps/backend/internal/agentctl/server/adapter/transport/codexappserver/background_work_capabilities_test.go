@@ -48,13 +48,14 @@ func TestCodexSubagentFramesCarryNativeCapabilities(t *testing.T) {
 		"agentThreadId": "thread-child",
 		"kind":          "running",
 	})
-	updated := nextCodexEvent(t, adapter)
-	require.Eventually(t, func() bool {
-		if updated.NormalizedPayload == nil {
-			updated = nextCodexEvent(t, adapter)
+	var updated streams.AgentEvent
+	for i := 0; i < 5; i++ {
+		updated = nextCodexEvent(t, adapter)
+		if updated.NormalizedPayload != nil && updated.NormalizedPayload.BackgroundWork() != nil {
+			break
 		}
-		return updated.NormalizedPayload != nil &&
-			updated.NormalizedPayload.BackgroundWork() != nil
-	}, 2*time.Second, 10*time.Millisecond)
+	}
+	require.NotNil(t, updated.NormalizedPayload)
+	require.NotNil(t, updated.NormalizedPayload.BackgroundWork())
 	require.NotNil(t, updated.NormalizedPayload.BackgroundWork().Capabilities)
 }

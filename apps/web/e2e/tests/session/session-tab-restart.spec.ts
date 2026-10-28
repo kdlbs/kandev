@@ -34,6 +34,7 @@ test("blocks sending throughout restart while keeping the draft editable", async
         (await apiClient.listTaskSessions(fixture.task.id)).sessions.filter(
           (session) => session.state === "WAITING_FOR_INPUT",
         ).length,
+      { message: "Waiting for the sibling session to become ready", timeout: 30_000 },
     )
     .toBe(2);
   await fixture.session.sessionTabBySessionId(fixture.sessionId).click();

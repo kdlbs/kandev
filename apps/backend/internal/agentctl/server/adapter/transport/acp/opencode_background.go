@@ -182,10 +182,7 @@ func (n *Normalizer) confirmBackgroundLaunch(payload *streams.NormalizedPayload,
 // openCodeBackgroundCapabilities is the truthful declaration for a legacy
 // OpenCode launch: inspectable identity, no output stream, no controls.
 func openCodeBackgroundCapabilities() streams.WorkloadCapabilities {
-	return streams.WorkloadCapabilities{
-		Discovery: "events_only",
-		Output:    "none",
-	}
+	return streams.InspectionOnlyWorkloadCapabilities()
 }
 
 // settleUnverifiedOpenCodeBackgroundWork closes the honest inspection window
@@ -247,8 +244,8 @@ func unverifiedOpenCodeWorkloadObservation(
 		Title:  title,
 		State:  streams.RunStateUnknown,
 		// The settlement update carries the original launch call so the durable
-		// row keeps its conversation association (AC-007.1/.5). Origin turn is
-		// preserved by the recorder because this update has none.
+		// row keeps its conversation association. Origin turn is preserved by
+		// the recorder because this update has none.
 		SourceCallID: toolCallID,
 		Capabilities: openCodeBackgroundCapabilities(),
 	}

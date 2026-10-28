@@ -111,3 +111,17 @@ func TestBackgroundWorkRunIDIsNeverDerived(t *testing.T) {
 		t.Fatalf("RunID = %q, want process-1", got)
 	}
 }
+
+// TestMonitorIdentityDeclaresInspectionOnlySurface pins that a Monitor producer
+// publishes its explicit inspect-only contract with the identity.
+func TestMonitorIdentityDeclaresInspectionOnlySurface(t *testing.T) {
+	payload := NewGeneric("Monitor", map[string]any{})
+	payload.SetMonitorIdentity("monitor-1", false)
+	work := payload.BackgroundWork()
+	if work == nil || work.Capabilities == nil {
+		t.Fatal("monitor identity must declare its capability surface")
+	}
+	if work.Capabilities.Output != "none" || len(work.Capabilities.Actions) != 0 {
+		t.Fatalf("monitor capabilities = %+v, want inspect-only", work.Capabilities)
+	}
+}

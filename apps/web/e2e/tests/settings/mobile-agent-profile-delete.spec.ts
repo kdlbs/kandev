@@ -1,17 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
+import { seededAgentProfile } from "../../helpers/seeded-agent-profile";
 import { waitForFiniteAnimations } from "../../helpers/animations";
-
-async function getSeededAgentProfile(apiClient: ApiClient, profileId: string) {
-  const { agents } = await apiClient.listAgents();
-  const matches = agents.flatMap((agent) =>
-    agent.profiles
-      .filter((profile) => profile.id === profileId)
-      .map((profile) => ({ agent, profile })),
-  );
-  expect(matches, "The seeded profile must have exactly one owning agent").toHaveLength(1);
-  return matches[0]!;
-}
 
 function longProfileDeleteConflict() {
   return {
@@ -33,7 +22,7 @@ test.describe("Agent profile deletion on mobile", () => {
     apiClient,
     seedData,
   }) => {
-    const { profile } = await getSeededAgentProfile(apiClient, seedData.agentProfileId);
+    const { profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
 
     await testPage.goto("/settings/agents");
 
@@ -78,7 +67,7 @@ test.describe("Agent profile deletion on mobile", () => {
     seedData,
     prCapture,
   }) => {
-    const { agent, profile: seedProfile } = await getSeededAgentProfile(
+    const { agent, profile: seedProfile } = await seededAgentProfile(
       apiClient,
       seedData.agentProfileId,
     );
@@ -139,7 +128,7 @@ test.describe("Agent profile deletion on mobile", () => {
   }) => {
     test.setTimeout(60_000);
 
-    const { agent, profile: seedProfile } = await getSeededAgentProfile(
+    const { agent, profile: seedProfile } = await seededAgentProfile(
       apiClient,
       seedData.agentProfileId,
     );

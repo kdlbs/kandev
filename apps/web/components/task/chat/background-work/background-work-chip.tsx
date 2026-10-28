@@ -28,13 +28,12 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
 import { cn } from "@/lib/utils";
-import { hasReadableOutput } from "@/lib/background-work/capabilities";
 import {
   workloadExitStatusKey,
   workloadKindLabelKey,
-  workloadStateBadgeVariant,
-  workloadStateLabelKey,
+  workloadOutputUnavailableKey,
 } from "./presentation";
+import { WorkloadStateBadge } from "./workload-state-badge";
 
 type WorkloadSummaryListProps = {
   workloads: WorkloadRunObservation[];
@@ -46,23 +45,6 @@ type WorkloadSummaryListProps = {
   onOpenAll: () => void;
   drawer?: boolean;
 };
-
-function WorkloadStateBadge({ workload }: { workload: WorkloadRunObservation }) {
-  const { t } = useTranslation();
-  return (
-    <Badge
-      variant={workloadStateBadgeVariant(workload.state)}
-      className={cn(
-        "text-[10px]",
-        workload.state === "running" && "bg-primary text-primary-foreground",
-      )}
-      data-testid={`background-work-state-${workload.work_id}`}
-      data-state={workload.state}
-    >
-      {t(workloadStateLabelKey(workload.state))}
-    </Badge>
-  );
-}
 
 function WorkloadSummaryCounts({
   runningCount,
@@ -277,15 +259,13 @@ function WorkloadDetailDrawerHeader({
 
 function WorkloadDetailBody({ workload }: { workload: WorkloadRunObservation }) {
   const { t } = useTranslation();
-  const outputAvailable = hasReadableOutput(workload.capabilities);
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-black/95 p-3 font-mono text-xs text-green-400">
       {workload.output_truncated && (
         <div className="mb-2 text-[10px] text-amber-400">[{t("task:earlierOutputTruncated")}]</div>
       )}
       <pre className="whitespace-pre-wrap break-all">
-        {workload.output ||
-          t(outputAvailable ? "task:liveOutputUnavailable" : "task:backgroundOutputUnavailable")}
+        {workload.output || t(workloadOutputUnavailableKey(workload))}
       </pre>
     </div>
   );

@@ -247,6 +247,41 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("for attempt in 1 2; do", self.generation)
         self.assertNotIn("opencode_status", self.generation)
 
+    # @covers AC-UI-PR-WALKTHROUGH-001.15
+    def test_generation_is_best_effort_and_warns_instead_of_failing(self) -> None:
+        run_step = self.generation.split("- name: Run OpenCode walkthrough", 1)[1].split(
+            "- name:", 1
+        )[0]
+        self.assertIn("continue-on-error: true", run_step)
+        self.assertIn("--print-logs", run_step)
+
+        self.assertIn("generated: ${{ steps.report.outputs.generated }}", self.generation)
+        report_step = self.generation.split(
+            "- name: Report walkthrough generation outcome", 1
+        )[1]
+        self.assertIn('echo "generated=true" >> "$GITHUB_OUTPUT"', report_step)
+        self.assertIn('echo "generated=false" >> "$GITHUB_OUTPUT"', report_step)
+        self.assertIn("GENERATE_OUTCOME: ${{ steps.generate.outcome }}", report_step)
+        self.assertIn("PR_NUMBER: ${{ github.event.pull_request.number }}", report_step)
+        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", report_step)
+        self.assertIn("pr-walkthrough-${PR_NUMBER}-${HEAD_SHA}", report_step)
+        self.assertIn("::warning title=PR walkthrough skipped::", report_step)
+        self.assertIn("## PR walkthrough skipped", report_step)
+        self.assertIn("best effort", report_step)
+
+        self.assertIn(
+            "needs.pr-walkthrough-generate.outputs.generated == 'true'",
+            self.publication,
+        )
+        self.assertIn("if-no-files-found: warn", self.generation)
+        for step_name in ("Stage walkthrough artifact", "Upload walkthrough artifact"):
+            step = self.generation.split(f"- name: {step_name}", 1)[1].split(
+                "- name:", 1
+            )[0]
+            self.assertIn(
+                "continue-on-error: ${{ steps.generate.outcome != 'success' }}", step
+            )
+
     def test_generation_budgets_preparation_and_generation_time(self) -> None:
         self.assertIn("timeout-minutes: 25", self.generation)
         budgets = (
@@ -350,7 +385,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("- name: Stage walkthrough artifact\n        if: always()", self.generation)
         self.assertIn("path: pr-walkthrough-artifact/", self.generation)
-        self.assertIn("if-no-files-found: error", self.generation)
+        self.assertIn("if-no-files-found: warn", self.generation)
 
     def test_walkthrough_runs_are_serialized_for_the_entire_pr_pipeline(self) -> None:
         workflow_header = self.workflow.split("jobs:", 1)[0]
@@ -427,13 +462,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
 
     def test_all_opencode_jobs_use_the_trusted_reusable_setup_action(self) -> None:
         workflows = self.workflow + self.review_workflow
-        self.assertEqual(workflows.count("uses: ./.trusted-actions/setup-opencode"), 3)
-        self.assertEqual(
-            workflows.count(
-                'git show "$BASE_SHA:.github/actions/setup-opencode/action.yml"'
-            ),
-            2,
-        )
+        self.assertEqual(self.workflow.count("uses: ./.trusted-actions/setup-opencode"), 1)
+        self.assertEqual(self.review_workflow.count("uses: ./.github/actions/setup-opencode"), 2)
         self.assertEqual(
             workflows.count(
                 'git show "$TRUSTED_SHA:.github/actions/setup-opencode/action.yml"'
@@ -449,12 +479,12 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             action,
         )
 
-    def test_fork_job_fetches_base_before_materializing_setup_action(self) -> None:
-        fetch = self.fork_review.index('git fetch --no-tags --prune origin "$BASE_SHA"')
-        materialize = self.fork_review.index(
-            'git show "$BASE_SHA:.github/actions/setup-opencode/action.yml"'
-        )
-        self.assertLess(fetch, materialize)
+    def test_fork_job_prepares_verified_objects_before_trusted_setup(self) -> None:
+        self.assertIn("ref: ${{ github.workflow_sha }}", self.fork_review)
+        prepare = self.fork_review.index('bash .github/scripts/prepare-pr-review.sh')
+        install = self.fork_review.index('uses: ./.github/actions/setup-opencode')
+        self.assertLess(prepare, install)
+        self.assertNotIn("ref: ${{ github.event.pull_request.head.sha }}", self.fork_review)
 
     def test_publication_is_artifact_only_and_exports_validated_url(self) -> None:
         self.assertIn("needs: pr-walkthrough-generate", self.publication)
