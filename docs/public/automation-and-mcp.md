@@ -344,6 +344,26 @@ Workspace MCP definitions are reusable, workspace-owned server configurations. O
 
 Add a custom definition as a remote endpoint, an exact-version managed npm package, or an existing executable. Bind secrets by workspace-secret reference. Saving a definition does not download, connect to, or start a server. Managed npm packages are materialized lazily in a Kandev-owned task-executor cache and do not change repository files or lockfiles.
 
+After adding a custom or marketplace server, **Saved to _workspace_** confirms
+its name in **Configured**. Choose **Done** to leave it saved, or **Use in** to
+choose a repository, an enabled agent profile in this workspace, or an existing
+task session. **Use in** is also available on saved catalog cards.
+
+Review the scope, then choose **Open MCP settings**. This only opens the existing
+editor and highlights the server once. Select its checkbox to add it. Repository
+and profile edits use **Save changes** and affect future sessions in that scope.
+A session link opens the named conversation; open its plug menu and **Customize**
+to select the server. That selection saves automatically for this session and
+uses the provider's existing application timing.
+
+If owner discovery fails or the owner becomes unavailable, the definition stays
+saved. Retry reads the current choices; it does not register another server or
+start an agent. Enable disabled definitions before using **Use in**.
+
+If Kandev cannot confirm the save, choose **Review saved servers**. This refreshes
+the catalog before you can add another server. Check for the server you intended
+to save; Kandev does not repeat an uncertain registration automatically.
+
 For an executable, each **Arguments** row is one argument, including spaces or an empty value. Configure non-secret environment values or HTTP headers in the editor. Use **Secret bindings** to choose a workspace or global secret reference for a credential. Only the reference is saved in the definition; the task executor receives the bound value when the server is prepared.
 
 Marketplace review shows the inputs requested by the selected setup. Complete required values and secret references before adding it. Choices that require unsupported variable substitution are unavailable.

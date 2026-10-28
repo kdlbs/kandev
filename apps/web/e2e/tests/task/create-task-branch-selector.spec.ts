@@ -6,6 +6,7 @@ import { expectWebkitDialogMotion } from "../../helpers/dialog-webkit-metrics";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForRepositoryPickerClose } from "../../helpers/task-create-picker";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test.use({ trace: "retain-on-failure" });
@@ -305,6 +306,8 @@ test.describe("Fresh-branch flow", () => {
       .getByRole("option", { name: new RegExp(`^${escapeRe(repoName)}\\b`, "i") })
       .first()
       .click();
+    await waitForRepositoryPickerClose(testPage);
+    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText(repoName);
     await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage
@@ -594,6 +597,7 @@ test.describe("Fresh-branch flow", () => {
         .getByRole("option", { name: new RegExp(`^${setup.repoName}\\b`, "i") })
         .first()
         .click();
+      await waitForRepositoryPickerClose(testPage);
       await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
 
       const executorSelector = testPage.getByTestId("executor-profile-selector");
@@ -660,6 +664,7 @@ test.describe("Branch refresh + filter", () => {
     // Repository names are not unique after earlier specs register additional
     // worktrees. cmdk's stable data-value is the repository ID.
     await testPage.locator(`[cmdk-item][data-value="${seedData.repositoryId}"]`).click();
+    await waitForRepositoryPickerClose(testPage);
     await expect(repoSelector).toBeFocused();
     // Worktree executor → branch selector enabled and refresh button visible.
     await testPage.getByTestId("executor-profile-selector").click();
@@ -755,6 +760,7 @@ test.describe("Branch refresh + filter", () => {
       .getByRole("option", { name: new RegExp(`^${repoName}\\b`, "i") })
       .first()
       .click();
+    await waitForRepositoryPickerClose(testPage);
     await expect(repoSelector).toBeFocused();
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();

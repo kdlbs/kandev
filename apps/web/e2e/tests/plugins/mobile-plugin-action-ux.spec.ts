@@ -11,6 +11,8 @@ import {
 } from "../../helpers/app-status-bar-settings";
 import { expectTouchDimension } from "../../helpers/touch-targets";
 
+test.use({ trace: "retain-on-failure" });
+
 async function assertGlyphSize(action: Locator, size: number): Promise<void> {
   const svg = action.locator('[data-slot="surface-action-icon"] > svg');
   await expect(svg).toHaveCount(1);
@@ -277,8 +279,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     await expect(drawerAction).toBeVisible();
     const drawerActionBox = await drawerAction.boundingBox();
     expect(drawerActionBox).not.toBeNull();
-    expect(drawerActionBox!.height).toBeGreaterThanOrEqual(44);
-    expect(drawerActionBox!.width).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(drawerActionBox!.height);
+    expectTouchDimension(drawerActionBox!.width);
     await drawerAction.focus();
     await testPage.keyboard.press("Enter");
 

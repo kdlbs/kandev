@@ -599,6 +599,7 @@ export function useTaskCreateDialogSetup(
     mcpDefinitions: mcp.definitions,
     mcpDefinitionsLoading: mcp.definitionsLoading,
     mcpInheritedSelections: mcp.inheritedSelections,
+    mcpSelectionRecovery: { error: mcp.editor.saveError, reload: mcp.editor.reload },
     initialWorkspaceLayoutMode,
   };
 }

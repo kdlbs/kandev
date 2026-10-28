@@ -1616,3 +1616,31 @@ start. The correction changes only that compilation allowance to twenty
 minutes; test deadlines, selections and required failure propagation remain.
 The owning CI completion design and task-16 work order record the evidence
 and validation. Fresh hosted Windows CI remains required before merge.
+
+### 2026-10-28 integration with MCP assignment main
+
+The next main revision is `4222c3654f9bb1efd1a7d27b5151c4b4c4f1ffd2`.
+Resolve three conflicts while preserving both input contracts: cancel the
+pending review-anchor restoration first, then admit direct-root pointer input
+or touch contact inside the scroller. Mouse and pen descendant presses retain
+suppression. The real-hook regression adds touch and pen cases under a pending
+restoration; the touch case fails before the combined correction and passes
+afterward. Main's certified-crossing tests remain intact.
+
+The silent-output fixture retains the shared unique mock gates, both silent
+before release, with a separate completion hold and finally release. This
+preserves main's replacement of the timed delay without duplicating gate
+plumbing. Auto-merged locale, Stats and chat fixtures preserve their existing
+branch corrections. SDK/package/release automation and the twenty-minute
+Windows persistence compilation allowance are unchanged.
+
+Validation passes 39 frontend tests, backend MCP eligibility race checks,
+full typecheck, scoped lint and docs/spec validation (414 decisions and 1,797
+specifications). Fresh browser checks pass all 23 pseudo-locale cases and two
+desktop/two phone review/stall cases with retries disabled. Direct documentation
+coverage passes 36 work orders and 118 linked documents. Remove the duplicate
+trace-retention declaration introduced by the automatic merge; one remains.
+
+Normal merge hooks, commit and push follow. The preceding head's 95 green
+checks are historical; fresh GitHub CI must verify the new head. The user owns
+the merge, and NOTIFICATION_GUIDE.md remains uncommitted.

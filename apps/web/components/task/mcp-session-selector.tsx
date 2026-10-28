@@ -1,11 +1,14 @@
 "use client";
 
+import { useSearchParams } from "@/lib/routing/client-router";
+import { readMCPContextHint } from "@/lib/mcp/management-links";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { IconChevronDown, IconX } from "@tabler/icons-react";
+import { MCPSelectionSaveFeedback } from "@/components/mcp/mcp-selection-save-feedback";
 import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
 import { McpSelectionNotice } from "./chat/mcp-explorer/mcp-selection-notice";
 import { mcpSelectionStateLabelKey } from "./chat/mcp-explorer/mcp-selection-presentation";
@@ -24,15 +27,19 @@ import type {
 } from "@/lib/types/http-mcp";
 
 export type MCPSessionSelectorProps = {
+  assignmentSessionId?: string;
+  assignmentActive?: boolean;
   workspaceId?: string | null;
   definitions: MCPServerDefinition[];
   definitionsLoading?: boolean;
   selectedIds: string[];
+  savedSelectedIds?: string[];
   onSelectedIdsChange: (ids: string[]) => void;
   inherited?: MCPInheritedSelection[];
   state?: MCPSessionSelectionState | null;
   disabled?: boolean;
   retry?: () => void;
+  reload?: () => Promise<unknown>;
   retrying?: boolean;
   error?: unknown;
   testId?: string;
@@ -43,10 +50,13 @@ export function MCPSessionSelectionBody({
   retry,
   retrying,
   definitionsLoading,
+  reload,
   ...props
 }: MCPSessionSelectorProps & { query: string; onQueryChange: (query: string) => void }) {
   const { t } = useTranslation();
-  const changes = mcpSelectionChanges(state, props.selectedIds);
+  const params = useSearchParams();
+  const routeSession = readMCPContextHint(params, "sessionId");
+  const changes = mcpSelectionChanges(state, props.savedSelectedIds ?? props.selectedIds);
   return (
     <div className="min-w-0 space-y-5">
       {state && (
@@ -64,6 +74,7 @@ export function MCPSessionSelectionBody({
           />
         </div>
       )}
+      {reload && <MCPSelectionSaveFeedback error={props.error} reload={reload} />}
       {definitionsLoading ? (
         <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
           {t("settings:mcpLoading")}
@@ -71,6 +82,18 @@ export function MCPSessionSelectionBody({
       ) : (
         <MCPSelectionContent
           {...props}
+          assignment={
+            props.assignmentSessionId
+              ? {
+                  ownerKey: props.assignmentSessionId,
+                  active: Boolean(
+                    props.assignmentActive && routeSession.value === props.assignmentSessionId,
+                  ),
+                  ready: !definitionsLoading && !props.error,
+                }
+              : undefined
+          }
+          error={reload ? undefined : props.error}
           sessionPresentation
           renderServerAnnotation={(id) => {
             const change = changes.changes.find((item) => item.definition_id === id);
@@ -98,7 +121,13 @@ export function MCPSessionSelector({
     if (isMobile && handledError) setOpen(false);
   }, [isMobile, handledError]);
   const body = (
-    <MCPSessionSelectionBody {...props} testId={testId} query={query} onQueryChange={setQuery} />
+    <MCPSessionSelectionBody
+      {...props}
+      assignmentActive={open}
+      testId={testId}
+      query={query}
+      onQueryChange={setQuery}
+    />
   );
   const trigger = (
     <Button
@@ -106,7 +135,7 @@ export function MCPSessionSelector({
       type="button"
       variant="outline"
       className="w-full justify-between gap-3 cursor-pointer"
-      disabled={props.disabled || handledError}
+      disabled={handledError}
       aria-expanded={open}
       aria-haspopup={isMobile ? "dialog" : undefined}
       onClick={isMobile ? () => setOpen(true) : undefined}

@@ -32,6 +32,7 @@ import {
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
 import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
+import { MCPSelectionSaveFeedback } from "@/components/mcp/mcp-selection-save-feedback";
 import { MCPSessionSelector } from "@/components/task/mcp-session-selector";
 import type {
   DialogFormBodyProps,
@@ -253,6 +254,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         }}
         mcpInheritedSelections={props.mcpInheritedSelections}
       />
+      {props.mcpSelectionRecovery && <MCPSelectionSaveFeedback {...props.mcpSelectionRecovery} />}
       {props.isEditMode && (
         <TaskEditDialogDependencies
           state={props.editDependencies}

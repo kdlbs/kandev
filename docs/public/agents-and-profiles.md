@@ -1012,6 +1012,17 @@ The **Marketplace** view combines Kandev-curated templates with cached public Re
 
 If public Registry discovery is unavailable, Kandev shows the most recent successful cache and marks it stale or degraded. Deprecated or deleted entries cannot be added from the marketplace. Existing configured servers remain available until you edit or disable them.
 
+After registration, **Done** leaves the definition saved without selecting it.
+Choose **Use in** from the saved confirmation or a catalog card to find a
+repository, an enabled profile, or an existing task session in this workspace.
+Review the scope before opening its MCP settings. Opening settings highlights
+an available definition once; it never checks its box or saves a selection.
+Global profiles still require this explicit workspace context. If discovery or
+navigation fails, the saved definition remains in **Configured** for another
+attempt. A session destination waits for you to open the plug menu and
+**Customize**. Repository and profile changes use **Save changes**; explicit
+session selections save automatically and retain normal provider timing.
+
 ## Find where a server is selected
 
 In **Configured**, choose **Used in** on a saved server. The list names the
@@ -1077,6 +1088,23 @@ provider applies them by reconnecting the same session after the current turn
 is idle. Providers without safe reconnection apply saved changes when the agent
 starts again. The state notice tells you which timing applies. If reconnect
 fails, the previous applied selection remains active and the UI offers retry.
+
+If another editor changes the saved choices, Kandev rejects your stale save.
+Choose **Reload choices**, review your retained draft against the latest saved
+choices, then save again. A save whose response is lost also requires a reload
+before another attempt.
+
+Repository and profile editors use **Save changes**. Session Customize saves
+after an explicit selection change.
+
+Application retry remains available for a saved session setup that failed to apply.
+The pending-change list continues to describe the saved choices while a rejected
+checkbox draft remains visible.
+
+In the existing task editor, a failed MCP save also exposes **Reload choices**.
+Reload keeps your task fields and MCP draft. Submit the task again only after
+you review those choices.
+
 
 For a saved global profile, **Workspace** selects the catalog context without
 changing your active workspace. If settings have unsaved changes, switching

@@ -119,6 +119,7 @@ export type MCPSelectionResponse = {
   scope: MCPSelectionScope;
   owner_id: string;
   definition_ids: string[];
+  selection_revision?: number;
   mcp_state?: MCPSessionSelectionState;
 };
 

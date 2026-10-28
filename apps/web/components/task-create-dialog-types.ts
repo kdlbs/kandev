@@ -759,6 +759,7 @@ export type DialogFormBodyProps = {
   mcpDefinitions: MCPServerDefinition[];
   mcpDefinitionsLoading: boolean;
   mcpInheritedSelections: MCPInheritedSelection[];
+  mcpSelectionRecovery?: { error: unknown; reload: () => Promise<unknown> };
   /**
    * Called by a plugin composer action after it inserted text into the
    * description and wants the form submitted the native way. The dialog

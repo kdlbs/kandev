@@ -271,6 +271,33 @@ describe("ReviewDiffList auto-mark", () => {
   });
 });
 
+describe("ReviewDiffList touch input", () => {
+  function contact(target: Element, pointerType: string) {
+    const event = new Event("pointerdown", { bubbles: true });
+    Object.defineProperty(event, "pointerType", { value: pointerType });
+    fireEvent(target, event);
+  }
+
+  it("marks a touch scroll from diff content without a touchmove event", () => {
+    const view = renderAutoMarkList();
+    firePosition(activeAutoMarkObserver(), false, 0);
+    contact(view.getByText("a.ts"), "touch");
+    expect(view.onToggleReviewed).not.toHaveBeenCalled();
+    firePosition(activeAutoMarkObserver(), true, 200);
+    expect(view.onToggleReviewed).toHaveBeenCalledExactlyOnceWith("a.ts", true);
+  });
+
+  it("keeps mouse and pen clicks inside diff content suppressed", () => {
+    const view = renderAutoMarkList();
+    for (const pointerType of ["mouse", "pen"]) {
+      firePosition(activeAutoMarkObserver(), false, 0);
+      contact(view.getByText("a.ts"), pointerType);
+      firePosition(activeAutoMarkObserver(), true, 200);
+    }
+    expect(view.onToggleReviewed).not.toHaveBeenCalled();
+  });
+});
+
 describe("ReviewDiffList manual clearing", () => {
   // @covers AC-UI-REVIEW-VIEWED-001.1, AC-UI-REVIEW-VIEWED-001.2
   it("keeps a manual uncheck until returning and passing the file again", () => {

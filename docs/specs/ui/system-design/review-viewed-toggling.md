@@ -59,11 +59,13 @@ position. Remove the listener and disconnect the observer together on cleanup.
 Preserve `useReviewDiffScrollInteraction` and `useReviewScrollAnchor` navigation
 suppression. Input cancellation first restores the previous suppression value
 and cancels the queued anchor frame. Then wheel/touch movement, scroll keys,
-and a pointer press on the scroll root explicitly allow automatic marking.
-That explicit input must win over the cancelled restoration's saved value.
-Descendant pointer presses cancel stale restoration without allowing marking;
-unrelated keys do neither. This ordering changes no crossing geometry or
-pending/stale eligibility gate.
+a pointer press on the scroll root, and touch contact anywhere inside the
+scroller explicitly allow automatic marking. That explicit input must win over
+the cancelled restoration's saved value. Chromium can scroll a touch gesture
+on the compositor without delivering `touchmove`; touch contact only permits
+a subsequent certified crossing and never marks by itself. Mouse and pen
+presses on descendants cancel stale restoration without allowing marking.
+Unrelated keys do neither. This changes no crossing geometry or eligibility gate.
 
 ## Shared state, identity, and persistence
 
@@ -93,6 +95,9 @@ suppression, disabled/stale/pending content, identity isolation and cleanup.
 Add desktop and mobile browser regressions using real scroll geometry and real
 checkbox mutations; do not force observer callbacks in browser tests. Include
 a below-viewport trailing file so the target start can pass the viewport top.
+Cover touch contact on diff descendants followed by a scroll crossing without
+`touchmove`, and preserve suppression for descendant mouse and pen clicks.
+Contact without a certified crossing must not mark a file.
 
 ## Implementation plan
 

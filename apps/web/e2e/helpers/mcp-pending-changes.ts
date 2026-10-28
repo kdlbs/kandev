@@ -140,12 +140,19 @@ export async function checkMCPPendingChanges(
     rejectSave = true;
     await surface.getByRole("checkbox").click();
     await expect(surface.getByRole("alert")).toBeVisible();
-    await expect(surface.getByRole("checkbox")).toBeChecked();
+    await expect(surface.getByRole("checkbox")).not.toBeChecked();
+    await expect(surface.getByRole("checkbox")).toBeDisabled();
     await expect(pending.getByRole("listitem")).toHaveCount(3);
     expect(
       (await api.getMCPSelections("task_session", sessionId, seed.workspaceId)).definition_ids,
     ).toEqual([added.id]);
     rejectSave = false;
+    await surface.getByRole("button", { name: "Reload choices", exact: true }).click();
+    await expect(surface.getByRole("checkbox")).toBeEnabled();
+    // The rejected draft remains unchecked; explicitly return to the saved choice first.
+    await surface.getByRole("checkbox").click();
+    await expect(surface.getByRole("checkbox")).toBeChecked();
+    await expect(surface.getByRole("checkbox")).toBeEnabled();
     await surface.getByRole("checkbox").click();
     await expect(surface.getByRole("checkbox")).not.toBeChecked();
     await expect(pending.getByRole("listitem")).toHaveCount(2);

@@ -1981,6 +1981,7 @@
   "tasksAffected_other": "{{count}} tasks affected",
   "tcpPortsWithActiveListenersInside": "TCP ports with active listeners inside the remote executor. Click refresh to re-scan.",
   "technicalDetails": "Technical details",
+  "jumpToLatestOutput": "Jump to latest output",
   "terminal": "Terminal",
   "terminalCount_one": "{{count}} terminal",
   "terminalCount_other": "{{count}} terminals",
