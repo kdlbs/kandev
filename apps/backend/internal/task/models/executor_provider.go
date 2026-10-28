@@ -68,14 +68,16 @@ type ExecutorProvider struct {
 	// capability declaration; an empty list means the provider is not gated.
 	RequiredCapabilities []ExecutorProviderCapabilityRequirement `json:"-"`
 	StateBudgetBytes     int                                     `json:"-"`
-	DisplayName          string                                  `json:"display_name"`
-	Description          string                                  `json:"description"`
-	LocalizedMessages    map[string]string                       `json:"localized_messages,omitempty"`
-	ProfileSchema        map[string]any                          `json:"profile_schema"`
-	ResourceStateSchema  map[string]any                          `json:"-"`
-	Capabilities         ExecutorProviderCapabilities            `json:"capabilities"`
-	Available            bool                                    `json:"available"`
-	AvailabilityCause    string                                  `json:"availability_cause,omitempty"`
+	// DestroyTimeoutSeconds is the manifest's destroy deadline; zero means the default.
+	DestroyTimeoutSeconds int                          `json:"-"`
+	DisplayName           string                       `json:"display_name"`
+	Description           string                       `json:"description"`
+	LocalizedMessages     map[string]string            `json:"localized_messages,omitempty"`
+	ProfileSchema         map[string]any               `json:"profile_schema"`
+	ResourceStateSchema   map[string]any               `json:"-"`
+	Capabilities          ExecutorProviderCapabilities `json:"capabilities"`
+	Available             bool                         `json:"available"`
+	AvailabilityCause     string                       `json:"availability_cause,omitempty"`
 }
 
 // ExecutorProviderCapabilityRequirement is one host capability a provider

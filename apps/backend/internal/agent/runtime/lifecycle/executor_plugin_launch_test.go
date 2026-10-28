@@ -47,6 +47,8 @@ type pluginExecutorOperationsFake struct {
 	destroyRequest     *pluginsdk.DestroyExecutorEnvironmentRequest
 	destroyResponse    *pluginsdk.DestroyExecutorEnvironmentResponse
 	destroyErr         error
+	beforeDestroy      func()
+	destroyDeadline    time.Time
 }
 
 func (f *pluginExecutorOperationsFake) ProvisionExecutorEnvironment(_ context.Context, req *pluginsdk.ProvisionExecutorEnvironmentRequest) (*pluginsdk.ProvisionExecutorEnvironmentResponse, error) {
@@ -82,8 +84,12 @@ func (f *pluginExecutorOperationsFake) ResolveExecutorConnection(_ context.Conte
 	return f.connectionResponse, f.connectionErr
 }
 
-func (f *pluginExecutorOperationsFake) DestroyExecutorEnvironment(_ context.Context, req *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error) {
+func (f *pluginExecutorOperationsFake) DestroyExecutorEnvironment(ctx context.Context, req *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error) {
 	f.destroyRequest = req
+	f.destroyDeadline, _ = ctx.Deadline()
+	if f.beforeDestroy != nil {
+		f.beforeDestroy()
+	}
 	return f.destroyResponse, f.destroyErr
 }
 

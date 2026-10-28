@@ -42,7 +42,7 @@ func (r *PluginRemoteExecutor) recoverPluginExecutor(ctx context.Context, record
 		if state.resource == nil {
 			return nil, errors.New("plugin executor cleanup inventory has no resource handle")
 		}
-		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "recovery_cleanup"); err != nil {
+		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "recovery_cleanup", state.profile.Provider); err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -174,7 +174,7 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 		if state.inventory.Phase == pluginExecutorPhaseReady {
 			return nil, errors.New("established plugin executor cannot be attached without its saved agentctl credential")
 		}
-		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "incomplete_bootstrap"); err != nil {
+		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "incomplete_bootstrap", state.profile.Provider); err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -492,7 +492,7 @@ func (r *PluginRemoteExecutor) cleanupPluginExecutorInstance(ctx context.Context
 	if instance.StopReason == StopReasonLaunchRollback {
 		reason = pluginExecutorCleanupReasonLaunch
 	}
-	return r.destroyPluginExecutorRecord(ctx, record, inventory, inventory.Resource, reason)
+	return r.destroyPluginExecutorRecord(ctx, record, inventory, inventory.Resource, reason, profile.Provider)
 }
 
 func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, environment *models.TaskEnvironment) error {
@@ -537,7 +537,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx contex
 	if err != nil || !shouldDestroy {
 		return err
 	}
-	return r.destroyPluginExecutorRecord(ctx, record, inventory, resource, "task_environment_reset")
+	return r.destroyPluginExecutorRecord(ctx, record, inventory, resource, "task_environment_reset", profile.Provider)
 }
 
 func pluginExecutorRecordMatchesEnvironment(environment *models.TaskEnvironment, record *models.ExecutorRunning) bool {
@@ -672,23 +672,37 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	inventory pluginExecutorInventory,
 	resource *pluginsdk.ExecutorResourceDescriptor,
 	reason string,
+	provider models.ExecutorProvider,
 ) error {
 	claim, err := r.acquirePluginExecutorCleanupClaim(ctx, record.TaskID, record.SessionID, inventory)
 	if err != nil {
 		return fmt.Errorf("plugin executor cleanup is fenced: %w", err)
 	}
 	defer r.releasePluginExecutorCleanupClaim(claim)
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	destroyTimeout := pluginExecutorDestroyTimeout(provider)
+	budget := destroyTimeout + pluginExecutorPersistGrace
+	if negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
+		budget += pluginExecutorDrainDeadline
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 	defer cancel()
 	claimedCtx := recoveryclaim.WithClaim(cleanupCtx, claim)
+	record, inventory, drain, err := r.drainBeforePluginDestroy(claimedCtx, record, inventory, resource, provider, claim)
+	if err != nil {
+		return err
+	}
 	operationContext := pluginExecutorRequestContextForRecord(record, inventory, models.ExecutorProviderLaunchProfile{
 		Provider:            models.ExecutorProvider{PluginID: inventory.PluginID, InstallationID: inventory.InstallationID, Key: inventory.ProviderKey, ContractVersion: inventory.ContractVersion},
 		OwnershipGeneration: inventory.EnvironmentGeneration,
 	})
-	operationContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
-	response, err := r.operations.DestroyExecutorEnvironment(claimedCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
+	operationContext.Deadline = time.Now().Add(destroyTimeout).UTC().Format(time.RFC3339Nano)
+	destroyCtx, cancelDestroy := context.WithTimeout(claimedCtx, destroyTimeout)
+	request := &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: operationContext, Resource: resource, CleanupReason: reason, CleanupClaim: claim.OperationID,
-	})
+	}
+	drain.applyTo(request)
+	response, err := r.operations.DestroyExecutorEnvironment(destroyCtx, request)
+	cancelDestroy()
 	record, inventory, resource = r.refreshAfterClaimCheckpoints(claimedCtx, record, inventory, resource)
 	if err != nil || response == nil || response.GetError() != nil || !response.GetConfirmedAbsent() || !latestPluginExecutorClaimCheckpointPersisted(inventory, claim) {
 		inventory.Resource = resource

@@ -94,6 +94,7 @@ type PluginRemoteExecutor struct {
 	newAgentctlClient           pluginAgentctlClientFactory
 	recoveredAgentctlInfoReader pluginRecoveredAgentctlInstanceReader
 	ready                       pluginAgentctlReadinessCheck
+	drainRuntime                pluginRuntimeDrainer
 }
 
 func (r *PluginRemoteExecutor) SetRecoveryDependencies(loader PluginExecutorProfileLoader, inventory PluginExecutorInventoryStore) {
@@ -127,6 +128,9 @@ type pluginExecutorInventory struct {
 	ExpiryCheckAt          string                                `json:"expiry_check_at,omitempty"`
 	LastInspectionState    string                                `json:"last_inspection_state,omitempty"`
 	Claim                  *pluginExecutorClaimState             `json:"claim,omitempty"`
+	DrainOutcome           string                                `json:"drain_outcome,omitempty"`
+	DrainReceiptID         string                                `json:"drain_receipt_id,omitempty"`
+	DrainClaim             string                                `json:"drain_claim,omitempty"`
 	Revision               uint64                                `json:"revision"`
 	Generation             uint64                                `json:"generation"`
 	EnvironmentGeneration  int64                                 `json:"environment_generation"`
@@ -138,6 +142,7 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 	}
 	runtime := &PluginRemoteExecutor{operations: operations, logger: log.WithFields(zap.String("runtime", string(executor.NamePluginRemote)))}
 	runtime.newAgentctlControlClient = createPluginEndpointControlClient
+	runtime.drainRuntime = defaultPluginRuntimeDrainer
 	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		return agentctl.NewEndpointClient(ctx, resolver, log,
 			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token))
@@ -264,11 +269,24 @@ func pluginExecutorLaunchInventory(req *ExecutorCreateRequest, profile models.Ex
 	}
 }
 
-func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, launch *pluginExecutorLaunchState) (*pluginsdk.ExecutorResourceDescriptor, error) {
-	bootstrap, err := json.Marshal(map[string]any{
+// pluginExecutorBootstrapJSON is the provider-facing bootstrap. A provider that
+// requires drain_receipt also receives idle_timeout_seconds 0, which the
+// provider maps to a disabled agentctl idle reaper so a retained environment is
+// never reaped from inside; other providers keep agentctl's default.
+func pluginExecutorBootstrapJSON(launch *pluginExecutorLaunchState) (string, error) {
+	fields := map[string]any{
 		"nonce": launch.nonce, "runtime_port": pluginExecutorRuntimePort,
 		"api_url": launch.apiURL, "execution_id": launch.request.InstanceID, "artifact_id": "agentctl",
-	})
+	}
+	if negotiatedDeclares(launch.inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
+		fields["idle_timeout_seconds"] = 0
+	}
+	encoded, err := json.Marshal(fields)
+	return string(encoded), err
+}
+
+func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, launch *pluginExecutorLaunchState) (*pluginsdk.ExecutorResourceDescriptor, error) {
+	bootstrap, err := pluginExecutorBootstrapJSON(launch)
 	if err != nil {
 		return nil, errors.New("plugin executor bootstrap could not be encoded")
 	}
@@ -279,7 +297,7 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 	provisioned, err := r.operations.ProvisionExecutorEnvironment(ctx, &pluginsdk.ProvisionExecutorEnvironmentRequest{
 		Context:       launch.operationContext,
 		Profile:       snapshot,
-		BootstrapJson: string(bootstrap),
+		BootstrapJson: bootstrap,
 	})
 	if err != nil || provisioned == nil || provisioned.GetResource() == nil || provisioned.GetResource().GetResourceHandle() == "" {
 		return nil, r.recoverOrRetainFailedProvision(ctx, launch.request, launch.operationContext, launch.profile, launch.inventory, err)

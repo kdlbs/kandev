@@ -50,6 +50,7 @@ func (s *Service) ListExecutorProviders(ctx context.Context) ([]models.ExecutorP
 				SupportedStateVersions: append([]int(nil), declared.SupportedStateVersions...),
 				RequiredCapabilities:   providerCapabilityRequirements(declared),
 				StateBudgetBytes:       declared.StateBudgetBytes,
+				DestroyTimeoutSeconds:  declared.DestroyTimeoutSeconds,
 				DisplayName:            declared.DisplayName,
 				Description:            declared.Description,
 				LocalizedMessages:      localizedMessages,
