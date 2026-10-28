@@ -17,6 +17,11 @@ const (
 	MinExecutorStateBudgetBytes = 1024
 	MaxExecutorStateBudgetBytes = 12288
 
+	// RuntimeAPIURLHostPublic and RuntimeAPIURLProviderForwarded are the two
+	// values of a provider's runtime_api_url.
+	RuntimeAPIURLHostPublic        = "host_public"
+	RuntimeAPIURLProviderForwarded = "provider_forwarded"
+
 	// DefaultExecutorDestroyTimeoutSeconds is the destroy deadline; a provider
 	// that requires drain_receipt can raise it up to MaxExecutorDestroyTimeoutSeconds.
 	DefaultExecutorDestroyTimeoutSeconds = 30
@@ -89,6 +94,7 @@ func (m *Manifest) validateHostCapabilities(prefix string, provider *ExecutorPro
 	errs = append(errs, m.validateCapabilityMinimumRelease(prefix, reqs)...)
 	errs = append(errs, validateStateBudget(prefix, provider)...)
 	errs = append(errs, validateDestroyTimeout(prefix, provider)...)
+	errs = append(errs, validateRuntimeAPIURL(prefix, provider)...)
 	errs = append(errs, validateLaunchPolicyIDs(prefix, provider)...)
 	return errs
 }
@@ -147,6 +153,21 @@ func validateDestroyTimeout(prefix string, provider *ExecutorProvider) []error {
 	if timeout > DefaultExecutorDestroyTimeoutSeconds && !declaresCapability(provider, "drain_receipt") {
 		return []error{fmt.Errorf("%s.destroy_timeout_seconds over %d requires the drain_receipt capability",
 			prefix, DefaultExecutorDestroyTimeoutSeconds)}
+	}
+	return nil
+}
+
+func validateRuntimeAPIURL(prefix string, provider *ExecutorProvider) []error {
+	switch provider.RuntimeAPIURL {
+	case "":
+		provider.RuntimeAPIURL = RuntimeAPIURLHostPublic
+	case RuntimeAPIURLHostPublic:
+	case RuntimeAPIURLProviderForwarded:
+		if !declaresCapability(provider, "api_url_forward") {
+			return []error{fmt.Errorf("%s.runtime_api_url provider_forwarded requires the api_url_forward capability", prefix)}
+		}
+	default:
+		return []error{fmt.Errorf("%s.runtime_api_url must be %s or %s", prefix, RuntimeAPIURLHostPublic, RuntimeAPIURLProviderForwarded)}
 	}
 	return nil
 }

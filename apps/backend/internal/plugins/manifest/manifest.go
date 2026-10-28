@@ -184,6 +184,9 @@ type ExecutorProvider struct {
 	// DestroyTimeoutSeconds is the deadline of the destroy call; a value over
 	// the default requires the drain_receipt capability.
 	DestroyTimeoutSeconds int `yaml:"destroy_timeout_seconds,omitempty" json:"destroy_timeout_seconds,omitempty"`
+	// RuntimeAPIURL is how the worker reaches the Kandev API: host_public (the
+	// default) or provider_forwarded, which requires api_url_forward.
+	RuntimeAPIURL string `yaml:"runtime_api_url,omitempty" json:"runtime_api_url,omitempty"`
 	// RequiresHostCapabilities lists the opt-in host capabilities this
 	// provider needs, each pinned to one version of the host registry.
 	RequiresHostCapabilities []HostCapabilityRequirement  `yaml:"requires_host_capabilities,omitempty" json:"requires_host_capabilities,omitempty"`

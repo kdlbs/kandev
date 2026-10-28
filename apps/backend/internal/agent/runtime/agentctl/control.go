@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -492,6 +493,48 @@ type RuntimeDrainRejectedError struct{ StatusCode int }
 
 func (e *RuntimeDrainRejectedError) Error() string {
 	return fmt.Sprintf("runtime seal-and-drain rejected: status %d", e.StatusCode)
+}
+
+// HostAPIProbeError is a probe reply whose status was not 204.
+type HostAPIProbeError struct{ StatusCode int }
+
+func (e *HostAPIProbeError) Error() string {
+	return fmt.Sprintf("host API probe answered status %d", e.StatusCode)
+}
+
+// ProbeHostAPI asks agentctl to request the host's ping route under
+// hostAPIURL with the probe token. Only a 204 reply is success.
+func (c *ControlClient) ProbeHostAPI(ctx context.Context, hostAPIURL, token string) error {
+	return c.ProbeHostAPIURL(ctx, strings.TrimRight(hostAPIURL, "/")+agentctltypes.HostAPIPingPath, token)
+}
+
+// ProbeHostAPIURL is ProbeHostAPI with the full ping URL.
+func (c *ControlClient) ProbeHostAPIURL(ctx context.Context, pingURL, token string) error {
+	body, err := json.Marshal(agentctltypes.HostAPIProbeRequest{URL: pingURL, Token: token})
+	if err != nil {
+		return fmt.Errorf("marshal host API probe request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/runtime/probe-host-api", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("host API probe failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("host API probe was refused: status %d", resp.StatusCode)
+	}
+	var reply agentctltypes.HostAPIProbeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		return fmt.Errorf("decode host API probe reply: %w", err)
+	}
+	if reply.StatusCode != http.StatusNoContent {
+		return &HostAPIProbeError{StatusCode: reply.StatusCode}
+	}
+	return nil
 }
 
 // ServerDetails carries the control-server values an adopting backend

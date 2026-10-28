@@ -464,6 +464,19 @@ stored evidence no longer matches, the environment is retained and nothing is
 adopted. The provider performs no extra calls for this; it only has to keep the
 agent runtime reachable at the connection lease it returned.
 
+The executor provider key `runtime_api_url` chooses how the agent runtime
+reaches the Kandev API. `host_public` (the default) sends the runtime the
+configured public HTTPS URL, unchanged. `provider_forwarded` requires the
+`api_url_forward` capability: the provider forwards a host API URL into the
+environment, Kandev skips the public HTTPS check, and the bootstrap payload
+carries `host_api_url` instead of `api_url`. Kandev does not open a new
+listener for this. Before it publishes the environment as ready, the host asks
+the agent runtime to call the unauthenticated, read-only
+`GET /api/v1/runtime/ping` on that URL with a one-time token, trying at most
+twice within 10 seconds. If the host does not see its token arrive, the launch
+is rolled back and the environment is cleaned up with the cleanup reason
+`api_unreachable`.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.

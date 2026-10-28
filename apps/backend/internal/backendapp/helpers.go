@@ -1376,6 +1376,7 @@ func registerRoutes(p routeParams) {
 	p.router.GET("/api/v1/features", func(c *gin.Context) {
 		c.JSON(http.StatusOK, p.features)
 	})
+	registerRuntimeProbeRoute(p.router, p.services.RuntimeProbes)
 	p.router.GET("/api/v1/app-state", func(c *gin.Context) {
 		routePath := c.Query("path")
 		if routePath == "" {

@@ -21,6 +21,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/workspacedescriptor"
+	"github.com/kandev/kandev/internal/runtimeprobe"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -32,6 +33,7 @@ const (
 	pluginExecutorInventoryMaxBytes     = 32 << 10
 	pluginExecutorRuntimePort           = 8765
 	pluginExecutorWorkspacePath         = "/workspace"
+	pluginExecutorAgentctlPurpose       = "agentctl"
 	pluginExecutorPhaseAllocating       = "allocating"
 	pluginExecutorPhaseArtifactStaging  = "artifact_staging"
 	pluginExecutorPhaseBootstrapping    = "bootstrapping"
@@ -96,6 +98,9 @@ type PluginRemoteExecutor struct {
 	ready                       pluginAgentctlReadinessCheck
 	drainRuntime                pluginRuntimeDrainer
 	runtimeSecrets              PluginExecutorRuntimeSecrets
+	hostAPIURL                  string
+	hostAPIProbes               *runtimeprobe.Registry
+	hostAPIProbeInterval        time.Duration
 }
 
 func (r *PluginRemoteExecutor) SetRecoveryDependencies(loader PluginExecutorProfileLoader, inventory PluginExecutorInventoryStore) {
@@ -165,6 +170,7 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 		return control.GetInstance(ctx, executionID)
 	}
 	runtime.ready = func(ctx context.Context, client *agentctl.Client) error { return client.Health(ctx) }
+	runtime.hostAPIProbeInterval = hostAPIProbeInterval
 	return runtime
 }
 
@@ -218,6 +224,7 @@ type pluginExecutorLaunchState struct {
 	profile          models.ExecutorProviderLaunchProfile
 	operationContext *pluginsdk.ExecutorProviderRequestContext
 	apiURL           string
+	hostAPIURL       string
 	nonce            string
 	inventory        pluginExecutorInventory
 }
@@ -226,11 +233,11 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	if err := r.validateLaunch(req); err != nil {
 		return nil, err
 	}
-	apiURL, err := validatePluginRuntimeAPIURL(req.Env[envKeyKandevAPIURL])
+	profile := req.PluginExecutor.Profile
+	apiURL, hostAPIURL, err := r.resolvePluginExecutorAPIEndpoints(profile.Provider, req.Env)
 	if err != nil {
 		return nil, err
 	}
-	profile := req.PluginExecutor.Profile
 	if err := r.rejectExpiredPluginExecutorEnvironment(ctx, req.TaskEnvironmentID, profile.OwnershipGeneration); err != nil {
 		return nil, err
 	}
@@ -259,7 +266,7 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	}
 	return &pluginExecutorLaunchState{
 		request: req, profile: profile, operationContext: operationContext,
-		apiURL: apiURL, nonce: nonce, inventory: inventory,
+		apiURL: apiURL, hostAPIURL: hostAPIURL, nonce: nonce, inventory: inventory,
 	}, nil
 }
 
@@ -285,7 +292,12 @@ func pluginExecutorLaunchInventory(req *ExecutorCreateRequest, profile models.Ex
 func pluginExecutorBootstrapJSON(launch *pluginExecutorLaunchState) (string, error) {
 	fields := map[string]any{
 		"nonce": launch.nonce, "runtime_port": pluginExecutorRuntimePort,
-		"api_url": launch.apiURL, "execution_id": launch.request.InstanceID, "artifact_id": "agentctl",
+		"execution_id": launch.request.InstanceID, "artifact_id": pluginExecutorAgentctlPurpose,
+	}
+	if launch.hostAPIURL != "" {
+		fields["host_api_url"] = launch.hostAPIURL
+	} else {
+		fields["api_url"] = launch.apiURL
 	}
 	if negotiatedDeclares(launch.inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
 		fields["idle_timeout_seconds"] = 0
@@ -372,6 +384,12 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 		if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
 			control.Close()
 			return fail("token_checkpoint", err)
+		}
+	}
+	if launch.hostAPIURL != "" {
+		if err := r.probeForwardedHostAPI(ctx, launch, control); err != nil {
+			control.Close()
+			return fail(cleanupReasonAPIUnreachable, err)
 		}
 	}
 	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request, launch.inventory.workspacePath())
@@ -667,7 +685,7 @@ func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.Ex
 		requestContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 		requestContext.Deadline = time.Now().Add(15 * time.Second).UTC().Format(time.RFC3339Nano)
 		response, err := r.operations.ResolveExecutorConnection(ctx, &pluginsdk.ResolveExecutorConnectionRequest{
-			Context: requestContext, Resource: resource, Purpose: "agentctl", RuntimePort: runtimePort,
+			Context: requestContext, Resource: resource, Purpose: pluginExecutorAgentctlPurpose, RuntimePort: runtimePort,
 		})
 		if err != nil || response == nil {
 			return nil, errors.New("provider connection lease is unavailable")
@@ -798,7 +816,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	cleanupContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	cleanupContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
 	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
-		Context: cleanupContext, Resource: resource, CleanupReason: pluginExecutorCleanupReasonLaunch, CleanupClaim: claim.OperationID,
+		Context: cleanupContext, Resource: resource, CleanupReason: launchCleanupReason(stage), CleanupClaim: claim.OperationID,
 	})
 	if err == nil && response != nil && response.GetConfirmedAbsent() {
 		inventory.Resource = retained

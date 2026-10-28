@@ -331,6 +331,11 @@ func isPublicPath(method, path string) bool {
 		// The encrypted execution capability is the credential. The handler
 		// checks its expiry and exact task/session/repository scope.
 		return method == http.MethodPost
+	case "/api/v1/runtime/ping":
+		// Worker-to-host reachability probe. The per-environment probe token
+		// header is the credential and the handler checks it; the route answers
+		// nothing but GET.
+		return method == http.MethodGet
 	case "/api/v1/git/credentials/resolve":
 		return method == http.MethodGet || method == http.MethodPost
 	case "/api/v1/git/credentials/reissue":

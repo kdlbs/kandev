@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/kandev/kandev/internal/runtimeprobe"
 	"net"
 	"net/http"
 	"os"
@@ -783,11 +784,13 @@ func startAgentInfrastructure(
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
 		lifecycleMgr.SetPluginExecutorClaimStore(repos.Task)
 		lifecycleMgr.SetPluginRuntimeAPIURL(pluginRuntimeAPIURL(cfg))
+		services.RuntimeProbes = runtimeprobe.New()
 		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
 		repos.Task.SetPluginStateWritableChecker(services.Plugins.CheckExecutorStateWritable)
 		pluginExecutor := lifecycle.NewPluginRemoteExecutor(services.Plugins, log)
 		pluginExecutor.SetRecoveryDependencies(services.Task, repos.Task)
 		pluginExecutor.SetRuntimeSecretStore(lifecycleMgr.RuntimeSecretStore())
+		pluginExecutor.SetHostAPIProbe(pluginHostAPIURL(cfg), services.RuntimeProbes)
 		lifecycleMgr.RegisterExecutorBackend(pluginExecutor)
 		services.Plugins.SetExecutorProviderHostHandler(lifecycleMgr)
 	}

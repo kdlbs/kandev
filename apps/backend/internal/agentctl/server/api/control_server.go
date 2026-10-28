@@ -156,6 +156,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/ownership/confirm", m.handleCredentialConfirm)
 	api.POST("/ownership/shutdown", m.handleOwnershipShutdown)
 	api.POST("/runtime/seal-and-drain", m.handleRuntimeSealAndDrain)
+	api.POST("/runtime/probe-host-api", m.handleHostAPIProbe)
 }
 
 func (m *ControlServer) handleSubprocessAdmission(c *gin.Context) {

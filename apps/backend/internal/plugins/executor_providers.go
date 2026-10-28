@@ -51,6 +51,7 @@ func (s *Service) ListExecutorProviders(ctx context.Context) ([]models.ExecutorP
 				RequiredCapabilities:   providerCapabilityRequirements(declared),
 				StateBudgetBytes:       declared.StateBudgetBytes,
 				DestroyTimeoutSeconds:  declared.DestroyTimeoutSeconds,
+				RuntimeAPIURL:          declared.RuntimeAPIURL,
 				DisplayName:            declared.DisplayName,
 				Description:            declared.Description,
 				LocalizedMessages:      localizedMessages,

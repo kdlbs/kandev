@@ -246,6 +246,10 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 			mutate: []func(*http.Request){func(r *http.Request) { r.Header.Set("Authorization", "Bearer agent.jwt.here") }},
 		},
 
+		{name: "runtime ping", method: http.MethodGet, path: "/api/v1/runtime/ping"},
+		{name: "runtime ping other method", method: http.MethodPost, path: "/api/v1/runtime/ping", blocked: true},
+		{name: "runtime ping sibling path", method: http.MethodGet, path: "/api/v1/runtime/ping/extra", blocked: true},
+		{name: "runtime sibling", method: http.MethodGet, path: "/api/v1/runtime/other", blocked: true},
 		{name: "github credential broker readiness", method: http.MethodGet, path: "/api/v1/github/credentials/resolve"},
 		{name: "github credential broker resolve", method: http.MethodPost, path: "/api/v1/github/credentials/resolve"},
 		{name: "github credential broker reissue", method: http.MethodPost, path: "/api/v1/github/credentials/reissue"},

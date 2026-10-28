@@ -3,6 +3,7 @@ package backendapp
 import (
 	"errors"
 	replaywire "github.com/kandev/kandev/internal/coordinator/replay/wire"
+	"github.com/kandev/kandev/internal/runtimeprobe"
 	taskusage "github.com/kandev/kandev/internal/task/usage"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -89,6 +90,8 @@ type Services struct {
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
 	Task                     *taskservice.Service
+	// RuntimeProbes holds the tokens of the worker-to-host reachability probe.
+	RuntimeProbes *runtimeprobe.Registry
 	// Org owns organizations. Always non-nil; Enabled() reports whether the
 	// multi-tenancy feature is on.
 	Org           *org.Service
