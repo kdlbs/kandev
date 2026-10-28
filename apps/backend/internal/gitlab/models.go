@@ -371,29 +371,45 @@ type Issue struct {
 //     "pending", "") — GitLab pipelines are the analogue of GitHub checks.
 //   - MergeStatus carries GitLab's own merge_status string verbatim
 //     (can_be_merged, cannot_be_merged, unchecked, …) for debugging.
+const (
+	TaskMRSourceAgentRegistration  = "agent_registration"
+	TaskMRSourceSelectedMention    = "selected_mention"
+	TaskMRComparisonPolicyPreserve = "preserve"
+)
+
 type TaskMR struct {
-	ID                string `json:"id" db:"id"`
-	TaskID            string `json:"task_id" db:"task_id"`
-	RepositoryID      string `json:"repository_id,omitempty" db:"repository_id"`
-	Host              string `json:"host" db:"host"`                 // gitlab base URL the MR lives on
-	ProjectPath       string `json:"project_path" db:"project_path"` // namespace/path
-	MRIID             int    `json:"mr_iid" db:"mr_iid"`             // GitLab per-project sequential id
-	MRURL             string `json:"mr_url" db:"mr_url"`
-	MRTitle           string `json:"mr_title" db:"mr_title"`
-	HeadBranch        string `json:"head_branch" db:"head_branch"`
-	HeadSHA           string `json:"head_sha" db:"head_sha"`
-	BaseBranch        string `json:"base_branch" db:"base_branch"`
-	BaseSHA           string `json:"base_sha" db:"base_sha"`
-	AuthorUsername    string `json:"author_username" db:"author_username"`
-	State             string `json:"state" db:"state"`                   // open, closed, merged, locked
-	ApprovalState     string `json:"approval_state" db:"approval_state"` // approved, pending, ""
-	PipelineState     string `json:"pipeline_state" db:"pipeline_state"` // success, failure, pending, ""
-	MergeStatus       string `json:"merge_status" db:"merge_status"`
-	Draft             bool   `json:"draft" db:"draft"`
-	ApprovalCount     int    `json:"approval_count" db:"approval_count"`
-	RequiredApprovals int    `json:"required_approvals" db:"required_approvals"`
-	PipelineJobsTotal int    `json:"pipeline_jobs_total" db:"pipeline_jobs_total"`
-	PipelineJobsPass  int    `json:"pipeline_jobs_pass" db:"pipeline_jobs_pass"`
+	ID                   string     `json:"id" db:"id"`
+	TaskID               string     `json:"task_id" db:"task_id"`
+	RepositoryID         string     `json:"repository_id,omitempty" db:"repository_id"`
+	Host                 string     `json:"host" db:"host"`                 // gitlab base URL the MR lives on
+	ProjectPath          string     `json:"project_path" db:"project_path"` // namespace/path
+	ProviderRepositoryID string     `json:"-" db:"provider_repository_id"`
+	ConnectionScope      string     `json:"-" db:"connection_scope"`
+	RepositoryPath       string     `json:"-" db:"repository_path"`
+	Source               string     `json:"source" db:"source"`
+	ComparisonPolicy     string     `json:"comparison_policy,omitempty" db:"comparison_policy"`
+	AssociationRevision  int64      `json:"association_revision" db:"association_revision"`
+	FirstOriginKind      string     `json:"first_origin_kind,omitempty" db:"first_origin_kind"`
+	FirstOriginID        string     `json:"first_origin_id,omitempty" db:"first_origin_id"`
+	FirstOriginRevision  string     `json:"first_origin_revision,omitempty" db:"first_origin_revision"`
+	DetachedAt           *time.Time `json:"-" db:"detached_at"`
+	MRIID                int        `json:"mr_iid" db:"mr_iid"` // GitLab per-project sequential id
+	MRURL                string     `json:"mr_url" db:"mr_url"`
+	MRTitle              string     `json:"mr_title" db:"mr_title"`
+	HeadBranch           string     `json:"head_branch" db:"head_branch"`
+	HeadSHA              string     `json:"head_sha" db:"head_sha"`
+	BaseBranch           string     `json:"base_branch" db:"base_branch"`
+	BaseSHA              string     `json:"base_sha" db:"base_sha"`
+	AuthorUsername       string     `json:"author_username" db:"author_username"`
+	State                string     `json:"state" db:"state"`                   // open, closed, merged, locked
+	ApprovalState        string     `json:"approval_state" db:"approval_state"` // approved, pending, ""
+	PipelineState        string     `json:"pipeline_state" db:"pipeline_state"` // success, failure, pending, ""
+	MergeStatus          string     `json:"merge_status" db:"merge_status"`
+	Draft                bool       `json:"draft" db:"draft"`
+	ApprovalCount        int        `json:"approval_count" db:"approval_count"`
+	RequiredApprovals    int        `json:"required_approvals" db:"required_approvals"`
+	PipelineJobsTotal    int        `json:"pipeline_jobs_total" db:"pipeline_jobs_total"`
+	PipelineJobsPass     int        `json:"pipeline_jobs_pass" db:"pipeline_jobs_pass"`
 	// DetailedMergeStatus, ReviewerCount and UnapprovedReviewers back the
 	// "awaiting review" summary label (Q2) and the auto-merge readiness
 	// gate (Q3). UnresolvedDiscussions is only ever set for MRs with

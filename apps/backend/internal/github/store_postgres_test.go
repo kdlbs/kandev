@@ -1,6 +1,7 @@
 package github
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -266,6 +267,128 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 	if err := store.DeleteUserConnectionsByWorkspace(ctx, "ws-1"); err != nil {
 		t.Fatalf("delete workspace GitHub connections: %v", err)
+	}
+}
+
+func TestPostgresRegistrationUnlinkFence(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := database.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			archived_at TIMESTAMPTZ
+		);
+		INSERT INTO workspaces (id) VALUES ('ws-registration-pg');
+		INSERT INTO tasks (id, workspace_id) VALUES ('task-registration-pg', 'ws-registration-pg')`); err != nil {
+		t.Fatalf("create registration fixtures: %v", err)
+	}
+	store, err := NewStore(database, database)
+	if err != nil {
+		t.Fatalf("create GitHub store: %v", err)
+	}
+	ctx := t.Context()
+	now := time.Now().UTC()
+	registration := &TaskPR{
+		WorkspaceID: "ws-registration-pg", TaskID: "task-registration-pg", RepositoryID: "repo-registration-pg",
+		Owner: "acme", Repo: "widget", PRNumber: 43, PRURL: "https://github.com/acme/widget/pull/43",
+		PRTitle: "registration fence", State: "open", CreatedAt: now, Source: TaskPRSourceAgentRegistration,
+		ProviderHost: "https://github.com", ConnectionScope: "builtin:ws-registration-pg",
+		ProviderRepositoryID: "provider-repo-43", RepositoryPath: "acme/widget",
+		ComparisonPolicy: TaskPRComparisonPolicyPreserve,
+	}
+	created, changed, err := store.RegisterTaskPRObservation(ctx, registration, false, 0)
+	if err != nil || !changed || created.AssociationRevision != 1 {
+		t.Fatalf("create observation = (%+v, changed=%v, err=%v)", created, changed, err)
+	}
+	detached, changed, err := store.DetachTaskPR(ctx, created.ID)
+	if err != nil || !changed || detached.AssociationRevision != 2 || detached.DetachedAt == nil {
+		t.Fatalf("detach observation = (%+v, changed=%v, err=%v)", detached, changed, err)
+	}
+	if _, _, err := store.RegisterTaskPRObservation(ctx, registration, true, 1); err != ErrTaskPRRegistrationRevisionChanged {
+		t.Fatalf("stale PostgreSQL restore error = %v, want revision changed", err)
+	}
+	start := make(chan struct{})
+	results := make(chan struct {
+		changed bool
+		err     error
+	}, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			candidate := *registration
+			_, restored, restoreErr := store.RegisterTaskPRObservation(ctx, &candidate, true, 2)
+			results <- struct {
+				changed bool
+				err     error
+			}{restored, restoreErr}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	changedCount := 0
+	for result := range results {
+		if result.err != nil && result.err != ErrTaskPRRegistrationRevisionChanged {
+			t.Fatalf("concurrent restore failed unexpectedly: %v", result.err)
+		}
+		if result.changed {
+			changedCount++
+		}
+	}
+	stored, err := store.GetTaskPRByID(ctx, created.ID)
+	if err != nil || changedCount != 1 || stored.AssociationRevision != 3 || stored.DetachedAt != nil {
+		t.Fatalf("concurrent restore result: changed=%d stored=%+v err=%v", changedCount, stored, err)
+	}
+
+	canonical := *registration
+	canonical.PRNumber = 44
+	canonical.RepositoryID = "repo-old"
+	canonical.ProviderRepositoryID = "provider-repo-stable"
+	canonical.PRURL = "https://github.com/acme/widget/pull/44"
+	firstCanonical, changed, err := store.RegisterTaskPRObservation(ctx, &canonical, false, 0)
+	if err != nil || !changed {
+		t.Fatalf("create canonical identity: row=%+v changed=%v err=%v", firstCanonical, changed, err)
+	}
+	rebound := canonical
+	rebound.RepositoryID = "repo-renamed"
+	rebound.Owner = "renamed"
+	rebound.Repo = "widget"
+	rebound.RepositoryPath = "renamed/widget"
+	rebound.PRURL = "https://github.com/renamed/widget/pull/44"
+	secondCanonical, changed, err := store.RegisterTaskPRObservation(ctx, &rebound, false, firstCanonical.AssociationRevision)
+	if err != nil || changed || secondCanonical.ID != firstCanonical.ID || secondCanonical.RepositoryID != firstCanonical.RepositoryID {
+		t.Fatalf("canonical identity changed after repository rename: first=%+v second=%+v changed=%v err=%v", firstCanonical, secondCanonical, changed, err)
+	}
+	if _, _, err := store.DetachTaskPR(ctx, firstCanonical.ID); err != nil {
+		t.Fatalf("detach canonical identity: %v", err)
+	}
+	reusedPath := rebound
+	reusedPath.ProviderRepositoryID = "provider-repo-replacement"
+	replacement, changed, err := store.RegisterTaskPRObservation(ctx, &reusedPath, false, 0)
+	if err != nil || !changed || replacement.ID == firstCanonical.ID || replacement.DetachedAt != nil {
+		t.Fatalf("path reuse inherited detached identity: replacement=%+v changed=%v err=%v", replacement, changed, err)
+	}
+
+	legacy := &TaskPR{
+		ID: "legacy-registration-pg", TaskID: registration.TaskID, RepositoryID: "repo-legacy",
+		Owner: "acme", Repo: "legacy", PRNumber: 45, PRURL: "https://github.com/acme/legacy/pull/45",
+		CreatedAt: time.Now().UTC(), ProviderHost: "https://github.com", ConnectionScope: registration.ConnectionScope,
+	}
+	if err := store.CreateTaskPR(ctx, legacy); err != nil {
+		t.Fatalf("seed unresolved legacy association: %v", err)
+	}
+	legacyCandidate := canonical
+	legacyCandidate.RepositoryID = legacy.RepositoryID
+	legacyCandidate.Owner = legacy.Owner
+	legacyCandidate.Repo = legacy.Repo
+	legacyCandidate.PRNumber = legacy.PRNumber
+	legacyCandidate.PRURL = legacy.PRURL
+	if _, _, err := store.RegisterTaskPRObservation(ctx, &legacyCandidate, true, 1); err != ErrTaskPRRegistrationIdentityUnresolved {
+		t.Fatalf("legacy identity repair error = %v, want unresolved", err)
 	}
 }
 

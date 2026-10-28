@@ -37,6 +37,7 @@ import {
   toTaskPreviewFeedbackRefs,
 } from "@/lib/preview-feedback-refs";
 import { findMessageByID, sendMessageRequest } from "./message-request";
+import { entityReferencesForAdmission } from "@/lib/entity-references/message-references";
 
 export { sendMessageRequest } from "./message-request";
 
@@ -262,6 +263,12 @@ async function deliverComposedMessage({
   clientAdmissionId: string;
 }): Promise<MessageAdmissionOutcome | false> {
   try {
+    const admittedReferences = payload.entityReferences
+      ? entityReferencesForAdmission(
+          payload.entityReferences,
+          planCommentRefs.length === 0 && previewFeedbackRefs.length === 0,
+        )
+      : undefined;
     if (hasPendingClarification || inputMode === "queue") {
       const accepted = await queue({
         taskId,
@@ -269,7 +276,7 @@ async function deliverComposedMessage({
         model: modelToSend,
         planMode: planModeEnabled,
         attachments: buildQueueAttachments(payload.attachments),
-        entityReferences: payload.entityReferences,
+        entityReferences: admittedReferences,
         clientQueueId: clientAdmissionId,
         ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
         ...(previewFeedbackRefs.length > 0 ? { previewFeedbackRefs } : {}),
@@ -293,7 +300,7 @@ async function deliverComposedMessage({
       hasReviewComments: !!payload.reviewComments?.length,
       attachments: payload.attachments,
       contextFilesMeta,
-      entityReferences: payload.entityReferences,
+      entityReferences: admittedReferences,
       planCommentRefs,
       previewFeedbackRefs,
     });
@@ -462,6 +469,14 @@ async function sendComposedMessage(payload: ChatSubmitPayload, context: Composed
     payload.previewFeedbackRefs ?? toTaskPreviewFeedbackRefs(context.previewFeedback);
   const contextFilesMeta = buildContextFilesMetadata(allContextFiles);
   const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
+  const hasPendingClarification =
+    context.getHasPendingClarification?.() ?? context.hasPendingClarification;
+  const admittedReferences = payload.entityReferences
+    ? entityReferencesForAdmission(
+        payload.entityReferences,
+        planCommentRefs.length === 0 && previewFeedbackRefs.length === 0,
+      )
+    : undefined;
   const admissionKey = messageAdmissionKey({
     taskId,
     resolvedSessionId,
@@ -473,7 +488,7 @@ async function sendComposedMessage(payload: ChatSubmitPayload, context: Composed
     previewFeedbackRefs,
     contextFilesMeta,
     attachments: payload.attachments,
-    entityReferences: payload.entityReferences,
+    entityReferences: admittedReferences,
   });
   const previousAdmission =
     pendingAdmissionRef.current?.key === admissionKey ? pendingAdmissionRef.current : null;
@@ -500,8 +515,7 @@ async function sendComposedMessage(payload: ChatSubmitPayload, context: Composed
     finalMessage,
     modelToSend,
     planModeEnabled: context.planModeEnabled,
-    hasPendingClarification:
-      context.getHasPendingClarification?.() ?? context.hasPendingClarification,
+    hasPendingClarification,
     planCommentRefs,
     previewFeedbackRefs,
     contextFilesMeta,

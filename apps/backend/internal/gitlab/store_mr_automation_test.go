@@ -860,11 +860,10 @@ func TestStore_DeleteTaskMRForWorkspace_DropsPerMRAutomationOptions(t *testing.T
 		t.Fatalf("unlink left lifecycle state behind: %+v", state)
 	}
 
-	// Re-linking the same MR must start from all-off, not resurrect the
-	// pre-unlink configuration.
+	// A provider refresh cannot implicitly restore the detached association.
 	relinked := newTestMR("task-1", "", "group/a", 1)
-	if err := store.UpsertTaskMR(ctx, relinked); err != nil {
-		t.Fatalf("re-link MR: %v", err)
+	if err := store.UpsertTaskMR(ctx, relinked); err != ErrTaskMRDetached {
+		t.Fatalf("refresh of detached MR error = %v, want detached fence", err)
 	}
 	opts, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", id)
 	if err != nil {

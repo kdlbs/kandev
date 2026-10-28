@@ -656,6 +656,69 @@ func TestUpdateMessageWithMetadataClearsEntityReferences(t *testing.T) {
 	assert.False(t, exists, "empty replacement must remove stale references")
 }
 
+func TestQueueMetadataUpdatesRejectUnsupportedLinkOnSendReferences(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+	entry, err := svc.QueueMessage(ctx, "session-link-gate", "task-link-gate", "keep this", "", QueuedByUser, false, nil)
+	require.NoError(t, err)
+	reference := apiv1.EntityReference{
+		Version: apiv1.EntityReferenceVersion, Ref: "mention:v1:github:pull_request:acme%2Frepo:42",
+		Provider: "github", Kind: "pull_request", ID: "42", Key: "acme/repo#42", Title: "Fix issue",
+		URL: "https://github.com/acme/repo/pull/42", Scope: "acme/repo", SelectionID: "selection-42",
+		AssociationMode: apiv1.EntityReferenceModeLinkOnSend,
+	}
+	updates := map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{reference}}
+	identity := QueueSessionIdentity{TaskID: "task-link-gate", SessionID: entry.SessionID, SessionIncarnationID: "incarnation"}
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "session scoped update",
+			call: func() error {
+				return svc.UpdateMessageWithMetadata(ctx, entry.SessionID, entry.ID, "changed", nil, updates, QueuedByUser)
+			},
+		},
+		{
+			name: "identity bound update",
+			call: func() error {
+				return svc.UpdateMessageWithMetadataForSession(ctx, identity, entry.ID, "changed", nil, updates, QueuedByUser)
+			},
+		},
+		{
+			name: "attachment claim update",
+			call: func() error {
+				return svc.UpdateMessageWithMetadataForSessionWithClaim(ctx, identity, entry.ID, "changed", nil, updates,
+					QueuedByUser, QueueAttachmentClaim{})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.ErrorIs(t, test.call(), ErrQueueAdmissionUnavailable)
+			entries := svc.GetStatus(ctx, entry.SessionID).Entries
+			require.Len(t, entries, 1)
+			assert.Equal(t, "keep this", entries[0].Content)
+			assert.Empty(t, entries[0].Metadata[MetadataEntityReferences])
+		})
+	}
+}
+
+func TestUnidentifiedQueueAdmissionRejectsLinkOnSendReferences(t *testing.T) {
+	svc := setupService(t)
+	reference := apiv1.EntityReference{
+		Version: apiv1.EntityReferenceVersion, Ref: "mention:v1:github:pull_request:acme%2Frepo:43",
+		Provider: "github", Kind: "pull_request", ID: "43", Key: "acme/repo#43", Title: "Fix issue",
+		URL: "https://github.com/acme/repo/pull/43", Scope: "acme/repo", SelectionID: "selection-43",
+		AssociationMode: apiv1.EntityReferenceModeLinkOnSend,
+	}
+	_, err := svc.QueueMessageWithMetadata(context.Background(), "session-link-gate", "task-link-gate", "queued", "",
+		QueuedByUser, false, nil, map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{reference}})
+	require.ErrorIs(t, err, ErrQueueAdmissionUnavailable)
+	assert.Empty(t, svc.GetStatus(context.Background(), "session-link-gate").Entries)
+}
+
 func TestRemoveEntry(t *testing.T) {
 	t.Run("removes the targeted entry", func(t *testing.T) {
 		svc := setupService(t)

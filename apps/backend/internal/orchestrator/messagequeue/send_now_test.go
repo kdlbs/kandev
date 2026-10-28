@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"errors"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -139,6 +140,26 @@ func TestBuildSendNowEnvelopeOmitsHandoffWhenNoEntryCarriesOne(t *testing.T) {
 	}
 	if _, ok := envelope.Metadata[MetadataStepHandoff]; ok {
 		t.Fatalf("envelope handoff = %#v, want absent", envelope.Metadata[MetadataStepHandoff])
+	}
+}
+
+func TestBuildSendNowEnvelopeUnionsQueueRegistrationOrigins(t *testing.T) {
+	entries := []QueuedMessage{
+		{ID: "first", SessionID: "session-1", Position: 1, Metadata: map[string]interface{}{
+			MetadataRegistrationOriginIDs: []string{"admission-first", "shared-origin"},
+		}},
+		{ID: "second", SessionID: "session-1", Position: 2, Metadata: map[string]interface{}{
+			MetadataRegistrationOriginIDs: []string{"admission-second", "shared-origin"},
+		}},
+	}
+
+	envelope, err := BuildSendNowEnvelope(entries)
+	if err != nil {
+		t.Fatalf("BuildSendNowEnvelope() error = %v", err)
+	}
+	originIDs, ok := envelope.Metadata[MetadataRegistrationOriginIDs].([]string)
+	if !ok || !reflect.DeepEqual(originIDs, []string{"admission-first", "shared-origin", "admission-second"}) {
+		t.Fatalf("registration origins = (%#v, valid=%v), want ordered union", envelope.Metadata[MetadataRegistrationOriginIDs], ok)
 	}
 }
 

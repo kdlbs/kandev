@@ -17,7 +17,20 @@ export type EntityReference = {
   title: string;
   url: string;
   scope: string;
+  selection_id?: string;
+  association_mode?: EntityReferenceAssociationMode;
+  registration_status?: EntityReferenceRegistrationStatus;
+  registration_error_code?: string;
 };
+
+export type EntityReferenceAssociationMode = "link_on_send" | "context_only";
+export type EntityReferenceRegistrationStatus =
+  | "pending"
+  | "linked"
+  | "failed"
+  | "suppressed"
+  | "uncertain"
+  | "unlinked";
 
 export type EntityReferenceSearchGroup = {
   source: string;

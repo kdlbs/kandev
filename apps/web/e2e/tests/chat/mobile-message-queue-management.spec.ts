@@ -5,6 +5,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionDone } from "../../helpers/session";
+import { waitForTaskSessionsSettled } from "../../helpers/session-store";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -270,8 +271,15 @@ test("mobile edit queued message reconciles after a session switch", async ({
 
   const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
   const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+  expect(await apiClient.setQueueAutoRun(queueIdentity, false)).toMatchObject({
+    session_id: sessionId,
+    auto_run: false,
+  });
   await apiClient.queueMessage(queueIdentity, scriptedQueueMessage("switch first"));
   await apiClient.queueMessage(queueIdentity, scriptedQueueMessage("switch second"));
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity))
+    .toMatchObject({ count: 2, auto_run: false });
 
   const chat = session.activeChat();
   const panel = chat.getByTestId("queued-ghost-list");
@@ -291,14 +299,17 @@ test("mobile edit queued message reconciles after a session switch", async ({
   await testPage.goto(`/t/${taskId}`);
   await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`), { timeout: 15_000 });
   await session.waitForLoad();
+  await waitForTaskSessionsSettled(testPage, taskId);
   const remountedChat = session.activeChat();
   const remountedPanel = remountedChat.getByTestId("queued-ghost-list");
   await remountedChat.getByTestId("queue-chip").tap();
-  const remountedRows = remountedPanel.getByTestId("queue-entry");
-  await expect(remountedRows).toHaveCount(2);
-  await remountedRows.nth(1).getByTestId("queue-entry-edit").tap();
-  await remountedPanel.getByTestId("queue-edit-textarea").fill("switch second edited");
+  const resumedEditor = remountedPanel.getByTestId("queue-edit-textarea");
+  const restoredQueue = await apiClient.getQueueStatus(queueIdentity);
+  expect(restoredQueue.count).toBe(2);
+  await expect(resumedEditor).toHaveValue(restoredQueue.entries.at(-1)!.content);
+  await resumedEditor.fill("switch second edited");
   await remountedPanel.getByRole("button", { name: "Save", exact: true }).tap();
+  await expect(remountedPanel.getByTestId("queue-entry")).toHaveCount(2);
   await expect(remountedPanel.getByTestId("queue-entry-text").last()).toContainText(
     "switch second edited",
   );

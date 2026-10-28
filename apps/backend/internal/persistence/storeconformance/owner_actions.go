@@ -70,6 +70,7 @@ type queueAdmissionStore interface {
 		int,
 		*messagequeue.AutoMergePolicy,
 		*messagequeue.WorkflowEntryIdentity,
+		messagequeue.QueueRegistrationAdmissionWriter,
 	) (*messagequeue.QueuedMessage, bool, error)
 	LookupQueueAdmission(
 		context.Context,
@@ -1248,7 +1249,7 @@ func messageQueueAction() apiAction {
 			Content: "admitted", Model: "model", QueuedBy: "conformance",
 			Metadata: map[string]interface{}{},
 		}
-		admitted, replay, err := admissions.AdmitQueueMessage(s.Context, identity, admissionID, candidate, nil, 10, nil, nil)
+		admitted, replay, err := admissions.AdmitQueueMessage(s.Context, identity, admissionID, candidate, nil, 10, nil, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("admit identified queue message: %w", err)
 		}

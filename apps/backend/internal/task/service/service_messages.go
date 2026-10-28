@@ -1260,6 +1260,27 @@ func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) er
 	return nil
 }
 
+// NotifyMessageUpdated publishes the current durable message projection after
+// an external transaction has updated its metadata alongside related state.
+func (s *Service) NotifyMessageUpdated(ctx context.Context, messageID string) error {
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if message.AuthorType == models.MessageAuthorUser {
+		if indexed, indexErr := s.messages.GetMessageWithPromptIndex(ctx, message.ID); indexErr == nil {
+			message = indexed
+		} else {
+			s.logger.Warn("failed to re-read indexed message for update event",
+				zap.String("message_id", message.ID), zap.Error(indexErr))
+		}
+	}
+	return s.publishMessageEvent(ctx, events.MessageUpdated, message)
+}
+
 func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.Message) (*models.ConversationMutationReceipt, error) {
 	if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
 		return writer.UpdateMessageWithConversationReceipt(ctx, message)

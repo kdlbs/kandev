@@ -426,10 +426,26 @@ requests. Use `get_task_change_requests_kandev` to read the current task's
 linked requests, automation settings, and provider capabilities.
 
 Use `manage_task_change_request_kandev` with `operation` set to `link`, `unlink`,
-or `replace`. Every mutation needs `task_id`, `provider` (`github` or `gitlab`),
-the canonical `repository_id`, and a positive request number. A number by itself
-is rejected, so a fork and its canonical repository can safely have the same
-number. For example:
+or `replace`. Existing explicit tuple calls use `task_id`, `provider` (`github`
+or `gitlab`), the canonical `repository_id`, and a positive request number. A
+number by itself is rejected, so a fork and its canonical repository can safely
+have the same number.
+
+For agent registration, link with the full request URL. If `task_id` is omitted,
+the current task is the target. The host must resolve the URL to one verified
+repository already attached to that task. URL operations use observation mode:
+they do not change comparison state or enable automation. Supplied tuple fields
+must agree with the URL. For example:
+
+```json
+{
+  "operation": "link",
+  "url": "https://github.com/acme/app/pull/42",
+  "association_mode": "observation"
+}
+```
+
+The explicit tuple form remains available for existing management calls:
 
 ```json
 {

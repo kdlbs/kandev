@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // TestClientForTaskStrict_NilWorkspaceSecrets_NeverUsesAmbientClient is the
@@ -129,6 +130,84 @@ func TestSyncTaskMRStrict_RejectsDifferentOrigin(t *testing.T) {
 	_, err := svc.SyncTaskMRStrict(context.Background(), "task-1", "", "group/a", 1, "https://gitlab.other.example.com")
 	if !errors.Is(err, ErrTaskMRHostMismatch) {
 		t.Fatalf("expected ErrTaskMRHostMismatch for a different host, got %v", err)
+	}
+}
+
+type detachOnMRFetchClient struct {
+	Client
+	detach func(context.Context) error
+}
+
+func (c *detachOnMRFetchClient) GetMRStatus(ctx context.Context, projectPath string, iid int) (*MRStatus, error) {
+	status, err := c.Client.GetMRStatus(ctx, projectPath, iid)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.detach(ctx); err != nil {
+		return nil, err
+	}
+	return status, nil
+}
+
+func TestSyncTaskMRReturnsNilWhenAssociationDetachesDuringFetch(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unscoped", true: "strict"}[strict], func(t *testing.T) {
+			store := newTestStore(t)
+			seedWorkspace(t, store, "ws-1")
+			seedTask(t, store, "task-1", "ws-1")
+			var svc *Service
+			var client Client
+			if strict {
+				secrets := &configTestSecrets{values: map[string]string{SecretKeyForWorkspace("ws-1"): "token"}}
+				if err := store.SaveConfigForWorkspace(context.Background(), "ws-1", &GitLabConfig{
+					Host: "https://gitlab.example.com", AuthMethod: AuthMethodPAT,
+				}); err != nil {
+					t.Fatalf("save workspace config: %v", err)
+				}
+				svc = newWorkspaceConfigService(t, store, secrets)
+			} else {
+				svc = NewService("https://gitlab.example.com", NewNoopClient("https://gitlab.example.com"), AuthMethodNone, nil, newTestLogger(t))
+				svc.SetStore(store)
+			}
+			mock := NewMockClient("https://gitlab.example.com")
+			mock.SeedMR("group/a", &MR{
+				IID: 1, State: "opened", WebURL: "https://gitlab.example.com/group/a/-/merge_requests/1",
+			})
+			association := &TaskMR{
+				TaskID: "task-1", Host: "https://gitlab.example.com", ProjectPath: "group/a", MRIID: 1,
+				MRURL: "https://gitlab.example.com/group/a/-/merge_requests/1", CreatedAt: time.Now().UTC(),
+			}
+			if err := store.UpsertTaskMR(context.Background(), association); err != nil {
+				t.Fatalf("seed active association: %v", err)
+			}
+			client = &detachOnMRFetchClient{
+				Client: mock,
+				detach: func(ctx context.Context) error {
+					_, _, err := store.DetachTaskMRForWorkspace(ctx, "ws-1", association.ID)
+					return err
+				},
+			}
+			if strict {
+				svc.workspaceClientFn = func(context.Context, *GitLabConfig, string) (Client, error) {
+					return client, nil
+				}
+			} else {
+				svc.mu.Lock()
+				svc.client = client
+				svc.mu.Unlock()
+			}
+
+			var got *TaskMR
+			var err error
+			if strict {
+				got, err = svc.SyncTaskMRStrict(context.Background(), "task-1", "", "group/a", 1, "https://gitlab.example.com")
+			} else {
+				got, err = svc.SyncTaskMR(context.Background(), "task-1", "", "group/a", 1)
+			}
+			if err != nil || got != nil {
+				t.Fatalf("sync result = (%+v, %v), want nil association and no error after concurrent detach", got, err)
+			}
+		})
 	}
 }
 

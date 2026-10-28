@@ -7,22 +7,32 @@ import { Button } from "@kandev/ui";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
+import { QueuedGhostReferenceEditor } from "@/components/task/chat/queued-ghost-reference-editor";
+import type { EntityReference } from "@/lib/types/entity-reference";
 
 type QueuedGhostEditViewProps = {
+  taskId: string;
+  sessionId: string;
   value: string;
+  references: readonly EntityReference[];
   saving: boolean;
   attachments: QueuedAttachment[];
   onChange: (value: string) => void;
+  onReferencesChange: (references: EntityReference[]) => void;
   onSave: () => void;
   onCancel: () => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
 };
 
 export function QueuedGhostEditView({
+  taskId,
+  sessionId,
   value,
+  references,
   saving,
   attachments,
   onChange,
+  onReferencesChange,
   onSave,
   onCancel,
   textareaRef,
@@ -55,6 +65,15 @@ export function QueuedGhostEditView({
         className={cn(
           "min-h-[60px] max-h-[200px] resize-none overflow-y-auto bg-background border-border",
         )}
+      />
+      <QueuedGhostReferenceEditor
+        taskId={taskId}
+        sessionId={sessionId}
+        value={value}
+        references={references}
+        disabled={saving}
+        onValueChange={onChange}
+        onReferencesChange={onReferencesChange}
       />
       <div className="flex items-center gap-2">
         <Button

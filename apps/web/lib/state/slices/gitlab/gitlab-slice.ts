@@ -2,9 +2,10 @@ import type { SliceCreator } from "@/lib/state/slice-creator";
 
 import type { GitLabSlice, GitLabSliceState } from "./types";
 import { normalizeGitLabOrigin } from "@/lib/gitlab-identity";
+import type { TaskMR } from "@/lib/types/gitlab";
 
 export const defaultGitLabState: GitLabSliceState = {
-  taskMRs: { byWorkspaceId: {} },
+  taskMRs: { byWorkspaceId: {}, deletedAssociationRevisionsByWorkspaceId: {} },
   gitlabReviewWatches: { items: [], loaded: false, loading: false },
   gitlabIssueWatches: { items: [], loaded: false, loading: false },
   gitlabMRWatches: { items: [], loaded: false, loading: false },
@@ -32,7 +33,25 @@ function taskMRActions(set: ImmerSet) {
   return {
     setTaskMRs: (workspaceId: string, mrs: GitLabSliceState["taskMRs"]["byWorkspaceId"][string]) =>
       set((draft) => {
-        draft.taskMRs.byWorkspaceId[workspaceId] = mrs;
+        const tombstones = taskMRDeletionMap(draft, workspaceId);
+        const current = draft.taskMRs.byWorkspaceId[workspaceId] ?? {};
+        const reconciled: Record<string, TaskMR[]> = {};
+        for (const [taskId, incoming] of Object.entries(mrs)) {
+          const existing = current[taskId] ?? [];
+          const next: TaskMR[] = [];
+          for (const mr of incoming) {
+            const revision = taskMRAssociationRevision(mr);
+            const deletedRevision = tombstones[mr.id];
+            if (deletedRevision !== undefined && revision <= deletedRevision) continue;
+            if (deletedRevision !== undefined) delete tombstones[mr.id];
+            const currentMR = existing.find((item) => sameTaskMRIdentity(item, mr));
+            next.push(
+              currentMR && taskMRAssociationRevision(currentMR) > revision ? currentMR : mr,
+            );
+          }
+          if (next.length > 0) reconciled[taskId] = next;
+        }
+        draft.taskMRs.byWorkspaceId[workspaceId] = reconciled;
       }),
     setTaskMR: (
       workspaceId: string,
@@ -40,28 +59,39 @@ function taskMRActions(set: ImmerSet) {
       mr: GitLabSliceState["taskMRs"]["byWorkspaceId"][string][string][number],
     ) =>
       set((draft) => {
+        const tombstones = taskMRDeletionMap(draft, workspaceId);
+        const revision = taskMRAssociationRevision(mr);
+        const deletedRevision = tombstones[mr.id];
+        if (deletedRevision !== undefined && revision <= deletedRevision) return;
         const workspaceMRs = draft.taskMRs.byWorkspaceId[workspaceId] ?? {};
         const existing = workspaceMRs[taskId] ?? [];
-        const repoKey = mr.repository_id ?? "";
-        const idx = existing.findIndex(
-          (m) =>
-            (m.repository_id ?? "") === repoKey &&
-            normalizeGitLabOrigin(m.host) === normalizeGitLabOrigin(mr.host) &&
-            m.project_path === mr.project_path &&
-            m.mr_iid === mr.mr_iid,
-        );
+        const idx = existing.findIndex((item) => sameTaskMRIdentity(item, mr));
+        if (idx >= 0 && taskMRAssociationRevision(existing[idx]!) > revision) return;
+        if (deletedRevision !== undefined) delete tombstones[mr.id];
         if (idx >= 0) existing[idx] = mr;
         else existing.push(mr);
         workspaceMRs[taskId] = existing;
         draft.taskMRs.byWorkspaceId[workspaceId] = workspaceMRs;
       }),
-    removeTaskMR: (workspaceId: string, associationId: string) =>
+    removeTaskMR: (workspaceId: string, associationId: string, associationRevision = 0) =>
       set((draft) => {
         const workspaceMRs = draft.taskMRs.byWorkspaceId[workspaceId];
+        const tombstones = taskMRDeletionMap(draft, workspaceId);
+        const revision = Number.isFinite(associationRevision)
+          ? Math.max(0, associationRevision)
+          : 0;
+        const current = workspaceMRs
+          ? Object.values(workspaceMRs)
+              .flat()
+              .find((mr) => mr.id === associationId)
+          : undefined;
+        if (current && taskMRAssociationRevision(current) > revision) return;
+        if ((tombstones[associationId] ?? -1) > revision) return;
+        tombstones[associationId] = Math.max(tombstones[associationId] ?? 0, revision);
         if (!workspaceMRs) return;
         for (const taskId of Object.keys(workspaceMRs)) {
           workspaceMRs[taskId] = (workspaceMRs[taskId] ?? []).filter(
-            (mr) => mr.id !== associationId,
+            (mr) => mr.id !== associationId || taskMRAssociationRevision(mr) > revision,
           );
         }
       }),
@@ -69,11 +99,33 @@ function taskMRActions(set: ImmerSet) {
       set((draft) => {
         if (workspaceId) {
           delete draft.taskMRs.byWorkspaceId[workspaceId];
+          if (draft.taskMRs.deletedAssociationRevisionsByWorkspaceId) {
+            delete draft.taskMRs.deletedAssociationRevisionsByWorkspaceId[workspaceId];
+          }
           return;
         }
         draft.taskMRs.byWorkspaceId = {};
+        draft.taskMRs.deletedAssociationRevisionsByWorkspaceId = {};
       }),
   };
+}
+
+function taskMRAssociationRevision(mr: TaskMR): number {
+  return Number.isFinite(mr.association_revision) ? Math.max(0, mr.association_revision ?? 0) : 0;
+}
+
+function sameTaskMRIdentity(left: TaskMR, right: TaskMR): boolean {
+  return (
+    (left.repository_id ?? "") === (right.repository_id ?? "") &&
+    normalizeGitLabOrigin(left.host) === normalizeGitLabOrigin(right.host) &&
+    left.project_path === right.project_path &&
+    left.mr_iid === right.mr_iid
+  );
+}
+
+function taskMRDeletionMap(state: GitLabSlice, workspaceId: string): Record<string, number> {
+  state.taskMRs.deletedAssociationRevisionsByWorkspaceId ??= {};
+  return (state.taskMRs.deletedAssociationRevisionsByWorkspaceId[workspaceId] ??= {});
 }
 
 function reviewWatchActions(set: ImmerSet) {

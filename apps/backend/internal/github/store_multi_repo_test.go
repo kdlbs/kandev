@@ -142,11 +142,9 @@ func TestTaskPR_ReplaceTaskPR_PreservesSiblingsAndUpserts(t *testing.T) {
 	}
 }
 
-// Regression: a task that pre-dated the multi-repo schema kept a row with
-// repository_id=”, then a later sync inserted a NEW row under the resolved
-// repository_id — leaving two rows for the same PR and "+2" badges on the
-// kanban card. backfillTaskPRsRepositoryID must dedup the legacy row.
-func TestBackfillTaskPRsRepositoryID_DedupsLegacyEmptyRow(t *testing.T) {
+// Historical paths do not prove the immutable identity of a PR association.
+// The migration leaves unresolved rows available for explicit removal.
+func TestBackfillTaskPRsRepositoryID_LeavesLegacyIdentityUnresolved(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -172,11 +170,12 @@ func TestBackfillTaskPRsRepositoryID_DedupsLegacyEmptyRow(t *testing.T) {
 	}
 
 	all, _ := store.ListTaskPRsByTask(ctx, "task-x")
-	if len(all) != 1 {
-		t.Fatalf("expected 1 PR after dedup, got %d", len(all))
+	if len(all) != 2 {
+		t.Fatalf("expected unresolved and scoped rows to remain, got %d", len(all))
 	}
-	if all[0].RepositoryID != "repo-1" {
-		t.Errorf("expected scoped row to win, got repository_id=%q", all[0].RepositoryID)
+	legacy, err := store.GetTaskPRByID(ctx, "legacy")
+	if err != nil || legacy == nil || legacy.RepositoryID != "" || legacy.ProviderRepositoryID != "" {
+		t.Fatalf("legacy identity was inferred: row=%+v err=%v", legacy, err)
 	}
 
 	// Idempotent: second pass is a no-op.
@@ -184,8 +183,8 @@ func TestBackfillTaskPRsRepositoryID_DedupsLegacyEmptyRow(t *testing.T) {
 		t.Fatalf("second backfill: %v", err)
 	}
 	all2, _ := store.ListTaskPRsByTask(ctx, "task-x")
-	if len(all2) != 1 {
-		t.Errorf("idempotent expected 1 PR, got %d", len(all2))
+	if len(all2) != 2 {
+		t.Errorf("expected 2 unresolved/scoped PRs after repeat migration, got %d", len(all2))
 	}
 }
 
@@ -307,12 +306,9 @@ func TestBackfillPRWatchesRepositoryID_BackfillsOrphanRow(t *testing.T) {
 	}
 }
 
-// Covers the UPDATE path: a legacy row with repository_id=” and NO per-repo
-// counterpart should get its repository_id stamped from task_repositories,
-// not deleted. This is the most common case in real upgrades — a task that
-// has only ever had one PR (so no duplicate to dedup) but pre-dates the
-// per-repo schema.
-func TestBackfillTaskPRsRepositoryID_BackfillsOrphanRow(t *testing.T) {
+// A single attached repository still cannot prove a legacy association's
+// immutable provider identity during migration.
+func TestBackfillTaskPRsRepositoryID_LeavesOrphanUnresolved(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
@@ -328,8 +324,7 @@ func TestBackfillTaskPRsRepositoryID_BackfillsOrphanRow(t *testing.T) {
 		t.Fatalf("seed task_repositories: %v", err)
 	}
 
-	// Orphan legacy row: no per-repo counterpart, so the dedup DELETE leaves
-	// it alone and the UPDATE has to do the healing.
+	// The row has no provider identity that proves it belongs to repo-abc.
 	if err := store.CreateTaskPR(ctx, &TaskPR{
 		ID: "legacy2", TaskID: "task-y", RepositoryID: "",
 		Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: time.Now().UTC(),
@@ -345,7 +340,7 @@ func TestBackfillTaskPRsRepositoryID_BackfillsOrphanRow(t *testing.T) {
 	if len(all) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(all))
 	}
-	if all[0].RepositoryID != "repo-abc" {
-		t.Errorf("expected backfilled repository_id='repo-abc', got %q", all[0].RepositoryID)
+	if all[0].RepositoryID != "" {
+		t.Errorf("expected unresolved legacy repository identity, got %q", all[0].RepositoryID)
 	}
 }

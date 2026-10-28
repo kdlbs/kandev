@@ -10,6 +10,7 @@ import { useGitLabStatus } from "./use-gitlab-status";
 
 type WorkspaceMRResponse = Awaited<ReturnType<typeof listWorkspaceTaskMRs>>;
 const workspaceMRRequests = new Map<string, Promise<WorkspaceMRResponse>>();
+const EMPTY_WORKSPACE_MRS: Record<string, TaskMR[]> = {};
 
 function acquireWorkspaceMRRequest(workspaceId: string) {
   const activeRequest = workspaceMRRequests.get(workspaceId);
@@ -113,6 +114,11 @@ export function useUnlinkTaskMR(
 ): (associationId: string) => Promise<void> {
   const { t } = useTranslation();
   const removeTaskMR = useAppStore((state) => state.removeTaskMR);
+  const workspaceMRs = useAppStore((state) =>
+    workspaceId
+      ? (state.taskMRs.byWorkspaceId[workspaceId] ?? EMPTY_WORKSPACE_MRS)
+      : EMPTY_WORKSPACE_MRS,
+  );
   const { toast } = useToast();
 
   return useCallback(
@@ -120,7 +126,10 @@ export function useUnlinkTaskMR(
       if (!workspaceId) return;
       try {
         await deleteTaskMR(associationId, workspaceId);
-        removeTaskMR(workspaceId, associationId);
+        const current = Object.values(workspaceMRs)
+          .flat()
+          .find((mr) => mr.id === associationId);
+        removeTaskMR(workspaceId, associationId, (current?.association_revision ?? 0) + 1);
       } catch (error) {
         toast({
           title: t("gitlab:failedToUnlinkMergeRequest"),
@@ -130,6 +139,6 @@ export function useUnlinkTaskMR(
         });
       }
     },
-    [workspaceId, removeTaskMR, toast, t],
+    [workspaceId, workspaceMRs, removeTaskMR, toast, t],
   );
 }

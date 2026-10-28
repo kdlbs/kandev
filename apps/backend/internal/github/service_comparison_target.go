@@ -34,6 +34,13 @@ func (s *Service) reconcileComparisonTargetFromSync(ctx context.Context, taskID 
 	s.reconcileComparisonTargetMode(ctx, taskID, pr, false)
 }
 
+func (s *Service) reconcileComparisonTargetForTaskPR(ctx context.Context, taskID string, association *TaskPR, pr *PR) {
+	if association != nil && association.ComparisonPolicy == TaskPRComparisonPolicyPreserve {
+		return
+	}
+	s.reconcileComparisonTarget(ctx, taskID, pr)
+}
+
 func (s *Service) reconcileComparisonTargetMode(ctx context.Context, taskID string, pr *PR, allowReplacement bool) {
 	if s.comparisonTargetObserver == nil || strings.TrimSpace(taskID) == "" {
 		return

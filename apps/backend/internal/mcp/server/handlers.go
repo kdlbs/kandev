@@ -368,22 +368,29 @@ func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
 		if err != nil || (operation != "link" && operation != "unlink" && operation != "replace") {
 			return mcp.NewToolResultError("operation must be link, unlink, or replace"), nil
 		}
-		taskID, err := req.RequireString(mcpKeyTaskID)
-		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
+		arguments := req.GetArguments()
+		if errMsg := validateChangeRequestRegistrationArguments(operation, arguments); errMsg != "" {
+			return mcp.NewToolResultError(errMsg), nil
 		}
-		if errMsg := validateChangeRequestOldIdentity(operation, req.GetArguments()); errMsg != "" {
+		if errMsg := validateChangeRequestOldIdentity(operation, arguments); errMsg != "" {
 			return mcp.NewToolResultError(errMsg), nil
 		}
 		payload := map[string]interface{}{
 			"operation":      operation,
-			mcpKeyTaskID:     taskID,
 			"caller_task_id": s.taskID,
 		}
+		if rawTaskID, ok := arguments[mcpKeyTaskID]; ok {
+			taskID, valid := rawTaskID.(string)
+			if !valid || strings.TrimSpace(taskID) == "" {
+				return mcp.NewToolResultError("task_id must be a non-empty string"), nil
+			}
+			payload[mcpKeyTaskID] = taskID
+		}
 		for _, key := range []string{
-			"provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number",
+			"url", "provider", "repository_id", "number", "association_mode", "restore_detached", "operation_id",
+			"old_provider", "old_repository_id", "old_number",
 		} {
-			if value, ok := req.GetArguments()[key]; ok {
+			if value, ok := arguments[key]; ok {
 				payload[key] = value
 			}
 		}
@@ -394,6 +401,64 @@ func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func validateChangeRequestRegistrationArguments(operation string, arguments map[string]interface{}) string {
+	if operation != "link" && operation != "unlink" && operation != "replace" {
+		return "operation must be link, unlink, or replace"
+	}
+	if message := validateRegistrationTargetArguments(operation, arguments); message != "" {
+		return message
+	}
+	return validateOptionalRegistrationArguments(operation, arguments)
+}
+
+func validateRegistrationTargetArguments(operation string, arguments map[string]interface{}) string {
+	urlValue, hasURL := arguments["url"]
+	if hasURL {
+		urlText, ok := urlValue.(string)
+		if !ok || strings.TrimSpace(urlText) == "" {
+			return "url must be a non-empty string"
+		}
+	}
+	identityFields := []string{"provider", "repository_id", "number"}
+	identityCount := 0
+	for _, key := range identityFields {
+		if _, ok := arguments[key]; ok {
+			identityCount++
+		}
+	}
+	if hasURL {
+		if operation == "replace" && identityCount == 0 {
+			// URL identifies the new target; replacement still requires its old tuple.
+		} else if identityCount > 0 && identityCount < len(identityFields) {
+			return "provider, repository_id, and number must be supplied together when asserting a URL identity"
+		}
+	} else if identityCount != len(identityFields) {
+		return "provide either url or provider, repository_id, and number"
+	}
+	return ""
+}
+
+func validateOptionalRegistrationArguments(operation string, arguments map[string]interface{}) string {
+	if mode, ok := arguments["association_mode"]; ok {
+		modeValue, valid := mode.(string)
+		if !valid || modeValue != "observation" || operation == "unlink" {
+			return "association_mode is observation and is only valid for link or replace"
+		}
+	}
+	if restore, ok := arguments["restore_detached"]; ok {
+		if _, valid := restore.(bool); !valid || operation == "unlink" {
+			return "restore_detached must be a boolean and is only valid for link or replace"
+		}
+	}
+	if operationID, ok := arguments["operation_id"]; ok {
+		operationIDValue, valid := operationID.(string)
+		if !valid || strings.TrimSpace(operationIDValue) == "" {
+			return "operation_id must be a non-empty string"
+		}
+	}
+	return ""
 }
 
 func (s *Server) getTaskChangeRequestsHandler() server.ToolHandlerFunc {

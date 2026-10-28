@@ -175,6 +175,15 @@ const createTablesSQL = `
 		auto_merge_observed_at DATETIME,
 		source TEXT NOT NULL DEFAULT '',
 		workflow_attention TEXT NOT NULL DEFAULT '',
+		provider_host TEXT NOT NULL DEFAULT '',
+		connection_scope TEXT NOT NULL DEFAULT '',
+		provider_repository_id TEXT NOT NULL DEFAULT '',
+		repository_path TEXT NOT NULL DEFAULT '',
+		comparison_policy TEXT NOT NULL DEFAULT 'legacy',
+		association_revision BIGINT NOT NULL DEFAULT 1,
+		first_origin_kind TEXT NOT NULL DEFAULT '',
+		first_origin_id TEXT NOT NULL DEFAULT '',
+		first_origin_revision TEXT NOT NULL DEFAULT '',
 		UNIQUE(task_id, repository_id, pr_number)
 	);
 
@@ -700,6 +709,38 @@ func (s *Store) initSchemaUpgrades() error {
 	if err := s.addTaskPRWorkflowAttentionColumn(); err != nil {
 		return err
 	}
+	if err := s.addTaskPRRegistrationColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) addTaskPRRegistrationColumns() error {
+	columns, err := s.tableColumns("github_task_prs")
+	if err != nil {
+		return fmt.Errorf("read github_task_prs columns: %w", err)
+	}
+	for _, column := range []struct{ name, ddl string }{
+		{"provider_host", "TEXT NOT NULL DEFAULT ''"},
+		{"connection_scope", "TEXT NOT NULL DEFAULT ''"},
+		{"provider_repository_id", "TEXT NOT NULL DEFAULT ''"},
+		{"repository_path", "TEXT NOT NULL DEFAULT ''"},
+		{"comparison_policy", "TEXT NOT NULL DEFAULT 'legacy'"},
+		{"association_revision", "BIGINT NOT NULL DEFAULT 1"},
+		{"first_origin_kind", "TEXT NOT NULL DEFAULT ''"},
+		{"first_origin_id", "TEXT NOT NULL DEFAULT ''"},
+		{"first_origin_revision", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if _, exists := columns[column.name]; exists {
+			continue
+		}
+		if _, err := s.db.Exec(schemaSQLForDriver(
+			"ALTER TABLE github_task_prs ADD COLUMN "+column.name+" "+column.ddl,
+			s.db.DriverName(),
+		)); err != nil && !dbutil.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add github_task_prs.%s: %w", column.name, err)
+		}
+	}
 	return nil
 }
 
@@ -968,6 +1009,17 @@ func (s *Store) clearLifecyclePromptOverrides() error {
 }
 
 func (s *Store) applyIdempotentSchemaIndexes() error {
+	// One task association represents a contribution's immutable provider
+	// identity. Local repository IDs and paths are locators and can change after
+	// a repository rename or re-attachment.
+	if _, err := s.db.Exec(schemaSQLForDriver(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_github_task_prs_registration_identity
+			ON github_task_prs (task_id, provider_host, connection_scope, provider_repository_id, pr_number)
+			WHERE provider_host <> '' AND connection_scope <> '' AND provider_repository_id <> ''`,
+		s.db.DriverName(),
+	)); err != nil {
+		return fmt.Errorf("create idx_github_task_prs_registration_identity: %w", err)
+	}
 	// pr_number is the 3rd column of UNIQUE(task_id, repository_id, pr_number),
 	// so SQLite can't use that index for the PR-number task search. Add a
 	// dedicated leading-key index so lookups by PR number stay index-backed.
@@ -1408,64 +1460,10 @@ func (s *Store) backfillTaskCIAutoMergeErrorKinds() error {
 	return nil
 }
 
-// backfillTaskPRsRepositoryID heals github_task_prs rows that pre-date the
-// per-repo schema (i.e. have repository_id = ”). Two passes:
-//
-//  1. Dedup: for each (task_id, owner, repo, pr_number) tuple, if a legacy
-//     row (repository_id = ”) AND a newer per-repo row coexist, drop the
-//     legacy one. This happens when an old single-repo install upgraded and
-//     a subsequent sync inserted a new row under the resolved repository_id
-//     instead of updating the legacy row, leaving two entries for one PR
-//     (and so two badges on the kanban card).
-//
-//  2. Backfill: for any remaining empty-repo rows, look up the task's
-//     primary repository (from `task_repositories` ordered by position) and
-//     stamp its id. Skipped silently when the task has zero per-repo rows
-//     (e.g. quick-chat tasks) — the row keeps its empty repository_id.
-//
-// Idempotent: re-running on a healed db is a no-op.
+// backfillTaskPRsRepositoryID intentionally leaves historical associations
+// unresolved. A task's current repository path cannot prove which immutable
+// provider repository owned an older PR row.
 func (s *Store) backfillTaskPRsRepositoryID() error {
-	if _, err := s.db.Exec(`
-		DELETE FROM github_task_prs
-		WHERE repository_id = ''
-		  AND EXISTS (
-		    SELECT 1 FROM github_task_prs other
-		    WHERE other.task_id = github_task_prs.task_id
-		      AND other.owner   = github_task_prs.owner
-		      AND other.repo    = github_task_prs.repo
-		      AND other.pr_number = github_task_prs.pr_number
-		      AND other.repository_id != ''
-		  )
-	`); err != nil {
-		return fmt.Errorf("dedup legacy task PR rows: %w", err)
-	}
-	// `task_repositories` lives in the task package's schema, not ours.
-	// Skip the backfill when it doesn't exist (e.g. github-store unit tests
-	// that init only this package's schema). The dedup pass above is the
-	// load-bearing fix for the "two PRs on a single-repo task" symptom; the
-	// backfill is a courtesy that converts orphan legacy rows in real
-	// deployments.
-	if !s.tableExists("task_repositories") {
-		return nil
-	}
-	_, err := s.db.Exec(`
-		UPDATE github_task_prs
-		SET repository_id = (
-		  SELECT tr.repository_id
-		  FROM task_repositories tr
-		  WHERE tr.task_id = github_task_prs.task_id
-		  ORDER BY tr.position
-		  LIMIT 1
-		)
-		WHERE repository_id = ''
-		  AND EXISTS (
-		    SELECT 1 FROM task_repositories tr
-		    WHERE tr.task_id = github_task_prs.task_id
-		  )
-	`)
-	if err != nil {
-		return fmt.Errorf("backfill task PR repository_id: %w", err)
-	}
 	return nil
 }
 
@@ -1725,6 +1723,15 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			auto_merge_observed_at DATETIME,
 			source TEXT NOT NULL DEFAULT '',
 			workflow_attention TEXT NOT NULL DEFAULT '',
+			provider_host TEXT NOT NULL DEFAULT '',
+			connection_scope TEXT NOT NULL DEFAULT '',
+			provider_repository_id TEXT NOT NULL DEFAULT '',
+			repository_path TEXT NOT NULL DEFAULT '',
+			comparison_policy TEXT NOT NULL DEFAULT 'legacy',
+			association_revision BIGINT NOT NULL DEFAULT 1,
+			first_origin_kind TEXT NOT NULL DEFAULT '',
+			first_origin_id TEXT NOT NULL DEFAULT '',
+			first_origin_revision TEXT NOT NULL DEFAULT '',
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
 		// The five outcome-attribution columns and source are selected
@@ -1742,7 +1749,9 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention,
+			provider_host, connection_scope, provider_repository_id, repository_path, comparison_policy,
+			association_revision, first_origin_kind, first_origin_id, first_origin_revision
 		) SELECT
  github_host,
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
@@ -1752,7 +1761,9 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			COALESCE(merge_queue_last_removal_reason, ''), COALESCE(merge_queue_last_removal_before_sha, ''),
 			review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
-			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at, source, workflow_attention,
+			provider_host, connection_scope, provider_repository_id, repository_path, comparison_policy,
+			association_revision, first_origin_kind, first_origin_id, first_origin_revision
 		FROM github_task_prs`,
 	)
 }
@@ -2908,7 +2919,8 @@ const taskPRColumns = `github_host, id, workspace_id, task_id, repository_id, ow
 	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
 	head_sha, merge_queue_entry_id, merge_queue_entry_head_sha, merge_queue_last_removal_id,
 	merge_queue_last_removed_at, merge_queue_last_removal_reason, merge_queue_last_removal_before_sha,
-	source, workflow_attention`
+	source, workflow_attention, provider_host, connection_scope, provider_repository_id, repository_path,
+	comparison_policy, association_revision, first_origin_kind, first_origin_id, first_origin_revision`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -2921,7 +2933,9 @@ const taskPRColumnsQualified = `gtp.github_host, gtp.id, gtp.workspace_id, gtp.t
 	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at,
 	gtp.head_sha, gtp.merge_queue_entry_id, gtp.merge_queue_entry_head_sha, gtp.merge_queue_last_removal_id,
 	gtp.merge_queue_last_removed_at, gtp.merge_queue_last_removal_reason, gtp.merge_queue_last_removal_before_sha,
-	gtp.source, gtp.workflow_attention`
+	gtp.source, gtp.workflow_attention, gtp.provider_host, gtp.connection_scope, gtp.provider_repository_id,
+	gtp.repository_path, gtp.comparison_policy, gtp.association_revision, gtp.first_origin_kind,
+	gtp.first_origin_id, gtp.first_origin_revision`
 
 type taskPRWriter interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -2964,8 +2978,24 @@ func taskPRValues(tp *TaskPR) []any {
 		tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt, tp.HeadSHA,
 		tp.MergeQueueEntryID, tp.MergeQueueEntryHeadSHA, tp.MergeQueueLastRemovalID,
 		tp.MergeQueueLastRemovedAt, tp.MergeQueueLastRemovalReason, tp.MergeQueueLastRemovalBeforeSHA,
-		tp.Source, marshalWorkflowAttention(tp.WorkflowAttention),
+		tp.Source, marshalWorkflowAttention(tp.WorkflowAttention), tp.ProviderHost, tp.ConnectionScope,
+		tp.ProviderRepositoryID, tp.RepositoryPath, defaultTaskPRComparisonPolicy(tp.ComparisonPolicy),
+		defaultTaskPRAssociationRevision(tp.AssociationRevision), tp.FirstOriginKind, tp.FirstOriginID, tp.FirstOriginRevision,
 	}
+}
+
+func defaultTaskPRComparisonPolicy(policy string) string {
+	if policy == "" {
+		return "legacy"
+	}
+	return policy
+}
+
+func defaultTaskPRAssociationRevision(revision int64) int64 {
+	if revision <= 0 {
+		return 1
+	}
+	return revision
 }
 
 func marshalWorkflowAttention(attention *WorkflowAttention) string {
@@ -3189,7 +3219,7 @@ func (s *Store) DetachTaskPR(ctx context.Context, associationID string) (*TaskPR
 		return nil, false, err
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(
-		`UPDATE github_task_prs SET detached_at = ?, updated_at = ?
+		`UPDATE github_task_prs SET detached_at = ?, association_revision = association_revision + 1, updated_at = ?
 		 WHERE id = ? AND detached_at IS NULL`), now, now, associationID)
 	if err != nil {
 		return nil, false, err
@@ -3449,6 +3479,10 @@ func (s *Store) ReplaceTaskPRTx(ctx context.Context, tx *sqlx.Tx, tp *TaskPR, st
 	if err != nil {
 		return err
 	}
+	if outgoing.ID != "" {
+		tp.AssociationRevision = outgoing.AssociationRevision
+	}
+	tp.AssociationRevision = defaultTaskPRAssociationRevision(tp.AssociationRevision)
 	tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt =
 		resolveTaskPROutcomeFields(outgoing, status)
 	if status != nil && status.PR != nil {

@@ -161,10 +161,11 @@ export function usePromptMentionNames() {
 export function usePromptMentionMarkdownComponents(
   promptNames: string[],
   entityReferences: readonly EntityReference[],
+  taskId?: string,
 ): Components | undefined {
   return useMemo(() => {
     const mentionNames = buildPromptMentionNames(promptNames);
-    const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences);
+    const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences, taskId);
     if (mentionNames.length === 0) {
       return entityReferences.length === 0 ? undefined : baseComponents;
     }
@@ -225,7 +226,7 @@ export function usePromptMentionMarkdownComponents(
         return <th {...props}>{renderChildren(children, "th")}</th>;
       },
     };
-  }, [promptNames, entityReferences]);
+  }, [promptNames, entityReferences, taskId]);
 }
 
 function renderChildrenWithPromptMentions(

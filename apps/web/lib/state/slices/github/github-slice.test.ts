@@ -484,6 +484,29 @@ describe("setTaskPR", () => {
     expect(Array.isArray(store.getState().taskPRs.byTaskId["task-1"])).toBe(true);
     expect(store.getState().taskPRs.byTaskId["task-1"]).toEqual([pr]);
   });
+
+  it("fences updates and deletes by association revision across hydration", () => {
+    const store = makeStore();
+    const deletedAt = makePR({ id: "association", association_revision: 4 });
+    store.getState().setTaskPRs({ "task-1": [deletedAt] });
+    store.getState().removeTaskPR("task-1", deletedAt.id, undefined, 5);
+
+    store.getState().setTaskPRs({
+      "task-1": [
+        makePR({ id: deletedAt.id, association_revision: 4, pr_title: "stale hydration" }),
+      ],
+    });
+    expect(store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
+
+    const relinked = makePR({ id: deletedAt.id, association_revision: 6, pr_title: "relinked" });
+    store.getState().setTaskPRs({ "task-1": [relinked] });
+    store.getState().removeTaskPR("task-1", deletedAt.id, undefined, 5);
+
+    expect(store.getState().taskPRs.byTaskId["task-1"]).toEqual([relinked]);
+    expect(store.getState().taskPRs.deletedAssociationIdsByTaskId?.["task-1"]?.[deletedAt.id]).toBe(
+      undefined,
+    );
+  });
 });
 
 describe("removeTaskPR", () => {

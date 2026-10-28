@@ -53,7 +53,13 @@ export async function unlinkTaskPRAssociation({
   try {
     await deleteTaskPR(associationId, workspaceId);
     if (isWorkspaceContextCurrent()) {
-      removeTaskPR(taskId, associationId, { workspaceId, workspaceContextGeneration });
+      const currentAssociation = taskPRs.find((pr) => pr.id === associationId);
+      removeTaskPR(
+        taskId,
+        associationId,
+        { workspaceId, workspaceContextGeneration },
+        (currentAssociation?.association_revision ?? 0) + 1,
+      );
       invalidateSync();
     }
     return true;

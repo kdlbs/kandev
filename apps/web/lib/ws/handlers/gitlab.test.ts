@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { createAppStore } from "@/lib/state/store";
 import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import { registerGitLabHandlers } from "./gitlab";
 
@@ -83,9 +84,51 @@ describe("GitLab WebSocket handlers", () => {
       payload: { workspace_id: WORKSPACE_A, task_id: "task-1", association_id: "mr-1" },
     } as never);
 
-    expect(removeTaskMR).toHaveBeenCalledWith(WORKSPACE_A, "mr-1");
+    expect(removeTaskMR).toHaveBeenCalledWith(WORKSPACE_A, "mr-1", 0);
   });
 
+  it("rejects delayed MR updates and deletes around relink hydration", () => {
+    const store = createAppStore();
+    store.getState().setActiveWorkspace(WORKSPACE_A);
+    const handlers = registerGitLabHandlers(store);
+    const association = (revision: number, title: string): TaskMR & { workspace_id: string } => ({
+      ...taskMR(WORKSPACE_A),
+      id: "association-revisioned",
+      association_revision: revision,
+      mr_title: title,
+    });
+    store.getState().setTaskMRs(WORKSPACE_A, { "task-1": [association(4, "old")] });
+    handlers["gitlab.task_mr.deleted"]!({
+      payload: {
+        workspace_id: WORKSPACE_A,
+        task_id: "task-1",
+        association_id: "association-revisioned",
+        association_revision: 5,
+      },
+    } as never);
+    handlers["gitlab.task_mr.updated"]!({
+      payload: association(4, "stale"),
+    } as never);
+    expect(store.getState().taskMRs.byWorkspaceId[WORKSPACE_A]?.["task-1"]).toEqual([]);
+
+    // Reconnect hydration installs the committed relink before replaying a
+    // delayed delete from the prior association revision.
+    store.getState().setTaskMRs(WORKSPACE_A, { "task-1": [association(6, "relinked")] });
+    handlers["gitlab.task_mr.deleted"]!({
+      payload: {
+        workspace_id: WORKSPACE_A,
+        task_id: "task-1",
+        association_id: "association-revisioned",
+        association_revision: 5,
+      },
+    } as never);
+    expect(store.getState().taskMRs.byWorkspaceId[WORKSPACE_A]?.["task-1"]?.[0]?.mr_title).toBe(
+      "relinked",
+    );
+  });
+});
+
+describe("GitLab WebSocket handler workspace filtering", () => {
   it("ignores task MR deletion from another workspace", () => {
     const { store, removeTaskMR } = makeStore("workspace-b");
     const handler = (registerGitLabHandlers(store) as Record<string, (message: never) => void>)[
@@ -113,7 +156,9 @@ describe("GitLab WebSocket handlers", () => {
 
     expect(setTaskMR).not.toHaveBeenCalled();
   });
+});
 
+describe("GitLab task MR automation options handlers", () => {
   it("stores a task MR automation options update pushed for the current task", () => {
     const { store, setTaskMRAutomationOptions, markTaskMRAutomationExternalUpdate } =
       makeStore(WORKSPACE_A);

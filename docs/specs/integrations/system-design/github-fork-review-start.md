@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -84,6 +84,11 @@ available while the task waits.
 Browser PR-link creation is a user-submitted task flow rather than a review
 watch. It does not carry the review-watch marker. Existing explicit task
 creation and launch behavior therefore remains unchanged for fork PR links.
+
+Agent-created or selected PR associations use the observation-only
+[registration contract](task-change-registration.md#observation-and-downstream-effects).
+Registration preserves the task's comparison target and does not reset session
+base SHAs, push a target into a running executor, or authorize automation.
 
 ## Verification
 

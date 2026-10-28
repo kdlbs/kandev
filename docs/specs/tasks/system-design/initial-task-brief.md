@@ -110,6 +110,7 @@ instruction. Existing canonical system-context additions retain their authority.
 Passthrough delivery retains visible text without hidden saved-prompt expansion.
 Keep submitted attachments, entity references, and plan-comment claims intact.
 `initial_prompt_preview` remains display-only and cannot supply prompt authority.
+When an accepted initial message includes a selected change-request reference, its registration intent shares the message transaction and is processed after commit. The [task change registration design](../../integrations/system-design/task-change-registration.md) owns provider linking, result states, retry, and unlink behavior.
 
 ## Transcript
 

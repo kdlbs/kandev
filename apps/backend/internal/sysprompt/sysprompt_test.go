@@ -688,3 +688,22 @@ func TestKandevContext_DoesNotContainConfigTools(t *testing.T) {
 	assert.NotContains(t, KandevContext(), "list_agents_kandev")
 	assert.NotContains(t, KandevContext(), "create_agent_kandev")
 }
+
+func TestKandevContextWithOptionsIncludesTaskChangeRegistrationGuidance(t *testing.T) {
+	without := FormatKandevContextWithOptions("task", "session", KandevContextOptions{})
+	assert.NotContains(t, without, "TASK CHANGE REQUESTS:")
+
+	with := FormatKandevContextWithOptions("task", "session", KandevContextOptions{
+		IncludeTaskChangeRequestGuidance: true,
+	})
+	for _, expected := range []string{
+		"get_task_change_requests_kandev",
+		"manage_task_change_request_kandev",
+		"Register every relevant stack layer separately",
+		"Ignore URLs that are only background context",
+		"do not claim that Kandev linked the change request",
+	} {
+		assert.Contains(t, with, expected)
+	}
+	assert.NotContains(t, FormatOfficeContext("task", "session"), "TASK CHANGE REQUESTS:")
+}

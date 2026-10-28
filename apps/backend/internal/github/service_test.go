@@ -359,6 +359,36 @@ func TestParsePRURL(t *testing.T) {
 			url:     "https://github.com//repo/pull/1",
 			wantErr: true,
 		},
+		{
+			name:    "unsafe scheme",
+			url:     "http://github.com/owner/repo/pull/1",
+			wantErr: true,
+		},
+		{
+			name:    "spoofed host",
+			url:     "https://github.com.evil.test/owner/repo/pull/1",
+			wantErr: true,
+		},
+		{
+			name:    "userinfo",
+			url:     "https://user@github.com/owner/repo/pull/1",
+			wantErr: true,
+		},
+		{
+			name:    "unexpected port",
+			url:     "https://github.com:444/owner/repo/pull/1",
+			wantErr: true,
+		},
+		{
+			name:    "encoded path separator",
+			url:     "https://github.com/owner%2frepo/repo/pull/1",
+			wantErr: true,
+		},
+		{
+			name:    "unknown suffix",
+			url:     "https://github.com/owner/repo/pull/1/untrusted",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

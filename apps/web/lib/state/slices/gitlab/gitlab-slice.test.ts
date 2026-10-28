@@ -190,6 +190,27 @@ describe("setTaskMR", () => {
     expect(list).toHaveLength(2);
     expect(list.map((m) => m.id).sort()).toEqual(["x", "y"]);
   });
+
+  it("fences stale MR updates and deletes across workspace hydration", () => {
+    const store = makeStore();
+    const detached = makeMR({ id: "association", association_revision: 4 });
+    store.getState().setTaskMRs("ws-1", { "task-1": [detached] });
+    store.getState().removeTaskMR("ws-1", detached.id, 5);
+
+    store.getState().setTaskMRs("ws-1", {
+      "task-1": [makeMR({ id: detached.id, association_revision: 4, mr_title: "stale hydration" })],
+    });
+    expect(workspaceMRs(store)["task-1"]).toBeUndefined();
+
+    const relinked = makeMR({ id: detached.id, association_revision: 6, mr_title: "relinked" });
+    store.getState().setTaskMRs("ws-1", { "task-1": [relinked] });
+    store.getState().removeTaskMR("ws-1", detached.id, 5);
+
+    expect(workspaceMRs(store)["task-1"]).toEqual([relinked]);
+    expect(
+      store.getState().taskMRs.deletedAssociationRevisionsByWorkspaceId?.["ws-1"]?.[detached.id],
+    ).toBeUndefined();
+  });
 });
 
 describe("resetTaskMRs", () => {

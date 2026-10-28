@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -82,6 +83,9 @@ func (s *Service) AutoLinkMRForBranch(
 	}
 	association := taskMRFromStatus(taskID, repositoryID, client.Host(), projectPath, status)
 	if err := store.UpsertTaskMR(ctx, association); err != nil {
+		if errors.Is(err, ErrTaskMRDetached) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
 	s.reconcileComparisonTarget(ctx, taskID, client.Host(), status.MR)

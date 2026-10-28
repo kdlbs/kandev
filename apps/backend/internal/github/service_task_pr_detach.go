@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/events"
@@ -16,9 +17,14 @@ var ErrTaskPRNotFound = errors.New("github task PR not found")
 // TaskPRDeletedEvent identifies one task-PR association removed from active
 // task surfaces. The remote GitHub pull request is intentionally untouched.
 type TaskPRDeletedEvent struct {
-	WorkspaceID   string `json:"workspace_id"`
-	TaskID        string `json:"task_id"`
-	AssociationID string `json:"association_id"`
+	WorkspaceID          string `json:"workspace_id"`
+	TaskID               string `json:"task_id"`
+	AssociationID        string `json:"association_id"`
+	AssociationRevision  int64  `json:"association_revision"`
+	ProviderHost         string `json:"provider_host"`
+	ConnectionScope      string `json:"connection_scope"`
+	ProviderRepositoryID string `json:"provider_repository_id"`
+	ChangeRequestID      string `json:"change_request_id"`
 }
 
 // GetWorkspaceID lets the websocket broadcaster route the typed event to the
@@ -41,7 +47,7 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	if s.comparisonTargetObserver != nil && tp.RepositoryID != "" {
+	if s.comparisonTargetObserver != nil && tp.RepositoryID != "" && tp.ComparisonPolicy != TaskPRComparisonPolicyPreserve {
 		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
 			ctx,
 			tp.TaskID,
@@ -74,9 +80,14 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	}
 	if s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRDeleted, "github", &TaskPRDeletedEvent{
-			WorkspaceID:   workspaceID,
-			TaskID:        detached.TaskID,
-			AssociationID: detached.ID,
+			WorkspaceID:          workspaceID,
+			TaskID:               detached.TaskID,
+			AssociationID:        detached.ID,
+			AssociationRevision:  detached.AssociationRevision,
+			ProviderHost:         detached.ProviderHost,
+			ConnectionScope:      detached.ConnectionScope,
+			ProviderRepositoryID: detached.ProviderRepositoryID,
+			ChangeRequestID:      strconv.Itoa(detached.PRNumber),
 		})
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRDeleted, event); err != nil {
 			s.logger.Debug("failed to publish task PR deleted event", zap.Error(err))

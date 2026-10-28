@@ -636,6 +636,9 @@ func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectP
 	if err != nil {
 		return nil, err
 	}
+	if result == nil {
+		return nil, nil
+	}
 	return result.taskMR, nil
 }
 
@@ -664,6 +667,9 @@ func (s *Service) SyncTaskMRStrict(ctx context.Context, taskID, repositoryID, pr
 	result, err := s.syncTaskMRStrictWithObservation(ctx, taskID, repositoryID, projectPath, iid, existingHost)
 	if err != nil {
 		return nil, err
+	}
+	if result == nil {
+		return nil, nil
 	}
 	return result.taskMR, nil
 }
@@ -746,6 +752,9 @@ func (s *Service) syncTaskMRWithClient(
 		LastSyncedAt:        &now,
 	}
 	if err := store.UpsertTaskMR(ctx, row); err != nil {
+		if errors.Is(err, ErrTaskMRDetached) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
 	s.reconcileComparisonTargetFromSync(ctx, taskID, host, mr)

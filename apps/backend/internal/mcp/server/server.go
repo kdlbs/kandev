@@ -1527,7 +1527,7 @@ func (s *Server) registerTaskPRLinkTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("manage_task_change_request_kandev",
-			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, canonical repository identity, and positive change request number. Replacement requires the complete old identity and keeps both identities on the same provider.",
+			"Link, unlink, or replace a supported pull request or merge request for the current task, or an explicitly selected task in the same workspace. Provide either a full supported URL or the complete provider, repository_id, and positive number identity. URL links use observation mode by default. Replacement requires the complete old identity and keeps both identities on the same provider.",
 			taskChangeRequestToolSchema(),
 		),
 		s.wrapHandler("manage_task_change_request_kandev", s.manageTaskChangeRequestHandler()),
@@ -1588,14 +1588,18 @@ func taskChangeRequestToolSchema() json.RawMessage {
   "properties": {
     "operation": {"type": "string", "enum": ["link", "unlink", "replace"]},
     "task_id": {"type": "string", "minLength": 1},
-    "provider": {"type": "string", "enum": ["github", "gitlab"]},
+    "url": {"type": "string", "minLength": 1},
+    "provider": {"type": "string", "minLength": 1},
     "repository_id": {"type": "string", "minLength": 1},
     "number": {"type": "integer", "minimum": 1},
+    "association_mode": {"type": "string", "enum": ["observation"]},
+    "restore_detached": {"type": "boolean"},
+    "operation_id": {"type": "string", "minLength": 1},
     "old_provider": {"type": "string", "enum": ["github", "gitlab"]},
     "old_repository_id": {"type": "string", "minLength": 1},
     "old_number": {"type": "integer", "minimum": 1}
   },
-  "required": ["operation", "task_id", "provider", "repository_id", "number"]
+  "required": ["operation"]
 }`)
 }
 

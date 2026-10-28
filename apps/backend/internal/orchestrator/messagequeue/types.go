@@ -56,6 +56,10 @@ const MetadataEntityReferences = "entity_references"
 // transcript for bounded client reconciliation after dispatch.
 const MetadataQueueAdmissionIDs = "queue_admission_ids"
 
+// MetadataRegistrationOriginIDs keeps queue-edit operation identities with
+// the accepted row until its registration intents are projected to a message.
+const MetadataRegistrationOriginIDs = "registration_origin_ids"
+
 // MetadataStepHandoff carries a completion-handoff carry token's claimed text
 // for a queued workflow auto-start prompt, so a dispatch path that defers
 // delivery through the queue (rather than sending it directly) still appends

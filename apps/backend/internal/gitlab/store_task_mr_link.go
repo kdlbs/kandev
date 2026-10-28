@@ -365,12 +365,30 @@ func (s *Store) ResolveTaskMRRepository(
 	}
 }
 
-// DeleteTaskMRForWorkspace atomically removes one association and only the
-// refresh watch that identifies the same task, repository, project and MR.
-func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, associationID string) error {
+func (s *Store) TaskMRProviderRepositoryID(ctx context.Context, workspaceID, taskID, repositoryID string) (string, error) {
+	var providerRepositoryID string
+	err := s.ro.GetContext(ctx, &providerRepositoryID, s.ro.Rebind(`
+		SELECT COALESCE(r.provider_repo_id, '')
+		FROM task_repositories tr
+		JOIN repositories r ON r.id = tr.repository_id
+		JOIN tasks t ON t.id = tr.task_id
+		WHERE tr.task_id = ? AND tr.repository_id = ? AND t.workspace_id = ? AND r.workspace_id = ?
+		LIMIT 1`), taskID, repositoryID, workspaceID, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrTaskMRNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("load GitLab provider repository ID: %w", err)
+	}
+	return strings.TrimSpace(providerRepositoryID), nil
+}
+
+// DetachTaskMRForWorkspace atomically tombstones one association and removes
+// only its refresh watch, lifecycle state, and automation switches.
+func (s *Store) DetachTaskMRForWorkspace(ctx context.Context, workspaceID, associationID string) (*TaskMR, bool, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -382,24 +400,24 @@ func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, assoc
 		WHERE gtm.id = ? AND t.workspace_id = ?
 		LIMIT 1`), associationID, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrTaskMRNotFound
+		return nil, false, ErrTaskMRNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("find task MR association: %w", err)
+		return nil, false, fmt.Errorf("find task MR association: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_mr_watches
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		association.TaskID, association.RepositoryID, association.ProjectPath, association.MRIID,
 	); err != nil {
-		return fmt.Errorf("delete task MR refresh watch: %w", err)
+		return nil, false, fmt.Errorf("delete task MR refresh watch: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM gitlab_task_mr_state
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		association.TaskID, association.RepositoryID, association.ProjectPath, association.MRIID,
 	); err != nil {
-		return fmt.Errorf("delete task MR lifecycle state: %w", err)
+		return nil, false, fmt.Errorf("delete task MR lifecycle state: %w", err)
 	}
 	// Drop this MR's automation switches with the association. Leaving the row
 	// behind means re-linking the same MR later — by hand, or through
@@ -413,10 +431,27 @@ func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, assoc
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`),
 		association.TaskID, association.RepositoryID, association.ProjectPath, association.MRIID,
 	); err != nil {
-		return fmt.Errorf("delete task MR automation options: %w", err)
+		return nil, false, fmt.Errorf("delete task MR automation options: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, tx.Rebind(`DELETE FROM gitlab_task_mrs WHERE id = ?`), association.ID); err != nil {
-		return fmt.Errorf("delete task MR association: %w", err)
+	changed := association.DetachedAt == nil
+	if changed {
+		if _, err = tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE gitlab_task_mrs SET detached_at = ?, association_revision = association_revision + 1, updated_at = ?
+			WHERE id = ? AND detached_at IS NULL`), time.Now().UTC(), time.Now().UTC(), association.ID); err != nil {
+			return nil, false, fmt.Errorf("detach task MR association: %w", err)
+		}
 	}
-	return tx.Commit()
+	if err := tx.GetContext(ctx, &association, tx.Rebind(`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs WHERE id = ?`), association.ID); err != nil {
+		return nil, false, fmt.Errorf("reload detached task MR association: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return &association, changed, nil
+}
+
+// DeleteTaskMRForWorkspace is kept for callers that only need unlink success.
+func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, associationID string) error {
+	_, _, err := s.DetachTaskMRForWorkspace(ctx, workspaceID, associationID)
+	return err
 }

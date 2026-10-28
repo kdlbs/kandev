@@ -305,13 +305,14 @@ func PendingTaskTitlePassthroughInstruction() string {
 // KandevContextOptions controls capability-dependent sections in the first-turn
 // Kandev context.
 type KandevContextOptions struct {
-	RequiresCompletionSignal       bool
-	IncludeCoordinatorTaskControls bool
-	IncludeTaskTitleTool           bool
-	IncludeCanvasGuidance          bool
-	Autopilot                      bool
-	IncludeUserQuestionTool        bool
-	IncludeParentQuestionTool      bool
+	RequiresCompletionSignal         bool
+	IncludeCoordinatorTaskControls   bool
+	IncludeTaskTitleTool             bool
+	IncludeCanvasGuidance            bool
+	IncludeTaskChangeRequestGuidance bool
+	Autopilot                        bool
+	IncludeUserQuestionTool          bool
+	IncludeParentQuestionTool        bool
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
@@ -356,6 +357,10 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeCanvasGuidance {
 		canvasGuidance = canvasGuidanceSection
 	}
+	taskChangeRequestGuidance := ""
+	if options.IncludeTaskChangeRequestGuidance {
+		taskChangeRequestGuidance = taskChangeRequestSection
+	}
 	return Resolve("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
@@ -366,8 +371,13 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
+		"task_change_registration_section": taskChangeRequestGuidance,
 	})
 }
+
+const taskChangeRequestSection = `TASK CHANGE REQUESTS:
+Use the linked change-request tools only when both get_task_change_requests_kandev and manage_task_change_request_kandev are available. For a pull request or merge request you create for this task, register its confirmed URL with manage_task_change_request_kandev after creation. Register every relevant stack layer separately. For review, fix, or update work, check the task's linked change requests first and add a relevant missing one. Ignore URLs that are only background context. Do not change comparison targets or automation settings while registering a link. Before reporting completion, read the linked change requests and report any failed, suppressed, or unknown result accurately. If these tools are unavailable, do not claim that Kandev linked the change request.
+`
 
 // ConfigContext returns the system prompt for config-mode MCP sessions.
 // Contains a {session_id} placeholder — use [FormatConfigContext] to inject values.

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import {
   entityReferenceMarkdown,
+  entityReferencesForAdmission,
   entityReferencesFromMetadata,
   matchEntityReferenceLink,
   survivingEntityReferences,
@@ -37,6 +38,21 @@ function issueReference(overrides: Partial<EntityReference> = {}): EntityReferen
   };
 }
 
+function pullRequestReference(overrides: Partial<EntityReference> = {}): EntityReference {
+  return {
+    version: 1,
+    ref: "mention:v1:github:pull_request:github.com%2Facme%2Fapp:PR_kwDOAA",
+    provider: "github",
+    kind: "pull_request",
+    id: "PR_kwDOAA",
+    key: "acme/app#12",
+    title: "Add authentication",
+    url: "https://github.com/acme/app/pull/12",
+    scope: "github.com/acme/app",
+    ...overrides,
+  };
+}
+
 describe("entityReferencesFromMetadata", () => {
   it("runtime-validates v1 references and deduplicates ref in first-valid order", () => {
     const first = taskReference();
@@ -61,6 +77,55 @@ describe("entityReferencesFromMetadata", () => {
         entity_references: [taskReference({ ref: "made-up", title: "" })],
       }),
     ).toEqual([]);
+  });
+
+  it("preserves valid selection intent and rejects forged linking modes", () => {
+    const linked = pullRequestReference({
+      selection_id: "selection-1",
+      association_mode: "link_on_send",
+    });
+    expect(entityReferencesFromMetadata({ entity_references: [linked] })).toEqual([linked]);
+    expect(
+      entityReferencesFromMetadata({
+        entity_references: [
+          pullRequestReference({ association_mode: "link_on_send" }),
+          pullRequestReference({
+            selection_id: "selection-2",
+            association_mode: "anything" as "context_only",
+          }),
+        ],
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("entity reference admission", () => {
+  const gitlabMergeRequest = pullRequestReference({
+    provider: "gitlab",
+    kind: "merge_request",
+    scope: "gitlab.example/acme/app",
+    ref: "mention:v1:gitlab:merge_request:gitlab.example%2Facme%2Fapp:12",
+    selection_id: "selection-gl",
+    association_mode: "link_on_send",
+  });
+
+  it.each([
+    pullRequestReference({ selection_id: "selection-gh", association_mode: "link_on_send" }),
+    gitlabMergeRequest,
+  ])("downgrades unsupported queued registration intent to context-only", (reference) => {
+    expect(entityReferencesForAdmission([reference], false)).toEqual([
+      { ...reference, association_mode: "context_only" },
+    ]);
+  });
+
+  it("preserves direct admission intent and non-registration references", () => {
+    const selected = pullRequestReference({
+      selection_id: "selection-direct",
+      association_mode: "link_on_send",
+    });
+    const literal = taskReference();
+    expect(entityReferencesForAdmission([selected, literal], true)).toEqual([selected, literal]);
+    expect(entityReferencesForAdmission([literal], false)).toEqual([literal]);
   });
 });
 

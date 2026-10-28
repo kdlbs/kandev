@@ -35,6 +35,9 @@ func (s *Service) reconcileComparisonTargetMode(ctx context.Context, taskID, hos
 	if s.comparisonTargetObserver == nil || strings.TrimSpace(taskID) == "" {
 		return
 	}
+	if s.hasObservationOnlyTaskMR(ctx, taskID, host, mr) {
+		return
+	}
 	candidate, ok := gitLabComparisonTargetCandidate(host, mr)
 	if !ok {
 		return
@@ -59,6 +62,31 @@ func (s *Service) reconcileComparisonTargetMode(ctx context.Context, taskID, hos
 			zap.String("outcome", string(result.Status)),
 			zap.String("target", candidate.TargetRepository.Path+":"+candidate.TargetBranch))
 	}
+}
+
+func (s *Service) hasObservationOnlyTaskMR(ctx context.Context, taskID, host string, mr *MR) bool {
+	if mr == nil || mr.IID <= 0 {
+		return false
+	}
+	store := s.requireStore()
+	if store == nil {
+		return true
+	}
+	rows, err := store.ListTaskMRsByTask(ctx, taskID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to check GitLab comparison policy", zap.String("task_id", taskID), zap.Error(err))
+		}
+		return true
+	}
+	for _, row := range rows {
+		if row.ComparisonPolicy == TaskMRComparisonPolicyPreserve && row.MRIID == mr.IID &&
+			strings.EqualFold(strings.Trim(row.ProjectPath, "/"), strings.Trim(mr.ProjectPath, "/")) &&
+			sameGitLabHost(row.Host, host) {
+			return true
+		}
+	}
+	return false
 }
 
 func gitLabComparisonTargetCandidate(host string, mr *MR) (taskmodels.ComparisonTargetCandidate, bool) {

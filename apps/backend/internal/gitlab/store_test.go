@@ -88,6 +88,9 @@ func TestStore_UpsertTaskMR_InsertsThenUpdates(t *testing.T) {
 	if tm.UpdatedAt.IsZero() {
 		t.Fatal("expected UpdatedAt populated after insert")
 	}
+	if tm.AssociationRevision != 1 {
+		t.Fatalf("association revision after insert = %d, want 1", tm.AssociationRevision)
+	}
 	originalID := tm.ID
 	originalCreated := tm.CreatedAt
 
@@ -100,6 +103,9 @@ func TestStore_UpsertTaskMR_InsertsThenUpdates(t *testing.T) {
 	}
 	if tm.ID != originalID {
 		t.Errorf("ID changed across upsert: %q -> %q", originalID, tm.ID)
+	}
+	if tm.AssociationRevision != 1 {
+		t.Errorf("association revision after update = %d, want 1", tm.AssociationRevision)
 	}
 	if !tm.CreatedAt.Equal(originalCreated) {
 		t.Errorf("CreatedAt clobbered: %v vs %v", originalCreated, tm.CreatedAt)

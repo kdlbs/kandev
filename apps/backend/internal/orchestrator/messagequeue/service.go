@@ -31,13 +31,15 @@ type autoMergePolicyLoader struct {
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo            Repository
-	maxPerSession   atomic.Int64
-	mergeEnabled    atomic.Bool
-	autoMergePolicy atomic.Pointer[AutoMergePolicy]
-	autoMergeLoader atomic.Pointer[autoMergePolicyLoader]
-	statusEpoch     string
-	logger          *logger.Logger
+	repo                        Repository
+	maxPerSession               atomic.Int64
+	mergeEnabled                atomic.Bool
+	autoMergePolicy             atomic.Pointer[AutoMergePolicy]
+	autoMergeLoader             atomic.Pointer[autoMergePolicyLoader]
+	statusEpoch                 string
+	logger                      *logger.Logger
+	registrationAdmissionWriter QueueRegistrationAdmissionWriter
+	registrationEditWriter      QueueRegistrationEditWriter
 	// lifecycleMu fences task-wide purges against every session-scoped queue
 	// admission. A task purge cannot enumerate every possibly empty session,
 	// so the barrier must cover admissions before they reach the repository.
@@ -142,6 +144,19 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 		registerQueueDepthProvider(provider)
 	}
 	return service
+}
+
+// SetQueueRegistrationWriters enables atomic registration-intent persistence
+// for browser queue admission and queue-editor saves.
+func (s *Service) SetQueueRegistrationWriters(
+	admission QueueRegistrationAdmissionWriter,
+	edit QueueRegistrationEditWriter,
+) {
+	if s == nil {
+		return
+	}
+	s.registrationAdmissionWriter = admission
+	s.registrationEditWriter = edit
 }
 
 // NewServiceMemory returns a Service backed by an in-memory repository.
@@ -724,6 +739,12 @@ func (s *Service) updateMessageWithLeaseAfterValidation(
 	if operationID == "" {
 		return 0, ErrEditLeaseNotFound
 	}
+	registrationRequested := hasLinkOnSendReferences(metadataUpdates)
+	if registrationRequested && s.registrationEditWriter == nil {
+		return 0, ErrQueueAdmissionUnavailable
+	}
+	_, referencesProvided := metadataUpdates[MetadataEntityReferences]
+	useRegistrationWriter := referencesProvided && s.registrationEditWriter != nil
 	key := s.editLeaseKey(sessionID, entryID)
 	operationHash := editOperationHash(content, attachments, metadataUpdates)
 	var revision int64
@@ -762,10 +783,26 @@ func (s *Service) updateMessageWithLeaseAfterValidation(
 			return err
 		}
 		if leaseRepository, ok := s.repo.(durableEditLeaseMutationRepository); ok {
-			if err := leaseRepository.updateContentAndMetadataWithLease(admittedCtx, sessionID, entryID, leaseID, content, attachments, metadataUpdates, QueuedByUser); err != nil {
+			var updateErr error
+			if useRegistrationWriter {
+				registrationRepository, supportsRegistration := s.repo.(registrationEditLeaseMutationRepository)
+				if !supportsRegistration {
+					updateErr = ErrQueueAdmissionUnavailable
+				} else {
+					updateErr = registrationRepository.updateContentAndMetadataWithLeaseAndRegistration(
+						admittedCtx, sessionID, entryID, leaseID, content, attachments,
+						metadataUpdates, QueuedByUser, operationID, s.registrationEditWriter,
+					)
+				}
+			} else {
+				updateErr = leaseRepository.updateContentAndMetadataWithLease(
+					admittedCtx, sessionID, entryID, leaseID, content, attachments, metadataUpdates, QueuedByUser,
+				)
+			}
+			if updateErr != nil {
 				s.editLeaseMu.Unlock()
 				s.rollbackPreparedEdit(admittedCtx, rollback)
-				return err
+				return updateErr
 			}
 		} else if err := s.repo.UpdateContentAndMetadata(admittedCtx, sessionID, entryID, content, attachments, metadataUpdates, QueuedByUser); err != nil {
 			s.editLeaseMu.Unlock()
@@ -1188,6 +1225,13 @@ func (s *Service) queueMessageWithMetadataForSessionWithClientQueueID(
 	if clientQueueID == "" || len(clientQueueID) > MaxQueueAdmissionIDLength {
 		return nil, false, errors.New("client queue id is invalid")
 	}
+	var registrationWriter QueueRegistrationAdmissionWriter
+	if hasLinkOnSendReferences(metadata) {
+		registrationWriter = s.registrationAdmissionWriter
+	}
+	if hasLinkOnSendReferences(metadata) && registrationWriter == nil {
+		return nil, false, ErrQueueAdmissionUnavailable
+	}
 	writer, ok := s.repo.(queueAdmissionRepository)
 	if !ok {
 		return nil, false, ErrQueueAdmissionUnavailable
@@ -1205,7 +1249,8 @@ func (s *Service) queueMessageWithMetadataForSessionWithClientQueueID(
 			policy := s.resolveAdmissionAutoMergePolicy(admittedCtx, &identity, identity.SessionID)
 			var err error
 			admitted, replay, err = writer.AdmitQueueMessage(
-				admittedCtx, identity, clientQueueID, candidate, claim, s.MaxPerSession(), policy, workflowEntry,
+				admittedCtx, identity, clientQueueID, candidate, claim, s.MaxPerSession(), policy,
+				workflowEntry, registrationWriter,
 			)
 			if errors.Is(err, ErrAutoMergePolicyChanged) {
 				continue
@@ -1306,6 +1351,9 @@ func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, identit
 //
 //nolint:gocognit // retry boundaries keep policy and workflow-entry validation before each mutation.
 func (s *Service) queueMessageWithMetadataAdmissionAtWorkflowEntry(ctx context.Context, identity *QueueSessionIdentity, workflowEntry *WorkflowEntryIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+	if hasLinkOnSendReferences(metadata) {
+		return nil, ErrQueueAdmissionUnavailable
+	}
 	var queued *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		for {
@@ -3028,6 +3076,9 @@ func (s *Service) GetEntryForSession(ctx context.Context, identity QueueSessionI
 // UpdateMessageWithMetadata atomically edits queue content and applies
 // metadata replacements while retaining unrelated metadata keys.
 func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	if hasLinkOnSendReferences(metadataUpdates) {
+		return ErrQueueAdmissionUnavailable
+	}
 	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		if s.editLeaseBlocksEntryLocked(sessionID, entryID) {
 			return ErrEditConflict
@@ -3078,6 +3129,9 @@ func (s *Service) RemoveEntryWithEntry(ctx context.Context, sessionID, entryID s
 
 // UpdateMessageWithMetadataForSession edits content only for the exact session incarnation.
 func (s *Service) UpdateMessageWithMetadataForSession(ctx context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	if hasLinkOnSendReferences(metadataUpdates) {
+		return ErrQueueAdmissionUnavailable
+	}
 	if err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		return s.repo.UpdateContentAndMetadataForSession(admittedCtx, identity, entryID, content, attachments, metadataUpdates, queuedBy)
 	}); err != nil {
@@ -3092,6 +3146,9 @@ func (s *Service) UpdateMessageWithMetadataForSession(ctx context.Context, ident
 // UpdateMessageWithMetadataForSessionWithClaim claims newly referenced staged
 // attachments and updates the exact queue row atomically.
 func (s *Service) UpdateMessageWithMetadataForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string, claim QueueAttachmentClaim) error {
+	if hasLinkOnSendReferences(metadataUpdates) {
+		return ErrQueueAdmissionUnavailable
+	}
 	if err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		claimRepo, ok := s.repo.(queueAttachmentRepository)
 		if !ok {

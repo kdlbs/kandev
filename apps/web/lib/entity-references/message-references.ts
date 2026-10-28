@@ -9,6 +9,16 @@ const MAX_TITLE_LENGTH = 500;
 const MAX_KEY_LENGTH = 200;
 const MAX_URL_LENGTH = 2048;
 const REFERENCE_STRING_FIELDS = ["ref", "provider", "kind", "id", "title", "url", "scope"] as const;
+const SELECTION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+const REGISTRATION_ERROR_CODE = /^[a-z0-9_]{1,128}$/u;
+const REGISTRATION_STATUSES = [
+  "pending",
+  "linked",
+  "failed",
+  "suppressed",
+  "uncertain",
+  "unlinked",
+] as const; // i18n-exempt: API state values, not copy.
 
 function codePointLength(value: string): number {
   return Array.from(value).length;
@@ -91,14 +101,56 @@ function hasValidDisplayFields(reference: EntityReference): boolean {
   );
 }
 
+function hasValidRegistrationIntent(reference: EntityReference): boolean {
+  if (reference.selection_id !== undefined && !SELECTION_ID.test(reference.selection_id))
+    return false;
+  if (
+    reference.registration_status !== undefined &&
+    !REGISTRATION_STATUSES.includes(reference.registration_status)
+  ) {
+    return false;
+  }
+  if (
+    reference.registration_error_code !== undefined &&
+    !REGISTRATION_ERROR_CODE.test(reference.registration_error_code)
+  ) {
+    return false;
+  }
+  if (reference.association_mode === undefined || reference.association_mode === "context_only")
+    return true;
+  return (
+    reference.association_mode === "link_on_send" &&
+    reference.selection_id !== undefined &&
+    ((reference.provider === "github" && reference.kind === "pull_request") ||
+      (reference.provider === "gitlab" && reference.kind === "merge_request"))
+  );
+}
+
 export function isEntityReference(value: unknown): value is EntityReference {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const reference = value as Record<string, unknown>;
   if (reference.version !== 1) return false;
   if (!REFERENCE_STRING_FIELDS.every((field) => typeof reference[field] === "string")) return false;
-  if (reference.key !== undefined && typeof reference.key !== "string") return false;
+  if (!hasValidOptionalReferenceFields(reference)) return false;
   const typed = reference as EntityReference;
-  return hasValidIdentityFields(typed) && hasValidDisplayFields(typed) && hasSafeURL(typed);
+  return (
+    hasValidIdentityFields(typed) &&
+    hasValidDisplayFields(typed) &&
+    hasSafeURL(typed) &&
+    hasValidRegistrationIntent(typed)
+  );
+}
+
+function hasValidOptionalReferenceFields(reference: Record<string, unknown>): boolean {
+  return (
+    (reference.key === undefined || typeof reference.key === "string") &&
+    (reference.selection_id === undefined || typeof reference.selection_id === "string") &&
+    (reference.association_mode === undefined || typeof reference.association_mode === "string") &&
+    (reference.registration_status === undefined ||
+      typeof reference.registration_status === "string") &&
+    (reference.registration_error_code === undefined ||
+      typeof reference.registration_error_code === "string")
+  );
 }
 
 export function normalizeEntityReferences(value: unknown): EntityReference[] {
@@ -116,6 +168,18 @@ export function normalizeEntityReferences(value: unknown): EntityReference[] {
 export function entityReferencesFromMetadata(metadata: unknown): EntityReference[] {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
   return normalizeEntityReferences((metadata as Record<string, unknown>).entity_references);
+}
+
+export function entityReferencesForAdmission(
+  references: readonly EntityReference[],
+  canLinkOnSend: boolean,
+): EntityReference[] {
+  if (canLinkOnSend) return [...references];
+  return references.map((reference) => {
+    return reference.association_mode === "link_on_send"
+      ? { ...reference, association_mode: "context_only" }
+      : reference;
+  });
 }
 
 function escapeMarkdownLabel(value: string): string {

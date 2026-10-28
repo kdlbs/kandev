@@ -71,6 +71,30 @@ func TestTaskChangeLinkRequestRejectsMissingCallerTask(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+func TestManageTaskChangeRequestDefaultsTargetToTrustedCaller(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-current", Name: "Current", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task-current", WorkspaceID: "ws-current", Title: "Current", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now}))
+
+	h := &Handlers{taskSvc: svc}
+	ctx = scope.WithPrincipal(ctx, scope.Principal{
+		WorkspaceID: "ws-current", CallerTaskID: "task-current", CallerSessionID: "session-current",
+	})
+	msg := makeWSMessage(t, ws.ActionMCPManageTaskChangeRequest, map[string]any{
+		"operation": "link", "caller_task_id": "task-current",
+		"url": "https://github.com/acme/site/pull/42", "association_mode": "observation",
+	})
+
+	payload, response, err := h.parseTaskChangeRequestPayload(ctx, msg)
+	require.NoError(t, err)
+	require.Nil(t, response)
+	assert.Equal(t, "task-current", payload.TaskID)
+	assert.Equal(t, "https://github.com/acme/site/pull/42", payload.URL)
+	assert.Equal(t, "observation", payload.AssociationMode)
+}
+
 func TestTaskChangeLinkRequestParsesReplacementIdentity(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

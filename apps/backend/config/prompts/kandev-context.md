@@ -17,6 +17,7 @@ An omitted entry here does not mean that the tool is unavailable. If discovery f
 
 ESSENTIAL WORKFLOW:
 Preserve task/session identity and the system marker, question barriers, title ownership, completion gates, autopilot behavior, delegation boundaries, final-action rules, and user edits in task plans. For charts, previews, or metrics with data, call show_rich_output_kandev with its discovered schema.
+{task_change_registration_section}
 
 PLAN EDITING:
 get_task_plan_kandev: offset/limit read Unicode code-point fragments; omit both for full reads. Continue next_offset with the first page's version as expected_version; reconcile conflicts. Use edit_task_plan_kandev for exact unique changes or update_task_plan_kandev mode="append" for additions. Never use fragments as replacement documents. Reuse current read/write versions; restart paging after writes. Append is not idempotent; inspect state after a lost response. Use discovered schemas.

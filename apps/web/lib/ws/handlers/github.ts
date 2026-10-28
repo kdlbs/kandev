@@ -32,7 +32,14 @@ export function registerGitHubHandlers(store: StoreApi<AppState>): WsHandlers {
               workspaceContextGeneration: state.workspaceContextGeneration,
             }
           : undefined;
-        store.getState().removeTaskPR(deleted.task_id, deleted.association_id, scope);
+        store
+          .getState()
+          .removeTaskPR(
+            deleted.task_id,
+            deleted.association_id,
+            scope,
+            deleted.association_revision ?? 0,
+          );
       }
     },
     "github.task_ci_options.updated": (message) => {

@@ -33,6 +33,7 @@ import {
   submitWithPromptSuggestion,
 } from "./tiptap-prompt-suggestion";
 import { EntityReferenceNode } from "./tiptap-entity-reference-extension";
+import { getEditorMentions, getEditorTaskMentions } from "./tiptap-editor-mentions";
 import { ContextMention } from "./tiptap-mention-extension";
 import { SlashCommandNode } from "./tiptap-slash-command-extension";
 import type { ContextFile } from "@/lib/state/context-files-store";
@@ -101,6 +102,7 @@ type UseTipTapEditorOptions = {
   slashSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   entityReferenceSuggestion?: any;
+  entityReferenceLinkingEnabled?: boolean;
   slashCommands: readonly SlashCommand[];
   /** True when a slash/@ suggestion menu is open with selectable items. Enter
    *  must defer to the suggestion plugin so the highlighted item is inserted
@@ -185,6 +187,7 @@ export function buildEditorExtensions(args: {
   slashSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   entityReferenceSuggestion?: any;
+  entityReferenceLinkingEnabled?: boolean;
   submitKeymap: Extension;
   historyKeymap: Extension;
 }) {
@@ -203,7 +206,9 @@ export function buildEditorExtensions(args: {
     DynamicPlaceholder,
     PromptSuggestion,
     SlashCommandNode,
-    EntityReferenceNode,
+    EntityReferenceNode.configure({
+      registrationEnabled: args.entityReferenceLinkingEnabled ?? true,
+    }),
     ContextMention.configure({
       suggestions: [
         args.mentionSuggestion,
@@ -296,6 +301,7 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
       mentionSuggestion: opts.mentionSuggestion,
       slashSuggestion: opts.slashSuggestion,
       entityReferenceSuggestion: opts.entityReferenceSuggestion,
+      entityReferenceLinkingEnabled: opts.entityReferenceLinkingEnabled,
       submitKeymap: SubmitKeymap,
       historyKeymap: historyController.extension,
     }),
@@ -323,6 +329,7 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     placeholder: opts.placeholder,
     sessionId: opts.sessionId,
     value: opts.value,
+    entityReferenceLinkingEnabled: opts.entityReferenceLinkingEnabled ?? true,
     isSyncingRef,
     initialSyncDoneRef,
     onChangeRef: refs.onChangeRef,
@@ -343,6 +350,7 @@ type SyncEditorOptions = {
   placeholder: string;
   sessionId: string | null;
   value: string;
+  entityReferenceLinkingEnabled: boolean;
   isSyncingRef: React.RefObject<boolean>;
   initialSyncDoneRef: React.RefObject<boolean>;
   onChangeRef: React.RefObject<(value: string) => void>;
@@ -394,6 +402,7 @@ function useSyncEditor({
   placeholder,
   sessionId,
   value,
+  entityReferenceLinkingEnabled,
   isSyncingRef,
   initialSyncDoneRef,
   onChangeRef,
@@ -417,14 +426,31 @@ function useSyncEditor({
 
   // Sync value prop changes
   useEffect(() => {
-    syncEditorValue({ editor, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef });
-  }, [editor, value, sessionId, isSyncingRef, initialSyncDoneRef, onChangeRef]);
+    syncEditorValue({
+      editor,
+      sessionId,
+      value,
+      entityReferenceLinkingEnabled,
+      isSyncingRef,
+      initialSyncDoneRef,
+      onChangeRef,
+    });
+  }, [
+    editor,
+    value,
+    sessionId,
+    entityReferenceLinkingEnabled,
+    isSyncingRef,
+    initialSyncDoneRef,
+    onChangeRef,
+  ]);
 }
 
 type SyncEditorValueOptions = {
   editor: ReturnType<typeof useEditor> | null;
   sessionId: string | null;
   value: string;
+  entityReferenceLinkingEnabled: boolean;
   isSyncingRef: React.RefObject<boolean>;
   initialSyncDoneRef: React.RefObject<boolean>;
   onChangeRef: React.RefObject<(value: string) => void>;
@@ -434,6 +460,7 @@ function syncEditorValue({
   editor,
   sessionId,
   value,
+  entityReferenceLinkingEnabled,
   isSyncingRef,
   initialSyncDoneRef,
   onChangeRef,
@@ -447,6 +474,7 @@ function syncEditorValue({
       if (savedContent) {
         isSyncingRef.current = true;
         editor.commands.setContent(savedContent as import("@tiptap/core").Content);
+        syncEntityReferenceRegistrationCapability(editor, entityReferenceLinkingEnabled);
         isSyncingRef.current = false;
         initialSyncDoneRef.current = true;
         onChangeRef.current(getMarkdownText(editor));
@@ -461,20 +489,46 @@ function syncEditorValue({
       editor.commands.clearContent();
       isSyncingRef.current = false;
     }
+    syncEntityReferenceRegistrationCapability(editor, entityReferenceLinkingEnabled);
     initialSyncDoneRef.current = true;
     return;
   }
 
   const currentText = getMarkdownText(editor);
   if (currentText === value) {
+    syncEntityReferenceRegistrationCapability(editor, entityReferenceLinkingEnabled);
     initialSyncDoneRef.current = true;
     return;
   }
 
   isSyncingRef.current = true;
   editor.commands.setContent(textToEditorContent(value));
+  syncEntityReferenceRegistrationCapability(editor, entityReferenceLinkingEnabled);
   isSyncingRef.current = false;
   initialSyncDoneRef.current = true;
+}
+
+function syncEntityReferenceRegistrationCapability(
+  editor: NonNullable<ReturnType<typeof useEditor>>,
+  enabled: boolean,
+) {
+  const transaction = editor.state.tr;
+  editor.state.doc.descendants((node, position) => {
+    if (node.type.name !== "entityReference") return;
+    const associationMode = enabled ? node.attrs.association_mode : "context_only";
+    if (
+      node.attrs.registration_enabled === enabled &&
+      node.attrs.association_mode === associationMode
+    ) {
+      return;
+    }
+    transaction.setNodeMarkup(position, undefined, {
+      ...node.attrs,
+      registration_enabled: enabled,
+      association_mode: associationMode,
+    });
+  });
+  if (transaction.docChanged) editor.view.dispatch(transaction);
 }
 
 // ── Focus-restore decision ───────────────────────────────────────────
@@ -624,39 +678,8 @@ function useEditorImperativeHandle(
         if (!editor) return;
         editor.chain().focus().insertContentAt({ from, to }, text).run();
       },
-      getMentions: () => {
-        if (!editor) return [];
-        const mentions: ContextFile[] = [];
-        editor.state.doc.descendants((node) => {
-          if (node.type.name === "contextMention") {
-            const { kind, path, label } = node.attrs;
-            if (kind === "file") mentions.push({ path, name: label, pinned: false });
-            else if (kind === "prompt") mentions.push({ path, name: label, pinned: false });
-            else if (kind === "plan") mentions.push({ path, name: label, pinned: false });
-          }
-        });
-        return mentions;
-      },
-      getTaskMentions: () => {
-        if (!editor) return [];
-        const seen = new Set<string>();
-        const mentions: TaskMentionData[] = [];
-        editor.state.doc.descendants((node) => {
-          if (node.type.name !== "contextMention") return;
-          const { kind, label, taskId, workflowId, workflowStepId, taskState } = node.attrs;
-          if (kind !== "task" || !taskId || !workflowId || !workflowStepId || seen.has(taskId))
-            return;
-          seen.add(taskId);
-          mentions.push({
-            taskId,
-            title: label ?? taskId,
-            workflowId,
-            workflowStepId,
-            state: taskState ?? null,
-          });
-        });
-        return mentions;
-      },
+      getMentions: () => getEditorMentions(editor),
+      getTaskMentions: () => getEditorTaskMentions(editor),
       getEntityReferences: () => (editor ? extractEntityReferences(editor.getJSON()) : []),
       acceptPromptSuggestion: () => (editor ? acceptPromptSuggestion(editor) : false),
       submitWithPromptSuggestion: (submit: () => void) =>

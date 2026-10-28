@@ -82,6 +82,7 @@ func (r *sqliteRepository) AdmitQueueMessage(
 	maxPerSession int,
 	policy *AutoMergePolicy,
 	workflowEntry *WorkflowEntryIdentity,
+	registrationWriter QueueRegistrationAdmissionWriter,
 ) (*QueuedMessage, bool, error) {
 	if err := validateQueueAdmissionInput(identity, clientQueueID, candidate); err != nil {
 		return nil, false, err
@@ -129,6 +130,11 @@ func (r *sqliteRepository) AdmitQueueMessage(
 	accepted, err := r.admitQueueCandidateTx(ctx, tx, admitted, claim, maxPerSession, policy)
 	if err != nil {
 		return nil, false, err
+	}
+	if registrationWriter != nil {
+		if err := registrationWriter(ctx, tx, identity, clientQueueID, candidate, accepted); err != nil {
+			return nil, false, fmt.Errorf("persist queue registration intents: %w", err)
+		}
 	}
 	if workflowEntry != nil {
 		if err := persistTaskManagementFenceTx(ctx, tx, r.db, accepted.ID, accepted.TaskID, *workflowEntry); err != nil {

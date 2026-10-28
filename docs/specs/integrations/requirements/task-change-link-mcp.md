@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-09-14
-updated: 2026-09-14
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -55,14 +55,15 @@ without me editing task records by hand.
 
 #### Acceptance criteria
 
-- **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-001.1:** When a mutation request is
-  authorized for the calling task's workspace and supplies the task ID,
-  provider (`github` or `gitlab`), canonical repository identity, and the
-  change-request number, the system applies the link, unlink, or replacement
-  and returns the resulting canonical linked set in the same response.
-  A bare number without repository identity is rejected, and same-number
-  change requests in a fork and a canonical repository remain distinct
-  associations.
+- **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-001.1:** Every management request
+  supplies an operation. Link accepts either the existing provider,
+  repository, and positive-number tuple or a full supported URL. When the URL
+  form omits `task_id`, the bound current task is the target; the host resolves
+  the URL to exactly one verified repository already attached to that task.
+  Explicit tuple fields supplied with a URL must agree with its resolved
+  identity. Unlink and replacement retain exact identity requirements. A bare
+  number is rejected, and same-number change requests in a fork and a canonical
+  repository remain distinct associations.
 - **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-001.2:** When a caller requests an
   operation for a task outside its reachable workspace set, the system
   rejects the request without mutating any store.
@@ -100,9 +101,16 @@ without me editing task records by hand.
 
 ### REQ-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003: Manage associations with explicit intent
 
-- **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.1:** `manage_task_change_request_kandev` shall require `operation: link | unlink | replace`, target task, and complete contribution identity.
-  Replacement shall additionally require complete old identity. Other operations shall reject old identity fields.
-  Unknown fields, unsupported providers, fractional numbers, and incomplete identities shall fail before mutation.
+- **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.1:**
+  `manage_task_change_request_kandev` shall require
+  `operation: link | unlink | replace`. A link shall accept either complete
+  provider/repository/number identity or a full supported URL. Omitted
+  `task_id` targets the authenticated current task; an explicit target remains
+  subject to existing reach checks. URL and supplied identity assertions must
+  agree. Unlink requires complete stored identity or an exact URL resolution.
+  Replacement additionally requires complete old identity. Other operations
+  reject old identity fields. Unknown fields, unsupported providers,
+  fractional numbers, and incomplete identities fail before mutation.
 - **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.2:** Replacement shall remain a single call and permit only the same provider.
   It shall establish the new link before removing the old link. An identical replacement shall be a no-op.
   Compensation shall never remove a new link that already existed before the request.

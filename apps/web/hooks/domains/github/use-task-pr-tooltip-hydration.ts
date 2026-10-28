@@ -81,10 +81,14 @@ function mergeMissingTaskPRs(
 
   for (const pr of prs) {
     const taskPRs = store.getState().taskPRs;
-    if (taskPRs.deletedAssociationIdsByTaskId?.[taskId]?.[pr.id]) continue;
+    const deletedRevision = taskPRs.deletedAssociationIdsByTaskId?.[taskId]?.[pr.id];
+    const revision = pr.association_revision ?? 0;
+    const deletedAt = deletedRevision === true ? 0 : deletedRevision;
+    if (deletedAt !== undefined && revision <= deletedAt) continue;
     const current = taskPRs.byTaskId[taskId];
     const currentPRs = Array.isArray(current) ? current : [];
-    if (currentPRs.some((candidate) => isSamePR(candidate, pr))) continue;
+    const existing = currentPRs.find((candidate) => isSamePR(candidate, pr));
+    if (existing && (existing.association_revision ?? 0) >= revision) continue;
     store.getState().setTaskPR(taskId, pr, scope);
   }
 }

@@ -40,8 +40,9 @@ func (r *memoryRepository) AdmitQueueMessage(
 	maxPerSession int,
 	policy *AutoMergePolicy,
 	workflowEntry *WorkflowEntryIdentity,
+	registrationWriter QueueRegistrationAdmissionWriter,
 ) (*QueuedMessage, bool, error) {
-	if workflowEntry != nil {
+	if workflowEntry != nil || registrationWriter != nil {
 		return nil, false, ErrQueueAdmissionUnavailable
 	}
 	if err := validateQueueAdmissionInput(identity, clientQueueID, candidate); err != nil {

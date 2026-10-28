@@ -17,17 +17,22 @@ const getWebSocketClientMock = vi.hoisted(() => vi.fn());
 const listTaskSessionsMock = vi.hoisted(() => vi.fn());
 const queueMock = vi.hoisted(() => vi.fn());
 const addMessageMock = vi.hoisted(() => vi.fn());
+const getTaskPlanCommentsMock = vi.hoisted(() => vi.fn());
+const getTaskPreviewFeedbackMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const RETRY_ID_ONE = "client-message-1";
 const RETRY_ID_TWO = "client-message-2";
 const MESSAGE_ADD_ACTION = "message.add";
 const CONTEXT_DIRECTORY_PATH = "src/components";
+const QUEUED_REFERENCE_MESSAGE = "Queue this";
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
     queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: addMessageMock,
+    setTaskPlanComments: vi.fn(),
+    setTaskPreviewFeedback: vi.fn(),
   },
 }));
 
@@ -37,6 +42,12 @@ vi.mock("@/lib/ws/connection", () => ({
 
 vi.mock("@/lib/api/domains/session-api", () => ({
   listTaskSessions: listTaskSessionsMock,
+}));
+vi.mock("@/lib/api/domains/plan-comment-api", () => ({
+  getTaskPlanComments: getTaskPlanCommentsMock,
+}));
+vi.mock("@/lib/api/domains/preview-feedback-api", () => ({
+  getTaskPreviewFeedback: getTaskPreviewFeedbackMock,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -52,6 +63,8 @@ const IMPROVE_HARNESS_CONTENT = "Review this session for durable harness improve
 beforeEach(() => {
   queueMock.mockResolvedValue(true);
   listTaskSessionsMock.mockResolvedValue({ sessions: [{ id: SESSION_ID }], total: 1 });
+  getTaskPlanCommentsMock.mockResolvedValue([]);
+  getTaskPreviewFeedbackMock.mockResolvedValue([]);
 });
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
@@ -586,6 +599,102 @@ describe("useMessageHandler input routing", () => {
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 
+  it("preserves linking intent for identified busy-session queue admission", async () => {
+    selectedSession("RUNNING", "generating");
+    const reference = queuedChangeRequestReference();
+    const { result } = renderMessageHandler();
+
+    await act(async () => {
+      await result.current.handleSendMessage({
+        message: QUEUED_REFERENCE_MESSAGE,
+        entityReferences: [reference],
+      });
+    });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityReferences: [reference],
+      }),
+    );
+  });
+
+  it("preserves linking intent for identified clarification-blocked queue admission", async () => {
+    selectedSession("WAITING_FOR_INPUT");
+    const reference = queuedChangeRequestReference();
+    const { result } = renderHook(() =>
+      useMessageHandler({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        sessionModel: null,
+        activeModel: null,
+        hasPendingClarification: true,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSendMessage({
+        message: QUEUED_REFERENCE_MESSAGE,
+        entityReferences: [reference],
+      });
+    });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityReferences: [reference],
+      }),
+    );
+  });
+
+  it("preserves linking intent when a direct-looking submit reaches an identified queue", async () => {
+    selectedSession("RUNNING", "background");
+    const reference = queuedChangeRequestReference();
+    const { result } = renderHook(() =>
+      useMessageHandler({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        sessionModel: null,
+        activeModel: null,
+        getHasPendingClarification: () => true,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSendMessage({
+        message: QUEUED_REFERENCE_MESSAGE,
+        entityReferences: [reference],
+      });
+    });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityReferences: [reference],
+      }),
+    );
+  });
+
+  it.each(["planCommentRefs", "previewFeedbackRefs"] as const)(
+    "keeps references context-only on the unsupported %s queue path",
+    async (admissionKind) => {
+      selectedSession("RUNNING", "generating");
+      const reference = queuedChangeRequestReference();
+      const { result } = renderMessageHandler();
+
+      await act(async () => {
+        await result.current.handleSendMessage({
+          message: QUEUED_REFERENCE_MESSAGE,
+          entityReferences: [reference],
+          [admissionKind]: [{ id: "comment-1", version: 1 }],
+        });
+      });
+
+      expect(queueMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entityReferences: [{ ...reference, association_mode: "context_only" }],
+        }),
+      );
+    },
+  );
+
   it("sends the first prompt directly for a CREATED session", async () => {
     selectedSession("CREATED");
     const { result } = renderMessageHandler();
@@ -656,6 +765,22 @@ describe("useMessageHandler input routing", () => {
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 });
+
+function queuedChangeRequestReference(): EntityReference {
+  return {
+    version: 1,
+    ref: "mention:v1:github:pull_request:github.com%2Facme%2Fapp:12",
+    provider: "github",
+    kind: "pull_request",
+    id: "12",
+    key: "acme/app#12",
+    title: "Add authentication",
+    url: "https://github.com/acme/app/pull/12",
+    scope: "github.com/acme/app",
+    selection_id: "selection-queue",
+    association_mode: "link_on_send",
+  };
+}
 
 describe("queued context file metadata", () => {
   beforeEach(() => {

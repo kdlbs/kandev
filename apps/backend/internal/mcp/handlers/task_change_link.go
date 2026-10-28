@@ -22,10 +22,14 @@ type TaskChangeLink struct {
 
 // TaskChangeLinkRequest is one provider-neutral change-request operation.
 type TaskChangeLinkRequest struct {
-	Operation string
-	TaskID    string
-	Link      TaskChangeLink
-	Old       *TaskChangeLink
+	Operation       string
+	TaskID          string
+	URL             string
+	AssociationMode string
+	RestoreDetached *bool
+	OperationID     string
+	Link            TaskChangeLink
+	Old             *TaskChangeLink
 }
 
 const (
@@ -56,9 +60,13 @@ type taskChangeRequestPayload struct {
 	Operation       string `json:"operation"`
 	TaskID          string `json:"task_id"`
 	CallerTaskID    string `json:"caller_task_id"`
+	URL             string `json:"url"`
 	Provider        string `json:"provider"`
 	RepositoryID    string `json:"repository_id"`
 	Number          int    `json:"number"`
+	AssociationMode string `json:"association_mode"`
+	RestoreDetached *bool  `json:"restore_detached"`
+	OperationID     string `json:"operation_id"`
 	OldProvider     string `json:"old_provider"`
 	OldRepositoryID string `json:"old_repository_id"`
 	OldNumber       int    `json:"old_number"`
@@ -114,8 +122,12 @@ func (h *Handlers) handleManageTaskChangeRequest(ctx context.Context, msg *ws.Me
 		return taskChangeLinksUnavailable(msg)
 	}
 	request := TaskChangeLinkRequest{
-		Operation: payload.Operation,
-		TaskID:    payload.TaskID,
+		Operation:       payload.Operation,
+		TaskID:          payload.TaskID,
+		URL:             payload.URL,
+		AssociationMode: payload.AssociationMode,
+		RestoreDetached: payload.RestoreDetached,
+		OperationID:     payload.OperationID,
 		Link: TaskChangeLink{
 			Provider: payload.Provider, RepositoryID: payload.RepositoryID, Number: payload.Number,
 		},
@@ -194,9 +206,13 @@ func (h *Handlers) parseTaskChangeRequestPayload(ctx context.Context, msg *ws.Me
 		Operation:       payload.Operation,
 		TaskID:          targetID,
 		CallerTaskID:    payload.CallerTaskID,
+		URL:             strings.TrimSpace(payload.URL),
 		Provider:        link.Provider,
 		RepositoryID:    link.RepositoryID,
 		Number:          link.Number,
+		AssociationMode: payload.AssociationMode,
+		RestoreDetached: payload.RestoreDetached,
+		OperationID:     strings.TrimSpace(payload.OperationID),
 		OldProvider:     strings.ToLower(strings.TrimSpace(payload.OldProvider)),
 		OldRepositoryID: payload.OldRepositoryID,
 		OldNumber:       payload.OldNumber,
@@ -212,9 +228,31 @@ func validateTaskChangeRequestOperation(
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "operation must be link, unlink, or replace", nil)
 		return TaskChangeLink{}, response, responseErr
 	}
-	link, err := validateTaskChangeLink(payload.Provider, payload.RepositoryID, payload.Number)
-	if err != nil || strings.TrimSpace(payload.TaskID) == "" {
-		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, provider, repository_id, and positive number are required", nil)
+	urlValue, urlPresent := fields["url"]
+	if urlPresent && (isJSONNull(urlValue) || strings.TrimSpace(payload.URL) == "") {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "url must be a non-empty string", nil)
+		return TaskChangeLink{}, response, responseErr
+	}
+	link, response, responseErr := validateTaskChangeRequestLink(msg, fields, payload)
+	if response != nil || responseErr != nil {
+		return TaskChangeLink{}, response, responseErr
+	}
+	if strings.TrimSpace(payload.TaskID) == "" && strings.TrimSpace(payload.CallerTaskID) == "" {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "trusted caller task identity is required", nil)
+		return TaskChangeLink{}, response, responseErr
+	}
+	if mode, ok := fields["association_mode"]; ok {
+		if isJSONNull(mode) || payload.AssociationMode != "observation" || payload.Operation == taskChangeOperationUnlink {
+			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "association_mode must be observation and is only valid for link or replace", nil)
+			return TaskChangeLink{}, response, responseErr
+		}
+	}
+	if restore, ok := fields["restore_detached"]; ok && (isJSONNull(restore) || payload.RestoreDetached == nil || payload.Operation == taskChangeOperationUnlink) {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "restore_detached must be a boolean and is only valid for link or replace", nil)
+		return TaskChangeLink{}, response, responseErr
+	}
+	if operationID, ok := fields["operation_id"]; ok && (isJSONNull(operationID) || strings.TrimSpace(payload.OperationID) == "" || len(payload.OperationID) > 128) {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "operation_id must be a non-empty string of at most 128 characters", nil)
 		return TaskChangeLink{}, response, responseErr
 	}
 	if payload.Operation == taskChangeOperationReplace {
@@ -222,7 +260,7 @@ func validateTaskChangeRequestOperation(
 			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "old_provider, old_repository_id, and positive old_number are required", nil)
 			return TaskChangeLink{}, response, responseErr
 		}
-		if link.Provider != strings.ToLower(strings.TrimSpace(payload.OldProvider)) {
+		if link.Provider != "" && link.Provider != strings.ToLower(strings.TrimSpace(payload.OldProvider)) {
 			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "replacement must use the same provider", nil)
 			return TaskChangeLink{}, response, responseErr
 		}
@@ -233,6 +271,56 @@ func validateTaskChangeRequestOperation(
 	return link, nil, nil
 }
 
+func validateTaskChangeRequestLink(
+	msg *ws.Message,
+	fields map[string]json.RawMessage,
+	payload taskChangeRequestPayload,
+) (TaskChangeLink, *ws.Message, error) {
+	if _, urlPresent := fields["url"]; urlPresent {
+		return validateTaskChangeURLIdentity(msg, fields, payload)
+	}
+	link, err := validateTaskChangeLink(payload.Provider, payload.RepositoryID, payload.Number)
+	if err == nil {
+		return link, nil, nil
+	}
+	response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+		"provide either a supported URL or provider, repository_id, and positive number", nil)
+	return TaskChangeLink{}, response, responseErr
+}
+
+func validateTaskChangeURLIdentity(
+	msg *ws.Message,
+	fields map[string]json.RawMessage,
+	payload taskChangeRequestPayload,
+) (TaskChangeLink, *ws.Message, error) {
+	identityCount := taskChangeRequestIdentityFieldCount(fields)
+	if identityCount == 3 {
+		link, err := validateTaskChangeLink(payload.Provider, payload.RepositoryID, payload.Number)
+		if err == nil {
+			return link, nil, nil
+		}
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"URL identity assertions must include a valid provider, repository_id, and positive number", nil)
+		return TaskChangeLink{}, response, responseErr
+	}
+	if identityCount > 0 && identityCount < 3 {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"URL identity assertions must supply provider, repository_id, and number together", nil)
+		return TaskChangeLink{}, response, responseErr
+	}
+	return TaskChangeLink{}, nil, nil
+}
+
+func taskChangeRequestIdentityFieldCount(fields map[string]json.RawMessage) int {
+	count := 0
+	for _, key := range []string{"provider", "repository_id", "number"} {
+		if _, ok := fields[key]; ok {
+			count++
+		}
+	}
+	return count
+}
+
 func (h *Handlers) authorizeTaskChangeRequest(
 	ctx context.Context, msg *ws.Message, payload taskChangeRequestPayload,
 ) (string, *ws.Message, error) {
@@ -240,17 +328,25 @@ func (h *Handlers) authorizeTaskChangeRequest(
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task service is not available", nil)
 		return "", response, responseErr
 	}
-	target, targetErr := h.taskSvc.GetTask(ctx, payload.TaskID)
-	if targetErr != nil || target == nil {
-		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
-		return "", response, responseErr
-	}
 	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
 	if !hasPrincipal || strings.TrimSpace(principal.WorkspaceID) == "" || strings.TrimSpace(payload.CallerTaskID) == "" {
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "trusted MCP caller identity is required", nil)
 		return "", response, responseErr
 	}
-	if payload.CallerTaskID != principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
+	if payload.CallerTaskID != principal.CallerTaskID {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is outside the caller workspace", nil)
+		return "", response, responseErr
+	}
+	targetID := strings.TrimSpace(payload.TaskID)
+	if targetID == "" {
+		targetID = principal.CallerTaskID
+	}
+	target, targetErr := h.taskSvc.GetTask(ctx, targetID)
+	if targetErr != nil || target == nil {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+		return "", response, responseErr
+	}
+	if target.WorkspaceID != principal.WorkspaceID {
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is outside the caller workspace", nil)
 		return "", response, responseErr
 	}
@@ -271,7 +367,8 @@ func taskChangeRequestFields(payload json.RawMessage) (map[string]json.RawMessag
 func rejectUnknownTaskChangeRequestFields(fields map[string]json.RawMessage) error {
 	for field := range fields {
 		switch field {
-		case "operation", keyTaskID, "caller_task_id", "provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number":
+		case "operation", keyTaskID, "caller_task_id", "url", "provider", "repository_id", "number",
+			"association_mode", "restore_detached", "operation_id", "old_provider", "old_repository_id", "old_number":
 		default:
 			return fmt.Errorf("unknown task change request field %q", field)
 		}

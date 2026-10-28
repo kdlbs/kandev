@@ -72,6 +72,7 @@ type TipTapInputProps = {
   taskId?: string | null;
   workspaceId?: string | null;
   entityReferencesEnabled?: boolean;
+  entityReferenceLinkingEnabled?: boolean;
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled?: boolean;
@@ -454,19 +455,18 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     taskId,
     workspaceId = null,
     entityReferencesEnabled = false,
+    entityReferenceLinkingEnabled,
     onImagePaste,
     promptSuggestion: suggestion = null,
     onPromptSuggestionDismiss: dismissSuggestion,
   },
   ref,
 ) {
-  const { menu, mentionSuggestion, slashSuggestion, slashCommands } = useComposerMenus(
-    sessionId,
-    taskId ?? null,
-    workspaceId,
-  );
+  const menuState = useComposerMenus(sessionId, taskId ?? null, workspaceId);
+  const { menu, mentionSuggestion, slashSuggestion, slashCommands } = menuState;
   const entityReferences = useEntityReferenceComposer({
     enabled: entityReferencesEnabled,
+    linkOnSendEnabled: entityReferenceLinkingEnabled ?? true,
     workspaceId,
     sessionId,
   });
@@ -496,6 +496,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     mentionSuggestion,
     slashSuggestion,
     entityReferenceSuggestion: entityReferences.suggestion,
+    entityReferenceLinkingEnabled: entityReferenceLinkingEnabled ?? true,
     onTextInput: entityReferences.onTextInput,
     onBeforeInput: entityReferences.onBeforeInput,
     slashCommands,

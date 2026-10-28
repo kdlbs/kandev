@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/plancomments"
 )
 
@@ -34,7 +35,51 @@ type queueAdmissionRepository interface {
 		int,
 		*AutoMergePolicy,
 		*WorkflowEntryIdentity,
+		QueueRegistrationAdmissionWriter,
 	) (*QueuedMessage, bool, error)
+}
+
+// QueueRegistrationAdmissionWriter persists selected-reference intents inside
+// the queue admission transaction that owns the accepted entry.
+type QueueRegistrationAdmissionWriter func(
+	context.Context,
+	*sqlx.Tx,
+	QueueSessionIdentity,
+	string,
+	*QueuedMessage,
+	*QueuedMessage,
+) error
+
+// QueueRegistrationEditWriter persists new selected-reference intents inside
+// the lease-guarded queue edit transaction.
+type QueueRegistrationEditWriter func(
+	context.Context,
+	*sqlx.Tx,
+	string,
+	*QueuedMessage,
+	*QueuedMessage,
+) error
+
+func hasLinkOnSendReferences(metadata map[string]interface{}) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	encoded, err := json.Marshal(metadata[MetadataEntityReferences])
+	if err != nil {
+		return false
+	}
+	var references []struct {
+		AssociationMode string `json:"association_mode"`
+	}
+	if json.Unmarshal(encoded, &references) != nil {
+		return false
+	}
+	for _, reference := range references {
+		if reference.AssociationMode == "link_on_send" {
+			return true
+		}
+	}
+	return false
 }
 
 type queueAdmissionKey struct {

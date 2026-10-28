@@ -9,6 +9,7 @@ import (
 // A merge must leave both queue entries untouched when its provenance cannot
 // be normalized safely.
 var ErrInvalidQueueAdmissionIDs = errors.New("invalid queue admission IDs")
+var ErrInvalidQueueRegistrationOriginIDs = errors.New("invalid queue registration origin IDs")
 
 func unionQueueAdmissionIDs(target, source map[string]interface{}) ([]string, bool) {
 	seen := make(map[string]struct{})
@@ -30,6 +31,29 @@ func unionQueueAdmissionIDs(target, source map[string]interface{}) ([]string, bo
 }
 
 func normalizeQueueAdmissionIDs(raw interface{}) ([]string, bool) {
+	return normalizeQueueIdentityIDs(raw)
+}
+
+func unionQueueRegistrationOriginIDs(target, source map[string]interface{}) ([]string, bool) {
+	seen := make(map[string]struct{})
+	var union []string
+	for _, metadata := range []map[string]interface{}{target, source} {
+		ids, ok := normalizeQueueIdentityIDs(metadata[MetadataRegistrationOriginIDs])
+		if !ok {
+			return nil, false
+		}
+		for _, id := range ids {
+			if _, duplicate := seen[id]; duplicate {
+				continue
+			}
+			seen[id] = struct{}{}
+			union = append(union, id)
+		}
+	}
+	return union, true
+}
+
+func normalizeQueueIdentityIDs(raw interface{}) ([]string, bool) {
 	if raw == nil {
 		return nil, true
 	}

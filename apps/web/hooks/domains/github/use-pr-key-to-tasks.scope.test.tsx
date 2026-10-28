@@ -262,7 +262,7 @@ describe("GitHub reverse association reactive scope", () => {
     );
     expect(result.current.map.size).toBe(1);
     act(() => store.getState().resetKanbanWorkspaceContext());
-    expect(store.getState().taskPRs.byTaskId).toBe(cache);
+    expect(store.getState().taskPRs.byTaskId).toEqual(cache);
     expect(result.current.map.size).toBe(0);
   });
 

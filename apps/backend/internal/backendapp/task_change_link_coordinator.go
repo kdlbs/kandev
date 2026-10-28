@@ -2,17 +2,23 @@ package backendapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/auth/authn"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	mcp "github.com/kandev/kandev/internal/mcp/handlers"
 	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"go.uber.org/zap"
 )
@@ -21,11 +27,28 @@ import (
 // reach checks and repository identity resolution at the host boundary, then
 // delegates persistence and provider reads to the established services.
 type taskChangeLinkCoordinator struct {
-	tasks              *taskservice.Service
-	github             githubChangeLinkProvider
-	gitlab             gitlabChangeLinkProvider
-	logger             *commonlogger.Logger
-	singleUserIdentity func() (authn.Identity, bool)
+	tasks               *taskservice.Service
+	db                  *sqlx.DB
+	registrationIntents taskChangeRegistrationIntentWriter
+	github              githubChangeLinkProvider
+	gitlab              gitlabChangeLinkProvider
+	logger              *commonlogger.Logger
+	singleUserIdentity  func() (authn.Identity, bool)
+}
+
+func newTaskChangeLinkCoordinator(p routeParams) taskChangeLinkCoordinator {
+	coordinator := taskChangeLinkCoordinator{
+		tasks: p.taskSvc, logger: p.log, singleUserIdentity: taskChangeLinkIdentityResolver(p.authSvc),
+	}
+	if p.services != nil {
+		coordinator.github = p.services.GitHub
+		coordinator.gitlab = p.services.GitLab
+	}
+	if p.dbPool != nil && p.taskRepo != nil {
+		coordinator.db = p.dbPool.Writer()
+		coordinator.registrationIntents = p.taskRepo
+	}
+	return coordinator
 }
 
 func (c taskChangeLinkCoordinator) ManageTaskChangeRequest(
@@ -93,14 +116,56 @@ type gitlabChangeLinkProvider interface {
 	UnlinkTaskMR(context.Context, string, string) error
 }
 
+type githubObservationChangeLinkProvider interface {
+	RegisterExistingPRByURLForWorkspace(context.Context, string, string, string, string, string, bool, string) (*github.TaskPR, error)
+}
+
+type gitlabObservationChangeLinkProvider interface {
+	RegisterExistingMRByURL(context.Context, string, string, string, string, bool, string) (*gitlab.TaskMR, error)
+}
+
+type githubTransactionalObservationProvider interface {
+	RegisterExistingPRByURLForWorkspaceWithCommit(context.Context, string, string, string, string, string, bool, string, github.TaskPRObservationCommitter) (*github.TaskPR, error)
+	RegisterTaskPRObservationTx(context.Context, *sqlx.Tx, *github.TaskPR, bool, int64) (*github.TaskPR, bool, error)
+}
+
+type gitlabTransactionalObservationProvider interface {
+	RegisterExistingMRByURLWithCommit(context.Context, string, string, string, string, bool, string, gitlab.TaskMRObservationCommitter) (*gitlab.TaskMR, error)
+	RegisterTaskMRObservationTx(context.Context, *sqlx.Tx, *gitlab.TaskMR, bool, int64) (*gitlab.TaskMR, bool, error)
+}
+
+type taskChangeRegistrationIntentWriter interface {
+	CreateTaskChangeRegistrationIntentTx(context.Context, *sqlx.Tx, *tasksqlite.TaskChangeRegistrationIntent) (*tasksqlite.TaskChangeRegistrationIntent, bool, error)
+}
+
 func (c taskChangeLinkCoordinator) LinkTaskChange(ctx context.Context, req mcp.TaskChangeLinkRequest) ([]mcp.TaskChangeLink, error) {
-	if err := c.link(ctx, req.TaskID, req.Link); err != nil {
+	if req.URL != "" {
+		resolved, err := c.resolveTaskChangeURL(ctx, req.TaskID, req.URL)
+		if err != nil {
+			return nil, err
+		}
+		if err := assertTaskChangeLinkMatchesURL(req.Link, resolved); err != nil {
+			return nil, err
+		}
+		req.Link = resolved
+	}
+	if err := c.link(ctx, req); err != nil {
 		return nil, err
 	}
 	return c.list(ctx, req.TaskID)
 }
 
 func (c taskChangeLinkCoordinator) UnlinkTaskChange(ctx context.Context, req mcp.TaskChangeLinkRequest) ([]mcp.TaskChangeLink, error) {
+	if req.URL != "" {
+		resolved, err := c.resolveTaskChangeURL(ctx, req.TaskID, req.URL)
+		if err != nil {
+			return nil, err
+		}
+		if err := assertTaskChangeLinkMatchesURL(req.Link, resolved); err != nil {
+			return nil, err
+		}
+		req.Link = resolved
+	}
 	if err := c.unlink(ctx, req.TaskID, req.Link); err != nil {
 		return nil, err
 	}
@@ -118,6 +183,16 @@ func (c taskChangeLinkCoordinator) replaceTaskChangeResult(
 	result := mcp.TaskChangeLinkMutationResult{TaskID: req.TaskID}
 	if req.Old == nil {
 		return c.taskChangeMutationFailure(req.TaskID, fmt.Errorf("current task change identity is required"))
+	}
+	if req.URL != "" {
+		resolved, err := c.resolveTaskChangeURL(ctx, req.TaskID, req.URL)
+		if err != nil {
+			return c.taskChangeMutationFailure(req.TaskID, err)
+		}
+		if err := assertTaskChangeLinkMatchesURL(req.Link, resolved); err != nil {
+			return c.taskChangeMutationFailure(req.TaskID, err)
+		}
+		req.Link = resolved
 	}
 	// Replacing an association with the exact same identity is already the
 	// requested final state. Do not detach it after the idempotent link.
@@ -140,7 +215,7 @@ func (c taskChangeLinkCoordinator) replaceTaskChangeResult(
 	newAlreadyLinked := taskChangeLinksContain(before, req.Link)
 	// Resolve and persist the incoming association first. A failed provider
 	// fetch therefore leaves the current association untouched.
-	if err := c.link(ctx, req.TaskID, req.Link); err != nil {
+	if err := c.link(ctx, req); err != nil {
 		c.logMutationError(req.TaskID, "link replacement", err)
 		result.OperationError = taskChangeMutationOperationError
 		return result, err
@@ -161,6 +236,15 @@ func (c taskChangeLinkCoordinator) replaceTaskChangeResult(
 	}
 	result.Links, result.StateKnown = links, true
 	return result, nil
+}
+
+func assertTaskChangeLinkMatchesURL(asserted, resolved mcp.TaskChangeLink) error {
+	if (asserted.Provider != "" && asserted.Provider != resolved.Provider) ||
+		(asserted.RepositoryID != "" && asserted.RepositoryID != resolved.RepositoryID) ||
+		(asserted.Number != 0 && asserted.Number != resolved.Number) {
+		return fmt.Errorf("URL does not match the asserted task change identity")
+	}
+	return nil
 }
 
 func (c taskChangeLinkCoordinator) readReplacementFailureState(
@@ -230,42 +314,385 @@ func taskChangeLinksContain(links []mcp.TaskChangeLink, target mcp.TaskChangeLin
 	return false
 }
 
-func (c taskChangeLinkCoordinator) link(ctx context.Context, taskID string, link mcp.TaskChangeLink) error {
-	task, repo, err := c.taskRepository(ctx, taskID, link.RepositoryID)
+func (c taskChangeLinkCoordinator) link(ctx context.Context, req mcp.TaskChangeLinkRequest) error {
+	task, repo, err := c.taskRepository(ctx, req.TaskID, req.Link.RepositoryID)
 	if err != nil {
 		return err
 	}
-	switch link.Provider {
+	switch req.Link.Provider {
 	case taskChangeProviderGitHub:
-		if c.github == nil {
-			return fmt.Errorf("GitHub PR links are not available")
-		}
-		url, err := githubChangeURL(repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, link.Number)
-		if err != nil {
-			return err
-		}
-		identity, ok := authn.IdentityFromContext(ctx)
-		if !ok && c.singleUserIdentity != nil {
-			identity, ok = c.singleUserIdentity()
-		}
-		if !ok || strings.TrimSpace(identity.UserID) == "" {
-			return fmt.Errorf("authenticated user identity is required for GitHub PR links")
-		}
-		_, err = c.github.AssociateExistingPRByURLForWorkspace(ctx, task.WorkspaceID, identity.UserID, task.ID, repo.ID, url)
-		return err
+		return c.linkGitHub(ctx, req, task, repo)
 	case taskChangeProviderGitLab:
-		if c.gitlab == nil {
-			return fmt.Errorf("GitLab MR links are not available")
-		}
-		url, err := gitlabChangeURL(repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, link.Number)
-		if err != nil {
-			return err
-		}
-		_, err = c.gitlab.AssociateExistingMRByURL(ctx, task.WorkspaceID, task.ID, repo.ID, url)
-		return err
+		return c.linkGitLab(ctx, req, task, repo)
 	default:
-		return fmt.Errorf("unsupported provider %q", link.Provider)
+		return fmt.Errorf("unsupported provider %q", req.Link.Provider)
 	}
+}
+
+func (c taskChangeLinkCoordinator) linkGitHub(
+	ctx context.Context, req mcp.TaskChangeLinkRequest, task *models.Task, repo *models.Repository,
+) error {
+	if c.github == nil {
+		return fmt.Errorf("GitHub PR links are not available")
+	}
+	changeURL, err := githubChangeURL(repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, req.Link.Number)
+	if err != nil {
+		return err
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok && c.singleUserIdentity != nil {
+		identity, ok = c.singleUserIdentity()
+	}
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		return fmt.Errorf("authenticated user identity is required for GitHub PR links")
+	}
+	if req.AssociationMode == "observation" || req.URL != "" {
+		return c.registerGitHubObservation(ctx, req, task, repo, identity.UserID, changeURL)
+	}
+	_, err = c.github.AssociateExistingPRByURLForWorkspace(
+		ctx, task.WorkspaceID, identity.UserID, task.ID, repo.ID, changeURL,
+	)
+	return err
+}
+
+func (c taskChangeLinkCoordinator) registerGitHubObservation(
+	ctx context.Context,
+	req mcp.TaskChangeLinkRequest,
+	task *models.Task,
+	repo *models.Repository,
+	userID, changeURL string,
+) error {
+	provider, ok := c.github.(githubObservationChangeLinkProvider)
+	if !ok {
+		return fmt.Errorf("GitHub provider does not support observation-only registration")
+	}
+	restore := req.RestoreDetached != nil && *req.RestoreDetached
+	if c.db == nil || c.registrationIntents == nil {
+		_, err := provider.RegisterExistingPRByURLForWorkspace(
+			ctx, task.WorkspaceID, userID, task.ID, repo.ID, changeURL, restore, req.OperationID,
+		)
+		return err
+	}
+	transactional, ok := c.github.(githubTransactionalObservationProvider)
+	if !ok {
+		return fmt.Errorf("GitHub provider does not support transactional registration")
+	}
+	_, err := transactional.RegisterExistingPRByURLForWorkspaceWithCommit(
+		ctx, task.WorkspaceID, userID, task.ID, repo.ID, changeURL, restore, req.OperationID,
+		func(commitCtx context.Context, registration *github.TaskPR, restore bool, revision int64) (*github.TaskPR, bool, error) {
+			return c.commitGitHubRegistration(commitCtx, transactional, registration, restore, revision, req.OperationID)
+		},
+	)
+	return err
+}
+
+func (c taskChangeLinkCoordinator) commitGitHubRegistration(
+	ctx context.Context,
+	provider githubTransactionalObservationProvider,
+	registration *github.TaskPR,
+	restore bool,
+	revision int64,
+	operationID string,
+) (*github.TaskPR, bool, error) {
+	tx, err := c.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	registered, changed, err := provider.RegisterTaskPRObservationTx(ctx, tx, registration, restore, revision)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := c.persistGitHubRegistrationIntent(ctx, tx, registration, registered, revision, restore, operationID); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return registered, changed, nil
+}
+
+func (c taskChangeLinkCoordinator) linkGitLab(
+	ctx context.Context, req mcp.TaskChangeLinkRequest, task *models.Task, repo *models.Repository,
+) error {
+	if c.gitlab == nil {
+		return fmt.Errorf("GitLab MR links are not available")
+	}
+	changeURL, err := gitlabChangeURL(repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, req.Link.Number)
+	if err != nil {
+		return err
+	}
+	if req.AssociationMode == "observation" || req.URL != "" {
+		return c.registerGitLabObservation(ctx, req, task, repo, changeURL)
+	}
+	_, err = c.gitlab.AssociateExistingMRByURL(ctx, task.WorkspaceID, task.ID, repo.ID, changeURL)
+	return err
+}
+
+func (c taskChangeLinkCoordinator) registerGitLabObservation(
+	ctx context.Context,
+	req mcp.TaskChangeLinkRequest,
+	task *models.Task,
+	repo *models.Repository,
+	changeURL string,
+) error {
+	provider, ok := c.gitlab.(gitlabObservationChangeLinkProvider)
+	if !ok {
+		return fmt.Errorf("GitLab provider does not support observation-only registration")
+	}
+	restore := req.RestoreDetached != nil && *req.RestoreDetached
+	if c.db == nil || c.registrationIntents == nil {
+		_, err := provider.RegisterExistingMRByURL(ctx, task.WorkspaceID, task.ID, repo.ID, changeURL, restore, req.OperationID)
+		return err
+	}
+	transactional, ok := c.gitlab.(gitlabTransactionalObservationProvider)
+	if !ok {
+		return fmt.Errorf("GitLab provider does not support transactional registration")
+	}
+	_, err := transactional.RegisterExistingMRByURLWithCommit(
+		ctx, task.WorkspaceID, task.ID, repo.ID, changeURL, restore, req.OperationID,
+		func(commitCtx context.Context, registration *gitlab.TaskMR, restore bool, revision int64) (*gitlab.TaskMR, bool, error) {
+			return c.commitGitLabRegistration(commitCtx, transactional, registration, restore, revision, req.OperationID)
+		},
+	)
+	return err
+}
+
+func (c taskChangeLinkCoordinator) commitGitLabRegistration(
+	ctx context.Context,
+	provider gitlabTransactionalObservationProvider,
+	registration *gitlab.TaskMR,
+	restore bool,
+	revision int64,
+	operationID string,
+) (*gitlab.TaskMR, bool, error) {
+	tx, err := c.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	registered, changed, err := provider.RegisterTaskMRObservationTx(ctx, tx, registration, restore, revision)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := c.persistGitLabRegistrationIntent(ctx, tx, registration, registered, revision, restore, operationID); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return registered, changed, nil
+}
+
+func (c taskChangeLinkCoordinator) persistGitHubRegistrationIntent(
+	ctx context.Context, tx *sqlx.Tx, requested, registered *github.TaskPR, expectedRevision int64, restore bool, operationID string,
+) error {
+	snapshot, err := json.Marshal(map[string]any{
+		"url": requested.PRURL, "repository_path": requested.RepositoryPath,
+		"provider_repository_id": requested.ProviderRepositoryID, "number": requested.PRNumber,
+	})
+	if err != nil {
+		return err
+	}
+	return c.persistTaskChangeRegistrationIntent(ctx, tx, &tasksqlite.TaskChangeRegistrationIntent{
+		TaskID: requested.TaskID, WorkspaceID: requested.WorkspaceID, SourceKind: "agent_registration",
+		OriginID: requested.FirstOriginID, SourceRevision: strconv.FormatInt(expectedRevision, 10),
+		ReferenceRef:      fmt.Sprintf("github:%s#%d", requested.ProviderRepositoryID, requested.PRNumber),
+		ReferenceSnapshot: string(snapshot), Provider: "github", ProviderHost: requested.ProviderHost,
+		ConnectionScope: requested.ConnectionScope, ProviderRepositoryID: requested.ProviderRepositoryID,
+		ChangeRequestID: strconv.Itoa(requested.PRNumber), ResolvedIdentity: string(snapshot),
+		ExpectedRevision: int64Pointer(expectedRevision), AssociationRevision: int64Pointer(registered.AssociationRevision),
+		OperationID: operationID, OperationFingerprint: taskChangeRegistrationFingerprint(
+			requested.TaskID, requested.ProviderHost, requested.ConnectionScope, requested.ProviderRepositoryID,
+			strconv.Itoa(requested.PRNumber), strconv.FormatInt(expectedRevision, 10), strconv.FormatBool(restore)),
+		OperationReceipt: registered.ID, State: "succeeded",
+	})
+}
+
+func (c taskChangeLinkCoordinator) persistGitLabRegistrationIntent(
+	ctx context.Context, tx *sqlx.Tx, requested, registered *gitlab.TaskMR, expectedRevision int64, restore bool, operationID string,
+) error {
+	snapshot, err := json.Marshal(map[string]any{
+		"url": requested.MRURL, "repository_path": requested.RepositoryPath,
+		"provider_repository_id": requested.ProviderRepositoryID, "iid": requested.MRIID,
+	})
+	if err != nil {
+		return err
+	}
+	return c.persistTaskChangeRegistrationIntent(ctx, tx, &tasksqlite.TaskChangeRegistrationIntent{
+		TaskID: requested.TaskID, WorkspaceID: strings.TrimPrefix(requested.ConnectionScope, "builtin:"),
+		SourceKind: "agent_registration", OriginID: requested.FirstOriginID,
+		SourceRevision:    strconv.FormatInt(expectedRevision, 10),
+		ReferenceRef:      fmt.Sprintf("gitlab:%s#%d", requested.ProviderRepositoryID, requested.MRIID),
+		ReferenceSnapshot: string(snapshot), Provider: "gitlab", ProviderHost: requested.Host,
+		ConnectionScope: requested.ConnectionScope, ProviderRepositoryID: requested.ProviderRepositoryID,
+		ChangeRequestID: strconv.FormatInt(int64(requested.MRIID), 10), ResolvedIdentity: string(snapshot),
+		ExpectedRevision: int64Pointer(expectedRevision), AssociationRevision: int64Pointer(registered.AssociationRevision),
+		OperationID: operationID, OperationFingerprint: taskChangeRegistrationFingerprint(
+			requested.TaskID, requested.Host, requested.ConnectionScope, requested.ProviderRepositoryID,
+			strconv.Itoa(requested.MRIID), strconv.FormatInt(expectedRevision, 10), strconv.FormatBool(restore)),
+		OperationReceipt: registered.ID, State: "succeeded",
+	})
+}
+
+func (c taskChangeLinkCoordinator) persistTaskChangeRegistrationIntent(
+	ctx context.Context, tx *sqlx.Tx, intent *tasksqlite.TaskChangeRegistrationIntent,
+) error {
+	_, _, err := c.registrationIntents.CreateTaskChangeRegistrationIntentTx(ctx, tx, intent)
+	return err
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
+func taskChangeRegistrationFingerprint(values ...string) string {
+	encoded, _ := json.Marshal(values)
+	fingerprint := sha256.Sum256(encoded)
+	return hex.EncodeToString(fingerprint[:])
+}
+
+type taskChangeURLIdentity struct {
+	provider string
+	scheme   string
+	host     string
+	owner    string
+	repo     string
+	number   int
+}
+
+func (c taskChangeLinkCoordinator) resolveTaskChangeURL(
+	ctx context.Context, taskID, rawURL string,
+) (mcp.TaskChangeLink, error) {
+	task, _, err := c.taskRepository(ctx, taskID, "")
+	if err != nil {
+		return mcp.TaskChangeLink{}, err
+	}
+	identity, err := parseTaskChangeURL(rawURL)
+	if err != nil {
+		return mcp.TaskChangeLink{}, err
+	}
+	var matches []mcp.TaskChangeLink
+	for _, taskRepo := range task.Repositories {
+		repositoryID := strings.TrimSpace(taskRepo.RepositoryID)
+		if repositoryID == "" {
+			continue
+		}
+		repo, getErr := c.tasks.GetRepository(ctx, repositoryID)
+		if getErr != nil || repo == nil || repo.WorkspaceID != task.WorkspaceID {
+			continue
+		}
+		if taskChangeURLMatchesRepository(identity, repo) {
+			matches = append(matches, mcp.TaskChangeLink{
+				Provider: identity.provider, RepositoryID: repo.ID, Number: identity.number,
+			})
+		}
+	}
+	if len(matches) == 0 {
+		return mcp.TaskChangeLink{}, fmt.Errorf("task change URL does not match an attached repository")
+	}
+	if len(matches) > 1 {
+		return mcp.TaskChangeLink{}, fmt.Errorf("task change URL matches more than one attached repository")
+	}
+	return matches[0], nil
+}
+
+const (
+	taskChangeURLSchemeHTTP  = "http"
+	taskChangeURLSchemeHTTPS = "https"
+)
+
+func parseTaskChangeURL(rawURL string) (taskChangeURLIdentity, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed == nil || parsed.User != nil || parsed.Host == "" ||
+		(parsed.Scheme != taskChangeURLSchemeHTTPS && parsed.Scheme != taskChangeURLSchemeHTTP) {
+		return taskChangeURLIdentity{}, fmt.Errorf("invalid task change URL")
+	}
+	if parsed.RawPath != "" || strings.Contains(parsed.EscapedPath(), "%") {
+		return taskChangeURLIdentity{}, fmt.Errorf("encoded task change paths are not supported")
+	}
+	identity := taskChangeURLIdentity{scheme: strings.ToLower(parsed.Scheme), host: normalizedURLHost(parsed)}
+	path := strings.Trim(parsed.Path, "/")
+	parts := strings.Split(path, "/")
+	switch {
+	case isGitHubPullRequestPath(parts):
+		identity, err = parseGitHubPullRequestPath(identity, parts)
+	case isGitLabMergeRequestPath(parts):
+		identity, err = parseGitLabMergeRequestPath(identity, parts)
+	default:
+		return taskChangeURLIdentity{}, fmt.Errorf("URL does not identify a supported pull request or merge request")
+	}
+	if err != nil || identity.number <= 0 || identity.host == "" {
+		return taskChangeURLIdentity{}, fmt.Errorf("invalid task change URL identity")
+	}
+	return identity, nil
+}
+
+func isGitHubPullRequestPath(parts []string) bool {
+	return len(parts) >= 4 && parts[2] == "pull"
+}
+
+func parseGitHubPullRequestPath(
+	identity taskChangeURLIdentity, parts []string,
+) (taskChangeURLIdentity, error) {
+	validDepth := len(parts) == 4 || (len(parts) == 5 && (parts[4] == "files" || parts[4] == "commits"))
+	if !validDepth || !validTaskChangePathPart(parts[0]) || !validTaskChangePathPart(parts[1]) {
+		return taskChangeURLIdentity{}, fmt.Errorf("invalid GitHub pull request URL")
+	}
+	number, err := strconv.Atoi(parts[3])
+	identity.provider, identity.owner, identity.repo, identity.number = taskChangeProviderGitHub, parts[0], parts[1], number
+	return identity, err
+}
+
+func isGitLabMergeRequestPath(parts []string) bool {
+	return len(parts) >= 5 && parts[len(parts)-3] == "-" && parts[len(parts)-2] == "merge_requests"
+}
+
+func parseGitLabMergeRequestPath(
+	identity taskChangeURLIdentity, parts []string,
+) (taskChangeURLIdentity, error) {
+	projectPath := strings.Join(parts[:len(parts)-3], "/")
+	if projectPath == "" || strings.ContainsAny(projectPath, "?#") {
+		return taskChangeURLIdentity{}, fmt.Errorf("invalid GitLab project path")
+	}
+	number, err := strconv.Atoi(parts[len(parts)-1])
+	identity.provider, identity.owner, identity.number = taskChangeProviderGitLab, projectPath, number
+	return identity, err
+}
+
+func normalizedURLHost(parsed *url.URL) string {
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if port := parsed.Port(); port != "" {
+		return host + ":" + port
+	}
+	return host
+}
+
+func validTaskChangePathPart(value string) bool {
+	return value != "" && value != "." && value != ".." && !strings.ContainsAny(value, "\\?#")
+}
+
+func taskChangeURLMatchesRepository(identity taskChangeURLIdentity, repo *models.Repository) bool {
+	if strings.ToLower(strings.TrimSpace(repo.Provider)) != identity.provider {
+		return false
+	}
+	providerHost := strings.TrimSpace(repo.ProviderHost)
+	if providerHost == "" || !strings.Contains(providerHost, "://") {
+		providerHost = "https://" + strings.TrimPrefix(providerHost, "//")
+	}
+	parsedHost, err := url.Parse(providerHost)
+	if err != nil || parsedHost.Host == "" || parsedHost.User != nil ||
+		!strings.EqualFold(parsedHost.Scheme, identity.scheme) || normalizedURLHost(parsedHost) != identity.host {
+		return false
+	}
+	owner, name := strings.Trim(strings.TrimSpace(repo.ProviderOwner), "/"), strings.Trim(strings.TrimSpace(repo.ProviderName), "/")
+	if owner == "" || name == "" {
+		return false
+	}
+	if identity.provider == taskChangeProviderGitHub {
+		return strings.EqualFold(owner, identity.owner) && strings.EqualFold(name, identity.repo)
+	}
+	return strings.EqualFold(owner+"/"+name, identity.owner)
 }
 
 func (c taskChangeLinkCoordinator) unlink(ctx context.Context, taskID string, link mcp.TaskChangeLink) error {

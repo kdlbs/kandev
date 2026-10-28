@@ -6,7 +6,10 @@ import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-whil
 import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
-import { waitForSessionAgentctlReady } from "../../helpers/session-store";
+import {
+  waitForSessionAgentctlReady,
+  waitForTaskSessionsSettled,
+} from "../../helpers/session-store";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { startQuickChatFromSetup } from "./quick-chat-helpers";
 import {
@@ -325,7 +328,7 @@ test.describe("Task session queue", () => {
     );
 
     // Keep a real agent turn running while the message is queued.
-    await session.sendMessage("/sleep 5s");
+    await session.sendMessage("/sleep 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForComposerQueueMode(testPage);
 
@@ -684,10 +687,21 @@ test.describe("Task session queue", () => {
     await session.sendMessage("/sleep 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForComposerQueueMode(testPage);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(
+      session.taskId,
+      session.sessionId,
+    );
+    expect(await apiClient.setQueueAutoRun(queueIdentity, false)).toMatchObject({
+      session_id: session.sessionId,
+      auto_run: false,
+    });
     await queueMessages(apiClient, session.taskId, session.sessionId, [
       scriptedQueueMessage("replacement first"),
       scriptedQueueMessage("replacement second"),
     ]);
+    await expect
+      .poll(() => apiClient.getQueueStatus(queueIdentity))
+      .toMatchObject({ count: 2, auto_run: false });
 
     await openQueuePanel(testPage);
     const rows = testPage.getByTestId("queue-entry");
@@ -707,12 +721,15 @@ test.describe("Task session queue", () => {
       timeout: 15_000,
     });
     await session.waitForLoad();
+    await waitForTaskSessionsSettled(testPage, session.taskId);
     await openQueuePanel(testPage);
-    const remountedRows = testPage.getByTestId("queue-entry");
-    await expect(remountedRows).toHaveCount(2, { timeout: 10_000 });
-    await remountedRows.nth(1).getByTestId("queue-entry-edit").click();
-    await testPage.getByTestId("queue-edit-textarea").fill("replacement second edited");
+    const resumedEditor = testPage.getByTestId("queue-edit-textarea");
+    const restoredQueue = await apiClient.getQueueStatus(queueIdentity);
+    expect(restoredQueue.count).toBe(2);
+    await expect(resumedEditor).toHaveValue(restoredQueue.entries.at(-1)!.content);
+    await resumedEditor.fill("replacement second edited");
     await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(testPage.getByTestId("queue-entry")).toHaveCount(2);
     await expect(testPage.getByTestId("queue-entry-text").last()).toContainText(
       "replacement second edited",
     );

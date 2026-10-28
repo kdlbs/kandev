@@ -54,6 +54,38 @@ func TestManageTaskChangeRequestSchemaAndDispatch(t *testing.T) {
 	assert.Equal(t, float64(42), payload["number"])
 }
 
+func TestManageTaskChangeRequestSupportsURLAndCurrentTaskDefault(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current", "links": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	tool, ok := s.mcpServer.ListTools()["manage_task_change_request_kandev"]
+	require.True(t, ok)
+	var schema map[string]interface{}
+	require.NoError(t, json.Unmarshal(tool.Tool.RawInputSchema, &schema))
+	assert.Equal(t, []interface{}{"operation"}, schema["required"])
+	properties, ok := schema["properties"].(map[string]interface{})
+	require.True(t, ok)
+	for _, field := range []string{"url", "association_mode", "restore_detached", "operation_id"} {
+		assert.Contains(t, properties, field)
+	}
+
+	result := callTool(t, s, "manage_task_change_request_kandev", map[string]interface{}{
+		"operation":        "link",
+		"url":              "https://github.com/acme/site/pull/42",
+		"association_mode": "observation",
+		"operation_id":     "registration-op-1",
+	})
+	require.False(t, result.IsError)
+	assert.Equal(t, "mcp.manage_task_change_request", backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.NotContains(t, payload, "task_id", "omitting task_id must preserve current-task binding")
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "https://github.com/acme/site/pull/42", payload["url"])
+	assert.Equal(t, "observation", payload["association_mode"])
+	assert.Equal(t, "registration-op-1", payload["operation_id"])
+}
+
 func TestManageTaskChangeRequestSchemaRejectsInvalidBranches(t *testing.T) {
 	tests := []struct {
 		name string

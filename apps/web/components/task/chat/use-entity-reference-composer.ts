@@ -10,6 +10,7 @@ import {
 } from "./tiptap-entity-reference-suggestion";
 import type { MenuState } from "./tiptap-suggestion";
 import { selectableEntityReferences } from "./entity-reference-groups";
+import { createEntityReferenceSelection } from "./reference-registration";
 
 const EMPTY_REFERENCE_MENU: MenuState<EntityReference> = {
   isOpen: false,
@@ -21,12 +22,14 @@ const EMPTY_REFERENCE_MENU: MenuState<EntityReference> = {
 
 type UseEntityReferenceComposerOptions = {
   enabled: boolean;
+  linkOnSendEnabled?: boolean;
   workspaceId: string | null;
   sessionId: string | null;
 };
 
 export function useEntityReferenceComposer({
   enabled,
+  linkOnSendEnabled = true,
   workspaceId,
   sessionId,
 }: UseEntityReferenceComposerOptions) {
@@ -62,10 +65,15 @@ export function useEntityReferenceComposer({
     void Promise.resolve().then(() => setMenu(EMPTY_REFERENCE_MENU));
   }, [enabled, inputGate, sessionId, workspaceId]);
 
-  const selectReference = useCallback((reference: EntityReference) => {
-    commandRef.current?.(reference);
-    setMenu(EMPTY_REFERENCE_MENU);
-  }, []);
+  const selectReference = useCallback(
+    (reference: EntityReference) => {
+      const selection = createEntityReferenceSelection(reference, undefined, linkOnSendEnabled);
+      Object.assign(selection, { registration_enabled: linkOnSendEnabled });
+      commandRef.current?.(selection);
+      setMenu(EMPTY_REFERENCE_MENU);
+    },
+    [linkOnSendEnabled],
+  );
   const onKeyDown = useCallback(
     (event: KeyboardEvent) =>
       handleEntityReferenceMenuKeyDown({

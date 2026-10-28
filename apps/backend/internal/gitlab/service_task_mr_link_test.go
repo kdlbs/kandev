@@ -217,6 +217,48 @@ func TestAssociateExistingMRByURLCreatesIdempotentWorkspaceScopedLink(t *testing
 	}
 }
 
+func TestAssociateExistingMRByURLRestoresDetachedAssociation(t *testing.T) {
+	const host = "https://gitlab.acme.test"
+	ctx := context.Background()
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-restore", "repo-restore")
+	setTaskMRRepositoryIdentity(t, store, "repo-restore", host, "group/subgroup/project")
+	setTaskMRRepositoryProviderRepoID(t, store, "repo-restore", "provider-project-42")
+	registration := &TaskMR{
+		TaskID: "task-restore", RepositoryID: "repo-restore", Host: host,
+		ProjectPath: "group/subgroup/project", MRIID: 17,
+		MRURL: host + "/group/subgroup/project/-/merge_requests/17", MRTitle: "Original title",
+		ProviderRepositoryID: "provider-project-42", ConnectionScope: "builtin:ws-1",
+		RepositoryPath: "group/subgroup/project", Source: TaskMRSourceSelectedMention,
+		ComparisonPolicy: TaskMRComparisonPolicyPreserve, FirstOriginKind: "selected_mention",
+		FirstOriginID: "original-selection", FirstOriginRevision: "message-revision-1",
+		CreatedAt: time.Now().UTC(),
+	}
+	created, changed, err := store.RegisterTaskMRObservation(ctx, registration, false, 0)
+	if err != nil || !changed {
+		t.Fatalf("create selected association: row=%+v changed=%v err=%v", created, changed, err)
+	}
+	detached, changed, err := store.DetachTaskMRForWorkspace(ctx, "ws-1", created.ID)
+	if err != nil || !changed || detached.AssociationRevision != 2 || detached.DetachedAt == nil {
+		t.Fatalf("detach selected association: row=%+v changed=%v err=%v", detached, changed, err)
+	}
+	client.SeedMR("group/subgroup/project", &MR{
+		IID: 17, Title: "Restored title", WebURL: registration.MRURL, State: "opened",
+		HeadBranch: "feature", BaseBranch: "main", CreatedAt: time.Now().UTC(),
+	})
+
+	restored, err := svc.AssociateExistingMRByURL(ctx, "ws-1", "task-restore", "repo-restore", registration.MRURL)
+	if err != nil {
+		t.Fatalf("AssociateExistingMRByURL after unlink: %v", err)
+	}
+	if restored.ID != created.ID || restored.DetachedAt != nil || restored.AssociationRevision != 3 ||
+		restored.Source != TaskMRSourceSelectedMention || restored.ComparisonPolicy != TaskMRComparisonPolicyPreserve ||
+		restored.FirstOriginKind != "selected_mention" || restored.FirstOriginID != "original-selection" ||
+		restored.FirstOriginRevision != "message-revision-1" || restored.MRTitle != "Restored title" {
+		t.Fatalf("restored association = %+v", restored)
+	}
+}
+
 func TestUnlinkTaskMRPublishesWorkspaceScopedDeletedEvent(t *testing.T) {
 	const host = "https://gitlab.acme.test"
 	svc, store, _ := newTaskMRLinkService(t, host)

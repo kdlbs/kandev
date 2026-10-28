@@ -63,6 +63,8 @@ export type GitLabAuthDiagnostics = {
 export type TaskMR = {
   id: string;
   task_id: string;
+  /** Monotonic association lifecycle revision used to fence delayed link events. */
+  association_revision?: number;
   repository_id?: string;
   host: string;
   project_path: string;
@@ -99,6 +101,7 @@ export type TaskMRDeletedEvent = {
   workspace_id: string;
   task_id: string;
   association_id: string;
+  association_revision?: number;
 };
 
 /** Response shape for `GET /api/v1/gitlab/workspaces/:id/task-mrs`. */

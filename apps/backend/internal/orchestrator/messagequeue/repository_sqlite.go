@@ -4848,10 +4848,24 @@ func (r *sqliteRepository) updateContentAndMetadataTx(
 	if n == 0 {
 		return ErrEntryNotFound
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *sqliteRepository) updateContentAndMetadataWithLease(ctx context.Context, sessionID, entryID, leaseID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	return r.updateContentAndMetadataWithLeaseAndRegistration(
+		ctx, sessionID, entryID, leaseID, content, attachments, metadataUpdates,
+		queuedBy, "", nil,
+	)
+}
+
+func (r *sqliteRepository) updateContentAndMetadataWithLeaseAndRegistration(
+	ctx context.Context,
+	sessionID, entryID, leaseID, content string,
+	attachments []MessageAttachment,
+	metadataUpdates map[string]interface{},
+	queuedBy, operationID string,
+	writer QueueRegistrationEditWriter,
+) error {
 	if queuedBy == "" || IsReservedQueuedBy(queuedBy) {
 		return ErrEntryNotFound
 	}
@@ -4873,9 +4887,36 @@ func (r *sqliteRepository) updateContentAndMetadataWithLease(ctx context.Context
 	if err := r.authorizeQueueEditLeaseTx(ctx, tx, sessionID, entryID, leaseID); err != nil {
 		return err
 	}
-	return r.updateContentAndMetadataTx(
+	previous, err := scanQueuedRow(tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+			attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages WHERE id = ? AND session_id = ? AND queued_by = ?
+			AND queued_by NOT IN (?, ?, ?)`),
+		entryID, sessionID, queuedBy, QueuedByAgent, QueuedByWorkflow, QueuedByServer))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read queued entry for edit registration: %w", err)
+	}
+	if err := r.updateContentAndMetadataTx(
 		ctx, tx, sessionID, entryID, content, queuedBy, attachmentsJSON, metadataUpdates,
-	)
+	); err != nil {
+		return err
+	}
+	if writer != nil {
+		updated := cloneQueuedMessage(previous)
+		updated.Content = content
+		updated.Attachments = append([]MessageAttachment(nil), attachments...)
+		updated.Metadata = applyMetadataUpdates(copyMessageMetadata(previous.Metadata, 0), metadataUpdates)
+		if err := writer(ctx, tx, operationID, previous, updated); err != nil {
+			return fmt.Errorf("persist queue edit registration intents: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit queued edit: %w", err)
+	}
+	return nil
 }
 
 // MergeIntoAbove folds the source entry into the entry directly above it within

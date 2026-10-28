@@ -446,6 +446,8 @@ Desktop panel groups can host agent chat, files, terminals, Changes, the task pl
 
 In **Files**, right-click a file or folder and select **Copy path**. On a phone, use the row's visible actions menu. Filename search results offer the same action. The copied path is the node's workspace-relative path, including its repository prefix in a multi-repository task. Copy path is unavailable for a multiple selection.
 
+In task chat and Quick Chat, type `#` to search connected work items. Selecting a result inserts a reference chip without sending the message. For a GitHub pull request or GitLab merge request, choose **Link on send** to request a task link after Kandev accepts a direct message or ordinary queued message, or choose **Context only** to include the reference without linking it. In the queue editor, new or reselected references use **Link on save**; Cancel creates no registration, and removing a reference does not undo an association already accepted. Replies held by a pending clarification and other unsupported queue paths include references as context only. A provider failure does not undo an accepted message. The reference shows its registration status and offers **Retry** when the result can be retried; retry does not send the message again.
+
 In multi-select view filters, selected options appear first when search is empty. Workflow-step options keep their workflow headings. Typing a search filters and ranks the matching options as usual.
 
 The phone menu groups plugin controls in one **Plugins** section. When both workspace and task controls are available, **Workspace** and **Task** labels distinguish them. Optional **System metrics** appear after navigation, before Utilities, when the app status bar is disabled.

@@ -4,6 +4,7 @@ import type {
   GitHubStatus,
   TaskCIAutomationOptions,
   TaskCIPRAutomationState,
+  TaskPR,
 } from "@/lib/types/github";
 import { registerGitHubHandlers } from "./github";
 
@@ -190,7 +191,7 @@ describe("registerGitHubHandlers", () => {
   });
 });
 
-describe("registerGitHubHandlers task and quota events", () => {
+describe("registerGitHubHandlers task association scope", () => {
   it("ignores a task PR update owned by another workspace", () => {
     const store = createAppStore();
     seedTaskPRScope(store);
@@ -251,7 +252,76 @@ describe("registerGitHubHandlers task and quota events", () => {
       "association-2",
     ]);
   });
+});
 
+describe("registerGitHubHandlers association revisions", () => {
+  it("rejects delayed update and deletion events around relink hydration", () => {
+    const store = createAppStore();
+    store.getState().setActiveWorkspace(ACTIVE_WORKSPACE_ID);
+    const scope = {
+      workspaceId: ACTIVE_WORKSPACE_ID,
+      workspaceContextGeneration: store.getState().workspaceContextGeneration,
+    };
+    const association = (revision: number, title: string): TaskPR => ({
+      id: "association-revisioned",
+      workspace_id: ACTIVE_WORKSPACE_ID,
+      task_id: TASK_ID,
+      owner: "acme",
+      repo: "kandev",
+      pr_number: 17,
+      pr_url: "https://github.com/acme/kandev/pull/17",
+      pr_title: title,
+      head_branch: "feature",
+      base_branch: "main",
+      author_login: "alice",
+      state: "open",
+      review_state: "",
+      checks_state: "",
+      mergeable_state: "",
+      review_count: 0,
+      pending_review_count: 0,
+      comment_count: 0,
+      unresolved_review_threads: 0,
+      checks_total: 0,
+      checks_passing: 0,
+      additions: 0,
+      deletions: 0,
+      created_at: "",
+      merged_at: null,
+      closed_at: null,
+      last_synced_at: null,
+      updated_at: "",
+      association_revision: revision,
+    });
+    const handlers = registerGitHubHandlers(store);
+    store.getState().setTaskPRs({ [TASK_ID]: [association(4, "old")] }, scope);
+    handlers["github.task_pr.deleted"]!({
+      payload: {
+        workspace_id: ACTIVE_WORKSPACE_ID,
+        task_id: TASK_ID,
+        association_id: "association-revisioned",
+        association_revision: 5,
+      },
+    } as never);
+    handlers["github.task_pr.updated"]!({ payload: association(4, "stale") } as never);
+    expect(store.getState().taskPRs.byTaskId[TASK_ID]).toBeUndefined();
+
+    // Reconnect hydration can install the committed relink. The delayed old
+    // delete is then ignored because its revision is below the hydrated row.
+    store.getState().setTaskPRs({ [TASK_ID]: [association(6, "relinked")] }, scope);
+    handlers["github.task_pr.deleted"]!({
+      payload: {
+        workspace_id: ACTIVE_WORKSPACE_ID,
+        task_id: TASK_ID,
+        association_id: "association-revisioned",
+        association_revision: 5,
+      },
+    } as never);
+    expect(store.getState().taskPRs.byTaskId[TASK_ID]?.[0]?.pr_title).toBe("relinked");
+  });
+});
+
+describe("registerGitHubHandlers quota events", () => {
   it("applies unscoped rate-limit events only to legacy shared connections", () => {
     const store = createAppStore();
     store.getState().resetGitHubStatus("legacy-workspace");

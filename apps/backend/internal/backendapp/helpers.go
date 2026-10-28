@@ -1786,10 +1786,11 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	if p.services != nil && p.services.Mentions != nil && p.services.Mentions.Submission != nil {
 		referenceValidators = append(referenceValidators, p.services.Mentions.Submission)
 	}
-	taskhandlers.RegisterMessageRoutes(
+	messageHandlers := taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
+	setupTaskChangeRegistration(p, messageHandlers)
 	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
 	if p.services != nil && p.services.Terminal != nil {
 		processHandlers.SetTerminalService(p.services.Terminal)
@@ -1802,6 +1803,58 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Debug("Registered Public Share Links handlers (HTTP)")
 	}
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
+}
+
+func setupTaskChangeRegistration(p routeParams, messageHandlers *taskhandlers.MessageHandlers) {
+	if p.dbPool == nil || p.taskRepo == nil {
+		return
+	}
+	processor := newTaskChangeRegistrationProcessor(
+		p.taskRepo, p.taskSvc, newTaskChangeLinkCoordinator(p), p.dbPool.Writer(), p.log,
+		taskChangeRegistrationActorResolver(p.authSvc),
+	)
+	setupQueueRegistrationWriters(p, processor)
+	messageHandlers.SetTaskChangeRegistrationNotifier(processor)
+	subscriptions, err := processor.SubscribeAssociationDetachEvents(p.eventBus)
+	if err != nil {
+		p.log.Warn("task change registration unlink projection is unavailable", zap.Error(err))
+	} else {
+		registerTaskChangeRegistrationCleanup(p, subscriptions)
+	}
+	processor.Start(p.ctx)
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			processor.Stop()
+			return nil
+		})
+	}
+}
+
+func setupQueueRegistrationWriters(p routeParams, processor *taskChangeRegistrationProcessor) {
+	if p.orchestratorSvc == nil {
+		return
+	}
+	queue := p.orchestratorSvc.GetMessageQueue()
+	if queue == nil {
+		return
+	}
+	queue.SetQueueRegistrationWriters(
+		processor.QueueAdmissionRegistrationTx,
+		processor.QueueEditRegistrationTx,
+	)
+	processor.SetQueueStatusNotifier(func(ctx context.Context, _, sessionID string) {
+		p.orchestratorSvc.PublishQueueStatusEvent(ctx, sessionID)
+	})
+}
+
+func registerTaskChangeRegistrationCleanup(p routeParams, subscriptions []bus.Subscription) {
+	if p.addCleanup == nil {
+		return
+	}
+	for _, subscription := range subscriptions {
+		subscription := subscription
+		p.addCleanup(func() error { return subscription.Unsubscribe() })
+	}
 }
 
 func configureMCPServices(
@@ -2644,10 +2697,8 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetTaskChangeRequestAutomationService(newTaskChangeRequestAutomationCoordinator(
 		p.taskSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
 	))
-	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
-		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
-		logger: p.log, singleUserIdentity: taskChangeLinkIdentityResolver(p.authSvc),
-	})
+	taskChangeLinks := newTaskChangeLinkCoordinator(p)
+	mcpHandlers.SetTaskChangeLinkService(taskChangeLinks)
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so
 	// workspace-group state stays consistent across both surfaces.

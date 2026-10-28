@@ -214,6 +214,10 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 	if err := ValidateSendNowEntries(entries); err != nil {
 		return nil, err
 	}
+	registrationOriginIDs, err := queueRegistrationOriginIDsForEntries(entries)
+	if err != nil {
+		return nil, err
+	}
 
 	contentParts := make([]string, 0, len(entries))
 	attachments := make([]MessageAttachment, 0)
@@ -254,6 +258,11 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 
 	oldest := entries[0]
 	metadata := copyMessageMetadata(oldest.Metadata, 2)
+	if len(registrationOriginIDs) == 0 {
+		delete(metadata, MetadataRegistrationOriginIDs)
+	} else {
+		metadata[MetadataRegistrationOriginIDs] = registrationOriginIDs
+	}
 	// A source-level transcript receipt applies only to that source payload.
 	// The combined Send Now envelope gets its own deterministic receipt after
 	// every selected source has been claimed.
@@ -285,6 +294,27 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 		QueuedAt:    oldest.QueuedAt,
 		QueuedBy:    oldest.QueuedBy,
 	}, nil
+}
+
+func queueRegistrationOriginIDsForEntries(entries []QueuedMessage) ([]string, error) {
+	var metadata map[string]interface{}
+	for _, entry := range entries {
+		originIDs, ok := unionQueueRegistrationOriginIDs(metadata, entry.Metadata)
+		if !ok {
+			return nil, ErrInvalidQueueRegistrationOriginIDs
+		}
+		if len(originIDs) > 0 {
+			metadata = map[string]interface{}{MetadataRegistrationOriginIDs: originIDs}
+		}
+	}
+	if metadata == nil {
+		return nil, nil
+	}
+	originIDs, ok := normalizeQueueIdentityIDs(metadata[MetadataRegistrationOriginIDs])
+	if !ok {
+		return nil, ErrInvalidQueueRegistrationOriginIDs
+	}
+	return originIDs, nil
 }
 
 func attachmentPayloadBytes(attachment MessageAttachment) (int64, error) {

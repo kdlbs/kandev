@@ -51,6 +51,7 @@ export type ChatInputEditorAreaProps = {
   taskId: string | null;
   workspaceId?: string | null;
   entityReferencesEnabled?: boolean;
+  entityReferenceLinkingEnabled?: boolean;
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled: boolean;
@@ -233,6 +234,7 @@ function ChatInputEditorField({
         taskId={p.taskId}
         workspaceId={p.workspaceId ?? null}
         entityReferencesEnabled={p.entityReferencesEnabled ?? false}
+        entityReferenceLinkingEnabled={p.entityReferenceLinkingEnabled ?? true}
         onAddContextFile={p.onAddContextFile}
         onToggleContextFile={p.onToggleContextFile}
         planContextEnabled={p.planContextEnabled}

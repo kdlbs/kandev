@@ -127,10 +127,26 @@ and [GitHub identity ownership](../../../decisions/0047-github-authentication-ow
 Delivery is tracked in the
 [single-user PR-link repair plan](../../../plans/mcp-pr-link-single-user/plan.md).
 
-## Tool example
+## Tool examples
 
 ```json
 {
+  "operation": "link",
+  "url": "https://github.com/acme/app/pull/3506",
+  "association_mode": "observation"
+}
+```
+
+The URL form defaults to the authenticated current task. Agent-created work
+uses `association_mode: observation`, which preserves comparison state and
+does not grant automation. The registration design defines this additive
+contract and its revision rules.
+
+Existing explicit tuple calls remain supported:
+
+```json
+{
+  "operation": "link",
   "task_id": "<task-id>",
   "provider": "github",
   "repository_id": "<repository-id>",
@@ -138,9 +154,10 @@ Delivery is tracked in the
 }
 ```
 
-`link_task_pr_kandev` and `unlink_task_pr_kandev` accept this shape;
-`replace_task_pr_kandev` additionally requires the old association triple
-(`old_provider`, `old_repository_id`, `old_number`). See
+Replacement additionally requires the old association triple
+(`old_provider`, `old_repository_id`, `old_number`). See the
+[task change request registration design](task-change-registration.md#agent-tool-extension)
+for URL resolution, observation, and restoration behavior. See
 [docs/public/automation-and-mcp.md](../../../public/automation-and-mcp.md)
 for the operator-facing contract.
 

@@ -89,6 +89,15 @@ func mergeEntryMetadata(target, source map[string]interface{}) (map[string]inter
 	} else {
 		merged[MetadataQueueAdmissionIDs] = admissionIDs
 	}
+	originIDs, ok := unionQueueRegistrationOriginIDs(target, source)
+	if !ok {
+		return nil, ErrInvalidQueueRegistrationOriginIDs
+	}
+	if len(originIDs) == 0 {
+		delete(merged, MetadataRegistrationOriginIDs)
+	} else {
+		merged[MetadataRegistrationOriginIDs] = originIDs
+	}
 	return merged, nil
 }
 

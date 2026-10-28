@@ -305,7 +305,11 @@ function useUserMentionComponents(comment: Message) {
     () => taskMentionReferences(comment.raw_content || comment.content),
     [comment.raw_content, comment.content],
   );
-  const components = usePromptMentionMarkdownComponents(promptNames, entityReferences);
+  const components = usePromptMentionMarkdownComponents(
+    promptNames,
+    entityReferences,
+    comment.task_id,
+  );
   return { components, taskMentions };
 }
 

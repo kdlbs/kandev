@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -30,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -103,6 +105,11 @@ type taskCanvasGuidanceResolver interface {
 	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type TaskChangeRegistrationNotifier interface {
+	NotifyAcceptedMessage(taskID, messageID string)
+	ActTaskChangeRegistration(ctx context.Context, taskID, registrationID, operationID, actorID, action string) error
+}
+
 type promptTaskWithPromptContext interface {
 	PromptTaskWithPromptContext(
 		ctx context.Context,
@@ -148,14 +155,15 @@ type canvasGuidanceProjection struct {
 
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
-	service             *service.Service
-	orchestrator        OrchestratorService
-	cancellationPending dto.CancellationPendingProvider
-	parkedProjection    dto.ParkedProvider
-	logger              *logger.Logger
-	referenceValidator  entityrefs.SubmissionValidator
-	messageIDMu         sync.Mutex
-	messageIDGates      map[string]*messageIDGate
+	service              *service.Service
+	orchestrator         OrchestratorService
+	cancellationPending  dto.CancellationPendingProvider
+	parkedProjection     dto.ParkedProvider
+	logger               *logger.Logger
+	referenceValidator   entityrefs.SubmissionValidator
+	registrationNotifier TaskChangeRegistrationNotifier
+	messageIDMu          sync.Mutex
+	messageIDGates       map[string]*messageIDGate
 	// waitForSessionReadyFn backs waitForSessionReady; defaults to
 	// service.WaitForSessionReady but is overridable in tests to avoid its
 	// real polling delay.
@@ -269,13 +277,14 @@ func (h *MessageHandlers) injectMessageContext(
 		return content
 	}
 	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
-		RequiresCompletionSignal:       requiresSignal,
-		IncludeCoordinatorTaskControls: !configMode,
-		IncludeTaskTitleTool:           !configMode && titleOwner,
-		IncludeCanvasGuidance:          includeCanvasGuidance,
-		Autopilot:                      task.Autopilot,
-		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
-		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
+		RequiresCompletionSignal:         requiresSignal,
+		IncludeCoordinatorTaskControls:   !configMode,
+		IncludeTaskTitleTool:             !configMode && titleOwner,
+		IncludeCanvasGuidance:            includeCanvasGuidance,
+		IncludeTaskChangeRequestGuidance: !configMode,
+		Autopilot:                        task.Autopilot,
+		IncludeUserQuestionTool:          !task.Autopilot && !sessionResp.Session.IsPassthrough,
+		IncludeParentQuestionTool:        task.Autopilot && task.ParentID != "",
 	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
 }
 
@@ -316,10 +325,15 @@ func RegisterMessageRoutes(
 	orchestrator OrchestratorService,
 	log *logger.Logger,
 	validators ...entityrefs.SubmissionValidator,
-) {
+) *MessageHandlers {
 	handlers := NewMessageHandlers(svc, orchestrator, log, validators...)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
+	return handlers
+}
+
+func (h *MessageHandlers) SetTaskChangeRegistrationNotifier(notifier TaskChangeRegistrationNotifier) {
+	h.registrationNotifier = notifier
 }
 
 func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
@@ -327,6 +341,50 @@ func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agent-sessions/:id/messages", h.httpListMessages)
 	api.GET("/task-sessions/:id/messages", h.httpListMessages) // Alias for SSR compatibility
 	api.GET("/task-sessions/:id/messages/:message_id/shell-output", h.httpGetShellOutput)
+	api.POST("/tasks/:id/change-request-registrations/:registration_id/retry", h.httpRetryTaskChangeRegistration)
+}
+
+func (h *MessageHandlers) httpRetryTaskChangeRegistration(c *gin.Context) {
+	taskID, registrationID := c.Param("id"), c.Param("registration_id")
+	if _, err := h.service.GetTask(c.Request.Context(), taskID); err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	var request struct {
+		Action      string `json:"action"`
+		OperationID string `json:"operation_id"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || (request.Action != "retry" && request.Action != "relink") ||
+		strings.TrimSpace(request.OperationID) == "" || len(request.OperationID) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task change registration action"})
+		return
+	}
+	if h.registrationNotifier == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "task change registration is unavailable"})
+		return
+	}
+	actorID := userstore.DefaultUserID
+	if identity, ok := authn.IdentityFromContext(c.Request.Context()); ok && strings.TrimSpace(identity.UserID) != "" {
+		actorID = identity.UserID
+	}
+	if err := h.registrationNotifier.ActTaskChangeRegistration(
+		c.Request.Context(), taskID, registrationID, request.OperationID, actorID, request.Action,
+	); err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			c.JSON(http.StatusNotFound, gin.H{"error": "registration not found"})
+		case errors.Is(err, taskrepo.ErrTaskChangeRegistrationNotRetryable),
+			errors.Is(err, taskrepo.ErrTaskChangeRegistrationConflict),
+			errors.Is(err, taskrepo.ErrTaskChangeRegistrationOperationConflict):
+			c.JSON(http.StatusConflict, gin.H{"error": "registration cannot be retried"})
+		default:
+			h.logger.Warn("failed to retry task change registration",
+				zap.String("task_id", taskID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retry task change registration"})
+		}
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"accepted": true, "state": "pending"})
 }
 
 func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
@@ -1091,6 +1149,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	req.Content = message.Content
 	req.deliverySubmissionID = message.ID
+	if h.registrationNotifier != nil {
+		h.registrationNotifier.NotifyAcceptedMessage(req.TaskID, message.ID)
+	}
 	initialTaskBriefQueued := (initialTaskBrief != nil && !initialTaskBrief.Selected) || queueBehindInitialBriefDispatch
 	// An idempotent create can return a row committed by another process, so
 	// the candidate pointer is not necessarily the object that selected the

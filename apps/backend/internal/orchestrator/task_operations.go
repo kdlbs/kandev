@@ -1205,13 +1205,14 @@ func (s *Service) wrapCreatedSessionPrompt(
 		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask)
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-			IncludeCoordinatorTaskControls: !configMode,
-			IncludeTaskTitleTool:           !configMode && titleOwner,
-			IncludeCanvasGuidance:          includeCanvasGuidance,
-			Autopilot:                      dbTask.Autopilot,
-			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
-			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
+			RequiresCompletionSignal:         s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			IncludeCoordinatorTaskControls:   !configMode,
+			IncludeTaskTitleTool:             !configMode && titleOwner,
+			IncludeCanvasGuidance:            includeCanvasGuidance,
+			IncludeTaskChangeRequestGuidance: !configMode,
+			Autopilot:                        dbTask.Autopilot,
+			IncludeUserQuestionTool:          !dbTask.Autopilot && !session.IsPassthrough,
+			IncludeParentQuestionTool:        dbTask.Autopilot && dbTask.ParentID != "",
 		}, referenceContext, promptReferenceContext, pullRequestTargetContext)
 	}
 }
@@ -2217,13 +2218,14 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		)
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
-		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
-		IncludeCoordinatorTaskControls: !p.configMode,
-		IncludeTaskTitleTool:           p.includeTaskTitleTool,
-		IncludeCanvasGuidance:          p.includeCanvasGuidance,
-		Autopilot:                      p.autopilot,
-		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
-		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,
+		RequiresCompletionSignal:         s.StepRequiresCompletionSignal(ctx, p.taskID),
+		IncludeCoordinatorTaskControls:   !p.configMode,
+		IncludeTaskTitleTool:             p.includeTaskTitleTool,
+		IncludeCanvasGuidance:            p.includeCanvasGuidance,
+		IncludeTaskChangeRequestGuidance: !p.configMode,
+		Autopilot:                        p.autopilot,
+		IncludeUserQuestionTool:          !p.autopilot && !p.isPassthrough,
+		IncludeParentQuestionTool:        p.autopilot && p.includeParentQuestionTool,
 	}, p.referenceContext, spawnContext, pullRequestTargetContext)
 }
 

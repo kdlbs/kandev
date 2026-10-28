@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -734,10 +735,10 @@ func (s *Service) associatePRWithTaskForSession(
 					s.logger.Debug("failed to publish restored task PR event", zap.Error(err))
 				}
 			}
-			s.reconcileComparisonTarget(ctx, taskID, pr)
+			s.reconcileComparisonTargetForTaskPR(ctx, taskID, restored, pr)
 			return restored, nil
 		}
-		s.reconcileComparisonTarget(ctx, taskID, pr)
+		s.reconcileComparisonTargetForTaskPR(ctx, taskID, existing, pr)
 		return existing, nil
 	}
 	tp := &TaskPR{
@@ -786,7 +787,7 @@ func (s *Service) associatePRWithTaskForSession(
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}
 	}
-	s.reconcileComparisonTarget(ctx, taskID, pr)
+	s.reconcileComparisonTargetForTaskPR(ctx, taskID, tp, pr)
 
 	s.logger.Info("associated PR with task",
 		zap.String("task_id", taskID),
@@ -967,40 +968,30 @@ func (s *Service) AssociatePRByURLForWorkspace(
 // Expected format: https://github.com/{owner}/{repo}/pull/{number}
 // Handles trailing slashes, query parameters, and URL fragments.
 func parsePRURL(prURL string) (owner, repo string, number int, err error) {
-	// Strip trailing whitespace/newlines
-	prURL = strings.TrimSpace(prURL)
-
-	// Find the /pull/ segment
-	idx := strings.Index(prURL, "/pull/")
-	if idx < 0 {
-		return "", "", 0, fmt.Errorf("URL does not contain /pull/: %s", prURL)
+	parsed, parseErr := url.Parse(strings.TrimSpace(prURL))
+	if parseErr != nil || parsed == nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Host == "" {
+		return "", "", 0, fmt.Errorf("invalid GitHub pull request URL")
 	}
-
-	// Parse PR number after /pull/, stripping query params, fragments, and trailing slashes
-	numStr := prURL[idx+len("/pull/"):]
-	if i := strings.IndexAny(numStr, "?#"); i >= 0 {
-		numStr = numStr[:i]
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if parsed.Port() != "" || (host != defaultGitHubHost && !strings.HasSuffix(host, ".github.com")) {
+		return "", "", 0, fmt.Errorf("unsupported GitHub pull request URL host")
 	}
-	numStr = strings.TrimRight(numStr, "/")
-	number, err = strconv.Atoi(numStr)
-	if err != nil {
-		return "", "", 0, fmt.Errorf("invalid PR number in URL %s: %w", prURL, err)
+	path := strings.TrimRight(parsed.EscapedPath(), "/")
+	if path == "" || strings.Contains(path, "%") {
+		return "", "", 0, fmt.Errorf("invalid GitHub pull request path")
 	}
-	if number <= 0 {
-		return "", "", 0, fmt.Errorf("invalid PR number in URL %s: must be greater than zero", prURL)
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) < 4 || len(parts) > 5 || parts[2] != "pull" ||
+		(len(parts) == 5 && parts[4] != "files" && parts[4] != "commits") {
+		return "", "", 0, fmt.Errorf("URL does not identify a supported pull request")
 	}
-
-	// Parse owner/repo from path before /pull/
-	pathBefore := prURL[:idx]
-	// Remove scheme+host prefix (find last two path segments)
-	parts := strings.Split(strings.TrimRight(pathBefore, "/"), "/")
-	if len(parts) < 2 {
-		return "", "", 0, fmt.Errorf("cannot extract owner/repo from URL: %s", prURL)
+	owner, repo = parts[0], parts[1]
+	if !validGitHubPathPart(owner) || !validGitHubPathPart(repo) {
+		return "", "", 0, fmt.Errorf("invalid repository identity in pull request URL")
 	}
-	repo = parts[len(parts)-1]
-	owner = parts[len(parts)-2]
-	if owner == "" || repo == "" {
-		return "", "", 0, fmt.Errorf("empty owner or repo in URL: %s", prURL)
+	number, parseErr = strconv.Atoi(parts[3])
+	if parseErr != nil || number <= 0 {
+		return "", "", 0, fmt.Errorf("invalid pull request number in URL")
 	}
 	return owner, repo, number, nil
 }
@@ -1951,7 +1942,9 @@ func (s *Service) persistAndPublishTaskPRSync(
 	// Provider payloads carry the authoritative head/base repository identity
 	// and branch. Reconcile after the TaskPR write so a malformed or
 	// unmatchable payload never prevents the review association from persisting.
-	s.reconcileComparisonTargetFromSync(ctx, taskID, pr)
+	if tp.ComparisonPolicy != TaskPRComparisonPolicyPreserve {
+		s.reconcileComparisonTargetFromSync(ctx, taskID, pr)
+	}
 
 	if changed && s.eventBus != nil {
 		published, err := s.store.GetTaskPRByID(ctx, tp.ID)

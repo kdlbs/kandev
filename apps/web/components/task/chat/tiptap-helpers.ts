@@ -34,7 +34,17 @@ export function isEntityReferenceTriggerAllowed(args: {
 
 function entityReferenceFromAttrs(attrs: Record<string, unknown> | undefined) {
   if (!attrs) return null;
-  const candidate = attrs.key === null ? { ...attrs, key: undefined } : attrs;
+  const candidate = { ...attrs };
+  delete candidate.registration_enabled;
+  for (const field of [
+    "key",
+    "selection_id",
+    "association_mode",
+    "registration_status",
+    "registration_error_code",
+  ]) {
+    if (candidate[field] === null) delete candidate[field];
+  }
   return isEntityReference(candidate) ? candidate : null;
 }
 

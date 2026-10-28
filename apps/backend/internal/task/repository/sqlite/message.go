@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -153,16 +154,24 @@ func (r *Repository) CreateMessageWithInitialTaskBrief(
 
 func (r *Repository) insertMessageRow(
 	ctx context.Context,
-	execer taskSessionExecutor,
+	tx *sqlx.Tx,
 	message *models.Message,
 	requestsInput int,
 	messageType, metadataJSON string,
 ) error {
-	_, err := execer.ExecContext(ctx, r.db.Rebind(`
+	var err error
+	metadataJSON, err = prepareMessageRegistrationMetadata(message, metadataJSON)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at, prompt_seq, payload_digest, payload_size)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt, message.PromptIndex, message.PayloadDigest, message.PayloadSize)
-	return err
+	if err != nil {
+		return err
+	}
+	return r.createMessageRegistrationIntentsTx(ctx, tx, message, messageType, metadataJSON)
 }
 
 // insertMessageWithSessionLock serializes message insertion with rollback of

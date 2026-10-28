@@ -346,6 +346,9 @@ func (s *Service) refreshTaskMRFromWatch(ctx context.Context, store *Store, clie
 			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(prevErr))
 	}
 	if err := store.UpsertTaskMR(ctx, association); err != nil {
+		if errors.Is(err, ErrTaskMRDetached) {
+			return
+		}
 		s.logger.Warn("failed to refresh task MR from watch",
 			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
 		return

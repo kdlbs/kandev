@@ -105,7 +105,16 @@ const createTablesSQL = `
 		closed_at DATETIME,
 		last_synced_at DATETIME,
 		updated_at DATETIME NOT NULL,
-		UNIQUE(task_id, repository_id, project_path, mr_iid)
+		provider_repository_id TEXT NOT NULL DEFAULT '',
+		connection_scope TEXT NOT NULL DEFAULT '',
+		repository_path TEXT NOT NULL DEFAULT '',
+		source TEXT NOT NULL DEFAULT '',
+		comparison_policy TEXT NOT NULL DEFAULT 'legacy',
+		association_revision BIGINT NOT NULL DEFAULT 1,
+		first_origin_kind TEXT NOT NULL DEFAULT '',
+		first_origin_id TEXT NOT NULL DEFAULT '',
+		first_origin_revision TEXT NOT NULL DEFAULT '',
+		detached_at DATETIME
 	);
 	CREATE INDEX IF NOT EXISTS idx_gitlab_task_mrs_task_id ON gitlab_task_mrs(task_id);
 
@@ -248,6 +257,12 @@ func (s *Store) createTables() error {
 	if err := s.migrateTaskMRSHAColumns(); err != nil {
 		return err
 	}
+	if err := s.migrateTaskMRRegistrationColumns(); err != nil {
+		return err
+	}
+	if err := s.migrateTaskMRCanonicalKey(); err != nil {
+		return err
+	}
 	if err := s.migrateMRWatchUniqueKey(); err != nil {
 		return err
 	}
@@ -255,6 +270,98 @@ func (s *Store) createTables() error {
 		return err
 	}
 	return s.healTaskOwnedOrphans()
+}
+
+func (s *Store) migrateTaskMRCanonicalKey() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return s.migrateTaskMRCanonicalKeyPostgres()
+	}
+	createNew := dialect.MustRenderSchema(s.db.DriverName(), `CREATE TABLE gitlab_task_mrs_new (
+			id TEXT PRIMARY KEY, task_id TEXT NOT NULL, repository_id TEXT NOT NULL DEFAULT '',
+			host TEXT NOT NULL DEFAULT '', project_path TEXT NOT NULL, mr_iid INTEGER NOT NULL,
+			mr_url TEXT NOT NULL, mr_title TEXT NOT NULL, head_branch TEXT NOT NULL, head_sha TEXT NOT NULL DEFAULT '',
+			base_branch TEXT NOT NULL, base_sha TEXT NOT NULL DEFAULT '', author_username TEXT NOT NULL DEFAULT '',
+			state TEXT NOT NULL DEFAULT 'open', approval_state TEXT NOT NULL DEFAULT '', pipeline_state TEXT NOT NULL DEFAULT '',
+			merge_status TEXT NOT NULL DEFAULT '', draft INTEGER NOT NULL DEFAULT 0, approval_count INTEGER DEFAULT 0,
+		required_approvals INTEGER DEFAULT 0, pipeline_jobs_total INTEGER DEFAULT 0, pipeline_jobs_pass INTEGER DEFAULT 0,
+		detailed_merge_status TEXT NOT NULL DEFAULT '', reviewer_count INTEGER NOT NULL DEFAULT 0,
+			unapproved_reviewers INTEGER NOT NULL DEFAULT 0, unresolved_discussions INTEGER NOT NULL DEFAULT 0,
+			created_at {{timestamp}} NOT NULL, merged_at {{timestamp}}, closed_at {{timestamp}}, last_synced_at {{timestamp}},
+			updated_at {{timestamp}} NOT NULL, provider_repository_id TEXT NOT NULL DEFAULT '',
+			connection_scope TEXT NOT NULL DEFAULT '', repository_path TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '',
+			comparison_policy TEXT NOT NULL DEFAULT 'legacy', association_revision BIGINT NOT NULL DEFAULT 1,
+			first_origin_kind TEXT NOT NULL DEFAULT '', first_origin_id TEXT NOT NULL DEFAULT '',
+			first_origin_revision TEXT NOT NULL DEFAULT '', detached_at {{timestamp}}
+		)`)
+	if err := s.rebuildIfHasLegacyConstraint(
+		"gitlab_task_mrs",
+		"UNIQUE(task_id, repository_id, project_path, mr_iid)",
+		createNew,
+		`INSERT INTO gitlab_task_mrs_new (
+			id, task_id, repository_id, host, project_path, mr_iid, mr_url, mr_title, head_branch, head_sha,
+			base_branch, base_sha, author_username, state, approval_state, pipeline_state, merge_status, draft,
+			approval_count, required_approvals, pipeline_jobs_total, pipeline_jobs_pass, detailed_merge_status,
+			reviewer_count, unapproved_reviewers, unresolved_discussions, created_at, merged_at, closed_at,
+			last_synced_at, updated_at, provider_repository_id, connection_scope, repository_path, source,
+			comparison_policy, association_revision, first_origin_kind, first_origin_id, first_origin_revision, detached_at
+		) SELECT id, task_id, COALESCE(repository_id, ''), COALESCE(host, ''), project_path, mr_iid, mr_url,
+			mr_title, head_branch, COALESCE(head_sha, ''), base_branch, COALESCE(base_sha, ''),
+			COALESCE(author_username, ''), COALESCE(state, 'open'), COALESCE(approval_state, ''),
+			COALESCE(pipeline_state, ''), COALESCE(merge_status, ''), COALESCE(draft, 0),
+			COALESCE(approval_count, 0), COALESCE(required_approvals, 0), COALESCE(pipeline_jobs_total, 0),
+			COALESCE(pipeline_jobs_pass, 0), COALESCE(detailed_merge_status, ''), COALESCE(reviewer_count, 0),
+			COALESCE(unapproved_reviewers, 0), COALESCE(unresolved_discussions, 0), created_at, merged_at,
+			closed_at, last_synced_at, updated_at, COALESCE(provider_repository_id, ''), COALESCE(connection_scope, ''),
+			COALESCE(repository_path, ''), COALESCE(source, ''), COALESCE(comparison_policy, 'legacy'),
+			COALESCE(association_revision, 1), COALESCE(first_origin_kind, ''), COALESCE(first_origin_id, ''),
+			COALESCE(first_origin_revision, ''), detached_at FROM gitlab_task_mrs`,
+	); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_gitlab_task_mrs_task_id ON gitlab_task_mrs(task_id)`); err != nil {
+		return fmt.Errorf("create GitLab task MR task index: %w", err)
+	}
+	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_gitlab_task_mrs_provider_identity
+		ON gitlab_task_mrs (task_id, connection_scope, host, provider_repository_id, mr_iid)
+		WHERE connection_scope <> '' AND provider_repository_id <> ''`)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_gitlab_task_mrs_active_locator
+		ON gitlab_task_mrs (task_id, repository_id, project_path, mr_iid) WHERE detached_at IS NULL`)
+	return err
+}
+
+func postgresTableUniqueConstraint(tx *sqlx.Tx, table string, columns ...string) (string, error) {
+	rows, err := tx.Query(`
+		SELECT tc.constraint_name, kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON kcu.constraint_schema = tc.constraint_schema AND kcu.constraint_name = tc.constraint_name
+			AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema = current_schema() AND tc.table_name = $1 AND tc.constraint_type = 'UNIQUE'
+		ORDER BY tc.constraint_name, kcu.ordinal_position`, table)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	constraintColumns := make(map[string][]string)
+	for rows.Next() {
+		var name, column string
+		if err := rows.Scan(&name, &column); err != nil {
+			return "", err
+		}
+		constraintColumns[name] = append(constraintColumns[name], column)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	for name, actual := range constraintColumns {
+		if sameColumnSet(actual, columns) {
+			return name, nil
+		}
+	}
+	return "", nil
 }
 
 // migrateTaskMRAutomationFields adds the reviewer/merge-readiness columns
@@ -272,6 +379,21 @@ func (s *Store) migrateTaskMRAutomationFields() error {
 		{"unresolved_discussions", sqlIntegerDefaultZero},
 	}
 	return addMissingColumns(s, "gitlab_task_mrs", columns)
+}
+
+func (s *Store) migrateTaskMRRegistrationColumns() error {
+	return addMissingColumns(s, "gitlab_task_mrs", []struct{ name, ddl string }{
+		{"provider_repository_id", sqlTextDefaultEmpty},
+		{"connection_scope", sqlTextDefaultEmpty},
+		{"repository_path", sqlTextDefaultEmpty},
+		{"source", sqlTextDefaultEmpty},
+		{"comparison_policy", "TEXT NOT NULL DEFAULT 'legacy'"},
+		{"association_revision", "BIGINT NOT NULL DEFAULT 1"},
+		{"first_origin_kind", sqlTextDefaultEmpty},
+		{"first_origin_id", sqlTextDefaultEmpty},
+		{"first_origin_revision", sqlTextDefaultEmpty},
+		{"detached_at", "DATETIME"},
+	})
 }
 
 // ensureMRWatchIndexes re-creates gitlab_mr_watches' indexes after
@@ -331,6 +453,33 @@ func (s *Store) migrateMRWatchUniqueKey() error {
 			created_at, updated_at
 		FROM gitlab_mr_watches`,
 	)
+}
+
+func (s *Store) migrateTaskMRCanonicalKeyPostgres() error {
+	tx, err := s.db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	legacy, err := postgresTableUniqueConstraint(tx, "gitlab_task_mrs", "task_id", "repository_id", "project_path", "mr_iid")
+	if err != nil {
+		return err
+	}
+	if legacy != "" {
+		if _, err := tx.Exec(`ALTER TABLE gitlab_task_mrs DROP CONSTRAINT ` + quotePostgresIdentifier(legacy)); err != nil {
+			return fmt.Errorf("drop legacy GitLab task MR key: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_gitlab_task_mrs_provider_identity
+		ON gitlab_task_mrs (task_id, connection_scope, host, provider_repository_id, mr_iid)
+		WHERE connection_scope <> '' AND provider_repository_id <> ''`); err != nil {
+		return fmt.Errorf("create GitLab task MR identity key: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_gitlab_task_mrs_active_locator
+		ON gitlab_task_mrs (task_id, repository_id, project_path, mr_iid) WHERE detached_at IS NULL`); err != nil {
+		return fmt.Errorf("create GitLab task MR active locator key: %w", err)
+	}
+	return tx.Commit()
 }
 
 // migratePostgresMRWatchUniqueKey replaces the legacy two-column unique
@@ -614,7 +763,9 @@ const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid
 	approval_state, pipeline_state, merge_status, draft, approval_count,
 	required_approvals, pipeline_jobs_total, pipeline_jobs_pass,
 	detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
-	created_at, merged_at, closed_at, last_synced_at, updated_at`
+	created_at, merged_at, closed_at, last_synced_at, updated_at,
+	provider_repository_id, connection_scope, repository_path, source, comparison_policy,
+	association_revision, first_origin_kind, first_origin_id, first_origin_revision, detached_at`
 
 // taskMRSelectColsQualified is the same projection prefixed with `gtm.`,
 // for the workspace JOIN where `tasks` shares column names (id, created_at,
@@ -627,7 +778,9 @@ const taskMRSelectColsQualified = `gtm.id, gtm.task_id, gtm.repository_id,
 	gtm.pipeline_jobs_pass, gtm.detailed_merge_status, gtm.reviewer_count,
 	gtm.unapproved_reviewers, gtm.unresolved_discussions,
 	gtm.created_at, gtm.merged_at, gtm.closed_at,
-	gtm.last_synced_at, gtm.updated_at`
+	gtm.last_synced_at, gtm.updated_at, gtm.provider_repository_id, gtm.connection_scope,
+	gtm.repository_path, gtm.source, gtm.comparison_policy, gtm.association_revision,
+	gtm.first_origin_kind, gtm.first_origin_id, gtm.first_origin_revision, gtm.detached_at`
 
 // UpsertTaskMR creates or updates a task↔MR association keyed by
 // (task_id, repository_id, project_path, mr_iid). Generates an ID on first
@@ -641,7 +794,27 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	if tm.CreatedAt.IsZero() {
 		tm.CreatedAt = now
 	}
-	rows, err := s.db.NamedQueryContext(ctx, `
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	lockClause := ""
+	if dialect.IsPostgres(s.db.DriverName()) {
+		lockClause = " FOR UPDATE"
+	}
+	var detachedAt sql.NullTime
+	err = tx.GetContext(ctx, &detachedAt, tx.Rebind(`
+		SELECT detached_at FROM gitlab_task_mrs
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`+lockClause),
+		tm.TaskID, tm.RepositoryID, tm.ProjectPath, tm.MRIID)
+	if err == nil && detachedAt.Valid {
+		return ErrTaskMRDetached
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	query, args, err := sqlx.Named(`
 		INSERT INTO gitlab_task_mrs (
 			id, task_id, repository_id, host, project_path, mr_iid, mr_url, mr_title,
 			head_branch, head_sha, base_branch, base_sha, author_username, state, approval_state, pipeline_state,
@@ -657,7 +830,7 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 			:detailed_merge_status, :reviewer_count, :unapproved_reviewers, :unresolved_discussions,
 			:created_at, :merged_at, :closed_at, :last_synced_at, :updated_at
 		)
-		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) WHERE detached_at IS NULL DO UPDATE SET
 			host = excluded.host, mr_url = excluded.mr_url, mr_title = excluded.mr_title,
 			head_branch = excluded.head_branch, head_sha = excluded.head_sha, base_branch = excluded.base_branch, base_sha = excluded.base_sha,
 			author_username = excluded.author_username, state = excluded.state,
@@ -678,7 +851,12 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 			-- automation-subscribed MRs.
 			merged_at = excluded.merged_at, closed_at = excluded.closed_at,
 			last_synced_at = excluded.last_synced_at, updated_at = excluded.updated_at
-		RETURNING id, created_at, updated_at`, tm)
+		WHERE gitlab_task_mrs.detached_at IS NULL
+		RETURNING id, created_at, updated_at, association_revision`, tm)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
@@ -689,7 +867,13 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 		}
 		return errors.New("upsert task MR returned no row")
 	}
-	return rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt)
+	if err := rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt, &tm.AssociationRevision); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateTaskMRUnresolvedDiscussions sets the unresolved-discussion count for
@@ -713,6 +897,7 @@ func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath
 	err := s.ro.GetContext(ctx, &tm, s.ro.Rebind(`
 		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
+			AND detached_at IS NULL
 		LIMIT 1`), taskID, repositoryID, projectPath, iid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -721,6 +906,40 @@ func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath
 		return nil, err
 	}
 	return &tm, nil
+}
+
+func (s *Store) GetTaskMRIncludingDetached(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
+	var tm TaskMR
+	err := s.ro.GetContext(ctx, &tm, s.ro.Rebind(`
+		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ? LIMIT 1`),
+		taskID, repositoryID, projectPath, iid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
+}
+
+func (s *Store) GetTaskMRByProviderIdentity(ctx context.Context, taskID, connectionScope, providerRepositoryID, host string, iid int) (*TaskMR, error) {
+	normalizedHost, err := normalizeHostOrigin(host)
+	if err != nil {
+		return nil, ErrTaskMRRegistrationIdentityUnresolved
+	}
+	var mr TaskMR
+	err = s.ro.GetContext(ctx, &mr, s.ro.Rebind(`
+		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
+		WHERE task_id = ? AND connection_scope = ? AND provider_repository_id = ? AND lower(host) = lower(?) AND mr_iid = ?
+		LIMIT 1`), taskID, connectionScope, providerRepositoryID, normalizedHost, iid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &mr, nil
 }
 
 // GetTaskMRByID returns one association by its stable primary key. It is used
@@ -743,7 +962,7 @@ func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR
 	var mrs []TaskMR
 	if err := s.ro.SelectContext(ctx, &mrs, s.ro.Rebind(
 		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
-		 WHERE task_id = ? ORDER BY created_at ASC`), taskID); err != nil {
+		 WHERE task_id = ? AND detached_at IS NULL ORDER BY created_at ASC`), taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskMR, 0, len(mrs))
@@ -761,7 +980,7 @@ func (s *Store) ListTaskMRsByTaskIDs(ctx context.Context, taskIDs []string) (map
 	}
 	query, args, err := sqlx.In(
 		`SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
-		 WHERE task_id IN (?) ORDER BY created_at ASC`, taskIDs,
+		 WHERE task_id IN (?) AND detached_at IS NULL ORDER BY created_at ASC`, taskIDs,
 	)
 	if err != nil {
 		return nil, err
@@ -786,7 +1005,7 @@ func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string
 	if err := s.ro.SelectContext(ctx, &mrs, s.ro.Rebind(
 		`SELECT `+taskMRSelectColsQualified+` FROM gitlab_task_mrs gtm
 		 INNER JOIN tasks t ON gtm.task_id = t.id
-		 WHERE t.workspace_id = ?
+			 WHERE t.workspace_id = ? AND gtm.detached_at IS NULL
 		 ORDER BY gtm.created_at ASC`), workspaceID); err != nil {
 		return nil, err
 	}

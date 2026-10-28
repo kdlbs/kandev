@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -183,5 +184,151 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 	if _, err := store.GetActionPresets(ctx, "ws-1"); err != nil {
 		t.Fatalf("get GitLab action presets: %v", err)
+	}
+}
+
+func TestPostgresRegistrationUnlinkFence(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := database.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			archived_at TIMESTAMPTZ
+		);
+		CREATE TABLE repositories (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			provider_repo_id TEXT NOT NULL,
+			provider_host TEXT NOT NULL,
+			provider_owner TEXT NOT NULL,
+			provider_name TEXT NOT NULL,
+			remote_url TEXT NOT NULL,
+			local_path TEXT NOT NULL
+		);
+		CREATE TABLE task_repositories (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
+		);
+		INSERT INTO workspaces (id) VALUES ('ws-registration-pg');
+		INSERT INTO tasks (id, workspace_id) VALUES ('task-registration-pg', 'ws-registration-pg');
+		INSERT INTO repositories (id, workspace_id, provider, provider_repo_id, provider_host, provider_owner, provider_name, remote_url, local_path)
+		VALUES ('repo-registration-pg', 'ws-registration-pg', 'gitlab', 'provider-project-42', 'https://gitlab.example.test', 'group', 'project', 'https://gitlab.example.test/group/project.git', '/repo');
+		INSERT INTO repositories (id, workspace_id, provider, provider_repo_id, provider_host, provider_owner, provider_name, remote_url, local_path)
+		VALUES ('repo-registration-rebound-pg', 'ws-registration-pg', 'gitlab', 'provider-project-42', 'https://gitlab.example.test', 'renamed', 'project', 'https://gitlab.example.test/renamed/project.git', '/renamed');
+		INSERT INTO task_repositories (id, task_id, repository_id, created_at, updated_at)
+		VALUES ('task-repo-registration-pg', 'task-registration-pg', 'repo-registration-pg', NOW(), NOW()),
+		('task-repo-registration-rebound-pg', 'task-registration-pg', 'repo-registration-rebound-pg', NOW(), NOW())`); err != nil {
+		t.Fatalf("create registration fixtures: %v", err)
+	}
+	store, err := NewStore(database, database)
+	if err != nil {
+		t.Fatalf("create GitLab store: %v", err)
+	}
+	ctx := context.Background()
+	registration := &TaskMR{
+		TaskID: "task-registration-pg", RepositoryID: "repo-registration-pg",
+		Host: "https://gitlab.example.test", ProjectPath: "group/project", MRIID: 43,
+		MRURL: "https://gitlab.example.test/group/project/-/merge_requests/43", MRTitle: "registration fence",
+		State: "opened", CreatedAt: time.Now().UTC(), Source: TaskMRSourceAgentRegistration,
+		ProviderRepositoryID: "provider-project-42", ConnectionScope: "builtin:ws-registration-pg",
+		RepositoryPath: "group/project", ComparisonPolicy: TaskMRComparisonPolicyPreserve,
+	}
+	created, changed, err := store.RegisterTaskMRObservation(ctx, registration, false, 0)
+	if err != nil || !changed || created.AssociationRevision != 1 {
+		t.Fatalf("create observation = (%+v, changed=%v, err=%v)", created, changed, err)
+	}
+	detached, changed, err := store.DetachTaskMRForWorkspace(ctx, "ws-registration-pg", created.ID)
+	if err != nil || !changed || detached.AssociationRevision != 2 || detached.DetachedAt == nil {
+		t.Fatalf("detach observation = (%+v, changed=%v, err=%v)", detached, changed, err)
+	}
+	if _, _, err := store.RegisterTaskMRObservation(ctx, registration, true, 1); err != ErrTaskMRRegistrationRevisionChanged {
+		t.Fatalf("stale PostgreSQL restore error = %v, want revision changed", err)
+	}
+	start := make(chan struct{})
+	results := make(chan struct {
+		changed bool
+		err     error
+	}, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			candidate := *registration
+			_, restored, restoreErr := store.RegisterTaskMRObservation(ctx, &candidate, true, 2)
+			results <- struct {
+				changed bool
+				err     error
+			}{restored, restoreErr}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	changedCount := 0
+	for result := range results {
+		if result.err != nil && result.err != ErrTaskMRRegistrationRevisionChanged {
+			t.Fatalf("concurrent restore failed unexpectedly: %v", result.err)
+		}
+		if result.changed {
+			changedCount++
+		}
+	}
+	stored, err := store.GetTaskMRIncludingDetached(ctx, created.TaskID, created.RepositoryID, created.ProjectPath, created.MRIID)
+	if err != nil || changedCount != 1 || stored == nil || stored.AssociationRevision != 3 || stored.DetachedAt != nil {
+		t.Fatalf("concurrent restore result: changed=%d stored=%+v err=%v", changedCount, stored, err)
+	}
+
+	canonical := *registration
+	canonical.ID = ""
+	canonical.MRIID = 44
+	canonical.MRURL = "https://gitlab.example.test/group/project/-/merge_requests/44"
+	firstCanonical, changed, err := store.RegisterTaskMRObservation(ctx, &canonical, false, 0)
+	if err != nil || !changed {
+		t.Fatalf("create canonical identity: row=%+v changed=%v err=%v", firstCanonical, changed, err)
+	}
+	rebound := canonical
+	rebound.RepositoryID = "repo-registration-rebound-pg"
+	rebound.RepositoryPath = "renamed/project"
+	rebound.ProjectPath = "renamed/project"
+	rebound.MRURL = "https://gitlab.example.test/renamed/project/-/merge_requests/44"
+	secondCanonical, changed, err := store.RegisterTaskMRObservation(ctx, &rebound, false, firstCanonical.AssociationRevision)
+	if err != nil || changed || secondCanonical.ID != firstCanonical.ID || secondCanonical.RepositoryID != firstCanonical.RepositoryID {
+		t.Fatalf("canonical identity changed after repository rename: first=%+v second=%+v changed=%v err=%v", firstCanonical, secondCanonical, changed, err)
+	}
+	if _, _, err := store.DetachTaskMRForWorkspace(ctx, "ws-registration-pg", firstCanonical.ID); err != nil {
+		t.Fatalf("detach canonical identity: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE repositories SET provider_repo_id = 'provider-project-replacement' WHERE id = 'repo-registration-rebound-pg'`); err != nil {
+		t.Fatalf("reuse path with different immutable identity: %v", err)
+	}
+	reusedPath := rebound
+	reusedPath.ID = ""
+	reusedPath.ProviderRepositoryID = "provider-project-replacement"
+	replacement, changed, err := store.RegisterTaskMRObservation(ctx, &reusedPath, false, 0)
+	if err != nil || !changed || replacement.ID == firstCanonical.ID || replacement.DetachedAt != nil {
+		t.Fatalf("path reuse inherited detached identity: replacement=%+v changed=%v err=%v", replacement, changed, err)
+	}
+
+	legacy := &TaskMR{
+		TaskID: registration.TaskID, RepositoryID: registration.RepositoryID, Host: registration.Host,
+		ProjectPath: registration.ProjectPath, MRIID: 45, MRURL: "https://gitlab.example.test/group/project/-/merge_requests/45",
+		MRTitle: "legacy registration", State: "opened", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.UpsertTaskMR(ctx, legacy); err != nil {
+		t.Fatalf("seed unresolved legacy association: %v", err)
+	}
+	legacyCandidate := canonical
+	legacyCandidate.ID = ""
+	legacyCandidate.MRIID = legacy.MRIID
+	legacyCandidate.MRURL = legacy.MRURL
+	if _, _, err := store.RegisterTaskMRObservation(ctx, &legacyCandidate, true, 1); err != ErrTaskMRRegistrationIdentityUnresolved {
+		t.Fatalf("legacy identity repair error = %v, want unresolved", err)
 	}
 }

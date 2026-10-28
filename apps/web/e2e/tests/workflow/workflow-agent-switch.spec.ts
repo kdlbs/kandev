@@ -275,6 +275,7 @@ async function runProfileSessionLifecycleScenario(
       { timeout: 30_000 },
     )
     .toBe(true);
+  const expectedProfileBState = endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED";
   await expect
     .poll(async () => {
       sessions = (await apiClient.listTaskSessions(task.id)).sessions;
@@ -288,7 +289,7 @@ async function runProfileSessionLifecycleScenario(
     .toEqual({
       originalA: "WAITING_FOR_INPUT",
       returnedA: "WAITING_FOR_INPUT",
-      parkedB: endPolicy === "park" ? "WAITING_FOR_INPUT" : "COMPLETED",
+      parkedB: expectedProfileBState,
     });
 
   expect(sessions).toHaveLength(startPolicy === "reuse" ? 2 : 3);

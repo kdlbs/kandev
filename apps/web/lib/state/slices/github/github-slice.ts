@@ -1,7 +1,11 @@
 import type { SliceCreator } from "@/lib/state/slice-creator";
 
 import type { GitHubSlice, GitHubSliceState, TaskPRScope } from "./types";
-import type { GitHubPRDiscoveryHealth, GitHubPRDiscoveryHealthUpdate } from "@/lib/types/github";
+import type {
+  GitHubPRDiscoveryHealth,
+  GitHubPRDiscoveryHealthUpdate,
+  TaskPR,
+} from "@/lib/types/github";
 
 export const defaultGitHubState: GitHubSliceState = {
   githubStatus: { byWorkspaceId: {}, pendingPRDiscoveryHealthByWorkspaceId: {} },
@@ -175,6 +179,15 @@ function applyTaskPRScope(draft: GitHubSlice, scope?: TaskPRScope): void {
   draft.taskPRs.workspaceContextGeneration = scope.workspaceContextGeneration;
 }
 
+function taskPRAssociationRevision(pr: { association_revision?: number }): number {
+  return Number.isFinite(pr.association_revision) ? Math.max(0, pr.association_revision ?? 0) : 0;
+}
+
+function deletionRevision(value: number | true | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return value === true ? 0 : value;
+}
+
 function clearTaskPRDeletionTombstone(draft: GitHubSlice, taskId: string, associationId: string) {
   const deletedByTask = draft.taskPRs.deletedAssociationIdsByTaskId;
   if (!deletedByTask) return;
@@ -184,6 +197,49 @@ function clearTaskPRDeletionTombstone(draft: GitHubSlice, taskId: string, associ
   if (Object.keys(deleted).length === 0) {
     delete deletedByTask[taskId];
   }
+}
+
+function reconcileIncomingTaskPRs(
+  draft: GitHubSlice,
+  taskId: string,
+  incoming: TaskPR[],
+): TaskPR[] {
+  const existing = Array.isArray(draft.taskPRs.byTaskId[taskId])
+    ? draft.taskPRs.byTaskId[taskId]
+    : [];
+  const next: TaskPR[] = [];
+  for (const pr of incoming) {
+    const revision = taskPRAssociationRevision(pr);
+    const tombstone = deletionRevision(
+      draft.taskPRs.deletedAssociationIdsByTaskId?.[taskId]?.[pr.id],
+    );
+    if (tombstone !== undefined && revision <= tombstone) continue;
+    if (tombstone !== undefined) clearTaskPRDeletionTombstone(draft, taskId, pr.id);
+    const current = existing.find(
+      (item) =>
+        (item.repository_id ?? "") === (pr.repository_id ?? "") && item.pr_number === pr.pr_number,
+    );
+    const chosen = current && taskPRAssociationRevision(current) > revision ? current : pr;
+    const duplicateIndex = next.findIndex(
+      (item) =>
+        (item.repository_id ?? "") === (chosen.repository_id ?? "") &&
+        item.pr_number === chosen.pr_number,
+    );
+    if (duplicateIndex >= 0) next[duplicateIndex] = chosen;
+    else next.push(chosen);
+    clearPendingForTaskPR(draft, taskId, chosen);
+  }
+  return next;
+}
+
+function replaceTaskPRs(draft: GitHubSlice, prs: Record<string, TaskPR[]>, scope?: TaskPRScope) {
+  applyTaskPRScope(draft, scope);
+  const reconciled: Record<string, TaskPR[]> = {};
+  for (const [taskId, incoming] of Object.entries(prs)) {
+    const next = reconcileIncomingTaskPRs(draft, taskId, Array.isArray(incoming) ? incoming : []);
+    if (next.length > 0) reconciled[taskId] = next;
+  }
+  draft.taskPRs.byTaskId = reconciled;
 }
 
 function createTaskPRActions(
@@ -198,22 +254,28 @@ function createTaskPRActions(
   | "upsertTaskIssue"
 > {
   return {
-    setTaskPRs: (prs, scope) =>
+    setTaskPRs: (prs, scope) => set((draft) => replaceTaskPRs(draft, prs, scope)),
+    removeTaskPR: (taskId, associationId, scope, associationRevision = 0) =>
       set((draft) => {
         applyTaskPRScope(draft, scope);
-        draft.taskPRs.byTaskId = prs;
-        draft.taskPRs.deletedAssociationIdsByTaskId = {};
-      }),
-    removeTaskPR: (taskId, associationId, scope) =>
-      set((draft) => {
-        applyTaskPRScope(draft, scope);
+        const current = draft.taskPRs.byTaskId[taskId];
+        const currentAssociation = Array.isArray(current)
+          ? current.find((pr) => pr.id === associationId)
+          : undefined;
+        const revision = Number.isFinite(associationRevision)
+          ? Math.max(0, associationRevision)
+          : 0;
+        if (currentAssociation && taskPRAssociationRevision(currentAssociation) > revision) return;
         const deletedByTask = (draft.taskPRs.deletedAssociationIdsByTaskId ??= {});
         const deleted = deletedByTask[taskId] ?? {};
-        deleted[associationId] = true;
+        const priorRevision = deletionRevision(deleted[associationId]);
+        if (priorRevision !== undefined && priorRevision > revision) return;
+        deleted[associationId] = Math.max(priorRevision ?? 0, revision);
         deletedByTask[taskId] = deleted;
-        const current = draft.taskPRs.byTaskId[taskId];
         if (!Array.isArray(current)) return;
-        const remaining = current.filter((pr) => pr.id !== associationId);
+        const remaining = current.filter(
+          (pr) => pr.id !== associationId || taskPRAssociationRevision(pr) > revision,
+        );
         if (remaining.length === 0) delete draft.taskPRs.byTaskId[taskId];
         else draft.taskPRs.byTaskId[taskId] = remaining;
       }),
@@ -231,7 +293,11 @@ function createTaskPRActions(
     setTaskPR: (taskId, pr, scope) =>
       set((draft) => {
         applyTaskPRScope(draft, scope);
-        clearTaskPRDeletionTombstone(draft, taskId, pr.id);
+        const revision = taskPRAssociationRevision(pr);
+        const tombstone = deletionRevision(
+          draft.taskPRs.deletedAssociationIdsByTaskId?.[taskId]?.[pr.id],
+        );
+        if (tombstone !== undefined && revision <= tombstone) return;
         // Upsert by (repository_id, pr_number) so multi-branch tasks can
         // hold N PRs on the same repo as siblings. Keying on
         // repository_id alone collapses every PR for that repo onto one
@@ -245,6 +311,8 @@ function createTaskPRActions(
         const idx = existing.findIndex(
           (p) => (p.repository_id ?? "") === repoKey && p.pr_number === pr.pr_number,
         );
+        if (idx >= 0 && taskPRAssociationRevision(existing[idx]!) > revision) return;
+        if (tombstone !== undefined) clearTaskPRDeletionTombstone(draft, taskId, pr.id);
         if (idx >= 0) existing[idx] = pr;
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;

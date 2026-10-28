@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
@@ -133,7 +134,11 @@ function baseState(entries: QueuedMessage[]) {
 const CHILD = <div data-testid="child-marker">input</div>;
 
 function renderQueue(node: ReactNode) {
-  return render(<StateProvider>{node}</StateProvider>);
+  return render(
+    <StateProvider>
+      <ToastProvider>{node}</ToastProvider>
+    </StateProvider>,
+  );
 }
 
 function pressQueueEscape(): ReturnType<typeof vi.fn> {
@@ -351,7 +356,7 @@ describe("QueueAffordance Send Now", () => {
 it("acquires a target lease before activating an editor and releases it after cancel", async () => {
   const state = queueState([entry()]);
   useQueueMock.mockReturnValue(state);
-  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
   fireEvent.click(screen.getByTestId(CHIP_ID));
 
   fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
@@ -401,7 +406,7 @@ it("preserves queued attachments when saving a text edit", async () => {
     beginEdit: vi.fn(async () => true),
     completeEdit: vi.fn(async () => {}),
   });
-  render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+  renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
   fireEvent.click(screen.getByTestId(CHIP_ID));
   fireEvent.click(screen.getByTestId(EDIT_BUTTON_ID));
   await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_ID)).toBeTruthy());
@@ -545,7 +550,7 @@ describe("QueueAffordance entity-reference edits", () => {
       }),
     ]);
     useQueueMock.mockReturnValue(state);
-    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    renderQueue(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
 
     fireEvent.click(screen.getByTestId(CHIP_ID));
     fireEvent.click(screen.getByTitle("Edit queued message"));

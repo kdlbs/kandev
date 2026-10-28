@@ -1,7 +1,5 @@
 "use client";
 
-import { queueMutationErrorKey } from "@/lib/queue-mutation-error";
-
 import {
   forwardRef,
   useCallback,
@@ -17,120 +15,51 @@ import ReactMarkdown from "react-markdown";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
-import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
 import { SenderTaskBadge } from "@/components/task/chat/messages/sender-task-badge";
-import type { SenderTaskInfo } from "@/hooks/domains/session/use-sender-task-badge-model";
-import {
-  WorkflowStepMessageBadge,
-  workflowMessageInfoFromMetadata,
-  type WorkflowStepMessageInfo,
-} from "@/components/task/chat/messages/workflow-step-message-badge";
+import { WorkflowStepMessageBadge } from "@/components/task/chat/messages/workflow-step-message-badge";
 import { rehypePlugins, remarkPlugins } from "@/components/shared/markdown-components";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
-import {
-  entityReferencesFromMetadata,
-  survivingEntityReferences,
-} from "@/lib/entity-references/message-references";
+import { entityReferencesFromMetadata } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
 import { BoundedMessagePreview } from "@/components/task/chat/messages/bounded-message-preview";
 import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
 import { useQueuedMessageOverflow } from "@/components/task/chat/use-queued-message-overflow";
 import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
 import { QueuedGhostEditView } from "@/components/task/chat/queued-ghost-edit-view";
-import { t } from "@/lib/i18n";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
   useQueuedGhostLeaseLoss,
   useQueuedGhostStartEdit,
 } from "@/hooks/use-queue-edit-protection";
+import { useQueuedGhostCancel, useQueuedGhostSave } from "./queued-ghost-edit-actions";
+import {
+  clearQueuedGhostEditDraft,
+  readQueuedGhostEditDraft,
+  writeQueuedGhostEditDraft,
+} from "./queued-ghost-edit-draft";
+import {
+  canMergeEntry,
+  getSenderTaskInfo,
+  getWorkflowMessageInfo,
+  senderKindOf,
+  senderLabel,
+  type SenderKind,
+} from "./queued-ghost-message-model";
+
+export {
+  canMergeEntry,
+  canMergeWithAbove,
+  isWorkflowQueuedMessage,
+} from "./queued-ghost-message-model";
 
 /** Imperative handle for the ghost row, used by chat input "edit last queued" affordance. */
 export type QueuedGhostMessageHandle = {
   startEdit: () => void;
 };
-
-type SenderKind = "user" | "agent" | "workflow" | "system";
-
-export function isWorkflowQueuedMessage(entry: QueuedMessage): boolean {
-  return (
-    entry.queued_by === "workflow" ||
-    entry.queued_by === "workflow-auto-start" ||
-    workflowMessageInfoFromMetadata(entry.metadata) !== null
-  );
-}
-
-function senderKindOf(entry: QueuedMessage): SenderKind {
-  if (isWorkflowQueuedMessage(entry)) return "workflow";
-  if (!entry.queued_by) return "system";
-  // Inter-task messages dispatched via dispatchTaskMessage hardcode
-  // queued_by="agent"; that's the only signal needed.
-  if (entry.queued_by === "agent") return "agent";
-  return "user";
-}
-
-/** A message may serve as a merge source or target only when its sender kind is
- * "user" or "agent". Server-owned rows (queued_by="server") are reserved
- * backend rows and are never mergeable. */
-export function canMergeEntry(entry: QueuedMessage): boolean {
-  if (entry.queued_by === "server") return false;
-  if (
-    entry.metadata &&
-    ("plan_comment_refs" in entry.metadata ||
-      "plan_comment_request_fingerprint" in entry.metadata ||
-      "client_queue_id" in entry.metadata)
-  ) {
-    return false;
-  }
-  const kind = senderKindOf(entry);
-  return kind === "user" || kind === "agent";
-}
-
-/** Two messages may merge when both are mergeable and share the same sender
- * kind. Agent entries additionally require an identical non-empty
- * sender_task_id; user entries require both rows to be owned by the caller
- * identity (callerId defaults to the backend's QueuedByUser, which is what the
- * SPA sends when it omits user_id). Mirrors the backend's mergeAllowed
- * predicate so the button never appears for merges the server would reject. */
-export function canMergeWithAbove(
-  entry: QueuedMessage,
-  above: QueuedMessage | undefined,
-  callerId = "user",
-): boolean {
-  if (!above) return false;
-  if (!canMergeEntry(entry) || !canMergeEntry(above)) return false;
-  if (senderKindOf(entry) !== senderKindOf(above)) return false;
-  if (senderKindOf(entry) === "agent") {
-    const senderTaskId = getSenderTaskInfo(entry)?.id;
-    return senderTaskId !== undefined && senderTaskId === getSenderTaskInfo(above)?.id;
-  }
-  if (senderKindOf(entry) === "user") {
-    return callerId !== "" && entry.queued_by === callerId && above.queued_by === callerId;
-  }
-  return false;
-}
-
-function senderLabel(entry: QueuedMessage): string {
-  const kind = senderKindOf(entry);
-  if (kind === "agent") {
-    const title = entry.metadata?.sender_task_title;
-    const sessionName = entry.metadata?.sender_session_name;
-    const base =
-      typeof title === "string" && title.length > 0
-        ? t("task:fromTask", { title })
-        : t("task:fromAgent");
-    return typeof sessionName === "string" && sessionName.length > 0
-      ? t("task:senderWithSession", { base, sessionName })
-      : base;
-  }
-  if (kind === "workflow") return t("task:workflowSender");
-  if (kind === "system") return t("task:systemSender");
-  return t("task:you");
-}
 
 type SenderIconProps = { entry: QueuedMessage };
 
@@ -150,37 +79,6 @@ function senderIconFor(kind: SenderKind): { Icon: typeof IconUser; tone: string 
 function SenderIcon({ entry }: SenderIconProps) {
   const { Icon, tone } = senderIconFor(senderKindOf(entry));
   return <Icon className={cn("h-3.5 w-3.5 flex-shrink-0", tone)} aria-label={senderLabel(entry)} />;
-}
-
-/**
- * Returns the inter-task sender info when this entry was queued by another
- * task's agent (queued_by="agent" + sender_task_id in metadata). User-typed
- * entries have no SenderTaskInfo — they render with just the IconUser cue.
- */
-function getSenderTaskInfo(entry: QueuedMessage): SenderTaskInfo | null {
-  if (senderKindOf(entry) !== "agent") return null;
-  const meta = entry.metadata as
-    | {
-        sender_task_id?: string;
-        sender_task_title?: string;
-        sender_session_id?: string;
-        sender_session_name?: string;
-      }
-    | undefined;
-  const id = meta?.sender_task_id;
-  if (typeof id !== "string" || id.length === 0) return null;
-  return {
-    id,
-    snapshotTitle: meta?.sender_task_title ?? "",
-    sessionId: meta?.sender_session_id,
-    sessionName: meta?.sender_session_name,
-  };
-}
-
-function getWorkflowMessageInfo(entry: QueuedMessage): WorkflowStepMessageInfo | null {
-  const info = workflowMessageInfoFromMetadata(entry.metadata);
-  if (info) return info;
-  return entry.queued_by === "workflow" || entry.queued_by === "workflow-auto-start" ? {} : null;
 }
 
 type DisplayViewProps = {
@@ -485,105 +383,187 @@ function useQueuedGhostEditEscapeGuard(
   );
   useClarificationEscapeGuard(editing ? editEscapeGuard : null);
 }
-type QueuedGhostSaveArgs = {
-  value: string;
-  entryContent: string;
-  entityReferences: readonly EntityReference[];
-  attachments?: QueuedMessage["attachments"];
-  onSave: QueuedGhostMessageProps["onSave"];
-  onEditComplete?: (editToken?: string, saved?: boolean) => void | Promise<void>;
-  editTokenRef: React.RefObject<string | undefined>;
-  setEditing: (editing: boolean) => void;
-  setSaving: (saving: boolean) => void;
-  t: (key: string) => string;
-};
-
-function useQueuedGhostSave({
-  value,
-  entryContent,
-  entityReferences,
-  attachments,
-  onSave,
-  onEditComplete,
-  editTokenRef,
-  setEditing,
-  setSaving,
-  t,
-}: QueuedGhostSaveArgs) {
-  return useCallback(async () => {
-    const editToken = editTokenRef.current;
-    const trimmed = value.trim();
-    const hasAttachments = (attachments?.length ?? 0) > 0;
-    if ((!trimmed && !hasAttachments) || trimmed === entryContent) {
-      setEditing(false);
-      await onEditComplete?.(editToken, false);
-      return;
-    }
-    setSaving(true);
-    try {
-      const updatedReferences = survivingEntityReferences(trimmed, entityReferences);
-      if (attachments === undefined) {
-        await onSave(trimmed, updatedReferences);
-      } else {
-        await onSave(trimmed, updatedReferences, attachments);
-      }
-      setEditing(false);
-      await onEditComplete?.(editToken, true);
-    } catch (err) {
-      console.error("Failed to update queued entry:", err);
-      if (err instanceof QueueEntryNotFoundError) {
-        toast.error(t("chat:queueEditAlreadySent"));
-      } else {
-        toast.error(t(queueMutationErrorKey(err, "chat:queueEditSaveFailed")));
-      }
-      setEditing(false);
-      await onEditComplete?.(editToken, false);
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    value,
-    entryContent,
-    onSave,
-    onEditComplete,
-    entityReferences,
-    attachments,
-    editTokenRef,
-    setEditing,
-    setSaving,
-    t,
-  ]);
-}
-
-type QueuedGhostCancelArgs = {
-  entryContent: string;
-  onEditComplete?: (editToken?: string, saved?: boolean) => void | Promise<void>;
-  editTokenRef: React.RefObject<string | undefined>;
-  setValue: (value: string) => void;
-  setEditing: (editing: boolean) => void;
-};
-
-function useQueuedGhostCancel({
-  entryContent,
-  onEditComplete,
-  editTokenRef,
-  setValue,
-  setEditing,
-}: QueuedGhostCancelArgs) {
-  return useCallback(async () => {
-    const editToken = editTokenRef.current;
-    setValue(entryContent);
-    setEditing(false);
-    await onEditComplete?.(editToken);
-  }, [editTokenRef, entryContent, onEditComplete, setEditing, setValue]);
-}
-
 function useQueuedGhostMetadata(entry: QueuedMessage, canMerge: boolean) {
   const entityReferences = useMemo(
     () => entityReferencesFromMetadata(entry.metadata),
     [entry.metadata],
   );
   return { entityReferences, effectiveCanMerge: canMerge && canMergeEntry(entry) };
+}
+
+function useQueuedGhostEditState(
+  entry: QueuedMessage,
+  editLeaseActive: boolean,
+  entityReferences: readonly EntityReference[],
+) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(entry.content);
+  const [draftReferences, setDraftReferences] = useState<EntityReference[]>([]);
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!editing) return;
+    writeQueuedGhostEditDraft(entry.session_id, entry.id, {
+      content: value,
+      references: draftReferences,
+    });
+  }, [draftReferences, editing, entry.id, entry.session_id, value]);
+  useEffect(() => {
+    if (!editing) setDraftReferences([...entityReferences]);
+  }, [editing, entityReferences]);
+  useFocusQueuedEdit(editing, textareaRef);
+  useQueuedGhostLeaseLoss(editing, editLeaseActive, entry.content, setValue, setEditing);
+  return {
+    editing,
+    setEditing,
+    value,
+    setValue,
+    draftReferences,
+    setDraftReferences,
+    saving,
+    setSaving,
+    textareaRef,
+  };
+}
+
+type QueuedGhostMessageBodyProps = {
+  entry: QueuedMessage;
+  index?: number;
+  canEdit: boolean;
+  canRemove: boolean;
+  canDrag: boolean;
+  showDragHandle: boolean;
+  isDragging: boolean;
+  onRemove: () => void | Promise<void>;
+  onMerge?: () => void | Promise<void>;
+  onSendNow: () => void;
+  sendNowDisabled: boolean;
+  editing: boolean;
+  effectiveCanMerge: boolean;
+  startEdit: () => void;
+  value: string;
+  references: EntityReference[];
+  saving: boolean;
+  onChange: (value: string) => void;
+  onReferencesChange: (references: EntityReference[]) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+};
+
+type QueuedGhostEditStarterArgs = {
+  entry: QueuedMessage;
+  entityReferences: EntityReference[];
+  canEdit: boolean;
+  editing: boolean;
+  saving: boolean;
+  onEditStart?: () => void | Promise<boolean | string | void>;
+  setValue: (value: string) => void;
+  setReferences: (references: EntityReference[]) => void;
+  setEditing: (editing: boolean) => void;
+};
+
+function useQueuedGhostEditStarter({
+  entry,
+  entityReferences,
+  canEdit,
+  editing,
+  saving,
+  onEditStart,
+  setValue,
+  setReferences,
+  setEditing,
+}: QueuedGhostEditStarterArgs) {
+  const editTokenRef = useRef<string | undefined>(undefined);
+  const resumeEditAttemptedRef = useRef(false);
+  const savedDraftRef = useRef(readQueuedGhostEditDraft(entry.session_id, entry.id));
+  const startEdit = useQueuedGhostStartEdit({
+    canEdit,
+    editing,
+    saving,
+    onEditStart,
+    onStart: (editToken) => {
+      resumeEditAttemptedRef.current = true;
+      editTokenRef.current = editToken;
+      const savedDraft =
+        readQueuedGhostEditDraft(entry.session_id, entry.id) ?? savedDraftRef.current;
+      savedDraftRef.current = null;
+      setValue(savedDraft?.content ?? entry.content);
+      setReferences(savedDraft?.references ?? [...entityReferences]);
+      setEditing(true);
+    },
+  });
+  useEffect(() => {
+    if (!canEdit || editing || !savedDraftRef.current || resumeEditAttemptedRef.current) return;
+    resumeEditAttemptedRef.current = true;
+    void startEdit();
+  }, [canEdit, editing, startEdit]);
+  return { editTokenRef, startEdit };
+}
+
+function QueuedGhostMessageBody({
+  entry,
+  index,
+  canEdit,
+  canRemove,
+  canDrag,
+  showDragHandle,
+  isDragging,
+  onRemove,
+  onMerge,
+  onSendNow,
+  sendNowDisabled,
+  editing,
+  effectiveCanMerge,
+  startEdit,
+  value,
+  references,
+  saving,
+  onChange,
+  onReferencesChange,
+  onSave,
+  onCancel,
+  textareaRef,
+}: QueuedGhostMessageBodyProps) {
+  return (
+    <SortableRowShell
+      id={entry.id}
+      disabled={editing || !canDrag}
+      canDrag={canDrag}
+      showHandle={showDragHandle && !editing}
+      isDragging={isDragging}
+    >
+      {editing ? (
+        <QueuedGhostEditView
+          taskId={entry.task_id}
+          sessionId={entry.session_id}
+          value={value}
+          references={references}
+          saving={saving}
+          attachments={(entry.attachments ?? []) as QueuedAttachment[]}
+          onChange={onChange}
+          onReferencesChange={onReferencesChange}
+          onSave={onSave}
+          onCancel={onCancel}
+          textareaRef={textareaRef}
+        />
+      ) : (
+        <DisplayView
+          entry={entry}
+          entityReferences={references}
+          positionLabel={queuePositionLabel(index, entry.position)}
+          canEdit={canEdit}
+          canRemove={canRemove}
+          canMerge={effectiveCanMerge}
+          onStartEdit={startEdit}
+          onRemove={onRemove}
+          onMerge={onMerge}
+          onSendNow={onSendNow}
+          sendNowDisabled={sendNowDisabled}
+        />
+      )}
+    </SortableRowShell>
+  );
 }
 
 export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGhostMessageProps>(
@@ -609,79 +589,78 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
     ref,
   ) {
     const { t } = useTranslation();
-    const [editing, setEditing] = useState(false);
-    const [value, setValue] = useState(entry.content);
-    const [saving, setSaving] = useState(false);
-    const editTokenRef = useRef<string | undefined>(undefined);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const { entityReferences, effectiveCanMerge } = useQueuedGhostMetadata(entry, canMerge);
-    useFocusQueuedEdit(editing, textareaRef);
-    useQueuedGhostLeaseLoss(editing, editLeaseActive, entry.content, setValue, setEditing);
-    const startEdit = useQueuedGhostStartEdit({
+    const editor = useQueuedGhostEditState(entry, editLeaseActive, entityReferences);
+    const { editTokenRef, startEdit } = useQueuedGhostEditStarter({
+      entry,
+      entityReferences,
       canEdit,
-      editing,
-      saving,
+      editing: editor.editing,
+      saving: editor.saving,
       onEditStart,
-      onStart: (editToken) => {
-        editTokenRef.current = editToken;
-        setValue(entry.content);
-        setEditing(true);
-      },
+      setValue: editor.setValue,
+      setReferences: editor.setDraftReferences,
+      setEditing: editor.setEditing,
     });
     useImperativeHandle(ref, () => ({ startEdit }), [startEdit]);
     const handleCancel = useQueuedGhostCancel({
       entryContent: entry.content,
       onEditComplete,
       editTokenRef,
-      setValue,
-      setEditing,
+      setValue: editor.setValue,
+      setReferences: editor.setDraftReferences,
+      entityReferences,
+      setEditing: editor.setEditing,
     });
     const handleSave = useQueuedGhostSave({
-      value,
+      value: editor.value,
       entryContent: entry.content,
-      entityReferences,
+      originalReferences: entityReferences,
+      entityReferences: editor.draftReferences,
       attachments: entry.attachments,
       onSave,
       onEditComplete,
       editTokenRef,
-      setEditing,
-      setSaving,
+      setEditing: editor.setEditing,
+      setSaving: editor.setSaving,
       t,
+      onSaveResult: (success) => {
+        if (success) clearQueuedGhostEditDraft(entry.session_id, entry.id);
+      },
     });
+    const handleCancelWithDraftClear = useCallback(async () => {
+      clearQueuedGhostEditDraft(entry.session_id, entry.id);
+      try {
+        await handleCancel();
+      } finally {
+        clearQueuedGhostEditDraft(entry.session_id, entry.id);
+      }
+    }, [entry.id, entry.session_id, handleCancel]);
     return (
-      <SortableRowShell
-        id={entry.id}
-        disabled={editing || !canDrag}
+      <QueuedGhostMessageBody
+        entry={entry}
+        index={index}
+        canEdit={canEdit}
+        canRemove={canRemove}
         canDrag={canDrag}
-        showHandle={showDragHandle && !editing}
+        showDragHandle={showDragHandle}
         isDragging={isDragging}
-      >
-        {editing ? (
-          <QueuedGhostEditView
-            value={value}
-            saving={saving}
-            attachments={(entry.attachments ?? []) as QueuedAttachment[]}
-            onChange={setValue}
-            onSave={handleSave}
-            onCancel={handleCancel}
-            textareaRef={textareaRef}
-          />
-        ) : (
-          <DisplayView
-            entry={entry}
-            entityReferences={entityReferences}
-            positionLabel={queuePositionLabel(index, entry.position)}
-            canEdit={canEdit}
-            canRemove={canRemove}
-            canMerge={effectiveCanMerge}
-            onStartEdit={startEdit}
-            onRemove={onRemove}
-            onMerge={onMerge}
-            onSendNow={onSendNow}
-            sendNowDisabled={sendNowDisabled}
-          />
-        )}
-      </SortableRowShell>
+        onRemove={onRemove}
+        onMerge={onMerge}
+        onSendNow={onSendNow}
+        sendNowDisabled={sendNowDisabled}
+        editing={editor.editing}
+        effectiveCanMerge={effectiveCanMerge}
+        startEdit={startEdit}
+        value={editor.value}
+        references={editor.draftReferences}
+        saving={editor.saving}
+        onChange={editor.setValue}
+        onReferencesChange={editor.setDraftReferences}
+        onSave={handleSave}
+        onCancel={handleCancelWithDraftClear}
+        textareaRef={editor.textareaRef}
+      />
     );
   },
 );

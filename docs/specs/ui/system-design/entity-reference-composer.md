@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-ENTITY-REFERENCE-COMPOSER-001
 created: 2026-07-21
-updated: 2026-08-24
+updated: 2026-10-10
 owners:
   - kandev
 ---
@@ -75,6 +75,8 @@ Users discuss external work items in agent chat, but plain ticket keys and pull-
 | `scope`    | string            | Non-secret provider connection/site/instance scope needed to prevent identity collisions.                                                                                                                                                                                                                          |
 
 Metadata is deduplicated by `ref` in first-appearance order. It never contains credentials, provider query syntax, or raw upstream error bodies.
+
+Selected GitHub pull requests and GitLab merge requests may carry a selection ID and an explicit `link_on_send` or `context_only` intent. Their accepted-message registration, result projection, retry, and unlink behavior are owned by the [task change registration design](../../integrations/system-design/task-change-registration.md); this composer contract only owns draft selection and submission transport.
 
 The registry, not an adapter, assigns `provider` and constructs `ref` from validated provider registration, connection scope, kind, and immutable resource identity. Native and future plugin candidates are untrusted input: Kandev bounds counts and field lengths and validates UTF-8, kind, identity, and URL before exposing or persisting a result.
 

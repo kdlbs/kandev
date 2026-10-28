@@ -8,6 +8,7 @@ import type { ChatPanelState } from "./use-chat-panel-state";
 import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import { useSessionComposerRecovery } from "./session-recovery-context";
 import { useComposerPromptSuggestion } from "./use-composer-prompt-suggestion";
+import { hasPendingClarification } from "./types";
 
 // i18n-exempt: stable backend failure code, not user-facing copy.
 const DURABLE_DELIVERY_UNCERTAIN = "DURABLE_DELIVERY_UNCERTAIN";
@@ -86,6 +87,24 @@ function hasContextComments(panelState: ChatPanelState): boolean {
   );
 }
 
+function canLinkEntityReferences(panelState: ChatPanelState): boolean {
+  const queuesInput =
+    panelState.inputMode === "queue" ||
+    hasPendingClarification(
+      Boolean(panelState.pendingClarification),
+      panelState.session?.pending_action,
+    );
+  return !hasContextComments(panelState) && (!queuesInput || panelState.isQueueReady);
+}
+
+function entityReferenceComposerProps(panelState: ChatPanelState) {
+  return {
+    entityReferencesEnabled: true as const,
+    entityReferenceLinkingEnabled: canLinkEntityReferences(panelState),
+    hasContextComments: hasContextComments(panelState),
+  };
+}
+
 /**
  * Builds the (large) prop object for `ChatInputContainer` from panel state
  * and derived values. Kept separate so `ChatInputArea`'s render body stays
@@ -134,7 +153,6 @@ export function useComposerProps(args: ComposerPropsArgs) {
   );
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
-  const hasPendingContextComments = hasContextComments(panelState);
   return {
     ...promptSuggestion,
     onSubmit: handleSubmit,
@@ -144,7 +162,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     workspaceId: composerWorkspaceId,
     workspaceResolutionFailed,
     onRetryWorkspaceResolution,
-    entityReferencesEnabled: true as const,
+    ...entityReferenceComposerProps(panelState),
     taskTitle: panelState.task?.title,
     taskDescription: panelState.taskDescription ?? "",
     planModeEnabled,
@@ -169,7 +187,6 @@ export function useComposerProps(args: ComposerPropsArgs) {
     showRequestChangesTooltip,
     onRequestChangesTooltipDismiss,
     pendingCommentsByFile: panelState.pendingCommentsByFile,
-    hasContextComments: hasPendingContextComments,
     submitKey: panelState.chatSubmitKey,
     hasAgentCommands: !!(panelState.agentCommands && panelState.agentCommands.length > 0),
     isFailed: panelState.isFailed,

@@ -11,6 +11,8 @@ import type {
 export type TaskMRsState = {
   /** Workspace -> task -> linked MRs. */
   byWorkspaceId: Record<string, Record<string, TaskMR[]>>;
+  /** Highest applied association deletion revision per workspace and row ID. */
+  deletedAssociationRevisionsByWorkspaceId?: Record<string, Record<string, number>>;
 };
 
 export type LoadableList<T> = {
@@ -66,7 +68,7 @@ export type GitLabSliceActions = {
   // TaskMR — keeping legacy names; do not collide with github slice.
   setTaskMRs: (workspaceId: string, mrs: Record<string, TaskMR[]>) => void;
   setTaskMR: (workspaceId: string, taskId: string, mr: TaskMR) => void;
-  removeTaskMR: (workspaceId: string, associationId: string) => void;
+  removeTaskMR: (workspaceId: string, associationId: string, associationRevision?: number) => void;
   resetTaskMRs: (workspaceId?: string) => void;
 
   setGitLabReviewWatches: (watches: ReviewWatch[]) => void;

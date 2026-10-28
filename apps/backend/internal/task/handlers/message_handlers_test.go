@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 )
 
@@ -123,6 +125,94 @@ func shellOutputTestRouter(t *testing.T, repo *shellOutputMessageRepo) *gin.Engi
 	router := gin.New()
 	NewMessageHandlers(svc, nil, log).registerHTTP(router)
 	return router
+}
+
+type registrationRetryTaskRepository struct {
+	mockRepository
+	task *models.Task
+	err  error
+}
+
+func (r *registrationRetryTaskRepository) GetTask(context.Context, string) (*models.Task, error) {
+	return r.task, r.err
+}
+
+type registrationRetryNotifier struct {
+	taskID         string
+	registrationID string
+	operationID    string
+	actorID        string
+	action         string
+	err            error
+	calls          int
+}
+
+func (*registrationRetryNotifier) NotifyAcceptedMessage(string, string) {}
+
+func (n *registrationRetryNotifier) ActTaskChangeRegistration(
+	_ context.Context, taskID, registrationID, operationID, actorID, action string,
+) error {
+	n.calls++
+	n.taskID, n.registrationID, n.operationID, n.actorID, n.action = taskID, registrationID, operationID, actorID, action
+	return n.err
+}
+
+func TestHTTPRetryTaskChangeRegistration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name        string
+		task        *models.Task
+		taskErr     error
+		notifier    bool
+		notifierErr error
+		wantStatus  int
+		wantCalls   int
+	}{
+		{name: "accepted", task: &models.Task{ID: "task-1"}, notifier: true, wantStatus: http.StatusAccepted, wantCalls: 1},
+		{name: "missing task", taskErr: taskrepo.ErrTaskNotFound, notifier: true, wantStatus: http.StatusNotFound},
+		{name: "missing registration", task: &models.Task{ID: "task-1"}, notifier: true, notifierErr: sql.ErrNoRows, wantStatus: http.StatusNotFound, wantCalls: 1},
+		{name: "registration conflict", task: &models.Task{ID: "task-1"}, notifier: true, notifierErr: taskrepo.ErrTaskChangeRegistrationNotRetryable, wantStatus: http.StatusConflict, wantCalls: 1},
+		{name: "registration store failure", task: &models.Task{ID: "task-1"}, notifier: true, notifierErr: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCalls: 1},
+		{name: "worker unavailable", task: &models.Task{ID: "task-1"}, wantStatus: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			require.NoError(t, err)
+			repo := &registrationRetryTaskRepository{task: test.task, err: test.taskErr}
+			svc := service.NewService(service.Repos{Tasks: repo, TaskRepos: repo}, nil, log, service.RepositoryDiscoveryConfig{})
+			handlers := NewMessageHandlers(svc, nil, log)
+			var notifier *registrationRetryNotifier
+			if test.notifier {
+				notifier = &registrationRetryNotifier{err: test.notifierErr}
+				handlers.SetTaskChangeRegistrationNotifier(notifier)
+			}
+			router := gin.New()
+			handlers.registerHTTP(router)
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost,
+				"/api/v1/tasks/task-1/change-request-registrations/selection-1/retry",
+				strings.NewReader(`{"action":"retry","operation_id":"action-1"}`))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(response, request)
+			require.Equal(t, test.wantStatus, response.Code)
+			if notifier != nil {
+				require.Equal(t, test.wantCalls, notifier.calls)
+				if test.wantCalls > 0 {
+					require.Equal(t, "task-1", notifier.taskID)
+					require.Equal(t, "selection-1", notifier.registrationID)
+					require.Equal(t, "action-1", notifier.operationID)
+					require.NotEmpty(t, notifier.actorID)
+					require.Equal(t, "retry", notifier.action)
+				}
+			}
+			if test.wantStatus == http.StatusAccepted {
+				var body map[string]any
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+				require.Equal(t, true, body["accepted"])
+				require.Equal(t, "pending", body["state"])
+			}
+		})
+	}
 }
 
 // sessionStateSequencer is a mock repository that returns a sequence of session states.

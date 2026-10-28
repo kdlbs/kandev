@@ -89,6 +89,49 @@ func TestNormalizeForSubmissionOmitsUnknownVersion(t *testing.T) {
 	}
 }
 
+func TestNormalizeForSubmissionDefaultsLegacyReferencesToContextOnly(t *testing.T) {
+	ref := apiv1.EntityReference{
+		Version:  apiv1.EntityReferenceVersion,
+		Ref:      CanonicalRef("github", "pull_request", "acme/repo", "17"),
+		Provider: "github", Kind: "pull_request", ID: "17", Key: "acme/repo#17",
+		Title: "Fix auth", URL: "https://github.com/acme/repo/pull/17", Scope: "acme/repo",
+	}
+	got, err := NormalizeForSubmission([]apiv1.EntityReference{ref})
+	if err != nil {
+		t.Fatalf("normalize legacy reference: %v", err)
+	}
+	if len(got) != 1 || got[0].AssociationMode != "" || got[0].SelectionID != "" {
+		t.Fatalf("legacy reference = %#v, want an omitted intent that remains context-only", got)
+	}
+}
+
+func TestNormalizeForSubmissionRequiresSelectionIdentityForSupportedLinkIntent(t *testing.T) {
+	ref := apiv1.EntityReference{
+		Version:  apiv1.EntityReferenceVersion,
+		Ref:      CanonicalRef("gitlab", "merge_request", "https://gitlab.example.test:2022/group/project", "7"),
+		Provider: "gitlab", Kind: "merge_request", ID: "7", Key: "group/project!7",
+		Title: "Fix auth", URL: "https://gitlab.example.test:2022/group/project/-/merge_requests/7",
+		Scope: "https://gitlab.example.test:2022/group/project", SelectionID: "selection-1",
+		AssociationMode: apiv1.EntityReferenceModeLinkOnSend,
+	}
+	got, err := NormalizeForSubmission([]apiv1.EntityReference{ref})
+	if err != nil || len(got) != 1 || got[0].SelectionID != ref.SelectionID || got[0].AssociationMode != ref.AssociationMode {
+		t.Fatalf("normalize link intent = %#v, err=%v", got, err)
+	}
+
+	withoutID := ref
+	withoutID.SelectionID = ""
+	if _, err := NormalizeForSubmission([]apiv1.EntityReference{withoutID}); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("missing selection ID error = %v, want invalid reference", err)
+	}
+	unsupported := ref
+	unsupported.Provider = "azure_devops"
+	unsupported.Ref = CanonicalRef(unsupported.Provider, unsupported.Kind, unsupported.Scope, unsupported.ID)
+	if _, err := NormalizeForSubmission([]apiv1.EntityReference{unsupported}); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("unsupported provider intent error = %v, want invalid reference", err)
+	}
+}
+
 func TestNormalizePersistedDecodesJSONRoundTripAndOmitsMalformed(t *testing.T) {
 	valid := apiv1.EntityReference{
 		Version:  apiv1.EntityReferenceVersion,

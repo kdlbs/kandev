@@ -630,6 +630,12 @@ const (
 	TaskPRSourceWatch = "watch"
 	// TaskPRSourceURLLink is a PR the user explicitly linked by URL.
 	TaskPRSourceURLLink = "url_link"
+	// TaskPRSourceAgentRegistration identifies observation-only agent links.
+	TaskPRSourceAgentRegistration = "agent_registration"
+	// TaskPRSourceSelectedMention identifies a user-selected message reference.
+	TaskPRSourceSelectedMention = "selected_mention"
+	// TaskPRComparisonPolicyPreserve prevents registration and sync from changing task comparison state.
+	TaskPRComparisonPolicyPreserve = "preserve"
 )
 
 // TaskPR associates a PR with a task. RepositoryID identifies which task
@@ -685,7 +691,16 @@ type TaskPR struct {
 	// Source records which write path created this association: see
 	// TaskPRSourceWatch / TaskPRSourceURLLink. Empty on rows written before
 	// this column existed; never backfilled.
-	Source string `json:"source" db:"source"`
+	Source               string `json:"source" db:"source"`
+	ProviderHost         string `json:"-" db:"provider_host"`
+	ConnectionScope      string `json:"-" db:"connection_scope"`
+	ProviderRepositoryID string `json:"-" db:"provider_repository_id"`
+	RepositoryPath       string `json:"-" db:"repository_path"`
+	ComparisonPolicy     string `json:"comparison_policy,omitempty" db:"comparison_policy"`
+	AssociationRevision  int64  `json:"association_revision" db:"association_revision"`
+	FirstOriginKind      string `json:"first_origin_kind,omitempty" db:"first_origin_kind"`
+	FirstOriginID        string `json:"first_origin_id,omitempty" db:"first_origin_id"`
+	FirstOriginRevision  string `json:"first_origin_revision,omitempty" db:"first_origin_revision"`
 
 	// WorkflowAttentionJSON is the persisted wire value. WorkflowAttention is
 	// the API-facing decoded form and is hydrated after database reads.

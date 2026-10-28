@@ -549,6 +549,7 @@ export const test = backendFixture.extend<
         apiClient
           .updateRepository(seedData.repositoryId, {
             provider: "",
+            provider_repo_id: "",
             provider_host: "",
             provider_owner: "",
             provider_name: "",

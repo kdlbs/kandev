@@ -236,6 +236,8 @@ export type TaskPR = {
   id: string;
   workspace_id: string;
   task_id: string;
+  /** Monotonic association lifecycle revision used to fence delayed link events. */
+  association_revision?: number;
   /** ID of the task repository this PR belongs to. Empty for legacy single-repo
    *  tasks persisted before multi-repo support. */
   repository_id?: string;
@@ -316,6 +318,7 @@ export type TaskPRDeletedEvent = {
   workspace_id: string;
   task_id: string;
   association_id: string;
+  association_revision?: number;
 };
 
 export type CIAutomationQueueRemovalCause =

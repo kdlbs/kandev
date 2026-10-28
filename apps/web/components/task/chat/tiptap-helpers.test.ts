@@ -81,6 +81,70 @@ describe("entity reference metadata", () => {
       }),
     ).toEqual([reference]);
   });
+
+  it("does not include the editor-only registration capability in submitted references", () => {
+    const reference = {
+      version: 1,
+      ref: "mention:v1:github:pull_request:github.com%2Facme%2Fapp:12",
+      provider: "github",
+      kind: "pull_request",
+      id: "12",
+      key: "acme/app#12",
+      title: "Add authentication",
+      url: "https://github.com/acme/app/pull/12",
+      scope: "github.com/acme/app",
+      selection_id: "selection-context",
+      association_mode: "context_only",
+    };
+    const extract = tiptapHelpers.extractEntityReferences as unknown as (doc: {
+      content: unknown[];
+    }) => object[];
+
+    expect(
+      extract({
+        content: [
+          {
+            type: "entityReference",
+            attrs: { ...reference, registration_enabled: false },
+          },
+        ],
+      }),
+    ).toEqual([reference]);
+  });
+
+  it("normalizes nullable legacy registration attributes to context-only references", () => {
+    const reference = {
+      version: 1,
+      ref: "mention:v1:github:pull_request:github.com%2Facme%2Fapp:12",
+      provider: "github",
+      kind: "pull_request",
+      id: "12",
+      key: "acme/app#12",
+      title: "Add authentication",
+      url: "https://github.com/acme/app/pull/12",
+      scope: "github.com/acme/app",
+    };
+    const extract = tiptapHelpers.extractEntityReferences as unknown as (doc: {
+      content: unknown[];
+    }) => object[];
+
+    expect(
+      extract({
+        content: [
+          {
+            type: "entityReference",
+            attrs: {
+              ...reference,
+              selection_id: null,
+              association_mode: null,
+              registration_status: null,
+              registration_error_code: null,
+            },
+          },
+        ],
+      }),
+    ).toEqual([reference]);
+  });
 });
 
 describe("getMarkdownText", () => {

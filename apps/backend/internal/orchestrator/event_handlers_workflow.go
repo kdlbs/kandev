@@ -6393,13 +6393,14 @@ func (s *Service) injectAutoStartRuntimeContext(
 			)
 	}
 	options := sysprompt.KandevContextOptions{
-		RequiresCompletionSignal:       requiresSignal,
-		IncludeCoordinatorTaskControls: !configMode,
-		IncludeTaskTitleTool:           !configMode && titleOwner,
-		IncludeCanvasGuidance:          includeCanvasGuidance,
-		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
-		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
-		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
+		RequiresCompletionSignal:         requiresSignal,
+		IncludeCoordinatorTaskControls:   !configMode,
+		IncludeTaskTitleTool:             !configMode && titleOwner,
+		IncludeCanvasGuidance:            includeCanvasGuidance,
+		IncludeTaskChangeRequestGuidance: !configMode,
+		Autopilot:                        taskForPrompt != nil && taskForPrompt.Autopilot,
+		IncludeUserQuestionTool:          taskForPrompt == nil || !taskForPrompt.Autopilot,
+		IncludeParentQuestionTool:        taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
 	}
 	return sysprompt.InjectKandevContextWithOptions(
 			state.taskID, state.sessionID, recordedPrompt, options,

@@ -19,6 +19,7 @@ import (
 var ErrInvalidReference = errors.New("invalid entity reference")
 
 var identityNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
+var selectionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 const (
 	// MaxReferencesPerMessage is the per-message entity-reference cap enforced
@@ -74,6 +75,7 @@ func normalize(references []apiv1.EntityReference, strict bool) ([]apiv1.EntityR
 	}
 	result := make([]apiv1.EntityReference, 0, len(references))
 	seen := make(map[string]struct{}, len(references))
+	selectionIDs := make(map[string]string, len(references))
 	for index, reference := range references {
 		if reference.Version != apiv1.EntityReferenceVersion {
 			continue
@@ -86,7 +88,25 @@ func normalize(references []apiv1.EntityReference, strict bool) ([]apiv1.EntityR
 			continue
 		}
 		if _, duplicate := seen[normalized.Ref]; duplicate {
+			for _, existing := range result {
+				if existing.Ref == normalized.Ref && (existing.SelectionID != normalized.SelectionID ||
+					effectiveAssociationMode(existing.AssociationMode) != effectiveAssociationMode(normalized.AssociationMode)) {
+					if strict {
+						return nil, fmt.Errorf("%w: duplicate reference has conflicting selection intent", ErrInvalidReference)
+					}
+					break
+				}
+			}
 			continue
+		}
+		if normalized.SelectionID != "" {
+			if priorRef, duplicate := selectionIDs[normalized.SelectionID]; duplicate && priorRef != normalized.Ref {
+				if strict {
+					return nil, fmt.Errorf("%w: selection ID is reused", ErrInvalidReference)
+				}
+				continue
+			}
+			selectionIDs[normalized.SelectionID] = normalized.Ref
 		}
 		seen[normalized.Ref] = struct{}{}
 		result = append(result, normalized)
@@ -103,6 +123,7 @@ func normalizeOne(reference apiv1.EntityReference) (apiv1.EntityReference, bool)
 	reference.Key = normalizeDisplayText(reference.Key)
 	reference.Title = normalizeDisplayText(reference.Title)
 	reference.URL = strings.TrimSpace(reference.URL)
+	reference.SelectionID = strings.TrimSpace(reference.SelectionID)
 
 	if !identityNamePattern.MatchString(reference.Provider) || !identityNamePattern.MatchString(reference.Kind) ||
 		!validIdentity(reference.ID) || !validIdentity(reference.Scope) || reference.Title == "" ||
@@ -113,7 +134,31 @@ func normalizeOne(reference apiv1.EntityReference) (apiv1.EntityReference, bool)
 		!safeURL(reference) {
 		return apiv1.EntityReference{}, false
 	}
+	if reference.SelectionID != "" && !selectionIDPattern.MatchString(reference.SelectionID) {
+		return apiv1.EntityReference{}, false
+	}
+	switch effectiveAssociationMode(reference.AssociationMode) {
+	case apiv1.EntityReferenceModeContextOnly:
+	case apiv1.EntityReferenceModeLinkOnSend:
+		if reference.SelectionID == "" || !supportsBuiltInChangeRequestRegistration(reference) {
+			return apiv1.EntityReference{}, false
+		}
+	default:
+		return apiv1.EntityReference{}, false
+	}
 	return reference, true
+}
+
+func effectiveAssociationMode(mode apiv1.EntityReferenceAssociationMode) apiv1.EntityReferenceAssociationMode {
+	if mode == "" {
+		return apiv1.EntityReferenceModeContextOnly
+	}
+	return mode
+}
+
+func supportsBuiltInChangeRequestRegistration(reference apiv1.EntityReference) bool {
+	return reference.Provider == "github" && reference.Kind == "pull_request" ||
+		reference.Provider == "gitlab" && reference.Kind == "merge_request"
 }
 
 func validIdentity(value string) bool {

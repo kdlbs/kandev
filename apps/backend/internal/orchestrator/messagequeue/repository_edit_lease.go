@@ -28,6 +28,17 @@ type durableEditLeaseMutationRepository interface {
 	) error
 }
 
+type registrationEditLeaseMutationRepository interface {
+	updateContentAndMetadataWithLeaseAndRegistration(
+		ctx context.Context,
+		sessionID, entryID, leaseID, content string,
+		attachments []MessageAttachment,
+		metadataUpdates map[string]interface{},
+		queuedBy, operationID string,
+		writer QueueRegistrationEditWriter,
+	) error
+}
+
 func (r *sqliteRepository) ensureEditLeaseSchema(ctx context.Context) error {
 	if _, err := r.db.ExecContext(ctx, editLeaseSchema); err != nil {
 		return fmt.Errorf("ensure queue edit lease schema: %w", err)

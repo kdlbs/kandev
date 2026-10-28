@@ -26,7 +26,10 @@ var (
 	ErrTaskMRRepositoryRequired = errors.New("repository_id is required for multi-repository tasks")
 	// ErrTaskMRRepositoryMismatch prevents an MR from being linked to a repository
 	// whose durable provider origin and project identity do not match the MR.
-	ErrTaskMRRepositoryMismatch = errors.New("repository does not match GitLab merge request")
+	ErrTaskMRRepositoryMismatch             = errors.New("repository does not match GitLab merge request")
+	ErrTaskMRRegistrationIdentityUnresolved = errors.New("GitLab merge request identity is unresolved")
+	ErrTaskMRRegistrationRevisionChanged    = errors.New("GitLab merge request association revision changed")
+	ErrTaskMRDetached                       = errors.New("GitLab merge request association is detached")
 )
 
 func parseMRURLForHost(rawURL, configuredHost string) (string, int, error) {
@@ -196,12 +199,52 @@ func (s *Service) AssociateExistingMRByURL(
 		return nil, ErrTaskMRNotFound
 	}
 	association := taskMRFromStatus(taskID, repositoryID, client.Host(), projectPath, status)
-	if err := store.UpsertTaskMR(ctx, association); err != nil {
+	association, err = s.upsertOrRestoreTaskMR(ctx, store, association)
+	if err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
 	s.reconcileComparisonTarget(ctx, taskID, client.Host(), status.MR)
 	s.publishTaskMRUpdated(ctx, workspaceID, association)
 	return association, nil
+}
+
+func (s *Service) upsertOrRestoreTaskMR(ctx context.Context, store *Store, registration *TaskMR) (*TaskMR, error) {
+	existing, err := store.GetTaskMRIncludingDetached(
+		ctx, registration.TaskID, registration.RepositoryID, registration.ProjectPath, registration.MRIID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil && existing.DetachedAt != nil {
+		return s.restoreManuallyLinkedTaskMR(ctx, store, registration, existing)
+	}
+	if err := store.UpsertTaskMR(ctx, registration); err == nil {
+		return registration, nil
+	} else if !errors.Is(err, ErrTaskMRDetached) {
+		return nil, err
+	}
+	// Detach may race with the first read. Re-read the detached revision and
+	// restore only if the same canonical association remains detached.
+	existing, err = store.GetTaskMRIncludingDetached(
+		ctx, registration.TaskID, registration.RepositoryID, registration.ProjectPath, registration.MRIID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil || existing.DetachedAt == nil {
+		return nil, ErrTaskMRRegistrationRevisionChanged
+	}
+	return s.restoreManuallyLinkedTaskMR(ctx, store, registration, existing)
+}
+
+func (s *Service) restoreManuallyLinkedTaskMR(
+	ctx context.Context, store *Store, registration, existing *TaskMR,
+) (*TaskMR, error) {
+	registration.ID = existing.ID
+	registration.ProviderRepositoryID = existing.ProviderRepositoryID
+	registration.ConnectionScope = existing.ConnectionScope
+	registration.RepositoryPath = existing.RepositoryPath
+	return store.RestoreDetachedTaskMR(ctx, registration, existing.AssociationRevision)
 }
 
 // AssociateExistingMRByURLForSession wraps AssociateExistingMRByURL for
@@ -296,7 +339,16 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if lookupErr != nil {
 		return lookupErr
 	}
-	if association != nil && s.comparisonTargetObserver != nil && association.RepositoryID != "" {
+	if association == nil {
+		return ErrTaskMRNotFound
+	}
+	if err := store.ValidateTaskMRScope(ctx, workspaceID, association.TaskID, association.RepositoryID); err != nil {
+		return err
+	}
+	if association.DetachedAt != nil {
+		return nil
+	}
+	if association.ComparisonPolicy != TaskMRComparisonPolicyPreserve && s.comparisonTargetObserver != nil && association.RepositoryID != "" {
 		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
 			ctx,
 			association.TaskID,
@@ -312,12 +364,16 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 			return err
 		}
 	}
-	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
+	detached, changed, err := store.DetachTaskMRForWorkspace(ctx, workspaceID, associationID)
+	if err != nil {
 		return err
 	}
-	if s.eventBus != nil && association != nil {
+	if s.eventBus != nil && changed {
 		event := bus.NewEvent(events.GitLabTaskMRDeleted, eventSource, &TaskMRDeletedEvent{
-			WorkspaceID: workspaceID, TaskID: association.TaskID, AssociationID: association.ID,
+			WorkspaceID: workspaceID, TaskID: detached.TaskID, AssociationID: detached.ID,
+			AssociationRevision: detached.AssociationRevision, ProviderHost: detached.Host,
+			ConnectionScope: detached.ConnectionScope, ProviderRepositoryID: detached.ProviderRepositoryID,
+			ChangeRequestID: strconv.Itoa(detached.MRIID),
 		})
 		if err := s.eventBus.Publish(ctx, events.GitLabTaskMRDeleted, event); err != nil {
 			s.logger.Debug("failed to publish GitLab task MR deletion event", zap.Error(err))
@@ -374,9 +430,14 @@ func (e *TaskMRUpdatedEvent) GetWorkspaceID() string {
 // TaskMRDeletedEvent identifies one task-MR association removed from active
 // task surfaces. The upstream merge request remains unchanged.
 type TaskMRDeletedEvent struct {
-	WorkspaceID   string `json:"workspace_id"`
-	TaskID        string `json:"task_id"`
-	AssociationID string `json:"association_id"`
+	WorkspaceID          string `json:"workspace_id"`
+	TaskID               string `json:"task_id"`
+	AssociationID        string `json:"association_id"`
+	AssociationRevision  int64  `json:"association_revision"`
+	ProviderHost         string `json:"provider_host"`
+	ConnectionScope      string `json:"connection_scope"`
+	ProviderRepositoryID string `json:"provider_repository_id"`
+	ChangeRequestID      string `json:"change_request_id"`
 }
 
 // GetWorkspaceID lets the websocket broadcaster route the deletion to the

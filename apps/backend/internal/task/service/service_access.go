@@ -561,6 +561,13 @@ func (s *Service) authorizeRepositoryID(ctx context.Context, repositoryID string
 	return nil
 }
 
+// AuthorizeRepositoryAccess checks that the current caller can reach the
+// workspace containing a repository. It is used by asynchronous operations
+// that must restore the accepted actor's scope before reading repository data.
+func (s *Service) AuthorizeRepositoryAccess(ctx context.Context, repositoryID string) error {
+	return s.authorizeRepositoryID(ctx, repositoryID)
+}
+
 // filterWorkspacesForCaller narrows a workspace list to the caller's view.
 //
 // The caller's whole membership map is read once here rather than per

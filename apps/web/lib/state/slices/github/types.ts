@@ -47,7 +47,7 @@ export type TaskPRsState = {
   workspaceId?: string | null;
   workspaceContextGeneration?: number;
   /** Association tombstones prevent stale HTTP responses from resurrecting a deletion. */
-  deletedAssociationIdsByTaskId?: Record<string, Record<string, true>>;
+  deletedAssociationIdsByTaskId?: Record<string, Record<string, number | true>>;
 };
 
 export type TaskIssuesState = {
@@ -129,7 +129,12 @@ export type GitHubSliceActions = {
   setGitHubAppRegistrationsLoading: (workspaceId: string, loading: boolean) => void;
   resetGitHubAppRegistrations: (workspaceId: string) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>, scope?: TaskPRScope) => void;
-  removeTaskPR: (taskId: string, associationId: string, scope?: TaskPRScope) => void;
+  removeTaskPR: (
+    taskId: string,
+    associationId: string,
+    scope?: TaskPRScope,
+    associationRevision?: number,
+  ) => void;
   setTaskIssues: (workspaceId: string, issues: Record<string, TaskIssueLink>) => void;
   upsertTaskIssue: (workspaceId: string, issue: TaskIssueLink) => void;
   setTaskPR: (taskId: string, pr: TaskPR, scope?: TaskPRScope) => void;

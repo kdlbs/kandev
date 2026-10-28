@@ -45,6 +45,19 @@ describe("editor extensions", () => {
     expect(extensions.map((extension) => extension.name)).toContain("entityReference");
   });
 
+  it("configures selected reference controls for context-only queue admission", () => {
+    const extensions = buildEditorExtensions({
+      mentionSuggestion: {},
+      slashSuggestion: {},
+      entityReferenceLinkingEnabled: false,
+      submitKeymap: Extension.create({ name: "submit-test" }),
+      historyKeymap: Extension.create({ name: "history-test" }),
+    });
+    const entityReference = extensions.find((extension) => extension.name === "entityReference");
+
+    expect(entityReference?.options.registrationEnabled).toBe(false);
+  });
+
   it("registers the # suggestion plugin independently from @ and slash", () => {
     const entityReferenceSuggestion = { char: "#" };
     const build = buildEditorExtensions as unknown as (args: {
