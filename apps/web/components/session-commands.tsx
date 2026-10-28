@@ -33,6 +33,8 @@ import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
+import { useToast } from "@/components/toast-provider";
+import { runFileOp } from "@/hooks/file-operation-utils";
 import { searchKeywords } from "@/lib/commands/search-keywords";
 import type { CommandItem } from "@/lib/commands/types";
 
@@ -162,7 +164,11 @@ export function buildGitCommands({
   ];
 }
 
-export function buildWorkspaceCommands(sessionId: string, t: TFunction): CommandItem[] {
+export function buildWorkspaceCommands(
+  sessionId: string,
+  t: TFunction,
+  toast: ReturnType<typeof useToast>["toast"],
+): CommandItem[] {
   return [
     {
       id: "workspace-create-file",
@@ -174,15 +180,17 @@ export function buildWorkspaceCommands(sessionId: string, t: TFunction): Command
       inputPlaceholder: t("common:commandCreateFilePlaceholder"),
       onInputSubmit: async (path) => {
         const client = getWebSocketClient();
-        if (!client) return;
-        try {
-          const response = await createFile(client, sessionId, path);
-          if (response.success) {
-            const name = path.split("/").pop() || path;
-            useDockviewStore.getState().addFileEditorPanel(path, name);
-          }
-        } catch (error) {
-          console.error("Failed to create file:", error);
+        const title = t("task:failedToCreateFile");
+        const unknownError = t("common:anUnknownErrorOccurred");
+        if (!client) {
+          toast({ title, description: unknownError, variant: "error" });
+          return;
+        }
+        if (
+          await runFileOp(() => createFile(client, sessionId, path), title, unknownError, toast)
+        ) {
+          const name = path.split("/").pop() || path;
+          useDockviewStore.getState().addFileEditorPanel(path, name);
         }
       },
     },
@@ -373,6 +381,7 @@ export function SessionCommands({
   isTaskArchived,
 }: SessionCommandsProps) {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const git = useGitOperations(sessionId);
   const panels = usePanelActions();
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
@@ -416,7 +425,7 @@ export function SessionCommands({
                 t,
               })
             : []),
-          ...(hasWorktree ? buildWorkspaceCommands(sessionId, t) : []),
+          ...(hasWorktree ? buildWorkspaceCommands(sessionId, t, toast) : []),
           ...buildPanelCommands(panels, isPassthrough, t),
         ]
       : [];
@@ -433,6 +442,7 @@ export function SessionCommands({
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
   }, [
+    toast,
     sessionId,
     activeTaskId,
     git,
