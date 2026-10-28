@@ -442,7 +442,7 @@ func githubPRBaseFromPR(pr *githubpkg.PR, owner, repo string, number int, checko
 	if err != nil {
 		return taskmodels.PRBase{}, fmt.Errorf("validate GitHub PR base identity: %w", err)
 	}
-	base := taskmodels.PRBase{Target: target, OID: pr.BaseSHA}
+	base := taskmodels.PRBase{Target: target, OID: pr.BaseSHA, HeadRepositoryNodeID: strings.TrimSpace(pr.HeadRepoNodeID)}
 	if err := base.Validate(); err != nil {
 		return taskmodels.PRBase{}, err
 	}

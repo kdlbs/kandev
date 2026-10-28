@@ -6,6 +6,7 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
+  - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-001
   - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-003
   - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-004
 acceptance_criteria:
@@ -38,6 +39,10 @@ and GHE.com PRs resolve their base, and PRs from another host fail closed.
 - `apps/backend/internal/backendapp/orchestrator.go`: `githubPRBaseFromPR` and
   `githubComparisonRepository` take the host from `pr.GitHubHost`. Empty means
   github.com, and an invalid value returns an error.
+
+- Review remediation: preserve the live head node ID in transient `PRBase`
+  data and normalize verified aliases during executor identity checks. Keep
+  persisted node-ID targets and numeric repository bindings compatible.
 
 ## Out of scope
 
@@ -131,3 +136,19 @@ Done on 2026-10-28.
   this macOS environment: `/var` symlinked temp paths are rejected as unsafe,
   and three still fail with a resolved `TMPDIR`. They do not exercise PR base
   identity. CI is the authority for them.
+
+## PR review remediation
+
+- Corrected the requirement references for legacy GitHub.com acceptance.
+- Reproduced the node-ID versus numeric-ID mismatch at conversion and launch
+  boundaries before the fix. Verified aliases now compare as the same live
+  head repository. Unknown aliases and cross-host identities remain rejected.
+- Added coverage for unchanged stored targets, absence of live alias evidence,
+  remote-contribution launch, and exclusion of live aliases from JSON.
+- Public documentation already describes Enterprise support. This correction
+  restores that documented behavior without adding configuration or API fields.
+- Linux verification passed: the complete executor package and the focused
+  `PRBase|GetPRForAutomation|Enterprise|Comparison` tests in `backendapp`,
+  `github`, and `task/models`. The executor suite took 152 seconds.
+- Documentation coverage, catalog validation, and specification lint passed.
+- Exact-head CI, automated review disposition, and merge remain pending.

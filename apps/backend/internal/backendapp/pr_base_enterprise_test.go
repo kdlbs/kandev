@@ -53,3 +53,15 @@ func enterprisePRBasePR(githubHost string) *githubpkg.PR {
 		BaseRepoOwner: "upstream", BaseRepoName: "widgets",
 	}
 }
+
+func TestPRBaseIdentityConversionPreservesLiveHeadAliases(t *testing.T) {
+	pr := enterprisePRBasePR("git.example.com")
+	pr.HeadRepoID, pr.HeadRepoNodeID, pr.BaseRepoID = 42, "R_verified", 99
+	base, err := githubPRBaseFromPR(pr, "upstream", "widgets", 42, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Target.HeadRepository.ProviderID != "42" || base.HeadRepositoryNodeID != "R_verified" || base.Target.TargetRepository.ProviderID != "99" {
+		t.Fatalf("live repository identity = %#v", base)
+	}
+}

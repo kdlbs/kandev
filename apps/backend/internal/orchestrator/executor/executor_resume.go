@@ -444,12 +444,31 @@ func validPRBaseIdentity(
 	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
 		return false, prBaseMismatchHeadBranch
 	}
+	attachedRepository = normalizePRBaseHeadAlias(base, attachedRepository)
+	headRepository = normalizePRBaseHeadAlias(base, headRepository)
+	if expected != nil {
+		copy := *expected
+		copy.HeadRepository = normalizePRBaseHeadAlias(base, copy.HeadRepository)
+		expected = &copy
+	}
 	if expected != nil || contribution {
 		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
 			headRepository, hasHeadRepository, contribution)
 	}
 	return validUnboundPRBaseIdentity(target, checkoutBranch, attachedRepository, hasAttachedRepository,
 		headRepository, hasHeadRepository)
+}
+
+// normalizePRBaseHeadAlias recognizes only the alias pair returned for this live
+// head repository. Stored identities and unrelated repository IDs stay intact.
+func normalizePRBaseHeadAlias(base models.PRBase, repository models.ComparisonTargetRepository) models.ComparisonTargetRepository {
+	head := base.Target.HeadRepository
+	if base.HeadRepositoryNodeID != "" && head.ProviderID != "" &&
+		repository.ProviderID == base.HeadRepositoryNodeID &&
+		strings.EqualFold(repository.Host, head.Host) && strings.EqualFold(repository.Path, head.Path) {
+		repository.ProviderID = head.ProviderID
+	}
+	return repository
 }
 
 func validBoundPRBaseIdentity(

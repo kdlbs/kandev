@@ -2,6 +2,7 @@
 created: 2026-10-28
 status: done
 requirements:
+  - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-001
   - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-003
   - REQ-INTEGRATIONS-GITHUB-ENTERPRISE-004
 system_design:
@@ -82,6 +83,8 @@ launch (Task execution).
   from, stamped by `GetPRForAutomation` on a response copy.
 - Cross-host PRs with equal owner, name, and number fail closed.
 - Empty `ProviderHost` legacy rows keep their github.com meaning.
+- Launch identity checks accept numeric and node IDs only when the live PR
+  response confirms they identify the same head repository.
 
 ### Out of scope
 
@@ -121,6 +124,16 @@ The executor then compares host-qualified identities. A PR fetched from a
 different host than the attached repository fails with
 `target_repository_mismatch` or `head_repository_mismatch`, not
 `repository_identity_missing`.
+
+### Live repository ID compatibility
+
+PR reconciliation and remote contributions can store a GitHub node ID, while
+repository imports and launch conversion use numeric IDs. Carry the live head
+node ID in the transient `PRBase` observation, outside serialized metadata.
+During launch comparison, normalize a stored node ID to the numeric ID only
+when the live response supplies both aliases for the same host and path.
+Compare copies so stored targets remain unchanged. Unknown aliases, changed
+IDs, different hosts, and different paths still fail identity checks.
 
 ## Work orders
 
