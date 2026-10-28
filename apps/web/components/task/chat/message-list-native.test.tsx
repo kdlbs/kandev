@@ -131,6 +131,7 @@ const TARGET_MESSAGE_ID = "target";
 const HANDLE_RENDER_ERROR = "handle did not render";
 const HARNESS_RENDER_ERROR = "harness did not render";
 const NATIVE_NAVIGATION_TARGET = "navigation-target";
+const NATIVE_NAVIGATION_SELECTOR = "#msg-navigation-target";
 const NATIVE_SCROLL_MANAGEMENT_TEST_ID = "native-scroll-management-container";
 const AUTO_SCROLL_CONTAINER_TEST_ID = "auto-scroll-container";
 const CACHED_MESSAGE_ID = "cached-message";
@@ -621,7 +622,7 @@ function retainedStartFixture(motionEnabled = false) {
   const root = view.container.querySelector<HTMLElement>(
     `[data-testid="${NATIVE_SCROLL_MANAGEMENT_TEST_ID}"]`,
   )!;
-  const row = root.querySelector<HTMLElement>("#msg-navigation-target")!;
+  const row = root.querySelector<HTMLElement>(NATIVE_NAVIGATION_SELECTOR)!;
   Object.defineProperty(root, "getBoundingClientRect", { value: () => createRect(80, 400) });
   Object.defineProperty(row, "getBoundingClientRect", {
     value: () => createRect(80 + geometry.documentTop - metrics.scrollTop, 20),
@@ -632,10 +633,13 @@ function retainedStartFixture(motionEnabled = false) {
   vi.spyOn(row, "scrollIntoView").mockImplementation(() => {
     root.scrollTop = geometry.documentTop - geometry.margin;
   });
+  const flushFrames = (limit = 6) => {
+    for (let i = 0; i < limit && frames.length; i++) frames.shift()!(i);
+  };
   const jump = () =>
     act(() => {
       expect(scrollToMessageRef.current?.(NATIVE_NAVIGATION_TARGET, { align: "start" })).toBe(true);
-      for (let i = 0; i < 6 && frames.length; i++) frames.shift()!(i);
+      flushFrames();
       root.dispatchEvent(new Event("scroll"));
       root.dispatchEvent(new Event("scrollend"));
       vi.advanceTimersByTime(300);
@@ -653,6 +657,7 @@ function retainedStartFixture(motionEnabled = false) {
     metrics,
     geometry,
     jump,
+    flushFrames,
     prepend,
     props,
     latestRef,
@@ -747,11 +752,14 @@ describe("retained start target ownership", () => {
     fixture.jump();
     act(() => {
       fixture.scrollToMessageRef.current?.(NATIVE_NAVIGATION_TARGET, { align: "center" });
-      fixture.root.dispatchEvent(new Event("scrollend"));
+      fixture.flushFrames(40);
     });
+    expect(fixture.programmaticLockRef.current?.()).toBe(false);
+    const topBeforePrepend =
+      fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top;
     fixture.prepend();
     expect(fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(
-      104,
+      topBeforePrepend,
     );
   });
 
@@ -1019,7 +1027,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
         />,
       );
       const scrollContainer = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
-      const target = container.querySelector<HTMLElement>("#msg-navigation-target");
+      const target = container.querySelector<HTMLElement>(NATIVE_NAVIGATION_SELECTOR);
       if (!target) throw new Error(HARNESS_RENDER_ERROR);
       Object.defineProperty(scrollContainer, "getBoundingClientRect", {
         configurable: true,
@@ -1030,7 +1038,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
         value: () => createRect(0, 20),
       });
 
-      expect(scrollToMessageRef.current?.("navigation-target", { align: "start" })).toBe(true);
+      expect(scrollToMessageRef.current?.(NATIVE_NAVIGATION_TARGET, { align: "start" })).toBe(true);
       metrics.scrollTop = 100;
       act(() => {
         for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
@@ -1144,7 +1152,9 @@ describe("useNativeScrollManagement transcript pagination", () => {
       metrics.scrollTop = 600;
       act(() => {
         scroller.dispatchEvent(new Event("scroll"));
-        expect(scrollToMessageRef.current?.("navigation-target", { align: "start" })).toBe(true);
+        expect(scrollToMessageRef.current?.(NATIVE_NAVIGATION_TARGET, { align: "start" })).toBe(
+          true,
+        );
         // The cancelled follow-bottom motion can finish before the new jump's frames.
         scroller.dispatchEvent(new Event("scrollend"));
       });
@@ -1162,7 +1172,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
       );
       expect(metrics.scrollTop).toBe(600);
       expect(programmaticLockRef.current?.()).toBe(true);
-      const target = container.querySelector<HTMLElement>("#msg-navigation-target");
+      const target = container.querySelector<HTMLElement>(NATIVE_NAVIGATION_SELECTOR);
       if (!target) throw new Error(HARNESS_RENDER_ERROR);
       Object.defineProperty(scroller, "getBoundingClientRect", {
         configurable: true,
@@ -1213,7 +1223,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
         />,
       );
       const scrollContainer = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
-      const target = container.querySelector<HTMLElement>("#msg-navigation-target");
+      const target = container.querySelector<HTMLElement>(NATIVE_NAVIGATION_SELECTOR);
       if (!target) throw new Error(HARNESS_RENDER_ERROR);
       scrollContainer.scrollTop = 0;
       Object.defineProperty(scrollContainer, "getBoundingClientRect", {
@@ -1225,7 +1235,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
         value: () => createRect(120 - metrics.scrollTop, 20),
       });
 
-      expect(scrollToMessageRef.current?.("navigation-target", { align: "start" })).toBe(true);
+      expect(scrollToMessageRef.current?.(NATIVE_NAVIGATION_TARGET, { align: "start" })).toBe(true);
       expect(programmaticLockRef.current?.()).toBe(true);
 
       act(() => {
