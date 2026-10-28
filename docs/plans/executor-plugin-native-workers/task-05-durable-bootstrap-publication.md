@@ -1,10 +1,10 @@
 ---
-id: "04-durable-bootstrap-publication"
+id: "05-durable-bootstrap-publication"
 title: "Durable bootstrap continuation and ready publication (R5)"
 status: pending
 wave: 3
 depends_on:
-  - "03"
+  - "04"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-NATIVE-WORKER-007
@@ -20,7 +20,7 @@ system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
 
-# Task 04: Durable bootstrap continuation and ready publication (R5)
+# Task 05: Durable bootstrap continuation and ready publication (R5)
 
 ## Summary
 

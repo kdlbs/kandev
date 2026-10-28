@@ -1,10 +1,10 @@
 ---
-id: "03-drain-receipt"
+id: "04-drain-receipt"
 title: "Drain receipt into destroy (R3)"
 status: pending
-wave: 2
+wave: 3
 depends_on:
-  - "02"
+  - "03"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-NATIVE-WORKER-005
@@ -21,7 +21,7 @@ system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
 
-# Task 03: Drain receipt into destroy (R3)
+# Task 04: Drain receipt into destroy (R3)
 
 ## Summary
 

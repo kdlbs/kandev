@@ -1,10 +1,10 @@
 ---
-id: "05-host-tunnel-api-forwarding"
+id: "06-host-tunnel-api-forwarding"
 title: "Negotiated transport and API forwarding (R2)"
 status: pending
-wave: 3
+wave: 4
 depends_on:
-  - "04"
+  - "05"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-NATIVE-WORKER-004
@@ -23,7 +23,7 @@ system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
 
-# Task 05: Negotiated transport and API forwarding (R2)
+# Task 06: Negotiated transport and API forwarding (R2)
 
 ## Summary
 

@@ -1,10 +1,10 @@
 ---
-id: "06-repository-intent"
+id: "07-repository-intent"
 title: "Repository intent and provider-prepared workspace (R7)"
 status: pending
 wave: 4
 depends_on:
-  - "05"
+  - "06"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-NATIVE-WORKER-003
@@ -21,7 +21,7 @@ system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
 
-# Task 06: Repository intent and provider-prepared workspace (R7)
+# Task 07: Repository intent and provider-prepared workspace (R7)
 
 ## Summary
 

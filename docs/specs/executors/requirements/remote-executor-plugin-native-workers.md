@@ -34,7 +34,7 @@ A provider declaring none of these keeps today's behavior, wire format, and inve
 
 #### Acceptance criteria
 
-- **AC-EXECUTORS-NATIVE-WORKER-001.1:** The manifest validator shall accept `requires_host_capabilities` on an executor provider only from the closed set `workspace_descriptor`, `repository_intent`, `tunnel_transport`, `api_url_forward`, `drain_receipt`, `destroy_checkpoints`, `durable_bootstrap`, and shall reject unknown or duplicate names.
+- **AC-EXECUTORS-NATIVE-WORKER-001.1:** The manifest validator shall accept `requires_host_capabilities` on an executor provider as defined by REQ-EXECUTORS-PLUGIN-CAPABILITY-001, and shall reject unknown or duplicate names. The seven names of this document are registry entries at version 1.
 - **AC-EXECUTORS-NATIVE-WORKER-001.2:** When a provider requires a capability the host does not implement, install, upgrade, and enable shall fail before activation and name the missing capability. An upgrade failure shall leave the working installation active.
 - **AC-EXECUTORS-NATIVE-WORKER-001.3:** When a provider declares no capability, its requests, responses, and persisted inventory shall be unchanged from the current contract, and the existing fixture conformance test shall pass without modification.
 - **AC-EXECUTORS-NATIVE-WORKER-001.4:** The host shall snapshot the declared capability set into inventory when an allocation is admitted. Recovery, attach, and destroy shall use that snapshot, not the installed manifest, so an upgrade never changes the rules for an existing environment.
@@ -145,13 +145,11 @@ A provider declaring none of these keeps today's behavior, wire format, and inve
 
 ## Out of scope
 
-- Removing or migrating any built-in executor, including a native Nomad executor. A built-in stays until a plugin passes its own live scenarios; both never operate on one environment.
-- A per-node repository mirror, autoscaling, fleet management UI, cost dashboards, and hostile-workload isolation.
-- A typed provider-maintenance operation and generic operator admin route (operator readmission of quarantined workers). A follow-up needs a typed provider RPC, an admin-only host route, claim-fenced settlement, and an audit record; v1 providers keep manual operator steps.
-- Native-state migration. Built-in environments drain before a plugin is enabled; no row is converted by renaming its executor type.
+- Removing a built-in executor. Migration is specified in [operations and migration](remote-executor-plugin-operations-migration.md); a built-in stays until a plugin passes its live scenarios.
+- A per-node repository mirror, autoscaling, fleet management UI beyond the status read, cost dashboards, and hostile-workload isolation.
+- Shared workspaces, admission, and queued placement: see [shared environments, admission, and placement](remote-executor-plugin-shared-admission-placement.md).
 - A new public relay service or any change to HTTPS lease validation for `https` leases.
-- Shared workspaces, durable event replay, and workspace backup.
-- Publishing the provider SDK as a versioned module. The pinned-reference pattern stays until the owner decides.
+- Durable event replay and workspace backup. Publishing the provider SDK as a versioned module.
 
 ## Implementation plans
 

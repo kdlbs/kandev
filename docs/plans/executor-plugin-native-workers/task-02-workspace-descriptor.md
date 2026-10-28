@@ -1,22 +1,14 @@
 ---
-id: "01-capability-negotiation-workspace"
-title: "Capability negotiation and workspace descriptor (R1)"
+id: "02-workspace-descriptor"
+title: "Workspace descriptor (R1)"
 status: pending
-wave: 1
+wave: 2
 depends_on:
-  - "00"
+  - "01"
 plan: "plan.md"
 requirements:
-  - REQ-EXECUTORS-NATIVE-WORKER-001
   - REQ-EXECUTORS-NATIVE-WORKER-002
 acceptance_criteria:
-  - AC-EXECUTORS-NATIVE-WORKER-001.1
-  - AC-EXECUTORS-NATIVE-WORKER-001.2
-  - AC-EXECUTORS-NATIVE-WORKER-001.3
-  - AC-EXECUTORS-NATIVE-WORKER-001.4
-  - AC-EXECUTORS-NATIVE-WORKER-001.5
-  - AC-EXECUTORS-NATIVE-WORKER-001.6
-  - AC-EXECUTORS-NATIVE-WORKER-001.7
   - AC-EXECUTORS-NATIVE-WORKER-002.1
   - AC-EXECUTORS-NATIVE-WORKER-002.2
   - AC-EXECUTORS-NATIVE-WORKER-002.3
@@ -28,11 +20,11 @@ system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
 
-# Task 01: Capability negotiation and workspace descriptor (R1)
+# Task 02: Workspace descriptor (R1)
 
 ## Summary
 
-Add the manifest keys and host capability set, the capability snapshot in inventory, and the workspace path and identity on the descriptor with platform-aware validation and immutability.
+Add the workspace path and identity on the descriptor with platform-aware validation and immutability, gated by the `workspace_descriptor` capability from task 01.
 
 ## Size
 
@@ -40,23 +32,22 @@ M: ~450 source, ~700 test lines.
 
 ## In scope
 
-- Add the manifest keys and host capability set, the capability snapshot in inventory, and the workspace path and identity on the descriptor with platform-aware validation and immutability.
+- Add the workspace path and identity on the descriptor with platform-aware validation and immutability, gated by the `workspace_descriptor` capability from task 01.
 
 ## Out of scope
 
-- Transport, repository intent, drain, checkpoints beyond the descriptor.
+- The registry and negotiation (task 01), transport, repository intent, drain, checkpoints.
 
 ## Acceptance
 
-- Manifest rejects unknown, duplicate, and unsatisfiable capabilities before activation; a non-declaring provider is byte-for-byte unchanged.
+- A provider not declaring `workspace_descriptor` is byte-for-byte unchanged.
 - The recorded workspace descriptor drives instance creation and is immutable per generation.
 
 ## Failing-first tests
 
-- Manifest validator table test for each capability rule (fails: field absent).
 - Workspace path table per platform: relative, root, UNC, NUL, dot segments, over-length, platform mismatch.
 - Attach returns a different path or identity: `conflict`, no inventory change, session not started.
-- Undeclared field in a provider response: `conflict` and the created resource is cleaned up.
+- Descriptor field in a response from a provider that did not declare the capability: `conflict` and cleanup.
 - Fixture conformance test passes unmodified.
 - No filesystem call on the recorded path (a test path that exists only on the backend host is never touched).
 

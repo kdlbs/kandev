@@ -16,7 +16,7 @@ system_design:
 
 ## Summary
 
-Record D1 (transport), D2 (workspace materialization), D3 (keep built-ins) and D6 (SDK pinning) as one ADR after the owner answers, and update the design table from pending to settled.
+Record D1, D2, D3, D6 and the medium-term open-question answers as one ADR; the owner answered D1, D2, D3, and D6 on 2026-10-28.
 
 ## Size
 
@@ -24,7 +24,7 @@ S: ~120 doc lines, 0 code.
 
 ## In scope
 
-- Record D1 (transport), D2 (workspace materialization), D3 (keep built-ins) and D6 (SDK pinning) as one ADR after the owner answers, and update the design table from pending to settled.
+- Record D1 (host-owned dialer), D2 (both modes plus the extensible preparation contract), D3 (keep built-ins until the 14 live scenarios pass), D6 (pinned-reference SDK), and the answers to the medium-term open questions (sharing principal, audit sink, admission policy scope, pending-placement UI) as one ADR. The owner answered D1, D2, D3, and D6 on 2026-10-28.
 
 ## Out of scope
 
@@ -32,7 +32,7 @@ S: ~120 doc lines, 0 code.
 
 ## Acceptance
 
-- One ADR under docs/decisions/ with alternatives and the owner answer for each of D1, D2, D3, D6.
+- One ADR under docs/decisions/ with alternatives and the owner answer for each of D1, D2, D3, D6 and each medium-term open question.
 - Design decision table updated; no requirement ID changes.
 
 ## Failing-first tests

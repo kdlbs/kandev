@@ -1,10 +1,10 @@
 ---
-id: "07-crash-barrier"
+id: "08-crash-barrier"
 title: "Provider-neutral crash barrier (R8)"
 status: pending
-wave: 4
+wave: 5
 depends_on:
-  - "06"
+  - "07"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-NATIVE-WORKER-008
@@ -16,7 +16,7 @@ system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
 
-# Task 07: Provider-neutral crash barrier (R8)
+# Task 08: Provider-neutral crash barrier (R8)
 
 ## Summary
 

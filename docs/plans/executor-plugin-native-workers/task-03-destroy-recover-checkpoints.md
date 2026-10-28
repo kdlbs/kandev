@@ -1,10 +1,10 @@
 ---
-id: "02-destroy-recover-checkpoints"
+id: "03-destroy-recover-checkpoints"
 title: "Destroy- and recover-scoped checkpoints (R4)"
 status: pending
 wave: 2
 depends_on:
-  - "01"
+  - "02"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-NATIVE-WORKER-006
@@ -20,7 +20,7 @@ system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
 
-# Task 02: Destroy- and recover-scoped checkpoints (R4)
+# Task 03: Destroy- and recover-scoped checkpoints (R4)
 
 ## Summary
 
