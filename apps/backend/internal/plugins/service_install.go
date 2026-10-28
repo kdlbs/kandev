@@ -88,10 +88,11 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	defer dispatchLock.Unlock()
 
 	if hadOldRec {
-		if err := s.guardExecutorProviderUpgrade(ctx, oldRec, result.Manifest); err != nil {
+		if err := s.guardExecutorProviderUpgradeLocked(ctx, oldRec, result.Manifest); err != nil {
 			_ = os.RemoveAll(result.InstallPath)
 			return nil, err
 		}
+		defer s.clearReadableOverride(oldRec.InstallationID)
 	}
 	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
 		// pkgtar.Install has already atomically extracted exactly this new
