@@ -38,3 +38,17 @@ func exerciseCleanupRequestUnderARecoveryClaim(t *testing.T, repo *Repository, s
 func TestCleanupRequestIsRecordableUnderARecoveryClaim(t *testing.T) {
 	exerciseCleanupRequestUnderARecoveryClaim(t, newRepoForSessionTests(t), seedDescriptorEnvironmentSQLite)
 }
+
+func TestCleanupRequestSurvivesALaterCheckpointThatDidNotCarryIt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedProvisionedForClaims(t, repo, seedDescriptorEnvironmentSQLite)
+	if err := repo.RecordPluginExecutorCleanupRequested(context.Background(), "session-descriptor-1", "execution-descriptor-1"); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if err := checkpointDescriptor(t, repo, descriptorFixture(1, "install-a", "provisioned", "/srv/work", "worker-1"), 3); err != nil {
+		t.Fatalf("checkpoint at the revision the request produced: %v", err)
+	}
+	if envelope, _ := storedEnvelope(t, repo); envelope["cleanup_requested"] != true {
+		t.Fatalf("a checkpoint that did not carry the request cleared it: %v", envelope["cleanup_requested"])
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/stretchr/testify/require"
 )
 
 func newRuntimeDrainTestClient(t *testing.T, identity, token string) (*ControlServer, *agentctl.ControlClient, *instance.Manager) {
@@ -172,19 +173,11 @@ func TestRuntimeSealAndDrainOtherClaimDuringDrainIsConflict(t *testing.T) {
 		firstDone <- err
 	}()
 	// The first drain is blocked on the admitted creation; a second claim must be refused.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
+	require.Eventually(t, func() bool {
 		cs.runtimeDrain.mu.Lock()
-		running := cs.runtimeDrain.running
-		cs.runtimeDrain.mu.Unlock()
-		if running == "claim-a" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("first drain never became the running drain")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		defer cs.runtimeDrain.mu.Unlock()
+		return cs.runtimeDrain.running == "claim-a"
+	}, 2*time.Second, time.Millisecond, "first drain never became the running drain")
 	_, err := client.SealAndDrainRuntime(t.Context(), agentctl.RuntimeDrainRequest{
 		RequestID: "claim-b", ExpectedServerIdentity: "runtime-a", DeadlineMS: 50,
 	})
