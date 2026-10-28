@@ -70,7 +70,9 @@ func (m *Manifest) validateExecutorProviders() []error {
 		if provider.ContractVersion != CurrentExecutorProviderContractVersion {
 			errs = append(errs, fmt.Errorf("%s.contract_version %d is unsupported; host supports %d", prefix, provider.ContractVersion, CurrentExecutorProviderContractVersion))
 		}
+		errs = append(errs, expandStateSchema(prefix, provider)...)
 		errs = append(errs, validateStateVersions(prefix, provider.SupportedStateVersions)...)
+		errs = append(errs, m.validateHostCapabilities(prefix, provider)...)
 		errs = append(errs, validateExecutorSchema(prefix+".profile_schema", provider.ProfileSchema, true, false)...)
 		errs = append(errs, validateExecutorSchema(prefix+".resource_state_schema", provider.ResourceStateSchema, false, true)...)
 		errs = append(errs, validateExecutorProviderCapabilities(prefix, &provider.Capabilities)...)

@@ -173,15 +173,21 @@ type Capabilities struct {
 // ExecutorProvider describes one provider implementation owned by a plugin.
 // Provider identities are derived as plugin:<plugin-id>:<key>.
 type ExecutorProvider struct {
-	Key                    string                       `yaml:"key" json:"key"`
-	DisplayName            string                       `yaml:"display_name" json:"display_name"`
-	Description            string                       `yaml:"description" json:"description"`
-	LocalizedMessages      map[string]string            `yaml:"localized_messages,omitempty" json:"localized_messages,omitempty"`
-	ContractVersion        int                          `yaml:"contract_version" json:"contract_version"`
-	SupportedStateVersions []int                        `yaml:"supported_state_versions" json:"supported_state_versions"`
-	ProfileSchema          map[string]any               `yaml:"profile_schema" json:"profile_schema"`
-	ResourceStateSchema    map[string]any               `yaml:"resource_state_schema" json:"resource_state_schema"`
-	Capabilities           ExecutorProviderCapabilities `yaml:"capabilities" json:"capabilities"`
+	Key                    string               `yaml:"key" json:"key"`
+	DisplayName            string               `yaml:"display_name" json:"display_name"`
+	Description            string               `yaml:"description" json:"description"`
+	LocalizedMessages      map[string]string    `yaml:"localized_messages,omitempty" json:"localized_messages,omitempty"`
+	ContractVersion        int                  `yaml:"contract_version" json:"contract_version"`
+	SupportedStateVersions []int                `yaml:"supported_state_versions" json:"supported_state_versions"`
+	StateSchema            *ExecutorStateSchema `yaml:"state_schema,omitempty" json:"state_schema,omitempty"`
+	StateBudgetBytes       int                  `yaml:"state_budget_bytes,omitempty" json:"state_budget_bytes,omitempty"`
+	// RequiresHostCapabilities lists the opt-in host capabilities this
+	// provider needs, each pinned to one version of the host registry.
+	RequiresHostCapabilities []HostCapabilityRequirement  `yaml:"requires_host_capabilities,omitempty" json:"requires_host_capabilities,omitempty"`
+	LaunchPolicyIDs          []string                     `yaml:"launch_policy_ids,omitempty" json:"launch_policy_ids,omitempty"`
+	ProfileSchema            map[string]any               `yaml:"profile_schema" json:"profile_schema"`
+	ResourceStateSchema      map[string]any               `yaml:"resource_state_schema" json:"resource_state_schema"`
+	Capabilities             ExecutorProviderCapabilities `yaml:"capabilities" json:"capabilities"`
 }
 
 // ExecutorProviderCapabilities is the maximum feature set a provider can
