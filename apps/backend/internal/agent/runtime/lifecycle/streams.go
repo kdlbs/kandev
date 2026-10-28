@@ -277,7 +277,6 @@ func (sm *StreamManager) ConnectWorkspaceStream(execution *AgentExecution, ready
 	}) && ready != nil {
 		close(ready)
 	}
-	sm.startRuntimeStorageAdvisory(execution)
 }
 
 // ConnectMCPStream opens the passthrough MCP proxy stream under goroutine
@@ -1132,6 +1131,9 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 
 		// Signal that workspace stream is ready
 		signalReady()
+		advisoryCtx, advisoryCancel := context.WithCancel(ctx)
+		sm.startRuntimeStorageAdvisoryWithContext(advisoryCtx, execution)
+		defer advisoryCancel()
 
 		// Wait for the stream to close. Also exits on Manager shutdown / Wait
 		// so the goroutine drains when the remote end keeps the connection

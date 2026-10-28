@@ -11,6 +11,13 @@ const defaultRuntimeStorageAdvisoryInterval = 30 * time.Second
 // from the workspace stream, so passthrough sessions receive capacity evidence
 // without any delivery-health reconciliation.
 func (sm *StreamManager) startRuntimeStorageAdvisory(execution *AgentExecution) {
+	sm.startRuntimeStorageAdvisoryWithContext(sm.streamContext(execution), execution)
+}
+
+func (sm *StreamManager) startRuntimeStorageAdvisoryWithContext(
+	parent context.Context,
+	execution *AgentExecution,
+) {
 	if sm == nil || execution == nil || execution.ID == "" {
 		return
 	}
@@ -19,7 +26,7 @@ func (sm *StreamManager) startRuntimeStorageAdvisory(execution *AgentExecution) 
 			cancel()
 		}
 	}
-	ctx, cancel := context.WithCancel(sm.streamContext(execution))
+	ctx, cancel := context.WithCancel(parent)
 	sm.runtimeStorageAdvisories.Store(execution.ID, cancel)
 	if !sm.start(func() {
 		defer sm.releaseRuntimeStorageAdvisory(execution)
