@@ -25,10 +25,10 @@ const health: RuntimeStorageHealth = {
   epoch: 5,
 };
 
-const NOTICE_TEST_ID = NOTICE_TEST_ID;
-const DETAILS_TEST_ID = DETAILS_TEST_ID;
-const DETAILS_PANEL_TEST_ID = DETAILS_PANEL_TEST_ID;
-const SETTINGS_TEST_ID = SETTINGS_TEST_ID;
+const NOTICE_TEST_ID = "session-delivery-storage-notice";
+const DETAILS_TEST_ID = "session-delivery-storage-details";
+const DETAILS_PANEL_TEST_ID = "session-delivery-storage-details-panel";
+const SETTINGS_TEST_ID = "session-delivery-storage-settings";
 
 afterEach(cleanup);
 

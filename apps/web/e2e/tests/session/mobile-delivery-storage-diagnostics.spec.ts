@@ -7,7 +7,8 @@ test("keeps the phone advisory compact with 44px controls", async ({
   testPage,
   apiClient,
   seedData,
-}) => {
+  prCapture,
+}, testInfo) => {
   const task = await apiClient.createTask(seedData.workspaceId, "Mobile storage advisory", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -60,6 +61,9 @@ test("keeps the phone advisory compact with 44px controls", async ({
   await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
     "Free space on sprites",
   );
+  await prCapture.screenshot(`delivery-storage-advisory-${testInfo.project.name}`, {
+    caption: "Phone disk advisory with executor scope, usage, and 44px controls.",
+  });
   await notify!({ ...base, state: "normal", available_bytes: 500_000_000, revision: 2 });
   await expect(notice).toHaveCount(0);
 });

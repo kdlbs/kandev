@@ -76,7 +76,7 @@ export function deliveryStorageFailureScenario() {
     }
     await testPage.reload();
     await expectStorageFailureCard(testPage);
-    await prCapture.screenshot("delivery-storage-failure", {
+    await prCapture.screenshot(`delivery-storage-failure-${testInfo.project.name}`, {
       caption: "Low disk failure keeps its cause and recovery action after reload.",
     });
   });

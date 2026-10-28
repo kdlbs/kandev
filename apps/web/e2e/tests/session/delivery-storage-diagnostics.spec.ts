@@ -7,7 +7,8 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
   testPage,
   apiClient,
   seedData,
-}) => {
+  prCapture,
+}, testInfo) => {
   const task = await apiClient.createTask(seedData.workspaceId, "Storage advisory", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -58,6 +59,9 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
   await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
     "Free space on this host",
   );
+  await prCapture.screenshot(`delivery-storage-advisory-${testInfo.project.name}`, {
+    caption: "Live disk advisory above the composer while work continues.",
+  });
 
   notify?.({ ...base, state: "warning", available_bytes: 120_000_000, revision: 2 });
   await expect(notice).toHaveCount(1);
