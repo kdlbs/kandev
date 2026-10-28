@@ -191,6 +191,7 @@ function useQuickChatTabActions({
 }: QuickChatTabActionsOptions) {
   const {
     sessionToClose,
+    taskIdToClose,
     setSessionToClose,
     handleCloseTab,
     handleConfirmClose,
@@ -270,6 +271,7 @@ function useQuickChatTabActions({
 
   return {
     sessionToClose,
+    taskIdToClose,
     setSessionToClose,
     handleOpenChange,
     handleNewChat,

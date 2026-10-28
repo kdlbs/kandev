@@ -4,7 +4,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useAppStore } from "@/components/state-provider";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import { ApiError } from "@/lib/api/client";
-import { deleteTaskAfterUserAction } from "@/lib/api/domains/kanban-api";
+import {
+  isTaskDeleteDirtyWorktreeError,
+  isTaskDeletePreviewOutdatedError,
+} from "@/lib/api/task-delete-errors";
+import { deleteTask, type DeleteTaskParams } from "@/lib/api/domains/kanban-api";
+import { i18n } from "@/lib/i18n";
 import {
   getQuickChatCreation,
   type QuickChatCreationStatusResponse,
@@ -51,7 +56,7 @@ export type QuickChatCreationActions = {
   ) => Promise<boolean>;
   check: (pending?: PendingQuickChatCreation) => Promise<void>;
   retry: () => Promise<boolean>;
-  remove: () => Promise<void>;
+  remove: (options?: DeleteTaskParams) => Promise<void>;
 };
 
 type QuickChatCreationArgs = {
@@ -305,6 +310,14 @@ function restoreAcceptedDraft(sessionId: string, pending: PendingQuickChatCreati
   setChatDraftAttachments(sessionId, toQuickChatDraftAttachments(pending.attachments));
 }
 
+function quickChatDeletionError(error: unknown): unknown {
+  if (isTaskDeletePreviewOutdatedError(error))
+    return new Error(i18n.t("task:deletePreflightError"));
+  return isTaskDeleteDirtyWorktreeError(error)
+    ? new Error(i18n.t("task:deleteDirtyWorktreeDescription"))
+    : error;
+}
+
 function useQuickChatCreationSubmission(
   args: QuickChatCreationArgs,
   check: (pending?: PendingQuickChatCreation) => Promise<void>,
@@ -390,17 +403,19 @@ function useQuickChatCreationSubmission(
     updatePendingCreation(pendingCreation.creationId, { state: "submitting" });
     return submit(pendingCreation, pendingCreationPayload(pendingCreation));
   }, [pendingCreation, submit, updatePendingCreation]);
-  const remove = useCallback(async () => {
-    const pending = pendingCreation;
-    if (!pending?.taskId) return;
-    try {
-      await deleteTaskAfterUserAction(pending.taskId);
-      clearPendingCreation(pending.creationId);
-    } catch (error) {
-      quickChat.reportSetupError(error);
-    }
-  }, [clearPendingCreation, pendingCreation, quickChat]);
-
+  const remove = useCallback(
+    async (options: DeleteTaskParams = {}) => {
+      const pending = pendingCreation;
+      if (!pending?.taskId) return;
+      try {
+        await deleteTask(pending.taskId, options);
+        clearPendingCreation(pending.creationId);
+      } catch (error) {
+        quickChat.reportSetupError(quickChatDeletionError(error));
+      }
+    },
+    [clearPendingCreation, pendingCreation, quickChat],
+  );
   return { start, retry, remove };
 }
 

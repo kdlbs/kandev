@@ -25,7 +25,7 @@ vi.mock("@/lib/api/domains/workspace-api", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
-  deleteTaskAfterUserAction: (...args: unknown[]) => deleteTask(...args),
+  deleteTask: (...args: unknown[]) => deleteTask(...args),
 }));
 
 import { useQuickChatCreation } from "./use-quick-chat-creation";
@@ -460,6 +460,8 @@ it("keeps an untyped 404 uncertain because it does not prove allocation failed",
   expect(handleSelectAgent).toHaveBeenCalledTimes(1);
 });
 
+const DELETE_TASK_ID = "task-delete";
+
 it("deletes a confirmed task and retires its pending receipt", async () => {
   const { result } = renderHook(() => useCreationHarness());
   act(() => {
@@ -471,12 +473,17 @@ it("deletes a confirmed task and retires its pending receipt", async () => {
   });
   const pending = result.current.setupDraft.pendingCreation!;
   act(() =>
-    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: "task-delete" }),
+    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: DELETE_TASK_ID }),
   );
 
-  await act(async () => result.current.creation.remove());
+  await act(async () =>
+    result.current.creation.remove({ confirmationId: "preview-1", discardWorktreeChanges: true }),
+  );
 
-  expect(deleteTask).toHaveBeenCalledWith("task-delete");
+  expect(deleteTask).toHaveBeenCalledWith(DELETE_TASK_ID, {
+    confirmationId: "preview-1",
+    discardWorktreeChanges: true,
+  });
   expect(result.current.setupDraft.pendingCreation).toBeNull();
 });
 
@@ -487,7 +494,7 @@ it("keeps the receipt and reports a deletion failure", async () => {
   });
   const pending = result.current.setupDraft.pendingCreation!;
   act(() =>
-    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: "task-delete" }),
+    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: DELETE_TASK_ID }),
   );
   deleteTask.mockRejectedValueOnce(new ApiError("delete unavailable", 503, null));
 
@@ -499,4 +506,27 @@ it("keeps the receipt and reports a deletion failure", async () => {
     creationId: pending.creationId,
   });
   expect(reportSetupError).toHaveBeenCalledWith(expect.any(ApiError));
+});
+
+it("keeps the receipt and explains how to retry an outdated preview", async () => {
+  const { result } = renderHook(() => useCreationHarness());
+  act(() =>
+    result.current.setupDraft.beginPendingCreation(openingPayload("Keep this chat"), "agent-1", []),
+  );
+  const pending = result.current.setupDraft.pendingCreation!;
+  act(() =>
+    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: DELETE_TASK_ID }),
+  );
+  deleteTask.mockRejectedValueOnce(
+    new ApiError("task deletion preview is no longer current", 409, {
+      error: "task deletion preview is no longer current",
+    }),
+  );
+  await act(async () => result.current.creation.remove({ confirmationId: "expired" }));
+  expect(result.current.setupDraft.pendingCreation).toMatchObject({
+    creationId: pending.creationId,
+  });
+  expect(reportSetupError).toHaveBeenCalledWith(
+    expect.objectContaining({ message: expect.stringContaining("Try again") }),
+  );
 });
