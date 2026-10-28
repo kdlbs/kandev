@@ -38,11 +38,15 @@ export function WorkflowExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <Textarea readOnly value={content} className="font-mono text-xs max-h-96 overflow-y-auto" />
+        <Textarea
+          readOnly
+          value={content}
+          className="font-mono text-xs h-full min-h-0 max-h-96 overflow-y-auto"
+        />
         <DialogFooter>
           <Button
             variant="outline"

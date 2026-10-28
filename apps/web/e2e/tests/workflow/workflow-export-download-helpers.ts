@@ -31,6 +31,21 @@ export async function checkGeometry(page: Page, touchSize: boolean) {
   const dialogBounds = await dialog.boundingBox();
   expect(bounds).not.toBeNull();
   expect(dialogBounds).not.toBeNull();
+  const viewport = page.viewportSize()!;
+  expect(dialogBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(dialogBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(viewport.width);
+  expect(dialogBounds!.y + dialogBounds!.height).toBeLessThanOrEqual(viewport.height);
+  const textarea = dialog.locator("textarea");
+  expect(
+    await textarea.evaluate((element) => {
+      const canScroll = element.scrollHeight > element.clientHeight;
+      element.scrollTop = 20;
+      const scrolled = element.scrollTop > 0;
+      element.scrollTop = 0;
+      return canScroll && scrolled;
+    }),
+  ).toBe(true);
   for (const name of ["Close", "Download", "Copy"]) {
     const button = footer.getByRole("button", { name, exact: true });
     const box = await button.boundingBox();
@@ -45,7 +60,6 @@ export async function checkGeometry(page: Page, touchSize: boolean) {
     expect(box!.y + box!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height + 1);
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.y).toBeGreaterThanOrEqual(0);
-    const viewport = page.viewportSize()!;
     expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
     expect(

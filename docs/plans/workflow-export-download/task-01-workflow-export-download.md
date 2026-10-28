@@ -182,3 +182,21 @@ SHA-256 hashes are retained under `/tmp/kandev-workflow-download-captures-046/`
 and `/tmp/kandev-workflow-download-mobile-final-wKBvIk/kandev-run.e2e.uVZ61uzj.log`.
 The initial phone and desktop captures are retained separately. No live developer
 data was used.
+
+A later short-phone review was reproduced on the unchanged published build:
+mobile-chrome at 375x568 placed Close's bottom at 576px for both Single and
+Export All. The causal RED and measurements are retained at
+`/tmp/kandev-workflow-short-568-8CrXt9/kandev-run.e2e.oBHSsPl4.log`.
+The local dialog now caps its height to the dynamic viewport and lets the YAML
+preview shrink and scroll internally. The focused mounted suite, targeted
+ESLint, i18n checks, 8 GiB typecheck, spec and public docs validators passed.
+A fresh same-worktree web build passed; unchanged backend and fixture builds
+were reused. Desktop Chromium passed three tests and mobile-chrome one test
+with one worker and zero retries, covering 375x600 and 375x568 on both pointer
+modes and both entry points, actual download bytes, hit testing, containment,
+and preview scrolling. Logs are
+`/tmp/kandev-workflow-short-fix-desktop-K9SKUf/kandev-run.e2e.ZhyqaeMo.log`
+and `/tmp/kandev-workflow-short-fix-mobile-gWgiEa/kandev-run.e2e.G0wG7K9C.log`.
+Fresh synthetic originals, manifests, and hashes are retained at
+`/tmp/kandev-workflow-short-fix-captures-046/`; the short-phone view was
+inspected and shows the complete dialog and footer within the viewport.

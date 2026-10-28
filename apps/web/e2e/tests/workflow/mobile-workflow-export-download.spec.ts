@@ -26,4 +26,22 @@ test("downloads single and all workflow exports on a phone", async ({
   await openExport(testPage, seedData.workspaceId, false, true);
   await checkGeometry(testPage, true);
   await checkDownload(testPage, true);
+  for (const height of [600, 568]) {
+    await testPage.setViewportSize({ width: 375, height });
+    for (const single of [true, false]) {
+      const dialog = await openExport(testPage, seedData.workspaceId, single, true);
+      await checkGeometry(testPage, true);
+      if (height === 568 && single) {
+        await prCapture.screenshot("workflow-export-short-phone", {
+          caption: "Workflow export actions on a short phone.",
+        });
+      }
+      await checkDownload(testPage, true);
+      await dialog
+        .locator('[data-slot="dialog-footer"]')
+        .getByRole("button", { name: "Close" })
+        .tap();
+      await expect(dialog).not.toBeVisible();
+    }
+  }
 });

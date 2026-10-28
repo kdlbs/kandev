@@ -50,8 +50,9 @@ existing Workflows settings actions as the nearest shipped control exemplar;
 the mobile language's existing dialog primitive supplies the surface. The
 short preview and temporary action justify keeping the current dialog instead
 of a new drawer or navigation. On phones the footer may stack or wrap while
-keeping all controls visible and contained. Preserve textarea scrolling, modal
-focus and dismissal, viewport/safe-area handling, and document width. Ordinary
+keeping all controls visible and contained. Cap the dialog to the dynamic viewport and let its preview row shrink and
+scroll internally, keeping header and footer within reach on short phones.
+Preserve modal focus and dismissal, safe-area handling, and document width. Ordinary
 fine-pointer desktop actions match existing settings density; phone width and
 coarse-pointer conditions independently provide at least 44 px hit areas,
 including a narrow fine-pointer phone. Compare actual rendered bounds, not
