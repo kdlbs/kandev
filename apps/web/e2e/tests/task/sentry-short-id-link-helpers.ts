@@ -20,11 +20,15 @@ export async function linkSentryIssue(
     capture,
     mobile,
     issueKey,
+    input,
+    captureAsset,
   }: {
     info: TestInfo;
     capture: PrAssetCapture;
     mobile: boolean;
     issueKey: string;
+    input: string;
+    captureAsset: boolean;
   },
 ) {
   const workspace = await api.createWorkspace(`Sentry link ${info.testId}`);
@@ -84,7 +88,7 @@ export async function linkSentryIssue(
     await activate(page.getByRole("menuitem", { name: "Sentry Issue", exact: true }), mobile);
     const dialog = page.getByRole("dialog", { name: "Link Sentry issue", exact: true });
     await expect(dialog).toBeVisible();
-    await dialog.getByTestId("task-external-link-input").fill(issueKey);
+    await dialog.getByTestId("task-external-link-input").fill(input);
     const replies: Response[] = [];
     const observe = (reply: Response) => {
       const url = new URL(reply.url());
@@ -112,7 +116,7 @@ export async function linkSentryIssue(
     }
     await expect(row).toBeVisible();
     await expect(row).toContainText(`${issueKey}: Sentry fixture task`);
-    if (issueKey === "WEB-1A") await capture.screenshot("linked-sentry");
+    if (captureAsset) await capture.screenshot("linked-sentry");
     await info.attach(`sentry-link-${issueKey}`, {
       body: await page.screenshot({ path: info.outputPath(`sentry-link-${issueKey}.png`) }),
       contentType: "image/png",

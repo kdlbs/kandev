@@ -62,10 +62,13 @@ behavior. This package is design-only until the separate implementation release.
 The independent component suite first reproduced the base32 rejection with two
 numeric controls passing. A further regression exposed numeric URL slug
 shadowing, and `WEB-1A-U` exposed a truncated identity; both were fixed after
-observed failing tests. The final focused component suite passed 9 tests.
+observed failing tests. A review regression also exposed short-ID URLs shadowed
+by hyphenated hosts and organization slugs. The final focused component suite
+passed 13 tests, including invalid or empty issue segments.
 
-The final managed host runs passed two desktop and two phone cases, one base32
-and one numeric control in each project, with a real scoped issue GET, mock
+The final managed host runs passed three desktop and three phone cases: a
+base32 ID, a short-ID URL and a numeric control in each project, with a scoped
+issue GET, mock
 provider response, rendered title and persisted task title. The phone run used
 a fresh build. Scoped ESLint passed with zero warnings. Public docs need no
 change because the existing integration page does not restrict short-ID syntax.

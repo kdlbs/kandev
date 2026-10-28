@@ -31,7 +31,10 @@ short-ID recognition patterns and `extractSentryShortId`. Align them on the
 provider alphabet and `O`/`I`/`L` decoder aliases, preserving case normalization
 and the existing project-slug grammar. A complete invalid suffix must not be
 accepted as a valid prefix; test boundaries and ambiguous slug separators.
-Do not decode or canonicalize aliases locally: the provider resolves them.
+When an `/issues/` path is present, validate its complete issue segment before
+considering any other text; an empty or invalid segment fails closed instead of
+matching an organization slug or host. Do not decode or canonicalize aliases
+locally: the provider resolves them.
 
 `TaskExternalLinkDialog` recognizes its existing numeric issue URL first, then
 uses the short-ID extractor. This prevents a hyphenated organization slug in a

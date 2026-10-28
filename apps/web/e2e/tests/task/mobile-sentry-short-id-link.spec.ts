@@ -1,8 +1,17 @@
 import { test } from "../../fixtures/test-base";
 import { linkSentryIssue } from "./sentry-short-id-link-helpers";
 
-for (const issueKey of ["WEB-1A", "WEB-123"]) {
-  test(`phone links Sentry ${issueKey}`, async ({
+for (const { label, issueKey, input, captureAsset } of [
+  { label: "base32", issueKey: "WEB-1A", input: "WEB-1A", captureAsset: false },
+  {
+    label: "short ID URL",
+    issueKey: "WEB-1A",
+    input: "https://my-org.sentry.io/issues/WEB-1A/",
+    captureAsset: true,
+  },
+  { label: "numeric", issueKey: "WEB-123", input: "WEB-123", captureAsset: false },
+]) {
+  test(`phone links Sentry ${label}`, async ({
     testPage,
     apiClient,
     seedData,
@@ -13,6 +22,8 @@ for (const issueKey of ["WEB-1A", "WEB-123"]) {
       capture: prCapture,
       mobile: true,
       issueKey,
+      input,
+      captureAsset,
     });
   });
 }

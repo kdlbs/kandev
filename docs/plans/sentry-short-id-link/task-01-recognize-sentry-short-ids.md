@@ -48,7 +48,9 @@ copies of qualification or private discovery fixtures.
    expected; if necessary, add all seven locales and run the i18n gates.
 3. Independently authored managed desktop and phone Playwright tests run RED
    before the correction and GREEN after, using native task menu → Link →
-   Sentry → real input → Save. Seed unique `WEB-1A` and numeric control issues
+   Sentry → real input → Save. Exercise a short-ID URL with a hyphenated host
+   or organization as well as a direct base32 ID and numeric control. Seed
+   unique `WEB-1A` and numeric control issues
    in an isolated Sentry instance via `/api/v1/sentry/mock/issues?instanceId=...`
    (`issues` payload); add a narrow `mockSentryAddIssues` API helper if needed.
    Observe the actual correlated scoped GET and mock-provider response, then
@@ -132,8 +134,11 @@ browser tests from live Sentry and physical-device testing.
 - Independent component RED reproduced base32 rejection with numeric short-ID
   and URL controls passing. Separate REDs exposed a hyphenated organization
   slug shadowing a numeric URL and an invalid `WEB-1A-U` truncating to `WEB-1A`.
-- Final focused Vitest run passed 9 tests; scoped ESLint passed with zero warnings.
-- Final managed desktop and phone runs passed 2 tests each, with one worker,
+- A review regression showed a hyphenated host or organization shadowing a
+  short-ID URL. Extraction now prioritizes and fully validates the issue-path
+  segment, including empty or invalid segments, without requiring a digit.
+- Final focused Vitest run passed 13 tests; scoped ESLint passed with zero warnings.
+- Final managed desktop and phone runs passed 3 tests each, with one worker,
   retries disabled, and a fresh build for each. Captures show the actual
   rendered linked title; provider data and workspaces were isolated fixtures.
 - No new UI copy or public documentation change was needed. No live Sentry or

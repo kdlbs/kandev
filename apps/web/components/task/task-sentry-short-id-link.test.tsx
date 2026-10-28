@@ -93,6 +93,12 @@ describe("Sentry short IDs", () => {
     expect(extractSentryShortId("WEB-1AU")).toBeNull();
     expect(extractSentryShortId("WEB-123U")).toBeNull();
     expect(extractSentryShortId("WEB-1A-U")).toBeNull();
+    expect(extractSentryShortId("https://my-org.sentry.io/issues/WEB-1A/")).toBe("WEB-1A");
+    expect(
+      extractSentryShortId("https://sentry.io/organizations/my-org/issues/WEB-1A-U/"),
+    ).toBeNull();
+    expect(extractSentryShortId("https://my-org.sentry.io/issues/WEB-A/")).toBe("WEB-A");
+    expect(extractSentryShortId("https://my-org.sentry.io/issues/")).toBeNull();
     expect(extractSentryShortId("WEB-")).toBeNull();
     expect(extractSentryShortId(null)).toBeNull();
   });
@@ -102,6 +108,12 @@ describe("link a Sentry issue", () => {
   it.each([
     { input: "WEB-1A", key: "WEB-1A", canonical: "WEB-1A" },
     { input: "WEB-123", key: "WEB-123", canonical: "WEB-123" },
+    {
+      input: "https://sentry.io/organizations/my-org/issues/WEB-1A/",
+      key: "WEB-1A",
+      canonical: "WEB-1A",
+    },
+    { input: "https://my-org.sentry.io/issues/WEB-1A/", key: "WEB-1A", canonical: "WEB-1A" },
     {
       input: "https://sentry.io/organizations/acme/issues/123456/",
       key: "123456",
@@ -140,7 +152,12 @@ describe("link a Sentry issue", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
-  it.each(["WEB-1AU", "WEB-1A-U"])("does not send invalid %s to the provider", async (input) => {
+  it.each([
+    "WEB-1AU",
+    "WEB-1A-U",
+    "https://my-org.sentry.io/issues/WEB-1A-U/",
+    "https://my-org.sentry.io/issues/",
+  ])("does not send invalid %s to the provider", async (input) => {
     const onOpenChange = renderSentryDialog();
     await submit(input);
     expect(await screen.findByTestId("task-external-link-error")).toBeTruthy();
