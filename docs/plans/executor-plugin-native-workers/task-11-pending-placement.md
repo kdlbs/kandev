@@ -26,7 +26,11 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.10
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.11
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.12
+  - AC-EXECUTORS-PLUGIN-PLACEMENT-001.9
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.13
+  - AC-EXECUTORS-PLUGIN-PLACEMENT-001.14
+  - AC-EXECUTORS-PLUGIN-PLACEMENT-001.15
+  - AC-EXECUTORS-PLUGIN-PLACEMENT-001.16
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-admission.md
 ---
@@ -43,7 +47,8 @@ L: ~600 source, ~1000 test lines including web and Playwright.
 
 ## In scope
 
-- `placement_deadline_seconds` from profile validation (60 to 86400, default 600) is copied into the pending state; `pending_placement` requires `provision_refusal` and `durable_bootstrap` (the continuation uses the persisted nonce); poll error mapping and the `cancelling` session label per AC 001.3 and 001.12; the continuation re-runs the capability gate but not admission; cancel RPC error is retried to the deadline then recovery destroy; cancel-first ends `placement_cancelled`, completion-first leaves a ready environment and an ordinary Stop. Failure copy under `executors:pluginFailure.<code>` with an icon beside the text.
+- Owns the transition table of AC 001.14 (the state machine is built here; fixture work order 16 only proves it end to end), the single-flight cancel, the poll-refusal and deadline-in-`cancelling` rows, provider `conflict` resolution (001.15), and the unconfirmed-destroy end state with the `placement_cancel_pending` session failure (001.16). The user-facing text of every failure code of AC 001.9 (including `placement_cancel_pending`, `capacity_refused`, each refusal reason, and the resume-refused-resource-class text) is localized here.
+- `placement_deadline_seconds` from the recorded profile snapshot (60 to 86400, default 600; origin is the host clock time of the first persisted pending response) is stored in the pending state; `pending_placement` requires `provision_refusal` and `durable_bootstrap` (the continuation uses the persisted nonce); poll error mapping and the `cancelling` session label per AC 001.3 and 001.12; the continuation re-runs the capability gate but not admission; cancel RPC error is retried to the deadline then recovery destroy; cancel-first ends `placement_cancelled`, completion-first leaves a ready environment and an ordinary Stop. Failure copy under `executors:pluginFailure.<code>` with an icon beside the text.
 - `PollExecutorPlacement` and `CancelExecutorPlacement`; `placement` fields in the envelope; per-operation poller and deadline.
 - Cancel under the claim with `cancelled` or `already_placed`; no ready publication after cancelling is committed.
 - Status label with reason and phase in the web app, localized in the seven catalogs, with a Playwright spec on the fixture.
@@ -66,7 +71,8 @@ L: ~600 source, ~1000 test lines including web and Playwright.
 - Archive, reset, and delete during `placement_pending` and `cancelling`: cancel path runs, `cleanup_requested` when the claim is held, delete refused as `placement_cancel_pending` until absence is confirmed.
 - Deadline with a fake clock (synctest); a pending response without the capability is `conflict`.
 - Refusal racing cancel or archive (sqlite and PostgreSQL race); refusal after a checkpoint is `conflict`; a lost reply is never a refusal.
-- Playwright: queued, cancel while queued, refused (no sleeps).
+- Single-flight cancel (Stop, archive and sweep together issue one RPC); destroy unconfirmed after the deadline ends the session `FAILED` with `placement_cancel_pending`; poll refusal in `placement_pending` and in `cancelling`; provider `conflict` on cancel never shown.
+- Playwright: queued, cancel while queued, refused, `placement_cancel_pending` text, `capacity_refused` and each refusal reason text, and the resume-refused-resource-class text (no sleeps).
 - `pnpm run i18n:check` passes in seven languages.
 
 ## Verification

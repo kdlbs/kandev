@@ -106,7 +106,7 @@ A provider declaring none of these keeps today's behavior, wire format, and inve
 
 ## Out of scope
 
-- Removing a built-in executor. Migration is specified in [operations and migration](remote-executor-plugin-operations-migration.md); a built-in stays until a plugin passes its live scenarios.
+- Removing a built-in executor. Profile migration is deferred (see Out of scope in [operations](remote-executor-plugin-operations-migration.md)); a built-in stays until a plugin passes its live scenarios.
 - A per-node repository mirror, autoscaling, fleet management UI beyond the status read, cost dashboards, and hostile-workload isolation.
 - Shared workspaces, admission, and queued placement: see [admission and placement](remote-executor-plugin-admission.md).
 - A new public relay service or any change to HTTPS lease validation for `https` leases.

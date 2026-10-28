@@ -19,6 +19,9 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.8
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.9
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.10
+  - AC-EXECUTORS-PLUGIN-ADMISSION-001.11
+  - AC-EXECUTORS-PLUGIN-ADMISSION-001.12
+  - AC-EXECUTORS-PLUGIN-ADMISSION-001.13
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-admission.md
 ---
@@ -27,7 +30,7 @@ system_design:
 
 ## Summary
 
-Add the admission message on provision and recover, the host `AdmissionHook` with an atomic reservation, the applied resource class, and enforcement at first launch, delayed launch, and resume.
+Add the admission message on provision and recover, the host `AdmissionHook` with an atomic reservation, the applied resource class, and enforcement at first launch and resume. The continuation of a pending placement is not an admission: it keeps the reservation and re-runs only the capability gate.
 
 ## Size
 
@@ -35,10 +38,10 @@ L: ~500 source, ~900 test lines.
 
 ## In scope
 
-- `admitLaunch` order: capability gate, label validation, `Admit` outside any transaction with a 5 s deadline, then one transaction that takes the scope lock, counts, and writes the reservation with the operation; the hook never counts. A resume keeps its reservation and takes none; the new launch that no longer fits gets `admission_denied` (`scope_full`). Test enumerates every caller of `validateLaunch`.
-- `admission.go` hook interface and default allow-all; one shared call function used by all three launch paths.
+- `admitLaunch` order: capability gate, label validation, `Admit` outside any transaction with a 5 s deadline, then one transaction that takes the scope lock, counts, and writes the reservation with the operation; the hook never counts. A resume keeps its reservation and takes none; the new launch that no longer fits gets `admission_denied` (`scope_full`). Test enumerates every caller of both entries. Resume follows the table of AC 001.11 (deny refuses, unavailable goes ahead, no reservation resumes by the same rules).
+- `admission.go` hook interface and default allow-all; one shared gate function called from both entries, `validateLaunch` (first launch) and `attachRetainedPluginExecutor` (resume, which runs before `validateLaunch` on main).
 - Reservation written with the operation record; exactly-once release; PostgreSQL advisory lock on the admission scope.
-- Label validation; applied-class check; resume keeps its class.
+- Label validation; applied-class check; resume keeps its class; identity snapshot in the envelope; class list dispositions.
 
 ## Out of scope
 
@@ -53,7 +56,8 @@ L: ~500 source, ~900 test lines.
 
 - Two launches compete for the last unit (sqlite and PostgreSQL race).
 - Admission hook races a resume of the same scope: serialized, loser sees the reservation.
-- Hook unavailable: `admission_unavailable`, no provider call.
+- Hook unavailable: first launch `admission_unavailable`, no provider call; resume goes ahead.
+- Resume through `attachRetainedPluginExecutor`: hook deny refuses, no reservation resumes, capability gate and measure run.
 - Reservation released exactly once after failure, destroy, and cancel.
 - Call-site test fails if a launch path skips the hook; the request builder cannot read names or credentials.
 
