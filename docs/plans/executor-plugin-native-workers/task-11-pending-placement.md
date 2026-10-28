@@ -28,7 +28,7 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.12
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.13
 system_design:
-  - ../../specs/executors/system-design/remote-executor-plugin-shared-admission-placement.md
+  - ../../specs/executors/system-design/remote-executor-plugin-admission.md
 ---
 
 # Task 11: Queued and pending placement and refused provision (M3)
