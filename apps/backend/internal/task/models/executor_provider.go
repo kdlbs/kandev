@@ -226,3 +226,51 @@ type PluginExecutorClaimCheckpoint struct {
 	Sequence uint64
 	Digest   string
 }
+
+// ErrExecutorPublishMismatch is the refusal of a ready publication whose
+// evidence does not match the stored operation. The environment is retained;
+// the wrapped PluginPublishMismatchError names the reason.
+var ErrExecutorPublishMismatch = errors.New("publish_mismatch")
+
+// Reasons a ready publication is refused. The set is closed.
+const (
+	PluginPublishReasonOperation  = "operation"
+	PluginPublishReasonOwner      = "owner"
+	PluginPublishReasonSession    = "session"
+	PluginPublishReasonGeneration = "generation"
+	PluginPublishReasonRuntime    = "runtime_identity"
+	PluginPublishReasonWorkspace  = "workspace_descriptor"
+	PluginPublishReasonRepos      = "repository_inventory"
+	PluginPublishReasonPhase      = "phase"
+	PluginPublishReasonRevision   = "revision"
+	PluginPublishReasonStatus     = "environment_status"
+)
+
+// PluginPublishMismatchError carries the named reason of a refused publication.
+type PluginPublishMismatchError struct{ Reason string }
+
+func (e *PluginPublishMismatchError) Error() string {
+	return ErrExecutorPublishMismatch.Error() + ": " + e.Reason
+}
+
+func (e *PluginPublishMismatchError) Is(target error) bool {
+	return target == ErrExecutorPublishMismatch
+}
+
+// PublishRecoveredTaskEnvironmentParams is the verified evidence for flipping a
+// creating environment to ready under the recovery claim. It carries no
+// provider data; the repository re-checks every field against the stored
+// envelope in the publishing transaction.
+type PublishRecoveredTaskEnvironmentParams struct {
+	Claim               *TaskEnvironmentRecoveryClaim
+	SessionID           string
+	EnvironmentID       string
+	OperationID         string
+	RuntimeIdentity     string
+	OwnershipGeneration int64
+	// ExpectedRevision is the envelope revision the caller read after writing
+	// the ready phase.
+	ExpectedRevision uint64
+	// Repos is the repository projection that replaces the environment's rows.
+	Repos []*TaskEnvironmentRepo
+}
