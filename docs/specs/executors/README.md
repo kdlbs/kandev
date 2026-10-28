@@ -38,6 +38,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Remote executor plugins: native worker recovery and proof](requirements/remote-executor-plugin-native-workers-recovery.md)
 - [Remote executor plugins: capability negotiation and versioning](requirements/remote-executor-plugin-capability-versioning.md)
 - [Remote executor plugins: shared environments, admission, and placement](requirements/remote-executor-plugin-shared-admission-placement.md)
+- [Remote executor plugins: queued and pending placement](requirements/remote-executor-plugin-placement.md)
 - [Remote executor plugins: operations, launch policy, preparation, and migration](requirements/remote-executor-plugin-operations-migration.md)
 - [Remote executor plugins: profile schema, typed values, and secret references](requirements/remote-executor-plugin-profile-contract.md)
 - [Agent survival across a backend restart](requirements/agent-survival-across-restart.md)
