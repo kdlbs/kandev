@@ -155,6 +155,6 @@ evidence, consistent with the Enterprise host design.
   `github.com.evil` as invalid. Under `githubhost`, it is a valid GHES
   authority. The test must change to assert that the identity is distinct from
   github.com, not rejected. Security comes from host-qualified equality.
-- Persisted comparison targets created before this fix have a github.com host,
-  but only for genuine github.com PRs, because Enterprise launches never
-  succeeded. No migration is required.
+- PR reconciliation already preserves Enterprise hosts in stored comparison
+  targets. This fix corrects the launch-time conversion and accepts verified
+  live ID aliases without rewriting those targets. No migration is required.
