@@ -44,7 +44,9 @@ desktop compact control density and no document overflow. Both direct composer
 and normal dialog entry points must receive equivalent close sizing and focus
 return; the composer currently owns a controlled dialog without a
 `DialogTrigger`, so explicitly restore its opener when still mounted. Avoid
-changing its upload, preview URL, delivery, and removal behavior.
+changing its upload, preview URL, delivery, and removal behavior. The chip
+exposes its main button for focus restoration without inserting a wrapper into
+the composer's context row.
 
 ## Failure and verification
 

@@ -25,7 +25,14 @@ it("resets the composer image inspection and retains its attachment", async () =
       preview: "blob:first",
     },
   };
-  const view = render(<ImageItem item={item} />);
+  const view = render(
+    <div data-testid="composer-context-row">
+      <ImageItem item={item} />
+    </div>,
+  );
+  expect(screen.getByTestId("context-chip-remove").parentElement?.parentElement).toBe(
+    screen.getByTestId("composer-context-row"),
+  );
   const opener = screen.getByRole("button", { name: "Screenshot" });
   opener.focus();
   await act(async () => fireEvent.click(opener));
@@ -34,7 +41,9 @@ it("resets the composer image inspection and retains its attachment", async () =
     fireEvent.click(within(dialog).getByRole("button", { name: "Actual size" })),
   );
   view.rerender(
-    <ImageItem item={{ ...item, attachment: { ...item.attachment, preview: "blob:next" } }} />,
+    <div data-testid="composer-context-row">
+      <ImageItem item={{ ...item, attachment: { ...item.attachment, preview: "blob:next" } }} />
+    </div>,
   );
   dialog = screen.getByRole("dialog");
   expect(within(dialog).getByRole("img").getAttribute("src")).toBe("blob:next");

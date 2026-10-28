@@ -137,6 +137,9 @@ gate; run it only if an actual unresolved type concern warrants it.
 
 - `apps/web/components/task/chat/image-preview-dialog.tsx` and its test.
 - `apps/web/components/task/chat/context-items/image-item.tsx` and new test.
+- `apps/web/components/task/chat/context-items/context-chip.tsx` and its test,
+  plus `apps/web/components/task/chat/messages/chat-message.test.tsx` for the
+  existing attachment preview contract.
 - `apps/web/components/task/chat/messages/kandev/rich-output/rich-output-renderer-file-targets.test.tsx`.
 - The two focused desktop/phone E2E specs and a shared helper only if needed.
 - `docs/public/automation-and-mcp.md`, `docs/public/tasks-and-workflows.md`,
@@ -171,3 +174,13 @@ manifests were preserved with hashes in the task evidence directory. The phone
 viewer and attachment guidance was updated. Specification catalog and lint,
 and both public-document validators passed. Final diff checks and hook results
 are recorded in the task handoff.
+
+Hosted CI subsequently exposed a stale attachment fit-class assertion and the
+composer image wrapper's violation of the Quick Chat context-row direct-child
+contract. The fix passes the main-button ref through `ContextChip`, removes the
+wrapper, and checks the attachment's mode behavior instead of the old class.
+The affected five-file Vitest suite passed, including both ref branches and
+focus restoration. Fresh managed desktop runs passed the Quick Chat case and
+two image-inspection cases; receipt-matched phone runs passed Quick Chat and
+image inspection. Scoped ESLint passed with zero warnings. Existing Quick Chat
+assertions and the prior UI captures were preserved.

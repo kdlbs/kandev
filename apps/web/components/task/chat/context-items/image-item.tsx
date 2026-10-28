@@ -21,7 +21,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
   const { t } = useTranslation("chat");
   const { isFinePointer } = useResponsiveBreakpoint();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const chipRef = useRef<HTMLDivElement>(null);
+  const chipRef = useRef<HTMLButtonElement>(null);
   // A restored or oversized ready image has no inline preview; the authorized
   // content URL keeps the thumbnail and larger viewer available.
   const previewSrc =
@@ -143,24 +143,23 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
 
   return (
     <>
-      <div ref={chipRef} className="contents">
-        <ContextChip
-          kind="image"
-          label={item.label}
-          thumbnail={deliveryMode === "prompt" ? previewSrc : undefined}
-          leadingIcon={leadingIcon}
-          preview={preview}
-          onClick={previewSrc ? handleClick : undefined}
-          onRemove={item.onRemove}
-        />
-      </div>
+      <ContextChip
+        kind="image"
+        label={item.label}
+        thumbnail={deliveryMode === "prompt" ? previewSrc : undefined}
+        leadingIcon={leadingIcon}
+        preview={preview}
+        onClick={previewSrc ? handleClick : undefined}
+        onRemove={item.onRemove}
+        triggerRef={chipRef}
+      />
       {previewSrc && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent
             aria-describedby={undefined}
             showCloseButton={false}
             onCloseAutoFocus={(event) => {
-              const opener = chipRef.current?.querySelector("button");
+              const opener = chipRef.current;
               if (opener) {
                 event.preventDefault();
                 opener.focus();
