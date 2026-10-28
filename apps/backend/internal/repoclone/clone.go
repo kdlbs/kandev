@@ -583,7 +583,7 @@ func (c *Cloner) refreshWorkspaceRepository(
 		return err
 	}
 	if prNumber > 0 {
-		prRefspec := fmt.Sprintf("pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
+		prRefspec := fmt.Sprintf("refs/pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
 		if err := runFetch(prRefspec); err != nil {
 			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
 		}
