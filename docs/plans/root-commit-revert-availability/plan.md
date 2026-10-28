@@ -20,6 +20,7 @@ Qualification at baseline `a7509ba288ece945cdbce63fd8981f48ee5309e6` observed tw
 
 - In scope: local ancestry projection, row eligibility, independently authored regression tests, and focused native desktop/coarse/phone verification.
 - Also in scope: accurate first-parent metadata on successful local commit notifications, including root and merge commits.
+- Required CI remediation: establish the existing resolver singleflight test's intended overlap before releasing its real HTTP response; do not change the resolver.
 - Out of scope: new root undo, Git history/ref changes, new copy, provider policy, broad Git refactors, and unrelated work.
 
 ## Technical approach
@@ -38,6 +39,8 @@ Add `apps/web/components/task/root-commit-revert.test.tsx` using real mappers an
 
 An independently authored focused Go test must create a root, an ordinary child, and a merge with two parents, then assert the real tracker notification against Git's actual graph: empty for root and the first parent for both ordinary and merge commits. It must demonstrate root-specific RED before the producer fix and GREEN after it.
 
+The unchanged `TestAgentctlResolverSingleflightsConcurrentDownloads` failed in Backend Tests (2/4) with two requests rather than one. Its HTTP response was released after the first request entered, without proving that the second caller joined the flight. The artifact does not reveal the actual interleaving, and the resolver and test match the base. Repair the test's overlap barrier using the existing observed-context pattern, with bounded waits and cleanup; retain both real callers and the one-request assertion. This tests coalescing of two joined waiters, not the separate stale-cache-miss race or the precise CI scheduling.
+
 ## E2E tests
 
 Add focused `apps/web/e2e/tests/git/root-commit-revert.spec.ts` (chromium, including `coarseDesktopTestPage`) and `mobile-root-commit-revert.spec.ts` (mobile-chrome), sharing a small sibling helper only if needed. Use deterministic environment-keyed session commit state, open Changes, exercise actual desktop context/hover and real touch long-press menu, and prove root absence with ordinary and other-action controls. Desktop validates selected-repository dispatch separately in the component regression; browser tests verify actual surfaces. Build freshly through the managed runner. Capture only actual rendered UI if capture is used; report any infrastructure limitation rather than presenting a DOM double as browser proof.
@@ -48,7 +51,7 @@ Add focused `apps/web/e2e/tests/git/root-commit-revert.spec.ts` (chromium, inclu
 
 ## Verification results
 
-Frontend and producer checks are recorded in [Task 01](task-01-guard-root-commit-revert.md#results). The independent producer regression failed for root before the correction while ordinary and merge controls passed, then all three passed after the correction.
+Frontend and producer checks are recorded in [Task 01](task-01-guard-root-commit-revert.md#results). The independent producer regression failed for root before the correction while ordinary and merge controls passed, then all three passed after the correction. A required CI failure in an unchanged lifecycle test exposed an unproven overlap precondition; the test-only synchronization correction and its adjacent control passed locally.
 
 ## Risks
 
@@ -56,6 +59,7 @@ Frontend and producer checks are recorded in [Task 01](task-01-guard-root-commit
 - A test that substitutes the menu primitive does not establish native touch behavior. A stale build cannot establish current browser behavior.
 - Git HEAD may move after the list was read; backend validation remains authoritative.
 - A failed parent query cannot be distinguished reliably from known ancestry by the existing string contract. Preserve existing failure handling without claiming that this correction repairs it.
+- A synchronized test does not establish which interleaving caused the earlier two-request observation or rule out a separate cache-miss race.
 
 ## Public documentation
 
