@@ -157,9 +157,9 @@ func TestPluginStateReadabilityPostgres(t *testing.T) {
 		t.Fatalf("init second postgres repo: %v", err)
 	}
 	t.Run("lock excludes admission across connections", func(t *testing.T) {
-		exerciseReadabilityLockExclusion(t, repo, secondRepo)
+		exerciseReadabilityLockExclusion(t, repo, secondRepo, "task-pg-plugin-executor-inventory")
 	})
 	t.Run("writable checker", func(t *testing.T) {
-		exerciseWritableChecker(t, repo)
+		exerciseWritableChecker(t, repo, "task-pg-plugin-executor-inventory")
 	})
 }
