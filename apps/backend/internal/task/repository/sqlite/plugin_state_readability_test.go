@@ -73,6 +73,9 @@ func TestPluginStateReadabilityLockExcludesAnAdmissionWrite(t *testing.T) {
 
 func exerciseReadabilityLockExclusion(t *testing.T, holder, writer *Repository, taskID string) {
 	t.Helper()
+	// The admission write reaches the installation lock only through the
+	// writable checker; without one the write never locks.
+	writer.SetPluginStateWritableChecker(func(context.Context, string, string, uint32) error { return nil })
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	held, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
