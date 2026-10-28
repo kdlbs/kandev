@@ -45,6 +45,16 @@ title update and close. Preserve current errors, cancellation, query/store
 ownership, routing, and request lifetime. The backend's existing Sentry REST
 resolver forwards short IDs; no provider or backend production change is needed.
 
+The task system's existing external-reference contract requires replacement of
+an existing leading prefix. `buildLinkedIssueTitle` in
+`apps/web/components/task/task-external-link-utils.ts` must also recognize a
+complete Sentry base32 prefix followed by the existing colon delimiter before
+composing the canonical new key. Keep its existing numeric Jira, Linear and
+Sentry prefix behavior, non-prefix handling, and code-point title truncation.
+This is the shared link action's title builder, not a change to unrelated title
+parsers. The existing title representation has no provider provenance for a
+prefix; recognition is therefore limited to the accepted anchored syntax.
+
 ## Desktop and phone flow
 
 Desktop uses the existing task sidebar action and phone uses the task picker,
@@ -62,4 +72,6 @@ Independently authored component and extraction regressions prove the actual
 submit callback and matching boundaries; isolated desktop and phone managed
 browser tests use the instance-scoped mock controller and real app/backend path,
 observe the correlated issue response, and check the rendered and persisted
-title. They do not establish live Sentry behavior or physical-device coverage.
+title. Relinking verification must exercise the shared title builder and actual
+dialog callback as well as the desktop and phone task actions. They do not
+establish live Sentry behavior or physical-device coverage.

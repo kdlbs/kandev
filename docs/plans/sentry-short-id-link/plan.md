@@ -26,9 +26,11 @@ patterns and extraction; preserve numeric links, canonical title, instance and
 workspace scope, dialog close and failures. Exercise desktop and native-phone
 entry paths with isolated mock-backed app/backend flows. Numeric issue URLs are
 recognized before short IDs so a hyphenated organization slug cannot shadow the
-numeric ID. Do not change Jira,
-Linear, generic parsers, provider APIs, backend routing, state/query ownership,
-copy, global mock seed data, or dialog composition.
+numeric ID. The relink remediation extends only
+`buildLinkedIssueTitle`'s leading-prefix recognition for supported Sentry
+base32 syntax. Do not change Jira or Linear input parsing, unrelated parsers,
+provider APIs, backend routing, state/query ownership, copy, global mock seed
+data, or dialog composition.
 
 ## Technical approach
 
@@ -49,6 +51,7 @@ rendered outcome and persisted title on both paths, plus a numeric control.
 ## Work order
 
 - [x] [Task 01: Recognize Sentry short IDs](task-01-recognize-sentry-short-ids.md) (wave 1; no dependencies).
+- [x] [Review remediation: replace a base32 prefix when relinking](task-01-recognize-sentry-short-ids.md#review-remediation-replace-a-base32-prefix-when-relinking).
 
 ## Risks and exclusions
 
@@ -57,7 +60,7 @@ mistake slug separators for the suffix. Provider alias acceptance is not local
 canonicalization. Managed mock tests do not prove live Sentry or physical-device
 behavior. This package is design-only until the separate implementation release.
 
-## Local verification results
+## Local verification results for the prior head
 
 The independent component suite first reproduced the base32 rejection with two
 numeric controls passing. A further regression exposed numeric URL slug
@@ -73,3 +76,12 @@ provider response, rendered title and persisted task title. The phone run used
 a fresh build. Scoped ESLint passed with zero warnings. Public docs need no
 change because the existing integration page does not restrict short-ID syntax.
 These tests do not claim live Sentry or physical-device coverage.
+
+## Relink remediation results
+
+The builder and rendered-dialog regressions first reproduced a stacked base32
+prefix. The final focused suites passed 10 builder tests and 14 dialog tests.
+Managed desktop and phone each passed four cases, including a real two-step
+relink and the existing base32, URL, and numeric controls. Scoped ESLint passed.
+Both provider lookups and the rendered and persisted titles were observed using
+isolated mock data; this is not live Sentry or physical-device coverage.

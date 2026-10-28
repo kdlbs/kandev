@@ -11,6 +11,7 @@ acceptance_criteria:
   - AC-INTEGRATIONS-SENTRY-SHORT-ID-LINK-001.1
   - AC-INTEGRATIONS-SENTRY-SHORT-ID-LINK-001.2
   - AC-INTEGRATIONS-SENTRY-SHORT-ID-LINK-001.3
+  - AC-INTEGRATIONS-SENTRY-SHORT-ID-LINK-001.4
 system_design:
   - ../../specs/integrations/system-design/sentry-short-id-link.md
 ---
@@ -25,7 +26,9 @@ Repair the Sentry-specific suffix recognition and extraction in
 extracting short IDs, so a hyphenated organization slug is not mistaken for an
 ID. Keep the existing slug
 syntax, case normalization, numeric URL fallback, instance/workspace lookup,
-provider canonical title and dialog success/close. No Jira, Linear, global
+provider canonical title and dialog success/close. The relink correction
+may extend only `buildLinkedIssueTitle`'s leading-prefix recognition for
+supported Sentry base32 syntax. No Jira or Linear input parsing, unrelated
 parser, backend production, API, query/store, layout or copy changes. Existing
 `PROJ-123` placeholder remains useful. Add independently authored tests, not
 copies of qualification or private discovery fixtures.
@@ -143,3 +146,68 @@ browser tests from live Sentry and physical-device testing.
   rendered linked title; provider data and workspaces were isolated fixtures.
 - No new UI copy or public documentation change was needed. No live Sentry or
   physical-device verification is claimed.
+
+## Review remediation: replace a base32 prefix when relinking
+
+The existing task
+external-reference requirement already requires prefix replacement. The shared
+`buildLinkedIssueTitle` currently removes only decimal suffixes, so relinking
+`WEB-1A: Fix login` to `WEB-1B` produces a stacked prefix and can truncate
+original title text. Extend only this builder's anchored, colon-delimited
+recognition to the accepted Sentry base32 suffix alphabet and decoder aliases;
+preserve existing numeric Jira/Linear/Sentry cases, non-prefix titles, empty
+titles and code-point-aware 60-character truncation. Do not modify unrelated
+global parsers, provider input validation, API routing, query/store ownership,
+dialog lifetime, or user-facing copy. A prefix matching this syntax has no
+stored provider provenance, so the builder cannot distinguish a natural title
+with the same complete prefix shape from an external issue prefix.
+
+Before production changes, independently add a failing test to
+`apps/web/components/task/task-external-link-utils.test.ts` for base32 prefix
+replacement, including letter-only and alias suffixes, numeric Jira/Linear
+controls, an unrelated title and truncation boundary. Add an actual rendered
+`TaskExternalLinkDialog` regression in
+`apps/web/components/task/task-sentry-short-id-link.test.tsx` proving the scoped
+provider's canonical new key is passed to the real title builder and the update
+uses `WEB-1B: Fix login` when the current title is `WEB-1A: Fix login`; do not
+mock the builder. Confirm RED is the stacked title, not fixture setup, then
+make the minimum correction and run GREEN.
+
+Extend the existing managed desktop and phone specs with independent relink
+scenarios: use the task menu and real input to link `WEB-1A`, then relink to
+`WEB-1B`; seed both issues through the task-owned Sentry mock instance. Observe
+both correlated scoped GETs and assert the visible and persisted title after
+each save, including exactly one prefix after the second. Keep existing numeric
+and URL controls independently reported. No intercepted success, global mock
+dataset edit, live provider write, or shared developer instance. Capture and
+inspect fresh desktop and phone outcomes for the final PR head.
+
+After the later lease, run sequentially from the repository root, with the
+pinned PATH and `GOTOOLCHAIN=local` shown above. Each quiet invocation has its
+own owned directory; join each actual handle and record exit before the next.
+Run the first two commands on the added tests before changing production, then
+the remaining commands after the correction. No reinstall is needed.
+
+```bash
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/tasks/accept-sentry-short_zfbey007/receipts/relink-unit-red scripts/run-quiet vitest -- pnpm --dir apps/web exec vitest run --project node components/task/task-external-link-utils.test.ts --maxWorkers=1 --no-file-parallelism
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/tasks/accept-sentry-short_zfbey007/receipts/relink-dialog-red scripts/run-quiet vitest -- pnpm --dir apps/web exec vitest run --project browser-locales components/task/task-sentry-short-id-link.test.tsx --maxWorkers=1 --no-file-parallelism
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/tasks/accept-sentry-short_zfbey007/receipts/relink-unit-green scripts/run-quiet vitest -- pnpm --dir apps/web exec vitest run --project node components/task/task-external-link-utils.test.ts --maxWorkers=1 --no-file-parallelism
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/tasks/accept-sentry-short_zfbey007/receipts/relink-dialog-green scripts/run-quiet vitest -- pnpm --dir apps/web exec vitest run --project browser-locales components/task/task-sentry-short-id-link.test.tsx --maxWorkers=1 --no-file-parallelism
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/tasks/accept-sentry-short_zfbey007/receipts/relink-desktop scripts/run-quiet e2e --summary -- env CAPTURE_PR_ASSETS=1 GOMAXPROCS=2 GOFLAGS=-p=2 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/sentry-short-id-link.spec.ts -- --workers=1 --retries=0
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/tasks/accept-sentry-short_zfbey007/receipts/relink-phone scripts/run-quiet e2e --summary -- env CAPTURE_PR_ASSETS=1 GOMAXPROCS=2 GOFLAGS=-p=2 pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-sentry-short-id-link.spec.ts -- --workers=1 --retries=0
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/tasks/accept-sentry-short_zfbey007/receipts/relink-lint scripts/run-quiet lint -- pnpm --dir apps/web exec eslint --max-warnings 0 components/task/task-external-link-utils.ts components/task/task-external-link-utils.test.ts components/task/task-sentry-short-id-link.test.tsx e2e/tests/task/sentry-short-id-link-helpers.ts e2e/tests/task/sentry-short-id-link.spec.ts e2e/tests/task/mobile-sentry-short-id-link.spec.ts
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+The earlier local results above remain historical evidence for the prior head;
+the relink remediation was separately verified as follows:
+
+- Builder RED reproduced stacked prefixes and lost title text; rendered-dialog
+  RED produced the same stacked title through the real callback.
+- Builder GREEN passed 10 tests and dialog GREEN passed 14; scoped ESLint passed.
+- Managed desktop and phone each passed 4 cases with one worker, retries 0,
+  and fresh builds. Both scoped mock-provider responses and rendered/persisted
+  titles were asserted for the two-step relink; captures show the resulting
+  single prefix. These tests do not claim live Sentry or physical-device coverage.

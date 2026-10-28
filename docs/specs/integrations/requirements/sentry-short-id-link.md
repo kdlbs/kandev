@@ -37,8 +37,14 @@ short ID, including IDs whose encoded suffix contains letters.
   continue to resolve through the selected instance, use the returned canonical
   short ID as the title prefix, and close on success. Invalid or unresolved
   references retain the existing failure behavior and do not update the task.
+- **AC-INTEGRATIONS-SENTRY-SHORT-ID-LINK-001.4:** On desktop and phone,
+  relinking a task whose leading issue prefix is a supported Sentry base32
+  short ID replaces that prefix with the newly resolved issue key instead of
+  stacking both. The existing title and length-limit behavior applies after
+  replacement, including when the new issue belongs to another supported
+  title-link provider.
 
 ## Out of scope
 
-Jira and Linear parsing; global title-prefix parsers; Sentry provider APIs,
+Jira and Linear input parsing; unrelated title parsers; Sentry provider APIs,
 backend routing, credentials, storage and task-link lifetime semantics.

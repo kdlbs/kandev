@@ -37,7 +37,7 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-function renderSentryDialog() {
+function renderSentryDialog(title = "Fix login") {
   vi.mocked(useSentryInstances).mockReturnValue({
     loading: false,
     instances: [instance],
@@ -53,7 +53,7 @@ function renderSentryDialog() {
           open
           onOpenChange={onOpenChange}
           provider="sentry"
-          task={{ id: "task-1", title: "Fix login" }}
+          task={{ id: "task-1", title }}
           workspaceId="workspace-1"
         />
       </ToastProvider>
@@ -105,6 +105,20 @@ describe("Sentry short IDs", () => {
 });
 
 describe("link a Sentry issue", () => {
+  it("replaces a previous base32 prefix with the resolved canonical key", async () => {
+    vi.mocked(getSentryIssue).mockResolvedValue({ shortId: "WEB-1B" } as never);
+    vi.mocked(updateTask).mockResolvedValue({ id: "task-1", title: "WEB-1B: Fix login" } as never);
+    const onOpenChange = renderSentryDialog("WEB-1A: Fix login");
+    await submit("WEB-1B");
+    await waitFor(() =>
+      expect(getSentryIssue).toHaveBeenCalledWith("workspace-1", "instance-1", "WEB-1B"),
+    );
+    await waitFor(() =>
+      expect(updateTask).toHaveBeenCalledWith("task-1", { title: "WEB-1B: Fix login" }),
+    );
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
   it.each([
     { input: "WEB-1A", key: "WEB-1A", canonical: "WEB-1A" },
     { input: "WEB-123", key: "WEB-123", canonical: "WEB-123" },
