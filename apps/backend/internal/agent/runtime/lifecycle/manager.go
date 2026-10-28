@@ -1008,6 +1008,11 @@ func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 	m.wireKubernetesEnvironmentStore()
 }
 
+// RuntimeSecretStore returns the store that holds runtime auth secrets, or nil.
+func (m *Manager) RuntimeSecretStore() secrets.SecretStore {
+	return m.secretStore
+}
+
 // SetAgentProfileReader wires the reader the launch-prep SkillDeployer uses
 // to resolve full agent_profiles rows by id. Without it, the skill deploy
 // step is silently skipped.

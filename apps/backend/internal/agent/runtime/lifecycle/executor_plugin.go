@@ -95,6 +95,7 @@ type PluginRemoteExecutor struct {
 	recoveredAgentctlInfoReader pluginRecoveredAgentctlInstanceReader
 	ready                       pluginAgentctlReadinessCheck
 	drainRuntime                pluginRuntimeDrainer
+	runtimeSecrets              PluginExecutorRuntimeSecrets
 }
 
 func (r *PluginRemoteExecutor) SetRecoveryDependencies(loader PluginExecutorProfileLoader, inventory PluginExecutorInventoryStore) {
@@ -131,6 +132,8 @@ type pluginExecutorInventory struct {
 	DrainOutcome           string                                `json:"drain_outcome,omitempty"`
 	DrainReceiptID         string                                `json:"drain_receipt_id,omitempty"`
 	DrainClaim             string                                `json:"drain_claim,omitempty"`
+	HandshakeStarted       bool                                  `json:"handshake_started,omitempty"`
+	CleanupRequested       bool                                  `json:"cleanup_requested,omitempty"`
 	Revision               uint64                                `json:"revision"`
 	Generation             uint64                                `json:"generation"`
 	EnvironmentGeneration  int64                                 `json:"environment_generation"`
@@ -245,7 +248,13 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	}
 	operationContext := pluginExecutorRequestContext(ctx, req, profile, operationID, digest)
 	inventory := pluginExecutorLaunchInventory(req, profile, operationID, digest)
+	if pluginExecutorDurableBootstrap(inventory) {
+		if err := r.persistDurableNonce(ctx, req, nonce); err != nil {
+			return nil, err
+		}
+	}
 	if err := checkpointPluginExecutor(ctx, req, inventory); err != nil {
+		r.settlePluginExecutorSecrets(ctx, inventory, req.InstanceID)
 		return nil, fmt.Errorf("persist plugin executor allocation intent: %w", err)
 	}
 	return &pluginExecutorLaunchState{
@@ -344,9 +353,26 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	fail := func(stage string, err error) (*agentctl.Client, string, error) {
 		return nil, "", r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource, stage, err)
 	}
+	durable := pluginExecutorDurableBootstrap(launch.inventory)
+	if durable {
+		launch.inventory.HandshakeStarted = true
+		if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
+			return fail("handshake_checkpoint", err)
+		}
+	}
 	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort), r.logger, launch.nonce)
 	if err != nil {
 		return fail("control_handshake", err)
+	}
+	if durable {
+		if err := r.persistDurableToken(ctx, launch.request, token); err != nil {
+			control.Close()
+			return fail("token_persist", err)
+		}
+		if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
+			control.Close()
+			return fail("token_checkpoint", err)
+		}
 	}
 	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request, launch.inventory.workspacePath())
 	control.Close()
@@ -381,10 +407,14 @@ func createPluginAgentctlInstance(ctx context.Context, control *agentctl.Control
 func (r *PluginRemoteExecutor) finishPluginExecutorLaunch(ctx context.Context, launch *pluginExecutorLaunchState, resource *pluginsdk.ExecutorResourceDescriptor, client *agentctl.Client, token string) (*ExecutorInstance, error) {
 	launch.inventory.Phase = pluginExecutorPhaseReady
 	launch.inventory.Generation++
+	delete(launch.request.Metadata, MetadataKeyBootstrapNonceSecret)
 	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
 		client.Close()
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"ready_checkpoint", err)
+	}
+	if pluginExecutorDurableBootstrap(launch.inventory) {
+		r.settlePluginExecutorNonce(ctx, launch.request.InstanceID)
 	}
 	metadata := clonePluginExecutorMetadata(launch.request.Metadata)
 	metadata[MetadataKeyPluginExecutor] = launch.inventory
@@ -720,6 +750,7 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 		if err := req.ReleaseRuntimeInventory(claimedCtx); err != nil {
 			return fmt.Errorf("release absent plugin executor inventory: %w", err)
 		}
+		r.settlePluginExecutorSecrets(ctx, inventory, req.InstanceID)
 		return errors.New("plugin executor allocation failed before creating a resource")
 	}
 	resource := recovery.GetResource()
@@ -778,6 +809,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if releaseErr := req.ReleaseRuntimeInventory(cleanupCtx); releaseErr != nil {
 			return fmt.Errorf("remote launch failed and inventory release failed: %w", releaseErr)
 		}
+		r.settlePluginExecutorSecrets(ctx, inventory, req.InstanceID)
 		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; allocated resource was removed"))
 	}
 	inventory.Resource = retained

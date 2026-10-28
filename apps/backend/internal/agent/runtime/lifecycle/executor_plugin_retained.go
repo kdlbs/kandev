@@ -43,6 +43,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	r.uploadPluginExecutorAgentCredentials(ctx, client, req)
 	r.applyPluginExecutorGitIdentity(ctx, client, req)
 	metadata := clonePluginExecutorMetadata(req.Metadata)
+	delete(metadata, MetadataKeyBootstrapNonceSecret)
 	metadata[MetadataKeyPluginExecutor] = inventory
 	return &ExecutorInstance{
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,

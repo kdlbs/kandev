@@ -153,7 +153,7 @@ func (r *PluginRemoteExecutor) acceptRecoveredPluginExecutorResource(
 }
 
 func shouldCleanupRecoveredPluginExecutor(state *pluginExecutorRecoveryState, record *models.ExecutorRunning) bool {
-	return state.cleanupPending || state.wasAllocating && isTerminalExecutorRunningStatus(record.Status)
+	return state.cleanupPending || state.inventory.CleanupRequested || state.wasAllocating && isTerminalExecutorRunningStatus(record.Status)
 }
 
 func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
@@ -169,6 +169,9 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 	}
 	if _, err := resolvePluginExecutorWorkspace(state.inventory.NegotiatedCapabilities, state.inventory.WorkspaceDescriptor, state.resource); err != nil {
 		return nil, err
+	}
+	if record.TransientAuthToken == "" && pluginExecutorDurableBootstrap(state.inventory) && state.inventory.Phase != pluginExecutorPhaseReady && record.TransientBootstrapNonce != "" {
+		return r.resumeDurableBootstrap(ctx, record, state)
 	}
 	if record.TransientAuthToken == "" {
 		if state.inventory.Phase == pluginExecutorPhaseReady {
@@ -304,8 +307,7 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 		client.Close()
 		return nil, err
 	}
-	metadata := clonePluginExecutorMetadata(record.Metadata)
-	metadata[MetadataKeyPluginExecutor] = state.inventory
+	metadata := pluginRecoveredMetadataWithoutNonce(record.Metadata, state.inventory)
 	return &ExecutorInstance{
 		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
 		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: info.WorkspacePath,
@@ -463,6 +465,7 @@ func (r *PluginRemoteExecutor) settleAbsentPluginExecutor(
 	if err := r.inventoryStore.DeletePluginExecutorInventoryIfCurrent(claimedCtx, record.SessionID, record.AgentExecutionID, inventory.EnvironmentGeneration); err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return err
 	}
+	r.settlePluginExecutorSecrets(ctx, inventory, record.AgentExecutionID)
 	return nil
 }
 
@@ -675,6 +678,9 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	provider models.ExecutorProvider,
 ) error {
 	claim, err := r.acquirePluginExecutorCleanupClaim(ctx, record.TaskID, record.SessionID, inventory)
+	if errors.Is(err, recoveryclaim.ErrBusy) {
+		r.recordCleanupRequested(ctx, record)
+	}
 	if err != nil {
 		return fmt.Errorf("plugin executor cleanup is fenced: %w", err)
 	}
@@ -719,6 +725,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 		if err := r.inventoryStore.DeletePluginExecutorInventoryIfCurrent(claimedCtx, record.SessionID, record.AgentExecutionID, inventory.EnvironmentGeneration); err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 			return fmt.Errorf("plugin executor cleanup succeeded but inventory removal failed: %w", err)
 		}
+		r.settlePluginExecutorSecrets(ctx, inventory, record.AgentExecutionID)
 	} else if err := r.checkpointPluginExecutorRecord(claimedCtx, record, inventory); err != nil {
 		return fmt.Errorf("plugin executor cleanup succeeded but inventory checkpoint failed: %w", err)
 	}
