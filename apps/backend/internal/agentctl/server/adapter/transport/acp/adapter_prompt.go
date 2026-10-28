@@ -684,6 +684,13 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	return nil
 }
 
+// prepareSessionCancel settles launches whose provider ends delivery with the
+// session. It runs before the generic cancel sweep so an identified launch
+// becomes unknown instead of a cancelled tool with running background work.
+func (a *Adapter) prepareSessionCancel(sessionID string) {
+	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
+}
+
 // cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
 // and clears the activeToolCalls map.
 //
@@ -699,13 +706,6 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 // terminated even though the SDK keeps streaming its real tool_call_update
 // when the subagent finishes seconds later. Leaving the entry in
 // activeToolCalls lets that authoritative terminal update land naturally.
-// prepareSessionCancel settles launches whose provider ends delivery with the
-// session. It runs before the generic cancel sweep so an identified launch
-// becomes unknown instead of a cancelled tool with running background work.
-func (a *Adapter) prepareSessionCancel(sessionID string) {
-	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
-}
-
 func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	a.cancelActiveToolCallsPreservingHandoff(sessionID, false)
 }
