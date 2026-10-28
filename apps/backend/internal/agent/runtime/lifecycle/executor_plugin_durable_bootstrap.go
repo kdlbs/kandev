@@ -164,6 +164,7 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 		return nil, false, errors.New("plugin executor bootstrap handshake is unavailable; recovery stays retryable")
 	}
 	defer control.Close()
+	r.reachCrashBarrier(claimedCtx, BarrierAfterHandshake)
 	instance, err := r.adoptDurableBootstrap(claimedCtx, record, state, control, token)
 	if err != nil {
 		return nil, false, err
@@ -172,6 +173,7 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 		instance.Client.Close()
 		return nil, false, err
 	}
+	r.clearPublishPending(claimedCtx, record, state)
 	return instance, false, nil
 }
 
@@ -205,6 +207,7 @@ func (r *PluginRemoteExecutor) adoptDurableBootstrap(
 		return nil, err
 	}
 	state.inventory.Phase = pluginExecutorPhaseReady
+	state.inventory.PublishPending = true
 	state.inventory.Generation++
 	record.Metadata = clonePluginExecutorMetadata(record.Metadata)
 	delete(record.Metadata, MetadataKeyBootstrapNonceSecret)
@@ -264,6 +267,7 @@ func pluginRecoveredMetadataWithoutNonce(metadata map[string]interface{}, invent
 // the held recovery claim. Re-reading the record after the ready checkpoint
 // supplies the revision the publication is fenced on.
 func (r *PluginRemoteExecutor) publishRecoveredPluginExecutor(ctx context.Context, claim *models.TaskEnvironmentRecoveryClaim, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) error {
+	r.reachCrashBarrier(ctx, BarrierBeforePublish)
 	publisher, ok := r.inventoryStore.(PluginExecutorReadyPublisher)
 	if !ok {
 		return errors.New("plugin executor ready publication is unavailable")
@@ -321,4 +325,33 @@ func (r *PluginRemoteExecutor) recordCleanupRequested(ctx context.Context, recor
 		}
 	}
 	r.logger.Warn("plugin executor cleanup request was not recorded", zap.String("session_id", record.SessionID))
+}
+
+// publishPendingReady completes a creating-to-ready publication that a crash
+// interrupted after the ready checkpoint: the envelope still marks it pending.
+// A holder of the recovery claim elsewhere publishes it instead.
+func (r *PluginRemoteExecutor) publishPendingReady(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) error {
+	claim, err := r.acquirePluginExecutorClaim(ctx, record.TaskID, record.SessionID, state.inventory, models.PluginClaimKindRecovery)
+	if errors.Is(err, recoveryclaim.ErrBusy) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("plugin executor recovery is fenced: %w", err)
+	}
+	defer r.releasePluginExecutorCleanupClaim(claim)
+	claimedCtx := recoveryclaim.WithClaim(ctx, claim)
+	if err := r.publishRecoveredPluginExecutor(claimedCtx, claim, record, state); err != nil {
+		return err
+	}
+	r.clearPublishPending(claimedCtx, record, state)
+	return nil
+}
+
+// clearPublishPending records that the publication happened. A failed write
+// only repeats the idempotent publication on the next recovery.
+func (r *PluginRemoteExecutor) clearPublishPending(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) {
+	state.inventory.PublishPending = false
+	if err := r.checkpointPluginExecutorRecord(ctx, record, state.inventory); err != nil {
+		r.logger.Warn("plugin executor publication marker was not cleared")
+	}
 }
