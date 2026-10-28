@@ -37,8 +37,9 @@ fields, trailing data, and extra YAML documents are rejected.
 
 ### `match`
 
-At least one of `pattern` or `terms` is required. Values inside one list are
-alternatives (OR).
+At least one of `pattern` or `terms` is required. In `providers`, `phases`,
+`httpStatus`, and the `context` lists, values are alternatives (OR). `terms`
+is different: at least `minTerms` distinct terms must match.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
