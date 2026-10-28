@@ -115,6 +115,10 @@ func (m *Manager) CheckpointExecutorResource(ctx context.Context, request *plugi
 	if existing, decodeErr := decodePluginExecutorInventory(req.Metadata); decodeErr == nil &&
 		existing.EnvironmentID == inventory.EnvironmentID && existing.EnvironmentGeneration == inventory.EnvironmentGeneration {
 		inventory.ExpiresAt = existing.ExpiresAt
+		inventory.WorkspaceDescriptor = existing.WorkspaceDescriptor
+	}
+	if inventory.WorkspaceDescriptor, err = resolvePluginExecutorWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, request.GetResource()); err != nil {
+		return err
 	}
 	inventory.ExpiresAt, err = pluginExecutorEarlierExpiry(inventory.ExpiresAt, request.GetResource().GetExpiresAt())
 	if err != nil {
@@ -205,6 +209,7 @@ func pluginExecutorInventoryForLaunch(req *ExecutorCreateRequest, request *plugi
 		EnvironmentID:          req.TaskEnvironmentID,
 		ContractVersion:        profile.Provider.ContractVersion,
 		SupportedStateVersions: append([]int(nil), profile.Provider.SupportedStateVersions...),
+		NegotiatedCapabilities: negotiatedCapabilities(profile.Provider),
 		ProfileID:              profile.ProfileID, ProfileConfig: clonePluginExecutorStringMap(profile.Config),
 		SecretReferences: clonePluginExecutorStringMap(profile.SecretReferences),
 		OperationID:      request.GetOperationId(), InputDigest: request.GetInputDigest(),

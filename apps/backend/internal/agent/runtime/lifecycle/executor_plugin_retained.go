@@ -46,7 +46,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	metadata[MetadataKeyPluginExecutor] = inventory
 	return &ExecutorInstance{
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
-		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: pluginExecutorWorkspacePath,
+		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: inventory.workspacePath(),
 		Metadata: metadata, AuthToken: state.token, BootstrapNonce: req.BootstrapNonce,
 		AgentProfileID: req.AgentProfileID,
 	}, nil
@@ -89,6 +89,9 @@ func (r *PluginRemoteExecutor) loadRetainedPluginExecutor(ctx context.Context, r
 		return nil, errors.New("recorded plugin executor provider is unavailable or incompatible")
 	}
 	if err := validatePluginExecutorResourceForProvider(provider, inventory.Resource); err != nil {
+		return nil, err
+	}
+	if err := requireRecordedPluginExecutorWorkspace(inventory); err != nil {
 		return nil, err
 	}
 	if err := checkRetainedPluginExecutorProfileSize(inventory, profile); err != nil {
@@ -153,6 +156,9 @@ func (r *PluginRemoteExecutor) inspectAndAttachRetainedPluginExecutor(ctx contex
 	}
 	resource := attached.GetResource()
 	if err := validatePluginExecutorResourceForProvider(provider, resource); err != nil {
+		return nil, nil, err
+	}
+	if _, err := resolvePluginExecutorWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, resource); err != nil {
 		return nil, nil, err
 	}
 	if resource.GetResourceHandle() != inventory.Resource.GetResourceHandle() || resource.GetStateVersion() != inventory.Resource.GetStateVersion() {

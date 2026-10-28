@@ -35,6 +35,9 @@ func (r *Repository) CheckpointPluginExecutorInventory(ctx context.Context, runn
 	if err := r.checkPluginStateWritable(ctx, tx, running); err != nil {
 		return err
 	}
+	if err := r.checkPluginWorkspaceUnique(ctx, tx, running); err != nil {
+		return err
+	}
 	if err := checkpointPluginExecutorInventoryRow(ctx, tx, r.db, running, observedRevision, now); err != nil {
 		return err
 	}
@@ -148,6 +151,9 @@ func updatePluginExecutorInventoryRow(ctx context.Context, tx *sqlx.Tx, db *sqlx
 	}
 	if !validPluginExecutorInventoryTransition(currentMetadata, running.Metadata) {
 		return fmt.Errorf("plugin executor inventory phase transition is invalid: %w", models.ErrExecutionRotated)
+	}
+	if err := checkPluginWorkspaceImmutable(currentMetadata, running.Metadata); err != nil {
+		return err
 	}
 	merged, err := mergePluginExecutorInventoryMetadata(currentMetadata, running.Metadata)
 	if err != nil {

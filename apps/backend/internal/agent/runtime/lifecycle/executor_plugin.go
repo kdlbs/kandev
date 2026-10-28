@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins/workspacedescriptor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -108,6 +109,7 @@ type pluginExecutorInventory struct {
 	SupportedStateVersions []int                                 `json:"supported_state_versions"`
 	StateVersion           uint32                                `json:"state_version,omitempty"`
 	NegotiatedCapabilities []string                              `json:"negotiated_capabilities,omitempty"`
+	WorkspaceDescriptor    *workspacedescriptor.Descriptor       `json:"workspace_descriptor,omitempty"`
 	ProfileID              string                                `json:"profile_id"`
 	ProfileConfig          map[string]string                     `json:"profile_config,omitempty"`
 	SecretReferences       map[string]string                     `json:"secret_references,omitempty"`
@@ -292,6 +294,12 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"secret_in_state", err)
 	}
+	descriptor, err := resolvePluginExecutorWorkspace(launch.inventory.NegotiatedCapabilities, launch.inventory.WorkspaceDescriptor, resource)
+	if err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"workspace_descriptor", err)
+	}
+	launch.inventory.WorkspaceDescriptor = descriptor
 	launch.inventory.Resource = resource
 	launch.inventory.StateVersion = resource.GetStateVersion()
 	launch.inventory.Platform = resource.GetPlatform()
@@ -319,7 +327,7 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	if err != nil {
 		return fail("control_handshake", err)
 	}
-	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request)
+	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request, launch.inventory.workspacePath())
 	control.Close()
 	if err != nil {
 		return fail("instance_create", err)
@@ -337,8 +345,8 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	return client, token, nil
 }
 
-func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest) (uint32, error) {
-	instanceReq := agentctlInstanceRequest(req, pluginExecutorWorkspacePath)
+func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest, workspacePath string) (uint32, error) {
+	instanceReq := agentctlInstanceRequest(req, workspacePath)
 	created, err := control.CreateInstance(ctx, &instanceReq)
 	if err != nil {
 		return 0, err
@@ -362,7 +370,7 @@ func (r *PluginRemoteExecutor) finishPluginExecutorLaunch(ctx context.Context, l
 	return &ExecutorInstance{
 		InstanceID: launch.request.InstanceID, TaskID: launch.request.TaskID, SessionID: launch.request.SessionID,
 		RuntimeName: agentruntime.RuntimePluginRemote, Client: client,
-		WorkspacePath: pluginExecutorWorkspacePath, Metadata: metadata, AuthToken: token,
+		WorkspacePath: launch.inventory.workspacePath(), Metadata: metadata, AuthToken: token,
 		ReleaseRuntimeInventory: launch.request.ReleaseRuntimeInventory,
 	}, nil
 }
