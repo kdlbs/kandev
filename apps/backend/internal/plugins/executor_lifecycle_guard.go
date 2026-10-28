@@ -155,10 +155,18 @@ func (s *Service) guardExecutorProviderUpgrade(ctx context.Context, old *store.R
 	if err != nil {
 		return err
 	}
+	var first error
+	affected := 0
 	for _, inventory := range retained {
 		if err := validateExecutorProviderUpgradeInventory(old, candidate, inventory); err != nil {
-			return err
+			affected++
+			if first == nil {
+				first = err
+			}
 		}
+	}
+	if first != nil {
+		return fmt.Errorf("%w; %d environments affected", first, affected)
 	}
 	return nil
 }

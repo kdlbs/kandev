@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -18,7 +17,7 @@ import (
 // ErrExecutorCapabilityMismatch reports that the installed manifest, the host
 // registry, and the running provider's echo do not agree. Launches fail with
 // the stable code capability_mismatch before any provider allocation call.
-var ErrExecutorCapabilityMismatch = errors.New("plugins: capability_mismatch")
+var ErrExecutorCapabilityMismatch = models.ErrExecutorCapabilityMismatch
 
 const defaultCapabilityValidationTimeout = 10 * time.Second
 

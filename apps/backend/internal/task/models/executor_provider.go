@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 )
 
 const (
@@ -54,22 +55,43 @@ func ExecutorProviderExecutorID(identity string) string {
 // installed plugin. It contains only manifest metadata and runtime
 // availability; provider resource state and credentials are never included.
 type ExecutorProvider struct {
-	ExecutorID             string                       `json:"executor_id"`
-	Identity               string                       `json:"identity"`
-	PluginID               string                       `json:"plugin_id"`
-	InstallationID         string                       `json:"installation_id"`
-	Key                    string                       `json:"key"`
-	ContractVersion        int                          `json:"contract_version"`
-	SupportedStateVersions []int                        `json:"-"`
-	DisplayName            string                       `json:"display_name"`
-	Description            string                       `json:"description"`
-	LocalizedMessages      map[string]string            `json:"localized_messages,omitempty"`
-	ProfileSchema          map[string]any               `json:"profile_schema"`
-	ResourceStateSchema    map[string]any               `json:"-"`
-	Capabilities           ExecutorProviderCapabilities `json:"capabilities"`
-	Available              bool                         `json:"available"`
-	AvailabilityCause      string                       `json:"availability_cause,omitempty"`
+	ExecutorID             string `json:"executor_id"`
+	Identity               string `json:"identity"`
+	PluginID               string `json:"plugin_id"`
+	InstallationID         string `json:"installation_id"`
+	Key                    string `json:"key"`
+	ContractVersion        int    `json:"contract_version"`
+	SupportedStateVersions []int  `json:"-"`
+	// RequiredCapabilities and StateBudgetBytes are the manifest's host
+	// capability declaration; an empty list means the provider is not gated.
+	RequiredCapabilities []ExecutorProviderCapabilityRequirement `json:"-"`
+	StateBudgetBytes     int                                     `json:"-"`
+	DisplayName          string                                  `json:"display_name"`
+	Description          string                                  `json:"description"`
+	LocalizedMessages    map[string]string                       `json:"localized_messages,omitempty"`
+	ProfileSchema        map[string]any                          `json:"profile_schema"`
+	ResourceStateSchema  map[string]any                          `json:"-"`
+	Capabilities         ExecutorProviderCapabilities            `json:"capabilities"`
+	Available            bool                                    `json:"available"`
+	AvailabilityCause    string                                  `json:"availability_cause,omitempty"`
 }
+
+// ExecutorProviderCapabilityRequirement is one host capability a provider
+// manifest requires, by registry name and version.
+type ExecutorProviderCapabilityRequirement struct {
+	Name    string `json:"name"`
+	Version int    `json:"version"`
+}
+
+// ErrExecutorCapabilityMismatch is the stable `capability_mismatch` refusal:
+// the manifest, the host registry, and the running provider's accepted echo do
+// not agree.
+var ErrExecutorCapabilityMismatch = errors.New("capability_mismatch")
+
+// ErrExecutorStateTooLarge is the host-originated `state_too_large` refusal for
+// provider state above its budget or an envelope above its cap. A provider
+// cannot return it.
+var ErrExecutorStateTooLarge = errors.New("state_too_large")
 
 // ExecutorProviderCapabilities is the provider's manifest capability ceiling.
 type ExecutorProviderCapabilities struct {
