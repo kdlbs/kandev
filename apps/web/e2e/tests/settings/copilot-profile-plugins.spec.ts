@@ -32,6 +32,9 @@ test("selects, saves, reloads, resets, and clears Copilot profile plugins", asyn
     await spark.click();
     await expect(spark).toBeChecked();
     await expect(selector).toHaveAttribute("data-settings-dirty", "true");
+    await expect(testPage.getByTestId("copilot-plugins-start-blocked")).toContainText(
+      "A new process cannot start with this selection.",
+    );
 
     const save = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
     await save.click();

@@ -148,3 +148,25 @@ describe("CopilotPluginProfileSelection", () => {
     expect(screen.getByText(/Local and worktree executors only/)).toBeTruthy();
   });
 });
+
+it("warns that a selected plugin blocks new processes while mounting is unverified", () => {
+  mocks.discovery = {
+    status: "ready",
+    response: { ...discovery, mount_permitted: false },
+    stale: false,
+  };
+  renderSelection([sparkPluginId]);
+  expect(screen.getByTestId("copilot-plugins-start-blocked").textContent).toContain(
+    "A new process cannot start with this selection.",
+  );
+});
+
+it("omits the start-blocked warning once mounting is permitted", () => {
+  mocks.discovery = {
+    status: "ready",
+    response: { ...discovery, mount_permitted: true },
+    stale: false,
+  };
+  renderSelection([sparkPluginId]);
+  expect(screen.queryByTestId("copilot-plugins-start-blocked")).toBeNull();
+});

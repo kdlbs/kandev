@@ -51,6 +51,7 @@ export function CopilotPluginProfileSelection({
     selectedPluginIds,
   );
   const searchable = status === "ready" && !stale;
+  const startBlocked = selectedPluginIds.length > 0 && response?.mount_permitted === false;
   const selectionIsDirty =
     savedSelectedPluginIds !== undefined &&
     !areStringSetsEqual(selectedPluginIds, savedSelectedPluginIds);
@@ -93,6 +94,15 @@ export function CopilotPluginProfileSelection({
       </div>
 
       <DiscoveryStatus status={status} stale={stale} isEmpty={rows.length === 0} />
+      {startBlocked ? (
+        <p
+          className="text-xs text-destructive"
+          role="status"
+          data-testid="copilot-plugins-start-blocked"
+        >
+          {t("agents:copilotPluginsBlocksStart")}
+        </p>
+      ) : null}
 
       {rows.length > 0 ? (
         <div className="space-y-1" role="list">

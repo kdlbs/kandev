@@ -598,3 +598,38 @@ func TestRuntimeVersionFromCommand(t *testing.T) {
 		t.Fatal("native binary command must not claim a managed package version")
 	}
 }
+
+func TestRelativeConfigDirectoryIsRejected(t *testing.T) {
+	cases := map[string]func(*LaunchContext){
+		"copilot_home": func(launch *LaunchContext) {
+			launch.Env["COPILOT_HOME"] = "./copilot"
+		},
+		"config_dir": func(launch *LaunchContext) {
+			launch.Env["COPILOT_HOME"] = ""
+			launch.CLIFlags = []string{"--config-dir=relative/copilot"}
+		},
+		"home": func(launch *LaunchContext) {
+			delete(launch.Env, "COPILOT_HOME")
+			launch.Env["HOME"] = "relative-home"
+		},
+	}
+	for name, configure := range cases {
+		t.Run(name, func(t *testing.T) {
+			launch := launchFor(t, t.TempDir())
+			configure(&launch)
+			runner := &fakeRunner{result: CommandResult{Stdout: []byte(`[]`)}}
+			snapshot := Discover(context.Background(), runner, launch)
+			if snapshot.Status != StatusUnsupported || snapshot.Reason != ReasonUnsupportedLaunch {
+				t.Fatalf("relative config snapshot = %#v", snapshot)
+			}
+			if len(runner.calls) != 0 {
+				t.Fatalf("relative config ran %d native commands", len(runner.calls))
+			}
+			_, err := ResolveLaunchSelection(context.Background(), runner, launch, []string{"installed:m/p"})
+			var pluginErr *Error
+			if !errors.As(err, &pluginErr) || pluginErr.Reason != ReasonUnsupportedLaunch {
+				t.Fatalf("relative config launch error = %#v", err)
+			}
+		})
+	}
+}

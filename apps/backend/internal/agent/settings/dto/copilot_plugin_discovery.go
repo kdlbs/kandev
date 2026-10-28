@@ -25,12 +25,15 @@ type CopilotPluginDiscoveryPlugin struct {
 
 // CopilotPluginDiscoveryResponse is the complete discovery snapshot.
 type CopilotPluginDiscoveryResponse struct {
-	AgentID         string                         `json:"agent_id"`
-	ProfileID       string                         `json:"profile_id"`
-	ProviderID      string                         `json:"provider_id"`
-	Status          string                         `json:"status"`
-	Reason          string                         `json:"reason,omitempty"`
-	ContextRevision string                         `json:"context_revision,omitempty"`
-	RuntimeVersion  string                         `json:"runtime_version,omitempty"`
-	Plugins         []CopilotPluginDiscoveryPlugin `json:"plugins"`
+	AgentID         string `json:"agent_id"`
+	ProfileID       string `json:"profile_id"`
+	ProviderID      string `json:"provider_id"`
+	Status          string `json:"status"`
+	Reason          string `json:"reason,omitempty"`
+	ContextRevision string `json:"context_revision,omitempty"`
+	RuntimeVersion  string `json:"runtime_version,omitempty"`
+	// MountPermitted reports whether a nonempty selection can start a new
+	// local/worktree process on the qualified runtime.
+	MountPermitted bool                           `json:"mount_permitted"`
+	Plugins        []CopilotPluginDiscoveryPlugin `json:"plugins"`
 }

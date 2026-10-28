@@ -106,10 +106,10 @@ func configDirForLaunch(launch LaunchContext) (string, bool, error) {
 	if configDir, ok, err := configDirFromCLIFlags(launch.CLIFlags); err != nil {
 		return "", false, err
 	} else if ok {
-		return configDir, true, nil
+		return absoluteConfigDir(configDir)
 	}
 	if configDir, ok := environmentValue(env, "COPILOT_HOME", runtime.GOOS == windowsOS); ok && strings.TrimSpace(configDir) != "" {
-		return strings.TrimSpace(configDir), true, nil
+		return absoluteConfigDir(configDir)
 	}
 	home, ok := environmentValue(env, "HOME", runtime.GOOS == windowsOS)
 	if !ok || strings.TrimSpace(home) == "" {
@@ -118,7 +118,22 @@ func configDirForLaunch(launch LaunchContext) (string, bool, error) {
 	if !ok || strings.TrimSpace(home) == "" {
 		return "", false, errUnsupportedLaunchContext
 	}
-	return filepath.Join(strings.TrimSpace(home), ".copilot"), false, nil
+	home = strings.TrimSpace(home)
+	if !filepath.IsAbs(home) {
+		return "", false, errUnsupportedLaunchContext
+	}
+	return filepath.Join(home, ".copilot"), false, nil
+}
+
+// absoluteConfigDir rejects relative native state directories. The inventory
+// command and the installation-state reader must resolve one directory; a
+// relative value would resolve against different working directories.
+func absoluteConfigDir(value string) (string, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || !filepath.IsAbs(value) {
+		return "", false, errUnsupportedLaunchContext
+	}
+	return filepath.Clean(value), true, nil
 }
 
 func effectiveEnvironment(overlay map[string]string) map[string]string {

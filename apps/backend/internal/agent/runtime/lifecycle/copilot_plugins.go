@@ -64,9 +64,6 @@ func (m *Manager) prepareCopilotPluginArgs(
 }
 
 func (m *Manager) copilotPluginSelection(ctx context.Context, execution *AgentExecution) ([]string, error) {
-	if execution.CopilotSelectedPlugins != nil {
-		return execution.CopilotSelectedPlugins, nil
-	}
 	profileID := execution.ExecutionProfileID
 	if profileID == "" {
 		// Legacy sessions may not carry the concrete profile identity. Agent
@@ -74,11 +71,14 @@ func (m *Manager) copilotPluginSelection(ctx context.Context, execution *AgentEx
 		profileID = execution.AgentProfileID
 	}
 	if profileID == "" {
-		return nil, nil
+		return append([]string{}, execution.CopilotSelectedPlugins...), nil
 	}
 	if m.profileResolver == nil {
 		return nil, &copilotplugins.Error{Reason: copilotplugins.ReasonMetadataUnavailable}
 	}
+	// Resolve the profile on every new process. A resume or relaunch after a
+	// profile edit must use the saved selection rather than an execution
+	// snapshot from an earlier launch.
 	profile, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve copilot plugin profile: %w", err)

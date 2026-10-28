@@ -31,6 +31,7 @@ export function copilotPluginDiscovery(agentId: string, profileId: string) {
     provider_id: "copilot-acp",
     status: "ready",
     runtime_version: "1.0.88",
+    mount_permitted: false,
     plugins: [
       {
         id: "installed:copilot-plugins/spark",

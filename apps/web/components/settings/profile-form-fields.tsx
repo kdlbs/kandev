@@ -150,6 +150,9 @@ function savedProfileLaunchSettings(
     env_vars: baselineProfile.env_vars ?? [],
     cli_flags: baselineProfile.cli_flags ?? [],
     command_prefix: baselineProfile.command_prefix ?? "",
+    ...(baselineProfile.copilot_selected_plugins !== undefined
+      ? { copilot_selected_plugins: [...baselineProfile.copilot_selected_plugins] }
+      : {}),
   };
 }
 

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -68,7 +69,10 @@ func (c *Controller) DiscoverCopilotPlugins(
 	if err != nil {
 		return nil, err
 	}
-	revision := c.copilotPluginContextRevision(req.AuthorizationScope, agentID, req.ProfileID, version, profileContext)
+	revision, err := c.copilotPluginContextRevision(req.AuthorizationScope, agentID, req.ProfileID, version, profileContext)
+	if err != nil {
+		return nil, err
+	}
 	generation := c.beginCopilotPluginDiscovery(revision, req.Refresh)
 	if !req.Refresh {
 		if cached, ok := c.copilotPluginCacheInstance().get(revision, time.Now()); ok {
@@ -88,6 +92,16 @@ func (c *Controller) DiscoverCopilotPlugins(
 		RuntimeCommand: spec.InteractiveCommand(version).Args(),
 	}
 	snapshot := copilotplugins.Discover(ctx, c.copilotPluginRunner(), launch)
+	// A runtime activation may land while the native inventory runs. Never
+	// publish or return an inventory qualified for a version that is no
+	// longer active.
+	activeVersion, err := c.copilotPluginRuntimeVersion(ctx, agent.Name, spec)
+	if err != nil {
+		return nil, err
+	}
+	if activeVersion != version {
+		return nil, ErrCopilotPluginDiscoverySuperseded
+	}
 	response := &dto.CopilotPluginDiscoveryResponse{
 		AgentID:         agentID,
 		ProfileID:       req.ProfileID,
@@ -96,6 +110,7 @@ func (c *Controller) DiscoverCopilotPlugins(
 		Reason:          string(snapshot.Reason),
 		ContextRevision: revision,
 		RuntimeVersion:  snapshot.RuntimeVersion,
+		MountPermitted:  copilotplugins.MountsPermitted(version),
 		Plugins:         copilotPluginRows(snapshot.Rows),
 	}
 	if !c.publishCopilotPluginDiscovery(revision, generation, response) {
@@ -156,8 +171,12 @@ func copilotPluginRows(rows []copilotplugins.InventoryRow) []dto.CopilotPluginDi
 	return plugins
 }
 
-func (c *Controller) copilotPluginContextRevision(scope, agentID, profileID, version string, profileContext hostutility.ProfileProbeContext) string {
-	hash := hmac.New(sha256.New, c.copilotPluginHMACKey())
+func (c *Controller) copilotPluginContextRevision(scope, agentID, profileID, version string, profileContext hostutility.ProfileProbeContext) (string, error) {
+	key, err := c.copilotPluginHMACKey()
+	if err != nil {
+		return "", err
+	}
+	hash := hmac.New(sha256.New, key)
 	writeRevisionPart(hash, scope)
 	writeRevisionPart(hash, agentID)
 	writeRevisionPart(hash, profileID)
@@ -173,23 +192,24 @@ func (c *Controller) copilotPluginContextRevision(scope, agentID, profileID, ver
 		writeRevisionPart(hash, key)
 		writeRevisionPart(hash, profileContext.Env[key])
 	}
-	return hex.EncodeToString(hash.Sum(nil))[:32]
+	return hex.EncodeToString(hash.Sum(nil))[:32], nil
 }
 
-func (c *Controller) copilotPluginHMACKey() []byte {
+func (c *Controller) copilotPluginHMACKey() ([]byte, error) {
 	c.copilotPluginMu.Lock()
 	defer c.copilotPluginMu.Unlock()
 	if len(c.copilotPluginKey) == 0 {
 		key := make([]byte, 32)
-		if _, err := rand.Read(key); err != nil {
-			// A random key protects secret-derived cache inputs. If the OS
-			// source is unavailable, fail closed to a per-process random value
-			// derived from address-independent data rather than a fixed key.
-			key = []byte("kandev-copilot-plugin-discovery-key")
+		reader := c.copilotPluginRandom
+		if reader == nil {
+			reader = rand.Reader
+		}
+		if _, err := io.ReadFull(reader, key); err != nil {
+			return nil, fmt.Errorf("generate copilot plugin discovery key: %w", err)
 		}
 		c.copilotPluginKey = key
 	}
-	return c.copilotPluginKey
+	return c.copilotPluginKey, nil
 }
 
 func writeRevisionPart(hash hash.Hash, value string) {
@@ -202,16 +222,23 @@ func writeRevisionPart(hash hash.Hash, value string) {
 func (c *Controller) beginCopilotPluginDiscovery(revision string, refresh bool) uint64 {
 	c.copilotPluginMu.Lock()
 	defer c.copilotPluginMu.Unlock()
-	if c.copilotPluginGenerations == nil || len(c.copilotPluginGenerations) > 2048 {
+	if c.copilotPluginGenerations == nil {
+		c.copilotPluginGenerations = make(map[string]uint64)
+	}
+	if len(c.copilotPluginGenerations) > 2048 {
+		// Drop per-revision bookkeeping, never the monotonic counter. A
+		// surviving in-flight result holds an older counter value and cannot
+		// match a later generation.
 		c.copilotPluginGenerations = make(map[string]uint64)
 	}
 	if c.copilotPluginCache == nil {
 		c.copilotPluginCache = newCopilotPluginDiscoveryCache()
 	}
 	if refresh {
+		c.copilotPluginGeneration++
+		c.copilotPluginGenerations[revision] = c.copilotPluginGeneration
 		c.copilotPluginCache.delete(revision)
 	}
-	c.copilotPluginGenerations[revision]++
 	return c.copilotPluginGenerations[revision]
 }
 
@@ -270,7 +297,7 @@ func (c *copilotPluginDiscoveryCache) get(key string, now time.Time) (*dto.Copil
 		return nil, false
 	}
 	if !now.Before(entry.expiresAt) {
-		delete(c.entries, key)
+		c.deleteLocked(key)
 		return nil, false
 	}
 	return cloneCopilotPluginResponse(entry.value), true
@@ -279,7 +306,17 @@ func (c *copilotPluginDiscoveryCache) get(key string, now time.Time) (*dto.Copil
 func (c *copilotPluginDiscoveryCache) delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.deleteLocked(key)
+}
+
+func (c *copilotPluginDiscoveryCache) deleteLocked(key string) {
 	delete(c.entries, key)
+	for index, candidate := range c.order {
+		if candidate == key {
+			c.order = append(c.order[:index], c.order[index+1:]...)
+			return
+		}
+	}
 }
 
 func (c *copilotPluginDiscoveryCache) set(key string, value *dto.CopilotPluginDiscoveryResponse, now time.Time) {

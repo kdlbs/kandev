@@ -24,6 +24,7 @@ type ProfileFormCapabilitySelection = {
   env_vars?: ProfileLaunchSettingsRequest["env_vars"];
   cli_flags?: ProfileLaunchSettingsRequest["cli_flags"];
   command_prefix?: string;
+  copilot_selected_plugins?: string[];
 };
 
 type ProfileCapabilityContext = {

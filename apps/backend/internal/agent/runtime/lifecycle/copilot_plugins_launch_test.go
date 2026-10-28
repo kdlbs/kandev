@@ -197,3 +197,30 @@ func TestCopilotPluginRuntimeSnapshotNotReread(t *testing.T) {
 		t.Fatalf("plugin preparation reread the active runtime %d times after argv construction", selection.calls)
 	}
 }
+
+func TestCopilotPluginSelectionRefreshesProfileOnEachLaunch(t *testing.T) {
+	profile := copilotLaunchProfile()
+	mgr := newCopilotLifecycleManager(t, profile, nil)
+	execution := copilotExecution("profile-1")
+	execution.CopilotSelectedPlugins = []string{"installed:stale/stale"}
+
+	got, err := mgr.copilotPluginSelection(context.Background(), execution)
+	if err != nil {
+		t.Fatalf("copilotPluginSelection: %v", err)
+	}
+	if len(got) != 1 || got[0] != "installed:copilot-plugins/spark" {
+		t.Fatalf("selection = %#v, want the saved profile value", got)
+	}
+	if len(execution.CopilotSelectedPlugins) != 1 || execution.CopilotSelectedPlugins[0] != got[0] {
+		t.Fatalf("execution snapshot = %#v", execution.CopilotSelectedPlugins)
+	}
+
+	profile.CopilotSelectedPlugins = nil
+	cleared, err := mgr.copilotPluginSelection(context.Background(), execution)
+	if err != nil {
+		t.Fatalf("copilotPluginSelection after clear: %v", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("cleared selection = %#v", cleared)
+	}
+}

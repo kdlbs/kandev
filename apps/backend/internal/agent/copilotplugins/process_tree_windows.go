@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	"github.com/kandev/kandev/internal/common/winproc"
 	"golang.org/x/sys/windows"
 )
 

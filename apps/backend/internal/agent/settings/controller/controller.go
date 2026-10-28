@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sync/singleflight"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -87,7 +88,9 @@ type Controller struct {
 	copilotPluginCache          *copilotPluginDiscoveryCache
 	copilotPluginMu             sync.Mutex
 	copilotPluginGenerations    map[string]uint64
+	copilotPluginGeneration     uint64
 	copilotPluginKey            []byte
+	copilotPluginRandom         io.Reader
 	hostUtility                 hostUtilityProvider
 	jobStore                    *JobStore
 	updateJobStore              *AgentUpdateJobStore
