@@ -470,6 +470,8 @@ If the final attempt fails and no matches were collected, it shows a retryable
 failure instead. Matches already found remain available during retries.
 
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
+Use **Search shortcuts** to filter core and integration actions by name. Clear
+the search to restore the full list; unsaved shortcut changes remain in the draft.
 
 In the **Integrations** group, click **Unbound** beside an integration, press a
 key combination, then select **Save changes**. The shortcut opens its Kandev

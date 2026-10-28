@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Kbd } from "@kandev/ui/kbd";
+import { Input } from "@kandev/ui/input";
 import type { Key, KeyboardShortcut } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import {
@@ -296,7 +297,14 @@ export function KeyboardShortcutsCard({
 }) {
   const { t } = useTranslation();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const [query, setQuery] = useState("");
   const integrations = integrationEntries ?? buildIntegrationShortcutEntries([], [], t);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const matches = (label: string) => label.toLocaleLowerCase().includes(normalizedQuery);
+  const visibleIds = CONFIGURABLE_SHORTCUT_IDS.filter((id) =>
+    matches(t(CONFIGURABLE_SHORTCUTS[id].labelKey)),
+  );
+  const visibleIntegrations = integrations.filter((entry) => matches(entry.label));
   const shortcuts = resolveAllShortcuts(overrides);
   const baselineShortcuts = resolveAllShortcuts(baselineOverrides);
 
@@ -334,8 +342,12 @@ export function KeyboardShortcutsCard({
         <CardTitle className="text-base">{t("settings:keyboardShortcuts")}</CardTitle>
       </CardHeader>
       <CardContent>
+        <ShortcutFilter query={query} onQueryChange={setQuery} />
+        {normalizedQuery && visibleIds.length === 0 && visibleIntegrations.length === 0 && (
+          <p className="text-sm text-muted-foreground">{t("settings:noMatchingShortcuts")}</p>
+        )}
         <div className="divide-y divide-border">
-          {CONFIGURABLE_SHORTCUT_IDS.map((id) => (
+          {visibleIds.map((id) => (
             <ShortcutRecorder
               key={id}
               shortcutId={id}
@@ -350,20 +362,55 @@ export function KeyboardShortcutsCard({
             />
           ))}
         </div>
-        <IntegrationShortcutRows
-          entries={integrations}
-          overrides={overrides}
-          baselineOverrides={baselineOverrides}
-          conflictLabels={conflictLabels}
-          touchSized={isMobile || !isFinePointer}
-          onChange={handleChange}
-          onReset={handleReset}
-        />
+        {(!normalizedQuery || visibleIntegrations.length > 0) && (
+          <IntegrationShortcutRows
+            entries={visibleIntegrations}
+            overrides={overrides}
+            baselineOverrides={baselineOverrides}
+            conflictLabels={conflictLabels}
+            touchSized={isMobile || !isFinePointer}
+            onChange={handleChange}
+            onReset={handleReset}
+          />
+        )}
         <p className="text-xs text-muted-foreground mt-3">
           {t("settings:clickAShortcutToRecordA")}
         </p>
       </CardContent>
     </SettingsCard>
+  );
+}
+
+function ShortcutFilter({
+  query,
+  onQueryChange,
+}: {
+  query: string;
+  onQueryChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="mb-3 flex min-w-0 items-center gap-2">
+      <Input
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder={t("common:searchEllipsis")}
+        aria-label={t("settings:searchShortcuts")}
+      />
+      {query && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={controlSizingClassName("icon", "shrink-0 cursor-pointer")}
+          onClick={() => onQueryChange("")}
+          aria-label={t("tasks:clearSearch")}
+          title={t("tasks:clearSearch")}
+        >
+          <IconX className="size-4" />
+        </Button>
+      )}
+    </div>
   );
 }
 
