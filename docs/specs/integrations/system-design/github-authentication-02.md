@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001` | [Migrated source detail](#migrated-source-detail), [User installation access](#user-access-to-an-app-installation) |
 | `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002` | [Executor host CLI bridge](#executor-host-cli-bridge) |
 
 ## Migrated source detail
@@ -86,6 +86,37 @@ post-signature processing failures produce `failing`; a later valid successful d
   is absent. Kandev does not rewrite repository provider identity from partial legacy metadata.
 - Changing the workspace policy affects new launches and the next resume, not an already-running
   process.
+
+## User access to an App installation
+
+This section implements criteria `AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.16`
+through `001.18`. The [repair package](../../../plans/github-installation-access-check/plan.md)
+records implementation status.
+
+`GitHubOAuthClient.UserCanAccessInstallation` uses the registration's existing
+REST base URL and the supplied user access token.
+It requests `GET /user/installations?per_page=100&page=N`, starting at page 1.
+GitHub documents the [list endpoint](https://docs.github.com/en/rest/apps/installations#list-app-installations-accessible-to-the-user-access-token).
+There is no singular user-installation lookup for this purpose.
+
+Each page must return HTTP 200 and decode `total_count` and `installations[].id`.
+Access requires at least one exact numeric ID match across the fetched pages.
+Other IDs never establish access. A match returns immediately.
+Without a match, an empty page or the cumulative `total_count` ends the search
+with `(false, nil)`. Non-positive requested IDs return `(false, nil)` without I/O.
+Non-200 responses return `GitHubAPIError`, including 401, 403, and 404.
+Transport, cancellation, and JSON decoding errors remain errors.
+Every page uses `apiRequest`, the existing HTTP transport, and the response size limit.
+Its body closes before the next request. Tokens and response bodies stay out of errors.
+
+The callback services keep their state, registration, user, and generation checks.
+`AppInstallationService.userCanAccessInstallation` retries only confirmed absence
+through its existing cancellable schedule. An error never commits a connection.
+`PersonalAuthService` retains atomic rotation and its current failure classifier.
+That classifier treats HTTP 401 as definitive. HTTP 403, including rate limiting,
+404, transport errors, and decoding errors do not invalidate stored personal auth.
+A successful inventory without the selected ID still invalidates on refresh.
+This corrects provider verification within ADR 0047's existing association boundary.
 
 ## Permissions And Security
 

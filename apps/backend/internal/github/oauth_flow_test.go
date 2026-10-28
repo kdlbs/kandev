@@ -164,8 +164,11 @@ func TestOAuthFlowGitHubClientExchangesRefreshesAndVerifiesUser(t *testing.T) {
 				t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 11, "login": "octocat"})
-		case "/user/installations/42":
-			w.WriteHeader(http.StatusOK)
+		case "/user/installations":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"total_count":   1,
+				"installations": []map[string]int64{{"id": 42}},
+			})
 		default:
 			http.NotFound(w, r)
 		}
