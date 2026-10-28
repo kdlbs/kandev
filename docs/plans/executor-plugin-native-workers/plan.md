@@ -146,3 +146,34 @@ Slice 1 only, on top of c76077772b. The fork branch holds one mixed commit (4788
 - WO 07: `RepoSpec.Position` is plumbed from the task repository position. A single-repository launch takes its locator from the `repository_clone_url` launch metadata. The checkout ref is `refs/pull/N/head` for a pull request, else `refs/heads/<branch>`. The envelope records the inventory once, in `repositories`, and the stored resource drops its copy. A secret-like or non-allowlisted `agent_env` name is dropped without an audit-log count (assumption). Branch verification uses checkout kind `branch` only; `preparation_hints` kinds are not part of slice 1. No SQL path is added.
 - WO 08: the three placement barriers are defined and armable but have no call site in slice 1 (placement is not built). Barrier interleaving tests found that a crash between the durable-bootstrap ready checkpoint and the ready publication left the environment `creating` forever (AC 007.3). Fix, recorded as a WO 05 correction: the ready checkpoint sets an envelope field `publish_pending`; the generic attach path publishes under a recovery claim when it is set, then clears it with one further checkpoint. Consequence: the published `ExpectedRevision` is now one below the final persisted revision, and the existing repeated-handshake test asserts that.
 - PostgreSQL: run by the owner on a laptop with PostgreSQL 15.x (CI uses 16/18). All 16 new slice-1 Postgres tests pass 3/3 with `-race` at c1f0427d3b. The full Postgres run of `internal/task/repository/sqlite` passes except `TestPostgresClearRecoveredAgentErrors` and `TestPostgresWorkspaceSourceParentGuard`, which fail identically on base 94644a03ca (PostgreSQL-version environmental).
+
+## Build round 1 (after Review round 1)
+
+| Finding | Commit | Change and test |
+|---|---|---|
+| R1-F1 typed-envelope bypass | a3db36f390 | `checkPluginStateWritable` reads the decoded envelope view, so a typed envelope is gated. `TestPluginStateWritableCheckerGatesATypedEnvelope`. |
+| R1-F2 PostgreSQL lock order | a3db36f390 | `lockPluginEnvelopeWrite` takes the task row first, then descriptors, then the inventory lock. A claim checkpoint also validates the claim acquisition (`recoveryclaim.ValidateAcquisitionTx`), so a delayed writer of an earlier acquisition is refused. `TestPluginEnvelopeWriteTakesTheTaskRowBeforeTheInventoryLockPostgres`, `TestReacquiredClaimStartsAFreshSequence` (+ Postgres wrapper). |
+| R1-F3 drain classification | a3db36f390 | Identity mismatch is 412 and classifies as `unreachable`; 409 means another request owns the drain and is `uncertain`. Only a stored `drained` outcome with a matching receipt id is replayed. `TestDrainOutcomeMapping`, `TestSameClaimRetryDrainsAgainAfterANonDrainedOutcome`. |
+| R1-F4 goleak | a3db36f390 | `executortunnel/goleak_test.go`; tests close tunnels through `newTestRegistry`. |
+| C-F1 auth token secret ref lost on merge | 7363e21ac3 | The merge keeps `env_secret_id_AGENTCTL_AUTH_TOKEN`. `TestPluginCheckpointPersistsTheAuthTokenSecretReference`. |
+| C-F3 cleanup request unrecordable under a held claim | 7363e21ac3, 0c0ffa5bb9 | `Repository.RecordPluginExecutorCleanupRequested` (revision-bumping, execution-fenced, no claim wait); `recordCleanupRequested` uses it; the merge never clears the marker. `TestCleanupRequestIsRecordableUnderARecoveryClaim` (+ Postgres wrapper), `TestCleanupRequestSurvivesALaterCheckpointThatDidNotCarryIt`. |
+| R1-T1 capability gate | 197f0d82b3 | `TestInstallRefusesAProviderRequiringAnUnsupportedHostCapability`, `TestUpgradeRefusedForAnUnsupportedHostCapabilityKeepsTheWorkingInstallationActive`. The enable path is not covered separately: a manifest is validated at install, so enable re-checks only the runtime echo. |
+| R1-T2 crash recovery over a held claim | 310a38520c | `TestClaimLeftHeldByACrashIsAdoptedByTheSameOperation` on the real store (another operation is refused, the same operation adopts the claim, the sequence continues). The lifecycle half stays covered by the fake-store barrier tests; there is no lifecycle test over the real store. |
+| R1-T3 tunnels close before destroy | 157282b566 | `TestDestroyClosesTheEnvironmentTunnelsBeforeTheProviderDestroy`. |
+| R1-T4 AC-003.3 | e3de9eb319 | The fixture returns a typed `conflict` for a changed digest. `TestPluginExecutorFixtureSameOperationSameInputReusesAndChangedInputConflicts`. |
+| R1-T4 AC-005.9 | e3de9eb319 | `TestShutdownReportsAPartialStopAndRetainsTheUnstoppedInstance` at the instance manager. The 500-with-no-receipt mapping in `runDrainAndRespond` has no HTTP test: the API package cannot inject a failing instance. |
+| R1-T4 TS-010 | 0c0ffa5bb9 | The hand-rolled poll became `require.Eventually`. |
+| SEC-002 | c9b7651297 | The host API probe requires a configured control credential. `TestProbeHostAPIFailsClosedWithoutConfiguredCredential`. |
+| CR-003 | c9b7651297 | The boundary ADR status line names the amending ADR. |
+
+Left for the owner: TS-008 (agent_env audit count) and SEC-003 (`cleanup_pending` uniqueness) need a contract decision; the frozen spec was not edited.
+
+Deviation: a same-claim retry now drains again after a stored outcome that is not `drained`, instead of replaying it. The design text carries the stored outcome forward; a replayed `uncertain` could never reach a receipt.
+
+PostgreSQL: the tests added in this round (`...TakesTheTaskRowBeforeTheInventoryLockPostgres`, `...ReacquiredClaimStartsAFreshSequencePostgres`, `...CleanupRequestIsRecordableUnderARecoveryClaimPostgres`) are unverified; no PostgreSQL was available locally. The owner reruns them.
+
+Gauntlet (macOS, HEAD at the commit that adds this section):
+- `make fmt`: exit 0. It reformatted six files this branch does not touch (`backendapp/canvas_edit_test.go`, `office/retention/sweep.go`, `orchestrator/{session_open_recovery_test.go,task_operations.go,workflow_start_prompt.go}`, `task/repository/sqlite/metadata_launch_error_cas.go`); each is gofmt-dirty at 94644a03ca and the changes were reverted.
+- `make typecheck test lint`: `test` exits 2 with 451 failing tests in 23 backend packages, and `lint` did not run after it. For the three touched packages with failures (`agent/runtime/lifecycle`, `agentctl/server/api`, `task/repository/sqlite`), the same 27 tests fail at the merge-base 94644a03ca in a scratch worktree and on this branch, with none unique to either side (`comm` of the two lists is empty both ways). The other failing packages are untouched by this branch.
+- Lint: `bash scripts/lint-go-changed <changed .go files>` exit 0.
+- `make lint-format`: exit 0. `cd apps/web && pnpm run i18n:ratchet`: exit 0.
