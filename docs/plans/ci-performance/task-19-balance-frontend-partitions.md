@@ -28,7 +28,8 @@ Current native discovery remains authoritative. Both jobs consume one frozen tim
 
 ## In scope
 
-- Capture the current two-shard baseline before adding timing instrumentation.
+- Capture the current two-shard performance baseline before adding timing instrumentation.
+  Exclude that pre-instrumentation run from `compare`, which requires timing-enabled artifacts from both sides.
 - Add bounded profile, snapshot, deterministic allocation, and result-reconciliation helpers without package dependencies.
 - Restore an optional compatible timing profile and publish one immutable input artifact inside `changes`.
 - Publish producer identity and digest outputs. Preserve the original producer identity during a single-shard rerun.

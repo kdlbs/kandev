@@ -87,7 +87,9 @@ For final comparisons, create a graph matching the exact workflow revision and e
 Pass that graph through `--graph` on the same command.
 Save raw API evidence, graphs, reports, and logs outside the repository.
 
-After you download both complete frontend artifact sets, run the planned comparison entry point:
+`compare` validates complete identity and outcome parity. It is not the before/after performance measurement, and it requires timing-enabled artifact sets from the same source revision.
+Retain the historical pre-instrumentation run for the hosted timing comparison, then produce a separate timing-enabled fallback run at the candidate source SHA as the paired identity baseline.
+After you download both complete timing-enabled artifact sets, run the comparison entry point:
 
 ```bash
 : "${CI_BASELINE_DIR:?Set the baseline artifact directory}"

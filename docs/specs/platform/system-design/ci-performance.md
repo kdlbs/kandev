@@ -334,8 +334,8 @@ They do not reopen the earlier complete-CI delivery loop or authorize publicatio
 
 ### E2E dependency paths
 
-The `e2e`, `e2e-containers`, `e2e-kubernetes-compatibility`, and `desktop-e2e` jobs still hardcode a pnpm store path.
-Resolve the store and pnpm version from `apps/` in each actual install environment.
+Before the October 26 repair, the `e2e`, `e2e-containers`, `e2e-kubernetes-compatibility`, and `desktop-e2e` jobs hardcoded a pnpm store path.
+Each repaired job resolves the store and pnpm version from `apps/` in its actual install environment.
 Use the frontend's existing platform/version/lockfile key contract.
 Keep the host build/report cache namespace and its restore-only report policy unchanged.
 Cache errors remain optional. Every job still runs its frozen installation.

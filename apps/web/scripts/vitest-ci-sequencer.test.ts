@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -12,6 +20,9 @@ import {
 import { FrontendTimingSequencer } from "./vitest-ci-sequencer";
 import { FrontendTimingReporter } from "./vitest-ci-reporter";
 
+const NODE_PROJECT = "node";
+const BROWSER_PROJECT = "browser";
+const BROWSER_LOCALES_PROJECT = "browser-locales";
 const SOURCE_SHA = "b".repeat(40);
 const COMPATIBILITY_HASH = "a".repeat(64);
 const RUN_ID = "12345";
@@ -32,10 +43,10 @@ async function withFixture(callback: (root: string) => Promise<void> | void) {
 
 function specifications(root: string): TestSpecification[] {
   const projectFiles = [
-    ["a.test.ts", "node"],
-    ["b.test.ts", "browser"],
-    ["c.test.ts", "browser-locales"],
-    ["d.test.ts", "node"],
+    ["a.test.ts", NODE_PROJECT],
+    ["b.test.ts", BROWSER_PROJECT],
+    ["c.test.ts", BROWSER_LOCALES_PROJECT],
+    ["d.test.ts", NODE_PROJECT],
   ] as const;
   return projectFiles.map(
     ([file, project]) =>
@@ -98,14 +109,16 @@ async function expectSnapshotRejection(
 const WEB_ROOT = path.resolve(import.meta.dirname, "..");
 
 function writeRunnerFixture(root: string): void {
-  for (const [name, title] of [
-    ["a", "one"],
-    ["b", "two"],
-    ["c", "three"],
-    ["d", "four"],
+  for (const [project, name, title] of [
+    [NODE_PROJECT, "a", "one"],
+    [NODE_PROJECT, "d", "four"],
+    [BROWSER_PROJECT, "b", "two"],
+    ["locales", "c", "three"],
   ]) {
+    const directory = path.join(root, project);
+    mkdirSync(directory, { recursive: true });
     writeFileSync(
-      path.join(root, `${name}.test.ts`),
+      path.join(directory, `${name}.test.ts`),
       `import { describe, expect, it } from "vitest";\n\ndescribe("${title} suite", () => {\n  it("passes", () => expect(1).toBe(1));\n  it.skip("stays skipped", () => expect(1).toBe(2));\n});\n`,
     );
   }
@@ -158,9 +171,28 @@ async function runFixtureShard(root: string, shard: number) {
     { run: true, root, config: false, shard: `${shard}/2`, silent: true },
     {
       test: {
-        name: "node",
-        include: ["**/*.test.ts"],
-        environment: "node",
+        projects: [
+          {
+            extends: true,
+            test: { name: NODE_PROJECT, include: ["node/**/*.test.ts"], environment: "node" },
+          },
+          {
+            extends: true,
+            test: {
+              name: BROWSER_PROJECT,
+              include: ["browser/**/*.test.ts"],
+              environment: "happy-dom",
+            },
+          },
+          {
+            extends: true,
+            test: {
+              name: BROWSER_LOCALES_PROJECT,
+              include: ["locales/**/*.test.ts"],
+              environment: "happy-dom",
+            },
+          },
+        ],
         pool: "threads",
         maxWorkers: 1,
         sequence: { sequencer: FrontendTimingSequencer },
@@ -237,7 +269,7 @@ describe("FrontendTimingSequencer count fallback", () => {
       }
 
       expect(new Set(files.map((file) => file.project.name))).toEqual(
-        new Set(["node", "browser", "browser-locales"]),
+        new Set([NODE_PROJECT, BROWSER_PROJECT, BROWSER_LOCALES_PROJECT]),
       );
       for (const index of [0, 1]) {
         expect(actualSelections[index].map((file) => file.moduleId)).toEqual(
@@ -356,7 +388,11 @@ describe("FrontendTimingSequencer runner integration", () => {
         webRoot: root,
       });
       expect(result.valid, result.failures.join("; ")).toBe(true);
-      expect(result.files).toHaveLength(4);
+      const files: string[] = result.files ?? [];
+      expect(files).toHaveLength(4);
+      expect(new Set(files.map((identity) => identity.split(":")[0]))).toEqual(
+        new Set([NODE_PROJECT, BROWSER_PROJECT, BROWSER_LOCALES_PROJECT]),
+      );
       expect(result.tests).toBe(8);
       expect(reports.map((report) => report.timing.attempt)).toEqual(["1", "2"]);
       expect(

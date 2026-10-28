@@ -115,6 +115,18 @@ test("composite action keeps restore-only defaults compatible and optional", () 
   ]) {
     assert.match(step(name), new RegExp(`identity\\.outputs\\.${output} == 'true'`));
   }
+  for (const [name, output] of [
+    ["Restore Go module downloads", "moduleSave"],
+    ["Restore Go build generation", "buildSave"],
+  ]) {
+    const restoreStep = step(name);
+    assert.match(restoreStep, new RegExp(`identity\\.outputs\\.${output} != 'true'`));
+    assert.doesNotMatch(restoreStep, /uses: actions\/cache@/);
+  }
+  assert.match(
+    step("Restore static analysis generation"),
+    /inputs\.family == 'static'[\s\S]*?identity\.outputs\.lintSave != 'true'/,
+  );
 });
 
 test("main ownership modes publish only the intended snapshots on misses", () => {

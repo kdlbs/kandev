@@ -61,8 +61,7 @@ zizmor .github/workflows
 git diff --check
 ```
 
-`cache-go-action.test.mjs` is a planned new test file.
-Its fixtures must exercise publication and failure behavior, not only match YAML strings.
+`cache-go-action.test.mjs` covers publication and failure behavior, not only YAML string matching.
 Compare the original and migrated native command blocks byte-for-byte after removing only cache setup.
 Record hosted paths, identity, role, generation, cache state, and restore/publication durations through Task 20.
 Include cold population caused by the shared recipe change.
