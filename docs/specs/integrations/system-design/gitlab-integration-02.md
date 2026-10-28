@@ -23,6 +23,7 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .20-.23) | [Watch dialog ownership](#watch-dialog-ownership) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .16-.19) | [Pipeline job summary classification](#pipeline-job-summary-classification) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .24-.27) | [Merge API source-head compatibility](#merge-api-source-head-compatibility) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .28-.30) | [Default merge squash choice](#default-merge-squash-choice) |
 
 
 ## Merge API source-head compatibility
@@ -53,6 +54,8 @@ callers therefore get the same guard without altering mock or noop contracts.
 Keep all existing merge request fields and error wrapping, credential selection,
 method and squash policy, and no requested source-branch removal. The extra
 scoped read is mandatory even for older hosts, and its failure is fail-closed.
+The separate default-choice correction below clarifies the preserved squash
+policy without changing this guard or the other AC .24-.27 invariants.
 
 GitLab's [single MR](https://docs.gitlab.com/api/merge_requests/#get-single-merge-request)
 and [merge API](https://docs.gitlab.com/api/merge_requests/#merge-a-merge-request)
@@ -62,6 +65,40 @@ shows the parameter passed to merge. The scoped registered-route and provider
 contract tests in the [work order](../../../plans/gitlab-required-merge-sha/task-01-bind-merge-head.md)
 prove the actual boundary with disposable servers. This is not a live GitLab
 mutation or a new public UI contract.
+
+## Default merge squash choice
+
+For AC .28-.30, `Service.mergeMRWithClient` must distinguish project
+capability from caller intent: an empty method leaves the existing squash bool
+false; explicit `squash` still validates `AllowSquash` and sets it true.
+The PAT request's existing `omitempty` omits false, so GitLab retains the MR
+choice and applies project policy. `default_off` and `default_on` both permit
+squash, but neither permission implies the user's current choice. Required
+and prohibited policies remain GitLab's decision. Other explicit method checks
+and unknown-method errors remain unchanged. `GLabClient` embeds the PAT client.
+No client interface, policy metadata, frontend option, or new setting is needed.
+
+The current desktop `MRStatusChipPopover` and phone `MRStatusChipDrawer` both
+render `MRCIPopover` and `MRMergeButton`; the MR detail confirmation also calls
+the existing `mergeMR` helper. Both pass `squash: false`, which the helper
+encodes as an omitted method in the existing workspace/expected-host request.
+The controller resolves the workspace client and automation uses the same
+service resolution with an empty method. The change is backend data behavior:
+no layout, touch interaction, navigation, or copy changes. This source trace
+does not establish rendered browser behavior; focused real-route and provider
+HTTP tests, rather than new mobile browser coverage, exercise the shared path.
+
+Independently authored disposable HTTP provider tests must observe the actual
+merge body and model GitLab's MR-choice and project-policy resolution. Cover
+both unchecked default policies, selected default-on, required and never,
+explicit squash and invalid methods, plus existing identity, head, race,
+message and source-branch guards. Exercise workspace action and automation
+wiring. The fixture models provider behavior and is not a live GitLab test.
+See the [work order](../../../plans/gitlab-squash-choice/task-01-respect-squash-choice.md).
+GitLab documents the [merge API](https://docs.gitlab.com/api/merge_requests/)
+and [squash policies](https://docs.gitlab.com/user/project/merge_requests/squash_and_merge/);
+its [merge parameter implementation](https://gitlab.com/gitlab-org/gitlab/-/raw/master/lib/api/merge_requests.rb)
+provides the omission behavior modeled by the fixture.
 
 ## Watch dialog ownership
 

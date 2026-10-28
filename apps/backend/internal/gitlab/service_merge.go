@@ -57,8 +57,7 @@ func (s *Service) mergeMRWithClient(ctx context.Context, client Client, projectP
 		}
 		squash = true
 	case "":
-		// caller didn't pick — use squash if available, else default.
-		squash = methods.AllowSquash
+		// Let GitLab apply the MR choice and project policy.
 	default:
 		return nil, fmt.Errorf("unknown merge method: %q", method)
 	}

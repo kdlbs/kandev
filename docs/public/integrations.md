@@ -492,6 +492,8 @@ Open a linked MR from the task review surface. Kandev fetches and displays its o
 
 These actions use the connected GitLab user's permissions and do not bypass protected branches, approval requirements, merge rules, or reviewer eligibility. The current product UI exposes notification subscription for linked merge requests; issue subscribe/unsubscribe is implemented in the backend integration but has no issue-detail control in `/gitlab`.
 
+Default merges from Kandev, including automatic merges, respect the squash choice saved on the GitLab merge request. GitLab's project policy can require or prohibit squashing.
+
 ### Automate a linked merge request
 
 For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**.

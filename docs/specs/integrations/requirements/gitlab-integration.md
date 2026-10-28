@@ -107,6 +107,20 @@ implementation and verification; unrelated criteria retain their lifecycle.
 This clarification excludes review-freshness UX, new permissions or settings,
 source-branch deletion, and changes to other GitLab features or providers.
 
+#### Default merge squash choice
+
+This separate correction clarifies the default squash behavior preserved by
+AC .27; it does not alter the source-head compatibility requirements in
+AC .24-.27. The [squash-choice package](../../../plans/gitlab-squash-choice/plan.md)
+records its planned implementation and verification.
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.28:** When an interactive or automated merge requests no explicit squash method, Kandev shall let GitLab apply the merge request's persisted squash choice and project policy. A project merely allowing squash shall not cause Kandev to override an unchecked choice.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.29:** When squash is explicitly requested, Kandev shall request squash only if the project permits it; unsupported and unknown methods shall retain their existing validation failures. GitLab's required or prohibited squash policy remains authoritative.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.30:** The default choice shall have the same semantics through existing desktop and phone merge actions and automation, while retaining the workspace, host, credential, project, IID, source-head guard, messages and source-branch behavior required by AC .24-.27.
+
+This correction adds no squash setting, selection control, interface or stored
+default metadata. It does not claim that the source head was reviewed.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/gitlab-integration-01.md), [part 2](../system-design/gitlab-integration-02.md).
