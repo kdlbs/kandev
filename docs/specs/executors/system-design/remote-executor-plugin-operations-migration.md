@@ -39,7 +39,7 @@ absent; no host record changes (AC 001.2).
 **Events.** A host callback `PublishProviderEvent` (alongside the existing executor callbacks, same dispatch-generation and
 installation binding) validates the closed kind, severity, subject, message code, and parameters, applies a token bucket of
 30 per minute per installation and a five-minute dedupe on the dedupe key, and calls the existing notification service for the
-instance administrators (an installation is instance-wide; the service has no administrator audience today, so the recipients are `providerOwners` filtered by the same administrator check as the admin routes, and the default user when authentication is not enforced; an event with no resolvable recipient is dropped and counted, never sent to another account). It stores nothing new. Free text is rejected by schema, so an event cannot carry a log line or secret
+instance administrators (an installation is instance-wide; the service has no administrator audience today, so the recipients are `providerOwners` filtered by the same administrator check as the admin routes, and the default user when authentication is not enforced; an event with no resolvable recipient is dropped and counted, never sent to another account). It adds one event type `executor.plugin_event` to `AvailableEvents` and `validateEvents` in `internal/notifications/service/service.go`, with no default subscription and no back-fill; `providerOwners` falls back to the default user when no one owns a provider, so the drop for that case is `dropped_no_subscriber`, and its unresolved-owner branch under enforced authentication is `dropped_no_recipient`. The message is built in Go from a fixed per-kind English table and carries the kind, severity, subject, code, and parameters in the payload for the web client to localize under `executors:pluginEvent.<kind>`. It stores nothing new. Free text is rejected by schema, so an event cannot carry a log line or secret
 (AC 001.3, 001.4).
 
 ## Maintenance
@@ -86,12 +86,12 @@ an executor type (AC 001.2).
 (live session), `drainable` (no live session, resources present), and `orphaned` (no owner). It is read-only (AC 001.1).
 
 **Operation.** A **new** state machine, reached through the start and rollback routes of AC 001.3 and 001.5 and stored in the **new** table `executor_profile_migrations` (AC 001.8): `freezing`, `draining`, `switching`, `done`,
-`rolled_back`. `freezing` moves the row to a frozen step, committed with the row revision. The gate is **new** `checkMigrationFreeze(profileID)`, called from the common launch entry that every executor type passes through (not the plugin-only allocation gate, which built-in launches never reach). It runs in the transaction that creates the launch's environment record, reads the profile's row, and refuses with `executor_migrating` when the step is `freezing`, `draining`, or `switching`; because the freeze CAS and that transaction exclude each other (SQLite immediate writer; PostgreSQL the `executor_migration:` advisory lock), a launch is either admitted before the freeze, finishes, and is drained, or is refused (AC 001.3). `draining` also waits until no environment record of the profile is in a launch phase.
+`rolled_back`. `freezing` moves the row to a frozen step, committed with the row revision. The gate is **new** `checkMigrationFreeze(profileID)`, called from the common launch entry that every executor type passes through (not the plugin-only allocation gate, which built-in launches never reach). It runs in the transaction that creates the launch's environment record, reads the profile's row, and refuses with `executor_migrating` when the step is `freezing`, `draining`, or `switching`; because the freeze CAS and that transaction exclude each other (SQLite immediate writer; PostgreSQL the `executor_migration:` advisory lock), a launch is either admitted before the freeze, finishes, and is drained, or is refused (AC 001.3). `draining` also waits until no environment record of the profile is in a launch phase. The gate covers both launch entries that reach the common launch path, a first launch and a resume of a stopped session (a resume that reuses an existing source environment passes the same gate, in the transaction that reads the environment record for reuse); it also takes `resolvedProfileID` from the caller and compares it inside the transaction with the current resolution (`migrated_to` applied), aborting and re-resolving once on a mismatch, so a launch that resolved the source before `switching` cannot create a built-in record after `done` (AC 001.3).
 `draining` waits for sessions to stop and runs the built-in cleanup (with the drain receipt where the built-in supports one).
-`switching` sets the source profile's `config` key `migrated_to` and moves the row to `done` in one transaction guarded by the row revision (AC 001.8); a rollback that races it commits the other transition and the loser re-reads, so exactly one wins. Launch resolution reads the key; rollback deletes it in the same guarded transaction that sets `rolled_back`. Each step records itself before acting, so a restart resumes from the
+`switching` sets the source profile's `config` key `migrated_to` and moves the row to `done` in one transaction guarded by the row revision (AC 001.8); a rollback that races it commits the other transition and the loser re-reads, so exactly one wins. Launch resolution reads the key; rollback deletes it in the same guarded transaction that sets `rolled_back`, from `switching` or from `done`. The drain re-reads the operation revision before each environment destroy and starts none once the row is `rolled_back`; a destroy already started runs to confirmation (AC 001.5). Each step records itself before acting, so a restart resumes from the
 recorded step (AC 001.4).
 
-**Rollback.** `rolled_back` switches new launches to the built-in profile. Plugin environments remain under the plugin as
+**Rollback.** `rolled_back` switches new launches to the built-in profile (allowed from `freezing`, `draining`, `switching`, and `done`; from `done` the plugin environments created after the switch are the retained records). Plugin environments remain under the plugin as
 retained records, are never adopted, and are read by the status and list paths; disabling or removing the plugin never deletes
 them (existing retention rule). A later drain destroys them (AC 001.5, 001.6). D3 stands: the built-in code stays until the plugin
 passes its live scenarios (AC 001.7).
@@ -111,7 +111,10 @@ keys (AC LAUNCHPOLICY 001.1, PREPARATION 001.1). Idempotency entries are in memo
 | --- | --- | --- |
 | Migration freeze races a new launch (MIGRATION 001.3) | earlier launch finishes and drains; later gets `executor_migrating` | sqlite and PostgreSQL race; lifecycle unit |
 | Two operators start one migration, or one start is replayed (001.8) | one row; loser reads it; replay returns it | sqlite and PostgreSQL; route unit |
-| Rollback arrives after `done`, or twice (001.5) | recorded outcome returned; no second switch | route unit |
+| Rollback arrives after `done` (001.5) | `migrated_to` removed under the revision guard, step `rolled_back`; plugin environments retained and resumable; a repeat returns the recorded outcome | route unit |
+| Rollback racing an in-flight drain destroy (001.5) | no destroy starts after the rollback commits; the started one finishes; rollback neither waits nor cancels | sqlite and PostgreSQL race |
+| Launch resolved the source before `switching` and reaches its transaction after `done` (001.3) | aborts, re-resolves once to the target; no built-in record; second mismatch is `executor_migrating` | sqlite and PostgreSQL race |
+| Resume of a stopped source-profile session during `draining` (001.3) | refused `executor_migrating`; after `done` it launches as a first launch on the target | lifecycle unit |
 | Same maintenance key while the first call is in flight; provider timeout (OPS 001.7) | waits and shares the outcome; timeout not recorded, replay calls again | route unit with fake clock |
 | Inventory and node ordering, cursor edges, page of 0 or 101 (OPS 001.1, 001.2) | byte order; empty cursor starts; defaults clamped | route table test |
 | Conflicting or malformed preparation settings (PREPARATION 001.1) | `invalid_config` with a named reason; no allocation | lifecycle table test |
@@ -132,7 +135,7 @@ Each test is written first and fails on main. Remaining ACs are table tests (hin
 
 ## Observability
 
-`executor_plugin_provider_event_total` (`kind`, `outcome`: delivered, rate_limited, deduped), `executor_plugin_maintenance_total`
+`executor_plugin_provider_event_total` (`kind`, `outcome`: delivered, rate_limited, deduped, dropped_no_recipient, dropped_no_subscriber, delivery_failed), `executor_plugin_maintenance_total`
 (`action`, `outcome`), `executor_plugin_launch_policy_total` (`policy`, `outcome`), and `executor_migration_step_total`
 (`step`). No installation, node, or environment label.
 

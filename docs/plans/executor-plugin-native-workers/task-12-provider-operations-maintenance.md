@@ -51,6 +51,7 @@ L: ~650 source, ~1000 test lines.
 
 - Oversize status and log responses are rejected, not truncated.
 - Event flood is limited and deduped (fake clock); free text in an event is rejected by schema.
+- New event type `executor.plugin_event` accepted by `validateEvents`, absent from default subscriptions; no administrator recipient and no subscribed provider are counted `dropped_no_recipient` and `dropped_no_subscriber` and reach nobody; the Go-built text uses the fixed per-kind table.
 - Same idempotency key with a different body is rejected; a non-admin is refused.
 - Provider restart mid-read: `unavailable`; launches unaffected (fixture).
 

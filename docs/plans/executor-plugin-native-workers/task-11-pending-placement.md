@@ -26,6 +26,7 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.10
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.11
   - AC-EXECUTORS-PLUGIN-PLACEMENT-001.12
+  - AC-EXECUTORS-PLUGIN-PLACEMENT-001.13
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-shared-admission-placement.md
 ---
@@ -60,7 +61,9 @@ L: ~600 source, ~1000 test lines including web and Playwright.
 
 - Cancel call errors or times out: stays cancelling, retried, cancelled only after the provider reply or confirmed absence. Completion first: task reported stopped, not cancelled.
 - Queued launch cancelled while placement completes (barrier e2e; sqlite and PostgreSQL race).
-- Restart while pending resumes polling without a second environment.
+- Restart while pending resumes polling without a second environment, startup recovery skips `placement_pending` and `cancelling` rows (no handshake against an unplaced worker), and the continuation publishes under the recovery claim.
+- Completion committed, then Stop before the agent start: ready environment, no agent started, task stopped not cancelled. A poll response with none of resource, refusal, or pending is `conflict` then `placement_failed`.
+- Archive, reset, and delete during `placement_pending` and `cancelling`: cancel path runs, `cleanup_requested` when the claim is held, delete refused as `placement_cancel_pending` until absence is confirmed.
 - Deadline with a fake clock (synctest); a pending response without the capability is `conflict`.
 - Refusal racing cancel or archive (sqlite and PostgreSQL race); refusal after a checkpoint is `conflict`; a lost reply is never a refusal.
 - Playwright: queued, cancel while queued, refused (no sleeps).

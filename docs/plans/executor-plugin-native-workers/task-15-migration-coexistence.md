@@ -50,7 +50,9 @@ L: ~600 source, ~900 test lines.
 
 - Freeze races a new launch: the earlier launch drains, the later is refused (sqlite and PostgreSQL race).
 - Backend restart in each step resumes without a double freeze (barrier e2e).
-- Rollback with retained plugin environments: not adopted, still listed, survive plugin disable.
+- Rollback with retained plugin environments: not adopted, still listed, survive plugin disable; rollback from `done` removes `migrated_to`, and a plugin environment created after the switch stays resumable.
+- Rollback racing an in-flight drain destroy: none starts after the rollback commits, the started one finishes.
+- A launch resolved to the source before `switching` that reaches its transaction after `done` aborts and re-resolves once; no built-in record after `done`. A resume of a stopped source-profile session during `draining` is refused `executor_migrating`.
 
 ## Verification
 
