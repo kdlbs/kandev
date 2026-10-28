@@ -367,11 +367,23 @@ func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface
 	if err := json.Unmarshal(encoded, &normalized); err != nil || normalized == nil {
 		return nil, errors.New("plugin executor checkpoint envelope is invalid")
 	}
-	merged["plugin_executor"] = normalized
+	merged["plugin_executor"] = keepPluginCleanupRequested(current, normalized)
 	if ref, ok := incoming[pluginAuthTokenSecretMetadataKey].(string); ok && ref != "" {
 		merged[pluginAuthTokenSecretMetadataKey] = ref
 	}
 	return merged, nil
+}
+
+// keepPluginCleanupRequested carries a recorded cleanup request across a
+// checkpoint that did not observe it; nothing clears the marker but deleting
+// the record.
+func keepPluginCleanupRequested(current map[string]interface{}, incoming interface{}) interface{} {
+	stored, _ := current["plugin_executor"].(map[string]interface{})
+	next, ok := incoming.(map[string]interface{})
+	if requested, _ := stored["cleanup_requested"].(bool); requested && ok {
+		next["cleanup_requested"] = true
+	}
+	return incoming
 }
 
 func validPluginExecutorInventoryTransition(current, incoming map[string]interface{}) bool {
