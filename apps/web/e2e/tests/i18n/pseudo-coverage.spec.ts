@@ -856,7 +856,7 @@ test.describe("i18n pseudo-locale coverage", () => {
     const runtime = await installRuntimeUpdateFixture(testPage);
     const screen = SCREENS.find((item) => item.url === "/settings/preferences/appearance");
     if (!screen) throw new Error("The appearance screen is missing");
-    await activatePseudo(testPage, backend.frontendUrl, screen.url);
+    await activatePseudo(testPage, `${backend.frontendUrl}${screen.url}`, backend.frontendUrl);
     await waitForScreen(testPage, screen);
     await runtime.emit("system.update_available", {
       version: "v1.2.3",
