@@ -860,15 +860,26 @@ test.describe("i18n pseudo-locale coverage", () => {
     await activatePseudo(testPage, new URL(screen.url, backend.frontendUrl).href, backend.frontendUrl);
     await waitForScreen(testPage, screen);
     await runtime.emit("system.update_available", {
+      version: "v9.8.7",
+      occurrence_id: "pseudo-update-v9.8.7",
+      title: "Kandev update available",
+      body: "Kandev v9.8.7 is available. Open Settings > System > Updates to review it.",
+    });
+    await runtime.emit("system.update_available", {
       version: "v1.2.3",
       occurrence_id: "pseudo-update-v1.2.3",
       title: "Kandev update available",
       body: "Kandev v1.2.3 is available. Open Settings > System > Updates to review it.",
     });
+    await expect(testPage.getByTestId("toast-message").filter({ hasText: "v9.8.7" })).toBeVisible();
+    await expect(testPage.getByTestId("toast-message").filter({ hasText: "v1.2.3" })).toBeVisible();
     const toast = testPage
       .getByTestId("toast-message")
-      .filter({ hasText: "Ķàńďēv ũƥďàţē àvàĩĺàƀĺē" });
-    await expect(toast).toContainText("Ķàńďēv v1.2.3 ĩś àvàĩĺàƀĺē");
+      .filter({ hasText: "Ķàńďēv ũƥďàţē àvàĩĺàƀĺē" })
+      .filter({ hasText: "v1.2.3" });
+    await expect(toast).toContainText(
+      "Ķàńďēv v1.2.3 ĩś àvàĩĺàƀĺē. Ōƥēń Śēţţĩńĝś > Śŷśţēḿ > Ũƥďàţēś ţō ŕēvĩēŵ ĩţ.",
+    );
   });
 
   for (const name of ["Untranslated action", "elete"]) {

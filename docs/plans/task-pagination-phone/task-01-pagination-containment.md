@@ -167,3 +167,31 @@ Reassess if implementation expands the user-visible behavior.
   no-build inputs and artifacts. The component suite passed 2 tests and scoped
   lint passed after the clearance change. Screenshots of all three actual phone
   footers were retained with checksums.
+
+## Required-CI remediation
+
+The current PR head's E2E shard 18 failed the pseudo-locale update-notification
+test, independently of the pagination change. The actual job log and its
+`test-results-18` artifact show a strict locator matching two update toasts:
+the live v0.98.0 notice and the synthetic v1.2.3 notice share the localized
+title. All four attempts failed at the same assertion. The existing title-only
+locator cannot identify the synthetic event when another notice is visible.
+
+After separate review and release, applied only the already-landed correction
+from commit `840de1aeb7e32cea17545106378e824fd57dce55` to
+`apps/web/e2e/tests/i18n/pseudo-coverage.spec.ts`: explicitly emit a second
+distinct update, assert both coexist, select the v1.2.3 toast by localized title
+and version, and assert the full translated body. This preserves the locale
+test and makes the overlapping-notification case deterministic. Do not rebase
+or alter pagination production code, unrelated tests, or the fixture runtime.
+
+The hosted shard's actual failure was the causal RED. The named real managed
+Chromium case passed with one worker and no retries; scoped lint also passed.
+The no-build run used identical source, tool versions, backend/fixture artifacts
+and dist before and after. The corrected test blob exactly matches the cited
+main commit. A new head receives normal CI; no manual CI job retry was used.
+
+```bash
+KANDEV_RUN_QUIET_DIR=/tmp/kandev-child031-pseudo-green scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/i18n/pseudo-coverage.spec.ts -- --workers=1 --retries=0 --grep 'localizes a Kandev update notification received from the backend'
+KANDEV_RUN_QUIET_DIR=/tmp/kandev-child031-pseudo-lint scripts/run-quiet frontend-lint -- pnpm --dir apps/web exec eslint --max-warnings=0 e2e/tests/i18n/pseudo-coverage.spec.ts
+```
