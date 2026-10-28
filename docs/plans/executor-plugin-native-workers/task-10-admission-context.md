@@ -30,7 +30,7 @@ system_design:
 
 ## Summary
 
-Add the admission message on provision and recover, the host `AdmissionHook` with an atomic reservation, the applied resource class, and enforcement at first launch and resume. The continuation of a pending placement is not an admission: it keeps the reservation and re-runs only the capability gate.
+Add the admission message on provision and recover, the host `AdmissionHook` with an atomic reservation, and enforcement at first launch and resume. The continuation of a pending placement is not an admission: it keeps the reservation and re-runs only the capability gate.
 
 ## Size
 
@@ -38,10 +38,10 @@ L: ~500 source, ~900 test lines.
 
 ## In scope
 
-- `admitLaunch` order: capability gate, label validation, `Admit` outside any transaction with a 5 s deadline, then one transaction that takes the scope lock, counts, and writes the reservation with the operation; the hook never counts. A resume keeps its reservation and takes none; the new launch that no longer fits gets `admission_denied` (`scope_full`). Test enumerates every caller of both entries. Resume follows the table of AC 001.11 (deny refuses, unavailable goes ahead, no reservation resumes by the same rules).
+- `admitLaunch` order: capability gate, `profile_too_large` measure, `Admit` outside any transaction with a 5 s deadline, then one transaction that takes the scope lock, counts, and writes the reservation with the operation; the hook never counts. A resume never takes the scope lock and keeps its reservation; only the new launch can get `admission_denied` (`scope_full`), in either order (AC 001.9). Test enumerates every caller of both entries. Resume follows the table of AC 001.11 (deny refuses, unavailable goes ahead, no reservation resumes by the same rules).
 - `admission.go` hook interface and default allow-all; one shared gate function called from both entries, `validateLaunch` (first launch) and `attachRetainedPluginExecutor` (resume, which runs before `validateLaunch` on main).
 - Reservation written with the operation record; exactly-once release; PostgreSQL advisory lock on the admission scope.
-- Label validation; applied-class check; resume keeps its class; identity snapshot in the envelope; class list dispositions.
+- Identity snapshot of seven fields in the envelope, carried unchanged to recovery and resume (AC 001.12). Resource classes, labels and provider-reported values are cut to card 11c92feb-2b4c-4d05-8318-9aff24e2fa10.
 
 ## Out of scope
 
@@ -50,7 +50,7 @@ L: ~500 source, ~900 test lines.
 ## Acceptance
 
 - Two launches for the last unit of a scope admit one; hook failure fails closed with no allocation.
-- A resume that races an admission request never changes the applied class.
+- A resume racing a new launch of the same scope gives the same outcome in either order.
 
 ## Failing-first tests
 

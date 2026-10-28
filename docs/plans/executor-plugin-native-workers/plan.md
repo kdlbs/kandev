@@ -88,6 +88,8 @@ Each slice is shippable alone, keeps contract version 1, and ends with its fixtu
 3. Operations, launch policy, and preparation hints: 12, 13, 14.
 4. Fixture proof and public documentation: 16 depends on 14 and 17, so it runs once after slices 1 to 3 for the cross-capability pass; each earlier slice ships with its own fixture additions and conformance run.
 
+**Slice freeze (owner decision, 2026-10-28, round 7).** If Spec Review round 8 is not clean, whole-package review stops. Slice 1 (capability registry, R1 to R8, and the profile contract) freezes for Build, and Spec Review then runs per later slice just before that slice is built. Resource classes, labels and provider-reported admission values are cut to follow-up card 11c92feb-2b4c-4d05-8318-9aff24e2fa10 (admission keeps its hook seam with a default allow-all).
+
 ## Scope
 
 ### In scope

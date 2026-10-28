@@ -31,7 +31,7 @@ effects, wrappers, and preparation strategies.
 reply: it rejects an oversize status (`response_too_large`), never truncates silently. The admin route
 (`GET /api/v1/plugins/executor-providers/:installation/status`, `/inventory`, `/log`, each taking the `provider_key` query selector of AC 001.1) is administrator-only and reuses the
 existing plugin admin authorization. Log lines go through the host's secret redaction before they are returned. Inventory
-reconciliation is read-only: entries are matched to host records by the opaque provider ID and shown as `unrecognized` when
+reconciliation is read-only: entries are matched to host records by the triple of installation, `provider_key` and provider ID and shown as `unrecognized` when
 absent; no host record changes (AC 001.2).
 
 **Events.** A host callback `PublishProviderEvent` (alongside the existing executor callbacks, same dispatch-generation and
@@ -52,7 +52,7 @@ An unavailable or version-mismatched provider returns `unavailable`; launches ar
 ## Launch policy
 
 Profile field `launch_policy` (`none`|`preferred`|`required`) and `policy_id` are validated by the profile editor path and again in
-`validateLaunch` before allocation (AC 001.1, 001.2). The provider reports supported policy IDs in profile validation. The
+`validateLaunch` before allocation (AC 001.1, 001.2). The supported policy IDs are the manifest field `launch_policy_ids` (validated like the other closed manifest lists), not a provider report. The agentctl bootstrap result carries `launch_policy_outcome` (applied policy and enforcement result), which the host copies into the envelope. The
 workspace descriptor gains `applied_launch_policy`; the host rejects one weaker than the profile requires (AC 001.3). The host
 passes `launch_policy` and `policy_id` in the agentctl bootstrap. Enforcement is in agentctl: for `required`, the process
 manager refuses to start an agent process without the wrapper and reports `launch_policy_unenforced`; there is no unwrapped
