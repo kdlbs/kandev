@@ -122,6 +122,8 @@ retries after matching same-worktree builds.
 
 Mounted RED failed on the missing searchbox; the final focused consumer suite passed 19 tests. Typecheck, focused lint, i18n checks and staged ratchet, E2E sleep ratchet, public-doc validators, spec validators and diff checks passed. Matching backend, web and fixture builds passed. Desktop chromium and mobile-chrome E2E each passed one test, including phone, narrow fine-pointer and coarse-pointer geometry. Screenshot originals and manifests were preserved externally with SHA-256 hashes before the subsequent managed run.
 
+Corrective verification also passed: both causal saved-refresh regressions, the final 23-test mounted suite, lint, typecheck, spec checks, matching web rebuild, and the desktop/phone browser cases. Edited and delete-target rows retain their current list positions only while their IDs remain loaded.
+
 ## Risks
 
 - A filtered array mistaken for the underlying collection would replace the true

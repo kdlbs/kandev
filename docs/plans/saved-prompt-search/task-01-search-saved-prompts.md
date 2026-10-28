@@ -34,6 +34,7 @@ phone in the same sequential slice.
 - Implement the design using existing settings `Input`, loaded saved entries,
   translations and list rendering. Keep search disabled throughout edit, create,
   delete confirmation and pending mutation, with matched editing row mounted.
+- Retain the edited row and open delete target in list order through saved-field refresh while their IDs remain loaded; resume normal filtering after each action and never restore a removed row.
 - Extend the existing consumer test without replacing its fixtures, assertions
   or meaning. Add the two dedicated E2E files described in the plan. Use only
   disposable prompts created by each test and clean up their IDs, never all
@@ -158,3 +159,5 @@ Sequential; no delegates or extra sessions.
 ## Results
 
 Mounted RED: exit 1, missing accessible searchbox (native 38315). Final consumer suite: 19 passed; focused lint passed (native 90987). Typecheck, i18n, staged ratchet, E2E sleep ratchet, public-doc validators, spec validators and diff checks passed (native 36217). Backend, E2E web and fixture builds passed (native 24046). After restoring the original scroll effect, focused lint, 19 consumer tests, typecheck and the web rebuild passed (native 1763). Final desktop chromium and mobile-chrome each passed one focused test (native 69486 and 81651); phone, narrow fine-pointer and coarse-pointer geometry passed. Original screenshots and manifests are preserved externally with hashes.
+
+Corrective validation: causal same-ID editor-refresh RED (native 12190, exit 1) and delete-confirmation-refresh RED (33176, exit 1) each failed because the row disappeared. Final 23 mounted tests, focused lint, typecheck, spec catalog/lint, diff and matching web build passed (86326, exit 0). Both focused desktop and phone browser cases passed with one worker and zero retries (36472, exit 0). Existing action and saved-data owners remain unchanged; the predicate retains each active ID only while present in the current list.

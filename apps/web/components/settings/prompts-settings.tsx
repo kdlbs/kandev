@@ -552,10 +552,10 @@ export function PromptsSettings() {
     confirmDelete,
     resetForm,
   } = usePromptsActions(state);
-  const isEditing = Boolean(editingId);
   const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState);
-  const visiblePrompts = filterSavedPrompts(prompts, query);
-  const searchDisabled = isEditing || showCreate || Boolean(deleteTarget) || isBusy;
+  const deleteTargetId = deleteTarget?.id ?? null;
+  const visiblePrompts = filterSavedPrompts(prompts, query, editingId, deleteTargetId);
+  const searchDisabled = Boolean(editingId || showCreate || deleteTarget || isBusy);
 
   useEffect(() => {
     if (!editingId) return;
@@ -589,7 +589,7 @@ export function PromptsSettings() {
           action={
             <PromptCreateButton
               onClick={startCreate}
-              disabled={isBusy || isEditing || showCreate}
+              disabled={isBusy || Boolean(editingId) || showCreate}
             />
           }
         >
@@ -620,7 +620,7 @@ export function PromptsSettings() {
               isBusy={isBusy}
               showCreate={showCreate}
               isFinePointer={isFinePointer}
-              deleteTargetId={deleteTarget?.id ?? null}
+              deleteTargetId={deleteTargetId}
             />
           </div>
         </SettingsGroup>

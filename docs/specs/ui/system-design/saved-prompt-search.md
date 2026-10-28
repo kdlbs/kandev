@@ -40,7 +40,7 @@ editing and clear behavior.
 
 Disable the query input when `editingId`, `showCreate`, `deleteTarget`, or
 `isBusy` is active. Filtering uses the saved entries, never `formState`, so a row
-matched before editing remains mounted while its draft is changed. Existing
+matched before editing remains mounted while its draft is changed. Retain each edited or open delete target ID through saved-field refresh as long as it remains in the loaded list. Include each current saved row in its existing list position even when it no longer matches; do not cache or restore removed rows. After the respective action ends, normal filtering resumes. Existing
 `SettingsPageTemplate` draft registration, action handlers, permission controls,
 mutation requests, loading and errors remain authoritative. No query state is
 passed to draft metadata or mutation calls. The existing session-local query can

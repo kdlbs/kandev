@@ -513,3 +513,147 @@ describe("PromptsSettings search during actions", () => {
     expect(search.hasAttribute("disabled")).toBe(true);
   });
 });
+
+const noResultsText = "No results.";
+
+describe("PromptsSettings search during saved-list refresh", () => {
+  it("keeps the edited row and draft visible when a refreshed saved prompt no longer matches", () => {
+    mocks.prompts = [existingPrompt];
+    const tree = (
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>
+    );
+    const { rerender } = render(tree);
+    const search = screen.getByRole("searchbox", { name: searchLabel });
+    fireEvent.change(search, { target: { value: promptName } });
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId(promptEditButtonTestId));
+    const editor = within(row).getByTestId(promptContentInputTestId) as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "Unsaved local draft" } });
+
+    mocks.prompts = [{ ...existingPrompt, name: "Remote name", content: "Remote content" }];
+    rerender(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(screen.getByTestId(promptRowTestId)).toBe(row);
+    expect(within(row).getByTestId(promptContentInputTestId)).toBe(editor);
+    expect(editor.value).toBe("Unsaved local draft");
+    expect(search.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId(promptRowTestId)).toBeNull();
+    expect(screen.getByText(noResultsText)).toBeTruthy();
+    expect(search.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("retains refreshed edits in list order without resurrecting a removed prompt", () => {
+    const rowNameAttribute = "data-prompt-name";
+    const first = { ...existingPrompt, id: "first", name: "Review first" };
+    const last = { ...existingPrompt, id: "last", name: "Review last" };
+    mocks.prompts = [first, existingPrompt, last];
+    const { rerender } = render(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    fireEvent.change(screen.getByRole("searchbox", { name: searchLabel }), {
+      target: { value: promptName },
+    });
+    fireEvent.click(
+      within(screen.getAllByTestId(promptRowTestId)[1]).getByTestId(promptEditButtonTestId),
+    );
+    mocks.prompts = [first, { ...existingPrompt, name: "Remote", content: "Changed" }, last];
+    rerender(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(
+      screen.getAllByTestId(promptRowTestId).map((row) => row.getAttribute(rowNameAttribute)),
+    ).toEqual(["Review first", "Remote", "Review last"]);
+    mocks.prompts = [first, last];
+    rerender(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(
+      screen.getAllByTestId(promptRowTestId).map((row) => row.getAttribute(rowNameAttribute)),
+    ).toEqual(["Review first", "Review last"]);
+  });
+});
+
+describe("PromptsSettings search during delete confirmation refresh", () => {
+  it("keeps the confirmation available when the saved target stops matching", () => {
+    mocks.prompts = [existingPrompt];
+    const { rerender } = render(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    const search = screen.getByRole("searchbox", { name: searchLabel });
+    fireEvent.change(search, { target: { value: promptName } });
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
+    const confirmation = screen.getByTestId(promptDeletePopoverTestId);
+
+    mocks.prompts = [{ ...existingPrompt, name: "Remote name", content: "Remote content" }];
+    rerender(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(screen.getByTestId(promptRowTestId)).toBe(row);
+    expect(screen.getByTestId(promptDeletePopoverTestId)).toBe(confirmation);
+    expect(search.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId(promptRowTestId)).toBeNull();
+    expect(screen.getByText(noResultsText)).toBeTruthy();
+    expect(search.hasAttribute("disabled")).toBe(false);
+    expect(mocks.deletePrompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("PromptsSettings search with distinct active rows", () => {
+  it("keeps both the edited row and the delete target in saved-list order", () => {
+    const second = { ...existingPrompt, id: "other", name: "Review other" };
+    mocks.prompts = [existingPrompt, second];
+    const { rerender } = render(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    const search = screen.getByRole("searchbox", { name: searchLabel });
+    fireEvent.change(search, { target: { value: promptName } });
+    const [editingRow, deleteRow] = screen.getAllByTestId(promptRowTestId);
+    fireEvent.click(within(editingRow).getByTestId(promptEditButtonTestId));
+    fireEvent.change(within(editingRow).getByTestId(promptContentInputTestId), {
+      target: { value: "Unsaved draft" },
+    });
+    fireEvent.click(within(deleteRow).getByTestId(promptDeleteButtonTestId));
+    const confirmation = screen.getByTestId(promptDeletePopoverTestId);
+    mocks.prompts = [
+      { ...existingPrompt, name: "Updated first", content: "Other first" },
+      { ...second, name: "Updated second", content: "Other second" },
+    ];
+    rerender(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(screen.getAllByTestId(promptRowTestId)).toEqual([editingRow, deleteRow]);
+    expect(
+      (within(editingRow).getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value,
+    ).toBe("Unsaved draft");
+    expect(screen.getByTestId(promptDeletePopoverTestId)).toBe(confirmation);
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(screen.getAllByTestId(promptRowTestId)).toEqual([editingRow]);
+    expect(search.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(within(editingRow).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryAllByTestId(promptRowTestId)).toHaveLength(0);
+    expect(search.hasAttribute("disabled")).toBe(false);
+  });
+});

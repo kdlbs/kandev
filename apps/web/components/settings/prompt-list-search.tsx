@@ -4,11 +4,19 @@ import { useTranslation } from "react-i18next";
 import type { CustomPrompt } from "@/lib/types/http";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 
-export function filterSavedPrompts(prompts: CustomPrompt[], query: string): CustomPrompt[] {
+export function filterSavedPrompts(
+  prompts: CustomPrompt[],
+  query: string,
+  editingId: string | null,
+  deleteTargetId: string | null,
+): CustomPrompt[] {
   const normalized = query.trim().toLowerCase();
   return normalized
-    ? prompts.filter((prompt) =>
-        [prompt.name, prompt.content].some((value) => value.toLowerCase().includes(normalized)),
+    ? prompts.filter(
+        (prompt) =>
+          prompt.id === editingId ||
+          prompt.id === deleteTargetId ||
+          [prompt.name, prompt.content].some((value) => value.toLowerCase().includes(normalized)),
       )
     : prompts;
 }
