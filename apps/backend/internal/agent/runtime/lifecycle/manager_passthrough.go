@@ -502,7 +502,7 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 		return preparedPassthroughMCP{}, fmt.Errorf("build passthrough MCP config: %w", err)
 	}
 	if err := validateSandboxMCPArtifacts(execution, len(servers), artifacts); err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	if err := m.writePassthroughMCPFiles(ctx, execution, artifacts.Files); err != nil {
 		return preparedPassthroughMCP{}, err

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	hcplugin "github.com/hashicorp/go-plugin"
-	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

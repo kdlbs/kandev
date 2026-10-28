@@ -10,11 +10,13 @@ import (
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
+const sandboxAccessRead = "read"
+
 func (p *Prepared) readReportData(ctx context.Context) (policy.ReportData, error) {
-	data := policy.ReportData{Status: "unsupported", Integrity: "unverified", SupportedClasses: slices.Clone(p.description.ReportClasses)}
+	data := policy.ReportData{Status: "unsupported", Integrity: pluginsdk.SandboxReportUnverified, SupportedClasses: slices.Clone(p.description.ReportClasses)}
 	if len(data.SupportedClasses) == 0 {
 		return data, nil
 	}
@@ -36,7 +38,7 @@ func (p *Prepared) readReportData(ctx context.Context) (policy.ReportData, error
 		}
 	}
 	if len(data.Sources) == 0 {
-		data.Status, data.Integrity, data.Complete = "unavailable", "unverified", false
+		data.Status, data.Integrity, data.Complete = "unavailable", pluginsdk.SandboxReportUnverified, false
 	}
 	return data, nil
 }
@@ -52,7 +54,7 @@ func (p *Prepared) appendReportSource(ctx context.Context, data *policy.ReportDa
 		Integrity: response.Integrity, NextCursor: response.NextCursor, Complete: response.Complete}
 	data.Sources = append(data.Sources, source)
 	data.Complete = data.Complete && source.Complete && source.NextCursor == ""
-	if response.Integrity == "unverified" || (response.Integrity == "partial" && data.Integrity == "complete") {
+	if response.Integrity == pluginsdk.SandboxReportUnverified || (response.Integrity == "partial" && data.Integrity == "complete") {
 		data.Integrity = response.Integrity
 	}
 	if err := p.appendDenials(data, sourceID, response.Records); err != nil {
@@ -84,7 +86,7 @@ func (p *Prepared) appendDenials(data *policy.ReportData, sourceID string, recor
 
 func denialKind(operation string) string {
 	switch operation {
-	case "read", "write":
+	case sandboxAccessRead, "write":
 		return "filesystem"
 	case "connect":
 		return "network"

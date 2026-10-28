@@ -2,7 +2,7 @@ package plugins
 
 import (
 	"github.com/kandev/kandev/internal/common/sandbox"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func validateSandboxRuntimeSources(sources []*pluginsdk.SandboxRuntimeSource) error {

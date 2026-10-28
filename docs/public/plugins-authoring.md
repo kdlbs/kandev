@@ -1031,7 +1031,7 @@ declare `slotProps?: PluginComposerSlotProps` directly, without narrowing an
 
 The optional `pluginsdk.SandboxProviderPlugin` interface translates policy and
 runtime evidence. Implement all six methods from the
-[SDK contract](../../apps/backend/pkg/pluginsdk/sandbox_provider.go): describe,
+[SDK contract](../../pluginsdk/sandbox_provider.go): describe,
 compile, normalize approval, normalize status, read report, and propose revision.
 Use the maintained [fixture provider](../../apps/backend/cmd/plugin-fixture/sandbox_provider.go)
 and its [tests](../../apps/backend/cmd/plugin-fixture/sandbox_provider_test.go)
@@ -3963,7 +3963,8 @@ instance:
 make -C apps/backend e2e-plugin-package
 cd apps/backend
 go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest \
-  ./internal/plugins/pkgtar ./pkg/pluginsdk
+  ./internal/plugins/pkgtar
+(cd ../../pluginsdk && go test -trimpath ./...)
 ```
 
 The fixture build proves the current SDK/package shape and produces a

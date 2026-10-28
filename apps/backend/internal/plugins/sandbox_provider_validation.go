@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/common/sandbox"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/protobuf/proto"
 )
 

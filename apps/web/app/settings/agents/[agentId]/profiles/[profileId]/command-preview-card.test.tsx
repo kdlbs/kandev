@@ -176,6 +176,7 @@ describe("CommandPreviewCard deferred Copilot mounts", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText(commandPreviewLabel));
     expect(await screen.findByTestId("command-preview-deferred-plugins")).toBeTruthy();
     expect(screen.getByText(/Selected plugin mounts resolve/)).toBeTruthy();
     expect(screen.getByText(/installed:copilot-plugins\/spark/)).toBeTruthy();

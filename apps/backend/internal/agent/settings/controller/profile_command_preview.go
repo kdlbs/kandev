@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 )
 
+const permissionAllowIndexing = "allow_indexing"
+
 var ErrProfileCommandPreviewMissing = errors.New("profile command preview unavailable")
 
 // PreviewSavedProfileCommand exposes only the safe composition of a saved global profile.
@@ -34,9 +36,9 @@ func (c *Controller) PreviewSavedProfileCommand(ctx context.Context, profileID s
 		SafeOnly: true, Model: profile.Model, CLIPassthrough: profile.CLIPassthrough,
 		CLIFlags: cliFlagsToDTO(profile.CLIFlags), CommandPrefix: profile.CommandPrefix,
 		PermissionSettings: map[string]bool{
-			agents.PermissionKeyAutoApprove: profile.AutoApprove,
-			"allow_indexing":                profile.AllowIndexing,
-			"dangerously_skip_permissions":  profile.DangerouslySkipPermissions,
+			agents.PermissionKeyAutoApprove:                profile.AutoApprove,
+			permissionAllowIndexing:                        profile.AllowIndexing,
+			agents.PermissionKeyDangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		},
 	})
 }

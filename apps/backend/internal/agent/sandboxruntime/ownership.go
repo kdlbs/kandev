@@ -9,7 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/processidentity"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/kandev/kandev/internal/plugins"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func (p *Prepared) BindOwner(ctx context.Context, agentctlIdentity string, owner *contract.ProcessOwner) error {

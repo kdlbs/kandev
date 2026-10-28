@@ -3,6 +3,7 @@ package sandboxruntime
 import (
 	"context"
 	"errors"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"time"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
@@ -48,7 +49,7 @@ func (p *Prepared) captureReport(ctx context.Context) (*policy.Report, error) {
 }
 
 func unavailableReport(previous *policy.Report) policy.ReportData {
-	data := policy.ReportData{Integrity: "unverified"}
+	data := policy.ReportData{Integrity: pluginsdk.SandboxReportUnverified}
 	if previous != nil {
 		data = previous.Data
 	}

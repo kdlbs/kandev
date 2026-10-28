@@ -186,10 +186,10 @@ func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting)
 	if s, exists := permSettings[agents.PermissionKeyAutoApprove]; exists {
 		autoApprove = s.Default
 	}
-	if s, exists := permSettings["allow_indexing"]; exists {
+	if s, exists := permSettings[permissionAllowIndexing]; exists {
 		allowIndexing = s.Default
 	}
-	if s, exists := permSettings["dangerously_skip_permissions"]; exists {
+	if s, exists := permSettings[agents.PermissionKeyDangerouslySkipPermissions]; exists {
 		skipPermissions = s.Default
 	}
 	return
@@ -275,7 +275,14 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		}
 	}
 	if req.SafeOnly {
-		return safeCommandPreview(cmd.Args(), req.CommandPrefix, req.CLIPassthrough)
+		preview, err := safeCommandPreview(cmd.Args(), req.CommandPrefix, req.CLIPassthrough)
+		if err != nil {
+			return nil, err
+		}
+		preview.DeferredPluginIDs = copilotPlugins
+		preview.DeferredPluginCount = len(copilotPlugins)
+		preview.CommandIncomplete = len(copilotPlugins) > 0
+		return preview, nil
 	}
 	// Both launch transports prepend the validated wrapper to the agent argv.
 	if prefixTokens, err := cliflags.Tokenise(req.CommandPrefix); err == nil && len(prefixTokens) > 0 {

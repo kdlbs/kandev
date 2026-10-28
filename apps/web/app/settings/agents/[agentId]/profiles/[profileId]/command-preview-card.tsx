@@ -79,6 +79,30 @@ function CommandIdentity({ label, command }: { label: string; command: CommandSu
   );
 }
 
+function DeferredPlugins({ preview }: { preview: CommandPreviewResponse }) {
+  const { t } = useTranslation();
+  if (!preview.deferred_plugin_count) return null;
+  return (
+    <div
+      className="space-y-1 rounded-md border border-dashed p-3"
+      data-testid="command-preview-deferred-plugins"
+    >
+      <p className="text-xs font-medium">{t("agents:copilotPluginsPreviewTitle")}</p>
+      <p className="text-xs text-muted-foreground">{t("agents:copilotPluginsPreviewNotice")}</p>
+      <p className="wrap-break-word text-xs text-muted-foreground">
+        {t("agents:copilotPluginsPreviewList", {
+          names: (preview.deferred_plugin_ids ?? []).join(", "),
+        })}
+      </p>
+      {preview.command_incomplete && (
+        <p className="text-xs text-muted-foreground">
+          {t("agents:copilotPluginsPreviewIncomplete")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function CommandPreviewCard({
   discoveryTargetId,
   agentName,
@@ -130,15 +154,21 @@ export function CommandPreviewCard({
           </p>
         )}
         {!loading && !error && preview?.composition && (
-          <dl className="space-y-3">
-            {preview.composition.wrapper && (
+          <>
+            <dl className="space-y-3">
+              {preview.composition.wrapper && (
+                <CommandIdentity
+                  label={t("agents:commandPrefix")}
+                  command={preview.composition.wrapper.command}
+                />
+              )}
               <CommandIdentity
-                label={t("agents:commandPrefix")}
-                command={preview.composition.wrapper.command}
+                label={t("agents:agentCommand")}
+                command={preview.composition.agent}
               />
-            )}
-            <CommandIdentity label={t("agents:agentCommand")} command={preview.composition.agent} />
-          </dl>
+            </dl>
+            <DeferredPlugins preview={preview} />
+          </>
         )}
         {!loading && !error && preview?.flag_destination === "acp_bridge" && (
           <p

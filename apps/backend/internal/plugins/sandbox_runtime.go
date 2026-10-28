@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type SandboxRuntimeBinary struct {

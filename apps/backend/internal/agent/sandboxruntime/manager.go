@@ -11,7 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/sandboxmcp"
 	"github.com/kandev/kandev/internal/common/sandboxproxy"
 	"github.com/kandev/kandev/internal/plugins"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type PrepareRequest struct {

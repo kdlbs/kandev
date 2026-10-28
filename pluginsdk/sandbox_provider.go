@@ -2,7 +2,7 @@ package pluginsdk
 
 import (
 	"context"
-	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

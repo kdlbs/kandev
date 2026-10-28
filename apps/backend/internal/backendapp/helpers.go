@@ -388,6 +388,7 @@ func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) boo
 
 const sessionIDPayloadKey = "session_id"
 const taskIDPayloadKey = "task_id"
+const workspaceIDPayloadKey = "workspace_id"
 const newStatePayloadKey = "new_state"
 const sessionUpdatedAtPayloadKey = "updated_at"
 
@@ -480,7 +481,7 @@ func appendSessionStateMessageWithCancellation(
 		"cancellation_revision":    uint64(0),
 		"execution_snapshot":       session.ExecutionSnapshot,
 		"execution_observation":    session.ExecutionObservation,
-		"queue_incarnation_id":     session.QueueIncarnationID,
+		queueIncarnationPayloadKey: session.QueueIncarnationID,
 	}
 	if cancellationProvider != nil {
 		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)

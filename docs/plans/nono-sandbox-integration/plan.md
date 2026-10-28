@@ -237,3 +237,9 @@ Tasks 01 through 08 and 10 are complete for the supported Linux amd64 Local/Work
 ## Implementation walkthrough
 
 The [host and Nono walkthrough](walkthrough.md) explains ownership, the six provider RPCs, policy selection, approvals, MCP connectivity, restart, cleanup, evidence limits, and future adapters. It records the inspected commits and links directly to both implementations.
+
+## SDK decoupling rebase (2026-10-28)
+
+Rebased the host branch onto main at `73d80d1beca140b4ace5abe3d72401d0cd7fa0d4` (PR #4534). The sandbox SDK capability and wire contract now live in `pluginsdk/`; host imports use `github.com/kdlbs/kandev/pluginsdk`. Conflict resolution preserves MCP delivery evidence, Copilot plugin selection, safe command previews, and task-creation recovery from main.
+
+Validation passed: standalone SDK tests, deterministic protobuf generation, isolated SDK consumer smoke, legacy SDK binary compatibility, targeted sandbox/plugin/lifecycle/settings/task/backend tests, 66 frontend tests, frontend typecheck, and documentation checks. The existing recovery test that requires `/bin/sleep` passed in a private mount namespace on this Nix host. Typecheck required an 8 GiB Node heap. No test instance was started and no retained instance was changed.

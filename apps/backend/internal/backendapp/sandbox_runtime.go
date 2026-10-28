@@ -20,6 +20,11 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
+const (
+	sandboxHTTPScheme       = "http"
+	sandboxLoopbackHostname = "localhost"
+)
+
 type sandboxRuntimeFactory struct {
 	runtime  *sandboxruntime.Manager
 	policies *policy.Service
@@ -83,11 +88,11 @@ func (f sandboxRuntimeFactory) validateExecutor(ctx context.Context, id string) 
 
 func (f sandboxRuntimeFactory) protectedPorts(transport *runtime.AgentCtlClient) ([]uint16, error) {
 	endpoint, err := url.Parse(transport.BaseURL())
-	if err != nil || endpoint.Scheme != "http" || endpoint.User != nil {
+	if err != nil || endpoint.Scheme != sandboxHTTPScheme || endpoint.User != nil {
 		return nil, policy.ErrIneligible
 	}
 	host := endpoint.Hostname()
-	if host != "localhost" && !net.ParseIP(host).IsLoopback() {
+	if host != sandboxLoopbackHostname && !net.ParseIP(host).IsLoopback() {
 		return nil, policy.ErrIneligible
 	}
 	instancePort, err := strconv.Atoi(endpoint.Port())

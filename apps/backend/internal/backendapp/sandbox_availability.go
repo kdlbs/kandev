@@ -8,8 +8,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/sandbox"
 	"github.com/kandev/kandev/internal/plugins"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
+
+const sandboxLocalTransport = "local"
 
 func checkSandboxInstallation(ctx context.Context, providers *plugins.Service, resolved *sandbox.Resolved) error {
 	binding, err := sandboxInstallation(ctx, providers, resolved)
@@ -20,7 +22,7 @@ func checkSandboxInstallation(ctx context.Context, providers *plugins.Service, r
 		ProviderKey: binding.ProviderKey, OperationId: uuid.NewString(), AttemptId: uuid.NewString(),
 		ExecutionId: uuid.NewString(), Generation: 1}
 	described, err := providers.DescribeSandboxProvider(ctx, binding, &pluginsdk.DescribeSandboxProviderRequest{
-		Context: request, Runtime: &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: "local"},
+		Context: request, Runtime: &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: sandboxLocalTransport},
 	})
 	if err != nil {
 		return err

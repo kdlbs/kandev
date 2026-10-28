@@ -14,7 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	pluginruntime "github.com/kandev/kandev/internal/plugins/runtime"
 	"github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

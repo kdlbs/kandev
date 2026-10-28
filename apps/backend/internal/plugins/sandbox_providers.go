@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 var ErrSandboxProviderUnavailable = errors.New("plugins: sandbox provider is unavailable")

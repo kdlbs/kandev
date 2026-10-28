@@ -62,3 +62,21 @@ func TestCopilotPluginPreview(t *testing.T) {
 		t.Fatal("non-Copilot preview with plugins unexpectedly succeeded")
 	}
 }
+
+func TestSafeCopilotPluginPreviewPreservesDeferredSelection(t *testing.T) {
+	ctrl, _, _ := newCopilotDiscoveryController(t)
+	resp, err := ctrl.PreviewAgentCommand(context.Background(), agents.CopilotACPAgentID, CommandPreviewRequest{
+		SafeOnly:               true,
+		CLIPassthrough:         true,
+		CopilotSelectedPlugins: []string{"installed:copilot-plugins/spark"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Composition == nil || resp.DeferredPluginCount != 1 || !resp.CommandIncomplete || len(resp.DeferredPluginIDs) != 1 {
+		t.Fatalf("safe preview lost composition or deferred selection: %+v", resp)
+	}
+	if resp.DeferredPluginIDs[0] != "installed:copilot-plugins/spark" || resp.CommandString != "" || len(resp.Command) != 0 {
+		t.Fatalf("safe preview changed selection or exposed raw command: %+v", resp)
+	}
+}

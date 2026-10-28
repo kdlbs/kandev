@@ -7,9 +7,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/protobuf/proto"
 )
+
+const sandboxLocalTransport = "local"
 
 const sandboxJSONContentType = "application/json"
 
@@ -68,7 +70,7 @@ func validateSandboxDescription(value *pluginsdk.SandboxProviderDescription) err
 
 func validateSandboxDescriptionLists(value *pluginsdk.SandboxProviderDescription) error {
 	for _, transport := range value.SupportedTransports {
-		if transport != "local" && transport != "worktree" {
+		if transport != sandboxLocalTransport && transport != "worktree" {
 			return errSandboxProviderReply
 		}
 	}

@@ -31,7 +31,7 @@ Env kandev injects into the subprocess:
 
 - `KANDEV_PLUGIN_DATA_DIR` — per-plugin writable dir (`~/.kandev/plugins/<id>/data`).
 
-## 3. Proto (`apps/backend/proto/kandev/plugin/v1/plugin.proto`)
+## 3. Proto (`pluginsdk/proto/kandev/plugin/v1/plugin.proto`)
 
 ```proto
 syntax = "proto3";
@@ -283,7 +283,7 @@ kandev database file directly. Full message definitions (`Page`, `PageInfo`,
 `Task`, `TaskFilter`, `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`,
 `Repository`, `Session`, `SessionFilter`, `SessionCodeStats`, and the write
 `CreateTaskRequest`/`UpdateTaskRequest`/`SendMessageRequest`/`SendMessageResponse`) live in
-the real proto — `apps/backend/proto/kandev/plugin/v1/plugin.proto` — and are not
+the real proto — `pluginsdk/proto/kandev/plugin/v1/plugin.proto` — and are not
 duplicated here; this section covers the RPC list (added to `service Host` above),
 capability gating, and cross-cutting conventions. See ADR 0043
 (`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
@@ -486,7 +486,7 @@ derived from.
 - **Ephemeral tasks** (quick-chat) are excluded from `ListTasks` unless the
   request sets `TaskFilter.include_ephemeral`.
 
-## 4. SDK (`apps/backend/pkg/pluginsdk`)
+## 4. SDK (`pluginsdk`)
 
 Public Go module surface (authors import only this):
 
@@ -571,7 +571,7 @@ case-sensitive. The broker does not add, remove, or equate a trailing `.git`.
 
 `SandboxProviderPlugin` is an optional, complete six-method extension. The SDK
 exports the generated typed messages from `plugin/v1` and the interface in
-`apps/backend/pkg/pluginsdk/sandbox_provider.go`. An older plugin remains
+`pluginsdk/sandbox_provider.go`. An older plugin remains
 compatible and returns `Unimplemented` for this extension.
 
 Each request binds protocol major 1, installation, provider key, operation,
@@ -1255,7 +1255,7 @@ if err != nil {
 _ = result.Status // APPLIED, ALREADY_APPLIED, or a typed non-success result
 ```
 
-### Host data API accessors (`apps/backend/pkg/pluginsdk/host.go`, `data_types.go`)
+### Host data API accessors (`pluginsdk/host.go`, `data_types.go`)
 
 Each `Host.<Resource>()` call above returns a small reader interface. All
 methods take `context.Context`; list methods take a Go-native `Page{Limit

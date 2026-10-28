@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // CompileLearning uses frozen attempt facts. It neither opens a new sandbox nor grants access.
@@ -57,7 +57,7 @@ func learningRequest(attempt *policy.Attempt, records []policy.DenialRecord) (*p
 		Context: &pluginsdk.SandboxRequestContext{ProtocolMajor: 1, InstallationId: provider.InstallationID, ProviderKey: provider.Key,
 			OperationId: uuid.NewString(), AttemptId: attempt.ID, ExecutionId: snapshot.ExecutionID, Generation: snapshot.Launch.Generation},
 		Policy:     wirePolicy(snapshot.Resolved, snapshot.Grants),
-		Runtime:    &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: "local", RuntimeVersion: provider.RuntimeVersion, RuntimeDigest: provider.RuntimeDigest},
+		Runtime:    &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: sandboxLocalTransport, RuntimeVersion: provider.RuntimeVersion, RuntimeDigest: provider.RuntimeDigest},
 		References: childDirectoryReferences(snapshot.AgentState.Directories()),
 	}
 	for _, record := range records {

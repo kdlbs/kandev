@@ -10,7 +10,7 @@ requirements:
 
 ## Boundary
 
-This optional contract extends `pkg/pluginsdk`, `proto/kandev/plugin/v1/plugin.proto`, manifest validation, and plugin dispatch.
+This optional contract extends `pluginsdk/`, `pluginsdk/proto/kandev/plugin/v1/plugin.proto`, manifest validation, and plugin dispatch.
 It does not reuse `ExecutorProviderPlugin`, which provisions remote environments.
 [Agents](../../agents/system-design/sandbox-policies.md) owns authorization, policy, process ownership, and user outcomes.
 REQ-PLUGINS-SANDBOX-001 maps to negotiation, calls, lifecycle, and repository boundaries below.

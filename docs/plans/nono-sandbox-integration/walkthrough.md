@@ -8,6 +8,8 @@ This guide describes the implementation inspected on 2026-10-27:
 - [Nono plugin PR #2](https://github.com/kdlbs/kandev-plugin-nono/pull/2), at [`8f68c6a10add`](https://github.com/kdlbs/kandev-plugin-nono/tree/8f68c6a10add119a1187c7428c5fad51aa6ca25a).
 - Nono runtime 0.80.0, built from upstream commit [`8bb041356d48`](https://github.com/nolabs-ai/nono/tree/8bb041356d48f771a221e58c98d9b1ff442e76fe).
 
+After the SDK decoupling rebase on 2026-10-28, the current SDK lives in `pluginsdk/`, and its wire contract lives in `pluginsdk/proto/`. The Go import is `github.com/kdlbs/kandev/pluginsdk`. The pinned links below retain the earlier source locations for historical context.
+
 Source links below use these commits. They remain useful after the branches change. This guide explains the delivered design; it does not replace the requirements or acceptance record.
 
 ## 1. What this initiative adds

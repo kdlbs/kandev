@@ -9,8 +9,10 @@ import (
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/kandev/kandev/internal/plugins"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
+
+const sandboxLocalTransport = "local"
 
 func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Prepared, err error) {
 	if req.ExecutionID == "" || req.Generation == 0 {
@@ -101,13 +103,13 @@ func validateCompiledOverrides(req PrepareRequest, compiled *pluginsdk.SandboxCo
 }
 
 func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *policy.Resolved) (*pluginsdk.CompileSandboxPolicyResponse, *plugins.SandboxRuntimeBinary, contract.Grants, error) {
-	facts := &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: "local"}
+	facts := &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: sandboxLocalTransport}
 	description, err := p.manager.providers.DescribeSandboxProvider(ctx, p.binding, &pluginsdk.DescribeSandboxProviderRequest{Context: p.request, Runtime: facts})
 	if err != nil {
 		return nil, nil, contract.Grants{}, err
 	}
 	p.description = description.Description
-	if !slices.Contains(p.description.SupportedTransports, "local") {
+	if !slices.Contains(p.description.SupportedTransports, sandboxLocalTransport) {
 		return nil, nil, contract.Grants{}, policy.ErrIneligible
 	}
 	binary, err := p.manager.providers.ReadSandboxRuntime(ctx, p.binding, p.description.RuntimeArtifact)

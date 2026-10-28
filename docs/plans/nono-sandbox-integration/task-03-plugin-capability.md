@@ -53,7 +53,8 @@ New test and runner paths below are implementation deliverables, not existing pa
 
 ```bash
 make -C apps/backend proto
-(cd apps/backend && go test -trimpath ./pkg/pluginsdk ./internal/plugins/... ./internal/common/launchwrapper -run 'SandboxProvider|GenericWrapper' -count=1)
+(cd pluginsdk && go test -trimpath ./... -count=1)
+(cd apps/backend && go test -trimpath ./internal/plugins/... ./internal/common/launchwrapper -run 'SandboxProvider|GenericWrapper' -count=1)
 ```
 
 Use TDD for changed logic. Before the first pnpm command in this workspace, run `(cd apps && pnpm install --frozen-lockfile)`.
@@ -61,12 +62,12 @@ Run each listed suite after its files exist. Do not count a zero-test filter as 
 
 ## Files likely touched
 
-- `apps/backend/proto/kandev/plugin/v1/plugin.proto`
-- `apps/backend/pkg/pluginsdk/sandbox_provider.go (new)`
+- `pluginsdk/proto/kandev/plugin/v1/plugin.proto`
+- `pluginsdk/sandbox_provider.go (new)`
 - `apps/backend/internal/plugins/manifest/`
 - `apps/backend/internal/plugins/`
 - `apps/backend/cmd/plugin-fixture/`
-- `apps/backend/pkg/pluginsdk/sandbox_provider_test.go (new)`
+- `pluginsdk/sandbox_provider_test.go (new)`
 
 ## Dependencies
 

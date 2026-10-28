@@ -22,6 +22,8 @@ type executionSnapshotRecorder struct {
 
 var errExecutionSnapshotUnavailable = errors.New("execution snapshot is unavailable")
 
+const queueIncarnationPayloadKey = "queue_incarnation_id"
+
 func (r executionSnapshotRecorder) record(ctx context.Context, execution *runtime.AgentExecution, snapshot models.ExecutionSnapshot, launch *contract.Launch) error {
 	if r.tasks == nil || execution == nil || snapshot.SessionID != execution.SessionID || snapshot.TaskID != execution.TaskID || snapshot.ExecutionID != execution.ID || snapshot.AgentProfileID != execution.AgentProfileID || snapshot.Sandbox != nil {
 		return errExecutionSnapshotUnavailable
@@ -65,8 +67,8 @@ func (r executionSnapshotRecorder) publish(ctx context.Context, captured *models
 		return err
 	}
 	payload := map[string]any{
-		"task_id": captured.TaskID, "session_id": captured.SessionID,
-		"workspace_id": task.WorkspaceID, "queue_incarnation_id": session.QueueIncarnationID,
+		taskIDPayloadKey: captured.TaskID, sessionIDPayloadKey: captured.SessionID,
+		workspaceIDPayloadKey: task.WorkspaceID, queueIncarnationPayloadKey: session.QueueIncarnationID,
 		"execution_snapshot": captured, "execution_observation": session.ExecutionObservation,
 	}
 	return r.eventBus.Publish(ctx, events.TaskSessionExecutionChanged,

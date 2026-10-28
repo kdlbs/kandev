@@ -6,7 +6,7 @@ import (
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
