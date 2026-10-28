@@ -1901,6 +1901,7 @@
   "tasksAffected_other": "影響 {{count}} 個任務",
   "tcpPortsWithActiveListenersInside": "遠端執行器內有活動監聽器的 TCP 端口。點擊刷新以重新掃描。",
   "technicalDetails": "技術詳情",
+  "jumpToLatestOutput": "跳至最新輸出",
   "terminal": "終端",
   "terminalCount_one": "{{count}} 個終端",
   "terminalCount_other": "{{count}} 個終端",

@@ -2020,6 +2020,7 @@
   "tasksAffected_other": "{{count}} 件のタスクに影響あり",
   "tcpPortsWithActiveListenersInside": "リモート実行環境内でアクティブなリスナーがある TCP ポート。更新をクリックして再スキャン。",
   "technicalDetails": "技術詳細",
+  "jumpToLatestOutput": "最新の出力に移動",
   "terminal": "ターミナル",
   "terminalCount_one": "{{count}} 個のターミナル",
   "terminalCount_other": "{{count}} 個のターミナル",

@@ -1,9 +1,10 @@
 "use client";
 
-import { IconDownload, IconPencil, IconTrash, IconUpload } from "@tabler/icons-react";
+import { IconCopy, IconDownload, IconPencil, IconTrash, IconUpload } from "@tabler/icons-react";
 import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import { useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
+import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 
 export type FileContextMenuItemsProps = {
   node: FileTreeNode;
@@ -27,21 +28,40 @@ export type FileContextMenuItemsProps = {
 function resolveActions({
   node,
   isBulk,
+  onDeleteFile,
   onRenameFile,
   onDownloadFile,
   onUploadFilesHere,
 }: FileContextMenuItemsProps) {
+  const showRename = !!onRenameFile && !isBulk;
+  const download = !node.is_dir && !isBulk ? onDownloadFile : undefined;
+  const upload = node.is_dir && !isBulk ? onUploadFilesHere : undefined;
   return {
-    showRename: !!onRenameFile && !isBulk,
-    download: !node.is_dir && !isBulk ? onDownloadFile : undefined,
-    upload: node.is_dir && !isBulk ? onUploadFilesHere : undefined,
+    showRename,
+    download,
+    upload,
+    hasFollowingItem: !!onDeleteFile || showRename || !!download || !!upload,
   };
+}
+
+function CopyPathItem({ path, hasFollowingItem }: { path: string; hasFollowingItem: boolean }) {
+  const { t } = useTranslation();
+  const copyPath = useCopyRepositoryPath();
+  return (
+    <>
+      <ContextMenuItem onSelect={() => void copyPath(path)}>
+        <IconCopy className="h-3.5 w-3.5" />
+        {t("task:copyPath")}
+      </ContextMenuItem>
+      {hasFollowingItem && <ContextMenuSeparator />}
+    </>
+  );
 }
 
 export function FileContextMenuItems(props: FileContextMenuItemsProps) {
   const { node, isBulk, selectedCount, onDeleteFile, onStartRename, onDelete } = props;
   const { t } = useTranslation();
-  const { showRename, download, upload } = resolveActions(props);
+  const { showRename, download, upload, hasFollowingItem } = resolveActions(props);
   const deleteLabel = isBulk
     ? t("task:deleteItemsLabel", { count: selectedCount })
     : t("task:delete");
@@ -49,6 +69,7 @@ export function FileContextMenuItems(props: FileContextMenuItemsProps) {
 
   return (
     <>
+      {!isBulk && <CopyPathItem path={node.path} hasFollowingItem={hasFollowingItem} />}
       {onDeleteFile && (
         <ContextMenuItem variant="destructive" onSelect={onDelete}>
           <IconTrash className="h-3.5 w-3.5" />
