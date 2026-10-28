@@ -101,7 +101,7 @@ Configuration Chat does not use repository selections. Its existing workspace pe
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
 
-Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
+Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. When you switch conversations or terminals, the selected tab is brought into view; you can scroll the tab row to browse others. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
