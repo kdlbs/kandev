@@ -80,6 +80,43 @@ func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
 	}
 }
 
+// TestLoadWithStartupPropagatesAgentBackgroundWork pins that the effective
+// shared background-work value is copied from the managed contract in both
+// directions, so a disabled launch keeps provider-neutral behavior.
+func TestLoadWithStartupPropagatesAgentBackgroundWork(t *testing.T) {
+	base := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	}
+
+	enabled := base
+	enabled.AgentBackgroundWorkEnabled = true
+	cfg, err := LoadWithStartup(enabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if !cfg.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled = false, want true when the startup contract enables it")
+	}
+	if !cfg.NewInstanceConfig(0, nil).AgentBackgroundWorkEnabled {
+		t.Fatal("instance config did not inherit AgentBackgroundWorkEnabled")
+	}
+
+	disabled := base
+	disabled.AgentBackgroundWorkEnabled = false
+	cfg, err = LoadWithStartup(disabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled = true, want false when the startup contract disables it")
+	}
+	if cfg.NewInstanceConfig(0, nil).AgentBackgroundWorkEnabled {
+		t.Fatal("instance config enabled background work for a disabled launch")
+	}
+}
+
 // TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
 // (unmanaged) launch -- Load(), no startup contract -- never engages the
 // capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".

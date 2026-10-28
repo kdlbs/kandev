@@ -136,6 +136,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
 	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
+	api.POST("/agents/:id/plugin-discovery", cfg, h.httpDiscoverCopilotPlugins)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
@@ -676,11 +677,12 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
-	Model              string           `json:"model"`
-	PermissionSettings map[string]bool  `json:"permission_settings"`
-	CLIPassthrough     bool             `json:"cli_passthrough"`
-	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
-	CommandPrefix      string           `json:"command_prefix,omitempty"`
+	Model                  string           `json:"model"`
+	PermissionSettings     map[string]bool  `json:"permission_settings"`
+	CLIPassthrough         bool             `json:"cli_passthrough"`
+	CLIFlags               []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix          string           `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string         `json:"copilot_selected_plugins,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -697,11 +699,12 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	}
 
 	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
-		Model:              body.Model,
-		PermissionSettings: body.PermissionSettings,
-		CLIPassthrough:     body.CLIPassthrough,
-		CLIFlags:           body.CLIFlags,
-		CommandPrefix:      body.CommandPrefix,
+		Model:                  body.Model,
+		PermissionSettings:     body.PermissionSettings,
+		CLIPassthrough:         body.CLIPassthrough,
+		CLIFlags:               body.CLIFlags,
+		CommandPrefix:          body.CommandPrefix,
+		CopilotSelectedPlugins: body.CopilotSelectedPlugins,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

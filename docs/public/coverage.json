@@ -17,12 +17,16 @@
       ],
       "sources": [
         "apps/cli/bin/native-shim.js",
+        "apps/backend/internal/launcher/service.go",
+        "apps/backend/internal/launcher/service_shell.go",
         "apps/backend/internal/launcher/launcher.go",
         "apps/desktop/src-tauri/src/lib.rs",
         "apps/desktop/src-tauri/src/main.rs"
       ],
       "tests": [
         "apps/cli/bin/native-shim.test.mjs",
+        "apps/backend/internal/launcher/service_shell_test.go",
+        "apps/backend/internal/launcher/service_shell_darwin_test.go",
         "apps/desktop/e2e/desktop-launch-smoke.test.mjs",
         "apps/desktop/src-tauri/src/shell.rs"
       ]
@@ -846,9 +850,18 @@
       ],
       "sources": [
         "Dockerfile",
-        "apps/backend/internal/launcher/service.go"
+        "apps/backend/internal/launcher/service.go",
+        "apps/backend/internal/launcher/service_shell.go",
+        "apps/backend/internal/launcher/service_metadata.go",
+        "apps/backend/internal/launcher/service_self_update.go",
+        "apps/backend/internal/system/updates/install_state.go"
       ],
       "tests": [
+        "apps/backend/internal/launcher/service_shell_test.go",
+        "apps/backend/internal/launcher/service_shell_darwin_test.go",
+        "apps/backend/internal/launcher/local_agent_path_test.go",
+        "apps/backend/internal/system/updates/apply_test.go",
+        "apps/backend/internal/system/updates/install_state_test.go",
         "apps/web/e2e/tests/docker/docker-launch.spec.ts"
       ]
     },

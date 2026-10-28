@@ -11,6 +11,7 @@ import { CursorPluginsMCPPreference } from "@/components/settings/cursor-plugins
 import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 import { CursorMCPAuthPreference } from "@/components/settings/cursor-mcp-auth-preference";
 import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
+import { CopilotPluginProfileSelection } from "@/components/settings/copilot-plugin-profile-selection";
 import { useProfileFormCapabilities } from "@/components/settings/profile-capability-helpers";
 import { ProfileCapabilitiesSection } from "@/components/settings/profile-capabilities-row";
 import { ModelFallbackSection } from "@/components/settings/profile-model-fields";
@@ -43,6 +44,7 @@ export type ProfileFormData = {
   cursor_plugins_mcp_enabled?: boolean;
   mcp_selection_mode?: MCPSelectionMode;
   mcp_selected_servers?: string[];
+  copilot_selected_plugins?: string[];
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
@@ -53,6 +55,8 @@ export type ProfileFormFieldsProps = {
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
   agentName: string;
+  agentId?: string;
+  copilotDiscoveryDisabled?: boolean;
   cursorMcpAuthSupported?: boolean;
   onRemove?: () => void;
   canRemove?: boolean;
@@ -146,6 +150,9 @@ function savedProfileLaunchSettings(
     env_vars: baselineProfile.env_vars ?? [],
     cli_flags: baselineProfile.cli_flags ?? [],
     command_prefix: baselineProfile.command_prefix ?? "",
+    ...(baselineProfile.copilot_selected_plugins !== undefined
+      ? { copilot_selected_plugins: [...baselineProfile.copilot_selected_plugins] }
+      : {}),
   };
 }
 
@@ -188,6 +195,8 @@ export function ProfileFormFields({
   permissionSettings,
   passthroughConfig,
   agentName,
+  agentId,
+  copilotDiscoveryDisabled = false,
   cursorMcpAuthSupported = false,
   onRemove,
   canRemove = false,
@@ -244,6 +253,16 @@ export function ProfileFormFields({
         onChange={onChange}
       />
 
+      <CopilotProfilePlugins
+        agentName={agentName}
+        agentId={agentId}
+        profile={profile}
+        baselineProfile={baselineProfile}
+        capabilityProfileId={capabilityProfileId}
+        discoveryDisabled={copilotDiscoveryDisabled}
+        onChange={onChange}
+      />
+
       <ProfileFormFooter
         profile={profile}
         baselineProfile={baselineProfile}
@@ -257,6 +276,40 @@ export function ProfileFormFields({
         disableUnverifiedModels={capabilityResult.discoveryState !== "ready"}
       />
     </div>
+  );
+}
+
+function CopilotProfilePlugins({
+  agentName,
+  agentId,
+  profile,
+  baselineProfile,
+  capabilityProfileId,
+  discoveryDisabled,
+  onChange,
+}: {
+  agentName: string;
+  agentId?: string;
+  profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
+  capabilityProfileId?: string;
+  discoveryDisabled: boolean;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+}) {
+  if (discoveryDisabled || agentName !== "copilot-acp" || !agentId) return null;
+  return (
+    <CopilotPluginProfileSelection
+      agentId={agentId}
+      profileId={capabilityProfileId ?? ""}
+      launchSettings={{
+        env_vars: profile.env_vars ?? [],
+        cli_flags: profile.cli_flags ?? [],
+        command_prefix: profile.command_prefix ?? "",
+      }}
+      selectedPluginIds={profile.copilot_selected_plugins ?? []}
+      savedSelectedPluginIds={baselineProfile?.copilot_selected_plugins}
+      onSelectedPluginsChange={(copilot_selected_plugins) => onChange({ copilot_selected_plugins })}
+    />
   );
 }
 

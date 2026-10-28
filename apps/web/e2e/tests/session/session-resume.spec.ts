@@ -190,18 +190,31 @@ test.describe("Session resume (ACP mode)", () => {
     const matchesSessionDetail = (url: URL) =>
       url.pathname === `/api/v1/task-sessions/${sessionId}`;
     const releaseResponse = Promise.withResolvers<void>();
-    const releaseDetailResponse = Promise.withResolvers<void>();
-    const pendingResponses = new Set<Promise<void>>();
-    const holdSessionResponse = (route: Route) => {
-      const gate = matchesSessionDetail(new URL(route.request().url()))
-        ? releaseDetailResponse.promise
-        : releaseResponse.promise;
-      const handled = gate.then(() => route.continue());
-      pendingResponses.add(handled);
-      return handled.finally(() => pendingResponses.delete(handled));
+    const releaseDetailReads = Promise.withResolvers<void>();
+    const pendingDetailReads = new Set<Promise<void>>();
+    let holdDetailReads = false;
+    const handleSessionDetail = async (route: Route) => {
+      if (holdDetailReads) {
+        await releaseDetailReads.promise;
+        await route.continue();
+        return;
+      }
+      const delivery = (async () => {
+        const response = await route.fetch();
+        await route.fulfill({ response });
+      })();
+      pendingDetailReads.add(delivery);
+      try {
+        await delivery;
+      } finally {
+        pendingDetailReads.delete(delivery);
+      }
     };
-    // Detail reconciliation can also clear a stale projection during resumption.
-    await testPage.route(matchesSessionDetail, holdSessionResponse);
+    const holdSessionResponse = async (route: Route) => {
+      await releaseResponse.promise;
+      await route.continue();
+    };
+    await testPage.route(matchesSessionDetail, handleSessionDetail);
     try {
       await testPage.reload();
       await session.waitForLoad();
@@ -216,8 +229,11 @@ test.describe("Session resume (ACP mode)", () => {
         message: "Resumed session did not settle before activity reconciliation",
         timeout: 30_000,
       });
-      await waitForTaskSessionsSettled(testPage, task.id);
 
+      // Drain earlier detail reads and hold later ones while the list refresh is tested.
+      holdDetailReads = true;
+      await Promise.all([...pendingDetailReads]);
+      await waitForTaskSessionsSettled(testPage, task.id);
       await testPage.route(matchesSessions, holdSessionResponse);
       const refreshRequested = testPage.waitForRequest(
         (request) => request.method() === "GET" && matchesSessions(new URL(request.url())),
@@ -243,10 +259,8 @@ test.describe("Session resume (ACP mode)", () => {
       await expect(session.anyIdleInput()).toBeVisible();
     } finally {
       releaseResponse.resolve();
-      releaseDetailResponse.resolve();
-      while (pendingResponses.size > 0) await Promise.all([...pendingResponses]);
-      await testPage.unroute(matchesSessions, holdSessionResponse);
-      await testPage.unroute(matchesSessionDetail, holdSessionResponse);
+      releaseDetailReads.resolve();
+      await testPage.unrouteAll({ behavior: "wait" });
     }
   });
 

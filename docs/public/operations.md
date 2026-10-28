@@ -972,6 +972,15 @@ Before any update, finish or stop active sessions, create and export a database 
   service flags, and restart; the UI never applies it.
 - Unmanaged CLI: run `brew upgrade kandev`, `scoop update kandev`, or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
+
+For a macOS user service with login-shell initialization enabled, an ordinary
+reinstall without `--shell` and a supported Apply update preserve the saved
+selection. Use `kandev service install --shell=none` to return to direct startup.
+If the service was installed with a custom `--home-dir`, repeat its existing
+path in the reset command, for example:
+`kandev service install --home-dir /path/to/existing/kandev-home --shell=none`.
+See [Run as a service](run-as-a-service.md#optional-macos-login-initialization)
+for shell startup behavior and recovery.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 
 After restart, verify `/ready`, **System > About**, **System > Status**, the database page, and one non-destructive agent session. Kandev does not perform automatic binary or database rollback. If rollback is necessary, restore a compatible pre-upgrade database and matching application release together.

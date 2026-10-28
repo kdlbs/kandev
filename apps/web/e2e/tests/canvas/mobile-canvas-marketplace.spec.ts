@@ -103,7 +103,7 @@ test.describe("Canvas marketplace on mobile", () => {
       await expect(detail).toBeVisible();
       const install = detail.getByRole("button", { name: "Review and install", exact: true });
       await expect(install).toBeVisible();
-      await expectTouchControl(install);
+      await expectTouchControl(install, "install button");
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);

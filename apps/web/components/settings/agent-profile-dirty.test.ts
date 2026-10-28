@@ -4,6 +4,8 @@ import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 const permissions: Record<string, PermissionSetting> = {};
 const testServerId = "plugin-atlassian-jira";
+const installedPluginP = "installed:m/p";
+const installedPluginQ = "installed:m/q";
 
 function profile(overrides: Record<string, unknown> = {}): AgentProfile {
   return {
@@ -48,6 +50,29 @@ describe("isProfileDirty Cursor MCP selection", () => {
       isProfileDirty(
         profile({ mcpSelectedServers: [testServerId] }),
         profile({ mcpSelectedServers: [testServerId] }),
+        permissions,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isProfileDirty Copilot plugin selection", () => {
+  it("marks a changed plugin set dirty", () => {
+    const saved = profile({ copilotSelectedPlugins: [installedPluginP] });
+    expect(
+      isProfileDirty(
+        profile({ copilotSelectedPlugins: [installedPluginP, installedPluginQ] }),
+        saved,
+        permissions,
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores set ordering and replaced arrays", () => {
+    expect(
+      isProfileDirty(
+        profile({ copilotSelectedPlugins: [installedPluginQ, installedPluginP] }),
+        profile({ copilotSelectedPlugins: [installedPluginP, installedPluginQ] }),
         permissions,
       ),
     ).toBe(false);

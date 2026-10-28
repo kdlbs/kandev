@@ -34,7 +34,7 @@ func TestWatchAndBatchHostReplacementDuringResolution(t *testing.T) {
 	for _, operation := range []string{"watch", "detection", "status sync", "watch batch", "status batch"} {
 		for _, replacementHost := range []string{"git.example.com", "other.example.com"} {
 			t.Run(operation+"/"+replacementHost, func(t *testing.T) {
-				service, _ := setupWatchServiceTest(t)
+				service, store := setupWatchServiceTest(t)
 				t.Cleanup(service.Stop)
 				initial := WorkspaceConnection{
 					WorkspaceID: "ws-1", Source: ConnectionSourcePAT, GitHubHost: "git.example.com",
@@ -49,6 +49,9 @@ func TestWatchAndBatchHostReplacementDuringResolution(t *testing.T) {
 				}}
 				service.resolver.SetAutomationProvider(enterpriseWatchCredentials{client: client})
 				watch := &PRWatch{ID: "watch", WorkspaceID: "ws-1", GitHubHost: initial.GitHubHost, Owner: "acme", Repo: "demo", PRNumber: 7, Branch: "feature"}
+				if createErr := store.CreatePRWatch(t.Context(), watch); createErr != nil {
+					t.Fatalf("seed PR watch: %v", createErr)
+				}
 				var err error
 				switch operation {
 				case "watch":

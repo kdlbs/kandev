@@ -186,7 +186,10 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
-		entered <- struct{}{}
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
 		<-release
 		_, _ = w.Write(compressed)
 	}))
@@ -197,17 +200,53 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 	})
 	platform := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
 	results := make(chan error, 2)
-	for range 2 {
-		go func() {
-			_, err := resolver.ResolveRemoteBinaryContext(context.Background(), platform, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	joined := []chan struct{}{make(chan struct{}), make(chan struct{})}
+	var releaseOnce sync.Once
+	releaseResponse := func() { releaseOnce.Do(func() { close(release) }) }
+	received := 0
+	defer func() {
+		cancel()
+		releaseResponse()
+		for received < len(joined) {
+			select {
+			case <-results:
+				received++
+			case <-time.After(10 * time.Second):
+				t.Error("timed out draining resolver callers")
+				return
+			}
+		}
+	}()
+	for _, signal := range joined {
+		go func(observed chan struct{}) {
+			caller := &observedDoneContext{Context: ctx, observed: observed}
+			_, err := resolver.ResolveRemoteBinaryContext(caller, platform, nil)
 			results <- err
-		}()
+		}(signal)
 	}
-	<-entered
-	close(release)
+	waitFor := func(signal <-chan struct{}, label string) {
+		t.Helper()
+		select {
+		case <-signal:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for %s", label)
+		}
+	}
+	waitFor(entered, "download request")
+	for _, signal := range joined {
+		waitFor(signal, "caller to join download")
+	}
+	releaseResponse()
 	for range 2 {
-		if err := <-results; err != nil {
-			t.Fatalf("ResolveRemoteBinaryContext: %v", err)
+		select {
+		case err := <-results:
+			received++
+			if err != nil {
+				t.Fatalf("ResolveRemoteBinaryContext: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("timed out waiting for resolver result")
 		}
 	}
 	if got := requests.Load(); got != 1 {

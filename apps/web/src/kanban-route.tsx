@@ -16,6 +16,7 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
 import {
+  mapWorkflowItem,
   mapWorkspaceItem,
   promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
@@ -29,7 +30,6 @@ import {
 } from "@/lib/state/workspace-context";
 import { isOfficeWorkspace } from "@/lib/state/slices/workspace/selectors";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-import type { Workflow } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 
 export type KanbanRouteSelection = {
@@ -306,21 +306,6 @@ async function settleKanbanRead<T>(promise: Promise<T>): Promise<KanbanReadResul
   } catch (error) {
     return { ok: false, error };
   }
-}
-
-function mapWorkflowItem(workflow: Workflow) {
-  return {
-    id: workflow.id,
-    workspaceId: workflow.workspace_id,
-    name: workflow.name,
-    description: workflow.description ?? null,
-    sortOrder: workflow.sort_order ?? 0,
-    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
-    ...(workflow.source !== undefined ? { source: workflow.source } : {}),
-    ...(workflow.source_path !== undefined ? { source_path: workflow.source_path } : {}),
-    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
-    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
-  };
 }
 
 export function KanbanRoute({

@@ -42,14 +42,14 @@ test.describe("Mobile task transient read recovery", () => {
     });
     await testPage.route(taskPath, async (route: Route) => {
       if (route.request().method() !== "GET") return route.continue();
-      if (failedReads < 3) {
+      if (failedReads < 5) {
         failedReads++;
         await route.fulfill({
           status: 503,
           contentType: "application/json",
           body: JSON.stringify({ code: "persistence_unavailable" }),
         });
-        if (failedReads === 3) markFailuresReturned();
+        if (failedReads === 5) markFailuresReturned();
         return;
       }
       markRecoveryStarted();
@@ -79,7 +79,7 @@ test.describe("Mobile task transient read recovery", () => {
     const retryBox = await retry.boundingBox();
     const overviewBox = await overview.boundingBox();
     const viewport = testPage.viewportSize();
-    expect(failedReads).toBe(3);
+    expect(failedReads).toBe(5);
     expect(retryBox).not.toBeNull();
     expect(overviewBox).not.toBeNull();
     expect(viewport).not.toBeNull();
@@ -161,7 +161,7 @@ test.describe("Mobile task transient read recovery", () => {
       markFailuresReturned = resolve;
     });
     const temporaryFailure = async (route: Route) => {
-      if (route.request().method() !== "GET" || failedReads >= 3) {
+      if (route.request().method() !== "GET" || failedReads >= 5) {
         await route.continue();
         return;
       }
@@ -171,7 +171,7 @@ test.describe("Mobile task transient read recovery", () => {
         contentType: "application/json",
         body: JSON.stringify({ code: "persistence_unavailable" }),
       });
-      if (failedReads === 3) markFailuresReturned();
+      if (failedReads === 5) markFailuresReturned();
     };
     await testPage.route(taskPath, temporaryFailure);
     try {
@@ -185,17 +185,19 @@ test.describe("Mobile task transient read recovery", () => {
       const recoveryNotice = testPage.getByTestId("task-read-recovery-notice");
       await expect(recoveryNotice).toBeVisible();
       await expect(recoveryNotice).toContainText("Task details could not be refreshed");
-      await expect
-        .poll(async () => (await workspaceLayout.boundingBox())?.y)
-        .toBeCloseTo(beforeRefresh!.y, 1);
-      await expect
-        .poll(async () => (await workspaceLayout.boundingBox())?.height)
-        .toBeCloseTo(beforeRefresh!.height, 1);
+      const noticeBox = await recoveryNotice.boundingBox();
+      const noticeLayoutBox = await workspaceLayout.boundingBox();
+      expect(noticeBox).not.toBeNull();
+      expect(noticeLayoutBox).not.toBeNull();
+      if (noticeBox && noticeLayoutBox) {
+        expect(noticeBox.y).toBeGreaterThanOrEqual(56);
+        expect(noticeLayoutBox.y).toBeGreaterThanOrEqual(noticeBox.y + noticeBox.height - 1);
+      }
       await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
       const retry = testPage.getByTestId("task-read-retry");
       const retryBox = await retry.boundingBox();
       const viewport = testPage.viewportSize();
-      expect(failedReads).toBe(3);
+      expect(failedReads).toBe(5);
       expect(retryBox).not.toBeNull();
       expect(viewport).not.toBeNull();
       if (retryBox && viewport) {
@@ -230,5 +232,81 @@ test.describe("Mobile task transient read recovery", () => {
     } finally {
       await testPage.unroute(taskPath, temporaryFailure);
     }
+  });
+
+  // @covers AC-PLATFORM-INTERACTIVE-READS-005.8
+  test("recovers automatically after a thirteen-second persistence outage", async ({
+    testPage,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const taskId = "mobile-task-navigation-timed-read-recovery";
+    const taskPath = new RegExp(`/api/v1/tasks/${taskId}$`);
+    const sessionPath = new RegExp(`/api/v1/tasks/${taskId}/sessions$`);
+    const recoveredTask = {
+      id: taskId,
+      title: "Recovered timed mobile task",
+      description: "",
+      workspace_id: seedData.workspaceId,
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      primary_session_id: null,
+      state: "COMPLETED",
+      archived_at: "2026-10-06T00:00:00Z",
+      priority: "medium",
+      position: 0,
+      repositories: [],
+    };
+    let firstReadAt: number | null = null;
+    let failedReads = 0;
+    await testPage.route(taskPath, async (route: Route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      firstReadAt ??= Date.now();
+      if (Date.now() - firstReadAt < 13_000) {
+        failedReads++;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "persistence_unavailable" }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(recoveredTask),
+      });
+    });
+    await testPage.route(sessionPath, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ sessions: [], total: 0 }),
+      }),
+    );
+
+    const recoveredRead = waitForHttp(testPage, "GET", taskPath, {
+      timeout: 30_000,
+      predicate: (response) => response.ok(),
+    });
+    await testPage.goto(`/t/${taskId}`);
+
+    const errorState = testPage.getByTestId("task-load-error-state");
+    await expect(errorState).toBeVisible();
+    await expect(testPage.getByTestId("task-unavailable-overview-link")).toBeVisible();
+    const retry = testPage.getByRole("button", { name: "Retry" });
+    await expect(retry).toBeDisabled();
+    const retryBox = await retry.boundingBox();
+    expect(retryBox).not.toBeNull();
+    if (retryBox) expect(retryBox.height).toBeGreaterThanOrEqual(44);
+
+    expect((await recoveredRead).ok()).toBe(true);
+    await expect(errorState).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+    expect(failedReads).toBe(3);
+    await testInfo.attach("phone-task-timed-read-recovery", {
+      body: await testPage.screenshot(),
+      contentType: "image/png",
+    });
   });
 });

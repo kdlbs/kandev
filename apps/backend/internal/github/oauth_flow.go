@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	oauthRandomBytes        = 32
-	appInstallationStateTTL = 10 * time.Minute
-	personalOAuthStateTTL   = 10 * time.Minute
+	oauthRandomBytes          = 32
+	appInstallationStateTTL   = 10 * time.Minute
+	personalOAuthStateTTL     = 10 * time.Minute
+	userInstallationsPath     = "/user/installations"
+	userInstallationsPageSize = 100
 )
 
 var (
@@ -328,28 +330,73 @@ func (c *GitHubOAuthClient) GetOAuthUser(ctx context.Context, accessToken string
 	return user, nil
 }
 
+// githubUserInstallationsPage is one page of the installations a user access
+// token can see. GitHub exposes no singular user-installation lookup.
+type githubUserInstallationsPage struct {
+	TotalCount    int `json:"total_count"`
+	Installations []struct {
+		ID int64 `json:"id"`
+	} `json:"installations"`
+}
+
+// UserCanAccessInstallation reports whether the authorizing user can access the
+// exact App installation. It pages the documented installation list endpoint so
+// an accessible installation on a later page still counts, while unrelated
+// installations never authorize the selected one.
 func (c *GitHubOAuthClient) UserCanAccessInstallation(
 	ctx context.Context,
 	accessToken string,
 	installationID int64,
 ) (bool, error) {
-	endpoint := fmt.Sprintf("/user/installations/%d", installationID)
-	request, err := c.apiRequest(ctx, http.MethodGet, endpoint, accessToken)
+	if installationID <= 0 {
+		return false, nil
+	}
+	fetched := 0
+	for page := 1; ; page++ {
+		result, err := c.userInstallationsPage(ctx, accessToken, page)
+		if err != nil {
+			return false, err
+		}
+		for _, installation := range result.Installations {
+			if installation.ID == installationID {
+				return true, nil
+			}
+		}
+		fetched += len(result.Installations)
+		if len(result.Installations) == 0 || fetched >= result.TotalCount {
+			return false, nil
+		}
+	}
+}
+
+func (c *GitHubOAuthClient) userInstallationsPage(
+	ctx context.Context,
+	accessToken string,
+	page int,
+) (githubUserInstallationsPage, error) {
+	request, err := c.apiRequest(
+		ctx, http.MethodGet,
+		fmt.Sprintf("%s?per_page=%d&page=%d", userInstallationsPath, userInstallationsPageSize, page),
+		accessToken,
+	)
 	if err != nil {
-		return false, err
+		return githubUserInstallationsPage{}, err
 	}
 	response, err := doGitHubRequest(c.httpClient, request)
 	if err != nil {
-		return false, fmt.Errorf("request GitHub user installation: %w", err)
+		return githubUserInstallationsPage{}, fmt.Errorf("request GitHub user installations: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusNotFound {
-		return false, nil
+	if response.StatusCode != http.StatusOK {
+		return githubUserInstallationsPage{}, &GitHubAPIError{
+			StatusCode: response.StatusCode, Endpoint: userInstallationsPath,
+		}
 	}
-	if response.StatusCode >= http.StatusBadRequest {
-		return false, &GitHubAPIError{StatusCode: response.StatusCode, Endpoint: endpoint}
+	var result githubUserInstallationsPage
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxGitHubAppResponseSize)).Decode(&result); err != nil {
+		return githubUserInstallationsPage{}, fmt.Errorf("decode GitHub user installations: %w", err)
 	}
-	return true, nil
+	return result, nil
 }
 
 func (c *GitHubOAuthClient) exchangeTokens(ctx context.Context, form url.Values) (GitHubOAuthTokens, error) {

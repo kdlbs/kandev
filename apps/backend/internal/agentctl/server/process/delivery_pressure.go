@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	agenttypes "github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
 )
 
@@ -15,10 +16,11 @@ var errDeliveryPressure = errors.New("durable delivery requires recovery before 
 // DeliveryHealth is independent of the native process status. A live process
 // with blocked output must remain reachable for status, replay, ACK, and Stop.
 type DeliveryHealth struct {
-	State               string           `json:"state"`
-	ProducerPaused      bool             `json:"producer_paused"`
-	Capacity            journal.Capacity `json:"capacity"`
-	CancellationPending bool             `json:"cancellation_pending"`
+	State               string                              `json:"state"`
+	ProducerPaused      bool                                `json:"producer_paused"`
+	Capacity            journal.Capacity                    `json:"capacity"`
+	CancellationPending bool                                `json:"cancellation_pending"`
+	Failure             *agenttypes.DeliveryFailureSnapshot `json:"failure,omitempty"`
 }
 
 const deliveryStorageError = "storage_error"
@@ -132,6 +134,11 @@ func (m *Manager) appendDeliveryWithRecovery(ctx context.Context, j *journal.Jou
 			}
 			return committed, nil
 		}
+		if errors.Is(err, journal.ErrEventTooLarge) || errors.Is(err, journal.ErrReplayPageTooLarge) {
+			// A permanent size refusal is not storage pressure. It must never
+			// enter the capacity wait or be reported as an exhausted journal.
+			return nil, err
+		}
 		if !paused && (errors.Is(err, journal.ErrStreamFull) || errors.Is(err, journal.ErrJournalFull) || errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)) {
 			paused = true
 			m.setDeliveryProducerPaused(true)
@@ -145,6 +152,19 @@ func (m *Manager) appendDeliveryWithRecovery(ctx context.Context, j *journal.Jou
 func (m *Manager) deliveryEventsCommitted(events []journal.Event) {
 	m.deliveryActiveMu.Lock()
 	defer m.deliveryActiveMu.Unlock()
+	// A real commit re-establishes a usable writer, but ordinary output from the
+	// failed submission cannot clear the sticky failure. Only its terminal or a
+	// commit from a different submission may release admission.
+	for _, event := range events {
+		clear := event.Terminal
+		if m.deliveryFailedSubmissionID != "" && event.SubmissionID != "" &&
+			event.SubmissionID != m.deliveryFailedSubmissionID {
+			clear = true
+		}
+		if clear {
+			m.clearDeliveryFailureLocked()
+		}
+	}
 	for _, event := range events {
 		if !event.Terminal || event.SubmissionID == "" || event.SubmissionID != m.deliveryPressureCancelledID {
 			continue
@@ -163,6 +183,8 @@ func (m *Manager) deliveryEventsCommitted(events []journal.Event) {
 func (m *Manager) waitForDeliveryCapacity(ctx context.Context, j *journal.Journal, events []journal.Event, writeErr error) error {
 	submissionID := deliveryBatchSubmission(events)
 	switch {
+	case errors.Is(writeErr, journal.ErrEventTooLarge), errors.Is(writeErr, journal.ErrReplayPageTooLarge):
+		return writeErr
 	case errors.Is(writeErr, syscall.ENOSPC), errors.Is(writeErr, syscall.EDQUOT):
 		m.recordDeliveryStorageFailure(writeErr)
 		m.cancelDeliveryAfterStorageFailure(submissionID)
@@ -226,6 +248,12 @@ func (m *Manager) beginDeliveryCancellationLocked(submissionID string) {
 
 func (m *Manager) applyDeliveryCapacityLocked(capacity journal.Capacity) {
 	m.deliveryHealth.Capacity = capacity
+	if m.deliveryHealth.Failure != nil {
+		// Only a successful commit can prove the writer usable again. Capacity
+		// recovery must not erase the captured failure.
+		m.deliveryBlocked = true
+		return
+	}
 	if m.deliveryCancellationFailed {
 		return
 	}
@@ -235,13 +263,13 @@ func (m *Manager) applyDeliveryCapacityLocked(capacity journal.Capacity) {
 	}
 	if capacity.Recovered && !m.deliveryHealth.CancellationPending {
 		m.deliveryBlocked = false
-		m.deliveryHealth.State = "healthy"
+		m.deliveryHealth.State = deliveryHealthyState
 		return
 	}
 	if capacity.Guarded {
 		m.deliveryBlocked = true
 		switch m.deliveryHealth.State {
-		case "", "healthy", "pressure":
+		case "", deliveryHealthyState, "pressure":
 			m.deliveryHealth.State = "guarded"
 		}
 		return

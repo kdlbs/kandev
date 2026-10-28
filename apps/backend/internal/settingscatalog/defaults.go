@@ -768,6 +768,7 @@ func profileDomain() DomainDescriptor {
 			profileWritable("agent_profile.cli_flags", "cli_flags", "CLI flags", "array", "Complete replacement list of validated CLI flags.", true),
 			profileWritableSensitive("agent_profile.env_vars", "env_vars", "Environment variables", "array", "Complete replacement list. Secret values remain references.", true),
 			profileWritable("agent_profile.command_prefix", "command_prefix", "Command prefix", "string", "Optional validated launcher prefix.", false),
+			profileWritable("agent_profile.copilot_selected_plugins", "copilot_selected_plugins", "Copilot plugins", "array", "Stable Copilot plugin identities loaded by new local/worktree processes. Omitted updates preserve the committed selection.", true),
 			profileWritable("agent_profile.dynamic", "dynamic", "Dynamic routing", "object", "Versioned dynamic routing document.", true),
 		},
 	}

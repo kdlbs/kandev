@@ -290,14 +290,21 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	}
 
 	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
-	if err := s.createTaskWithCapacity(ctx, prepared.task); err != nil {
+	insertTask := func() error { return s.createTaskWithCapacity(ctx, prepared.task) }
+	var createErr error
+	if prepared.task.CreationAttachmentClaim != nil && s.attachmentSvc != nil {
+		createErr = s.attachmentSvc.withClaimAdmission(insertTask)
+	} else {
+		createErr = insertTask()
+	}
+	if createErr != nil {
 		if found, ok, lookupErr := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil
 		} else if lookupErr != nil {
-			return CreateTaskResult{}, errors.Join(err, fmt.Errorf("recheck task identity after insert failure: %w", lookupErr))
+			return CreateTaskResult{}, errors.Join(createErr, fmt.Errorf("recheck task identity after insert failure: %w", lookupErr))
 		}
-		s.logger.Error("failed to create task", zap.Error(err))
-		return CreateTaskResult{}, err
+		s.logger.Error("failed to create task", zap.Error(createErr))
+		return CreateTaskResult{}, createErr
 	}
 
 	return s.finalizeCreatedTask(ctx, prepared, req)
@@ -422,6 +429,11 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 			return nil, err
 		}
 	}
+	claim, err := s.prepareCreationAttachmentClaim(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	task.CreationAttachmentClaim = claim
 
 	return s.resolveTaskCreationReferences(ctx, req, task)
 }

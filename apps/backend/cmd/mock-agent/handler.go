@@ -530,6 +530,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitDetachedBackgroundWork(e, cmd)
 	case strings.EqualFold(cmd, "/parked-fixture") || strings.HasPrefix(strings.ToLower(cmd), "/parked-fixture "):
 		emitParkedFixture(e, cmd)
+	case strings.EqualFold(cmd, "/opencode-background-fixture") || strings.HasPrefix(strings.ToLower(cmd), "/opencode-background-fixture "):
+		emitOpenCodeBackgroundFixture(e, cmd)
 	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):

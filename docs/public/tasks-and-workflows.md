@@ -621,6 +621,44 @@ background** after its foreground yields while a recognized async subagent,
 immediately and the child may continue streaming. Other providers and
 foreground-generating Claude turns retain the coarse queueing behavior.
 
+### Inspect background work
+
+When an agent reports a background shell command, subagent, or monitor, Kandev
+adds a content-width chip directly above the message box. The chip counts the
+jobs that are running, waiting, or of unknown activity. Select it to open a
+summary. Selecting a job opens its own tab in the central area on desktop, or a
+full-height detail view on a phone. **View all** opens the Background Work
+overview. Closing a tab or view does not stop the job.
+
+Background inspection is standard behavior in the shipped profiles. Operators
+can disable it with the `features.agentBackgroundWork` runtime toggle
+(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, reads, and
+job controls are unavailable, and existing chat behavior is unchanged. The
+toggle is separate from the Claude background prompt handoff experiment.
+
+The chip never changes how a prompt is admitted. A foreground that is still
+generating keeps its normal **Queue** behavior. An idle foreground accepts an
+ordinary new prompt while earlier jobs continue, and those jobs keep their
+identity and history across the new turn.
+
+What a job row can show depends on the agent runtime:
+
+- **Running and waiting** counts come from a runtime that reports current job
+  activity and later completion.
+- **Unknown** means Kandev identified the launch but cannot establish current
+  activity, for example after a reconnect or when the runtime ends delivery with
+  the foreground prompt. Unknown is neither success nor verified running work.
+- **Completed** and **Failed** rows stay reachable after the active count reaches
+  zero. A failed row keeps its exit status and retained output when the runtime
+  reports them.
+
+Controls appear only when the runtime advertises them and the job is currently
+actionable. Runs that provide observation only, such as a detached OpenCode
+shell launch on a runtime without continuous delivery, show no Stop, Interrupt,
+or input controls, and their output is labeled unavailable rather than shown as
+live logs. The launch banner in the original tool message is not live command
+output.
+
 ### Prevent auto-start on open
 
 Under **Settings → Preferences → Task Behavior**, the **Prevent auto-start on open**
@@ -1214,6 +1252,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 
 ## Troubleshooting
 
+- **A task shows as temporarily unavailable:** Kandev retries the task and session reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. If recovery stops, select **Retry**, or use **Back to task overview**. Task details that already appeared stay visible while a refresh retries.
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.

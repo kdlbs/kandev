@@ -42,6 +42,7 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-001.2:** When a provider cannot supply an operation, output stream, hierarchy, reasoning summary, or usage attribution, the system shall indicate its unavailability and shall not fabricate data or attempt an alternative process-control mechanism.
 - **AC-AGENTS-BACKGROUND-WORK-001.3:** When the shared feature is disabled or an older peer omits the new contract, existing chat, inline subagent history, background accounting, and admission behavior shall continue; new controls shall not execute.
 - **AC-AGENTS-BACKGROUND-WORK-001.4:** When Codex native support is enabled, its supported capabilities shall be established against the selected protocol version; enabling this feature shall not enable unrelated provider experiments or override an explicit operator restriction.
+- **AC-AGENTS-BACKGROUND-WORK-001.5:** When shipped profiles use their defaults, shared background-work inspection shall be enabled. Explicit operator overrides shall remain effective.
 
 ### REQ-AGENTS-BACKGROUND-WORK-002: Identity and reliable lifecycle
 
@@ -70,6 +71,7 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-004.2:** When inspecting command output, users shall have ANSI-color-safe text rendering, search within retained output, pause/resume auto-scroll, and local clear. Clear shall not stop the process or delete durable conversation history.
 - **AC-AGENTS-BACKGROUND-WORK-004.3:** When child summaries, tool activity, or reasoning summaries are exposed by the provider, the shared viewer shall reuse their normalized transcript representation; unavailable private reasoning shall not be inferred or promised.
 - **AC-AGENTS-BACKGROUND-WORK-004.4:** When usage can be attributed to a child, the viewer shall use the existing accounting source, distinguish reported/estimated/unavailable values, and avoid adding the same measurement to parent and child totals twice.
+- **AC-AGENTS-BACKGROUND-WORK-004.5:** After a user clears a command output view, subsequent retained output for that workload and run shall appear, including while its bounded output window rolls. Repeated clears hide output through the latest clear; a clear in one view shall not hide output for another session, workload, or run.
 
 ### REQ-AGENTS-BACKGROUND-WORK-005: Desktop and phone experience
 
@@ -88,6 +90,42 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-006.1:** When enabling the feature for Codex, contract tests shall prove discovery, targeted termination, isolated child interruption, output fallback, and reconnection against the pinned schema, with real-provider evidence distinguished from deterministic fake-server coverage.
 - **AC-AGENTS-BACKGROUND-WORK-006.2:** When an ACP adapter supplies existing normalized observations, it shall use the shared viewer with unsupported controls absent. A provider-neutral conformance fixture shall exercise supported and unsupported capabilities without protocol-name branches in the UI.
 - **AC-AGENTS-BACKGROUND-WORK-006.3:** When running through local, Docker, SSH, or Kubernetes executors, controls and observations shall use the owning runtime; a remote process identifier shall never be treated as a host OS process identifier.
+
+### REQ-AGENTS-BACKGROUND-WORK-007: OpenCode background shell continuity
+
+**Intent:** Keep OpenCode jobs identifiable after their launch tool finishes.
+
+- **AC-AGENTS-BACKGROUND-WORK-007.1:** When OpenCode confirms a detached shell launch, the system shall retain one workload with its original conversation, command, and launch association.
+- **AC-AGENTS-BACKGROUND-WORK-007.2:** When the launch tool completes while its shell remains active, the system shall distinguish launch completion from workload completion.
+- **AC-AGENTS-BACKGROUND-WORK-007.3:** When OpenCode reports a job outcome, the system shall update that job once and retain its available output and exit status.
+- **AC-AGENTS-BACKGROUND-WORK-007.4:** When completion delivery or current liveness is unavailable, the system shall show that limitation without reporting successful completion or verified running activity.
+- **AC-AGENTS-BACKGROUND-WORK-007.5:** When a new foreground turn starts, jobs from earlier turns shall retain their identity and remain inspectable.
+
+### REQ-AGENTS-BACKGROUND-WORK-008: OpenCode automatic follow-up delivery
+
+**Intent:** Deliver the agent response that follows a background result.
+
+- **AC-AGENTS-BACKGROUND-WORK-008.1:** When a supported OpenCode connection resumes the agent after a job result, the response shall appear once in the original conversation.
+- **AC-AGENTS-BACKGROUND-WORK-008.2:** When an automatic response starts or ends, its activity and completion shall belong to that response and preserve foreground prompt ownership.
+- **AC-AGENTS-BACKGROUND-WORK-008.3:** When a user message races an automatic response, the system shall serialize delivery without losing, duplicating, or moving either message to another conversation.
+- **AC-AGENTS-BACKGROUND-WORK-008.4:** When a connection loses events or changes ownership, the system shall preserve history and disclose uncertain activity until fresh provider evidence resolves it.
+- **AC-AGENTS-BACKGROUND-WORK-008.5:** When an older OpenCode version lacks continuous delivery, existing prompting shall remain available and automatic follow-up delivery shall be reported as unavailable.
+
+### REQ-AGENTS-BACKGROUND-WORK-009: OpenCode background-work experience
+
+**Intent:** Keep background work visible while the main conversation remains usable.
+
+- **AC-AGENTS-BACKGROUND-WORK-009.1:** When OpenCode jobs have verified live activity, the session shall show working-in-background activity through the shared background-work experience.
+- **AC-AGENTS-BACKGROUND-WORK-009.2:** When the foreground turn is idle, a user shall be able to send another prompt while its background jobs continue.
+- **AC-AGENTS-BACKGROUND-WORK-009.3:** When OpenCode has an active foreground prompt without steering support, additional input shall queue and shall not claim immediate delivery.
+- **AC-AGENTS-BACKGROUND-WORK-009.4:** When users inspect OpenCode jobs on desktop or phone, they shall use the shared viewer, retain their draft, and see only supported controls.
+- **AC-AGENTS-BACKGROUND-WORK-009.5:** When all OpenCode jobs become terminal, the active count shall clear while completed history remains reachable.
+- **AC-AGENTS-BACKGROUND-WORK-009.6:** When a job fails, the viewer shall show its failure independently from any later agent recovery attempt.
+
+The [OpenCode continuity design](../system-design/background-work-opencode.md)
+owns these provider-specific additions. The shared criteria above retain their
+existing meanings. A working-in-background display does not change workflow
+placement, authorize concurrent prompts, or declare the user's goal complete.
 
 ## Exclusions and related contracts
 

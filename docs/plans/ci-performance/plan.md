@@ -9,6 +9,7 @@ requirements:
   - REQ-PLATFORM-CI-PERFORMANCE-005
   - REQ-PLATFORM-CI-PERFORMANCE-006
   - REQ-PLATFORM-CI-PERFORMANCE-007
+  - REQ-PLATFORM-CI-PERFORMANCE-008
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-TASKS-TASK-ACTIONS-MENU-004
@@ -33,6 +34,73 @@ The earlier October stage measured frontend sharding after cheaper setup and kep
 The user authorized implementation after planning. The October changes passed
 local validation; hosted performance acceptance remains open. Historical
 September results remain separate from the current experiment.
+
+## October 26 cache and partition continuation
+
+Tasks 17–20 implement the bounded follow-up to the [October 26 investigation](evidence-2026-10-26.md).
+Platform owns the existing cache, coverage, and capacity contracts.
+The maintainer confirms a shared limit of 60 concurrent GitHub Actions jobs.
+Queue saturation remains an operational constraint, not evidence of incorrect gate placement.
+
+The user has authorized implementation. Work through the tasks sequentially in the primary session.
+Earlier publication and continuous-delivery instructions describe earlier work. They do not authorize this continuation's commits, pushes, or workflow dispatches.
+
+### Delivery order
+
+1. Task 17 repairs confirmed E2E pnpm paths in the four execution environments.
+2. Task 18 migrates legacy Linux Go caches to the existing shared helper.
+3. Task 19 measures file costs and balances the same two frontend partitions.
+4. Task 20 compares complete coverage, execution, waiting, and runner-minutes before adoption.
+
+Implementation remains sequential in the primary session. These tasks share workflow files.
+Capture a baseline before each candidate. Use natural CI runs or separately authorized hosted measurements.
+
+### Scope and boundaries
+
+- Preserve the current job graph, matrix sizes, runner placement, permissions, required names, triggers, and concurrency policy.
+- Preserve every selected assertion, isolated environment, platform, race check, retry policy, and existing package command.
+- Reuse the frontend pnpm key contract and the shared Go cache action.
+- Publish migrated Go generations from main, with one module-cache owner and explicit build-role owners.
+- Freeze a shared advisory timing snapshot in `changes`. Retain native current discovery and deterministic fallback.
+- Reconcile complete shard results inside the existing frontend gate without package installation or another job.
+- Keep Windows caches, sidebar resource caches, PostgreSQL 18, host E2E build/report caching, and browser-cache rollout outside this migration.
+- Exclude paid capacity, gate rerouting, more shards, a cache backend, persistent Node bytecode caching, and conditional HTML reporting.
+
+The [system design](../../specs/platform/system-design/ci-performance.md#october-26-cache-and-partition-continuation)
+owns the new technical contract. The complete-CI design retains the separate historical fifteen-minute target.
+Tasks 17–20 do not claim or close the pending acceptance of Tasks 02–04 or 14–16.
+
+### Acceptance mapping
+
+| Work | Acceptance criteria | Targeted evidence |
+| --- | --- | --- |
+| Task 17 | 002.1–002.3, 005.6 | E2E workflow contracts and actual missing/save/restore/cache-error installation evidence |
+| Task 18 | 008.1–008.3, 005.6 | Go identity/action fixtures, workflow contracts, cold and warm jobs, publication ownership |
+| Task 19 | 003.1–003.3, 003.6–003.7, 005.6 | Native sequencer/reporter fixtures, complete disjoint assignment, rerun and gate failure paths |
+| Task 20 | 004.1–004.2, 004.4, 005.1, 005.6–005.7 | Attempt-specific graphs, exact identity/outcome comparison, three paired samples and all failed attempts |
+
+The table uses the `AC-PLATFORM-CI-PERFORMANCE-` prefix.
+Each work order defines exact commands and file ownership.
+Compare balancing against the current two-shard configuration. Additional-partition thresholds do not apply to unchanged fan-out.
+Cache adoption requires lower median total setup/verification occupancy, including transfer and publication, without coverage or loaded-feedback regression.
+Insufficient hosted evidence leaves adoption pending. A measured rejection retains the simpler safe configuration.
+
+### Design validation
+
+Design validation passed on 2026-10-26:
+
+- `python3 scripts/list-docs.py validate`: 403 decisions and 1,740 specifications validated.
+- `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
+- `python3 scripts/lint-spec-files.py --all`: all specification files passed.
+- The catalog discovers the existing owning requirements and both referenced system designs.
+- The PR documentation validator classifies the actual documentation-only diff as exempt.
+- The same validator accepts all four new work orders against a representative planned source change.
+- Requirement IDs, acceptance IDs, design ownership, plan backlinks, dependency paths, and pending statuses passed validation.
+- `git diff --check` passed. Status inspection includes all four new work orders and the evidence note.
+
+Only internal requirements, system designs, plans, and evidence change in this turn.
+There is no rendered UI or public application documentation impact.
+No workflow implementation, native test change, hosted experiment, commit, or push occurred.
 
 ## October 14 complete-CI continuation
 
@@ -188,6 +256,10 @@ No browser E2E is needed for CI-only behavior. Existing application E2E coverage
 - [ ] [Task 14: Partition frontend and Windows verification](task-14-partition-independent-checks.md)
 - [ ] [Task 15: Shorten remaining critical paths](task-15-remaining-critical-paths.md)
 - [ ] [Task 16: Measure and deliver complete CI](task-16-complete-ci-delivery.md)
+- [ ] [Task 17: Repair E2E dependency caches](task-17-repair-e2e-dependency-caches.md)
+- [ ] [Task 18: Refresh Linux Go caches](task-18-refresh-linux-go-caches.md)
+- [x] [Task 19: Balance existing frontend partitions](task-19-balance-frontend-partitions.md)
+- [ ] [Task 20: Measure cache and partition adoption](task-20-measure-cache-and-partition-adoption.md)
 
 ## Execution and evidence
 

@@ -90,6 +90,7 @@ function toProfileFormData(
     cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
     mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
     mcp_selected_servers: profile.mcpSelectedServers ?? [],
+    copilot_selected_plugins: profile.copilotSelectedPlugins ?? [],
     cli_flags: profile.cliFlags ?? [],
     env_vars: profile.envVars ?? [],
     command_prefix: profile.commandPrefix ?? "",
@@ -209,6 +210,7 @@ function ProfileSettingsCard({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          agentId={agent.id}
           capabilityProfileId={savedProfile?.id}
           cursorMcpAuthSupported={
             agent.name === "cursor-acp" || agent.tui_config?.mcp_strategy === "cursor"
@@ -304,6 +306,7 @@ function ProfileEditorBody({
         cliPassthrough={draft.cliPassthrough}
         cliFlags={draft.cliFlags ?? []}
         commandPrefix={draft.commandPrefix}
+        copilotSelectedPlugins={draft.copilotSelectedPlugins}
         envVars={draft.envVars}
         secrets={secrets}
         discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "command-preview")}

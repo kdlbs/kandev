@@ -2156,6 +2156,9 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
+	if services.Task != nil {
+		orchScheduler.SetTaskCreationAttachmentReader(services.Task)
+	}
 	// Bind Office credentials to the concrete launch session before dispatch.
 	// Deferred starts refresh credentials after their persisted-token redaction.
 	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)

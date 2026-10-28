@@ -35,6 +35,9 @@ Reviewers can inspect a diff in GitHub, but a large pull request still takes tim
 - **AC-UI-PR-WALKTHROUGH-001.13:** When rendering completes, generation shall accept the verified output pair for the current attempt and exact PR head without requiring another agent response.
 - **AC-UI-PR-WALKTHROUGH-001.14:** Generation shall enforce one total time limit across attempts and retain diagnostics before the outer job deadline. Cancellation, invalid output, or expiration without verified completion shall prevent publication.
 - **AC-UI-PR-WALKTHROUGH-001.15:** When generation does not produce a verified output pair, the workflow shall report a warning, skip publication and description linking, and leave the pull request check successful.
+- **AC-UI-PR-WALKTHROUGH-001.16:** Each generation discovers the current free models from the `opencode` provider and tries eligible models when an earlier model is unavailable, rate-limited, or its usage limit is reached.
+- **AC-UI-PR-WALKTHROUGH-001.17:** If no eligible free model exists or every eligible free model fails with a recoverable provider error, generation shall try OpenCode Go Muse Spark 1.3 Contributor, subject to the shared deadline and available credentials.
+- **AC-UI-PR-WALKTHROUGH-001.18:** Generation shall report the model and outcome of each attempt without exposing credentials. The selected models may retain submitted PR context or use it for training.
 
 ## Migrated source detail
 
@@ -50,11 +53,13 @@ the dedicated Cloudflare R2 walkthrough bucket. Lifecycle controls retention.
 [ADR-2026-09-05-pr-walkthrough-description-integrity](../../../decisions/2026-09-05-pr-walkthrough-description-integrity.md),
 [ADR-2026-08-24-unified-fork-approval-label](../../../decisions/2026-08-24-unified-fork-approval-label.md),
 [ADR-2026-09-30-pr-walkthrough-render-completion](../../../decisions/2026-09-30-pr-walkthrough-render-completion.md),
-[ADR-2026-10-27-advisory-pr-walkthrough-generation](../../../decisions/2026-10-27-advisory-pr-walkthrough-generation.md)
+[ADR-2026-10-27-advisory-pr-walkthrough-generation](../../../decisions/2026-10-27-advisory-pr-walkthrough-generation.md),
+[ADR-2026-10-28-pr-walkthrough-model-fallback](../../../decisions/2026-10-28-pr-walkthrough-model-fallback.md)
 
 **Implementation plans:**
 [PR walkthrough description integrity fix](../../../plans/pr-walkthrough-description-integrity-fix/plan.md),
-[PR walkthrough generation completion](../../../plans/pr-walkthrough-generation-completion/plan.md)
+[PR walkthrough generation completion](../../../plans/pr-walkthrough-generation-completion/plan.md),
+[PR walkthrough model fallback](../../../plans/pr-walkthrough-model-fallback/plan.md)
 
 ## Generation contract
 
@@ -70,8 +75,9 @@ binds identity and links to trusted event metadata before rendering.
 
 The managed adapter accepts a renderer-completed output pair after independent
 verification. A process that remains live after rendering does not delay this
-completion. Unexpected non-zero exits fail without a retry. An incomplete
-zero-exit attempt can retry once within the remaining total time limit.
+completion. Recoverable model availability and quota failures can advance to
+the next candidate. An incomplete zero-exit attempt can retry once within the
+remaining total time limit.
 
 The generation job is advisory. An attempt that does not return a verified
 output pair reports a warning and keeps the pull request check successful.
@@ -131,8 +137,9 @@ adapters remain outside the skill because they are platform integration code.
 
 ## Failure modes
 
-- If the agent exits non-zero unexpectedly, generation fails and records
-  diagnostics. Expected termination after verified rendering is successful.
+- If the agent exits non-zero without a recognized recoverable provider error,
+  generation fails and records diagnostics. Expected termination after
+  verified rendering is successful.
 - If the total time limit expires without verified completion, generation
   stops, retains diagnostics, and prevents publication.
 - If generation does not produce a verified output pair, the workflow reports

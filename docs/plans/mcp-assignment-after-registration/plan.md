@@ -1239,3 +1239,38 @@ zero neutral, failed or pending checks; its all-terminal helper exit 1 records
 the main-branch merge conflict, not a test failure. That result remains
 historical. Normal merge hooks, immutable publication and fresh exact-head
 CI/review remain pending for the reconciliation.
+
+### Main conflict reconciliation (2026-10-28)
+
+The user requested conflict resolution for ready PR #4760. Verified a clean
+owned checkout and matching local, remote and PR head
+`74069f8b52326eb09180846b6fd3f42503017413`. Preserved it at
+`backup/clarify-mcp-before-conflicts-20261028`, then merged verified main
+`a5fdd9b12f54ee5df03c20699f61418bfac3de9a`.
+
+Resolved three E2E conflicts. Session resume uses main's initial-detail drain,
+subsequent detail hold and awaited route cleanup. Mobile profile deletion uses
+main's canonical seeded-profile helper and retains exact profile-ID row
+selection with uniqueness. The pseudo notification test keeps main's second
+injected release and complete localized body assertion, plus this branch's
+version-scoped uniqueness and separate title assertion. The canvas and public
+documentation automatic merges preserve both sides. No production path needed
+manual reconciliation. Trimmed one incoming plan's extra trailing blank line
+reported by the staged whitespace check. Main's CI flaky-flag removal is kept.
+
+Reconciled-source verification passed: 236 frontend cases across 28 files,
+full web typecheck (8192 MB heap), affected ESLint (90 files), scoped Go lint
+(four packages), five MCP/selection/profile backend race-test scopes, i18n,
+documentation catalog and full specification lint. Go module tidy made no
+additional changes and module verification passed; 242 incoming Go files are
+gofmt clean. A fresh managed production build passed 13 desktop browser cases;
+the same fresh artifacts passed 12 phone cases. Both runs used one worker and
+zero retries, covering all 16 assignment journeys, all three phone profile
+removal cases, the conflicted resume/pseudo cases, both overlapping canvas
+cases and Portuguese notice delivery on both viewports.
+
+Main advanced during verification to
+`fb4c2bc3ef98da2fc303fe05cb144bcd6c167d58` with a disjoint Sentry short-ID fix.
+Its exact merge-result compatibility, normal hooks, immutable publication and
+new-head hosted checks are tracked in the PR fixup receipt. Earlier green CI
+and bot reports are historical and do not clear the new merge head.

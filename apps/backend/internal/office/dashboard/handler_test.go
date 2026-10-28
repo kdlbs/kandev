@@ -195,7 +195,6 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL DEFAULT '',
-		agent_execution_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		state TEXT NOT NULL DEFAULT 'CREATED',
 		started_at TIMESTAMP,

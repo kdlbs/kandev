@@ -30,6 +30,7 @@ require (
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.11.1
 	github.com/superfly/sprites-go v0.0.0-20260206213632-8176adff485b
+	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/tiktoken-go/tokenizer v0.8.1
 	github.com/tuzig/vt10x v0.0.0-20231206072048-370e51642bf7
 	github.com/yuin/goldmark v1.7.13

@@ -110,9 +110,13 @@ type CreateTaskRequest struct {
 	ExecutorProfileID string `json:"-"`
 	// ExecutorProfileIDExplicit marks a caller-selected profile. Deferred
 	// inherited profile IDs remain valid until launch-time admission.
-	ExecutorProfileIDExplicit bool                   `json:"-"`
-	DeferredLaunch            map[string]interface{} `json:"deferred_launch,omitempty"`
-	MCPServerIDs              []string               `json:"mcp_server_ids,omitempty"`
+	ExecutorProfileIDExplicit bool `json:"-"`
+	// Attachments is the creation-time submission. File-backed descriptors are
+	// claimed atomically with the task row; the bounded inline compatibility
+	// path stays on DeferredLaunch.
+	Attachments    []v1.MessageAttachment `json:"attachments,omitempty"`
+	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
+	MCPServerIDs   []string               `json:"mcp_server_ids,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.

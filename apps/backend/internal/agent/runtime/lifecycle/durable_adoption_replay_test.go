@@ -151,10 +151,14 @@ func TestDurableAdoptionReplayRejectsGapBeforeHighWater(t *testing.T) {
 		DeliveryStreamID:          "stream-1",
 		DeliveryIncarnationID:     "incarnation-1",
 		DeliveryHarnessGeneration: 2,
-		DeliveryDescriptor: &agentctl.DeliveryStatus{Stream: &journal.Stream{
-			SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
-			StreamID: "stream-1", HighWater: 2, FirstRetained: 1,
-		}},
+		DeliveryDescriptor: &agentctl.DeliveryStatus{
+			StorageCapability: journal.StorageCapability{
+				Version: journal.CurrentVersion, Durable: true, ReplayBytes: journal.DefaultMaxReplayBytes,
+			},
+			Stream: &journal.Stream{
+				SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+				StreamID: "stream-1", HighWater: 2, FirstRetained: 1,
+			}},
 		agentctl: client,
 	}
 
@@ -251,10 +255,14 @@ func TestDurableAdoptionReplayStopsAtCapturedHighWaterWhenPeerAppendsTail(t *tes
 		DeliveryStreamID:          "stream-1",
 		DeliveryIncarnationID:     "incarnation-1",
 		DeliveryHarnessGeneration: 2,
-		DeliveryDescriptor: &agentctl.DeliveryStatus{Stream: &journal.Stream{
-			SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
-			StreamID: "stream-1", HighWater: highWater, FirstRetained: 1,
-		}},
+		DeliveryDescriptor: &agentctl.DeliveryStatus{
+			StorageCapability: journal.StorageCapability{
+				Version: journal.CurrentVersion, Durable: true, ReplayBytes: journal.DefaultMaxReplayBytes,
+			},
+			Stream: &journal.Stream{
+				SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+				StreamID: "stream-1", HighWater: highWater, FirstRetained: 1,
+			}},
 		agentctl: client,
 	}
 

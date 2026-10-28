@@ -11,6 +11,7 @@ import {
   IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME,
   ImagePreviewContent,
 } from "@/components/task/chat/image-preview-dialog";
+import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { ContextChip } from "./context-chip";
 
 // The image chip intentionally owns the preview, delivery toggle, and retry
@@ -20,7 +21,11 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
   const { t } = useTranslation("chat");
   const { isFinePointer } = useResponsiveBreakpoint();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const previewSrc = item.attachment.preview;
+  // A restored or oversized ready image has no inline preview; the authorized
+  // content URL keeps the thumbnail and larger viewer available.
+  const previewSrc =
+    item.attachment.preview ??
+    (item.attachment.attachmentId ? attachmentContentUrl(item.attachment.attachmentId) : undefined);
   const deliveryMode = item.attachment.deliveryMode;
   const uploadStatus = item.attachment.uploadStatus;
   const deliveryDescription =

@@ -78,6 +78,8 @@ type SchedulerIntegration struct {
 	// taskContexts feeds PromptContext.HandoffContext on every run.
 	// nil-safe: when unconfigured, the handoff section is omitted.
 	taskContexts TaskContextProvider
+	// creationAttachments supplies the task's explicit creation set.
+	creationAttachments TaskCreationAttachmentReader
 }
 
 // SetTaskContextProvider wires the office task-handoffs prompt
@@ -85,6 +87,27 @@ type SchedulerIntegration struct {
 // constructed.
 func (si *SchedulerIntegration) SetTaskContextProvider(p TaskContextProvider) {
 	si.taskContexts = p
+}
+
+// TaskCreationAttachmentReader supplies the explicit ordered creation set for
+// a task-bound launch. It must never include later chat or session claims.
+type TaskCreationAttachmentReader interface {
+	ReadTaskCreationAttachments(ctx context.Context, taskID string) ([]v1.MessageAttachment, error)
+}
+
+// SetTaskCreationAttachmentReader wires the task-owned creation attachment
+// reader used for every task-bound Office launch.
+func (si *SchedulerIntegration) SetTaskCreationAttachmentReader(reader TaskCreationAttachmentReader) {
+	si.creationAttachments = reader
+}
+
+func (si *SchedulerIntegration) launchCreationAttachments(
+	ctx context.Context, taskID string,
+) ([]v1.MessageAttachment, error) {
+	if taskID == "" || si.creationAttachments == nil {
+		return nil, nil
+	}
+	return si.creationAttachments.ReadTaskCreationAttachments(ctx, taskID)
 }
 
 // NewSchedulerIntegration creates a new SchedulerIntegration.
@@ -451,10 +474,19 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		zap.String("run_id", run.ID),
 		zap.Int("env_count", len(env)))
 
+	creationAttachments, err := si.launchCreationAttachments(ctx, taskID)
+	if err != nil {
+		si.logger.Warn("creation attachment read failed; retrying run",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID), zap.Error(err))
+		si.releaseCheckoutIfNeeded(ctx, run)
+		_ = si.svc.HandleRunFailure(ctx, run, err)
+		return
+	}
 	launchCtx := LaunchContext{
 		ExecutorID:           execCfg.Type,
 		CausingRunID:         run.ID,
 		Prompt:               prompt,
+		Attachments:          creationAttachments,
 		Env:                  env,
 		ProfileID:            profileID,
 		AdditionalSkillSlugs: decisionSkillSlugs(runCtx.AvailableActions),

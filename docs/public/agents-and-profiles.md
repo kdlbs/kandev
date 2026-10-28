@@ -1,6 +1,6 @@
 ---
 title: "Agents and Profiles"
-description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, passthrough, and MCP."
+description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, plugins, passthrough, and MCP."
 ---
 
 # Agents and Profiles
@@ -51,6 +51,18 @@ Kandev currently uses `@openai/codex` version `0.154.0` as its managed default. 
 Native sessions show response and turn token usage in the chat footer. A provider thread usage estimate may appear when Codex reports one. It is an estimate, not a promise of the billed charge. Kandev keeps provider estimates separate from calculated cost.
 
 After a completed turn, use **Fork conversation** to create another session through that turn. The new session keeps the task and executor, and files remain shared in the workspace. It does not create a branch or worktree. Native Codex subagents and background commands stay within the session; they do not become separate Kandev tasks.
+
+### Inspect agent background work
+
+Agents that report background shell commands, subagents, or monitors feed the shared background-work chip above the message box. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
+
+Provider support differs, and Kandev shows only what the connected runtime verifies:
+
+- **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
+- **OpenCode ACP** reports a detached shell launch with its native shell identity. The supported OpenCode versions end their ACP subscription with the foreground prompt, so Kandev keeps the launch inspectable but marks its later activity unknown instead of promising completion, live output, or controls. The original launch banner stays in the tool message.
+- **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
+
+A bounded probe or reconnect can also leave a job unknown. Unknown activity is neither a successful completion nor a verified running job, and retained history stays reachable after the active count reaches zero.
 
 Codex questions sent through Kandev's `ask_user_question_kandev` MCP tool or through the native app-server `item/tool/requestUserInput` method use the normal clarification UI. Native options and permitted free-text answers map back to Codex's answer format. Secret questions fail closed because Kandev's clarification flow stores answers in the conversation. If Codex resolves a pending request, Kandev closes the corresponding clarification.
 
@@ -929,6 +941,57 @@ For marketplace plugins, Kandev reads Cursor's enabled-plugin inventory and uses
 The shared auth file is keyed by MCP server name. Kandev does not compare server URLs or OAuth issuers between projects. A project with a matching server name can therefore use a copied credential even when its MCP configuration points to a different endpoint. Enable sharing only for trusted local project configurations. If a credential may have reached an unintended endpoint, revoke it through that provider.
 
 To stop sharing, clear the option and launch that profile again. That launch removes only the Kandev-created link for its project. Running processes keep credentials they already loaded. Cursor may refresh credentials through the link, but Kandev does not copy refreshed credentials back to source projects. A later launch rebuilds the shared file from those source projects. Kandev preserves a native-refreshed credential while its original source remains unchanged. Changed or removed source credentials invalidate that preservation; Kandev does not treat an old shared snapshot as an independent source.
+
+### Load Copilot plugins for a profile
+
+On a saved Copilot profile, open **Plugins** and choose **Refresh plugins**.
+Kandev runs the profile's selected Copilot CLI with its effective home, path,
+and resolved secret references. The list shows installed plugins, their
+marketplace and version, and the CLI's own enabled status. A plugin that the CLI
+has disabled is still selectable here: this checkbox means "load this plugin
+for this Kandev profile", not "enable it globally".
+
+Kandev can discover installed plugins and save a selection on a profile. Native
+plugin mounting is currently fail-closed: a new local or worktree process with
+a nonempty saved selection returns `policy_unverified`. Kandev has not yet
+established with authenticated native fixtures that an explicit
+`--plugin-dir` mount preserves Copilot's MCP disables and managed prohibitions.
+Discovery, save, Reset, and removal remain available while that qualification
+is outstanding.
+
+When native mounting is enabled, a selection will load the whole plugin through
+Copilot's native `--plugin-dir` support. A plugin can run MCP servers, skills,
+agents, commands, hooks, and other executable components. Loading is additive.
+Copilot can still load other plugins that its own configuration enables, so
+this is not an exclusive whitelist. Review a plugin's publisher and contents
+before selecting it.
+
+Selections are stored on the profile and apply when the next Copilot process
+starts. Saving a profile does not reload or stop a running process; that
+process keeps the plugins it started with. Missing plugins stay visible and can
+be unchecked. A new process does not start while a saved selection is missing,
+unresolvable, or policy-unqualified.
+
+Profile plugin loading is limited to local and worktree executions. Profiles
+with a nonempty selection cannot start on Docker, SSH, Kubernetes, Sprites, or
+another isolated executor; clear the selection or use a local executor.
+Profiles with no selected plugins keep their existing behavior on every
+executor.
+
+Copilot's native authentication, MCP disables, tool permissions, and managed
+policy remain authoritative. Kandev does not copy credentials, start a login,
+install, enable, disable, or update plugins, or reuse plugin MCP definitions as
+Kandev-managed servers. Use Copilot's own commands for plugin management.
+
+Kandev currently qualifies inventory discovery for managed Copilot 1.0.88 and
+1.0.104. Another selected runtime shows an unsupported message instead of
+falling back to an unrelated global CLI. The command preview shows the base
+command and marks it incomplete when plugin mounts are deferred to process
+start; it never shows resolved host directories.
+
+If refresh fails, Kandev keeps your saved choices and says availability was not
+checked. You can still remove a choice. The profile's normal **Save**, **Reset**,
+and external-change recovery flow applies to plugin changes.
 
 <details>
 <summary>Configure workspace MCP servers</summary>

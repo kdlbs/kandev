@@ -19,6 +19,11 @@ const attachmentSelectColumns = `id, owner_id, workspace_id, task_id, session_id
 	message_id, queue_id, name, mime_type, kind, delivery_mode, size_bytes,
 	storage_key, state, expires_at, created_at, updated_at`
 
+const creationAttachmentSelectColumns = `a.id, a.owner_id, a.workspace_id, a.task_id,
+	a.session_id, a.message_id, a.queue_id, a.name, a.mime_type, a.kind,
+	a.delivery_mode, a.size_bytes, a.storage_key, a.state, a.expires_at,
+	a.created_at, a.updated_at`
+
 func (r *Repository) CreateMessageAttachment(ctx context.Context, attachment *models.TaskMessageAttachment) error {
 	if attachment.ID == "" {
 		attachment.ID = uuid.NewString()
@@ -184,6 +189,186 @@ func (r *Repository) ClaimMessageAttachments(ctx context.Context, ids []string, 
 		return fmt.Errorf("commit attachment claim: %w", err)
 	}
 	return nil
+}
+
+func validCreationAttachmentClaim(
+	task *models.Task,
+) (*models.TaskCreationAttachmentClaim, error) {
+	claim := task.CreationAttachmentClaim
+	if claim == nil || len(claim.IDs) == 0 {
+		return nil, nil
+	}
+	if claim.OwnerID == "" || claim.WorkspaceID == "" || task.ID == "" {
+		return nil, models.ErrAttachmentClaimConflict
+	}
+	if len(claim.IDs) > models.MaxMessageAttachmentCount {
+		return nil, models.ErrTooManyAttachments
+	}
+	return claim, nil
+}
+
+// claimCreationAttachmentsTx claims the ordered creation set and records its
+// explicit association inside the task insert transaction. A missing, expired,
+// foreign, or mixed-invalid row rolls the whole task back.
+func (r *Repository) claimCreationAttachmentsTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	claim, err := validCreationAttachmentClaim(task)
+	if err != nil || claim == nil {
+		return err
+	}
+	now := time.Now().UTC()
+	seen := make(map[string]struct{}, len(claim.IDs))
+	var totalSize int64
+	for position, id := range claim.IDs {
+		if !recordUniqueAttachmentID(seen, id) || id == "" {
+			return models.ErrAttachmentClaimConflict
+		}
+		attachment, err := loadCreationAttachmentForClaim(ctx, tx, r.db.Rebind, id)
+		if err != nil {
+			return err
+		}
+		size, err := creationAttachmentClaimSize(attachment, claim, task.ID, now)
+		if err != nil {
+			return err
+		}
+		totalSize += size
+		if totalSize > models.MaxMessageAttachmentBytes {
+			return models.ErrAttachmentTotalTooLarge
+		}
+		if attachment.State == models.AttachmentStateStaged {
+			if err := r.markCreationAttachmentClaimed(ctx, tx, attachment, claim, task.ID, now); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO task_creation_attachments (task_id, attachment_id, position)
+			VALUES (?, ?, ?)
+		`), task.ID, id, position); err != nil {
+			return fmt.Errorf("record creation attachment association: %w", err)
+		}
+	}
+	return nil
+}
+
+func creationAttachmentClaimSize(
+	attachment *models.TaskMessageAttachment,
+	claim *models.TaskCreationAttachmentClaim,
+	taskID string,
+	now time.Time,
+) (int64, error) {
+	if attachment.OwnerID != claim.OwnerID || attachment.WorkspaceID != claim.WorkspaceID {
+		return 0, models.ErrAttachmentClaimConflict
+	}
+	switch attachment.State {
+	case models.AttachmentStateStaged:
+		if !attachment.ExpiresAt.IsZero() && !attachment.ExpiresAt.After(now) {
+			return 0, models.ErrAttachmentClaimConflict
+		}
+		if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+			return 0, models.ErrAttachmentTooLarge
+		}
+		return attachment.SizeBytes, nil
+	case models.AttachmentStateClaimed:
+		if attachment.TaskID != taskID || attachment.SessionID != "" {
+			return 0, models.ErrAttachmentClaimConflict
+		}
+		return attachment.SizeBytes, nil
+	default:
+		return 0, models.ErrAttachmentClaimConflict
+	}
+}
+
+func (r *Repository) markCreationAttachmentClaimed(
+	ctx context.Context,
+	tx *sql.Tx,
+	attachment *models.TaskMessageAttachment,
+	claim *models.TaskCreationAttachmentClaim,
+	taskID string,
+	now time.Time,
+) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_message_attachments
+		SET task_id = ?, session_id = '', state = ?, updated_at = ?
+		WHERE id = ? AND owner_id = ? AND workspace_id = ? AND state = ?
+	`), taskID, models.AttachmentStateClaimed, now, attachment.ID, claim.OwnerID,
+		claim.WorkspaceID, models.AttachmentStateStaged)
+	if err != nil {
+		return fmt.Errorf("claim creation attachment: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return models.ErrAttachmentClaimConflict
+	}
+	return nil
+}
+
+func loadCreationAttachmentForClaim(
+	ctx context.Context,
+	tx *sql.Tx,
+	rebind func(string) string,
+	id string,
+) (*models.TaskMessageAttachment, error) {
+	attachment := &models.TaskMessageAttachment{}
+	err := tx.QueryRowContext(ctx, rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments WHERE id = ?
+	`), id).Scan(
+		&attachment.ID, &attachment.OwnerID, &attachment.WorkspaceID,
+		&attachment.TaskID, &attachment.SessionID, &attachment.MessageID,
+		&attachment.QueueID, &attachment.Name, &attachment.MimeType,
+		&attachment.Kind, &attachment.DeliveryMode, &attachment.SizeBytes,
+		&attachment.StorageKey, &attachment.State, &attachment.ExpiresAt,
+		&attachment.CreatedAt, &attachment.UpdatedAt,
+	)
+	if errorsIsNoRows(err) {
+		return nil, models.ErrAttachmentNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load creation attachment for claim: %w", err)
+	}
+	return attachment, nil
+}
+
+// ListTaskCreationAttachments returns the explicit ordered creation set for a
+// task. Later chat, queued, and session claims are never included.
+func (r *Repository) ListTaskCreationAttachments(
+	ctx context.Context, taskID string,
+) ([]*models.TaskMessageAttachment, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(`
+		SELECT `+creationAttachmentSelectColumns+`
+		FROM task_creation_attachments ca
+		JOIN task_message_attachments a ON a.id = ca.attachment_id
+		WHERE ca.task_id = ?
+		ORDER BY ca.position ASC
+	`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task creation attachments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var attachments []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			return nil, fmt.Errorf("scan task creation attachment: %w", err)
+		}
+		attachments = append(attachments, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task creation attachments: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task creation attachments: %w", err)
+	}
+	var expected int
+	if err := r.db.GetContext(ctx, &expected, r.db.Rebind(`
+		SELECT COUNT(*) FROM task_creation_attachments WHERE task_id = ?
+	`), taskID); err != nil {
+		return nil, fmt.Errorf("count task creation attachments: %w", err)
+	}
+	if len(attachments) != expected {
+		return nil, fmt.Errorf("task creation attachment set is incomplete: %d of %d", len(attachments), expected)
+	}
+	return attachments, nil
 }
 
 // ClaimQueuedMessageAttachments marks only newly staged rows with queueID.
@@ -948,6 +1133,9 @@ func referencedAttachmentIDsTx(
 	queueTablePresent bool,
 ) (map[string]struct{}, error) {
 	referenced := make(map[string]struct{})
+	if err := addTaskCreationAttachmentReferences(ctx, tx, taskID, referenced); err != nil {
+		return nil, err
+	}
 	//nolint:nestif // durable queue and transcript references use separate optional tables.
 	if queueTablePresent {
 		rows, err := tx.QueryxContext(ctx, tx.Rebind(`
@@ -1152,6 +1340,33 @@ func addAttachmentReferences(target map[string]struct{}, attachments []attachmen
 	}
 }
 
+// addTaskCreationAttachmentReferences protects the task's durable creation set
+// from any session-scoped release path.
+func addTaskCreationAttachmentReferences(
+	ctx context.Context, tx *sqlx.Tx, taskID string, target map[string]struct{},
+) error {
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT attachment_id FROM task_creation_attachments WHERE task_id = ?
+	`), taskID)
+	if err != nil {
+		return fmt.Errorf("list creation attachment references: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var attachmentID string
+		if err := rows.Scan(&attachmentID); err != nil {
+			return fmt.Errorf("scan creation attachment reference: %w", err)
+		}
+		if attachmentID != "" {
+			target[attachmentID] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate creation attachment references: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error) {
 	if taskID == "" {
 		return nil, nil
@@ -1263,6 +1478,12 @@ func (r *Repository) DeleteMessageAttachmentsByWorkspaceTx(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate workspace attachments for cleanup: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM task_creation_attachments
+		WHERE task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)
+	`), workspaceID); err != nil {
+		return nil, fmt.Errorf("delete workspace creation attachment associations: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_message_attachments WHERE workspace_id = ?`), workspaceID); err != nil {
 		return nil, fmt.Errorf("delete workspace attachments: %w", err)

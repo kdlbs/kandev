@@ -7,12 +7,6 @@ on:
   pull_request_target:
     types: [opened, ready_for_review, reopened, synchronize, labeled]
 
-env:
-  # Free model with zero retention and no training on the PR patch or prepared
-  # head context. Keep this policy when replacing a retired model.
-  PR_WALKTHROUGH_MODEL: opencode/deepseek-v4.1-flash-free
-  PR_WALKTHROUGH_VARIANT: high
-
 concurrency:
   # GitHub resolves workflow concurrency before it evaluates the job `if`.
   # Keep every event rejected by the generation gate out of the canceling
@@ -171,7 +165,10 @@ jobs:
         uses: ./.trusted-actions/setup-opencode
 
       # The walkthrough is best effort: a model or provider outage must not block
-      # the pull request, so a failed attempt warns and skips publication.
+      # the pull request, so a failed attempt warns and skips publication. The
+      # trusted runner discovers free models and rotates on model quota or
+      # availability errors; the selected models can retain or train on the
+      # submitted PR context.
       - name: Run OpenCode walkthrough
         id: generate
         continue-on-error: true
@@ -195,7 +192,6 @@ jobs:
           ---
           description: Generate and render a visual pull request walkthrough.
           mode: primary
-          model: "opencode/deepseek-v4.1-flash-free"
           temperature: 0.1
           permission:
             "*": deny
@@ -244,8 +240,8 @@ jobs:
             "$HOME/.opencode/bin/opencode" run \
             --print-logs \
             --agent github-pr-walkthrough \
-            --model "$PR_WALKTHROUGH_MODEL" \
-            --variant "$PR_WALKTHROUGH_VARIANT" \
+            --model '{model}' \
+            --variant '{variant}' \
             --title "PR #${PR_NUMBER} walkthrough" \
             --file .pr-walkthrough/guidelines.md \
             --file .pr-walkthrough/walkthrough.patch \

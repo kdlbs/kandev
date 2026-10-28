@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import Link from "@/components/routing/app-link";
@@ -348,6 +348,9 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     },
     [effectiveTaskId, loadTaskDetails],
   );
+  const isTemporaryTaskReadError =
+    isTemporaryTaskNavigationError(taskLoadError) ||
+    isTemporaryTaskNavigationReadPending(navigationReadState);
 
   return {
     task,
@@ -358,10 +361,17 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     onTaskUnarchived,
     refreshTask: loadTaskDetails,
     retryTaskRead: () => loadTaskDetails(true, effectiveTaskId, true),
-    isTemporaryTaskReadError:
-      isTemporaryTaskNavigationError(taskLoadError) ||
-      (navigationReadState.phase === "failed" && navigationReadState.temporary),
+    isTemporaryTaskReadError,
   };
+}
+
+function isTemporaryTaskNavigationReadPending(
+  readState: ReturnType<typeof useTaskNavigationReadState>,
+): boolean {
+  if (!readState.temporary) return false;
+  return (
+    readState.phase === "loading" || readState.phase === "retrying" || readState.phase === "failed"
+  );
 }
 
 function useTaskPageData(
@@ -451,6 +461,50 @@ function useTaskPageData(
   };
 }
 
+function resolveTaskPageReadFallback({
+  isMounted,
+  task,
+  hasTaskDetails,
+  taskLoadError,
+  isTemporaryTaskReadError,
+  navigationReadState,
+  retryTaskRead,
+}: {
+  isMounted: boolean;
+  task: Task | null;
+  hasTaskDetails: boolean;
+  taskLoadError: unknown;
+  isTemporaryTaskReadError: boolean;
+  navigationReadState: ReturnType<typeof useTaskNavigationReadState>;
+  retryTaskRead: () => void;
+}): ReactNode {
+  if (!isMounted) return <TaskLoadingState />;
+  const hasPermanentTaskReadError = taskLoadError !== null && !isTemporaryTaskReadError;
+  const hasPermanentSharedReadFailure =
+    navigationReadState.phase === "failed" && !navigationReadState.temporary;
+  if (hasPermanentTaskReadError || hasPermanentSharedReadFailure) {
+    return <TaskLoadErrorState />;
+  }
+  const contentState = resolveTaskContentState({
+    isMounted,
+    hasTask: Boolean(task),
+    hasTaskDetails,
+    hasTaskLoadError: Boolean(taskLoadError),
+  });
+  if (contentState === "loading") return <TaskLoadingState />;
+  if (contentState === "error") {
+    return (
+      <TaskLoadErrorState
+        temporaryError={isTemporaryTaskReadError}
+        retrying={isTaskNavigationReadPending(navigationReadState)}
+        onRetry={retryTaskRead}
+      />
+    );
+  }
+  if (!task) return <TaskLoadErrorState />;
+  return null;
+}
+
 function TaskPageContentLive({
   task: initialTask,
   taskId: initialTaskId = null,
@@ -505,24 +559,16 @@ function TaskPageContentLive({
     queueMicrotask(() => setIsMounted(true));
   }, []);
 
-  const contentState = resolveTaskContentState({
+  const readFallback = resolveTaskPageReadFallback({
     isMounted,
-    hasTask: Boolean(task),
+    task,
     hasTaskDetails,
-    hasTaskLoadError: Boolean(taskLoadError),
+    taskLoadError,
+    isTemporaryTaskReadError,
+    navigationReadState,
+    retryTaskRead,
   });
-
-  if (contentState === "loading") return <TaskLoadingState />;
-  if (contentState === "error") {
-    return (
-      <TaskLoadErrorState
-        temporaryError={isTemporaryTaskReadError}
-        retrying={isTaskNavigationReadPending(navigationReadState)}
-        onRetry={retryTaskRead}
-      />
-    );
-  }
-  if (!task) return <TaskLoadErrorState />;
+  if (readFallback) return readFallback;
 
   return (
     <TaskPageInner

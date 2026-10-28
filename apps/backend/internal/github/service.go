@@ -128,6 +128,8 @@ type Service struct {
 	connectionMutationLocks     [64]sync.Mutex
 	legacyCredentialMu          sync.Mutex
 	legacyCredentialRevision    string
+	prWatchLifecycleLocksMu     sync.Mutex
+	prWatchLifecycleLocks       map[string]*prWatchLifecycleLock
 	client                      Client
 	authMethod                  string
 	secrets                     SecretProvider
@@ -271,6 +273,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		rateCoordinator:              rateCoordinator,
 		prDiscoveryHealth:            newPRDiscoveryHealth(eventBus, log),
 		prDiscoveryAttempts:          make(map[string]*prDiscoveryAttemptResult),
+		prWatchLifecycleLocks:        make(map[string]*prWatchLifecycleLock),
 		tokenClientFactory:           func(token string) Client { return NewPATClient(token) },
 		ghAccountLister:              ListGHAccounts,
 		cleanupFailureCounts:         make(map[string]int),

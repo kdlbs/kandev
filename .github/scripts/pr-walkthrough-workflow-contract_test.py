@@ -182,16 +182,27 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("managed runner", self.skill)
         self.assertIn("arbitrary Git or shell commands", self.skill)
 
-    def test_generation_uses_requested_model_native_high_reasoning_variant(self) -> None:
-        model = "opencode/deepseek-v4.1-flash-free"
-        variant = "high"
-        self.assertIn(f"PR_WALKTHROUGH_MODEL: {model}", self.workflow)
-        self.assertIn(f"PR_WALKTHROUGH_VARIANT: {variant}", self.workflow)
-        self.assertIn(f'model: "{model}"', self.generation)
-        self.assertIn('--model "$PR_WALKTHROUGH_MODEL"', self.generation)
-        self.assertIn('--variant "$PR_WALKTHROUGH_VARIANT"', self.generation)
-        self.assertNotIn("#high", self.workflow)
-        self.assertNotIn("reasoningEffort", self.generation)
+    def test_generation_discovers_models_and_keeps_a_fallback_model(self) -> None:
+        self.assertNotIn("PR_WALKTHROUGH_MODEL", self.workflow)
+        self.assertNotIn("PR_WALKTHROUGH_VARIANT", self.workflow)
+        self.assertIn('--model \'{model}\'', self.generation)
+        self.assertIn('--variant \'{variant}\'', self.generation)
+        self.assertNotIn('model: "opencode/deepseek-v4.1-flash-free"', self.generation)
+        self.assertIn("OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", self.generation)
+        runner = (REPO_ROOT / ".github" / "scripts" / "pr-walkthrough-runner.py").read_text(
+            encoding="utf-8"
+        )
+        for value in (
+            'PREFERRED_FREE_MODEL = "opencode/deepseek-v4.1-flash-free"',
+            'FREE_MODEL_PROVIDER = "opencode"',
+            'GO_FALLBACK_MODEL = "opencode-go/muse-spark-1.3-contributor"',
+            '"models", "--verbose", "--refresh"',
+            "build_candidates",
+            "classify_provider_error",
+            "RATE_LIMIT_ERROR_PATTERNS",
+        ):
+            self.assertIn(value, runner)
+        self.assertIn("retain or train on", self.generation)
 
     def test_generation_keeps_untrusted_head_out_of_secret_bearing_workspace(self) -> None:
         self.assertIn("ref: ${{ github.workflow_sha }}", self.generation)
@@ -239,8 +250,8 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             "python3 .github/scripts/pr-walkthrough-runner.py -- \\",
             '"$HOME/.opencode/bin/opencode" run',
             "--agent github-pr-walkthrough",
-            '--model "$PR_WALKTHROUGH_MODEL"',
-            '--variant "$PR_WALKTHROUGH_VARIANT"',
+            "--model '{model}'",
+            "--variant '{variant}'",
             "--file .pr-walkthrough/guidelines.md",
         ):
             self.assertIn(value, self.generation)
