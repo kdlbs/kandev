@@ -4,11 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-<<<<<<< HEAD
-=======
 	contract "github.com/kandev/kandev/internal/common/sandbox"
-	"net/url"
->>>>>>> 1e370d684fe0 (feat: review sandbox policy changes before restart)
 	"os"
 	"path/filepath"
 	"reflect"

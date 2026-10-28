@@ -1,6 +1,6 @@
 # Sandbox walkthrough: Kandev and Nono
 
-Read sections 1 through 4 for the main design. Continue with sections 5 through 10 for the operational details and future adapters.
+Read sections 1 through 4 for the main design and exact plugin contract. Section 11 distinguishes tested Nono behavior from remaining delivery gaps.
 
 This guide describes the implementation inspected on 2026-10-27:
 
@@ -70,6 +70,40 @@ The plugin does not receive a sandbox `Start`, `Stop`, or `SavePolicy` RPC. Core
 The production plugin lives in its dedicated repository. The host contains the SDK, protocol, loader integration, policy system, and test fixtures. Installing a plugin still means trusting executable host code; the RPC boundary does not isolate a malicious plugin.
 
 Read the [wire contract](https://github.com/kdlbs/kandev/blob/f0a7e7f35a2d9ac1af9fed10f32556f86d60f21f/apps/backend/proto/kandev/plugin/v1/plugin.proto) and the [Nono manifest](https://github.com/kdlbs/kandev-plugin-nono/blob/8f68c6a10add119a1187c7428c5fad51aa6ca25a/manifest.yaml).
+
+### Exact additions to the existing plugin contract
+
+The SDK extraction already merged into main. This PR adds the sandbox capability to that standalone SDK. It does not introduce another plugin transport.
+
+**Manifest admission.** A provider adds `capabilities.sandbox_provider: true` and a `sandbox_providers` entry with `key`, `display_name`, and `protocol_major: 1`. The host requires a managed API version 2 plugin. It rejects unknown provider fields, duplicate keys, and unsupported protocol majors. Ordinary plugins do not need this declaration.
+
+**Go interface and wire service.** The optional `SandboxProviderPlugin` interface contains all six methods above. The existing `kandev.plugin.v1.Plugin` service gains corresponding RPCs. The server requires the complete interface before serving this extension. An implementation without it returns `Unimplemented`. Existing plugin methods remain available.
+
+**Policy input.** Compilation receives a frozen policy snapshot, runtime facts, declared references, and explicit endpoints. The snapshot includes filesystem paths with read/write permissions, network host/port/protocol tuples, permitted environment keys, and the logical Kandev MCP grant. Revision, policy digest, ceiling digest, and source provenance identify what was authorized.
+
+**Launch output.** Compilation returns a typed command prefix, profile/config artifacts, effective grants, override constraints, and required host capabilities. Each argument is a literal, runtime reference, or artifact reference. Artifact bindings identify existing empty JSON strings for host substitution. Callback credentials are absent from endpoint messages. Core resolves reserved references after compilation and verifies the packaged runtime digest before use.
+
+For example, the plugin can return a reference to `sandbox.runtime`, arguments for `run --profile`, and a reference to a generated profile. Core chooses private paths, fills approved bindings, appends the agent command, and owns the resulting process.
+
+**Runtime interpretation.** The description declares bounded runtime record sources and static allow-once, deny, and timeout responses. Approval normalization returns the operation, target, request identity, and process/session identity. Core decides whether to authorize it. Status normalization can return identity and evidence, which core validates separately. Report reading declares coverage limits. Revision proposals return candidate permissions for operator review.
+
+### Validation and compatibility limits
+
+The host binds calls to an installed plugin package, installation identity, provider, and operation. It applies deadlines and a 1 MiB message limit. It validates response identity, schema, payload, and effective grants. A required provider that fails validation blocks launch.
+
+The host also rejects unknown Protobuf fields in sandbox messages. Adding a field therefore needs coordinated schema and compatibility work. Protobuf's usual tolerance for unknown fields does not imply compatibility here.
+
+These version numbers have separate meanings:
+
+- The SDK module version identifies the Go dependency used to build a plugin.
+- Manifest API version `2` identifies the managed plugin format.
+- Protobuf package `kandev.plugin.v1` identifies the existing service namespace.
+- Sandbox protocol major `1` and response schema version `1` identify this optional capability.
+- Nono runtime `0.80.0` identifies the packaged enforcement binary. It is separate from provider version `0.1.0`.
+
+This is a Kandev-specific policy contract over standard gRPC/Protobuf. Nono itself does not implement these six RPCs. The dedicated plugin implements them and translates to Nono's CLI, profile, webhook, registry, and audit formats.
+
+Current source: [manifest validation](../../../apps/backend/internal/plugins/manifest/sandbox_provider.go), [SDK interface](../../../pluginsdk/sandbox_provider.go), [wire messages](../../../pluginsdk/proto/kandev/plugin/v1/plugin.proto), and [host dispatch checks](../../../apps/backend/internal/plugins/sandbox_provider_dispatch.go).
 
 ## 5. What the Nono plugin implements
 
@@ -169,6 +203,38 @@ The current Nono plugin is already an adapter between Kandev's policy contract a
 The recommendation is to add those adapters when a concrete backend or consumer needs them. An adapter must declare missing guarantees. It cannot manufacture exact-port enforcement, operator approval, or policy attestation that the backend cannot supply. Some integrations may require a versioned contract extension.
 
 No OCI, OpenSandbox, or Kubernetes adapter is delivered by these two PRs.
+
+## 11. Nono maturity at the 2026-10-28 checkpoint
+
+The Kandev integration is experimental, with real end-to-end evidence on a narrow supported configuration. This assessment concerns the integration, not the maturity of the upstream Nono project.
+
+### What has actual runtime evidence
+
+The October 27 acceptance record uses pinned Nono 0.80.0 on Linux amd64. Separate runtime conformance checks passed for filesystem/network enforcement, approval responses, PTY input/resize, cancellation, cleanup, and fresh process restart.
+
+The managed transport receipt uses Pi ACP 0.0.34 and Pi 1.3.0. It records actual ACP tools and MCP, native terminal input/resize and MCP, and permitted work alongside filesystem/network denials. It also records same-session restart with a rotated MCP endpoint, active cancellation with descendant cleanup, sibling isolation, and scoped cleanup with workspace retention.
+
+Discovery, operator decisions, and policy learning have separate recorded checks. The standalone runtime conformance suite alone does not establish those outcomes. A successful replacement sales conversation does not establish recovery of the original failed Task 04 session.
+
+### What remains limited or unsupported
+
+The supported configuration is Linux amd64 with Local/Worktree executors and the required host containment facilities. These receipts do not establish support for every agent, operating system, executor, or Nono version.
+
+Nono's session registry supplies process identity but no accepted current-policy attestation. The host therefore reports confinement status as unknown. Successful negative tests do not justify a continuously verified protection badge.
+
+Approval support covers verified file operations. Denial reports cover only part of filesystem activity and do not provide a complete network audit. Network rules authorize destination TCP connections through the core proxy. They do not prove application-level HTTP/HTTPS protocol enforcement.
+
+### What the SDK rebase did not complete
+
+The host now imports `github.com/kdlbs/kandev/pluginsdk` from `pluginsdk/`. The Nono plugin at `8f68c6a10add` still imports `github.com/kandev/kandev/pkg/pluginsdk`. Its `go.mod` replaces the old host module with the sibling `apps/backend` checkout. Its `.kandev-sdk-ref` still pins the earlier host contract at `beca1157060f61a7a4dafbec0e759e71a469de98`.
+
+The companion plugin therefore still needs SDK source migration, dependency/pin updates, and package validation. Its old local dependency layout does not consume the extracted SDK. This source migration gap does not by itself prove that a previously built plugin binary is wire-incompatible.
+
+The recorded managed acceptance predates SDK extraction. It was not replayed against the current rebased host/plugin pair. Current host unit and integration checks are separate evidence, not a replacement for that replay.
+
+GitHub inspection on October 28 found plugin PR #2 still open as a draft and no published GitHub release. Its README still describes the earlier pending acceptance checkpoint. Release documentation must be reconciled with the later host acceptance record. The sandbox feature remains off in shipped profiles.
+
+Before declaring this pair ready for general use, migrate and build the plugin against the extracted SDK, replay isolated managed acceptance, and record the exact package/runtime digests. Keep the platform, audit, and attestation limits explicit in its release documentation.
 
 ## Reference terms
 
