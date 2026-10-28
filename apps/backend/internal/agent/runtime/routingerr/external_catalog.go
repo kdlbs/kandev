@@ -108,6 +108,9 @@ func externalCatalogTermMatcher(in Input, eligible bool) func(string) bool {
 	}
 }
 
+// externalKeywordDecision applies the catalog's effective scope: Match has
+// already narrowed a requested account or model scope to path_model when the
+// observation lacks that identity.
 func externalKeywordDecision(match externalcatalog.Decision, in Input) *KeywordDecision {
 	decision := keywordDecision(externalCatalogGroup(Code(match.Code)), in)
 	decision.Scope = match.Scope

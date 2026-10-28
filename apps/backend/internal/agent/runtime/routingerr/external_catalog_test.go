@@ -112,6 +112,21 @@ func TestExternalCatalog_EligibleContextAppliesScopeBackoffAndReset(t *testing.T
 	}
 }
 
+func TestExternalCatalog_EligibleScopeNeedsIdentity(t *testing.T) {
+	installExternalCatalogForTest(t, parseExternalCatalogForTest(t))
+	eligible := KeywordContext{Enabled: true, Diagnostic: true}
+	got := Classify(Input{Phase: PhasePromptSend, ProviderID: "example-gateway", Stderr: "Error: credit balance exhausted",
+		KeywordContext: eligible})
+	if got.Keyword == nil || got.Keyword.Scope != externalcatalog.ScopePathModel {
+		t.Fatalf("account scope without account id = %+v", got.Keyword)
+	}
+	got = Classify(Input{Phase: PhasePromptSend, ProviderID: "example-gateway", Stderr: "Error: shard saturated",
+		KeywordContext: eligible})
+	if got.Keyword == nil || got.Keyword.Scope != externalcatalog.ScopePathModel {
+		t.Fatalf("model scope without model id = %+v", got.Keyword)
+	}
+}
+
 func TestExternalCatalog_QuotedTermsDoNotMatch(t *testing.T) {
 	installExternalCatalogForTest(t, parseExternalCatalogForTest(t))
 	got := Classify(Input{Phase: PhasePromptSend, ProviderID: "example-gateway",
