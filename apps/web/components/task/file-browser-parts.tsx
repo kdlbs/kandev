@@ -10,6 +10,7 @@ import {
   IconRefresh,
   IconDotsVertical,
   IconTrash,
+  IconCopy,
 } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
+import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
@@ -140,15 +142,19 @@ export function FileTreeNodeTouchActions({
   node,
   showTouchActions,
   onAddToChatContext,
+  selectedCount = 0,
 }: {
   node: FileTreeNode;
   showTouchActions?: boolean;
   onAddToChatContext?: (node: FileTreeNode) => void;
+  selectedCount?: number;
 }) {
   const { t } = useTranslation();
+  const copyPath = useCopyRepositoryPath();
   const deleteAction = useFileDeleteAction();
   const deletePendingRef = React.useRef(false);
-  if (!showTouchActions || (!onAddToChatContext && !deleteAction)) return null;
+  const isBulk = selectedCount > 1;
+  if (!showTouchActions || (isBulk && !onAddToChatContext && !deleteAction)) return null;
 
   const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
 
@@ -181,6 +187,15 @@ export function FileTreeNodeTouchActions({
           deleteAction?.onDelete();
         }}
       >
+        {!isBulk && (
+          <DropdownMenuItem
+            className="min-h-11 cursor-pointer"
+            onSelect={() => void copyPath(node.path)}
+          >
+            <IconCopy className="h-3.5 w-3.5" />
+            {t("task:copyPath")}
+          </DropdownMenuItem>
+        )}
         {onAddToChatContext && (
           <DropdownMenuItem
             data-testid="file-tree-touch-add-to-chat"
@@ -286,6 +301,7 @@ export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowP
         node={node}
         showTouchActions={showTouchActions}
         onAddToChatContext={onAddToChatContext}
+        selectedCount={props.selectedCount}
       />
     </div>
   );
