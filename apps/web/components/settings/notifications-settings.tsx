@@ -17,6 +17,7 @@ import {
   useIsDirty,
   type NotificationsState,
 } from "@/components/settings/notifications-settings-actions";
+import { WebPushSection } from "@/components/settings/web-push-section";
 import { ExternalProvidersSection } from "@/components/settings/notifications-settings-external-providers";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
@@ -126,6 +127,7 @@ export function NotificationsSettings() {
           onRefreshPermission={actions.handleRefreshPermission}
           onTestNotification={actions.handleTestNotification}
         />
+        <WebPushSection />
         <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
         <ExternalProvidersSection
           appriseAvailable={appriseAvailable}
