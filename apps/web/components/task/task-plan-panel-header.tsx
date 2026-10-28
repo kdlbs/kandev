@@ -5,6 +5,7 @@ import { PanelHeaderBarSplit } from "./panel-primitives";
 import { TaskPlanRevisions } from "./task-plan-revisions";
 import { getPlanToolbarImplementState } from "./task-plan-implement";
 import { ImplementPlanButton } from "./chat/implement-plan-button";
+import { PlanDownloadButton } from "./plan-download-button";
 import { useImplementPlanRunner } from "@/hooks/domains/kanban/use-plan-actions";
 import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
@@ -110,6 +111,7 @@ export function PlanPanelHeader({
               }}
             />
           )}
+          <PlanDownloadButton draftContent={draftContent} />
           <TaskPlanRevisions
             taskId={taskId}
             revisions={revisions}
