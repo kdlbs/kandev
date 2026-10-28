@@ -1,7 +1,21 @@
 import path from "node:path";
-import { expect, test } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test as base } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+
+const test = base.extend<{ cleanSeedCheckout: void }>({
+  cleanSeedCheckout: [
+    async ({ backend, seedData }, use) => {
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+      try {
+        await use();
+      } finally {
+        resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+      }
+    },
+    { auto: true },
+  ],
+});
 
 // @covers AC-UI-FILE-TREE-NATURAL-ORDER-001.1
 // @covers AC-UI-FILE-TREE-NATURAL-ORDER-001.3
