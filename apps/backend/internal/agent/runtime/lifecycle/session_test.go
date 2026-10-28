@@ -66,6 +66,7 @@ type mockAgentServer struct {
 	materialized         []materializedUpload
 	failMaterialize      bool
 	materializedName     string
+	promptAttachments    [][]v1.MessageAttachment
 }
 
 // materializedUpload records one /api/v1/attachments/materialize request so a
@@ -287,6 +288,12 @@ func (m *mockAgentServer) materializedUploads() []materializedUpload {
 }
 
 // setFailMaterialize makes the materialization endpoint reject every upload.
+func (m *mockAgentServer) promptAttachmentSets() [][]v1.MessageAttachment {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([][]v1.MessageAttachment(nil), m.promptAttachments...)
+}
+
 func (m *mockAgentServer) setFailMaterialize(fail bool) {
 	m.mu.Lock()
 	m.failMaterialize = fail
@@ -331,6 +338,13 @@ func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 		})
 		return resp
 	case "agent.prompt":
+		var request struct {
+			Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
+		}
+		_ = msg.ParsePayload(&request)
+		m.mu.Lock()
+		m.promptAttachments = append(m.promptAttachments, request.Attachments)
+		m.mu.Unlock()
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success": true,
 		})

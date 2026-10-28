@@ -17,6 +17,20 @@ describe("buildLinkedIssueTitle", () => {
     );
   });
 
+  it("replaces a Sentry base32 prefix when relinking to another provider", () => {
+    expect(buildLinkedIssueTitle("WEB-1A: Fix login", "WEB-1B")).toBe("WEB-1B: Fix login");
+    expect(buildLinkedIssueTitle("WEB-A: Fix login", "ENG-20")).toBe("ENG-20: Fix login");
+    expect(buildLinkedIssueTitle("WEB-OIL: Fix login", "PROJ-12")).toBe("PROJ-12: Fix login");
+    expect(buildLinkedIssueTitle("WEB-1AU: Fix login", "ENG-20")).toBe(
+      "ENG-20: WEB-1AU: Fix login",
+    );
+  });
+
+  it("replaces a base32 prefix before applying the title limit", () => {
+    const title = `WEB-1A: ${"x".repeat(51)}…`;
+    expect(buildLinkedIssueTitle(title, "WEB-1B")).toBe(`WEB-1B: ${"x".repeat(51)}…`);
+  });
+
   it("replaces the prefix on a previously-truncated title without exceeding the limit", () => {
     // Simulate a title already truncated by a previous link (60 chars, "…" tail).
     // Equal-length keys keep the composed title at exactly the limit, so this

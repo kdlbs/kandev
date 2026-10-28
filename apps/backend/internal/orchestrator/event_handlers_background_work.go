@@ -21,13 +21,48 @@ func (s *Service) handleBackgroundWorkUpdatedEvent(ctx context.Context, payload 
 	}
 	obs := *payload.Data.BackgroundWork
 	obs.SessionID = sessionID
-	if s.backgroundWorkObserver != nil {
-		_ = s.backgroundWorkObserver.RecordBackgroundWorkloadObservation(ctx, obs, payload.TaskID, sessionID)
-	}
+	published := s.recordBackgroundWorkObservation(ctx, obs, payload.TaskID, sessionID)
 	if s.eventBus != nil {
 		subject := events.BuildBackgroundWorkUpdatedSubject(sessionID)
-		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &obs))
+		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &published))
 	}
+}
+
+// recordBackgroundWorkObservation persists one observation and returns the
+// projection to publish. Observers that can report the committed row let the
+// publication carry its durable revision, output, and exit status; providers'
+// raw adapter frames lose those fields at the journal boundary.
+func (s *Service) recordBackgroundWorkObservation(
+	ctx context.Context,
+	obs streams.WorkloadRunObservation,
+	taskID, sessionID string,
+) streams.WorkloadRunObservation {
+	if s.backgroundWorkObserver == nil {
+		return obs
+	}
+	if recorder, ok := s.backgroundWorkObserver.(BackgroundWorkRecordingObserver); ok {
+		committed, err := recorder.RecordBackgroundWorkloadObservationWithResult(ctx, obs, taskID, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to record background workload observation",
+				zap.String("session_id", sessionID),
+				zap.String("work_id", obs.WorkID),
+				zap.Error(err))
+			return obs
+		}
+		// An adapter declaration wins over the projected row; a frame without
+		// one keeps the declaration already recorded for this workload. Dynamic
+		// availability always follows the committed state.
+		if obs.Capabilities.HasDeclaration() {
+			committed.Capabilities = obs.Capabilities
+		}
+		committed.Capabilities = streams.ApplyWorkloadActionAvailability(
+			committed.Capabilities,
+			committed.State,
+		)
+		return committed
+	}
+	_ = s.backgroundWorkObserver.RecordBackgroundWorkloadObservation(ctx, obs, taskID, sessionID)
+	return obs
 }
 
 func (s *Service) handleBackgroundWorkOutputEvent(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
@@ -69,9 +104,13 @@ func buildObservationFromNormalized(payload *runtime.AgentStreamEventPayload, or
 	if workID == "" {
 		workID = payload.Data.ToolCallID
 	}
-	return &streams.WorkloadRunObservation{
-		SessionID:    payload.SessionID,
-		WorkID:       workID,
+	obs := &streams.WorkloadRunObservation{
+		SessionID: payload.SessionID,
+		WorkID:    workID,
+		// Only the adapter-declared provider run identity is trusted here.
+		// Deriving it from WorkID would invent a second run for a provider
+		// whose item and process identities differ (native Codex).
+		RunID:        bw.RunID,
 		Kind:         streams.NormalizeWorkloadKind(string(bw.Kind)),
 		Title:        title,
 		State:        state,
@@ -79,6 +118,10 @@ func buildObservationFromNormalized(payload *runtime.AgentStreamEventPayload, or
 		SourceCallID: payload.Data.ToolCallID,
 		OriginTurnID: originTurnID,
 	}
+	if bw.Capabilities != nil {
+		obs.Capabilities = *bw.Capabilities
+	}
+	return obs
 }
 
 func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
@@ -104,11 +147,11 @@ func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Con
 	}
 
 	if s.backgroundWorkObserver != nil {
-		_ = s.backgroundWorkObserver.RecordBackgroundWorkloadObservation(ctx, obs, payload.TaskID, payload.SessionID)
-	}
-	if s.eventBus != nil {
-		subject := events.BuildBackgroundWorkUpdatedSubject(payload.SessionID)
-		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &obs))
+		published := s.recordBackgroundWorkObservation(ctx, obs, payload.TaskID, payload.SessionID)
+		if s.eventBus != nil {
+			subject := events.BuildBackgroundWorkUpdatedSubject(payload.SessionID)
+			_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &published))
+		}
 	}
 }
 
@@ -120,7 +163,19 @@ type BackgroundWorkSettler interface {
 	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
 }
 
+// BackgroundWorkRecordingObserver optionally reports the committed projection
+// after recording an observation. Publishers use it to carry the durable
+// revision and retained output instead of the adapter's raw frame.
+type BackgroundWorkRecordingObserver interface {
+	RecordBackgroundWorkloadObservationWithResult(
+		ctx context.Context,
+		obs streams.WorkloadRunObservation,
+		taskID, sessionID string,
+	) (streams.WorkloadRunObservation, error)
+}
+
 var _ BackgroundWorkSettler = (*taskservice.Service)(nil)
+var _ BackgroundWorkRecordingObserver = (*taskservice.Service)(nil)
 
 func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
 	settler, _ := s.backgroundWorkObserver.(BackgroundWorkSettler)

@@ -6,15 +6,19 @@ import type { SentryIssue, SentryLevel, SentryStatus } from "@/lib/types/sentry"
 import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
 import { useTranslation } from "react-i18next";
 
-// Sentry short IDs look like "PROJ-123" — alphanumeric uppercase project slug
-// followed by a numeric counter. Underscores and hyphens are allowed in the
-// project slug part.
-export const SENTRY_SHORT_ID_RE = /^[A-Z][A-Z0-9_-]*-\d+$/;
-export const SENTRY_SHORT_ID_EXTRACT_RE = /\b[A-Z][A-Z0-9_-]*-\d+\b/;
+// Sentry encodes issue counters in base32 and accepts O, I, and L as aliases.
+export const SENTRY_SHORT_ID_RE = /^[A-Z][A-Z0-9_-]*-[0-9A-TV-Z]+$/i;
+export const SENTRY_SHORT_ID_EXTRACT_RE = /\b[A-Z][A-Z0-9_-]*-[0-9A-TV-Z]+(?![A-Z0-9_-])/i;
 
 export function extractSentryShortId(input: string | undefined | null): string | null {
   if (!input) return null;
-  const match = input.toUpperCase().match(SENTRY_SHORT_ID_EXTRACT_RE);
+  const normalized = input.toUpperCase();
+  const issuePath = normalized.match(/\/ISSUES(?:\/([^/?#]*)|(?=[?#]|$))/);
+  if (issuePath) {
+    const issueId = issuePath[1] ?? "";
+    return SENTRY_SHORT_ID_RE.test(issueId) ? issueId : null;
+  }
+  const match = normalized.match(SENTRY_SHORT_ID_EXTRACT_RE);
   return match ? match[0] : null;
 }
 

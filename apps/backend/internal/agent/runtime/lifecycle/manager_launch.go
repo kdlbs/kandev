@@ -730,6 +730,12 @@ func (m *Manager) buildAgentCommandWithContext(
 	if err != nil {
 		return agentCommands{}, err
 	}
+	if agentConfig.ID() == agents.CopilotACPAgentID && profileInfo != nil && len(profileInfo.CopilotSelectedPlugins) > 0 {
+		// Native-binary preference is not version-qualified. Typed plugin
+		// selections must use the selected managed package so inventory and
+		// the ACP process agree on one runtime.
+		preferNative = false
+	}
 	// Allow model override from request (for dynamic model switching)
 	if req.ModelOverride != "" {
 		model = req.ModelOverride
@@ -2007,6 +2013,10 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.AgentArgs = cmds.args
 		execution.ContinueArgs = cmds.continueArgs
 		execution.LaunchWrapper = cmds.wrapper
+		execution.ExecutionProfileID = executionProfileID(req)
+		if profileInfo != nil {
+			execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
+		}
 		if req.ACPSessionID != "" && execution.ACPSessionID == "" {
 			execution.ACPSessionID = req.ACPSessionID
 		}
@@ -2437,6 +2447,10 @@ func (m *Manager) buildExecutionFromInstance(
 	prepResult *EnvPrepareResult,
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
+	execution.ExecutionProfileID = executionProfileID(req)
+	if profileInfo != nil {
+		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
+	}
 	execution.SessionID = req.SessionID
 	execution.TaskScope = req.TaskScope
 	execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
@@ -3088,9 +3102,15 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
+	agentArgs, err := m.prepareCopilotPluginArgs(ctx, execution, configureEnv, execution.AgentArgs)
+	if err != nil {
+		m.updateExecutionError(execution.ID, "failed to prepare copilot profile plugins: "+err.Error())
+		return "", err
+	}
+
 	// Starting with stale agent configuration could expose an old credential
 	// set, so the subprocess must not start when configuration delivery fails.
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper); err != nil {
+	if err := client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

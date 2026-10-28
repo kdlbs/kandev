@@ -45,6 +45,7 @@ import {
 import { PluginPageFrame } from "@/components/plugins/plugin-page";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import {
+  mapWorkflowItem,
   mapWorkspaceItem,
   promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
@@ -931,21 +932,6 @@ function firstKnownWorkspaceId(...ids: (string | null | undefined)[]): string | 
     if (value) return value;
   }
   return null;
-}
-
-function mapWorkflowItem(workflow: Workflow) {
-  return {
-    id: workflow.id,
-    workspaceId: workflow.workspace_id,
-    name: workflow.name,
-    description: workflow.description ?? null,
-    sortOrder: workflow.sort_order ?? 0,
-    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
-    ...(workflow.source !== undefined ? { source: workflow.source } : {}),
-    ...(workflow.source_path !== undefined ? { source_path: workflow.source_path } : {}),
-    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
-    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
-  };
 }
 
 function normalizePath(pathname: string): string {

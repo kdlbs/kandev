@@ -883,6 +883,12 @@ func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, ex
 	if err != nil {
 		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, err
 	}
+	if baseCommand.IsEmpty() {
+		baseCommand, err = m.copilotPassthroughBaseCommand(ctx, agentConfig, profileInfo)
+		if err != nil {
+			return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, err
+		}
+	}
 
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Runtime:          execution.RuntimeName,
@@ -999,6 +1005,9 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	if err != nil {
 		return err
 	}
+	if err := m.applyPassthroughCopilotPlugins(ctx, execution, profileInfo, &cmd, env); err != nil {
+		return err
+	}
 
 	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
 		return err
@@ -1109,6 +1118,12 @@ func (m *Manager) freshPassthroughCommandForResolved(ctx context.Context, execut
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, passthroughCommand{}, err
 	}
+	if baseCommand.IsEmpty() {
+		baseCommand, err = m.copilotPassthroughBaseCommand(ctx, resolved.agentConfig, resolved.profile)
+		if err != nil {
+			return agents.PassthroughConfig{}, nil, passthroughCommand{}, err
+		}
+	}
 
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Runtime:          execution.RuntimeName,
@@ -1142,6 +1157,12 @@ func (m *Manager) resumePassthroughCommandWithPreparation(ctx context.Context, e
 	baseCommand, err := m.openCodePassthroughCommand(ctx, resolved.agentConfig, execution.RuntimeName)
 	if err != nil {
 		return passthroughCommand{}, err
+	}
+	if baseCommand.IsEmpty() {
+		baseCommand, err = m.copilotPassthroughBaseCommand(ctx, resolved.agentConfig, resolved.profile)
+		if err != nil {
+			return passthroughCommand{}, err
+		}
 	}
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Runtime:          execution.RuntimeName,
@@ -1313,6 +1334,9 @@ func (m *Manager) launchResumedPassthroughProcess(ctx context.Context, execution
 
 	env, err := m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
 	if err != nil {
+		return err
+	}
+	if err := m.applyPassthroughCopilotPlugins(ctx, execution, resolved.profile, &cmd, env); err != nil {
 		return err
 	}
 
@@ -1575,6 +1599,10 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	env, err := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
 	if err != nil {
 		m.notifyFallbackInfrastructureFailure(runner, sessionID, "resolve profile environment", err)
+		return
+	}
+	if err := m.applyPassthroughCopilotPlugins(ctx, execution, resolved.profile, &cmd, env); err != nil {
+		m.notifyFallbackInfrastructureFailure(runner, sessionID, "prepare copilot profile plugins", err)
 		return
 	}
 	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, rt.StripEnv, true)

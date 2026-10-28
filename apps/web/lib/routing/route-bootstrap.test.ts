@@ -16,6 +16,7 @@ const OFFICE_COOKIE = "office-active-workspace";
 
 import {
   apiOriginPort,
+  mapWorkflowItem,
   mapWorkspaceItem,
   promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
@@ -25,7 +26,13 @@ import {
   resolveSettingsActiveWorkspaceId,
   scopedCookieName,
 } from "./route-bootstrap";
-import type { ListWorkspacesResponse } from "@/lib/types/http";
+import {
+  agentProfileId,
+  workflowId,
+  workspaceId,
+  type ListWorkspacesResponse,
+  type Workflow,
+} from "@/lib/types/http";
 
 type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
 
@@ -64,6 +71,68 @@ describe("mapWorkspaceItem", () => {
       office_workflow_id: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",
+    });
+  });
+});
+
+describe("mapWorkflowItem", () => {
+  const listedWorkflow = (overrides: Partial<Workflow> = {}): Workflow => ({
+    id: workflowId("wf-1"),
+    workspace_id: workspaceId("ws-1"),
+    name: "Development",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-02T00:00:00Z",
+    ...overrides,
+  });
+
+  it("keeps the editable workflow fields the settings page saves", () => {
+    expect(
+      mapWorkflowItem(
+        listedWorkflow({
+          description: "Plan, implement, review",
+          prompt: "Shared step-entry instructions",
+          sort_order: 2,
+          agent_profile_id: agentProfileId("profile-1"),
+          hidden: false,
+          style: "kanban",
+        }),
+      ),
+    ).toEqual({
+      id: "wf-1",
+      workspaceId: "ws-1",
+      name: "Development",
+      description: "Plan, implement, review",
+      prompt: "Shared step-entry instructions",
+      sortOrder: 2,
+      agent_profile_id: "profile-1",
+      hidden: false,
+      style: "kanban",
+    });
+  });
+
+  it("maps a prompt the API omitted as empty", () => {
+    expect(mapWorkflowItem(listedWorkflow())).toEqual({
+      id: "wf-1",
+      workspaceId: "ws-1",
+      name: "Development",
+      description: null,
+      prompt: "",
+      sortOrder: 0,
+    });
+  });
+
+  it("preserves provenance for synced workflows", () => {
+    expect(
+      mapWorkflowItem(
+        listedWorkflow({
+          source: "github",
+          source_path: ".kandev/workflows/development.yaml",
+        }),
+      ),
+    ).toMatchObject({
+      id: "wf-1",
+      source: "github",
+      source_path: ".kandev/workflows/development.yaml",
     });
   });
 });

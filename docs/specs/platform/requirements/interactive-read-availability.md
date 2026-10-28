@@ -1,7 +1,8 @@
 ---
-status: draft
+status: active
 system: platform
 created: 2026-09-12
+updated: 2026-10-27
 owners:
   - kandev
 ---
@@ -69,12 +70,15 @@ Task and workspace systems retain authority over their records and permissions.
 #### Acceptance criteria
 
 - **AC-PLATFORM-INTERACTIVE-READS-005.1:** Temporary task-read failures shall show localized availability copy and Retry. They shall not imply deletion or lost access.
-- **AC-PLATFORM-INTERACTIVE-READS-005.2:** Each task-navigation read attempt shall finish within ten seconds. A timeout shall be classified as temporary and use the same retry budget. A recovery cycle shall perform at most two automatic retries; exhausted recovery shall retain manual Retry and the task-overview link.
+- **AC-PLATFORM-INTERACTIVE-READS-005.2:** Each task-navigation read attempt shall finish within ten seconds. Timeouts shall remain temporary errors. One recovery cycle shall permit at most four automatic retries within thirty seconds of visible-tab time. Exhausted recovery shall retain manual Retry and the task-overview link.
 - **AC-PLATFORM-INTERACTIVE-READS-005.3:** Concurrent recovery triggers shall share one read. Navigation, authentication changes, and unmount shall invalidate obsolete recovery work.
 - **AC-PLATFORM-INTERACTIVE-READS-005.4:** Successful recovery shall open the selected task and retain its valid selected session. It shall not select a task from an earlier request.
 - **AC-PLATFORM-INTERACTIVE-READS-005.5:** Missing or inaccessible tasks shall retain the existing generic unavailable state. Authorization errors shall not receive automatic retries.
 - **AC-PLATFORM-INTERACTIVE-READS-005.6:** Desktop and phone users shall have equivalent keyboard and touch recovery actions. Phone targets shall measure at least 44px without horizontal overflow.
-- **AC-PLATFORM-INTERACTIVE-READS-005.7:** When a refresh fails after task details load, those details shall remain visible. The page shall identify the failed refresh without presenting stale data as newly verified.
+- **AC-PLATFORM-INTERACTIVE-READS-005.7:** When a temporary task read fails after content appears, the current task content and valid selected session shall remain visible during recovery and exhaustion. This applies to loaded details and the current authorized task projection. The page shall show recovery status without claiming that retained data is newly verified. A different task, changed identity or workspace, or permanent failure shall not reuse that content.
+- **AC-PLATFORM-INTERACTIVE-READS-005.8:** When a temporary outage lasts up to fifteen seconds and each read settles within one second, task navigation shall recover automatically. Recovery shall not require another click, focus event, navigation, or page reload.
+- **AC-PLATFORM-INTERACTIVE-READS-005.9:** Hidden tabs shall pause automatic retry delays and the visible-time budget. Returning to the tab shall resume the remaining cycle. Concurrent foreground triggers shall not reset an active cycle's budget or duplicate its requests.
+- **AC-PLATFORM-INTERACTIVE-READS-005.10:** During recovery, the page shall announce progress and retain a reachable task-overview action. Retry shall keep its accessible name and remain disabled while the shared cycle runs. A server retry delay shall never be shortened to fit the remaining budget. When no compliant retry fits, the cycle shall stop within its budget.
 
 ### REQ-PLATFORM-INTERACTIVE-READS-006: Navigation reads without writer reservation
 

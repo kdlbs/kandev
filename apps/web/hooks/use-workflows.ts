@@ -7,6 +7,7 @@ import {
   isCurrentWorkspaceContext,
   retryAfterMilliseconds,
 } from "@/lib/state/workspace-context";
+import { mapWorkflowItem } from "@/lib/routing/route-bootstrap";
 import type { AppState } from "@/lib/state/store";
 import type { StoreApi } from "zustand";
 import { useForegroundRefresh } from "./use-foreground-refresh";
@@ -17,23 +18,6 @@ const WORKSPACE_CONTEXT_RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const NOOP_REFRESH = () => {};
 
 type SetWorkflows = AppState["setWorkflows"];
-type JourneyWorkflow = Awaited<ReturnType<typeof readJourneyWorkflows>>["workflows"][number];
-
-function mapWorkflowItem(workflow: JourneyWorkflow) {
-  return {
-    id: workflow.id,
-    workspaceId: workflow.workspace_id,
-    name: workflow.name,
-    description: workflow.description,
-    prompt: workflow.prompt,
-    sortOrder: workflow.sort_order ?? 0,
-    agent_profile_id: workflow.agent_profile_id,
-    source: workflow.source,
-    source_path: workflow.source_path,
-    hidden: workflow.hidden,
-    style: workflow.style,
-  };
-}
 
 function canRetryWorkspaceContext(
   readState: WorkspaceContextReadState | undefined,

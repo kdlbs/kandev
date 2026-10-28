@@ -175,6 +175,13 @@ type Config struct {
 	// launcher-side kill-path removal (Layer 5.9).
 	AgentSurvivalEnabled bool
 
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value for this launch, copied directly from the managed startup
+	// contract. An unmanaged/direct launch (Load(), no startup contract)
+	// resolves this to false. It gates OpenCode's provider background
+	// attestation, never the existing Claude/Codex observations.
+	AgentBackgroundWorkEnabled bool
+
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
 }
@@ -311,6 +318,11 @@ type InstanceConfig struct {
 	// (AC-EXECUTORS-SURVIVAL-001.6), inherited from the server startup
 	// contract. It sizes the process manager's updates channel buffer.
 	DetachedEventLimit int
+
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value inherited from the server startup contract. False keeps
+	// provider background attestation off for this instance.
+	AgentBackgroundWorkEnabled bool
 
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
@@ -478,6 +490,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
 	homeDir := resolveHomeDir()
 	agentSurvivalEnabled := false
+	agentBackgroundWorkEnabled := false
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
@@ -497,6 +510,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		// answer here (every managed launch states it), so it is copied
 		// unconditionally rather than guarded by a zero-value check.
 		agentSurvivalEnabled = startup.AgentSurvivalEnabled
+		agentBackgroundWorkEnabled = startup.AgentBackgroundWorkEnabled
 	}
 
 	cfg := &Config{
@@ -514,23 +528,24 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
-		ShellEnabled:              getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:                  getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
-		LogFormat:                 getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		McpLogFile:                getEnv("KANDEV_MCP_LOG_FILE", ""),
-		VscodeCommand:             getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
-		ListenHostOverride:        getEnv("AGENTCTL_LISTEN_HOST", ""),
-		IdleTimeout:               idleTimeout,
-		IdleReaperInterval:        idleReaperInterval,
-		NotificationQueueCapacity: notificationQueueCapacity,
-		PromptCancelJoinTimeout:   promptCancelJoinTimeout,
-		OTLPEndpoint:              otlpEndpoint,
-		UnownedPeriod:             unownedPeriod,
-		DetachedEventLimit:        detachedEventLimit,
-		HomeDir:                   homeDir,
-		ServerIdentity:            generateSelfToken(),
-		DiagnosticLogPath:         resolveDiagnosticLogPath(homeDir),
-		AgentSurvivalEnabled:      agentSurvivalEnabled,
+		ShellEnabled:               getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		LogLevel:                   getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
+		LogFormat:                  getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		McpLogFile:                 getEnv("KANDEV_MCP_LOG_FILE", ""),
+		VscodeCommand:              getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ListenHostOverride:         getEnv("AGENTCTL_LISTEN_HOST", ""),
+		IdleTimeout:                idleTimeout,
+		IdleReaperInterval:         idleReaperInterval,
+		NotificationQueueCapacity:  notificationQueueCapacity,
+		PromptCancelJoinTimeout:    promptCancelJoinTimeout,
+		OTLPEndpoint:               otlpEndpoint,
+		UnownedPeriod:              unownedPeriod,
+		DetachedEventLimit:         detachedEventLimit,
+		HomeDir:                    homeDir,
+		ServerIdentity:             generateSelfToken(),
+		DiagnosticLogPath:          resolveDiagnosticLogPath(homeDir),
+		AgentSurvivalEnabled:       agentSurvivalEnabled,
+		AgentBackgroundWorkEnabled: agentBackgroundWorkEnabled,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -653,24 +668,25 @@ func generateSelfToken() string {
 // If port is 0, it should be allocated by the caller.
 func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
 	cfg := &InstanceConfig{
-		Port:                      port,
-		MCPHost:                   c.MCPReachableHost(),
-		Protocol:                  c.Defaults.Protocol,
-		AgentCommand:              c.Defaults.AgentCommand,
-		WorkDir:                   c.Defaults.WorkDir,
-		AutoStart:                 c.Defaults.AutoStart,
-		AutoApprovePermissions:    c.Defaults.AutoApprovePermissions,
-		ShellEnabled:              c.ShellEnabled,
-		LogLevel:                  c.LogLevel,
-		LogFormat:                 c.LogFormat,
-		ProcessBufferMaxBytes:     c.Defaults.ProcessBufferMaxBytes,
-		NotificationQueueCapacity: c.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
-		DetachedEventLimit:        c.DetachedEventLimit,
-		VscodeCommand:             c.VscodeCommand,
-		McpMode:                   "task",
-		AuthToken:                 c.AuthToken,
-		CreateReadyMillis:         &atomic.Int64{},
+		Port:                       port,
+		MCPHost:                    c.MCPReachableHost(),
+		Protocol:                   c.Defaults.Protocol,
+		AgentCommand:               c.Defaults.AgentCommand,
+		WorkDir:                    c.Defaults.WorkDir,
+		AutoStart:                  c.Defaults.AutoStart,
+		AutoApprovePermissions:     c.Defaults.AutoApprovePermissions,
+		ShellEnabled:               c.ShellEnabled,
+		LogLevel:                   c.LogLevel,
+		LogFormat:                  c.LogFormat,
+		ProcessBufferMaxBytes:      c.Defaults.ProcessBufferMaxBytes,
+		NotificationQueueCapacity:  c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:    c.PromptCancelJoinTimeout,
+		DetachedEventLimit:         c.DetachedEventLimit,
+		AgentBackgroundWorkEnabled: c.AgentBackgroundWorkEnabled,
+		VscodeCommand:              c.VscodeCommand,
+		McpMode:                    "task",
+		AuthToken:                  c.AuthToken,
+		CreateReadyMillis:          &atomic.Int64{},
 	}
 
 	applyOverrides(cfg, overrides)

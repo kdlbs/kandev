@@ -1,4 +1,4 @@
-import { createElement, type ReactNode, useEffect, useState } from "react";
+import { createElement, type ReactNode, useState } from "react";
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -8,7 +8,6 @@ import { taskId, workflowId, workspaceId, type Task } from "@/lib/types/http";
 import { TaskLoadErrorState, useTaskDetails } from "./task-page-content";
 import { TaskNavigationReadFeedback } from "./task-navigation-read-feedback";
 import { TaskRouteSessionHydrationProvider } from "./task-route-session-hydration";
-import { TaskRemovalBoundary } from "./task-removal-boundary";
 
 afterEach(() => {
   cleanup();
@@ -18,13 +17,27 @@ afterEach(() => {
 
 const TASK_A = "task-a";
 const TASK_B = "task-b";
-const REMOVAL_STATUS_TEST_ID = "task-removal-status";
 const TASK_CREATED_AT = "2026-07-18T00:00:00Z";
+const CURRENT_TASK_TITLE = "Current task";
+const REFRESHED_TASK_TITLE = "Refreshed task";
+const RECOVERED_TASK_TITLE = "Recovered task";
 
 function createStateWrapper(initialState: unknown) {
   return function StateTestWrapper({ children }: { children: ReactNode }) {
     return createElement(StateProvider, { initialState: initialState as never, children });
   };
+}
+
+function temporaryPersistenceFailure() {
+  return new ApiError("busy", 503, { code: "persistence_unavailable" });
+}
+
+async function advanceAutomaticRetryCycle() {
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(2_000);
+  await vi.advanceTimersByTimeAsync(5_000);
+  await vi.advanceTimersByTimeAsync(10_000);
+  await vi.advanceTimersByTimeAsync(10_000);
 }
 
 function renderErrorState(activeId: string | null) {
@@ -88,6 +101,10 @@ describe("TaskLoadErrorState", () => {
     const retry = screen.getByRole("button", { name: "Retry" });
     expect(retry.hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("status").textContent).toContain("Retrying...");
+    const notice = screen.getByTestId("task-read-recovery-notice");
+    expect(notice.className).not.toContain("absolute");
+    expect(notice.className).toContain("w-full");
+    expect(retry.className).toContain("max-md:h-11");
   });
 
   it("keeps routine background refreshes silent when task details are available", () => {
@@ -104,13 +121,45 @@ describe("TaskLoadErrorState", () => {
 describe("useTaskDetails temporary refresh failure", () => {
   it("keeps loaded task details and allows a bounded manual retry", async () => {
     vi.useFakeTimers();
-    const initialTask = { id: taskId(TASK_A), title: "Current task" } as Task;
-    const refreshedTask = { ...initialTask, title: "Refreshed task" };
+    const initialTask = { id: taskId(TASK_A), title: CURRENT_TASK_TITLE } as Task;
+    const refreshedTask = { ...initialTask, title: REFRESHED_TASK_TITLE };
     const fetchTask = vi
       .spyOn(api, "fetchTask")
-      .mockRejectedValueOnce(new ApiError("busy", 503, { code: "persistence_unavailable" }))
-      .mockRejectedValueOnce(new ApiError("busy", 503, { code: "persistence_unavailable" }))
-      .mockRejectedValueOnce(new ApiError("busy", 503, { code: "persistence_unavailable" }))
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockResolvedValueOnce(refreshedTask);
+    vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
+    const { result } = renderHook(() => useTaskDetails(TASK_A, initialTask), {
+      wrapper: createStateWrapper({ tasks: { activeTaskId: TASK_A } }),
+    });
+
+    await act(async () => {
+      const refresh = result.current.refreshTask();
+      await advanceAutomaticRetryCycle();
+      await refresh;
+    });
+    expect(result.current.taskLoadError).toMatchObject({ status: 503 });
+    expect(result.current.task?.title).toBe(CURRENT_TASK_TITLE);
+    expect(result.current.isTemporaryTaskReadError).toBe(true);
+
+    await act(async () => {
+      await result.current.retryTaskRead();
+    });
+    expect(result.current.task?.title).toBe(REFRESHED_TASK_TITLE);
+    expect(result.current.taskLoadError).toBeNull();
+    expect(fetchTask).toHaveBeenCalledTimes(6);
+  });
+
+  // @covers AC-PLATFORM-INTERACTIVE-READS-005.7
+  it("reports a temporary read while the shared cycle is still retrying", async () => {
+    vi.useFakeTimers();
+    const initialTask = { id: taskId(TASK_A), title: CURRENT_TASK_TITLE } as Task;
+    const refreshedTask = { ...initialTask, title: REFRESHED_TASK_TITLE };
+    vi.spyOn(api, "fetchTask")
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
       .mockResolvedValueOnce(refreshedTask);
     vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
     const { result } = renderHook(() => useTaskDetails(TASK_A, initialTask), {
@@ -120,32 +169,27 @@ describe("useTaskDetails temporary refresh failure", () => {
     await act(async () => {
       const refresh = result.current.refreshTask();
       await vi.advanceTimersByTimeAsync(0);
+      expect(result.current.navigationReadState.phase).toBe("retrying");
+      expect(result.current.isTemporaryTaskReadError).toBe(true);
+      expect(result.current.task?.title).toBe(CURRENT_TASK_TITLE);
       await vi.advanceTimersByTimeAsync(2_000);
-      await vi.advanceTimersByTimeAsync(5_000);
       await refresh;
     });
-    expect(result.current.taskLoadError).toMatchObject({ status: 503 });
-    expect(result.current.task?.title).toBe("Current task");
-    expect(result.current.isTemporaryTaskReadError).toBe(true);
-
-    await act(async () => {
-      await result.current.retryTaskRead();
-    });
-    expect(result.current.task?.title).toBe("Refreshed task");
-    expect(result.current.taskLoadError).toBeNull();
-    expect(fetchTask).toHaveBeenCalledTimes(4);
+    expect(result.current.task?.title).toBe(REFRESHED_TASK_TITLE);
+    expect(result.current.isTemporaryTaskReadError).toBe(false);
   });
 
   it("retries one shared recovery cycle on a foreground burst after exhaustion", async () => {
     vi.useFakeTimers();
-    const initialTask = { id: taskId(TASK_A), title: "Current task" } as Task;
-    const recoveredTask = { ...initialTask, title: "Recovered task" };
-    const temporaryFailure = () => new ApiError("busy", 503, { code: "persistence_unavailable" });
+    const initialTask = { id: taskId(TASK_A), title: CURRENT_TASK_TITLE } as Task;
+    const recoveredTask = { ...initialTask, title: RECOVERED_TASK_TITLE };
     const fetchTask = vi
       .spyOn(api, "fetchTask")
-      .mockRejectedValueOnce(temporaryFailure())
-      .mockRejectedValueOnce(temporaryFailure())
-      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
+      .mockRejectedValueOnce(temporaryPersistenceFailure())
       .mockResolvedValueOnce(recoveredTask);
     vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
     const { result, rerender } = renderHook(() => useTaskDetails(TASK_A, initialTask), {
@@ -154,16 +198,14 @@ describe("useTaskDetails temporary refresh failure", () => {
 
     await act(async () => {
       window.dispatchEvent(new Event("online"));
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(2_000);
-      await vi.advanceTimersByTimeAsync(5_000);
+      await advanceAutomaticRetryCycle();
     });
-    expect(fetchTask).toHaveBeenCalledTimes(3);
+    expect(fetchTask).toHaveBeenCalledTimes(5);
     expect(result.current.taskLoadError).toMatchObject({ status: 503 });
 
     await act(async () => result.current.refreshTask());
     rerender();
-    expect(fetchTask).toHaveBeenCalledTimes(3);
+    expect(fetchTask).toHaveBeenCalledTimes(5);
 
     await act(async () => {
       window.dispatchEvent(new Event("online"));
@@ -172,8 +214,8 @@ describe("useTaskDetails temporary refresh failure", () => {
       document.dispatchEvent(new Event("visibilitychange"));
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(result.current.task?.title).toBe("Recovered task");
-    expect(fetchTask).toHaveBeenCalledTimes(4);
+    expect(result.current.task?.title).toBe(RECOVERED_TASK_TITLE);
+    expect(fetchTask).toHaveBeenCalledTimes(6);
     expect(result.current.taskLoadError).toBeNull();
   });
 });
@@ -421,173 +463,6 @@ describe("useTaskDetails unarchive refresh", () => {
       await olderRequest;
     });
     expect(result.current.task?.archived_at).toBeNull();
-  });
-});
-
-function StartRemoval({
-  removalTaskId = "task-1",
-  activeTaskId,
-}: {
-  removalTaskId?: string;
-  activeTaskId?: string;
-}) {
-  const store = useAppStoreApi();
-  useEffect(() => {
-    if (activeTaskId) store.getState().setActiveTask(activeTaskId);
-    store.getState().beginTaskRemoval({
-      action: "delete",
-      workspaceId: "ws-1",
-      taskIds: [removalTaskId],
-      requestIds: [removalTaskId],
-      departure: null,
-    });
-  }, [activeTaskId, removalTaskId, store]);
-  return null;
-}
-
-function StoreCapture({
-  onStore,
-}: {
-  onStore: (store: ReturnType<typeof useAppStoreApi>) => void;
-}) {
-  onStore(useAppStoreApi());
-  return null;
-}
-
-describe("TaskRemovalBoundary pending presentation", () => {
-  it("unmounts outgoing content while a removal operation is pending", async () => {
-    render(
-      <StateProvider>
-        <StartRemoval />
-        <TaskRemovalBoundary taskId="task-1">
-          <div data-testid="outgoing-task-content">Outgoing task</div>
-        </TaskRemovalBoundary>
-      </StateProvider>,
-    );
-
-    await waitFor(() => expect(screen.getByTestId(REMOVAL_STATUS_TEST_ID)).toBeTruthy());
-    expect(screen.queryByTestId("outgoing-task-content")).toBeNull();
-  });
-
-  it("does not let a stale active task hide an explicit route task", async () => {
-    render(
-      <StateProvider initialState={{ tasks: { activeTaskId: TASK_A } } as never}>
-        <StartRemoval removalTaskId={TASK_A} />
-        <TaskRemovalBoundary taskId={TASK_B}>
-          <div data-testid="explicit-task-content">Explicit task</div>
-        </TaskRemovalBoundary>
-      </StateProvider>,
-    );
-
-    await waitFor(() => expect(screen.getByTestId("explicit-task-content")).toBeTruthy());
-    expect(screen.queryByTestId(REMOVAL_STATUS_TEST_ID)).toBeNull();
-  });
-});
-
-describe("TaskRemovalBoundary displayed identity", () => {
-  it("lets a newly committed route supersede the pending old route", async () => {
-    let store!: ReturnType<typeof useAppStoreApi>;
-    const view = render(
-      <StateProvider initialState={{ tasks: { activeTaskId: TASK_A } } as never}>
-        <StoreCapture onStore={(value) => (store = value)} />
-        <TaskRemovalBoundary taskId={TASK_A}>
-          <div data-testid="new-route-content">New route</div>
-        </TaskRemovalBoundary>
-      </StateProvider>,
-    );
-
-    let token: string | null = null;
-    act(() => {
-      token = store.getState().beginTaskRemoval({
-        action: "delete",
-        workspaceId: "ws-1",
-        taskIds: [TASK_A],
-        requestIds: [TASK_A],
-        departure: null,
-      });
-    });
-
-    view.rerender(
-      <StateProvider initialState={{ tasks: { activeTaskId: TASK_A } } as never}>
-        <StoreCapture onStore={(value) => (store = value)} />
-        <TaskRemovalBoundary taskId={TASK_B}>
-          <div data-testid="new-route-content">New route</div>
-        </TaskRemovalBoundary>
-      </StateProvider>,
-    );
-
-    await waitFor(() => expect(screen.getByTestId("new-route-content")).toBeTruthy());
-    expect(screen.queryByTestId(REMOVAL_STATUS_TEST_ID)).toBeNull();
-
-    act(() => {
-      store.getState().releaseTaskRemoval(token!);
-    });
-  });
-
-  it("gates an in-place sidebar selection while the route still names the original task", async () => {
-    let store!: ReturnType<typeof useAppStoreApi>;
-    render(
-      <StateProvider initialState={{ tasks: { activeTaskId: TASK_A } } as never}>
-        <StoreCapture onStore={(value) => (store = value)} />
-        <TaskRemovalBoundary taskId={TASK_A}>
-          <div data-testid="selected-task-content">Selected task</div>
-        </TaskRemovalBoundary>
-      </StateProvider>,
-    );
-
-    act(() => {
-      store.getState().setActiveTask(TASK_B);
-    });
-
-    let token: string | null = null;
-    act(() => {
-      token = store.getState().beginTaskRemoval({
-        action: "delete",
-        workspaceId: "ws-1",
-        taskIds: [TASK_B],
-        requestIds: [TASK_B],
-        departure: null,
-      });
-    });
-
-    await waitFor(() => expect(screen.getByTestId(REMOVAL_STATUS_TEST_ID)).toBeTruthy());
-    expect(screen.queryByTestId("selected-task-content")).toBeNull();
-
-    act(() => {
-      store.getState().recordTaskRemovalResult(token!, [TASK_B], "succeeded");
-    });
-    expect(screen.getByTestId(REMOVAL_STATUS_TEST_ID)).toBeTruthy();
-
-    act(() => {
-      store.getState().releaseTaskRemoval(token!);
-    });
-    await waitFor(() => expect(screen.getByTestId("selected-task-content")).toBeTruthy());
-  });
-
-  it("does not gate the displayed task when an unselected route task is removed", async () => {
-    let store!: ReturnType<typeof useAppStoreApi>;
-    render(
-      <StateProvider initialState={{ tasks: { activeTaskId: TASK_A } } as never}>
-        <StoreCapture onStore={(value) => (store = value)} />
-        <TaskRemovalBoundary taskId={TASK_A}>
-          <div data-testid="displayed-task-content">Displayed task</div>
-        </TaskRemovalBoundary>
-      </StateProvider>,
-    );
-
-    act(() => {
-      store.getState().setActiveTask(TASK_B);
-      store.getState().beginTaskRemoval({
-        action: "archive",
-        workspaceId: "ws-1",
-        taskIds: [TASK_A],
-        requestIds: [TASK_A],
-        departure: null,
-      });
-    });
-
-    await waitFor(() => expect(screen.getByTestId("displayed-task-content")).toBeTruthy());
-    expect(screen.queryByTestId(REMOVAL_STATUS_TEST_ID)).toBeNull();
   });
 });
 

@@ -41,7 +41,7 @@ export function useProfileModelCapabilities(
   const isStaticContext = options.skipCapabilityProbe || !modelConfig.supports_dynamic_models;
   const launchSettings = useMemo(
     () => canonicalLaunchSettings(profile),
-    [profile.env_vars, profile.cli_flags, profile.command_prefix],
+    [profile.env_vars, profile.cli_flags, profile.command_prefix, profile.copilot_selected_plugins],
   );
   const currentLaunchKey = profileContextKey(agentName, options.profileId, launchSettings);
   const profileIdentity = `${agentName}:${options.profileId ?? "draft"}`;

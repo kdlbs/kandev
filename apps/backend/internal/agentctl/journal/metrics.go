@@ -35,6 +35,8 @@ var boundedDeliveryLabels = map[string]struct{}{
 	"journal_newer_version": {},
 	"journal_full":          {},
 	"stream_full":           {},
+	"event_too_large":       {},
+	"replay_page_too_large": {},
 	"storage_unavailable":   {},
 	"unknown":               {},
 }
@@ -88,6 +90,10 @@ func classifyJournalError(err error) string {
 		return "journal_newer_version"
 	case errors.Is(err, ErrJournalFull):
 		return "journal_full"
+	case errors.Is(err, ErrEventTooLarge):
+		return "event_too_large"
+	case errors.Is(err, ErrReplayPageTooLarge):
+		return "replay_page_too_large"
 	case errors.Is(err, ErrStreamFull):
 		return "stream_full"
 	case errors.Is(err, ErrSequenceConflict):

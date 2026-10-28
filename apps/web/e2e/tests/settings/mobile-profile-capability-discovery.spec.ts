@@ -336,6 +336,7 @@ test.describe("Mobile profile capability discovery", () => {
           },
         ],
         command_prefix: commandPrefix,
+        copilot_selected_plugins: [],
       });
       await expectWrapperRetry(
         testPage,

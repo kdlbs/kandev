@@ -45,6 +45,55 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
 
 
 class E2EWorkflowContractTest(unittest.TestCase):
+    def test_execution_jobs_cache_the_resolved_pnpm_store_before_frozen_install(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        jobs = (
+            ("e2e", "playwright_image"),
+            ("e2e-containers", "e2e-kubernetes-compatibility"),
+            ("e2e-kubernetes-compatibility", "desktop-e2e"),
+            ("desktop-e2e", "e2e-report"),
+        )
+        for job_name, next_job in jobs:
+            with self.subTest(job=job_name):
+                block = job_block(workflow, job_name, next_job)
+                resolver_match = re.search(
+                    r"(?ms)^      - name: Resolve pnpm store path\n(.*?)(?=^      - name:)",
+                    block,
+                )
+                cache_match = re.search(
+                    r"(?ms)^      - name: Cache pnpm store\n(.*?)(?=^      - name:)",
+                    block,
+                )
+                install_match = re.search(
+                    r"(?ms)^      - name: Install dependencies\n(.*?)(?=^      - name:|\Z)",
+                    block,
+                )
+                self.assertIsNotNone(resolver_match, "missing in-environment store resolution")
+                self.assertIsNotNone(cache_match, "missing pnpm store cache")
+                self.assertIsNotNone(install_match, "missing frozen dependency installation")
+                resolver = resolver_match.group(1)
+                cache = cache_match.group(1)
+                install = install_match.group(1)
+
+                self.assertIn("working-directory: apps", resolver)
+                self.assertIn("continue-on-error: true", resolver)
+                self.assertIn('STORE_PATH="$(pnpm store path --silent)"', resolver)
+                self.assertIn('PNPM_VERSION="$(pnpm --version)"', resolver)
+                self.assertIn('path: ${{ steps.pnpm_store.outputs.path }}', cache)
+                self.assertIn(
+                    "key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}",
+                    cache,
+                )
+                self.assertIn(
+                    "restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-",
+                    cache,
+                )
+                self.assertIn("continue-on-error: true", cache)
+                self.assertIn("run: pnpm install --frozen-lockfile", install)
+                self.assertNotIn("if:", install)
+                self.assertLess(block.index("Resolve pnpm store path"), block.index("Cache pnpm store"))
+                self.assertLess(block.index("Cache pnpm store"), block.index("Install dependencies"))
+
     def test_required_report_reconciles_the_build_catalog(self) -> None:
         workflow = E2E_WORKFLOW.read_text()
         report = workflow.partition("  e2e-report:\n")[2]
@@ -96,13 +145,20 @@ class E2EWorkflowContractTest(unittest.TestCase):
         self.assertEqual(family["instances"], [{"shard": n} for n in range(1, count + 1)])
         self.assertIn("name: E2E Shard ${{ matrix.shard }}/28", workflow)
 
-    def test_independent_helper_cache_snapshots_refresh_after_source_changes(self) -> None:
+    def test_independent_helper_uses_shared_daily_cache_identity(self) -> None:
         workflow = E2E_WORKFLOW.read_text()
-        dependency = "${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}"
         block = job_block(workflow, "helper_compile", "build")
-        prefix = f"go-e2e-helpers-{dependency}"
-        self.assertIn(f"key: {prefix}-${{{{ github.sha }}}}", block)
-        self.assertIn(f"restore-keys: |\n            {prefix}-\n", block)
+        self.assertIn("uses: ./.github/actions/cache-go", block)
+        self.assertIn("family: e2e-helpers", block)
+        self.assertIn(
+            "save-mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'build' || 'none' }}",
+            block,
+        )
+        self.assertNotIn("uses: actions/cache@", block)
+        self.assertIn(
+            "make -C apps/backend build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg build-codexdbg build-winjob",
+            block,
+        )
 
     def test_build_reuses_optional_daily_cache_without_conditioning_verification(self) -> None:
         workflow = E2E_WORKFLOW.read_text()
@@ -116,11 +172,16 @@ class E2EWorkflowContractTest(unittest.TestCase):
         self.assertIn("make -C apps/backend build-kandev", build)
         self.assertIn("make build-web-e2e", build)
         action = (REPO_ROOT / ".github/actions/cache-go/action.yml").read_text()
-        self.assertEqual(action.count("continue-on-error: true"), 4)
-        self.assertIn("key: ${{ steps.identity.outputs.buildKey }}", action)
-        self.assertIn("restore-keys: ${{ steps.identity.outputs.buildPrefix }}", action)
+        self.assertIn("save-mode:", action)
+        self.assertIn("actions/cache/restore@", action)
+        self.assertIn("actions/cache@", action)
+        self.assertIn("steps.identity.outputs.buildKey", action)
+        self.assertIn("steps.identity.outputs.buildPrefix", action)
         lint = LINT_WORKFLOW.read_text()
-        self.assertIn("node --test .github/scripts/go-cache-identity.test.mjs", lint)
+        self.assertIn(
+            "node --test .github/scripts/go-cache-identity.test.mjs .github/scripts/cache-go-action.test.mjs",
+            lint,
+        )
 
     def test_parallel_build_joins_both_children_and_preserves_each_failure(self) -> None:
         source = E2E_WORKFLOW.read_text().split("      - name: Build backend and web\n", 1)[1]
@@ -326,7 +387,8 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("image: ghcr.io/kdlbs/kandev-ci:desktop-latest", desktop_job)
         self.assertIn("options: --ipc=host", desktop_job)
         self.assertIn("git config --global --add safe.directory", desktop_job)
-        self.assertIn("path: ~/.local/share/pnpm/store", desktop_job)
+        self.assertIn("path: ${{ steps.pnpm_store.outputs.path }}", desktop_job)
+        self.assertIn("pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}", desktop_job)
         self.assertIn("actions/setup-go@", desktop_job)
         self.assertIn("go-version-file: apps/backend/go.mod", desktop_job)
         self.assertIn("pnpm install --frozen-lockfile", desktop_job)

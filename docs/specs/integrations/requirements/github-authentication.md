@@ -37,6 +37,9 @@ Host families and host-specific authentication policy are defined by the
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.13:** The public guide shall explain historical managed defaults, preserved upgrade policies, and recovery through explicit task-access selection. It shall distinguish managed checkouts, user-managed checkouts, and remote executors.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.14:** When the managed `gh` shim resolves the real GitHub CLI, it shall skip every `PATH` candidate inside a Kandev shim directory, whichever `agentctl` that candidate links to or copies, and every candidate that is the running `agentctl` executable. A nested shim invocation below a fixed depth bound shall still launch the real CLI, so a `gh` extension that calls `gh` keeps working. At the bound the shim shall fail with an error that names the nesting and shall launch no process.
 - **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.15:** When a managed task launches and no per-run environment overlay has been delivered for the execution, the agent subprocess shall receive the launch-composed environment unchanged, including the managed helper path, broker URL, and lease that its generated credential helper entries expand.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.16:** During App installation and personal authorization, Kandev shall verify access to the exact selected installation through the authorizing user's credentials. An accessible installation on a later results page shall remain eligible. Other accessible installations shall not authorize the selected installation.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.17:** When GitHub cannot complete installation-access verification, Kandev shall report an error instead of treating that error as confirmed absence. A failed callback shall preserve the previous connection. Existing bounded installation retries shall remain available for confirmed absence immediately after installation.
+- **AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.18:** When personal tokens refresh, verified access to the selected installation shall permit the existing atomic token rotation. Confirmed loss of access or a definitive authentication error shall invalidate the personal connection. Other verification errors shall preserve its stored status and tokens, and shall fail the current request.
 
 ### REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002: Executor HTTPS access through host GitHub CLI
 
@@ -61,3 +64,10 @@ It does not change managed repository materialization, credential snapshots, UI 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/github-authentication-01.md), [part 2](../system-design/github-authentication-02.md), [part 3](../system-design/github-authentication-03.md).
+
+## Implementation plans
+
+The [installation access repair](../../../plans/github-installation-access-check/plan.md)
+clarifies criteria 001.16 through 001.18 and corrects the provider verification path.
+The [original authentication package](../../../plans/github-authentication/plan.md)
+records the earlier delivery. Its completed work remains historical evidence.

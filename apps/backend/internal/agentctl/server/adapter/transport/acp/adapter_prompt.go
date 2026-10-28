@@ -141,6 +141,10 @@ func (a *Adapter) sendPrompt(
 			zap.Int("context_length", len(pendingContext)))
 	}
 	a.beginPromptTurn(sessionID)
+	// Every prompt-ending path must close the honest inspection window for a
+	// launch whose provider ends delivery with this prompt. Success settles
+	// before the complete event below; this covers error and cancel returns.
+	defer a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 
@@ -293,6 +297,10 @@ func (a *Adapter) sendPrompt(
 	// tool_call without a terminal status update from the agent).
 	continuationSafety := a.continuationSafetySnapshot(turn)
 	capacityContinuation := a.capacityContinuationSnapshot(turn, notificationsDrained)
+	// Retained launches whose provider ends delivery with this prompt become
+	// unknown before the generic sweep: no later terminal frame can arrive, so
+	// they must neither be reported as cancelled nor keep fencing new prompts.
+	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool
@@ -644,6 +652,9 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 
 	a.logger.Info("cancelling session", zap.String("session_id", sessionID))
 
+	// Settle retained launches whose provider cannot report a later outcome
+	// before the generic cancel sweep can turn them into cancelled tools.
+	a.prepareSessionCancel(sessionID)
 	// Mark all active tool calls as cancelled before sending cancel to agent.
 	a.cancelActiveToolCalls(sessionID)
 
@@ -671,6 +682,13 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	a.logger.Info("cancel acknowledged by in-flight prompt",
 		zap.String("session_id", sessionID))
 	return nil
+}
+
+// prepareSessionCancel settles launches whose provider ends delivery with the
+// session. It runs before the generic cancel sweep so an identified launch
+// becomes unknown instead of a cancelled tool with running background work.
+func (a *Adapter) prepareSessionCancel(sessionID string) {
+	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 }
 
 // cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls

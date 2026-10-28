@@ -11,6 +11,7 @@ import {
 } from "./workspace-restoration";
 import { buildSessionViewActions } from "./session-runtime-view-actions";
 import { buildSessionGitCheckoutActions } from "./session-runtime-git-checkout-actions";
+import { buildBackgroundWorkActions } from "./session-runtime-background-work";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -54,6 +55,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionPollMode.bySessionId[sessionId];
   delete state.embeddedVscodeSupport.bySessionId[sessionId];
   delete state.backgroundWork.workloadsBySessionId[sessionId];
+  delete state.backgroundWork.outputWindowsBySessionId[sessionId];
   delete state.backgroundWork.activeWorkIdBySessionId[sessionId];
   delete state.backgroundWork.loadingBySessionId[sessionId];
 }
@@ -142,6 +144,8 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   workspaceRestoration: { byEnvironmentId: {} },
   backgroundWork: {
     workloadsBySessionId: {},
+    outputWindowsBySessionId: {},
+    nextOutputWindowGeneration: 1,
     activeWorkIdBySessionId: {},
     loadingBySessionId: {},
   },
@@ -341,104 +345,6 @@ function buildUserShellActions(set: ImmerSet) {
     setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
       set((draft) => {
         draft.sessionPollMode.bySessionId[sessionId] = mode;
-      }),
-  };
-}
-
-function isTerminalRunState(s?: string) {
-  return s === "completed" || s === "failed" || s === "interrupted" || s === "ended";
-}
-
-function buildBackgroundWorkActions(set: ImmerSet) {
-  return {
-    setBackgroundWorkloads: (
-      sessionId: string,
-      workloads: Parameters<SessionRuntimeSlice["setBackgroundWorkloads"]>[1],
-    ) =>
-      set((draft) => {
-        const existingList = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const existingMap = new Map(existingList.map((w) => [w.work_id, w]));
-        const merged = workloads.map((incoming) => {
-          const existing = existingMap.get(incoming.work_id);
-          if (!existing) return incoming;
-          if (existing.revision > incoming.revision) {
-            return existing;
-          }
-          if (isTerminalRunState(existing.state) && !isTerminalRunState(incoming.state)) {
-            return {
-              ...incoming,
-              state: existing.state,
-              exit_code: existing.exit_code,
-              finished_at: existing.finished_at,
-              revision: Math.max(incoming.revision, existing.revision),
-            };
-          }
-          return incoming;
-        });
-        draft.backgroundWork.workloadsBySessionId[sessionId] = merged;
-        draft.backgroundWork.loadingBySessionId[sessionId] = false;
-      }),
-    updateBackgroundWorkload: (
-      sessionId: string,
-      workload: Parameters<SessionRuntimeSlice["updateBackgroundWorkload"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const idx = list.findIndex((w) => w.work_id === workload.work_id);
-        if (idx >= 0) {
-          const existing = list[idx]!;
-          if (existing.revision > workload.revision) {
-            return;
-          }
-          if (isTerminalRunState(existing.state) && !isTerminalRunState(workload.state)) {
-            return;
-          }
-          list[idx] = {
-            ...existing,
-            ...workload,
-            output: workload.output !== undefined ? workload.output : existing.output,
-          };
-        } else {
-          list.push(workload);
-        }
-        draft.backgroundWork.workloadsBySessionId[sessionId] = list;
-      }),
-    appendBackgroundWorkloadOutput: (
-      sessionId: string,
-      chunk: Parameters<SessionRuntimeSlice["appendBackgroundWorkloadOutput"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const workload = list.find((w) => w.work_id === chunk.work_id);
-        if (workload && chunk.chunk) {
-          const currentOutput = workload.output || "";
-          const newOutput = currentOutput + chunk.chunk;
-          const maxLen = 200 * 1024;
-          if (newOutput.length > maxLen) {
-            workload.output = newOutput.slice(newOutput.length - maxLen);
-            workload.output_truncated = true;
-          } else {
-            workload.output = newOutput;
-          }
-          workload.output_offset = chunk.offset;
-          if (chunk.truncated) {
-            workload.output_truncated = true;
-          }
-        }
-      }),
-    setActiveBackgroundWorkload: (sessionId: string, workId: string) =>
-      set((draft) => {
-        draft.backgroundWork.activeWorkIdBySessionId[sessionId] = workId;
-      }),
-    clearBackgroundWork: (sessionId: string) =>
-      set((draft) => {
-        delete draft.backgroundWork.workloadsBySessionId[sessionId];
-        delete draft.backgroundWork.activeWorkIdBySessionId[sessionId];
-        delete draft.backgroundWork.loadingBySessionId[sessionId];
-      }),
-    setBackgroundWorkLoading: (sessionId: string, loading: boolean) =>
-      set((draft) => {
-        draft.backgroundWork.loadingBySessionId[sessionId] = loading;
       }),
   };
 }

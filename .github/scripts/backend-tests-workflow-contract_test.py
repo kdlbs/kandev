@@ -29,10 +29,44 @@ def step_block(workflow: str, name: str) -> str:
     return remainder.partition("\n      - name: ")[0]
 
 
+def job_block(workflow: str, job: str, next_job: str) -> str:
+    marker = f"  {job}:\n"
+    _, separator, remainder = workflow.partition(marker)
+    if not separator:
+        raise AssertionError(f"backend-tests.yml has no {job!r} job")
+    return remainder.partition(f"\n  {next_job}:\n")[0]
+
+
 class BackendTestsWorkflowContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.workflow = WORKFLOW.read_text(encoding="utf-8")
         self.base_image_workflow = BASE_IMAGE_WORKFLOW.read_text(encoding="utf-8")
+
+    def test_linux_go_caches_use_shared_families_and_main_only_publication(self) -> None:
+        jobs = (
+            ("static_checks", "test_shards", "static", "all"),
+            ("test_shards", "repository_tests", "test-${{ matrix.shard }}", "build"),
+            ("repository_tests", "test_ambient_env", "repository-${{ matrix.shard }}", "build"),
+            ("test_ambient_env", "test", "ambient", "build"),
+            ("postgres-boot", "sidebar-resources", "postgres-${{ matrix.cohort }}", "build"),
+        )
+        publisher = (
+            "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
+            "&& '%s' || 'none' }}"
+        )
+        for name, next_job, family, mode in jobs:
+            with self.subTest(job=name):
+                block = job_block(self.workflow, name, next_job)
+                self.assertIn("uses: ./.github/actions/cache-go", block)
+                self.assertIn(f"family: {family}", block)
+                self.assertIn(f"save-mode: {publisher % mode}", block)
+                self.assertNotIn("uses: actions/cache@", block)
+
+        static = job_block(self.workflow, "static_checks", "test_shards")
+        self.assertIn("GOLANGCI_LINT_CACHE: /root/.cache/golangci-lint", static)
+        detect = job_block(self.workflow, "changes", "static_checks")
+        self.assertIn(".github/actions/cache-go/**", detect)
+        self.assertIn(".github/scripts/go-cache-identity.*", detect)
 
     def test_windows_build_cache_refreshes_by_suite_without_cohort_duplication(self) -> None:
         discover = step_block(self.workflow, "Resolve Windows Go build cache")

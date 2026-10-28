@@ -145,6 +145,24 @@ Passive workspace refreshes follow these intervals. An explicit pull request
 refresh checks immediately, subject to the workspace's authentication and
 GitHub rate limits.
 
+#### Stop and resume pull request watches
+
+Delete a pull request watch to retire its target. A retired target stops future
+watch polling, even when its task remains active. Retirement preserves the task's
+pull request association, CI state, and automation settings.
+
+The default watch list shows active watches. Add `include_retired=true` to the
+workspace-scoped `GET /api/v1/github/watches/pr` request to include retired
+targets. The `workspace_id` parameter is required for list, delete, and resume
+requests.
+
+Resume a retired target with
+`POST /api/v1/github/watches/pr/{id}/resume?workspace_id={workspace_id}`. Kandev
+uses the target stored on the retired watch. The task must exist, remain
+unarchived, and retain the repository attachment. Resumption creates a new watch
+ID. Results from requests tied to the retired ID cannot update the resumed watch.
+Use the same workspace that owns the retired watch.
+
 #### Issue and review watch polling
 
 Issue and review watches share a rotating background polling cycle. When
@@ -473,6 +491,8 @@ Open a linked MR from the task review surface. Kandev fetches and displays its o
 - refresh, open in GitLab, or unlink the association.
 
 These actions use the connected GitLab user's permissions and do not bypass protected branches, approval requirements, merge rules, or reviewer eligibility. The current product UI exposes notification subscription for linked merge requests; issue subscribe/unsubscribe is implemented in the backend integration but has no issue-detail control in `/gitlab`.
+
+Default merges from Kandev, including automatic merges, respect the squash choice saved on the GitLab merge request. GitLab's project policy can require or prohibit squashing.
 
 ### Automate a linked merge request
 

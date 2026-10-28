@@ -98,6 +98,9 @@ jobs:
             Makefile
             scripts/check-make-shells
             .github/workflows/backend-tests.yml
+            .github/docker/ci-base/**
+            .github/actions/cache-go/**
+            .github/scripts/go-cache-identity.*
             .github/scripts/repository-test-shard.py
             .github/scripts/changed-paths.py
             .github/scripts/runner-plan.py
@@ -166,6 +169,8 @@ jobs:
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
+    env:
+      GOLANGCI_LINT_CACHE: /root/.cache/golangci-lint
     defaults:
       run:
         # Container jobs default to `sh` (dash); pin to bash so `set -o pipefail`
@@ -189,17 +194,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-            ~/.cache/golangci-lint
-          key: go-static-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
-          restore-keys: |
-            go-static-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: static
+          save-mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'all' || 'none' }}
 
       - name: Build
         run: go build -v ./cmd/kandev
@@ -339,16 +338,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-test-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
-          restore-keys: |
-            go-test-${{ matrix.shard }}-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: test-${{ matrix.shard }}
+          save-mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'build' || 'none' }}
 
       - name: Run tests
         env:
@@ -487,16 +481,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-repository-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
-          restore-keys: |
-            go-repository-${{ matrix.shard }}-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: repository-${{ matrix.shard }}
+          save-mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'build' || 'none' }}
 
       - name: Run repository cohort
         env:
@@ -548,16 +537,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-ambient-env-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
-          restore-keys: |
-            go-ambient-env-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: ambient
+          save-mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'build' || 'none' }}
 
       - name: Run GitLab-facing packages under a poisoned host environment
         env:
@@ -702,16 +686,11 @@ jobs:
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-postgres-${{ matrix.cohort }}-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
-          restore-keys: |
-            go-postgres-${{ matrix.cohort }}-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: postgres-${{ matrix.cohort }}
+          save-mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'build' || 'none' }}
 
       - name: Run fixed PostgreSQL 16 persistence gates
         env:

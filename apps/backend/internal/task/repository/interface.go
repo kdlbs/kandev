@@ -514,6 +514,13 @@ type ConversationTurnStampWriter interface {
 	CreateTurnWithStepStampConversationReceipt(context.Context, *models.Turn) (bool, *models.ConversationMutationReceipt, error)
 }
 
+// TaskCreationAttachmentRepository reads a task's explicit ordered creation
+// attachment set. It is a narrow optional capability so unrelated repository
+// fakes do not need to implement it.
+type TaskCreationAttachmentRepository interface {
+	ListTaskCreationAttachments(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
+}
+
 // AttachmentRepository stores file-backed prompt attachment descriptors.
 // Implementations must keep ownership and aggregate-claim checks in the same
 // transaction as state transitions so a retry cannot partially claim a batch.

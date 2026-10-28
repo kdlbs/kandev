@@ -1056,7 +1056,10 @@ func (s *Service) trackBackgroundToolUpdate(
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
 			kind := backgroundWorkKind(payload.Data.Normalized)
-			if kind == streams.BackgroundWorkKindShell {
+			// Only attest the parked projection for a workload whose provider
+			// can confirm later liveness on this connection. An identified but
+			// unverified launch stays inspectable without claiming to be live.
+			if kind == streams.BackgroundWorkKindShell && payload.Data.Normalized.IsVerifiedBackgroundWork() {
 				// Waiting-attribution spec (docs/specs/disambiguate-waiting):
 				// this is the recognised condition for "a detached
 				// background-shell launch happened during this turn" — the

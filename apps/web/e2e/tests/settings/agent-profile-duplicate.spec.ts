@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { seededAgentProfile } from "../../helpers/seeded-agent-profile";
 
 /**
  * Verifies the agent profile duplicate flow:
@@ -14,12 +15,14 @@ import { test, expect } from "../../fixtures/test-base";
  * freshly POSTed profile race-conditions with SSR.
  */
 test.describe("Agent profile duplicate", () => {
-  test("duplicates the seeded profile from the settings list", async ({ testPage, apiClient }) => {
+  test("duplicates the seeded profile from the settings list", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(90_000);
 
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     const copyName = `${profile.name} Copy`;
 
     try {
@@ -91,10 +94,9 @@ test.describe("Agent profile duplicate", () => {
   test("keeps profile actions in the overflow menu at tablet width", async ({
     tabletTestPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
 
     await tabletTestPage.goto("/settings/agents");
 
@@ -116,15 +118,84 @@ test.describe("Agent profile duplicate", () => {
     await expect(tabletTestPage.getByTestId(`delete-profile-${profile.id}`)).toBeVisible();
   });
 
+  test("keeps the profile menu open when agent discovery completes", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
+    await tabletTestPage.goto("/settings/agents");
+    await tabletTestPage.waitForFunction((agentName) => {
+      const discovery = Reflect.get(window, "__KANDEV_E2E_STORE__")?.getState().agentDiscovery;
+      return (
+        discovery?.loaded &&
+        discovery.items.some((item: { name: string }) => item.name === agentName)
+      );
+    }, agent.name);
+    await tabletTestPage.evaluate(() => {
+      const store = Reflect.get(window, "__KANDEV_E2E_STORE__");
+      Reflect.set(window, "__profileDiscoverySnapshot", store.getState().agentDiscovery.items);
+      store.getState().setAgentDiscovery([]);
+    });
+    const trigger = tabletTestPage.getByTestId(`profile-actions-menu-${profile.id}`);
+    await trigger.tap();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await tabletTestPage.evaluate(() => {
+      const store = Reflect.get(window, "__KANDEV_E2E_STORE__");
+      store.getState().setAgentDiscovery(Reflect.get(window, "__profileDiscoverySnapshot"));
+      Reflect.deleteProperty(window, "__profileDiscoverySnapshot");
+    });
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(tabletTestPage.getByTestId(`duplicate-profile-${profile.id}`)).toBeVisible();
+  });
+
+  test("keeps the profile menu open when another profile is added or removed", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
+    const extraName = "Temporary profile for menu refresh";
+    let extraId: string | undefined;
+    try {
+      await tabletTestPage.goto("/settings/agents");
+      await tabletTestPage.waitForFunction(
+        () =>
+          Reflect.get(window, "__KANDEV_E2E_STORE__")?.getState().connection.status === "connected",
+      );
+      const row = tabletTestPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
+      const trigger = row.getByTestId(`profile-actions-menu-${profile.id}`);
+      await trigger.tap();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(tabletTestPage.getByTestId(`duplicate-profile-${profile.id}`)).toBeVisible();
+
+      const extra = await apiClient.createAgentProfile(agent.id, extraName, {
+        model: profile.model || "mock-fast",
+      });
+      extraId = extra.id;
+      const extraRow = tabletTestPage
+        .getByTestId("agent-profile-row")
+        .filter({ hasText: extraName });
+      await expect(extraRow).toHaveCount(1);
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await apiClient.deleteAgentProfile(extraId, true);
+      extraId = undefined;
+      await expect(extraRow).toHaveCount(0);
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(tabletTestPage.getByTestId(`delete-profile-${profile.id}`)).toBeVisible();
+    } finally {
+      if (extraId) await apiClient.deleteAgentProfile(extraId, true);
+    }
+  });
+
   test("duplicates from the profile page header and navigates to the copy", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     test.setTimeout(90_000);
 
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const { agent, profile } = await seededAgentProfile(apiClient, seedData.agentProfileId);
     const copyName = `${profile.name} Copy`;
 
     try {

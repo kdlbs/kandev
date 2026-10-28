@@ -29,7 +29,7 @@ import { latestIncompleteTurnId } from "@/lib/state/slices/session/turn-actions"
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
 import { beginOptionalHydration, type OptionalHydrationResult } from "@/lib/ssr/optional-hydration";
-import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import { mapWorkflowItem, mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
 import type { StoreApi } from "zustand";
 import {
@@ -180,13 +180,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
     // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
     ...optionalState(workflows, (value) => ({
       workflows: {
-        items: value.map((w) => ({
-          id: w.id as string,
-          workspaceId: w.workspace_id as string,
-          name: w.name,
-          hidden: w.hidden,
-          style: w.style,
-        })),
+        items: value.map(mapWorkflowItem),
       } as Partial<AppState>["workflows"],
     })),
     ...optionalState(repositories, (value) => ({
