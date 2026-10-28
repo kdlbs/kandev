@@ -72,19 +72,20 @@ func seedProfile(repo *fakeSettingsRepo, id, agentID, name, workspaceID string) 
 // wantProfileDTO is the DTO the seeded profile is expected to serialize to.
 func wantProfileDTO(id, agentID, name, billingType string) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
-		ID:                 id,
-		AgentID:            agentID,
-		Kind:               "concrete",
-		Name:               name,
-		AgentDisplayName:   "Display",
-		Model:              "model-a",
-		CLIFlags:           []dto.CLIFlagDTO{},
-		MCPSelectionMode:   dto.MCPSelectionModeInherit,
-		MCPSelectedServers: []string{},
-		Enabled:            true,
-		BillingType:        billingType,
-		CreatedAt:          fixedSettingsTime,
-		UpdatedAt:          fixedSettingsTime,
+		ID:                     id,
+		AgentID:                agentID,
+		Kind:                   "concrete",
+		Name:                   name,
+		AgentDisplayName:       "Display",
+		Model:                  "model-a",
+		CLIFlags:               []dto.CLIFlagDTO{},
+		MCPSelectionMode:       dto.MCPSelectionModeInherit,
+		MCPSelectedServers:     []string{},
+		CopilotSelectedPlugins: []string{},
+		Enabled:                true,
+		BillingType:            billingType,
+		CreatedAt:              fixedSettingsTime,
+		UpdatedAt:              fixedSettingsTime,
 	}
 }
 

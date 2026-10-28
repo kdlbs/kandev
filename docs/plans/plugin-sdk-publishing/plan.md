@@ -1578,3 +1578,30 @@ A fresh anonymous npm lookup is 404; saved authenticated npm commands return
 Both SDK environment confirmations remain absent. Existing signing and channel
 secret names are present, but secret values were not read or tested. No package,
 release, environment setting, migration or external notification was changed.
+
+### 2026-10-28 final conflict reconciliation
+
+The user will merge PR #4534. Integrate main
+`fb4c2bc3ef98da2fc303fe05cb144bcd6c167d58` without merging the PR or
+continuing the cancelled npm bootstrap investigation.
+
+Keep main's shared Go cache families and main-only cache publication roles.
+The shared cache identity still hashes both backend and standalone SDK module
+files. Its CLI regression checks SDK dependency invalidation alongside the
+new save-role assertions. Keep main's frontend timing allocation and the
+informational recovered-retry policy. The pseudo-locale regression uses main's
+two explicit release versions, verifies both notices, and retains the exact
+localized body and version-scoped locator. Restore the archive handler's time
+import after incoming attachment changes remove its former use.
+
+Validation passes 106 cache/workflow/timing/gate checks, archive HTTP/WebSocket
+race tests, full frontend typecheck and scoped Go/web lint. All 23 pseudo-locale
+browser cases pass on a fresh build with retries disabled. Go module tidy adds
+no changes and module verification passes. Documentation validation passes
+414 decisions and 1,791 specifications; direct coverage passes 36 work orders
+and 118 linked documents without errors.
+
+Normal merge hooks and push follow. Historical head c3fa104f6907 had 95 passing
+checks; those results do not certify the new integrated head. Fresh GitHub
+checks must pass before the operator merges. NOTIFICATION_GUIDE.md remains
+uncommitted. SDK release code and protected publication contracts are unchanged.

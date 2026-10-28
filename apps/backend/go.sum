@@ -363,6 +363,8 @@ github.com/subosito/gotenv v1.4.2 h1:X1TuBLAMDFbaTAChgCBLu3DU3UPyELpnF2jjJ2cz/S8
 github.com/subosito/gotenv v1.4.2/go.mod h1:ayKnFf/c6rvx/2iiLrJUk1e6plDbT3edrFNGqEflhK0=
 github.com/superfly/sprites-go v0.0.0-20260206213632-8176adff485b h1:m20F4on1i8Mv3nexDOJGB6JhpOG9Q4XepN45yJvd8Lc=
 github.com/superfly/sprites-go v0.0.0-20260206213632-8176adff485b/go.mod h1:4zltGIGJa3HV+XumRyNn4BmhlavbUZH3Uh5xJNaDwsY=
+github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f h1:9hiVElpCmKzsBKQHkBqZ8LGzt82iLfM8egxr4sew+Ys=
+github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f/go.mod h1:8/zr1Tv0+cKpVtGCEB/7YfRXr2TszsMxMXLaT8YuBgU=
 github.com/tiktoken-go/tokenizer v0.8.1 h1:4obDoB6/dhdBt9xMweX4nww5cjdOq/nYF4ecwPq2+mg=
 github.com/tiktoken-go/tokenizer v0.8.1/go.mod h1:eLA0t6nGvn9mDc7gt90qt7pMat+gE9ViqwQ6l9B+tA4=
 github.com/tuzig/vt10x v0.0.0-20231206072048-370e51642bf7 h1:U7j2kc5ZS6dmwTg0H2VbRNGUwUxxEv9HtyxsyiYyS84=

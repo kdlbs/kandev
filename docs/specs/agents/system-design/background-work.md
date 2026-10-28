@@ -69,11 +69,18 @@ Capabilities distinguish observation and action:
   unknown row, never a command. Unknown action identifiers are rejected.
   Other jobs remain accessible in the shared list without pretending to be shells.
 
-Introduce `features.agentBackgroundWork` /
-`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`, restart-required, default false in prod,
-dev, and e2e; targeted fixtures explicitly enable it. Wire config, the existing
-runtime flag registry, profiles, and frontend defaults through the current typed
-registry pattern. Do not copy an outdated config-switch pattern from a skill.
+The initial implementation introduced `features.agentBackgroundWork` /
+`KANDEV_FEATURES_AGENT_BACKGROUND_WORK` with all shipped defaults false.
+The [default-on promotion](../../../plans/opencode-background-continuity/task-07-default-on-rollout.md)
+changes prod, dev, and e2e defaults to true after its targeted checks pass.
+Retain the restart-required registry entry and backend/frontend gates as an
+operator off switch during rollout. Explicit environment and SQLite overrides
+retain their current precedence. Browser fallback defaults stay false until
+the backend supplies authoritative feature state.
+
+Use the existing typed registry and embedded-profile synchronization. A later
+flag retirement removes the gates and appends both identities to the retired
+registry. That retirement is outside the current package.
 `features.codexAppServer` still controls native Codex startup; both are needed
 for new native controls. The shared feature is independent of that gate for ACP.
 Do not change the Claude background prompt-handoff flag or its admission policy.
@@ -447,6 +454,12 @@ native-Codex and companion follow-up results remain historical evidence; this
 package requires its own exact-head results.
 
 ## Implementation package
+
+OpenCode continuous background delivery extends this shared contract through
+[its provider design](background-work-opencode.md) and
+[implementation package](../../../plans/opencode-background-continuity/plan.md).
+It reuses this viewer and preserves the existing admission boundary. OpenCode
+2.2.0 alone does not prove post-prompt completion delivery.
 
 [Plan and work orders](../../../plans/agent-background-work/plan.md). The
 [clear-window repair](../../../plans/background-work-clear-window/plan.md)

@@ -79,7 +79,7 @@ func (s *Server) handleDeliverySubmission(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxDeliverySubmissionRequestBytes(deliveryJournal.MaxEventBytes()))
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxDeliverySubmissionRequestBytes(deliveryJournal.MaxSubmissionBytes()))
 	var request deliverySubmissionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		var maxBytesError *http.MaxBytesError
@@ -106,6 +106,9 @@ func (s *Server) handleDeliverySubmission(c *gin.Context) {
 		case errors.Is(err, journal.ErrSubmissionConflict):
 			status = http.StatusConflict
 			code = "SUBMISSION_CONFLICT"
+		case errors.Is(err, journal.ErrEventTooLarge):
+			status = http.StatusRequestEntityTooLarge
+			code = "EVENT_TOO_LARGE"
 		case errors.Is(err, journal.ErrStreamFull):
 			status = http.StatusRequestEntityTooLarge
 			code = "SUBMISSION_TOO_LARGE"
@@ -475,6 +478,10 @@ func writeDeliveryError(c *gin.Context, err error) {
 		status, code = http.StatusConflict, "SUBMISSION_CONFLICT"
 	case errors.Is(err, journal.ErrSubmissionState):
 		status, code = http.StatusConflict, "SUBMISSION_STATE"
+	case errors.Is(err, journal.ErrEventTooLarge):
+		status, code = http.StatusRequestEntityTooLarge, "EVENT_TOO_LARGE"
+	case errors.Is(err, journal.ErrReplayPageTooLarge):
+		status, code = http.StatusRequestEntityTooLarge, "REPLAY_PAGE_TOO_LARGE"
 	case errors.Is(err, journal.ErrStreamFull):
 		status, code = http.StatusRequestEntityTooLarge, "SUBMISSION_TOO_LARGE"
 	}

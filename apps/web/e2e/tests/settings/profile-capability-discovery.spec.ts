@@ -318,6 +318,7 @@ test.describe("Profile capability discovery", () => {
           },
         ],
         command_prefix: alpha.commandPrefix,
+        copilot_selected_plugins: [],
       });
       expect(
         requests.some(

@@ -203,7 +203,8 @@ func TestGLabAndAutomationMergeUseScopedHead(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Error(err)
 					}
-					if body.SHA != mergeHeadSHA || !body.Squash || body.Remove || (!tc.automation && body.Message != "combined") {
+					wantSquash := !tc.automation
+					if body.SHA != mergeHeadSHA || body.Squash != wantSquash || body.Remove || (!tc.automation && body.Message != "combined") {
 						t.Errorf("merge body = %+v", body)
 					}
 					_, _ = w.Write([]byte(`{"iid":17,"state":"merged"}`))

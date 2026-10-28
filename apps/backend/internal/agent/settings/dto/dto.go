@@ -51,6 +51,7 @@ type AgentProfileDTO struct {
 	CursorPluginsMCPEnabled bool     `json:"cursor_plugins_mcp_enabled"`
 	MCPSelectionMode        string   `json:"mcp_selection_mode"`
 	MCPSelectedServers      []string `json:"mcp_selected_servers"`
+	CopilotSelectedPlugins  []string `json:"copilot_selected_plugins"`
 	// ProviderSupported is computed at read time: true when the profile's
 	// agent advertises OpenAI-compatible provider support. Not persisted.
 	ProviderSupported bool `json:"provider_supported"`
@@ -563,10 +564,11 @@ type AgentProfileMcpConfigDTO struct {
 
 // CommandPreviewRequest is the request body for previewing the agent CLI command
 type CommandPreviewRequest struct {
-	Model              string          `json:"model"`
-	PermissionSettings map[string]bool `json:"permission_settings"`
-	CLIPassthrough     bool            `json:"cli_passthrough"`
-	CommandPrefix      string          `json:"command_prefix,omitempty"`
+	Model                  string          `json:"model"`
+	PermissionSettings     map[string]bool `json:"permission_settings"`
+	CLIPassthrough         bool            `json:"cli_passthrough"`
+	CommandPrefix          string          `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string        `json:"copilot_selected_plugins,omitempty"`
 }
 
 // Flag destinations reported by CommandPreviewResponse.
@@ -588,6 +590,15 @@ type CommandPreviewResponse struct {
 	// difference is the whole reason a flag can look enabled and change
 	// nothing. Values: "agent_cli" or "acp_bridge".
 	FlagDestination string `json:"flag_destination,omitempty"`
+	// DeferredPluginIDs lists stable Copilot plugin identities whose native
+	// directories resolve only at the next process start. Command never
+	// contains those directories.
+	DeferredPluginIDs []string `json:"deferred_plugin_ids,omitempty"`
+	// DeferredPluginCount mirrors the length for compact UI copy.
+	DeferredPluginCount int `json:"deferred_plugin_count,omitempty"`
+	// CommandIncomplete is true when the previewed command omits deferred
+	// plugin mounts.
+	CommandIncomplete bool `json:"command_incomplete,omitempty"`
 }
 
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
@@ -612,6 +623,10 @@ type ProfileLaunchSettingsRequest struct {
 	EnvVars       *[]ProfileEnvVarDTO `json:"env_vars"`
 	CLIFlags      *[]CLIFlagDTO       `json:"cli_flags"`
 	CommandPrefix *string             `json:"command_prefix"`
+	// CopilotSelectedPlugins optionally replaces the saved selection for this
+	// request. Omission uses the saved profile value, or an empty set for a
+	// new draft.
+	CopilotSelectedPlugins OptionalStringList `json:"copilot_selected_plugins,omitempty"`
 }
 
 // ProfileCapabilityRequest asks the host utility to inspect a saved profile

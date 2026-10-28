@@ -62,6 +62,12 @@ type Config struct {
 	// capacity. Zero keeps compatibility for directly constructed test configs.
 	NotificationQueueCapacity int
 
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value for this launch. It gates provider attestation whose
+	// later lifecycle the adapter cannot otherwise confirm; older callers
+	// omit it and keep the provider-neutral behavior.
+	AgentBackgroundWorkEnabled bool
+
 	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
 	PromptCancelJoinTimeout time.Duration
 

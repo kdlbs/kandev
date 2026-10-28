@@ -120,6 +120,10 @@ type Adapter struct {
 	// Agent identity (from config, for logging)
 	agentID string
 
+	// backgroundWorkEnabled is the effective shared background-work feature
+	// value resolved by the backend for this launch.
+	backgroundWorkEnabled bool
+
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *Normalizer
 
@@ -506,7 +510,8 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		cfg:                       cfg,
 		logger:                    l,
 		agentID:                   cfg.AgentID,
-		normalizer:                NewNormalizer(cfg.AgentID),
+		backgroundWorkEnabled:     cfg.AgentBackgroundWorkEnabled,
+		normalizer:                NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
 		dialect:                   newACPDialect(cfg.AgentID),
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
@@ -811,7 +816,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 }
 
 func (a *Adapter) sendUpdateNow(event AgentEvent) {
-	event = streams.BoundGenericToolEvent(event)
+	event = streams.PrepareToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -847,7 +852,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
-	event = streams.BoundGenericToolEvent(event)
+	event = streams.PrepareToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:

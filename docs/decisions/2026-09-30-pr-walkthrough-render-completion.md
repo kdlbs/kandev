@@ -20,6 +20,9 @@ Unexpected non-zero exits, external cancellation, missing receipts, and invalid 
 
 One total generation deadline covers all attempts. An incomplete zero-exit attempt can retry once within the remaining budget. Cleanup and diagnostics finish before the outer job deadline.
 
+The [model fallback decision](2026-10-28-pr-walkthrough-model-fallback.md)
+extends the retry rule for recognized model quota and availability errors.
+
 This decision extends the [filesystem runner contract](2026-08-22-pr-walkthrough-filesystem-runner.md). The agent still writes the draft and invokes the fixed renderer. The workflow validates agent-built outputs rather than creating missing outputs after an agent exits.
 
 ## Consequences

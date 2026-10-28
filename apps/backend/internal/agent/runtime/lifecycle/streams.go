@@ -40,26 +40,32 @@ type StreamCallbacks struct {
 
 // StreamManager manages WebSocket streams to agent executions
 type StreamManager struct {
-	logger                        *logger.Logger
-	callbacks                     StreamCallbacks
-	reconciliationMu              sync.Mutex
-	deliveryReconciliations       map[string]*deliveryReconciliationCycle
-	stoppedReconciliations        map[string]struct{}
-	reconciliationContext         context.Context
-	reconciliationCancel          context.CancelFunc
-	reconciliationNow             func() time.Time
-	reconciliationWait            func(context.Context, time.Duration) error
-	isExecutionCurrent            func(*AgentExecution) bool
-	onDeliveryReconciliationPhase func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
-	deliverySubmissionSettler     func(context.Context, *AgentExecution, DeliveryReconciliationIdentity, *journal.Submission) (bool, error)
-	deliveryMu                    sync.RWMutex
-	delivery                      AgentDeliveryRepository
-	ackMu                         sync.Mutex
-	ackWorkers                    map[string]*durableDeliveryAckWorker
-	ackStopped                    bool
-	ackWG                         sync.WaitGroup
-	mcpMu                         sync.RWMutex
-	mcpHandler                    agentctl.MCPHandler
+	logger                         *logger.Logger
+	callbacks                      StreamCallbacks
+	reconciliationMu               sync.Mutex
+	deliveryReconciliations        map[string]*deliveryReconciliationCycle
+	stoppedReconciliations         map[string]struct{}
+	reconciliationContext          context.Context
+	reconciliationCancel           context.CancelFunc
+	reconciliationNow              func() time.Time
+	reconciliationWait             func(context.Context, time.Duration) error
+	deliveryHealthClock            func() time.Time
+	deliveryHealthWait             func(context.Context, time.Duration) error
+	deliveryHealthProbeInterval    time.Duration
+	deliveryHealthProbeTimeout     time.Duration
+	deliveryHealthRecoveryCooldown time.Duration
+	deliveryAttachments            sync.Map
+	isExecutionCurrent             func(*AgentExecution) bool
+	onDeliveryReconciliationPhase  func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
+	deliverySubmissionSettler      func(context.Context, *AgentExecution, DeliveryReconciliationIdentity, *journal.Submission) (bool, error)
+	deliveryMu                     sync.RWMutex
+	delivery                       AgentDeliveryRepository
+	ackMu                          sync.Mutex
+	ackWorkers                     map[string]*durableDeliveryAckWorker
+	ackStopped                     bool
+	ackWG                          sync.WaitGroup
+	mcpMu                          sync.RWMutex
+	mcpHandler                     agentctl.MCPHandler
 	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
 	// stream's task. Nil leaves dispatch unscoped (single-user instances and
 	// isolated tests); set via Manager.SetMCPIdentityScoper.
@@ -172,18 +178,22 @@ func (c *stopChannelContext) Err() error {
 func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler agentctl.MCPHandler, stopCh <-chan struct{}) *StreamManager {
 	reconciliationContext, reconciliationCancel := context.WithCancel(context.Background())
 	return &StreamManager{
-		logger:                  log.WithFields(zap.String("component", "stream-manager")),
-		callbacks:               callbacks,
-		mcpHandler:              mcpHandler,
-		stopCh:                  stopCh,
-		waitCh:                  make(chan struct{}),
-		ackWorkers:              make(map[string]*durableDeliveryAckWorker),
-		deliveryReconciliations: make(map[string]*deliveryReconciliationCycle),
-		stoppedReconciliations:  make(map[string]struct{}),
-		reconciliationContext:   reconciliationContext,
-		reconciliationCancel:    reconciliationCancel,
-		reconciliationNow:       time.Now,
-		reconciliationWait:      waitForReconciliation,
+		logger:                         log.WithFields(zap.String("component", "stream-manager")),
+		callbacks:                      callbacks,
+		mcpHandler:                     mcpHandler,
+		stopCh:                         stopCh,
+		waitCh:                         make(chan struct{}),
+		ackWorkers:                     make(map[string]*durableDeliveryAckWorker),
+		deliveryReconciliations:        make(map[string]*deliveryReconciliationCycle),
+		stoppedReconciliations:         make(map[string]struct{}),
+		reconciliationContext:          reconciliationContext,
+		reconciliationCancel:           reconciliationCancel,
+		reconciliationNow:              time.Now,
+		reconciliationWait:             waitForReconciliation,
+		deliveryHealthClock:            time.Now,
+		deliveryHealthProbeInterval:    defaultDeliveryHealthProbeInterval,
+		deliveryHealthProbeTimeout:     defaultDeliveryHealthProbeTimeout,
+		deliveryHealthRecoveryCooldown: defaultDeliveryHealthCooldown,
 	}
 }
 
@@ -427,11 +437,15 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
+	monitorCtx, monitorCancel := context.WithCancel(ctx)
+	attachment := sm.startDeliveryHealthMonitor(monitorCtx, monitorCancel, execution, client)
 	// Processor failure cancels only this connection, including when no later
 	// frame arrives. Disconnect handling reports the original processing error.
 	err := client.StreamUpdatesFrom(processor.ctx, func(event agentctl.AgentEvent) {
 		processor.enqueue(event)
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
+		attachment.close()
+		monitorCancel()
 		processErr := processor.close()
 		if processErr != nil {
 			sm.logger.Error("durable agent event processing failed",
@@ -471,6 +485,10 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		}
 	}, after)
 	execution.recordDeliveryStreamFailure(startupGeneration, err)
+	if err != nil {
+		attachment.close()
+		monitorCancel()
+	}
 	releaseClient()
 
 	// Signal that the stream connection attempt is complete (success or failure)

@@ -210,7 +210,7 @@ func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Sub
 	if submission.ID == "" || submission.Hash == "" {
 		return Submission{}, fmt.Errorf("submission id and hash are required")
 	}
-	if int64(len(submission.Payload)) > j.config.MaxEventBytes {
+	if int64(len(submission.Payload)) > j.config.MaxSubmissionBytes {
 		return Submission{}, fmt.Errorf("%w: %d bytes", ErrStreamFull, len(submission.Payload))
 	}
 	if submission.CreatedAt.IsZero() {

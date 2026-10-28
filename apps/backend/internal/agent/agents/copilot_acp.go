@@ -17,6 +17,9 @@ var copilotACPLogoDark []byte
 
 const copilotACPPackage = "@github/copilot"
 
+// CopilotACPAgentID is the registry identifier for Copilot's ACP provider.
+const CopilotACPAgentID = "copilot-acp"
+
 // copilotNativeBinary is the standalone CLI installed by the @github/copilot
 // npm package. It remains available for discovery and preflight checks, but
 // ACP launches always use the exact package pin.
@@ -56,7 +59,7 @@ func NewCopilotACP() *CopilotACP {
 	}
 }
 
-func (a *CopilotACP) ID() string          { return "copilot-acp" }
+func (a *CopilotACP) ID() string          { return CopilotACPAgentID }
 func (a *CopilotACP) Name() string        { return "Copilot ACP Agent" }
 func (a *CopilotACP) DisplayName() string { return "Copilot" }
 func (a *CopilotACP) Description() string {

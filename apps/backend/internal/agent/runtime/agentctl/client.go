@@ -252,9 +252,10 @@ func (c *Client) getTraceCtx() context.Context {
 // StatusResponse from agentctl
 type StatusResponse struct {
 	DeliveryHealth struct {
-		State               string `json:"state"`
-		CancellationPending bool   `json:"cancellation_pending"`
-		ProducerPaused      bool   `json:"producer_paused"`
+		State               string                         `json:"state"`
+		CancellationPending bool                           `json:"cancellation_pending"`
+		ProducerPaused      bool                           `json:"producer_paused"`
+		Failure             *types.DeliveryFailureSnapshot `json:"failure,omitempty"`
 	} `json:"delivery_health"`
 	AgentStatus string                 `json:"agent_status"`
 	ProcessInfo map[string]interface{} `json:"process_info"`

@@ -187,6 +187,8 @@ export type ProfileLaunchSettingsRequest = {
   env_vars: { key: string; value?: string; secret_id?: string }[];
   cli_flags: CLIFlag[];
   command_prefix: string;
+  /** Draft selection for a capability or model probe. Omit to use the saved value. */
+  copilot_selected_plugins?: string[];
 };
 
 export type ProfileCapabilityRequest = {

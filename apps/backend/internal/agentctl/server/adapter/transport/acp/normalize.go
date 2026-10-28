@@ -93,12 +93,30 @@ func DetectToolOperationType(toolKind string, args map[string]any) string {
 type Normalizer struct {
 	agentID string
 	dialect acpDialect
+	// backgroundWorkEnabled is the effective shared background-work feature
+	// value for this launch. It gates provider attestation whose later
+	// lifecycle the adapter cannot otherwise confirm.
+	backgroundWorkEnabled bool
 }
 
 // NewNormalizer creates a new ACP normalizer. agentID selects per-agent enrichers
 // (e.g. "codex-acp"); pass "" for common-layer-only normalization in tests.
 func NewNormalizer(agentID string) *Normalizer {
-	return &Normalizer{agentID: agentID, dialect: newACPDialect(agentID)}
+	return newNormalizer(agentID, false)
+}
+
+// NewNormalizerWithBackgroundWork creates a normalizer whose provider
+// background attestation follows the effective shared feature value.
+func NewNormalizerWithBackgroundWork(agentID string, enabled bool) *Normalizer {
+	return newNormalizer(agentID, enabled)
+}
+
+func newNormalizer(agentID string, backgroundWorkEnabled bool) *Normalizer {
+	return &Normalizer{
+		agentID:               agentID,
+		dialect:               newACPDialect(agentID),
+		backgroundWorkEnabled: backgroundWorkEnabled,
+	}
 }
 
 // NormalizeToolCall converts ACP tool call data to NormalizedPayload.
@@ -240,7 +258,7 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 	}
 
 	if se := payload.ShellExec(); se != nil {
-		updateShellExecInput(se, inputMap)
+		updateShellExecInput(se, inputMap, n.agentID)
 		stampBackgroundShellWork(n.agentID, payload)
 	}
 	if gen := payload.Generic(); gen != nil {
@@ -305,10 +323,13 @@ func isEmptyGenericInputValue(v any) bool {
 func stampBackgroundShellWork(agentID string, payload *streams.NormalizedPayload) {
 	if backgroundlaunch.RecognizesDetachedLaunch(agentID, payload) {
 		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
+		// ACP shell producers expose launch identity only: no output stream and
+		// no process controls are available through this transport.
+		payload.SetBackgroundWorkCapabilities(streams.InspectionOnlyWorkloadCapabilities())
 	}
 }
 
-func updateShellExecInput(se *streams.ShellExecPayload, inputMap map[string]any) {
+func updateShellExecInput(se *streams.ShellExecPayload, inputMap map[string]any, agentID string) {
 	if cmd := shared.GetString(inputMap, "command"); cmd != "" && se.Command == "" {
 		se.Command = cmd
 	}
@@ -323,7 +344,7 @@ func updateShellExecInput(se *streams.ShellExecPayload, inputMap map[string]any)
 	// background flag must be honored on merge, not only at initial normalize.
 	// Only ever set true — a later foreground update must not clear a flag an
 	// earlier frame already established.
-	if isBackgroundExecInput(inputMap) {
+	if isBackgroundExecInputFor(agentID, inputMap) {
 		se.Background = true
 	}
 }
@@ -525,21 +546,39 @@ func (n *Normalizer) normalizeExecute(args map[string]any) *streams.NormalizedPa
 	workDir := shared.GetString(rawInput, "cwd")
 	timeout := shared.GetInt(rawInput, "max_wait_seconds")
 
-	return streams.NewShellExec(command, workDir, "", timeout, isBackgroundExecInput(rawInput))
+	return streams.NewShellExec(command, workDir, "", timeout, isBackgroundExecInputFor(n.agentID, rawInput))
 }
 
-// isBackgroundExecInput reports whether an execute/bash rawInput marks the
-// command as background work. Claude's Bash tool signals it with
-// run_in_background:true (and no `wait` field); other agents use wait:false.
-// Either shape counts as background.
+// isBackgroundExecInput reports whether an execute/bash rawInput carries any
+// known detached-execution shape. It is provider-agnostic on purpose: it
+// answers "could this call leave work running?" for continuation safety, where
+// a false negative is worse than a false positive.
 func isBackgroundExecInput(inputMap map[string]any) bool {
+	return isScopedBackgroundExecInput(inputMap) ||
+		booleanField(inputMap, openCodeBackgroundInputKey)
+}
+
+// isBackgroundExecInputFor reports whether an execute/bash rawInput marks the
+// command as background work for this agent's presentation. Each shape is
+// scoped to the agent that emits it so one provider's flag can never be read
+// as another provider's background signal.
+func isBackgroundExecInputFor(agentID string, inputMap map[string]any) bool {
+	if isScopedBackgroundExecInput(inputMap) {
+		return true
+	}
+	return agentID == openCodeAgentID && booleanField(inputMap, openCodeBackgroundInputKey)
+}
+
+func isScopedBackgroundExecInput(inputMap map[string]any) bool {
 	if wait, ok := inputMap["wait"].(bool); ok && !wait {
 		return true
 	}
-	if bg, ok := inputMap["run_in_background"].(bool); ok && bg {
-		return true
-	}
-	return false
+	return booleanField(inputMap, "run_in_background")
+}
+
+func booleanField(inputMap map[string]any, key string) bool {
+	value, ok := inputMap[key].(bool)
+	return ok && value
 }
 
 // normalizeCodeSearch converts ACP search tool data.
@@ -662,6 +701,7 @@ func stampSubagentBackgroundWork(payload *streams.NormalizedPayload, agentID str
 		detached,
 		ended,
 	)
+	payload.SetBackgroundWorkCapabilities(streams.InspectionOnlyWorkloadCapabilities())
 }
 
 func subagentStatusTerminal(status string) bool {

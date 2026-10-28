@@ -4,6 +4,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 
 import { NewTaskDialog } from "./new-task-dialog";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 
 const { createTask } = vi.hoisted(() => ({
   createTask: vi.fn().mockResolvedValue({ id: "task-created" }),
@@ -45,9 +46,11 @@ describe("NewTaskDialog create payload", () => {
   it("sends assignee_agent_profile_id as a top-level field, not inside metadata", async () => {
     render(
       <StateProvider>
-        <TooltipProvider>
-          <Harness />
-        </TooltipProvider>
+        <ToastProvider>
+          <TooltipProvider>
+            <Harness />
+          </TooltipProvider>
+        </ToastProvider>
       </StateProvider>,
     );
 

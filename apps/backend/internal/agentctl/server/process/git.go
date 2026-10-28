@@ -980,7 +980,10 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 	if g.workspaceTracker != nil {
 		// Get commit details
 		commitSHA, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
-		parentSHA, _ := g.runGitCommand(ctx, "rev-parse", "HEAD~1")
+		parentSHA, parentErr := g.runGitCommand(ctx, "show", "-s", "--format=%P", "HEAD")
+		if parentErr == nil {
+			parentSHA, _, _ = strings.Cut(strings.TrimSpace(parentSHA), " ")
+		}
 
 		// Get commit info (author name|author email)
 		authorInfo, _ := g.runGitCommand(ctx, "show", "-s", "--format=%an|%ae", "HEAD")

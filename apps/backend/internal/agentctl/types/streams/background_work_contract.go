@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -114,6 +115,59 @@ type WorkloadRunObservation struct {
 
 func (o WorkloadRunObservation) GetSessionID() string {
 	return o.SessionID
+}
+
+// HasWorkloadCapabilityDeclaration reports whether an adapter supplied a
+// verified capability declaration instead of the contract's zero value.
+func (c WorkloadCapabilities) HasDeclaration() bool {
+	return c.Discovery != ""
+}
+
+// WorkloadActionableState reports whether a workload in state may accept a
+// control now. Unknown, disconnected, and terminal states are not actionable.
+func WorkloadActionableState(state RunState) bool {
+	return state == RunStateRunning || state == RunStateWaiting
+}
+
+// ApplyWorkloadActionAvailability keeps static support but clears dynamic
+// availability for a state that cannot accept a control.
+func ApplyWorkloadActionAvailability(c WorkloadCapabilities, state RunState) WorkloadCapabilities {
+	if WorkloadActionableState(state) || len(c.Actions) == 0 {
+		return c
+	}
+	actions := make(map[WorkloadActionKind]ActionCapability, len(c.Actions))
+	for kind, capability := range c.Actions {
+		capability.Available = false
+		actions[kind] = capability
+	}
+	c.Actions = actions
+	return c
+}
+
+// EncodeWorkloadCapabilities serializes an adapter declaration for durable
+// storage. An empty declaration encodes as an empty string.
+func EncodeWorkloadCapabilities(c WorkloadCapabilities) string {
+	if !c.HasDeclaration() {
+		return ""
+	}
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
+// DecodeWorkloadCapabilities parses a stored declaration. It reports false for
+// absent or malformed evidence so readers fall back to unavailable.
+func DecodeWorkloadCapabilities(raw string) (WorkloadCapabilities, bool) {
+	if raw == "" {
+		return WorkloadCapabilities{}, false
+	}
+	var c WorkloadCapabilities
+	if err := json.Unmarshal([]byte(raw), &c); err != nil || !c.HasDeclaration() {
+		return WorkloadCapabilities{}, false
+	}
+	return c, true
 }
 
 // BackgroundWorkSnapshot captures the full collection of workloads for a session at a moment in time.

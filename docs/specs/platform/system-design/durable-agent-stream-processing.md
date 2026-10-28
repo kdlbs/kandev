@@ -27,7 +27,7 @@ under [the segment identity decision](../../../decisions/2026-10-26-durable-agen
 ### Journal batching
 
 Normal journal batches contain at most 64 KiB and wait at most 20 ms before starting their commit.
-One supported indivisible event above 64 KiB uses a singleton transaction within the 1 MiB event limit.
+One supported indivisible event above 64 KiB uses a singleton transaction within the 2 MiB event limit.
 These are batching bounds, not guarantees about disk completion latency.
 
 ### Replay and legacy handling
@@ -140,7 +140,7 @@ Remote agents retain output and continue independent work during prolonged backe
 Default production retention has no fixed logical byte ceiling. The former 256 MiB stream and 2 GiB journal limits do not stop execution.
 Explicit positive internal limits remain available for bounded-quota tests.
 Keep the existing bbolt format, sequence checks, and owner checks.
-Keep the 1 MiB event limit and bounded pending producer buffers and replay pages.
+Keep the 2 MiB event limit and bounded pending producer buffers and replay pages.
 Unacknowledged records grow on the executor volume without age-based expiry or deletion to reclaim space.
 
 Disk pressure uses available capacity on that volume, a 32 MiB control/recovery reserve, and pending write headroom.
@@ -170,7 +170,7 @@ Raw SQL cursors and internal storage paths are diagnostic details, not required 
 
 Oversized assistant/reasoning text uses the existing chunk representation.
 [Bounded tool delivery](bounded-tool-delivery.md) defines marked presentation
-reduction before acceptance, including generic nested results and duplicate
+reduction before acceptance, including typed and generic results and duplicate
 carriers. Accepted output must not be truncated during replay or projection.
 Representation changes require the existing version and rollback checks.
 Keep coverage for cumulative snapshots that can multiply retained bytes.
@@ -182,6 +182,17 @@ Journal and SQL checkpoint changes require restart-reconcilable intent and owner
 A journal already above its submission limit blocks new admission until safe rollover.
 Representation changes require a versioned migration and an explicit supported rollback boundary.
 An older binary must not read a changed format as an empty or newly dispatchable stream.
+
+### Event budgets and writer failure
+
+The [tool delivery design](bounded-tool-delivery.md) owns the 2 MiB event budget,
+separate 1 MiB submission limit, and 4 MiB encoded replay-page ceiling.
+The record count remains an additional replay limit.
+Short pages continue to the captured high-water mark without changing accepted records.
+
+The [failure design](durable-delivery-failure.md) owns independent status observation
+and bounded producer drain after a writer failure.
+A health report cannot replace an actual terminal or authorize another prompt.
 
 ### Visible failure and overload
 

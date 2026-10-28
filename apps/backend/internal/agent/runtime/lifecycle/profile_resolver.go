@@ -103,6 +103,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		CursorPluginsMCPEnabled:    profile.CursorPluginsMCPEnabled,
 		MCPSelectionMode:           profile.MCPSelectionMode,
 		MCPSelectedServers:         append([]string{}, profile.MCPSelectedServers...),
+		CopilotSelectedPlugins:     append([]string{}, profile.CopilotSelectedPlugins...),
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,
 	}, nil

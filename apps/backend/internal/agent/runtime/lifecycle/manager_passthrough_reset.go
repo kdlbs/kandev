@@ -115,6 +115,9 @@ func (m *Manager) preparePassthroughReset(ctx context.Context, execution *AgentE
 			return process.InteractiveStartRequest{}, nil, err
 		}
 	}
+	if err := m.applyPassthroughCopilotPlugins(ctx, execution, resolved.profile, &cmd, env); err != nil {
+		return process.InteractiveStartRequest{}, nil, err
+	}
 	return buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, rt.StripEnv, true), resolved.mcpOperation, nil
 }
 

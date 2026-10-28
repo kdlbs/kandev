@@ -20,6 +20,7 @@ type CommandPreviewCardProps = {
   commandPrefix?: string;
   envVars?: ProfileEnvVar[];
   secrets?: { id: string; name: string }[];
+  copilotSelectedPlugins?: string[];
   discoveryTargetId?: string;
 };
 
@@ -122,6 +123,26 @@ function CommandPreviewContent({ preview, cliPassthrough, envPrefix }: CommandPr
         </Button>
       </div>
 
+      {preview.deferred_plugin_count ? (
+        <div
+          className="space-y-1 rounded-md border border-dashed p-3"
+          data-testid="command-preview-deferred-plugins"
+        >
+          <p className="text-xs font-medium">{t("agents:copilotPluginsPreviewTitle")}</p>
+          <p className="text-xs text-muted-foreground">{t("agents:copilotPluginsPreviewNotice")}</p>
+          <p className="wrap-break-word text-xs text-muted-foreground">
+            {t("agents:copilotPluginsPreviewList", {
+              names: (preview.deferred_plugin_ids ?? []).join(", "),
+            })}
+          </p>
+          {preview.command_incomplete ? (
+            <p className="text-xs text-muted-foreground">
+              {t("agents:copilotPluginsPreviewIncomplete")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {!cliPassthrough && (
         <p className="text-xs text-muted-foreground">
           <Trans i18nKey="agents:promptTokenHint" values={{ token: PROMPT_TOKEN }}>
@@ -143,6 +164,7 @@ export function CommandPreviewCard({
   commandPrefix,
   envVars,
   secrets,
+  copilotSelectedPlugins,
   discoveryTargetId,
 }: CommandPreviewCardProps) {
   const { t } = useTranslation();
@@ -157,8 +179,16 @@ export function CommandPreviewCard({
   const latestRequestId = useRef(0);
 
   const settingsKey = useMemo(
-    () => JSON.stringify({ model, permissionSettings, cliPassthrough, cliFlags, commandPrefix }),
-    [model, permissionSettings, cliPassthrough, cliFlags, commandPrefix],
+    () =>
+      JSON.stringify({
+        model,
+        permissionSettings,
+        cliPassthrough,
+        cliFlags,
+        commandPrefix,
+        copilotSelectedPlugins,
+      }),
+    [model, permissionSettings, cliPassthrough, cliFlags, commandPrefix, copilotSelectedPlugins],
   );
 
   useEffect(() => {
@@ -174,6 +204,7 @@ export function CommandPreviewCard({
           cli_passthrough: cliPassthrough,
           cli_flags: cliFlags,
           command_prefix: commandPrefix,
+          copilot_selected_plugins: copilotSelectedPlugins,
         });
         if (requestId !== latestRequestId.current) return;
         setPreview(response);

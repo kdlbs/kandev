@@ -1784,6 +1784,10 @@ func (m *Manager) prepareAgentRestart(
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
+	if profileInfo != nil {
+		execution.ExecutionProfileID = profileInfo.ProfileID
+		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
+	}
 	var runtimeConfig models.SessionRuntimeConfig
 	if runtimeConfigOverride == nil {
 		runtimeConfig = m.captureSessionRuntimeConfigForReset(ctx, execution)
@@ -3273,6 +3277,10 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 			return agentCommands{}, fmt.Errorf("resolve profile %s for restart: %w", execution.AgentProfileID, resolveErr)
 		}
 		profileInfo = pi
+	}
+	if profileInfo != nil {
+		execution.ExecutionProfileID = profileInfo.ProfileID
+		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
 	}
 	return m.buildFreshAgentCommandWithProfile(ctx, execution, agentConfig, profileInfo)
 }

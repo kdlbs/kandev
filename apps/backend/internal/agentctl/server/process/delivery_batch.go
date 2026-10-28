@@ -10,12 +10,13 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 )
 
 const (
 	deliveryWriterBatchBytes = 64 << 10
 	deliveryWriterBatchWait  = 20 * time.Millisecond
-	deliveryWriterQueueBytes = 4 << 20
+	deliveryWriterQueueBytes = int(deliverylimits.WriterQueueBytes)
 )
 
 var errDeliveryWriterClosed = errors.New("durable delivery writer is closed")

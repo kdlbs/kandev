@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -57,13 +58,14 @@ type Manager struct {
 	providerGatewayAuthResolver ProviderGatewayAuthResolver
 	profileEnvironmentResolver  ProfileEnvironmentResolver
 
-	parentTmpDir  string
-	tempArtifacts *tempartifacts.Registry
-	tempLease     *tempartifacts.Lease
-	cache         *cache
-	modelCache    *modelConfigCache
-	profileCache  *profileCapabilityCache
-	profileKey    []byte
+	parentTmpDir            string
+	tempArtifacts           *tempartifacts.Registry
+	tempLease               *tempartifacts.Lease
+	cache                   *cache
+	modelCache              *modelConfigCache
+	profileCache            *profileCapabilityCache
+	profileKey              []byte
+	copilotPluginRunnerImpl copilotplugins.Runner
 
 	mu                            sync.RWMutex
 	instances                     map[string]*instance // keyed by agent type
