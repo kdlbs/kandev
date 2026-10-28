@@ -1879,15 +1879,33 @@ message ExecutorResourceDescriptor {
   uint32 state_version = 7;
 }
 
+// ExecutorHostCapability is one row of the host capability registry offered
+// to a provider in the profile validation request.
+message ExecutorHostCapability {
+  string name = 1;
+  uint32 min_version = 2;
+  uint32 max_version = 3;
+  string deprecated_in = 4;
+}
+
+// ExecutorCapabilityVersion is a capability and the version a provider
+// implements; the validation response echoes the full set.
+message ExecutorCapabilityVersion {
+  string name = 1;
+  uint32 version = 2;
+}
+
 message ValidateExecutorProfileRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorProfileSnapshot profile = 2;
+  repeated ExecutorHostCapability host_capabilities = 3;
 }
 
 message ValidateExecutorProfileResponse {
   repeated ExecutorProviderFieldError field_errors = 1;
   ExecutorProviderCapabilities capabilities = 2;
   ExecutorProviderError error = 3;
+  repeated ExecutorCapabilityVersion implemented_capabilities = 4;
 }
 
 message ProvisionExecutorEnvironmentRequest {

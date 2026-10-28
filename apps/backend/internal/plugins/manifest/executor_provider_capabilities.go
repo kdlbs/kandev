@@ -41,7 +41,8 @@ func (p *ExecutorProvider) DeclaresHostCapabilities() bool {
 	return len(p.RequiresHostCapabilities) > 0
 }
 
-func (p *ExecutorProvider) hostcapRequirements() []hostcaps.Requirement {
+// HostCapabilityRequirements converts the declaration to registry requirements.
+func (p *ExecutorProvider) HostCapabilityRequirements() []hostcaps.Requirement {
 	out := make([]hostcaps.Requirement, len(p.RequiresHostCapabilities))
 	for i, req := range p.RequiresHostCapabilities {
 		out[i] = hostcaps.Requirement{Name: req.Name, Version: req.Version}
@@ -76,7 +77,7 @@ func expandStateSchema(prefix string, provider *ExecutorProvider) []error {
 // version, state_budget_bytes, and launch_policy_ids for one provider.
 func (m *Manifest) validateHostCapabilities(prefix string, provider *ExecutorProvider) []error {
 	var errs []error
-	reqs := provider.hostcapRequirements()
+	reqs := provider.HostCapabilityRequirements()
 	for _, err := range hostcaps.ValidateRequirements(reqs) {
 		errs = append(errs, fmt.Errorf("%s.requires_host_capabilities: %w", prefix, err))
 	}
@@ -163,7 +164,7 @@ func declaresCapability(provider *ExecutorProvider, name string) bool {
 func (m *Manifest) ExecutorProviderWarnings() []string {
 	var warnings []string
 	for i := range m.ExecutorProviders {
-		warnings = append(warnings, hostcaps.DeprecationWarnings(m.ExecutorProviders[i].hostcapRequirements())...)
+		warnings = append(warnings, hostcaps.DeprecationWarnings(m.ExecutorProviders[i].HostCapabilityRequirements())...)
 	}
 	return warnings
 }

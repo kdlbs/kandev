@@ -127,6 +127,7 @@ type Service struct {
 	runtime                         PluginRuntime
 	executorProviderHostHandler     ExecutorProviderHostHandler
 	executorProviderInventoryReader ExecutorProviderInventoryReader
+	capabilityGate                  capabilityGate
 	executorProviderOpMu            sync.Mutex
 	executorProviderOps             map[string]*activeExecutorProviderOperation
 	executorProviderDispatches      map[string]map[uint64]context.CancelFunc
