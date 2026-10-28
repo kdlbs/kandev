@@ -49,15 +49,13 @@ func (sm *StreamManager) monitorRuntimeStorageAdvisory(ctx context.Context, exec
 	if interval <= 0 {
 		interval = defaultRuntimeStorageAdvisoryInterval
 	}
-	first := true
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if !first && !waitRuntimeStorageAdvisory(ctx, interval) {
+		if !waitRuntimeStorageAdvisory(ctx, interval) {
 			return
 		}
-		first = false
 		if sm.isExecutionCurrent != nil && !sm.isExecutionCurrent(execution) {
 			return
 		}
