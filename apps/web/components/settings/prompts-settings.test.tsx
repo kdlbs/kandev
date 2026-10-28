@@ -371,3 +371,145 @@ describe("PromptsSettings agent permission intent", () => {
     expect(mocks.updatePrompt.mock.calls[0][1].allow_agent_edits).toBe(true);
   });
 });
+
+const searchLabel = "Search...";
+const builtinNeedleName = "BuiltIn Needle";
+
+describe("PromptsSettings search", () => {
+  it("filters the mounted list by saved content beyond its preview", () => {
+    mocks.prompts = [
+      { ...existingPrompt, content: "First line\nUnique hidden body" },
+      { ...existingPrompt, id: "other", name: "Other", content: "unrelated" },
+    ];
+    render(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: searchLabel }), {
+      target: { value: "hidden body" },
+    });
+    expect(screen.getAllByTestId(promptRowTestId)).toHaveLength(1);
+    expect(screen.getByTestId(promptRowTestId).getAttribute("data-prompt-name")).toBe("Review");
+  });
+
+  it("matches literal name and raw body case insensitively, preserves order and data, and resets", () => {
+    const records: CustomPrompt[] = [
+      {
+        ...existingPrompt,
+        id: "builtin",
+        name: builtinNeedleName,
+        content: "first",
+        builtin: true,
+      },
+      { ...existingPrompt, id: "body", name: "Second", content: "first\nNEEDLE [literal]" },
+      { ...existingPrompt, id: "other", name: "Third", content: "different" },
+    ];
+    mocks.prompts = records;
+    const snapshot = structuredClone(records);
+    render(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    const search = screen.getByRole("searchbox", { name: searchLabel });
+    const names = () =>
+      screen.queryAllByTestId(promptRowTestId).map((row) => row.getAttribute("data-prompt-name"));
+
+    fireEvent.change(search, { target: { value: "  nEeDlE  " } });
+    expect(names()).toEqual([builtinNeedleName, "Second"]);
+    fireEvent.change(search, { target: { value: "[literal]" } });
+    expect(names()).toEqual(["Second"]);
+    fireEvent.change(search, { target: { value: "[missing]" } });
+    expect(names()).toEqual([]);
+    expect(screen.getByText("No results.")).toBeTruthy();
+    expect(search.hasAttribute("disabled")).toBe(false);
+    fireEvent.change(search, { target: { value: "   " } });
+    expect(names()).toEqual([builtinNeedleName, "Second", "Third"]);
+    fireEvent.change(search, { target: { value: "needle" } });
+    fireEvent.change(search, { target: { value: "" } });
+    expect(names()).toEqual([builtinNeedleName, "Second", "Third"]);
+    expect(records).toEqual(snapshot);
+    expect(mocks.setPrompts).not.toHaveBeenCalled();
+    expect(mocks.createPrompt).not.toHaveBeenCalled();
+    expect(mocks.updatePrompt).not.toHaveBeenCalled();
+    expect(mocks.deletePrompt).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: saveChangesLabel })).toBeNull();
+  });
+
+  it("does not install a dirty-route guard for search, while a real draft does", async () => {
+    renderPromptSettings();
+    fireEvent.change(screen.getByRole("searchbox", { name: searchLabel }), {
+      target: { value: "Review" },
+    });
+    const cleanUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanUnload);
+    expect(cleanUnload.defaultPrevented).toBe(false);
+    fireEvent.click(screen.getByTestId(promptEditButtonTestId));
+    fireEvent.change(screen.getByTestId(promptContentInputTestId), {
+      target: { value: "Changed" },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: saveChangesLabel })).toBeTruthy(),
+    );
+    const dirtyUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyUnload);
+    expect(dirtyUnload.defaultPrevented).toBe(true);
+  });
+
+  it("retains the empty collection view while searching", () => {
+    render(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    const empty = screen.getByText(/No prompts yet/i);
+    fireEvent.change(screen.getByRole("searchbox", { name: searchLabel }), {
+      target: { value: "missing" },
+    });
+    expect(empty.isConnected).toBe(true);
+    expect(screen.queryByText("No results.")).toBeNull();
+  });
+});
+
+describe("PromptsSettings search during actions", () => {
+  it("disables search while editing and keeps the matched row and draft", () => {
+    renderPromptSettings();
+    const search = screen.getByRole("searchbox", { name: searchLabel });
+    fireEvent.change(search, { target: { value: "Review" } });
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId(promptEditButtonTestId));
+    expect(search.hasAttribute("disabled")).toBe(true);
+    const editor = within(row).getByTestId(promptContentInputTestId) as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "Draft without the query" } });
+    fireEvent.change(within(row).getByTestId("prompt-name-input"), {
+      target: { value: "Renamed" },
+    });
+    expect(row.isConnected).toBe(true);
+    expect(editor.value).toBe("Draft without the query");
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(search.hasAttribute("disabled")).toBe(false);
+    expect(row.isConnected).toBe(true);
+  });
+
+  it("disables search while creating and during delete confirmation and request", async () => {
+    mocks.deletePrompt.mockReturnValue(new Promise<void>(() => undefined));
+    renderPromptSettings();
+    const search = screen.getByRole("searchbox", { name: searchLabel });
+    fireEvent.click(screen.getByTestId("prompt-create-button"));
+    expect(search.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(
+      within(screen.getByTestId("prompt-create-form")).getByRole("button", { name: "Cancel" }),
+    );
+    expect(search.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByTestId(promptDeleteButtonTestId));
+    expect(search.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(
+      within(screen.getByTestId(promptDeletePopoverTestId)).getByTestId(promptDeleteConfirmTestId),
+    );
+    await waitFor(() => expect(mocks.deletePrompt).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId(promptDeletePopoverTestId)).toBeNull();
+    expect(search.hasAttribute("disabled")).toBe(true);
+  });
+});

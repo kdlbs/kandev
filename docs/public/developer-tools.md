@@ -194,7 +194,7 @@ If the session is broken, choose **Restart session** in the Settings panel heade
 <details>
 <summary>Saved prompt details</summary>
 
-Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
+Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content. Use search to find prompts by name or saved content.
 
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
