@@ -241,27 +241,67 @@ If more than one person can reach the VPN endpoint, use [Kandev authentication](
 Kandev authentication does not replace HTTPS. For single-user access on an encrypted VPN, the VPN tunnel provides transport encryption.
 Plain HTTP inside that tunnel is acceptable.
 
-## Add Kandev to the home screen
+## Install Kandev as an app
 
-Kandev includes an installable web-app manifest and standalone display mode. The installed shortcut opens Kandev without a normal browser tab bar.
+Kandev ships a web-app manifest and a service worker, so Chrome on Android can install it as a standalone app with its own icon and window.
 
-Use an HTTPS Kandev URL for standalone installation. The Tailscale Serve and Cloudflare Tunnel paths provide HTTPS. Direct HTTP access may create only a home-screen shortcut, not an installable standalone web app.
-
-On iPhone or iPad:
-
-1. Open the Kandev URL in Safari.
-2. Select **Share**.
-3. Select **Add to Home Screen**.
-4. Open Kandev from the new icon.
+Installation needs an HTTPS URL. The Tailscale Serve and Cloudflare Tunnel paths provide one. Plain HTTP over a VPN address cannot register a service worker, so it offers at most a home-screen shortcut.
 
 On Android:
 
-1. Open the Kandev URL in Chrome.
-2. Open the browser menu.
-3. Select **Install app** or **Add to Home screen**.
+1. Open the Kandev HTTPS URL in Chrome and sign in.
+2. Open the Chrome menu.
+3. Select **Install app**. If the menu only offers **Add to Home screen**, Chrome has not yet accepted the page as installable; reload once and check again.
 4. Open Kandev from the new icon.
 
-The shortcut does not add offline support. The Kandev host and VPN must remain reachable.
+On iPhone or iPad, open the URL in Safari, select **Share**, then **Add to Home Screen**. Kandev's push notifications are not set up or tested for iOS.
+
+The service worker keeps the install small. It caches only the app's static icons, an offline page, and the content-hashed build files. It never caches API responses, WebSocket traffic, or the app page itself, because the page carries live data. If the host is unreachable, the installed app shows an offline page with a **Try again** button instead of a browser error. Kandev still needs a live connection to your host to do anything useful.
+
+A new Kandev version's service worker activates as soon as the browser has installed it. Reload an open window to load the new app files.
+
+### Cloudflare Access and the installed app
+
+Cloudflare Access redirects every request without a valid session cookie to a `cloudflareaccess.com` sign-in page. Kandev handles this as follows:
+
+- The manifest link is marked `crossorigin="use-credentials"`, so Chrome sends your Access cookie when it fetches the manifest.
+- The service worker never stores a redirect, an HTML page, or an opaque response as an app file. A sign-in page cannot be saved as a script or stylesheet.
+- Page loads are passed to the network untouched. When your Access session has expired, the installed app lands on the Access sign-in page exactly as a browser tab would.
+- Sign in again after the Access session lifetime ends. Until then, background push messages still arrive, because the push service delivers them without your Access cookie.
+
+## Receive push notifications
+
+Kandev can send a Web Push notification to each phone or browser you enable. The Kandev backend sends the message to the browser vendor's push service over outbound HTTPS, so it needs no inbound connection beyond the one you already expose. For Chrome on Android that push service is Google's; the service sees the message's size and timing and the encrypted body, not its content.
+
+Push messages carry only a short title, a one-line status, and a link to the task or session. They never carry code, tokens, or message text.
+
+### Turn push on
+
+1. Open **Settings > Notifications** on the device and select **Enable push** under **Push Notifications**. This must be a tap you make yourself, because Chrome only shows the permission prompt after a gesture.
+2. Allow notifications when Chrome asks.
+3. Select **Send test push**. A test notification should arrive within a few seconds.
+4. In **Notification Events**, choose which events the **Web Push** row should send. It starts with agent questions, permission requests, failed sessions, and finished turns.
+
+Each device subscribes separately. **Disable push** removes only the current device.
+
+Kandev does not show a push notification while a Kandev window is focused and visible. Tapping a notification focuses an open Kandev window and opens the task or session. If no window is open, it opens the app at that link. Repeated notifications for the same session replace each other instead of piling up.
+
+The backend identifies itself to push services with a contact address. Set it with the `KANDEV_WEBPUSH_SUBJECT` environment variable, for example `KANDEV_WEBPUSH_SUBJECT=mailto:you@example.com`. A `mailto:` or `https:` value is accepted. The default is a placeholder address. The signing keys are generated on first use and stored in the Kandev database. Back up the database to keep subscriptions across a restore. If the keys are lost, turn push off and on again on each device.
+
+### Troubleshoot push notifications
+
+The status line under **Push Notifications** names the state:
+
+| Status | What to do |
+| --- | --- |
+| Not supported | Open Kandev over HTTPS in a current Chrome. Plain HTTP and some in-app browsers cannot use push. |
+| Blocked | Allow notifications for the site in Chrome's site settings or Android's app notification settings, then select the refresh button. |
+| Session may have expired | Reload the page and sign in again through Cloudflare Access or Kandev, then retry. |
+| Setup failed | Check that the host is reachable and retry. The Kandev log lists push delivery warnings. |
+
+If **Send test push** reports that the push service rejected the message, select **Disable push** and **Enable push** again to create a fresh subscription. Kandev deletes a subscription automatically when the push service reports it as expired.
+
+Android can also silence notifications by battery or Do Not Disturb settings. Check Chrome's notification settings in Android, and exclude Chrome from aggressive battery optimization if messages arrive late.
 
 ## Troubleshoot the connection
 
@@ -271,6 +311,7 @@ The shortcut does not add offline support. The Kandev host and VPN must remain r
 4. Open `/ready` on the same Kandev origin.
 5. Review the host firewall and the tailnet or Access policy.
 6. Review the actual Kandev port in the startup output or service logs.
+7. If the installed app shows a Kandev offline page, the device has no route to the host. Check the network path above, then select **Try again**.
 
 If the page loads but live updates fail, make sure that the proxy forwards the whole origin and supports WebSockets.
 
