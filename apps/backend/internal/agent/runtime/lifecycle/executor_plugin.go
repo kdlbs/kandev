@@ -152,6 +152,7 @@ type pluginExecutorInventory struct {
 	DrainReceiptID         string                                `json:"drain_receipt_id,omitempty"`
 	DrainClaim             string                                `json:"drain_claim,omitempty"`
 	HandshakeStarted       bool                                  `json:"handshake_started,omitempty"`
+	PublishPending         bool                                  `json:"publish_pending,omitempty"`
 	CleanupRequested       bool                                  `json:"cleanup_requested,omitempty"`
 	Revision               uint64                                `json:"revision"`
 	Generation             uint64                                `json:"generation"`
@@ -348,6 +349,7 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 		return nil, r.recoverOrRetainFailedProvision(ctx, launch.request, launch.operationContext, launch.profile, launch.inventory, err)
 	}
 	resource := provisioned.GetResource()
+	r.reachCrashBarrier(ctx, BarrierAfterSideEffect)
 	if provisioned.GetError() != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"provision_rejected", pluginExecutorProviderError(provisioned.GetError()))
@@ -407,6 +409,7 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 		return fail("control_handshake", err)
 	}
 	if durable {
+		r.reachCrashBarrier(ctx, BarrierAfterHandshake)
 		if err := r.persistDurableToken(ctx, launch.request, token); err != nil {
 			control.Close()
 			return fail("token_persist", err)
@@ -901,6 +904,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
 			return fmt.Errorf("remote launch failed and absence checkpoint failed: %w", checkpointErr)
 		}
+		r.reachCrashBarrier(cleanupCtx, BarrierAfterDestroyConfirm)
 		if releaseErr := req.ReleaseRuntimeInventory(cleanupCtx); releaseErr != nil {
 			return fmt.Errorf("remote launch failed and inventory release failed: %w", releaseErr)
 		}

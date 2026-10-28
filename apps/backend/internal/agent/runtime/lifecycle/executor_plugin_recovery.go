@@ -202,7 +202,15 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 	if err := r.checkpointPluginExecutorRecord(ctx, record, state.inventory); err != nil {
 		return nil, err
 	}
-	return r.newRecoveredPluginExecutorInstance(ctx, record, state)
+	instance, err := r.newRecoveredPluginExecutorInstance(ctx, record, state)
+	if err != nil || !state.inventory.PublishPending {
+		return instance, err
+	}
+	if err := r.publishPendingReady(ctx, record, state); err != nil {
+		instance.Client.Close()
+		return nil, err
+	}
+	return instance, nil
 }
 
 func pluginExecutorPhaseCanAttach(phase string) bool {
@@ -722,6 +730,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 		}
 		return errors.New("plugin executor cleanup is unconfirmed; retry information was retained")
 	}
+	r.reachCrashBarrier(claimedCtx, BarrierAfterDestroyConfirm)
 	inventory.Resource = nil
 	inventory.Phase = pluginExecutorPhaseAbsent
 	session, sessionErr := r.inventoryStore.GetTaskSession(claimedCtx, record.SessionID)

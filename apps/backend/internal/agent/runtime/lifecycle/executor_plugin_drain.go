@@ -141,6 +141,7 @@ func (r *PluginRemoteExecutor) drainBeforePluginDestroy(
 	if err != nil {
 		return record, inventory, decision, err
 	}
+	r.reachCrashBarrier(ctx, BarrierAfterDrain)
 	return record, persisted, decision, nil
 }
 
