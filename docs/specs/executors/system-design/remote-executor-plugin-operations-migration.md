@@ -5,16 +5,15 @@ requirements:
   - REQ-EXECUTORS-PLUGIN-OPS-001
   - REQ-EXECUTORS-PLUGIN-LAUNCHPOLICY-001
   - REQ-EXECUTORS-PLUGIN-PREPARATION-001
-  - REQ-EXECUTORS-PLUGIN-MIGRATION-001
 ---
 
-# Remote executor plugins: operations, launch policy, preparation, and migration system design
+# Remote executor plugins: operations, launch policy, and preparation system design
 
 ## Purpose and boundaries
 
-Four operator-facing mechanisms gated by [capabilities](remote-executor-plugin-capability-versioning.md). Names marked
+Three operator-facing mechanisms gated by [capabilities](remote-executor-plugin-capability-versioning.md). Names marked
 **new** do not describe existing APIs. Core owns the admin routes, redaction, audit, rate limits, the launch-policy
-enforcement point in agentctl, intent verification, and the authority field. The provider owns node state, maintenance
+enforcement point in agentctl, and intent verification. The provider owns node state, maintenance
 effects, wrappers, and preparation strategies.
 
 ## Requirement mapping
@@ -24,7 +23,6 @@ effects, wrappers, and preparation strategies.
 | REQ-EXECUTORS-PLUGIN-OPS-001 | Provider operations; Maintenance |
 | REQ-EXECUTORS-PLUGIN-LAUNCHPOLICY-001 | Launch policy |
 | REQ-EXECUTORS-PLUGIN-PREPARATION-001 | Preparation hints |
-| REQ-EXECUTORS-PLUGIN-MIGRATION-001 | Migration and coexistence |
 
 ## Provider operations
 
@@ -60,7 +58,7 @@ passes `launch_policy` and `policy_id` in the agentctl bootstrap. Enforcement is
 manager refuses to start an agent process without the wrapper and reports `launch_policy_unenforced`; there is no unwrapped
 fallback (AC 001.4). The existing `common/launchwrapper` package on main provides the spec and executable handling. Its node-policy files exist only on the fork reference
 (`nova28/kandev`, branch `feature/nomad-native-executor`, head `f0c3b0ab18`: `apps/backend/internal/common/launchwrapper/node_policy.go`, `node_policy_unix.go`, `node_policy_other.go`) and are
-ported by the work order, test-first, from that read-only reference; if the reference is unavailable the work order writes them from this section. The provider hands agentctl the wrapper spec through the
+not ported by this cycle: node-policy files are provider-side (AC LAUNCHPOLICY 001.5), and the host and agentctl read only the wrapper specification that the provider places in the instance environment. The provider hands agentctl the wrapper spec through the
 instance environment (AC 001.5). On `preferred`, agentctl tries the wrapper at every agent start and reports `wrapped` or `unwrapped`; the host stores the last outcome. The strength order and
 rejection rule are AC 001.3.
 
@@ -74,55 +72,21 @@ unchanged by strategy: the returned set equals the intent set, each path is cont
 checkout, or pull-request strategy therefore needs provider work only. The fixture proves this with two strategies the host has
 never seen, selected only through hints.
 
-## Migration and coexistence
-
-**Source and target.** The source is a profile of one built-in executor type on main (`local_docker`, `remote_docker`, `sprites`, `ssh`, `k8s`); main has no other remote built-in, and the native executor that D3 names exists only on the fork reference. The target is a `plugin_remote` profile.
-
-**Authority.** The envelope for plugin rows already names the installation; a built-in row gets `authority: builtin` only when the migration touches it, and rows without the key read as `builtin`, so nothing is written to untouched rows. A record has exactly one authority and only
-`transitionAuthority`, called by the migration operation under the cleanup claim, can change it; there is no code path that renames
-an executor type (AC 001.2).
-
-**Enumeration.** `GET /api/v1/executors/profiles/:profile_id/migration/environments` reads built-in rows by executor type, classifying `active`
-(live session), `drainable` (no live session, resources present), and `orphaned` (no owner). It is read-only (AC 001.1).
-
-**Operation.** A **new** state machine, reached through the start and rollback routes of AC 001.3 and 001.5 and stored in the **new** table `executor_profile_migrations` (AC 001.8): `freezing`, `draining`, `switching`, `done`,
-`rolled_back`. `freezing` moves the row to a frozen step, committed with the row revision. The gate is **new** `checkMigrationFreeze(profileID)`, called from the common launch entry that every executor type passes through (not the plugin-only allocation gate, which built-in launches never reach). It runs at the start of `launchPreparedSession` and `ResumeSessionWithOptions` (`internal/orchestrator/executor`), in one transaction that precedes any runtime allocation and any environment record, reads the profile's row, writes the resolved profile ID to the session's existing `executor_profile_id` metadata key, and refuses with `executor_migrating` when the step is `freezing`, `draining`, or `switching`; because the freeze CAS and that transaction exclude each other (SQLite immediate writer; PostgreSQL the `executor_migration:` advisory lock), a launch is either admitted before the freeze, finishes, and is drained, or is refused (AC 001.3). `draining` also waits until no session whose recorded `executor_profile_id` is the source is in `STARTING`, so a launch admitted before the freeze is drained and a refused one leaves nothing to leak. The gate covers both launch entries that reach the common launch path, a first launch and a resume of a stopped session (a resume that reuses an existing source environment passes the same gate before the environment record is read, and a new session on an existing task environment enters through the first-launch entry); it also takes `resolvedProfileID` from the caller and compares it inside the transaction with the current resolution (`migrated_to` applied), aborting and re-resolving once on a mismatch, so a launch that resolved the source before `switching` cannot create a built-in record after `done` (AC 001.3).
-`draining` waits for sessions to stop and runs the built-in cleanup (with the drain receipt where the built-in supports one).
-`switching` sets the source profile's `config` key `migrated_to` and moves the row to `done` in one transaction guarded by the row revision (AC 001.8); a rollback that races it commits the other transition and the loser re-reads, so exactly one wins. Launch resolution reads the key; rollback deletes it in the same guarded transaction that sets `rolled_back`, from `switching` or from `done`. The drain re-reads the operation revision before each environment destroy and starts none once the row is `rolled_back`; a destroy already started runs to confirmation (AC 001.5). Each step records itself before acting, so a restart resumes from the
-recorded step (AC 001.4).
-
-**Rollback.** `rolled_back` switches new launches to the built-in profile (allowed from `freezing`, `draining`, `switching`, and `done`; from `done` the plugin environments created after the switch are the retained records). Plugin environments remain under the plugin as
-retained records, are never adopted, and are read by the status and list paths; disabling or removing the plugin never deletes
-them (existing retention rule). The migration drain never destroys them (AC 001.4); they leave through the ordinary archive, delete, or reset of the owning task (AC 001.5, 001.6). A start while the row is `rolled_back` reuses the row for a new operation (new target, step `freezing`, revision bumped), a start while `done` or with a different target in a running step is `conflict`, and a replay of the running target returns the operation (AC 001.8). D3 stands: the built-in code stays until the plugin
-passes its live scenarios (AC 001.7).
-
 ## Data model
 
-One **new** table, `executor_profile_migrations(profile_id PRIMARY KEY, target_profile_id, step, revision, created_at, updated_at)`,
-created idempotently in both dialects; no column is added to `executor_profiles` (the profile has no metadata or revision column on
-main). The envelope gains `authority` for built-in rows (tolerant decode). Launch policy and preparation settings are profile `config`
-keys (AC LAUNCHPOLICY 001.1, PREPARATION 001.1). Idempotency entries are in memory with a 24 h TTL and a per-key single-flight; only
-`applied`, `noop`, and `refused` outcomes are kept. SQLite and PostgreSQL: the row revision CAS covers the freeze race and double start; PostgreSQL takes
-`pg_advisory_xact_lock(hashtextextended('executor_migration:'||profile_id, 0))` for step transitions.
+No new table and no DDL migration. Launch policy and preparation settings are profile `config` keys (AC LAUNCHPOLICY 001.1,
+PREPARATION 001.1). Maintenance idempotency entries are in memory with a 24 h TTL and a per-key single-flight; only `applied`, `noop`,
+and `refused` outcomes are kept, and a backend restart clears them (AC OPS 001.7). The event token bucket and dedupe map are in
+memory and reset on a restart. SQLite and PostgreSQL: no schema change, so the replayable-migration tests are unaffected.
 
 ## Interleavings and failing-first tests
 
 | Interleaving | Required outcome | Tests (level) |
 | --- | --- | --- |
-| Migration freeze races a new launch (MIGRATION 001.3) | earlier launch finishes and drains; later gets `executor_migrating` | sqlite and PostgreSQL race; lifecycle unit |
-| Two operators start one migration, or one start is replayed (001.8) | one row; loser reads it; replay returns it | sqlite and PostgreSQL; route unit |
-| Start in `done`, in `rolled_back`, or with a different target mid-run (001.8) | `conflict`; a new operation reusing the row; `conflict` | route unit |
-| New session on an existing source environment during `freezing` (001.3) | refused `executor_migrating` before any runtime allocation or record | lifecycle unit |
-| Rollback arrives after `done` (001.5) | `migrated_to` removed under the revision guard, step `rolled_back`; plugin environments retained and resumable; a repeat returns the recorded outcome | route unit |
-| Rollback racing an in-flight drain destroy (001.5) | no destroy starts after the rollback commits; the started one finishes; rollback neither waits nor cancels | sqlite and PostgreSQL race |
-| Launch resolved the source before `switching` and reaches its transaction after `done` (001.3) | aborts, re-resolves once to the target; no built-in record; second mismatch is `executor_migrating` | sqlite and PostgreSQL race |
-| Resume of a stopped source-profile session during `draining` (001.3) | refused `executor_migrating`; after `done` it launches as a first launch on the target | lifecycle unit |
 | Same maintenance key while the first call is in flight; provider timeout (OPS 001.7) | waits and shares the outcome; timeout not recorded, replay calls again | route unit with fake clock |
 | Inventory and node ordering, cursor edges, page of 0 or 101 (OPS 001.1, 001.2) | byte order; empty cursor starts; defaults clamped | route table test |
 | Conflicting or malformed preparation settings (PREPARATION 001.1) | `invalid_config` with a named reason; no allocation | lifecycle table test |
 | `required` policy on a provider without the capability or without the ID (LAUNCHPOLICY 001.2) | `launch_policy_unsupported`; no allocation | lifecycle unit |
-| Backend restart in each migration step (001.4) | resumes from the recorded step; no double freeze | barrier e2e (`after_migration_step`); unit per step |
-| Rollback with retained plugin environments (001.5, 001.6) | not adopted; still listed; survive plugin disable | store and lifecycle unit |
 | Two operators send one maintenance key with different bodies (OPS 001.7) | second rejected `conflict`; same body inside 24 h returns the recorded outcome with one provider call | route unit |
 | Event flood from a provider (OPS 001.4) | rate-limited and deduped; others delivered | callback unit with fake clock |
 | Oversize status or log response (OPS 001.1, 001.5) | rejected, not truncated | route and lifecycle unit |
@@ -131,6 +95,10 @@ keys (AC LAUNCHPOLICY 001.1, PREPARATION 001.1). Idempotency entries are in memo
 | `preferred` policy, wrapper absent on one start and present on the next (001.4) | each start reports its own outcome; latest recorded | agentctl process test |
 | Provider reports weaker applied policy (001.3) | rejected before ready; cleanup | lifecycle unit |
 | New strategy label and hint key (PREPARATION 001.4) | recorded, no host change | fixture over the process boundary |
+| Inventory row with the same provider ID under another installation or provider key (OPS 001.2) | not matched to the host row; reported unmatched | route table test |
+| Event with empty, over-long or bad-charset key or code; burst of 31 in 2 s (OPS 001.4, 001.6) | `invalid_request` before dedupe; validate, dedupe, then rate limit; bucket resets on restart | callback unit with fake clock |
+| Wrapper missing, invalid, or failing to execute (LAUNCHPOLICY 001.4) | `required` refuses, `preferred` reports the outcome; no node-policy files | agentctl process test |
+| Sparse list with blanks or whitespace; PR numbers for several repositories; bad label charset (PREPARATION 001.1, 001.3) | normalized or `invalid_config` with a named reason | lifecycle table test |
 | Returned repository set differs from the intent (001.3) | `repository_inventory_mismatch` cleanup | lifecycle unit |
 
 Each test is written first and fails on main. Remaining ACs are table tests (hint rules, caps, action set).
@@ -138,8 +106,7 @@ Each test is written first and fails on main. Remaining ACs are table tests (hin
 ## Observability
 
 `executor_plugin_provider_event_total` (`kind`, `outcome`: delivered, rate_limited, deduped, dropped_no_recipient, dropped_no_subscriber, delivery_failed), `executor_plugin_maintenance_total`
-(`action`, `outcome`), `executor_plugin_launch_policy_total` (`policy`, `outcome`), and `executor_migration_step_total`
-(`step`). No installation, node, or environment label.
+(`action`, `outcome`), `executor_plugin_launch_policy_total` (`policy`, `outcome`). No installation, node, or environment label.
 
 ## Security
 

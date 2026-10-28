@@ -43,13 +43,13 @@ cleanup admission. The provider keeps placement, worker transport, provider fenc
 The owner confirmed D1, D2, D3, and D6 on 2026-10-28; the others are settled here. The capability registry, negotiation, and
 versioning are specified first in the [versioning design](remote-executor-plugin-capability-versioning.md); admission
 and placement in the [admission design](remote-executor-plugin-admission.md); operations, launch policy, preparation hints,
-and migration in the [operations design](remote-executor-plugin-operations-migration.md).
+in the [operations design](remote-executor-plugin-operations-migration.md); profile migration is deferred (see Out of scope there).
 
 | # | Decision | Rationale |
 | --- | --- | --- |
 | D1 (confirmed) | Host-owned dialer: a bidirectional gRPC `OpenExecutorTunnel` stream bound to installation, environment, generation, and port, for control traffic. Reverse direction uses a provider-forwarded API URL. | Relaxing HTTPS or loopback checks (a) weakens validation for every provider and cannot express SSH; a plugin loopback listener (b) opens an unauthenticated port on the backend host and races the port allocator. A host-initiated stream keeps identity binding, cancellation, and generation fencing in core. |
 | D2 (confirmed) | Ship both preparation modes. `core` stays the default; `provider` is added in the same release through repository intent, with the extensible contract of REQ-EXECUTORS-PLUGIN-PREPARATION-001 so a mirror, sparse checkout, or pull-request checkout needs no further core change. | The first release must keep a local-worktree checkout for a local node. Core clone alone would change that observable behavior. The PLAN suggested deferring only if the assertion could change; it cannot cheaply. |
-| D3 (confirmed) | Keep built-in executor code (and the fork's native executor, which is not on main) until the plugin passes its live scenarios; those scenarios live in the vendor plugin repository and no host behavior depends on them. Never both on one environment. | Removing it first strands retained inventory. Confirmed by the owner; migration is the drain-based operation in the operations design. |
+| D3 (confirmed) | Keep built-in executor code (and the fork's native executor, which is not on main) until the plugin passes its live scenarios; those scenarios live in the vendor plugin repository and no host behavior depends on them. Never both on one environment. | Removing it first strands retained inventory. Confirmed by the owner; the drain-based migration operation is deferred to a follow-up card (see Out of scope in the operations requirements). |
 | D4 | One ledger in core (`executors_running` envelope plus existing recovery claims); no provider database authority. | The base design owns inventory. Dialect tests for every new SQL path. |
 | D5 | This document and its requirements amend the executor spec before code. | Contract change precedes build. |
 | D6 (confirmed) | Provider SDK stays a pinned-reference dependency for v1; do not publish a module yet. | No second external plugin exists to justify a versioning commitment. Revisit then. |
@@ -168,7 +168,7 @@ it accepts verified evidence and carries no provider data. A racing archive, del
 `lifecycle/crash_barrier.go` defines the closed barrier names and `armBarrier(name, mode)`; the arming route sits under
 `/api/v1/e2e/` and is mounted only when `KANDEV_E2E_MOCK=true`, like the child-kill route. Barrier calls in production
 paths are a single cheap lookup that returns immediately when none is armed. The closed names are `after_side_effect`, `after_drain`, `after_handshake`, `before_publish`, `after_destroy_confirm`,
-`after_placement_persist`, `before_placement_commit`, `after_cancel_mark`, and `after_migration_step`; the first caller to reach an armed name fires it, and arming an armed name returns `conflict`. `cmd/plugin-fixture` gains every
+`after_placement_persist`, `before_placement_commit`, and `after_cancel_mark`; the first caller to reach an armed name fires it, and arming an armed name returns `conflict`. `cmd/plugin-fixture` gains every
 capability behind fixture configuration and a local in-process tunnel target, and its conformance test runs each
 capability and barrier through the managed plugin process.
 

@@ -14,7 +14,7 @@ requirements:
 
 One registry, one negotiation point, one pinned snapshot. This design is built first: every other capability in the
 [native worker design](remote-executor-plugin-native-workers.md), the [admission and placement design](remote-executor-plugin-admission.md),
-and the [operations and migration design](remote-executor-plugin-operations-migration.md) is a registry entry. Names
+and the [operations design](remote-executor-plugin-operations-migration.md) is a registry entry. Names
 marked **new** do not describe existing APIs. The base [plugin design](remote-executor-plugins.md) keeps the RPCs,
 leases, and inventory; the provider contract version stays 1.
 
@@ -62,7 +62,7 @@ rules from the native design (preparation mode, API URL mode, destroy timeout) s
 ## Snapshot
 
 At admission the host writes `negotiated_capabilities` (sorted `name@version` strings) and the existing `state_version` into the
-`plugin_executor` envelope, in the same position as the existing `capabilities` key, which keeps its meaning. A record without `negotiated_capabilities` reads as the empty set (AC 003.6). Recovery, attach, destroy, lease
+`plugin_executor` envelope, in the same position as the existing `capabilities` key, which keeps its meaning. A record without `negotiated_capabilities` reads as the empty set (AC 003.6). Recovery, resume, destroy, lease
 validation, and response validation read the snapshot. A host that no longer supports a recorded version maps the
 provider to `unavailable` for that environment through the existing availability path (AC 003.5).
 
@@ -99,7 +99,7 @@ The code for every rejection is `state_too_large`. It is a host-originated failu
 (`invalid_config`, `denied`, `unsupported`, `not_found`, `expired`, `conflict`, `unavailable`, `rate_limited`, `cleanup_pending`): a provider cannot return
 it, and the launch path reports it as the failure code. Cleanup after a rejection writes only the fixed-size terminal transition (phase and claim
 fields, at most 256 bytes) onto the last persisted envelope, so a rejected write cannot recurse; if even that write fails, the record is retained as
-`cleanup_pending`. A host-side write (attach, placement, drain outcome, owner change) that would exceed the cap despite the maxima is refused whole,
+`cleanup_pending`. A host-side write (placement, drain outcome, admission snapshot) that would exceed the cap despite the maxima is refused whole,
 logged, and leaves the stored envelope unchanged; launch paths then run the cleanup above, and ownership writes return `conflict` to their caller.
 
 The worst-case test builds an envelope with every field at its maximum and a 12288-byte state made of bytes that escape to the longest form, marshals

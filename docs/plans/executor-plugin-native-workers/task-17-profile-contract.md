@@ -65,7 +65,7 @@ M: ~450 source, ~800 test lines.
 - Linear-time pattern test at a 1 MiB input with a time bound.
 - Default change after an upgrade leaves an existing environment's snapshot unchanged.
 - Secret rotated or deleted between allocation and recovery; value never in refs, errors, logs, or state.
-- `profile_too_large`: measured by one shared function (compact JSON of the filled provider-facing config without the six kandev keys and `migrated_to` (the document-set keys are measured), plus the secret ID array), identical at save and launch; local and before any provider call and before the echo gate; a resume of an environment allocated with an empty negotiated set is not re-measured after a plugin upgrade adds a capability.
+- `profile_too_large`: measured by one shared function (compact JSON of the filled provider-facing config without the six kandev keys (the document-set keys are measured), plus the secret ID array), identical at save and launch; local and before any provider call and before the echo gate; a resume of an environment allocated with an empty negotiated set is not re-measured after a plugin upgrade adds a capability.
 - Unparseable integer stored: `invalid_type`, no provider call. Undeclared `typed_config` use: `conflict`.
 
 ## Verification
