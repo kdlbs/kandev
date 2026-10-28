@@ -6,7 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/workspacedescriptor"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const pluginExecutorCapabilityWorkspaceDescriptor = "workspace_descriptor"

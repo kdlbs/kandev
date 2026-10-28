@@ -25,7 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const (
@@ -305,7 +305,7 @@ func newDurableRecoveryFixture(t *testing.T, phase string) *durableRecoveryFixtu
 		}
 		return agentctl.NewControlClient(controlURL.Hostname(), controlPort, log), durableToken, nil
 	}
-	fixture.runtime.newRecoveredAgentctlClient = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	fixture.runtime.newAgentctlClient = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		return agentctl.NewClient("unused", 0, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token)), nil
 	}
 	fixture.runtime.ready = func(context.Context, *agentctl.Client) error { return nil }
@@ -434,7 +434,7 @@ func TestRetainedAttachDoesNotCopyTheNonceReferenceToAnotherSession(t *testing.T
 	fixture.operations.inspectResponses = []*pluginsdk.InspectExecutorEnvironmentResponse{{State: "running"}, {State: "running"}}
 	fixture.runtime.operations = confirmingOperations{fixture.operations}
 	fixture.runtime.ready = func(context.Context, *agentctl.Client) error { return nil }
-	fixture.runtime.newRecoveredAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error) {
+	fixture.runtime.newAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error) {
 		return agentctl.NewClient("127.0.0.1", testPluginExecutorInstancePort, newTestLogger()), nil
 	}
 	instance, err := fixture.runtime.CreateInstance(context.Background(), &ExecutorCreateRequest{

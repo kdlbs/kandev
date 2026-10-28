@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
-	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
+	"github.com/kdlbs/kandev/pluginsdk"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 	"google.golang.org/protobuf/proto"
 )
 

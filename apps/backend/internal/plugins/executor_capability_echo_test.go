@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/hostcaps"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 var (

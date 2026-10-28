@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func claimSettlementRuntime(t *testing.T, phase string, claim *pluginExecutorClaimState, resource *pluginsdk.ExecutorResourceDescriptor) (*PluginRemoteExecutor, *pluginExecutorOperationsFake, *pluginExecutorInventoryStoreFake) {

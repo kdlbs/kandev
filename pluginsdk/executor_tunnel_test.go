@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

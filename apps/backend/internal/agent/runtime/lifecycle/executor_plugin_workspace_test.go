@@ -16,7 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/workspacedescriptor"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const testBackendOnlyWorkspace = "/kandev-backend-host-only/never-created/workspace"

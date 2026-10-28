@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func testSchema() map[string]any {

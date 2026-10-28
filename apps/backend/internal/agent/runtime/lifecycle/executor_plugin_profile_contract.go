@@ -8,7 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/profilesnapshot"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // checkRetainedPluginExecutorProfileSize applies the aggregate profile limit

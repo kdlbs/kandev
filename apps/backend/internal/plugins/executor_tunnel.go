@@ -10,7 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/hostcaps"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/protobuf/proto"
 )
 
