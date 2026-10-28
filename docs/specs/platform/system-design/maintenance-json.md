@@ -45,8 +45,10 @@ consumers should ignore them. There is no version field.
   `retired_delivery_event_receipts`, `purged_retired_delivery_rows`,
   `delivery_orphan_jobs_scheduled`, and `delivery_retirement_jobs_completed`.
   These are the existing human report's committed counts and job counts, not
-  a sum of candidates. `partial` is the existing delivery bounded-work flag,
-  not a general success indicator; it can be false when compaction fails.
+  a sum of candidates. `partial` is the existing bounded-work flag: a sample
+  limit in any candidate group, pending delivery work, or a delivery execution
+  error can set it. It is not a general success indicator and can be false
+  when compaction fails.
 - `compaction` is omitted unless compaction completed successfully. When
   present it has `size_before_bytes`, `size_after_bytes`, and `rollback_path`.
 

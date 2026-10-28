@@ -337,10 +337,11 @@ counts `deleted_git_snapshots`, `deleted_plan_revisions`,
 counts are integers, and omitted sections are not null. Future fields may be
 added; scripts should ignore unknown fields.
 
-`partial` means bounded delivery work may remain, not that the command failed.
-Check the exit status: if an error occurs after work commits, stdout still
-reports the committed outcome, stderr reports the failure, and the exit status
-is 1. A failure before an outcome may leave stdout empty. A failed stdout
+`partial` indicates that bounded maintenance work may remain: any candidate
+sample limit, pending delivery work, or a delivery execution error can set it.
+It is not a general success indicator. Check the exit status: if an error
+occurs after work commits, stdout still reports the committed outcome, stderr
+reports the failure, and the exit status is 1. A failure before an outcome may leave stdout empty. A failed stdout
 write can leave incomplete JSON and also produces a nonzero exit.
 
 **Execute.** `--execute` requires exclusive access to the database: it takes

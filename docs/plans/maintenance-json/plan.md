@@ -56,6 +56,6 @@ Hosted CI and reviews remain pending publication.
 ## Risks
 
 A command may have committed work even when it exits 1. `partial` represents
-bounded delivery work and does not encode every failure; scripts must check the
-exit status. A failed stdout write can leave incomplete JSON. Samples and
+bounded maintenance work and does not encode every failure; scripts must check
+the exit status. A failed stdout write can leave incomplete JSON. Samples and
 estimates are not complete totals or promised physical space savings.
