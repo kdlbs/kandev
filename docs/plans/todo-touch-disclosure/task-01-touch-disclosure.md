@@ -97,3 +97,22 @@ sequential
 ## Results
 
 The independent component test failed only the wide-coarse disclosure before the fix (1 failed, 3 controls passed); after the fix all 4 passed. The existing content suite passed (2 tests). Real managed Chromium passed wide CDP tap and touch scroll plus fine desktop hover/focus (2 tests), and mobile-chrome passed phone tap, CDP touch scroll and tap dismissal (1 test). Focus return, 44px targets and viewport containment were checked. Initial fresh builds passed; after the touch-only test refinement, unchanged production inputs and dist fingerprints were compared before and after focused `--no-build` reruns. Scoped ESLint, canonical web typecheck at 6 GiB and `i18n:check` passed. Browser captures and command logs are retained in task-owned evidence. Specification catalog and lint passed. Public docs need no change: existing access is repaired without new workflow or terminology.
+
+## Required CI remediation: update notification coexistence
+
+The current-head E2E shard 18 artifact shows the pseudo-locale update notification test matching two distinct update toasts by their shared title: one for v0.98.0 and the fixture's v1.2.3. The helper forwards the real backend WebSocket while injecting the fixture event. The exact upstream emitter of the first notification is not established. The repair owns only `apps/web/e2e/tests/i18n/pseudo-coverage.spec.ts` and this work-order record; no production behavior or sibling notification is suppressed.
+
+First extend the existing test to deterministically emit a distinct sibling update notification through the existing fixture, assert both localized version-specific notifications are present, and retain the original shared-title selector for a causal RED with the same strict-locator ambiguity. Then select the intended v1.2.3 toast by its localized title **and** version-specific body, retaining a separate assertion of the complete expected localized body. Keep the sibling forwarded and rendered; do not use `first()` or `nth()`. Re-run the same focused test for GREEN. This checks coexistence and preserves the localization oracle, rather than accepting any one matching title. The focused coexistence test produced the expected shared-title strict-locator RED (two visible versions), then passed after selecting v1.2.3 and checking its full localized body.
+
+Run sequentially from the repository root only after a separate implementation and HEAVY release, preserving every actual native handle and join. The current test has no describe-level retry override; if one is introduced, override it only in a disposable proof copy, never in the permanent suite. Use fresh managed assets, or `--no-build` only after exact production-input and dist fingerprints prove current assets match. The runner clears `.pr-assets`; preserve and checksum the owned PR captures and manifest before invoking it.
+
+```bash
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/todo-touch-disclosure-evidence/pseudo-red scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/i18n/pseudo-coverage.spec.ts -- --workers=1 --retries=0 --grep 'localizes a Kandev update notification received from the backend'
+# After the expected strict-locator RED, correct the version-specific selector.
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/todo-touch-disclosure-evidence/pseudo-green scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/i18n/pseudo-coverage.spec.ts -- --workers=1 --retries=0 --grep 'localizes a Kandev update notification received from the backend'
+KANDEV_RUN_QUIET_DIR=/home/jcfs/.kandev/todo-touch-disclosure-evidence/pseudo-lint scripts/run-quiet lint -- pnpm --dir apps/web exec eslint --max-warnings=0 e2e/tests/i18n/pseudo-coverage.spec.ts
+```
+
+After the focused checks and work-order result update, stage the two owned paths and use normal active hooks, a Conventional Commit, and the authorized push. Preserve existing captures and PR body sections. No CI retry, observer renewal, or merge is authorized by this remediation plan.
+
+Remediation results: managed Chromium with one shard, one worker and zero retries reported the expected strict-locator RED (1 failed) and then GREEN (1 passed), using `--no-build` after matching production-input and dist fingerprints. Scoped ESLint passed with zero warnings. The existing backend WebSocket path and sibling notification remain intact.
