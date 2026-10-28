@@ -8,10 +8,13 @@ export type ExecutorProfileField = {
   enumValues: string[];
   minimum?: number;
   maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  defaultValue?: string;
 };
 
 export type ExecutorProfileFieldError = {
-  code: "required" | "type" | "enum" | "minimum" | "maximum";
+  code: "required" | "type" | "enum" | "minimum" | "maximum" | "minLength" | "maxLength";
   value?: number;
 };
 
@@ -65,7 +68,14 @@ function parseField(
     enumValues: enumValues.map(String),
     minimum: typeof property.minimum === "number" ? property.minimum : undefined,
     maximum: typeof property.maximum === "number" ? property.maximum : undefined,
+    minLength: typeof property.minLength === "number" ? property.minLength : undefined,
+    maxLength: typeof property.maxLength === "number" ? property.maxLength : undefined,
+    defaultValue: property.secret === true ? undefined : defaultText(property.default),
   };
+}
+
+function defaultText(value: unknown): string | undefined {
+  return isScalar(value) ? String(value) : undefined;
 }
 
 export function parseExecutorProfileSchema(
@@ -117,12 +127,30 @@ function validateField(
 ): ExecutorProfileFieldError | undefined {
   if (!value) {
     if (field.secret && secretConfigured && !secretCleared) return undefined;
+    if (field.defaultValue !== undefined) return undefined;
     return field.required ? { code: "required" } : undefined;
   }
+  const lengthError = validateLength(field, value);
+  if (lengthError) return lengthError;
   if (field.enumValues.length > 0 && !field.enumValues.includes(value)) return { code: "enum" };
   if (field.type === "boolean" && value !== "true" && value !== "false") return { code: "type" };
   if (field.type !== "number" && field.type !== "integer") return undefined;
   return validateNumber(field, value);
+}
+
+function validateLength(
+  field: ExecutorProfileField,
+  value: string,
+): ExecutorProfileFieldError | undefined {
+  if (field.type !== "string") return undefined;
+  const length = Array.from(value).length;
+  if (field.minLength !== undefined && length < field.minLength) {
+    return { code: "minLength", value: field.minLength };
+  }
+  if (field.maxLength !== undefined && length > field.maxLength) {
+    return { code: "maxLength", value: field.maxLength };
+  }
+  return undefined;
 }
 
 function validateNumber(

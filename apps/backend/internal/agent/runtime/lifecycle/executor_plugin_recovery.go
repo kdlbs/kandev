@@ -96,10 +96,11 @@ func (r *PluginRemoteExecutor) recoverPluginExecutorAllocation(
 	record *models.ExecutorRunning,
 	state *pluginExecutorRecoveryState,
 ) (*pluginsdk.ExecutorResourceDescriptor, bool, error) {
-	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{
-		Context: state.operationContext,
-		Profile: &pluginsdk.ExecutorProfileSnapshot{ProfileId: state.profile.ProfileID, Config: state.profile.Config, SecretValues: state.profile.SecretValues},
-	})
+	snapshot, err := pluginExecutorProfileSnapshot(*state.profile, state.inventory.NegotiatedCapabilities)
+	if err != nil {
+		return nil, false, errors.New("plugin executor operation recovery is unavailable")
+	}
+	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{Context: state.operationContext, Profile: snapshot})
 	if err != nil || recovery == nil || recovery.GetError() != nil {
 		return nil, false, errors.New("plugin executor operation recovery is unavailable")
 	}
@@ -124,6 +125,9 @@ func (r *PluginRemoteExecutor) acceptRecoveredPluginExecutorResource(
 	resource *pluginsdk.ExecutorResourceDescriptor,
 ) (*pluginsdk.ExecutorResourceDescriptor, bool, error) {
 	if err := validatePluginExecutorResourceForProvider(state.profile.Provider, resource); err != nil {
+		return nil, false, err
+	}
+	if err := rejectSecretInProviderState(state.profile.SecretValues, resource); err != nil {
 		return nil, false, err
 	}
 	if state.inventory.Resource != nil && state.inventory.Resource.GetResourceHandle() != resource.GetResourceHandle() {
@@ -560,10 +564,11 @@ func (r *PluginRemoteExecutor) recoverPluginExecutorCleanupResource(
 		return nil, false, errors.New("plugin executor cleanup resource handle is missing")
 	}
 	operationContext := pluginExecutorRequestContextForRecord(record, inventory, *profile)
-	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{
-		Context: operationContext,
-		Profile: &pluginsdk.ExecutorProfileSnapshot{ProfileId: profile.ProfileID, Config: profile.Config, SecretValues: profile.SecretValues},
-	})
+	snapshot, err := pluginExecutorProfileSnapshot(*profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		return nil, false, errors.New("plugin executor allocation outcome is unavailable for cleanup")
+	}
+	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{Context: operationContext, Profile: snapshot})
 	if err != nil || recovery == nil || recovery.GetError() != nil {
 		return nil, false, errors.New("plugin executor allocation outcome is unavailable for cleanup")
 	}
@@ -587,6 +592,9 @@ func (r *PluginRemoteExecutor) recordRecoveredCleanupResource(
 	resource *pluginsdk.ExecutorResourceDescriptor,
 ) (*pluginsdk.ExecutorResourceDescriptor, bool, error) {
 	if err := validatePluginExecutorResourceForProvider(profile.Provider, resource); err != nil {
+		return nil, false, err
+	}
+	if err := rejectSecretInProviderState(profile.SecretValues, resource); err != nil {
 		return nil, false, err
 	}
 	inventory.Resource = resource

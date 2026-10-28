@@ -225,14 +225,16 @@ func (s *Service) ConfirmExecutorProviderCapabilities(ctx context.Context, plugi
 		}
 		return s.capabilityGate.confirm(callCtx, capabilityKeyFor(record, remote, providerKey), declared,
 			func(validateCtx context.Context) (*pluginsdk.ValidateExecutorProfileResponse, error) {
+				snapshot, snapshotErr := validationProfileSnapshot(declaration, profile)
+				if snapshotErr != nil {
+					return nil, snapshotErr
+				}
 				return remote.ValidateExecutorProfile(validateCtx, &pluginsdk.ValidateExecutorProfileRequest{
 					Context: &pluginsdk.ExecutorProviderRequestContext{
 						PluginId: record.ID, InstallationId: record.InstallationID,
 						ProviderKey: providerKey, ContractVersion: int32(declaration.ContractVersion),
 					},
-					Profile: &pluginsdk.ExecutorProfileSnapshot{
-						ProfileId: profile.ProfileID, Config: profile.Config, SecretValues: profile.SecretValues,
-					},
+					Profile:          snapshot,
 					HostCapabilities: hostCapabilityRows(),
 				})
 			})

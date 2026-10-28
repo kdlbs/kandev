@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/profilesnapshot"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -101,14 +102,16 @@ func (s *Service) ValidateExecutorProviderProfile(ctx context.Context, executorI
 	}
 	var fieldErrors []models.ExecutorProviderFieldError
 	err = s.withExecutorProvider(ctx, selected.PluginID, selected.Key, func(callCtx context.Context, remote *pluginsdk.RemotePlugin, declaration *manifest.ExecutorProvider) error {
+		snapshot, snapshotErr := validationProfileSnapshot(declaration, profile)
+		if snapshotErr != nil {
+			return snapshotErr
+		}
 		response, callErr := remote.ValidateExecutorProfile(callCtx, &pluginsdk.ValidateExecutorProfileRequest{
 			Context: &pluginsdk.ExecutorProviderRequestContext{
 				PluginId: selected.PluginID, InstallationId: selected.InstallationID,
 				ProviderKey: selected.Key, ContractVersion: int32(declaration.ContractVersion),
 			},
-			Profile: &pluginsdk.ExecutorProfileSnapshot{
-				ProfileId: profile.ProfileID, Config: profile.Config, SecretValues: profile.SecretValues,
-			},
+			Profile:          snapshot,
 			HostCapabilities: hostCapabilityRows(),
 		})
 		if callErr != nil {
@@ -358,4 +361,23 @@ func providerCapabilityRequirements(declared manifest.ExecutorProvider) []models
 		out[i] = models.ExecutorProviderCapabilityRequirement{Name: requirement.Name, Version: requirement.Version}
 	}
 	return out
+}
+
+// validationProfileSnapshot builds the profile that a validation request
+// carries, with the additive typed and reference forms for a provider that
+// requires them.
+func validationProfileSnapshot(declaration *manifest.ExecutorProvider, profile models.ExecutorProviderProfile) (*pluginsdk.ExecutorProfileSnapshot, error) {
+	required := declaration.HostCapabilityRequirements()
+	names := make([]string, len(required))
+	for index, requirement := range required {
+		names[index] = requirement.Name
+	}
+	snapshot, err := profilesnapshot.Build(profilesnapshot.Input{
+		ProfileID: profile.ProfileID, Config: profile.Config, SecretValues: profile.SecretValues,
+		SecretRefs: profile.SecretReferences, Schema: declaration.ProfileSchema, Capabilities: names,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", models.ErrExecutorProfileInvalidType, err.Error())
+	}
+	return snapshot, nil
 }
