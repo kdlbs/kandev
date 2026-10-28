@@ -32,7 +32,7 @@ func TestGitHubComparisonRepositoryFromRepositoryAcceptsCanonicalProviderHost(t 
 }
 
 func TestNormalizeGitHubComparisonRepositoryRejectsOtherHosts(t *testing.T) {
-	for _, host := range []string{"https://github.com.evil", "https://github.com:8443", "https://github.com/api"} {
+	for _, host := range []string{"https://github.com:8443", "https://github.com/api", "https://user@git.example.com", "http://git.example.com"} {
 		t.Run(host, func(t *testing.T) {
 			if _, ok := normalizeGitHubComparisonRepository(models.ComparisonTargetRepository{
 				Host: host, Path: "test-owner/test-repo",
