@@ -65,7 +65,7 @@ M: ~650 source, ~1000 test lines. Built first; every later order is a registry e
 - Per-installation lock shared by admission and activation (`plugin_state_readability:`), and the echo captured per (installation, dispatch generation) with a validation run when a generation has none.
 - Registry package, manifest validator, host constant comparison at install, upgrade, and enable.
 - Additive `host_capabilities` and `implemented_capabilities` fields; `capability_mismatch` availability.
-- `checkCapabilityAgreement` in `validateLaunch`; `negotiated_capabilities` and `provider_state_version` in the envelope.
+- `checkCapabilityAgreement` in `validateLaunch`; `negotiated_capabilities` in the envelope, with the existing `state_version` key as the provider state version.
 - `checkStateReadable` for upgrade, rollback, and retirement; append-only retired list with a golden-file test.
 
 ## Out of scope

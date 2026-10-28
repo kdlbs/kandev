@@ -53,7 +53,11 @@ It is built from the validated, filled config by schema type and is omitted unle
 (`models.ExecutorProfileSecretID`), and the inventory already records property-to-ID pairs in `secret_references`, which this design reuses (no `secret_ref_ids` field). Replacing a secret
 creates a new store entry and a new ID, and there is no revision counter, so a reference has no version. An environment keeps its allocation-time ID; the existing retention check
 (`retainedPluginExecutorReferences`) stops the profile service from deleting a secret that a retained environment still names. On recovery and destroy the host reveals the recorded
-ID through `loadRecordedExecutorProviderSecrets`: a missing secret is a named failure before any provider call, otherwise the value goes in `secret_values` only for the duration of the call.
+ID through `loadRecordedExecutorProviderSecrets`: a missing secret is the named failure `secret_reference_missing` before any provider call, otherwise the value goes in `secret_values` only for the duration of the call.
+
+**State check.** After every call that received `secret_values`, the host compares the returned state and checkpoint bytes with each revealed value of at least 8 bytes and, on an exact match, rejects the response as `secret_in_state` without persisting and runs the existing cleanup. Transformed copies (encoded or split) are a provider obligation, not detected.
+
+**Config rules.** Absent and empty are equal except for a `string` with `min_length` 0; an empty required value takes its default; lengths are code points; `bool` is `true|false`, numbers are decimal text; undeclared keys are `unknown_property` except the host-owned keys named in AC 001.7.
 
 ## Data model
 

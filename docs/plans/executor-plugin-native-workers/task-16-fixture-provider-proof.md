@@ -35,6 +35,8 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-PROFILE-003.3
   - AC-EXECUTORS-PLUGIN-PLACEMENT-002.4
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.7
+  - AC-EXECUTORS-PLUGIN-PLACEMENT-001.9
+  - AC-EXECUTORS-PLUGIN-PROFILE-003.5
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
   - ../../specs/executors/system-design/remote-executor-plugin-capability-versioning.md
@@ -55,7 +57,7 @@ M: ~300 source, ~650 test lines, including one Playwright spec.
 
 ## In scope
 
-- One parametrized Playwright spec triggers each remaining host-originated failure code (`capability_mismatch`, `executor_migrating`, `admission_denied`, `admission_unavailable`, `launch_policy_unenforced`, `bootstrap_consumed`, `repository_inventory_mismatch`, `state_too_large`, `api_unreachable`, `placement_failed`, `placement_timeout`) through the fixture and asserts localized text with an icon, using the pseudo-locale.
+- One parametrized Playwright spec triggers each remaining host-originated failure code (`capability_mismatch`, `missing_capability`, `executor_migrating`, `admission_denied` including `scope_full`, `admission_unavailable`, `launch_policy_unsupported`, `launch_policy_unenforced`, `secret_reference_missing`, `secret_in_state`, `bootstrap_consumed`, `repository_inventory_mismatch`, `state_too_large`, `api_unreachable`, `placement_failed`, `placement_timeout`) through the fixture and asserts localized text with an icon, using the pseudo-locale.
 - Extend cmd/plugin-fixture to declare every capability behind configuration and run one conformance test through the managed plugin process covering each capability and barrier, with no vendor, cluster, network, or credentials.
 
 ## Out of scope

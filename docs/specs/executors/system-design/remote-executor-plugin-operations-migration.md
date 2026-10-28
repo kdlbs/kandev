@@ -82,14 +82,14 @@ never seen, selected only through hints.
 `transitionAuthority`, called by the migration operation under the cleanup claim, can change it; there is no code path that renames
 an executor type (AC 001.2).
 
-**Enumeration.** `GET /api/v1/executors/:id/migration/environments` reads built-in rows by executor type, classifying `active`
+**Enumeration.** `GET /api/v1/executors/profiles/:profile_id/migration/environments` reads built-in rows by executor type, classifying `active`
 (live session), `drainable` (no live session, resources present), and `orphaned` (no owner). It is read-only (AC 001.1).
 
-**Operation.** A **new** state machine, reached through the start and rollback routes of AC 001.3 and 001.5 and stored on the executor profile metadata: `freezing`, `draining`, `switching`, `done`,
+**Operation.** A **new** state machine, reached through the start and rollback routes of AC 001.3 and 001.5 and stored in the **new** table `executor_profile_migrations` (AC 001.8): `freezing`, `draining`, `switching`, `done`,
 `rolled_back`. `freezing` sets `migrating`, which the allocation gate treats like an admission denial (`executor_migrating`),
-committed with the profile revision so a launch admitted earlier finishes and is drained and a later one is refused (AC 001.3).
+committed with the row revision so a launch admitted earlier finishes and is drained and a later one is refused (AC 001.3).
 `draining` waits for sessions to stop and runs the built-in cleanup (with the drain receipt where the built-in supports one).
-`switching` flips the profile to the plugin in one write. Each step records itself before acting, so a restart resumes from the
+`switching` sets the source profile's `config` key `migrated_to` in one write (AC 001.8); launch resolution reads the key, and rollback deletes it. Each step records itself before acting, so a restart resumes from the
 recorded step (AC 001.4).
 
 **Rollback.** `rolled_back` switches new launches to the built-in profile. Plugin environments remain under the plugin as
@@ -99,9 +99,11 @@ passes its live scenarios (AC 001.7).
 
 ## Data model
 
-No new table and no DDL. Profile metadata holds the migration step; the envelope gains `authority` for built-in rows (tolerant
-decode). Idempotency entries are in memory with a short TTL; losing them on restart only re-allows a replay, which the provider
-treats idempotently by key. SQLite and PostgreSQL: the profile revision CAS covers the freeze race; PostgreSQL takes
+One **new** table, `executor_profile_migrations(profile_id PRIMARY KEY, target_profile_id, step, revision, created_at, updated_at)`,
+created idempotently in both dialects; no column is added to `executor_profiles` (the profile has no metadata or revision column on
+main). The envelope gains `authority` for built-in rows (tolerant decode). Launch policy and preparation settings are profile `config`
+keys (AC LAUNCHPOLICY 001.1, PREPARATION 001.1). Idempotency entries are in memory with a 24 h TTL and a per-key single-flight; only
+`applied`, `noop`, and `refused` outcomes are kept. SQLite and PostgreSQL: the row revision CAS covers the freeze race and double start; PostgreSQL takes
 `pg_advisory_xact_lock(hashtextextended('executor_migration:'||profile_id, 0))` for step transitions.
 
 ## Interleavings and failing-first tests
@@ -109,6 +111,12 @@ treats idempotently by key. SQLite and PostgreSQL: the profile revision CAS cove
 | Interleaving | Required outcome | Tests (level) |
 | --- | --- | --- |
 | Migration freeze races a new launch (MIGRATION 001.3) | earlier launch finishes and drains; later gets `executor_migrating` | sqlite and PostgreSQL race; lifecycle unit |
+| Two operators start one migration, or one start is replayed (001.8) | one row; loser reads it; replay returns it | sqlite and PostgreSQL; route unit |
+| Rollback arrives after `done`, or twice (001.5) | recorded outcome returned; no second switch | route unit |
+| Same maintenance key while the first call is in flight; provider timeout (OPS 001.7) | waits and shares the outcome; timeout not recorded, replay calls again | route unit with fake clock |
+| Inventory and node ordering, cursor edges, page of 0 or 101 (OPS 001.1, 001.2) | byte order; empty cursor starts; defaults clamped | route table test |
+| Conflicting or malformed preparation settings (PREPARATION 001.1) | `invalid_config` with a named reason; no allocation | lifecycle table test |
+| `required` policy on a provider without the capability or without the ID (LAUNCHPOLICY 001.2) | `launch_policy_unsupported`; no allocation | lifecycle unit |
 | Backend restart in each migration step (001.4) | resumes from the recorded step; no double freeze | barrier e2e (`after_migration_step`); unit per step |
 | Rollback with retained plugin environments (001.5, 001.6) | not adopted; still listed; survive plugin disable | store and lifecycle unit |
 | Two operators send one maintenance key with different bodies (OPS 001.7) | second rejected `conflict`; same body inside 24 h returns the recorded outcome with one provider call | route unit |

@@ -73,7 +73,7 @@ provider to `unavailable` through the existing availability path, never `absent`
 ## Workspace descriptor
 
 **New** `ExecutorResourceDescriptor` fields `workspace_path` and `workspace_identity` (additive proto fields).
-`validatePluginExecutorWorkspace(platform, path, identity)` is a pure function in `executor_plugin_validation.go`;
+**New** `validatePluginExecutorWorkspace(platform, path, identity)` (absent on main) is a pure function in `executor_plugin_validation.go`;
 it never touches the filesystem and parses by the descriptor's `platform` (`windows/*` drive-letter paths; others POSIX).
 Validation runs in `validatePluginExecutorResourceForProvider`, so provision, attach, recovery, and checkpoint share it.
 The envelope gains `workspace_path`, `workspace_identity`, and `workspace_preparation`. The constant
@@ -87,12 +87,11 @@ or identity differs from a non-empty recorded value for that generation fails be
 **New** `ProvisionExecutorEnvironmentRequest.repositories` (message `ExecutorRepositoryIntent`: id, locator, branch,
 base branch, checkout ref) and `agent_env` (map). The intent is built from the same workspace repository projection
 that `ExecutorCreateRequest` carries; locators go through the existing credential scrubbing. `agent_env` starts from the
-instance environment that `agentctlInstanceRequest` uses and removes entries that the managed-credential
-classification (`internal/githubauth`) or the secret-classified set marks. Both are included in
+instance environment that `agentctlInstanceRequest` uses and keeps only the profile's plain `EnvVars` and the host allowlist, dropping managed credentials (`internal/githubauth`) and any name matching the secret patterns of AC 003.4, sorted by name; over 64 entries or 16 KiB is `invalid_config`. Both are included in
 `pluginExecutorInputDigest`.
 
 For `workspace_preparation: provider` the descriptor gains `repositories` (message `ExecutorRepositoryState`: id,
-relative path, branch, head commit). `verifyPluginExecutorRepositoryInventory` compares the set to the intent by
+relative path, branch, head commit). **New** `verifyPluginExecutorRepositoryInventory` compares the set to the intent by
 repository ID, requires every path to be inside `workspace_path` after platform-aware cleaning, and persists the
 result in the envelope. In this mode `startPluginExecutorAgentctl` skips core materialization; `core` mode is unchanged.
 Launch admission rejects managed Git credentials with `provider` preparation before allocation.
@@ -131,7 +130,7 @@ seconds apart, 10 seconds in total; a failure rolls provisioning back with the c
 Agentctl **new** route `POST /runtime/seal-and-drain` (authenticated with the control token, body carries the expected
 runtime identity and claim) stops accepting work, stops managed process groups, and returns a receipt; the
 `instance.Manager` and control client carry the generic part ported from the native branch. A second call with the
-same claim returns the stored receipt. Lifecycle adds `drainBeforePluginDestroy` ahead of
+same claim returns the stored receipt; a call under another claim during a drain is `conflict`, and a drain that stops only some groups or hits the deadline returns no receipt. Lifecycle adds **new** `drainBeforePluginDestroy` ahead of
 `destroyPluginExecutorRecord`: under the cleanup claim it calls drain with a 60 s deadline, writes the host-only
 `drain_receipt` checkpoint (CAS), then calls destroy with **new** `DestroyExecutorEnvironmentRequest.drain_receipt`
 and `drain_outcome`. Outcome mapping: a receipt is `drained`; a refused connection or identity mismatch is `unreachable`; a lost reply or the 60 s deadline is `uncertain`; a failed-launch rollback before a runtime exists is `not_attempted`. A successor claim re-runs the drain (agentctl returns a fresh receipt for an already sealed runtime) and a replayed destroy under the same claim carries the stored outcome. The destroy deadline is
@@ -145,7 +144,7 @@ must match the active cleanup claim or recovery claim row (`internal/task/recove
 `claim.OperationID`, which destroy requests already send as `cleanup_claim`, so no claim token is added)
 for the same environment, owner, generation, and operation, and the dispatch generation must be current. Phases
 `cleanup_progress` and `recovery_progress` join the allowed set when the snapshot has `destroy_checkpoints`; each claim type accepts only its own phase,
-and a provider `sequence` per claim (new additive field, strictly increasing; an equal sequence with an equal digest is an idempotent success) enforces order. The write is the existing `CheckpointPluginExecutorInventory` CAS, so two callbacks
+and a provider `sequence` per claim (new additive field, strictly increasing) enforces order. The claim kind, last sequence, and digest live in the envelope, written in the claim-taking transaction (AC 006.8); the claim table has no kind column and gains none. Check order: shape, claim identity, sequence (an equal sequence with an equal digest is an idempotent success even after the revision moved), then the revision CAS. The write is the existing `CheckpointPluginExecutorInventory` CAS, so two callbacks
 at one revision serialize to one winner. Settlement requires `confirmed_absent` and a successful latest checkpoint.
 
 ## Durable bootstrap and ready publication
@@ -159,10 +158,10 @@ branch in `attachRecoveredPluginExecutor` for `durable_bootstrap`: reveal the no
 instance after verifying owner, workspace path, and port, then publish. A repeated handshake that agentctl accepts continues to readiness; one it rejects as consumed ends in cleanup
 with reason `bootstrap_consumed`. The envelope records `handshake_started` before each handshake.
 
-Publication is a single repository method `PublishRecoveredTaskEnvironment` that, under the recovery claim, verifies
+Publication is a **new** single repository method `PublishRecoveredTaskEnvironment` (absent on main; ported from the fork reference, then adapted) that, under the recovery claim, verifies
 operation, task, session, environment owner and generation, runtime identity, descriptor, and repository inventory and
 flips the environment from `creating` to `ready`. It is idempotent on a ready row with identical evidence. It is generic:
-it accepts verified evidence and carries no provider data.
+it accepts verified evidence and carries no provider data. A racing archive, delete, or reset that no-ops records `cleanup_requested`, which the cleanup sweep acts on after the claim is released (AC 007.9).
 
 ## Crash barrier and fixture
 
@@ -184,7 +183,7 @@ state version is rejected (versioning design, AC CAPABILITY-003.3).
 ## Data model
 
 No new table and no DDL migration. The `plugin_executor` envelope in `executors_running.metadata` gains fields:
-`negotiated_capabilities`, `provider_state_version`, `workspace_path`, `workspace_identity`, `workspace_preparation`, `repositories`, `drain_outcome`,
+`negotiated_capabilities`, `profile_snapshot_digest`, `workspace_path`, `workspace_identity`, `workspace_preparation`, `repositories`, `drain_outcome`,
 `drain_receipt_id`. The envelope stays under 32 KiB through the per-field maxima and the 20480-byte host reserve of the [versioning design](remote-executor-plugin-capability-versioning.md#state-budget); an
 oversize write is rejected as `state_too_large`. The workspace path is stored once, in the envelope. `repositories` persists `id`, `relative_path`, and `head_commit` only. Secret references add metadata keys, not columns. Publication touches
 the existing task environment and repository projection rows.
