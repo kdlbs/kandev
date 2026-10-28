@@ -35,7 +35,7 @@ L: ~600 source, ~900 test lines.
 
 ## In scope
 
-- New worker-to-host reachability probe: one-use probe token, `GET /api/v1/runtime/ping` (204), agentctl control route `POST /runtime/probe-host-api`, 10 s and two attempts, cleanup reason `api_unreachable`.
+- New worker-to-host reachability probe: per-environment probe token valid for both attempts and deleted at the end of the probe, `GET /api/v1/runtime/ping` (204, 401 otherwise) added to `isPublicPath` in `internal/auth/httpmw/middleware.go` for GET only with the `middleware_test.go` pinning test updated, agentctl control route `POST /runtime/probe-host-api`, 10 s and two attempts, cleanup reason `api_unreachable`.
 - Add the OpenExecutorTunnel stream, the lease transport field, the host tunnel dialer used by agentctl and gateway proxies, and provider-forwarded API URL handling.
 
 ## Out of scope

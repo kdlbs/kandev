@@ -31,7 +31,7 @@ effects, wrappers, and preparation strategies.
 **New** additive RPCs gated by `provider_operations`: `GetExecutorProviderStatus`, `ListExecutorInventory` (cursor, page at most
 100), and `ReadExecutorProviderLog` (tail lines at most 500, 64 KiB). The host enforces the size caps itself after receiving the
 reply: it rejects an oversize status (`response_too_large`), never truncates silently. The admin route
-(`GET /api/v1/plugins/executor-providers/:installation/status`, `/inventory`, `/log`) is administrator-only and reuses the
+(`GET /api/v1/plugins/executor-providers/:installation/status`, `/inventory`, `/log`, each taking the `provider_key` query selector of AC 001.1) is administrator-only and reuses the
 existing plugin admin authorization. Log lines go through the host's secret redaction before they are returned. Inventory
 reconciliation is read-only: entries are matched to host records by the opaque provider ID and shown as `unrecognized` when
 absent; no host record changes (AC 001.2).
@@ -39,13 +39,13 @@ absent; no host record changes (AC 001.2).
 **Events.** A host callback `PublishProviderEvent` (alongside the existing executor callbacks, same dispatch-generation and
 installation binding) validates the closed kind, severity, subject, message code, and parameters, applies a token bucket of
 30 per minute per installation and a five-minute dedupe on the dedupe key, and calls the existing notification service for the
-instance administrators (an installation is instance-wide). It stores nothing new. Free text is rejected by schema, so an event cannot carry a log line or secret
+instance administrators (an installation is instance-wide; the service has no administrator audience today, so the recipients are `providerOwners` filtered by the same administrator check as the admin routes, and the default user when authentication is not enforced; an event with no resolvable recipient is dropped and counted, never sent to another account). It stores nothing new. Free text is rejected by schema, so an event cannot carry a log line or secret
 (AC 001.3, 001.4).
 
 ## Maintenance
 
 **New** RPC `ApplyProviderMaintenance` gated by `provider_maintenance` (which requires `provider_operations`). The admin route
-`POST /api/v1/plugins/executor-providers/:installation/maintenance` takes `{action, subject_id, reason_code, idempotency_key}`
+`POST /api/v1/plugins/executor-providers/:installation/maintenance` takes `{provider_key, action, subject_id, reason_code, idempotency_key}`
 with the closed action set. The host writes the audit record before and after the call (actor, installation, action, subject,
 outcome) and keeps a short-lived idempotency map keyed by installation and key whose entry holds the request digest, so a replay
 with a different body is rejected (AC 001.7). The audit sink is a structured log line, the owner's answer of 2026-10-28; a persisted audit trail would be a separate change. A replay with the same key and body inside 24 hours returns the recorded outcome (the map entry holds digest and outcome); a different body is `conflict`. This absorbs the former deferred provider-maintenance item.
@@ -86,10 +86,9 @@ an executor type (AC 001.2).
 (live session), `drainable` (no live session, resources present), and `orphaned` (no owner). It is read-only (AC 001.1).
 
 **Operation.** A **new** state machine, reached through the start and rollback routes of AC 001.3 and 001.5 and stored in the **new** table `executor_profile_migrations` (AC 001.8): `freezing`, `draining`, `switching`, `done`,
-`rolled_back`. `freezing` sets `migrating`, which the allocation gate treats like an admission denial (`executor_migrating`),
-committed with the row revision so a launch admitted earlier finishes and is drained and a later one is refused (AC 001.3).
+`rolled_back`. `freezing` moves the row to a frozen step, committed with the row revision. The gate is **new** `checkMigrationFreeze(profileID)`, called from the common launch entry that every executor type passes through (not the plugin-only allocation gate, which built-in launches never reach). It runs in the transaction that creates the launch's environment record, reads the profile's row, and refuses with `executor_migrating` when the step is `freezing`, `draining`, or `switching`; because the freeze CAS and that transaction exclude each other (SQLite immediate writer; PostgreSQL the `executor_migration:` advisory lock), a launch is either admitted before the freeze, finishes, and is drained, or is refused (AC 001.3). `draining` also waits until no environment record of the profile is in a launch phase.
 `draining` waits for sessions to stop and runs the built-in cleanup (with the drain receipt where the built-in supports one).
-`switching` sets the source profile's `config` key `migrated_to` in one write (AC 001.8); launch resolution reads the key, and rollback deletes it. Each step records itself before acting, so a restart resumes from the
+`switching` sets the source profile's `config` key `migrated_to` and moves the row to `done` in one transaction guarded by the row revision (AC 001.8); a rollback that races it commits the other transition and the loser re-reads, so exactly one wins. Launch resolution reads the key; rollback deletes it in the same guarded transaction that sets `rolled_back`. Each step records itself before acting, so a restart resumes from the
 recorded step (AC 001.4).
 
 **Rollback.** `rolled_back` switches new launches to the built-in profile. Plugin environments remain under the plugin as

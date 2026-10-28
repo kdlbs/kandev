@@ -18,6 +18,7 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.7
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.8
   - AC-EXECUTORS-PLUGIN-ADMISSION-001.9
+  - AC-EXECUTORS-PLUGIN-ADMISSION-001.10
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-shared-admission-placement.md
 ---

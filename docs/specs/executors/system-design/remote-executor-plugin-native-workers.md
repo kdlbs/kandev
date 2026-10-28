@@ -87,7 +87,7 @@ or identity differs from a non-empty recorded value for that generation fails be
 **New** `ProvisionExecutorEnvironmentRequest.repositories` (message `ExecutorRepositoryIntent`: id, locator, branch,
 base branch, checkout ref) and `agent_env` (map). The intent is built from the same workspace repository projection
 that `ExecutorCreateRequest` carries; locators go through the existing credential scrubbing. `agent_env` starts from the
-instance environment that `agentctlInstanceRequest` uses and keeps only the profile's plain `EnvVars` and the host allowlist, dropping managed credentials (`internal/githubauth`) and any name matching the secret patterns of AC 003.4, sorted by name; over 64 entries or 16 KiB is `invalid_config`. Both are included in
+instance environment that `agentctlInstanceRequest` uses and keeps only the profile's plain `EnvVars` and the host allowlist (`KANDEV_TASK_ID`, `KANDEV_SESSION_ID`, `KANDEV_INSTANCE_ID`, `KANDEV_TASK_ENVIRONMENT_ID`, `KANDEV_AGENT_PROFILE_ID`, `KANDEV_EXECUTION_PROFILE_ID`, `LANG`, `LC_ALL`, `TZ`; a constant in code, tested against this list), dropping managed credentials (`internal/githubauth`) and any name matching the secret patterns of AC 003.4, sorted by name; over 64 entries or 16 KiB is `invalid_config`. Both are included in
 `pluginExecutorInputDigest`.
 
 For `workspace_preparation: provider` the descriptor gains `repositories` (message `ExecutorRepositoryState`: id,
@@ -111,7 +111,7 @@ checks, `base_url` must be empty, and header rules still apply. `agentctl` build
 dialer use it with a synthetic authority that is never resolved. The dialer checks the requested port against
 `{control port, recorded instance port}` before opening a stream, writes nothing before the acknowledgement, and
 closes the stream when the request context ends. A tunnel registry keyed by installation, environment, generation
-counts streams (limit 64) and closes all on dispatch generation change, disable, plugin exit, or environment release.
+counts streams (limit 64 per environment across all owners and ports) and closes all on dispatch generation change, disable, plugin exit, or environment release. A shared-environment attach or release neither closes nor re-binds other owners' streams or leases (`share_epoch` is not part of a stream binding); a release closes only the streams on the released owner's recorded port, and the provider-side fence of the shared design covers provider calls only.
 Gateway `vscode_proxy.go`, `port_proxy.go`, and `port_tunnel.go` already obtain the lease transport; they take the
 tunnel dialer from the same resolver. Authentication to agentctl stays the host-applied bearer token.
 
@@ -121,8 +121,8 @@ For `provider_forwarded` the launch path replaces `validatePluginRuntimeAPIURL` 
 base URL is known. The bootstrap JSON gains `host_api_url` (the backend's own listener, loopback allowed) and
 `idle_timeout_seconds`. The provider arranges worker-side reachability (for example a reverse forward) and starts
 agentctl with the worker-local URL. No listener is added. The reachability proof is a **new** probe, since main has only the agentctl `Health` call, which proves the host-to-worker path: the host
-registers a one-use probe token (random, in memory, 60 s, bound to the environment) on a **new** route `GET /api/v1/runtime/ping` that answers 204 to a matching
-token header, then asks agentctl through the control transport (**new** route `POST /runtime/probe-host-api` with the URL and token) to request it. Two attempts, two
+registers a probe token (random, in memory, 60 s, bound to the environment, deleted when the probe ends) on a **new** route `GET /api/v1/runtime/ping` that answers 204 to a matching
+token header and 401 otherwise, then asks agentctl through the control transport (**new** route `POST /runtime/probe-host-api` with the URL `<host_api_url>/api/v1/runtime/ping` and the token) to request it. The auth middleware blocks unauthenticated requests by default, so `isPublicPath` in `internal/auth/httpmw/middleware.go` gains `/api/v1/runtime/ping` for `GET` only (the token is the credential, checked in the handler), and the pinning test in `middleware_test.go` gains the entry plus a negative case for another method and a sibling path. A matched token marks the probe reached on the host, so a lost 204 followed by a second attempt is not a failure. Two attempts, two
 seconds apart, 10 seconds in total; a failure rolls provisioning back with the cleanup reason `api_unreachable`.
 
 ## Drain receipt
@@ -223,7 +223,7 @@ agent env filtering), the unchanged fixture conformance test (001.3), and an `-r
 ## Observability
 
 Closed-label counters join the existing executor-plugin metrics: `executor_plugin_capability_rejected_total`
-(`capability`), `executor_plugin_tunnel_open` gauge and `executor_plugin_tunnel_closed_total` (`reason`: cancel, restart,
+(`capability`, `phase`: install, upgrade, enable, allocate, echo; one metric, defined in the [versioning design](remote-executor-plugin-capability-versioning.md#observability)), `executor_plugin_tunnel_open` gauge and `executor_plugin_tunnel_closed_total` (`reason`: cancel, restart,
 limit, ack_timeout, provider_error), `executor_plugin_drain_total` (`outcome`), and `executor_plugin_publish_total`
 (`outcome`). Barrier firings log with the barrier name. Plugin, task, environment, and execution IDs are never labels.
 

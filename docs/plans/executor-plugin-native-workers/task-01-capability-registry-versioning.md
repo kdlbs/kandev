@@ -44,6 +44,8 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-CAPABILITY-004.3
   - AC-EXECUTORS-PLUGIN-CAPABILITY-004.4
   - AC-EXECUTORS-PLUGIN-CAPABILITY-004.5
+  - AC-EXECUTORS-PLUGIN-CAPABILITY-002.7
+  - AC-EXECUTORS-PLUGIN-CAPABILITY-003.9
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-capability-versioning.md
 ---
