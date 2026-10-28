@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -21,16 +24,24 @@ import (
 )
 
 // fakeRunPermissionResolver fails its first `failures` calls with err, or
-// every call when failures is negative.
+// returns scripted results in order when results is set.
 type fakeRunPermissionResolver struct {
 	resolved []string
 	canceled []string
 	err      error
 	failures int
+	results  []error
 }
 
 func (f *fakeRunPermissionResolver) result() error {
 	calls := len(f.resolved) + len(f.canceled)
+	if len(f.results) > 0 {
+		index := calls - 1
+		if index >= len(f.results) {
+			index = len(f.results) - 1
+		}
+		return f.results[index]
+	}
 	if f.err != nil && (f.failures < 0 || calls <= f.failures) {
 		return f.err
 	}
@@ -149,7 +160,8 @@ func TestTasklessPermission_RejectsAndRunFinishesOnReady(t *testing.T) {
 		t.Fatalf("resolved = %v, want the reject option", f.resolver.resolved)
 	}
 	decisions := f.decisions(t)
-	if len(decisions) != 1 || decisions[0]["decision"] != "rejected" || decisions[0]["title"] != "Run ls" {
+	if len(decisions) != 1 || decisions[0]["decision"] != "rejected" || decisions[0]["title"] != "Run ls" ||
+		decisions[0]["request_id"] != "request-1" || decisions[0]["option_id"] != "reject-once" {
 		t.Fatalf("decision events = %v", decisions)
 	}
 
@@ -234,11 +246,89 @@ func TestTasklessPermission_RetriesTransientAnswerFailure(t *testing.T) {
 	}
 }
 
+func TestTasklessPermission_DoesNotRetryOrStopOnTerminalPermissionResults(t *testing.T) {
+	permissionError := func(code string) error {
+		return &agentctlclient.PermissionOperationError{Code: code, Message: code}
+	}
+
+	tests := []struct {
+		name         string
+		mutate       func(*lifecycle.PermissionRequestEventPayload)
+		results      []error
+		wantResolved int
+		wantCanceled int
+	}{
+		{
+			name: "resolve after a lost response",
+			results: []error{
+				errors.New("agentctl accepted the answer but the response was lost"),
+				fmt.Errorf("retry result: %w", permissionError(streams.PermissionErrorAlreadyResolved)),
+			},
+			wantResolved: 2,
+		},
+		{
+			name: "cancel after a lost response",
+			mutate: func(p *lifecycle.PermissionRequestEventPayload) {
+				p.Options = []lifecycle.PermissionOption{{OptionID: "allow-once", Kind: "allow_once"}}
+			},
+			results: []error{
+				errors.New("agentctl accepted the cancellation but the response was lost"),
+				permissionError(streams.PermissionErrorAlreadyResolved),
+			},
+			wantCanceled: 2,
+		},
+		{
+			name:         "resolve stale request",
+			results:      []error{permissionError(streams.PermissionErrorStale)},
+			wantResolved: 1,
+		},
+		{
+			name: "cancel stale request",
+			mutate: func(p *lifecycle.PermissionRequestEventPayload) {
+				p.Options = []lifecycle.PermissionOption{{OptionID: "allow-once", Kind: "allow_once"}}
+			},
+			results:      []error{permissionError(streams.PermissionErrorStale)},
+			wantCanceled: 1,
+		},
+		{
+			name:         "resolve missing request",
+			results:      []error{permissionError(streams.PermissionErrorNotFound)},
+			wantResolved: 1,
+		},
+		{
+			name: "cancel missing request",
+			mutate: func(p *lifecycle.PermissionRequestEventPayload) {
+				p.Options = []lifecycle.PermissionOption{{OptionID: "allow-once", Kind: "allow_once"}}
+			},
+			results:      []error{permissionError(streams.PermissionErrorNotFound)},
+			wantCanceled: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newTasklessPermissionFixture(t)
+			f.resolver.results = tt.results
+			f.publish(t, f.request(tt.mutate))
+
+			if len(f.resolver.resolved) != tt.wantResolved || len(f.resolver.canceled) != tt.wantCanceled {
+				t.Fatalf("resolved=%d canceled=%d, want resolved=%d canceled=%d",
+					len(f.resolver.resolved), len(f.resolver.canceled), tt.wantResolved, tt.wantCanceled)
+			}
+			if len(f.stopper.executionIDs) != 0 {
+				t.Fatalf("stopped executions=%v, want none for a terminal permission result", f.stopper.executionIDs)
+			}
+		})
+	}
+}
+
 // An answer that can never be delivered must not leave the agent waiting:
 // Office stops the execution so the run settles and frees the agent's slot.
 func TestTasklessPermission_StopsExecutionWhenAnswerCannotBeDelivered(t *testing.T) {
 	f := newTasklessPermissionFixture(t)
-	f.resolver.err = errors.New("agentctl unavailable")
+	f.resolver.err = &agentctlclient.PermissionOperationError{
+		Code: streams.PermissionErrorDeliveryFailed, Message: "agentctl unavailable",
+	}
 	f.resolver.failures = -1
 
 	f.publish(t, f.request(nil))
@@ -286,7 +376,8 @@ func TestTasklessPermission_AnswersAndLogsWhenDecisionRecordFails(t *testing.T) 
 		t.Fatalf("answer attempts = %d, want the request answered despite the record failure", len(f.resolver.resolved))
 	}
 	entries := logs.FilterMessage("taskless permission decision not recorded").All()
-	if len(entries) != 1 || entries[0].ContextMap()["decision"] != "rejected" || entries[0].ContextMap()["title"] != "Run ls" {
+	if len(entries) != 1 || entries[0].ContextMap()["decision"] != "rejected" || entries[0].ContextMap()["title"] != "Run ls" ||
+		entries[0].ContextMap()["request_id"] != "request-1" || entries[0].ContextMap()["option_id"] != "reject-once" {
 		t.Fatalf("record-failure log = %v, want one entry naming the decision", entries)
 	}
 }
@@ -307,7 +398,8 @@ func TestTasklessPermission_RecordsAlreadyAnsweredAutoApproval(t *testing.T) {
 			f.resolver.resolved, f.resolver.canceled, f.stopper.executionIDs)
 	}
 	decisions := f.decisions(t)
-	if len(decisions) != 1 || decisions[0]["decision"] != "approved" || decisions[0]["option_kind"] != "allow_once" {
+	if len(decisions) != 1 || decisions[0]["decision"] != "approved" || decisions[0]["option_kind"] != "allow_once" ||
+		decisions[0]["request_id"] != "request-1" || decisions[0]["option_id"] != "allow-once" {
 		t.Fatalf("decision events = %v, want one recorded approval", decisions)
 	}
 }

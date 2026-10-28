@@ -28,6 +28,22 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound)
 }
 
+// IsTerminalPermissionError reports whether a permission operation returned a
+// result that cannot be changed by retrying the same request.
+func IsTerminalPermissionError(err error) bool {
+	type permissionError interface{ PermissionCode() string }
+	var coded permissionError
+	if !errors.As(err, &coded) {
+		return false
+	}
+	switch coded.PermissionCode() {
+	case streams.PermissionErrorAlreadyResolved, streams.PermissionErrorStale, streams.PermissionErrorNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
 // facade is the default Runtime implementation: a thin adapter over
 // the lifecycle Manager (or any Backend).
 type facade struct {

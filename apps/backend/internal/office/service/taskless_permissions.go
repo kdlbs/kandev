@@ -75,11 +75,13 @@ func (s *Service) handleTasklessPermissionRequest(ctx context.Context, event *bu
 	}
 	if request.AutoApprovedOptionID != "" && !request.AutoApprovalPending {
 		// agentctl already delivered this auto-approval; the event is a record.
-		s.recordTasklessPermissionDecision(ctx, run.ID, request, permissionDecisionApproved, request.AutoApprovedOptionKind)
+		s.recordTasklessPermissionDecision(
+			ctx, run.ID, request, permissionDecisionApproved, request.AutoApprovedOptionID, request.AutoApprovedOptionKind,
+		)
 		return nil
 	}
 	decision, optionID, optionKind := decideTasklessPermission(request)
-	s.recordTasklessPermissionDecision(ctx, run.ID, request, decision, optionKind)
+	s.recordTasklessPermissionDecision(ctx, run.ID, request, decision, optionID, optionKind)
 	s.deliverTasklessPermissionAnswer(ctx, run.ID, request, decision, optionID)
 	return nil
 }
@@ -88,11 +90,16 @@ func (s *Service) handleTasklessPermissionRequest(ctx context.Context, event *bu
 // failed write still lets the answer go out, because withholding it would
 // block the turn again; the decision is logged instead.
 func (s *Service) recordTasklessPermissionDecision(
-	ctx context.Context, runID string, request *tasklessPermissionRequest, decision, optionKind string,
+	ctx context.Context,
+	runID string,
+	request *tasklessPermissionRequest,
+	decision, optionID, optionKind string,
 ) {
 	err := s.appendRunEventStrict(ctx, runID, runEventTypePermissionDecision, "info", map[string]interface{}{
 		"decision":       decision,
 		"option_kind":    optionKind,
+		"option_id":      optionID,
+		"request_id":     request.RequestID,
 		"title":          request.Title,
 		"run_session_id": request.RunSessionID,
 		"execution_id":   request.AgentExecutionID,
@@ -102,6 +109,7 @@ func (s *Service) recordTasklessPermissionDecision(
 		s.logger.Error("taskless permission decision not recorded",
 			zap.String("run_id", runID), zap.String("run_session_id", request.RunSessionID),
 			zap.String("execution_id", request.AgentExecutionID), zap.String("pending_id", request.PendingID),
+			zap.String("request_id", request.RequestID), zap.String("option_id", optionID),
 			zap.String("decision", decision), zap.String("option_kind", optionKind),
 			zap.String("title", request.Title), zap.Error(err))
 	}
@@ -121,7 +129,7 @@ func (s *Service) deliverTasklessPermissionAnswer(
 	}
 	err := s.answerTasklessPermission(ctx, request, decision, optionID)
 	for _, delay := range delays {
-		if err == nil || runtimeapi.IsNotFound(err) {
+		if tasklessPermissionAnswerCompleted(err) {
 			return
 		}
 		select {
@@ -131,7 +139,7 @@ func (s *Service) deliverTasklessPermissionAnswer(
 		}
 		err = s.answerTasklessPermission(ctx, request, decision, optionID)
 	}
-	if err == nil || runtimeapi.IsNotFound(err) {
+	if tasklessPermissionAnswerCompleted(err) {
 		return
 	}
 	s.logger.Warn("taskless permission answer failed; stopping execution",
@@ -145,6 +153,10 @@ func (s *Service) deliverTasklessPermissionAnswer(
 		s.logger.Error("stop execution after undeliverable permission answer failed",
 			zap.String("run_id", runID), zap.String("execution_id", request.AgentExecutionID), zap.Error(stopErr))
 	}
+}
+
+func tasklessPermissionAnswerCompleted(err error) bool {
+	return err == nil || runtimeapi.IsNotFound(err) || runtimeapi.IsTerminalPermissionError(err)
 }
 
 func (s *Service) answerTasklessPermission(
