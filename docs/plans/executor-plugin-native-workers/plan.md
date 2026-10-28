@@ -129,10 +129,12 @@ Slice 1 only, on top of c76077772b. The fork branch holds one mixed commit (4788
 | a328d60fd3 | 17 | Profile schema keywords, typed values, secret references, profile budget |
 | c50f3a8c34 | 02 | Workspace descriptor, immutability and per-installation uniqueness |
 | 2350fdaa32 | 03 | Claim-scoped destroy and recover checkpoints with sequence fencing |
-| (WO 04 commit) | 04 | Runtime seal and drain, `drain_receipt`, `destroy_timeout_seconds`, idle-reaper bootstrap field |
+| 657224d1e4 | 04 | Runtime seal and drain, `drain_receipt`, `destroy_timeout_seconds`, idle-reaper bootstrap field |
+| 6c550b7070, f4532a54f9 | 05 | Guarded ready publication under the recovery claim; `durable_bootstrap` resume with repeated handshake, `bootstrap_consumed` cleanup |
 
 ### Deviations
 - WO 03, AC 006.8: envelope claim state is first written by the first checkpoint's transaction (pending owner review).
 - WO 03: settlement requires at least one checkpoint stored for the claim, not the latest one (pending owner review).
 - WO 04: the receipt message `ExecutorDrainReceipt` and the extra envelope field `drain_claim` are assumptions. The runtime identity is bound by the authenticated control token plus the freshly read server identity. Only a refused connection and 401/403/409 classify as `unreachable`; every other failure is `uncertain`. The `after_drain` crash barrier belongs to WO 08. The provider maps `idle_timeout_seconds: 0` to `KANDEV_ACP_IDLE_TIMEOUT=0`. The fork's Nomad port-busy wait is not ported.
-- PostgreSQL tests for WO 01 to 03 are written and env-gated but not run locally (no PostgreSQL or Docker).
+- WO 05: recovery creates a minimal agentctl instance when none exists and adopts an existing one otherwise; the nonce secret is deleted at ready or settle and both runtime secrets at record removal; a cleanup that loses the claim race records `cleanup_requested` by CAS and runs after the claim is released; ready publication is an optional-interface assertion on the inventory store and fails closed when absent; durable recovery makes no provider Inspect or Attach call; the lifecycle passes nil repositories, which the repository refuses for a task with repositories, so such a launch stays retained until WO 07.
+- PostgreSQL tests for WO 01 to 03 and 05 are written and env-gated but not run locally (no PostgreSQL or Docker).
