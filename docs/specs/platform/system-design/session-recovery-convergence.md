@@ -52,6 +52,14 @@ a retained terminal wins over a late transport error. Settle with a bounded
 cancellation-independent context. Journal close or failed writes leave retained
 progress for constructor reconciliation, never authorize redispatch.
 
+## Delivery writer failure
+
+The planned [delivery failure extension](durable-delivery-failure.md) adds independent health observation
+without changing disposition precedence or native retirement authority.
+A failed writer keeps the adapter consumer available for bounded cancellation drain.
+Only a real committed terminal, or existing authenticated native recovery proof, can resolve its exact admission fence.
+Idle process state and a coarse waiting session state remain insufficient evidence.
+
 ## Native acknowledgement and SQL convergence
 
 Require native initialized, exact native ID and current session/incarnation/

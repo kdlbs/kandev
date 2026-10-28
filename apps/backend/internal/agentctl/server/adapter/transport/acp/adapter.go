@@ -809,7 +809,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 }
 
 func (a *Adapter) sendUpdateNow(event AgentEvent) {
-	event = streams.BoundGenericToolEvent(event)
+	event = streams.PrepareToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -845,7 +845,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
-	event = streams.BoundGenericToolEvent(event)
+	event = streams.PrepareToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:

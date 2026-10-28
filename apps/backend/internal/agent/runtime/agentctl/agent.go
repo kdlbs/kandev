@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
@@ -842,7 +843,7 @@ type agentEventQueue struct {
 }
 
 const maxAgentEventQueueItems = 4096
-const maxAgentEventQueueBytes = 4 << 20
+const maxAgentEventQueueBytes = int(deliverylimits.BackendDispatchQueueBytes)
 
 // ErrAgentEventQueueFull indicates that the bounded reader-side event queue
 // could not accept another event. Durable callers reconnect from their

@@ -155,3 +155,70 @@ func TestDeliveryClientAcceptsSubmissionAndAcknowledges(t *testing.T) {
 		t.Fatalf("AcknowledgeDelivery: %v", err)
 	}
 }
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.2
+func TestDeliveryClientReplayPageLimitUsesAdvertisedBudget(t *testing.T) {
+	legacy := NewClient("127.0.0.1", 1, newTestLogger())
+	if got := legacy.DeliveryReplayPageLimit(1000); got != 1 {
+		t.Fatalf("legacy peer replay page limit = %d, want 1", got)
+	}
+	modern := NewClient("127.0.0.1", 1, newTestLogger())
+	modern.setDurableDelivery(&DurableDeliveryInfo{
+		Version: journal.CurrentVersion, Durable: true,
+		EventBytes: journal.DefaultMaxEventBytes, SubmissionBytes: journal.DefaultMaxSubmissionBytes,
+		ReplayBytes: journal.DefaultMaxReplayBytes,
+	})
+	if got := modern.DeliveryReplayPageLimit(1000); got != 1000 {
+		t.Fatalf("modern peer replay page limit = %d, want 1000", got)
+	}
+	capability, advertised := modern.DurableDeliveryCapability()
+	if !advertised || capability.ReplayBytes != journal.DefaultMaxReplayBytes ||
+		capability.EventBytes != journal.DefaultMaxEventBytes ||
+		capability.SubmissionBytes != journal.DefaultMaxSubmissionBytes {
+		t.Fatalf("advertised capability = %#v", capability)
+	}
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.4
+func TestDeliveryClientReplayRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"events":[{"payload":"`))
+		_, _ = w.Write(make([]byte, journal.DefaultMaxReplayBytes+journal.DefaultMaxEventBytes))
+	}))
+	t.Cleanup(server.Close)
+	host, port := splitTestServerHostPort(t, server)
+	c := NewClient(host, port, newTestLogger())
+	if _, _, err := c.ReplayDelivery(context.Background(), "stream-1", 0, 1); !errors.Is(err, ErrDeliveryReplayResponseTooLarge) {
+		t.Fatalf("oversized replay error = %v, want ErrDeliveryReplayResponseTooLarge", err)
+	}
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.4
+func TestDeliveryClientStatusDecodesFailureSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/status" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agent_status": "running",
+			"delivery_health": map[string]any{
+				"state": "delivery_failed",
+				"failure": map[string]any{
+					"reason": "event_too_large", "revision": 3, "submission_id": "submission-1",
+					"session_id": "session-1", "stream_id": "stream-1", "event_bytes": 2048, "event_limit": 1024,
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+	host, port := splitTestServerHostPort(t, server)
+	status, err := NewClient(host, port, newTestLogger()).GetStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	failure := status.DeliveryHealth.Failure
+	if failure == nil || failure.Reason != "event_too_large" || failure.Revision != 3 ||
+		failure.SubmissionID != "submission-1" || failure.EventBytes != 2048 || failure.EventLimit != 1024 {
+		t.Fatalf("failure snapshot = %#v", failure)
+	}
+}

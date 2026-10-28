@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -125,6 +126,7 @@ type Manager struct {
 	// but unreadable journal is an admission error, never a legacy fallback.
 	deliveryJournal             *journal.Journal
 	deliveryJournalErr          error
+	deliveryLimit               int64
 	deliveryWriter              *deliveryEventWriter
 	shellDeliveryMu             sync.Mutex
 	shellDelivery               map[shellDeliveryKey]shellDeliveryBaseline
@@ -137,6 +139,8 @@ type Manager struct {
 	deliveryActiveMu            sync.RWMutex
 	deliveryActiveID            string
 	deliveryHealth              DeliveryHealth
+	deliveryFailureRevision     atomic.Uint64
+	deliveryFailureDrain        time.Duration
 	deliveryPausedWriters       int
 	deliveryBlocked             bool
 	deliveryPressureCancelledID string
@@ -462,6 +466,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	if cfg.DurableJournalPath != "" {
 		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
 		if m.deliveryJournalErr == nil {
+			m.deliveryLimit = m.deliveryJournal.MaxEventBytes()
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
 			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
 		}
@@ -556,7 +561,8 @@ func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	if err != nil {
 		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
 	}
-	return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true, Unresolved: unresolved}
+	capability := journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true, Unresolved: unresolved}
+	return capability.WithLimits(m.deliveryJournal)
 }
 
 // DeliveryRecoveryDescriptor returns the authenticated instance's durable
@@ -2490,12 +2496,14 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {
 				m.logger.Error("failed to commit durable delivery event", zap.Error(err))
-				// A configured journal is the commit-before-publish boundary. Stop
-				// forwarding when it cannot commit so the backend never observes an
-				// event that cannot be replayed after a disconnect.
-				m.recordDeliveryStorageFailure(err)
+				// Capture the failure before cancellation, then keep the sole
+				// adapter consumer alive through a bounded drain so an actual
+				// terminal can still settle the retained submission.
 				m.cancelDeliveryAfterStorageFailure(update.DeliverySubmissionID)
-				return
+				if !m.drainAfterDeliveryFailure(updatesCh, stopCh) {
+					return
+				}
+				continue
 			}
 			update = persisted
 			if update.Type == "" {
@@ -2528,7 +2536,6 @@ func (m *Manager) drainDeliveryUpdates(updates <-chan adapter.AgentEvent) {
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {
-				m.recordDeliveryStorageFailure(err)
 				return
 			}
 			m.recordTerminalOutcome(&persisted)
@@ -2552,11 +2559,21 @@ func (m *Manager) closeDeliveryEventWriter() {
 // The normalized event is kept as an opaque payload here; backend projection
 // remains the owner of canonical task messages and workflow effects.
 func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
-	update = streams.BoundGenericToolEvent(update)
+	m.deliveryJournalMu.RLock()
+	deliveryJournal := m.deliveryJournal
+	eventLimit := m.deliveryLimit
+	if eventLimit <= 0 && deliveryJournal != nil && m.deliveryJournalErr == nil {
+		eventLimit = deliveryJournal.MaxEventBytes()
+	}
+	m.deliveryJournalMu.RUnlock()
+	if eventLimit <= 0 {
+		eventLimit = deliverylimits.MaxEventBytes
+	}
+	limit := deliverylimits.DisplayBudgetFor(eventLimit)
+	update = streams.PrepareToolEventWithLimit(update, limit)
 	m.deliveryJournalMu.Lock()
 	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
-	deliveryJournal := m.deliveryJournal
-	if deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
+	if configured && deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
 		(m.deliveryWriter.ctx.Err() != nil && (m.Status() == StatusRunning || m.Status() == StatusStarting))) {
 		m.deliveryWriter = newDeliveryEventWriter(m)
 	}
@@ -2567,13 +2584,21 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 	}
 	if deliveryJournal == nil {
 		_, err := m.DeliveryJournal()
+		if err != nil {
+			m.recordDeliveryWriteFailure(err, update, eventLimit)
+		}
 		return update, err
 	}
 	if writer != nil {
-		return writer.persist(context.Background(), update)
+		persisted, err := writer.persist(context.Background(), update)
+		if err != nil {
+			m.recordDeliveryWriteFailure(err, update, eventLimit)
+		}
+		return persisted, err
 	}
 	committed, err := m.persistDeliveryBatch(context.Background(), []adapter.AgentEvent{update})
 	if err != nil {
+		m.recordDeliveryWriteFailure(err, update, eventLimit)
 		return update, err
 	}
 	return committed[0], nil

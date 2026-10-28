@@ -14,18 +14,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
 const (
 	CurrentVersion                     uint32 = 2
-	DefaultMaxEventBytes                      = 1 << 20
-	DefaultReserveBytes                       = 1 << 20
+	DefaultMaxEventBytes                      = deliverylimits.MaxEventBytes
+	DefaultMaxSubmissionBytes                 = deliverylimits.MaxSubmissionBytes
+	DefaultMaxReplayBytes                     = deliverylimits.ReplayResponseBytes
+	DefaultReserveBytes                       = deliverylimits.MiB
 	DefaultDiskReserveBytes                   = 32 << 20
 	DefaultDiskAllocationHeadroomBytes        = 16 << 20
-	DefaultDiskWriteHeadroomBytes             = DefaultDiskAllocationHeadroomBytes + (4 << 20) + 2*DefaultMaxEventBytes
+	DefaultDiskWriteHeadroomBytes             = DefaultDiskAllocationHeadroomBytes + (4 << 20) + 3*DefaultMaxEventBytes
 	MaxStreamSubmissions                      = 10000
+	replayEnvelopeAllowanceBytes              = 4 << 10
+	replayRecordOverheadBytes                 = 512
 	defaultDiskCapacityReadTimeout            = 2 * time.Second
 )
 
@@ -35,6 +40,8 @@ var (
 	ErrJournalNewerVersion  = errors.New("agent delivery journal uses a newer version")
 	ErrJournalFull          = errors.New("agent delivery journal is full")
 	ErrStreamFull           = errors.New("agent delivery stream is full")
+	ErrEventTooLarge        = fmt.Errorf("%w: event payload exceeds the maximum event size", ErrStreamFull)
+	ErrReplayPageTooLarge   = errors.New("agent delivery replay page exceeds the byte budget")
 	ErrStreamNotFound       = errors.New("agent delivery stream not found")
 	ErrCursorExpired        = errors.New("agent delivery cursor expired")
 	ErrSequenceConflict     = errors.New("agent delivery sequence conflict")
@@ -59,6 +66,8 @@ type Config struct {
 	ExistingOnly           bool
 	Path                   string
 	MaxEventBytes          int64
+	MaxSubmissionBytes     int64
+	MaxReplayBytes         int64
 	MaxStreamBytes         int64
 	MaxJournalBytes        int64
 	ReserveBytes           int64
@@ -73,6 +82,12 @@ type Config struct {
 func (c Config) withDefaults() Config {
 	if c.MaxEventBytes <= 0 {
 		c.MaxEventBytes = DefaultMaxEventBytes
+	}
+	if c.MaxSubmissionBytes <= 0 {
+		c.MaxSubmissionBytes = deliverylimits.SubmissionLimitFor(c.MaxEventBytes)
+	}
+	if c.MaxReplayBytes <= 0 {
+		c.MaxReplayBytes = DefaultMaxReplayBytes
 	}
 	if c.ReserveBytes <= 0 {
 		c.ReserveBytes = DefaultReserveBytes
@@ -493,13 +508,28 @@ func (j *Journal) CompactIfNeeded(ctx context.Context) error {
 	return j.Compact(ctx)
 }
 
-// MaxEventBytes returns the configured logical payload limit shared by event
-// and submission admission.
+// MaxEventBytes returns the configured encoded event payload limit.
 func (j *Journal) MaxEventBytes() int64 {
 	if j == nil {
 		return 0
 	}
 	return j.config.MaxEventBytes
+}
+
+// MaxSubmissionBytes returns the independent prompt submission limit.
+func (j *Journal) MaxSubmissionBytes() int64 {
+	if j == nil {
+		return 0
+	}
+	return j.config.MaxSubmissionBytes
+}
+
+// MaxReplayBytes returns the encoded replay response budget.
+func (j *Journal) MaxReplayBytes() int64 {
+	if j == nil {
+		return 0
+	}
+	return j.config.MaxReplayBytes
 }
 
 func (j *Journal) Append(ctx context.Context, event Event) (Event, error) {
@@ -576,7 +606,7 @@ func prepareAppendEvents(events []Event, maxEventBytes int64) error {
 			return fmt.Errorf("event stream, session, and type are required")
 		}
 		if len(event.Payload) > int(maxEventBytes) {
-			return fmt.Errorf("%w: %d bytes", ErrStreamFull, len(event.Payload))
+			return fmt.Errorf("%w: %d bytes exceeds %d", ErrEventTooLarge, len(event.Payload), maxEventBytes)
 		}
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = time.Now().UTC()
@@ -761,7 +791,7 @@ func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, lim
 		if stream.FirstRetained != 0 && after+1 < stream.FirstRetained {
 			return ErrCursorExpired
 		}
-		events, replayErr := replayEvents(tx, streamID, after, limit)
+		events, replayErr := replayEvents(tx, streamID, after, limit, replayPageBytes(stream, j.config.MaxReplayBytes))
 		out = events
 		return replayErr
 	})
@@ -777,7 +807,7 @@ func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, lim
 	return out, stream, err
 }
 
-func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int) ([]Event, error) {
+func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int, maxBytes int64) ([]Event, error) {
 	if after == ^uint64(0) {
 		return nil, nil
 	}
@@ -786,15 +816,42 @@ func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int) ([]Even
 		return nil, nil
 	}
 	var out []Event
+	pageBytes := int64(0)
 	cursor := bucket.Cursor()
 	for key, value := cursor.Seek(sequenceKey(after + 1)); key != nil && len(out) < limit; key, value = cursor.Next() {
+		recordBytes := int64(len(value)) + replayRecordOverheadBytes
+		if maxBytes > 0 && pageBytes+recordBytes > maxBytes {
+			if len(out) == 0 {
+				return nil, fmt.Errorf("%w: record after sequence %d is %d bytes", ErrReplayPageTooLarge, after, recordBytes)
+			}
+			break
+		}
 		var event Event
 		if err := json.Unmarshal(value, &event); err != nil {
 			return nil, ErrJournalCorrupt
 		}
 		out = append(out, event)
+		pageBytes += recordBytes
 	}
 	return out, nil
+}
+
+// replayPageBytes reserves the stream metadata envelope before the record
+// budget is applied. An unset or non-positive budget keeps the historical
+// count-only behavior for explicit callers.
+func replayPageBytes(stream Stream, maxBytes int64) int64 {
+	if maxBytes <= 0 {
+		return 0
+	}
+	encoded, err := json.Marshal(stream)
+	if err != nil {
+		return maxBytes
+	}
+	remaining := maxBytes - int64(len(encoded)) - replayEnvelopeAllowanceBytes
+	if remaining < replayEnvelopeAllowanceBytes {
+		return replayEnvelopeAllowanceBytes
+	}
+	return remaining
 }
 
 func (j *Journal) Acknowledge(ctx context.Context, streamID string, sequence uint64) error {

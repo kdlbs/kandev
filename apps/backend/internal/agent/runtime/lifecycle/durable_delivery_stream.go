@@ -138,6 +138,11 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 ) (uint64, error) {
 	remaining := target - after
 	limit := durableDeliveryReplayPageSize
+	if execution.DeliveryDescriptor != nil && execution.DeliveryDescriptor.ReplayBytes > 0 {
+		limit = durableDeliveryReplayPageSize
+	} else {
+		limit = client.DeliveryReplayPageLimit(durableDeliveryReplayPageSize)
+	}
 	if remaining < uint64(limit) {
 		limit = int(remaining)
 	}

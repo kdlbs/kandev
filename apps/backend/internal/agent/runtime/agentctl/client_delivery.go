@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -36,10 +38,13 @@ func (e *DeliveryHTTPError) Error() string {
 // agentctl. A missing value means the peer predates the durable-delivery
 // response field and must be treated as a legacy peer.
 type DurableDeliveryInfo struct {
-	Version    uint32 `json:"version"`
-	Durable    bool   `json:"durable"`
-	Unresolved bool   `json:"unresolved,omitempty"`
-	Reason     string `json:"reason,omitempty"`
+	Version         uint32 `json:"version"`
+	Durable         bool   `json:"durable"`
+	Unresolved      bool   `json:"unresolved,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	EventBytes      int64  `json:"event_bytes,omitempty"`
+	SubmissionBytes int64  `json:"submission_bytes,omitempty"`
+	ReplayBytes     int64  `json:"replay_bytes,omitempty"`
 }
 
 func (c *Client) setDurableDelivery(info *DurableDeliveryInfo) {
@@ -82,11 +87,30 @@ func (c *Client) DurableDeliveryCapability() (journal.StorageCapability, bool) {
 		return c.deliveryStatus.StorageCapability, true
 	}
 	return journal.StorageCapability{
-		Version:    c.durableDelivery.Version,
-		Durable:    c.durableDelivery.Durable,
-		Unresolved: c.durableDelivery.Unresolved,
-		Reason:     c.durableDelivery.Reason,
+		Version:         c.durableDelivery.Version,
+		Durable:         c.durableDelivery.Durable,
+		Unresolved:      c.durableDelivery.Unresolved,
+		Reason:          c.durableDelivery.Reason,
+		EventBytes:      c.durableDelivery.EventBytes,
+		SubmissionBytes: c.durableDelivery.SubmissionBytes,
+		ReplayBytes:     c.durableDelivery.ReplayBytes,
 	}, true
+}
+
+// DeliveryReplayPageLimit bounds one HTTP replay page. A peer that does not
+// advertise a replay byte budget predates byte-bounded pages, so only one
+// event per page can be read safely. It returns limit unchanged for a peer
+// with the byte-budget metadata.
+func (c *Client) DeliveryReplayPageLimit(limit int) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.durableDelivery != nil && c.durableDelivery.ReplayBytes > 0 {
+		return limit
+	}
+	if c.deliveryStatus != nil && c.deliveryStatus.ReplayBytes > 0 {
+		return limit
+	}
+	return 1
 }
 
 // DeliveryRecoveryDescriptor returns the last authenticated recovery
@@ -196,11 +220,17 @@ func (c *Client) ReplayDelivery(ctx context.Context, streamID string, after uint
 		Events []journal.Event `json:"events"`
 		Stream journal.Stream  `json:"stream"`
 	}
-	if err := c.doDeliveryRequest(ctx, http.MethodGet, "/api/v1/agent/delivery/stream?"+query.Encode(), nil, &result); err != nil {
+	responseLimit := journal.DefaultMaxReplayBytes + journal.DefaultMaxEventBytes
+	if err := c.doDeliveryRequestLimited(ctx, http.MethodGet, "/api/v1/agent/delivery/stream?"+query.Encode(), nil, &result, responseLimit); err != nil {
 		return nil, journal.Stream{}, err
 	}
 	return result.Events, result.Stream, nil
 }
+
+// ErrDeliveryReplayResponseTooLarge reports an oversized replay response from
+// a peer that did not honour the replay byte budget. The caller must treat it
+// as a bounded transport failure rather than decoding or retrying blindly.
+var ErrDeliveryReplayResponseTooLarge = errors.New("durable delivery replay response exceeds the supported read budget")
 
 // AcknowledgeDelivery commits the highest event safely received by the
 // backend. It does not imply that the canonical projection has completed.
@@ -212,6 +242,18 @@ func (c *Client) AcknowledgeDelivery(ctx context.Context, streamID string, seque
 }
 
 func (c *Client) doDeliveryRequest(ctx context.Context, method, path string, input, output any) error {
+	return c.doDeliveryRequestLimited(ctx, method, path, input, output, 0)
+}
+
+// doDeliveryRequestLimited bounds the response read when limit is positive.
+// A nil limit preserves the unbounded durable-delivery request behavior used
+// by status and acknowledgement calls.
+func (c *Client) doDeliveryRequestLimited(
+	ctx context.Context,
+	method, path string,
+	input, output any,
+	limit int64,
+) error {
 	var body *bytes.Reader
 	if input == nil {
 		body = bytes.NewReader(nil)
@@ -235,7 +277,7 @@ func (c *Client) doDeliveryRequest(ctx context.Context, method, path string, inp
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	responseBody, err := readResponseBody(resp)
+	responseBody, err := readLimitedResponseBody(resp, limit)
 	if err != nil {
 		return fmt.Errorf("read durable delivery response: %w", err)
 	}
@@ -249,6 +291,20 @@ func (c *Client) doDeliveryRequest(ctx context.Context, method, path string, inp
 		return fmt.Errorf("parse durable delivery response: %w", err)
 	}
 	return nil
+}
+
+func readLimitedResponseBody(resp *http.Response, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return readResponseBody(resp)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, ErrDeliveryReplayResponseTooLarge
+	}
+	return body, nil
 }
 
 // RetireInterruptedDeliverySubmission binds retirement to the observed predecessor stream.
