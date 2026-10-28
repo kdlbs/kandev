@@ -275,10 +275,10 @@ Polling ACs 001.6-001.8 and 002.5-002.7 map to this section and the next section
 The [rate coordination design](github-rate-limit-coordination.md) retains
 principal-wide pacing, reserve, interactive priority, and provider retry rules.
 
-`fetchBatchedWatchStatuses` currently fetches numbered PRs before searching
-branches. A deferred branch phase returns no statuses to the application stage.
-Its shared progress key includes both reference sets. Search membership changes
-therefore prevent reuse of completed numbered work.
+Before this repair, `fetchBatchedWatchStatuses` fetched numbered PRs before
+searching branches under one shared progress key. A deferred branch phase
+returned no statuses to the application stage, and search membership changes
+prevented reuse of completed numbered work.
 
 Separate numbered and searching fetch phases inside the existing batch service.
 Apply a complete numbered phase before a later branch phase can defer.

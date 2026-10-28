@@ -59,10 +59,11 @@ Retain call-count assertions: a correct final `PRStatus` cannot detect duplicate
 `fetchBatchedWatchStatuses` runs a numbered phase and then a searching phase.
 Each phase owns its singleflight and progress key (`batched-pr:` /
 `batched-branch:`), so a changing search set never discards numbered chunk
-progress. A completed numbered phase is applied before the searching phase runs;
-a later searching deferral cannot withhold a finished known-PR update.
-`apply*BatchGroups` is the only apply seam; keep review-thread pagination
-complete before publication and keep `applyPRWatchStatusResult` as the writer.
+progress. The numbered phase is fetched, applied, and published before the
+searching read starts; searching latency or its context deadline cannot withhold
+a finished known-PR update. `apply*BatchGroups` is the only apply seam; keep
+review-thread pagination complete before publication and keep
+`applyPRWatchStatusResult` as the writer.
 
 `prWatchSyncOutcome` carries applied results plus the unfinished phase and a
 typed `AdmissionDeferredError`. Local deferral must not enter REST fallback or

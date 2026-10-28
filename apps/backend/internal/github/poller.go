@@ -360,11 +360,14 @@ func (p *Poller) checkWorkspacePRWatches(
 		outcome.state = prWatchBatchFallbackEligible
 		return outcome
 	}
+	// A completed pass clears any earlier failure backoff, while a local
+	// deferral is not a provider failure and other errors keep their class.
+	// Recording it here is what lets a successful probe reset the schedule.
+	p.circuits.recordError(workspaceID, syncOutcome.Err, time.Now().UTC())
 	if syncOutcome.Err == nil && len(outcome.unfinished) == 0 {
 		outcome.state = prWatchBatchCompleted
 		return outcome
 	}
-	p.circuits.recordError(workspaceID, syncOutcome.Err, time.Now().UTC())
 	p.logger.Debug("batched PR watch check incomplete",
 		zap.String("workspace_id", workspaceID),
 		zap.Bool("deferred", syncOutcome.Deferred != nil),

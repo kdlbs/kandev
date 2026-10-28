@@ -61,6 +61,7 @@ type progressBatchExecutor struct {
 	deferDelay    time.Duration
 	numberedState []string
 	onNumbered    func()
+	onBranch      func()
 }
 
 func (e *progressBatchExecutor) ExecuteGraphQL(
@@ -117,10 +118,14 @@ func (e *progressBatchExecutor) executeBranchBatch(query string, out any) error 
 	e.branchCalls++
 	delay := e.deferDelay
 	deferred := e.deferredBranches > 0
+	hook := e.onBranch
 	if deferred {
 		e.deferredBranches--
 	}
 	e.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if deferred {
 		return progressTestDeferral("test branch pacing", delay)
 	}

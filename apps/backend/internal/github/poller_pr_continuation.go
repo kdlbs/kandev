@@ -209,16 +209,19 @@ func (p *Poller) recordPRMonitorPending(
 			p.pending[outcome.workspaceID] = work
 		}
 		for _, watch := range outcome.watches {
-			if watch != nil {
-				delete(work.targets, prWatchDiscoveryTargetKey(watch))
+			if watch == nil {
+				continue
 			}
+			removePRMonitorPendingConsumer(
+				work, prWatchDiscoveryTargetKey(watch), prMonitorWatchConsumerKey(watch),
+			)
 		}
 		if next := prMonitorPendingFromOutcome(outcome, now); next != nil {
 			if fingerprint := fingerprints[outcome.workspaceID]; fingerprint != "" {
 				work.fingerprint = fingerprint
 			}
 			for key, target := range next.targets {
-				work.targets[key] = target
+				mergePRMonitorPendingTarget(work, key, target)
 			}
 		}
 		if len(work.targets) == 0 {
@@ -256,6 +259,38 @@ func prMonitorPendingFromOutcome(
 		return nil
 	}
 	return &prMonitorPendingWork{workspaceID: outcome.workspaceID, targets: targets}
+}
+
+// removePRMonitorPendingConsumer drops only the consumer a pass attempted.
+// Sibling consumers of the same provider target keep their queued boundary.
+func removePRMonitorPendingConsumer(work *prMonitorPendingWork, targetKey, consumerKey string) {
+	target := work.targets[targetKey]
+	if target == nil {
+		return
+	}
+	delete(target.watches, consumerKey)
+	if len(target.watches) == 0 {
+		delete(work.targets, targetKey)
+	}
+}
+
+// mergePRMonitorPendingTarget keeps consumers that were not part of the retried
+// pass and retains the earliest boundary, because one provider read serves every
+// consumer of the same target.
+func mergePRMonitorPendingTarget(
+	work *prMonitorPendingWork, key string, next *prMonitorPendingTarget,
+) {
+	existing := work.targets[key]
+	if existing == nil {
+		work.targets[key] = next
+		return
+	}
+	for consumerKey, watch := range next.watches {
+		existing.watches[consumerKey] = watch
+	}
+	if existing.retryAt.IsZero() || (!next.retryAt.IsZero() && next.retryAt.Before(existing.retryAt)) {
+		existing.retryAt = next.retryAt
+	}
 }
 
 // prMonitorPendingBoundary prefers the deferral's next authorization boundary,
@@ -416,7 +451,7 @@ func prMonitorPendingDueWatches(work *prMonitorPendingWork, now time.Time) []*PR
 // seam. It never runs the transport fallback, so a continuation wake cannot
 // replenish a poll cycle's fallback budget.
 func (p *Poller) resumePRMonitorPending(ctx context.Context) {
-	p.pruneStalePendingCredentials(ctx)
+	p.refreshPRMonitorPendingTargets(ctx)
 	now := p.now()
 	due := p.takeDuePRMonitorPending(now)
 	if len(due) == 0 {
@@ -437,6 +472,20 @@ func (p *Poller) resumePRMonitorPending(ctx context.Context) {
 	outcomes := p.runBatchedPRWatchCheck(ctx, eligible)
 	p.recordPRMonitorPending(ctx, outcomes, p.now())
 	p.logger.Debug("resumed deferred PR monitoring", zap.Int("workspaces", len(outcomes)))
+}
+
+// refreshPRMonitorPendingTargets revalidates retained consumers against the
+// active inventory before a wake, so a re-branched or replaced watch is not
+// queried for its old target. Credential identity is checked on the same pass;
+// a failed inventory read falls back to that check alone.
+func (p *Poller) refreshPRMonitorPendingTargets(ctx context.Context) {
+	watches, err := p.service.ListActivePRWatches(ctx)
+	if err != nil {
+		p.logger.Debug("failed to list PR watches before continuation", zap.Error(err))
+		p.pruneStalePendingCredentials(ctx)
+		return
+	}
+	p.prunePRMonitorPending(ctx, watches)
 }
 
 // pruneStalePendingCredentials drops entries whose workspace credential identity

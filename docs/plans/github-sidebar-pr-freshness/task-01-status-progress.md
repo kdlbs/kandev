@@ -98,7 +98,8 @@ None. This work order defines the outcome consumed by Task 02.
 - [Discovery requirements](../../specs/integrations/requirements/github-pr-discovery-health.md), POLLING-001 and POLLING-002.
 - [Independent publication design](../../specs/integrations/system-design/github-pr-discovery-health.md#independent-pr-status-publication).
 - [Plan evidence and reproduction](plan.md#evidence-and-assumption-check).
-- Existing `TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral`.
+- Existing `TestBatchedWatchPhases_NumberedPhaseSurvivesSearchingDeferral`
+  (formerly `TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral`).
 - Existing `service_pr_watch_result.go` transaction and retirement guards.
 
 ## Risks
@@ -161,9 +162,10 @@ same blocked work. It reloads the completed rows and returns the deferral.
 `TestTriggerPRSyncAll_DeferredAdmissionSkipsFallback` covers plain, wrapped, and
 joined deferrals with zero REST calls.
 
-Deviations: `TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral`
-now resumes only the unfinished phase, because the completed phase is applied
-immediately and its progress is released. The two `...QueryError_ReturnsError`
+Deviations: the phase test (formerly
+`TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral`) now
+drives the numbered and searching phase helpers separately, because the
+completed phase is applied immediately and its progress is released. The two `...QueryError_ReturnsError`
 tests now accept one unapplied result entry alongside the error instead of
 `nil`, matching the partial-outcome contract.
 

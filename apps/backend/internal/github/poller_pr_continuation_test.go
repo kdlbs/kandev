@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -193,26 +194,45 @@ func TestPRMonitorContinuation_PreservesFairnessAndBudgets(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		poller, service, store, deferredExecutor := newPRStatusProgressTest(t)
 		seedPRMonitorContinuationWatches(t, store)
+		deferredClient := &fallbackCountingClient{Client: service.client}
+		service.client = deferredClient
 
 		// A second, independently eligible principal must keep progressing while
 		// the first one waits for its admission boundary.
 		seedTask(t, store, "task-independent", false)
-		configureTestWorkspaceAuth(t, service, service.client, testWorkspaceID, "workspace-free")
 		independentExecutor := &progressBatchExecutor{prNumber: 999, checksState: "SUCCESS"}
 		independent := &progressGraphQLClient{MockClient: NewMockClient(), inner: independentExecutor}
+		// A transport failure stays inside its cycle budget and must not be
+		// replayed by a continuation wake.
+		seedTask(t, store, "task-transport", false)
+		transportClient := &fallbackCountingClient{Client: &graphQLMockClient{
+			MockClient: NewMockClient(),
+			branchErr:  errors.New("graphql 500"),
+		}}
+		configureTestWorkspaceAuth(t, service, deferredClient,
+			testWorkspaceID, "workspace-free", "workspace-transport")
 		service.resolver.SetAutomationProvider(workspaceAutomationCredentialProvider{clients: map[string]Client{
-			testWorkspaceID:  service.client,
-			"workspace-free": independent,
+			testWorkspaceID:       deferredClient,
+			"workspace-free":      independent,
+			"workspace-transport": transportClient,
 		}})
 		require.NoError(t, store.CreatePRWatch(context.Background(), &PRWatch{
 			WorkspaceID: "workspace-free", SessionID: "session-independent", TaskID: "task-independent",
 			Owner: "o", Repo: "r", PRNumber: 999, Branch: "feat",
+		}))
+		require.NoError(t, store.CreatePRWatch(context.Background(), &PRWatch{
+			WorkspaceID: "workspace-transport", SessionID: "session-transport", TaskID: "task-transport",
+			Owner: "o", Repo: "r", Branch: "feature/transport",
 		}))
 
 		poller.checkPRWatches(pollerContext(context.Background()))
 		independentNumbered, _ := independentExecutor.counts()
 		require.Equal(t, 1, independentNumbered, "an eligible principal completes while another is deferred")
 		requireProgressTaskPRState(t, store, "task-independent", "success")
+		transportFind, _ := transportClient.fallbackCalls()
+		require.Greater(t, transportFind, 0, "a transport failure uses its bounded REST fallback")
+		deferredFind, _ := deferredClient.fallbackCalls()
+		require.Zero(t, deferredFind, "a local deferral must not enter REST fallback")
 
 		time.Sleep(2 * time.Second)
 		poller.resumePRMonitorPending(pollerContext(context.Background()))
@@ -221,6 +241,11 @@ func TestPRMonitorContinuation_PreservesFairnessAndBudgets(t *testing.T) {
 		require.Equal(t, 1, deferredBranch)
 		independentNumbered, _ = independentExecutor.counts()
 		require.Equal(t, 1, independentNumbered, "continuation wakes must not repeat completed work")
+		transportFindAfter, _ := transportClient.fallbackCalls()
+		require.Equal(t, transportFind, transportFindAfter,
+			"continuation wakes must not replenish a fallback budget")
+		deferredFindAfter, _ := deferredClient.fallbackCalls()
+		require.Zero(t, deferredFindAfter)
 		require.Empty(t, pendingWorkspaceIDs(poller))
 	})
 }
@@ -228,45 +253,183 @@ func TestPRMonitorContinuation_PreservesFairnessAndBudgets(t *testing.T) {
 // @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-001.3
 // @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-002.7
 func TestPRMonitorContinuation_PrunesObsoleteWorkAndStops(t *testing.T) {
+	t.Run("retiring a deferred searching lifetime drops its work", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			poller, _, store, executor := newPRStatusProgressTest(t)
+			_, searching := seedPRMonitorContinuationWatches(t, store)
+			searchKey := prWatchDiscoveryTargetKey(searching)
+			executor.deferredBranches = 1
+			executor.deferDelay = 10 * time.Minute
+			poller.checkPRWatches(pollerContext(context.Background()))
+			require.Equal(t, []string{searchKey}, pendingTargetKeys(poller))
+
+			_, err := store.RetirePRWatch(context.Background(), searching.ID, time.Now().UTC())
+			require.NoError(t, err)
+			poller.checkPRWatches(pollerContext(context.Background()))
+			require.NotContains(t, pendingTargetKeys(poller), searchKey,
+				"retired targets must not keep pending work")
+		})
+	})
+
+	t.Run("retiring a deferred known-PR lifetime drops its work", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			poller, _, store, executor := newPRStatusProgressTest(t)
+			numbered, _ := seedPRMonitorContinuationWatches(t, store)
+			numberedKey := prWatchDiscoveryTargetKey(numbered)
+			executor.deferredNumbered = 1
+			executor.deferDelay = 10 * time.Minute
+			poller.checkPRWatches(pollerContext(context.Background()))
+			require.Contains(t, pendingTargetKeys(poller), numberedKey)
+
+			_, err := store.RetirePRWatch(context.Background(), numbered.ID, time.Now().UTC())
+			require.NoError(t, err)
+			poller.checkPRWatches(pollerContext(context.Background()))
+			require.NotContains(t, pendingTargetKeys(poller), numberedKey,
+				"a retired known-PR lifetime must not keep pending work")
+		})
+	})
+
+	t.Run("removal and shutdown clear retained work", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			poller, _, store, executor := newPRStatusProgressTest(t)
+			_, searching := seedPRMonitorContinuationWatches(t, store)
+			executor.deferredBranches = 1
+			executor.deferDelay = 10 * time.Minute
+			poller.checkPRWatches(pollerContext(context.Background()))
+			require.NotEmpty(t, pendingTargetKeys(poller))
+
+			require.NoError(t, store.DeletePRWatch(context.Background(), searching.ID))
+			// Let the principal's pacing window clear so the surviving known-PR
+			// phase can complete during this verification pass.
+			time.Sleep(2 * time.Second)
+			poller.checkPRWatches(pollerContext(context.Background()))
+			require.Empty(t, pendingTargetKeys(poller), "removed targets must not keep pending work")
+
+			// A fresh deferral on a new target is cleared by shutdown.
+			seedTask(t, store, "task-stop", false)
+			require.NoError(t, store.CreatePRWatch(context.Background(), &PRWatch{
+				WorkspaceID: testWorkspaceID, SessionID: "session-stop", TaskID: "task-stop",
+				Owner: "o", Repo: "r", Branch: "feature/stop",
+			}))
+			executor.deferredBranches = 1
+			time.Sleep(2 * time.Second)
+			poller.checkPRWatches(pollerContext(context.Background()))
+			require.NotEmpty(t, pendingTargetKeys(poller))
+
+			cancel := startPRMonitorLoop(t, poller)
+			synctest.Wait()
+			cancel()
+			poller.wg.Wait()
+			require.Empty(t, pendingTargetKeys(poller), "shutdown clears retained work")
+		})
+	})
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-002.6
+func TestPRMonitorContinuation_PreservesConsumersOnSharedTargetWake(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		poller, _, store, executor := newPRStatusProgressTest(t)
-		numbered, searching := seedPRMonitorContinuationWatches(t, store)
-		searchKey := prWatchDiscoveryTargetKey(searching)
-		numberedKey := prWatchDiscoveryTargetKey(numbered)
-
+		for _, suffix := range []string{"a", "b"} {
+			taskID := "task-shared-wake-" + suffix
+			seedTask(t, store, taskID, false)
+			require.NoError(t, store.CreatePRWatch(context.Background(), &PRWatch{
+				WorkspaceID: testWorkspaceID, SessionID: "session-shared-wake-" + suffix,
+				TaskID: taskID, Owner: "o", Repo: "r",
+				PRNumber: progressTestPRNumber, Branch: "feat",
+			}))
+		}
+		executor.deferredNumbered = 1
+		executor.deferDelay = 10 * time.Second
 		poller.checkPRWatches(pollerContext(context.Background()))
-		require.Equal(t, []string{searchKey}, pendingTargetKeys(poller))
+		require.Equal(t, 2, pendingConsumerCount(poller))
 
-		// Removing the deferred target invalidates its retained work.
-		require.NoError(t, store.DeletePRWatch(context.Background(), searching.ID))
-		poller.checkPRWatches(pollerContext(context.Background()))
-		require.NotContains(t, pendingTargetKeys(poller), searchKey,
-			"removed targets must not keep pending work")
-
-		// Retiring the known-PR lifetime invalidates its work as well.
-		require.NoError(t, store.DeletePRWatch(context.Background(), numbered.ID))
-		poller.checkPRWatches(pollerContext(context.Background()))
-		require.NotContains(t, pendingTargetKeys(poller), numberedKey)
-		require.Empty(t, pendingTargetKeys(poller))
-
-		// A fresh deferral on a new target is cleared by shutdown.
-		seedTask(t, store, "task-stop", false)
+		// A new consumer joins the same provider target before the boundary. Its
+		// own deferral must not evict the consumers already waiting.
+		seedTask(t, store, "task-shared-wake-c", false)
 		require.NoError(t, store.CreatePRWatch(context.Background(), &PRWatch{
-			WorkspaceID: testWorkspaceID, SessionID: "session-stop", TaskID: "task-stop",
-			Owner: "o", Repo: "r", Branch: "feature/stop",
+			WorkspaceID: testWorkspaceID, SessionID: "session-shared-wake-c",
+			TaskID: "task-shared-wake-c", Owner: "o", Repo: "r",
+			PRNumber: progressTestPRNumber, Branch: "feat",
 		}))
+		executor.deferredNumbered = 1
+		executor.deferDelay = 10 * time.Second
+		time.Sleep(2 * time.Second)
 		poller.checkPRWatches(pollerContext(context.Background()))
-		require.NotEmpty(t, pendingTargetKeys(poller))
 
-		cancel := startPRMonitorLoop(t, poller)
-		synctest.Wait()
-		cancel()
-		poller.wg.Wait()
-		require.Empty(t, pendingTargetKeys(poller), "shutdown clears retained work")
+		require.Equal(t, 3, pendingConsumerCount(poller),
+			"a new consumer must not drop siblings already waiting on the target")
+	})
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-002.7
+func TestPRMonitorContinuation_ResumeSkipsRebranchedWatch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		poller, _, store, executor := newPRStatusProgressTest(t)
+		seedTask(t, store, "task-rebranch", false)
+		watch := &PRWatch{
+			WorkspaceID: testWorkspaceID, SessionID: "session-rebranch",
+			TaskID: "task-rebranch", Owner: "o", Repo: "r", Branch: "feature/rebranch-old",
+		}
+		require.NoError(t, store.CreatePRWatch(context.Background(), watch))
+		executor.deferredBranches = 1
+		executor.deferDelay = 10 * time.Minute
+		poller.checkPRWatches(pollerContext(context.Background()))
+		require.Equal(t, 1, pendingConsumerCount(poller))
+
+		require.NoError(t, store.UpdatePRWatchBranchIfSearching(
+			context.Background(), watch.ID, "feature/rebranch-new",
+		))
+		time.Sleep(2 * time.Second)
+		poller.resumePRMonitorPending(pollerContext(context.Background()))
 
 		_, branchCalls := executor.counts()
-		require.Zero(t, branchCalls)
+		require.Equal(t, 1, branchCalls, "a re-branched watch must not query its old branch")
+		require.Empty(t, pendingTargetKeys(poller))
+
+		poller.checkPRWatches(pollerContext(context.Background()))
+		_, branchCalls = executor.counts()
+		require.Equal(t, 2, branchCalls, "the next inventory tick polls the new branch")
 	})
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-001.6
+func TestPRStatusProgress_PublishesNumberedPhaseWhileSearchingIsHeld(t *testing.T) {
+	_, service, mockClient, store := setupPollerTest(t)
+	executor := &progressBatchExecutor{prNumber: progressTestPRNumber, checksState: "SUCCESS"}
+	client := &progressGraphQLClient{MockClient: mockClient, inner: executor}
+	service.client = client
+	configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
+	ctx := context.Background()
+	seedTask(t, store, "task-held-known", false)
+	seedTask(t, store, "task-held-search", false)
+	require.NoError(t, store.CreatePRWatch(ctx, &PRWatch{
+		WorkspaceID: testWorkspaceID, SessionID: "session-held-known", TaskID: "task-held-known",
+		Owner: "o", Repo: "r", PRNumber: progressTestPRNumber, Branch: "feat",
+	}))
+	require.NoError(t, store.CreatePRWatch(ctx, &PRWatch{
+		WorkspaceID: testWorkspaceID, SessionID: "session-held-search", TaskID: "task-held-search",
+		Owner: "o", Repo: "r", Branch: "feature/held-search",
+	}))
+	watches, err := service.store.ListActivePRWatches(ctx)
+	require.NoError(t, err)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	executor.onBranch = func() {
+		once.Do(func() { close(started) })
+		<-release
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- service.syncWorkspaceWatchesBatchedForPoller(ctx, testWorkspaceID, watches).Err
+	}()
+	<-started
+	// The completed known-PR phase must be persisted while the unrelated search
+	// is still in flight, not after it finishes or times out.
+	requireProgressTaskPRState(t, store, "task-held-known", "success")
+	close(release)
+	require.NoError(t, <-done)
 }
 
 // @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-002.6

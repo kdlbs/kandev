@@ -20,8 +20,8 @@ without task selection. First separate completed status publication from deferre
 discovery. Then resume pending work at its admission boundary. Finally prove
 delivery through task summaries and the existing desktop and phone rows.
 
-The design package is implemented; the working tree stays uncommitted for review.
-All three work orders are done and record their own results.
+The design package is implemented. All three work orders are done and record
+their own results.
 
 ## Evidence and assumption check
 
@@ -197,9 +197,10 @@ Design validation passed on 2026-10-28:
 - Work-order IDs and relative document links: all references resolved.
 - `git diff --check -- docs/specs docs/plans/github-sidebar-pr-freshness`: passed.
 - `git status --short -- docs/specs docs/plans/github-sidebar-pr-freshness`:
-  two specification edits and the new package remain unstaged and uncommitted.
+  two specification edits and the new package were unstaged and uncommitted at
+  design handoff.
 
-Implementation tests, browser tests, and runtime verification: not run in this design turn.
+Implementation verification is recorded under "Implementation results" below.
 
 ## Implementation results
 
@@ -287,6 +288,42 @@ keeping expired deadlines, one consumer per target, and target-key-only pruning
 made the continuation regressions fail (the expired-deadline mutation instead
 spun the virtual-time loop until the test timeout, which is the reported P1
 symptom).
+
+### Review round 2
+
+A second code review of the pushed head found four more defects and two stale
+prose statements. All are fixed and covered:
+
+- P1: a successful workspace pass did not clear the poller's prior failure
+  streak, so a later failure continued an old backoff instead of starting fresh.
+  `checkWorkspacePRWatches` now records the outcome on every completed pass
+  (success clears, local deferral is ignored, errors keep their class).
+  `TestCheckPRWatches_SuccessClearsPriorCircuitFailure` covers it.
+- P1: the numbered phase was applied only after the searching **fetch** finished,
+  so a slow search delayed a finished known-PR update and an expired context
+  could lose it. `runBatchedLeaderPhases` now fetches, applies, and publishes the
+  numbered phase before the searching read starts. A numbered failure also
+  completes every searching attempt admitted for that pass, so a joined consumer
+  cannot wait on an abandoned attempt.
+  `TestPRStatusProgress_PublishesNumberedPhaseWhileSearchingIsHeld` holds the
+  searching read and asserts the known-PR row is already persisted.
+- P2: a new consumer joining a shared provider target could evict the consumers
+  already waiting on it when its own attempt deferred. Pending merges now remove
+  only the attempted consumer and keep sibling consumers plus the earliest
+  boundary. `TestPRMonitorContinuation_PreservesConsumersOnSharedTargetWake`
+  covers the three-consumer case.
+- P2: a resume could query a searching watch's old branch after
+  `UpdatePRWatchBranchIfSearching` changed it. `resumePRMonitorPending` now
+  refreshes retained targets from the active inventory (falling back to the
+  credential check alone if the list fails).
+  `TestPRMonitorContinuation_ResumeSkipsRebranchedWatch` proves the old branch is
+  not queried and the next tick polls the new one.
+- Prose: the completed plan no longer claims the tree is uncommitted or that
+  verification was not run, and the durable discovery design now describes the
+  pre-repair behavior in the past tense.
+- The pruning and budget regressions were tightened: retirement uses
+  `RetirePRWatch` for both lifetime kinds, and the fairness test now counts a
+  transport failure's bounded REST fallback across a continuation wake.
 
 
 

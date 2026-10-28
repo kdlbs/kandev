@@ -330,48 +330,61 @@ func (s *Service) beginPRWatchBatchGroups(
 	return leaderGroups, joinedGroups
 }
 
-// runBatchedLeaderPhases fetches each phase in turn and applies a completed
-// numbered phase before a searching phase can defer. Unfinished phases are
-// returned so the caller can resume them at their own boundary.
+// runBatchedLeaderPhases fetches and applies each phase in order. A completed
+// numbered phase is applied as soon as its read finishes, before the searching
+// read starts, so unrelated discovery latency or its context deadline cannot
+// withhold a finished known-PR update. Unfinished phases are returned so the
+// caller can resume them at their own boundary.
 func (s *Service) runBatchedLeaderPhases(
 	req batchedPRWatchSync, leaderGroups []*prWatchBatchGroup,
 	resultsByWatch map[*PRWatch]PRWatchSyncResult,
 ) prWatchSyncOutcome {
-	outcome := prWatchSyncOutcome{}
 	if len(leaderGroups) == 0 {
-		return outcome
+		return prWatchSyncOutcome{}
 	}
 	numbered, searching := splitBatchGroups(leaderGroups)
-	statuses, fetchErr := s.fetchBatchedWatchStatuses(
-		req.ctx, req.client, req.exec, req.cacheScope,
-		batchGroupWatches(numbered), batchGroupWatches(searching), req.explicitRefresh,
-	)
-	if statuses == nil {
-		statuses = &batchedWatchStatuses{}
-	}
 	now := time.Now().UTC()
-	if statuses.numberedComplete {
-		s.applyNumberedBatchGroups(req, numbered, statuses, now, resultsByWatch)
+	numberedStatuses, err := s.fetchBatchedNumberedPhase(
+		req.ctx, req.client, req.exec, req.cacheScope,
+		batchGroupWatches(numbered), req.explicitRefresh,
+	)
+	if err != nil {
+		// Complete every still-open leader attempt, including searching groups
+		// whose attempts were admitted before this pass but never fetched, so a
+		// joined consumer cannot wait forever on an abandoned attempt.
+		pending, paused := s.failBatchedBatchGroups(req, leaderGroups, err)
+		return batchedPhaseFailureOutcome(pending, paused, err)
 	}
-	if statuses.searchingComplete {
-		s.applySearchingBatchGroups(req, searching, statuses, now, resultsByWatch)
+	s.applyNumberedBatchGroups(
+		req, numbered, &batchedWatchStatuses{byKey: numberedStatuses}, now, resultsByWatch,
+	)
+	if len(searching) == 0 {
+		return prWatchSyncOutcome{}
 	}
-	if fetchErr == nil {
-		return outcome
+	searchingStatuses := &batchedWatchStatuses{
+		byKey:               make(map[string]*PRStatus, len(searching)),
+		branchResolvedEmpty: make(map[string]struct{}, len(searching)),
 	}
-	failed := unfinishedBatchGroups(leaderGroups, statuses)
-	pending, paused := s.failBatchedBatchGroups(req, failed, fetchErr)
+	if err := s.fetchBatchedSearchingPhase(
+		req.ctx, req.client, req.exec, req.cacheScope,
+		batchGroupWatches(searching), searchingStatuses, req.explicitRefresh,
+	); err != nil {
+		pending, paused := s.failBatchedBatchGroups(req, searching, err)
+		return batchedPhaseFailureOutcome(pending, paused, err)
+	}
+	s.applySearchingBatchGroups(req, searching, searchingStatuses, now, resultsByWatch)
+	return prWatchSyncOutcome{}
+}
+
+// batchedPhaseFailureOutcome reports unfinished work unless the shared health
+// store already paused those targets.
+func batchedPhaseFailureOutcome(
+	pending []prWatchSyncPending, paused bool, err error,
+) prWatchSyncOutcome {
 	if paused {
-		// Schema and throttling failures are not eligible for the legacy
-		// per-watch fallback: it would repeat the same rejected provider request
-		// once for every watch. Keep those targets paused under the shared retry
-		// deadline and report no error, exactly as the previous shared seam did.
-		return outcome
+		return prWatchSyncOutcome{}
 	}
-	outcome.Pending = pending
-	outcome.Err = fetchErr
-	outcome.Deferred = admissionDeferralOf(fetchErr)
-	return outcome
+	return prWatchSyncOutcome{Pending: pending, Err: err, Deferred: admissionDeferralOf(err)}
 }
 
 func splitBatchGroups(groups []*prWatchBatchGroup) (numbered, searching []*prWatchBatchGroup) {
@@ -391,22 +404,6 @@ func batchGroupWatches(groups []*prWatchBatchGroup) []*PRWatch {
 		watches = append(watches, group.representative)
 	}
 	return watches
-}
-
-func unfinishedBatchGroups(
-	groups []*prWatchBatchGroup, statuses *batchedWatchStatuses,
-) []*prWatchBatchGroup {
-	unfinished := make([]*prWatchBatchGroup, 0, len(groups))
-	for _, group := range groups {
-		if group.numbered && statuses.numberedComplete {
-			continue
-		}
-		if !group.numbered && statuses.searchingComplete {
-			continue
-		}
-		unfinished = append(unfinished, group)
-	}
-	return unfinished
 }
 
 // failBatchedBatchGroups releases unfinished attempts without inventing a
@@ -810,59 +807,15 @@ func workflowAttentionBatchKey(cacheScope, owner, repo, headSHA string) string {
 	return workflowRunsCacheKey(cacheScope, owner, repo, headSHA)
 }
 
-// batchedWatchStatuses is the shared, read-only result of one batched fetch.
+// batchedWatchStatuses is the shared, read-only result of one batched phase.
 //
-// byKey holds every PR the batch resolved, keyed by prStatusCacheKey for
+// byKey holds every PR the phase resolved, keyed by prStatusCacheKey for
 // numbered watches and graphqlBranchKey for searching ones. branchResolvedEmpty
-// holds the branch keys the batch answered definitively as "no open PR" — see
-// branchBatchResult for why that distinction matters. numberedComplete and
-// searchingComplete report which phase produced this result, so a caller can
-// publish the finished phase before the other one defers.
+// holds the branch keys the phase answered definitively as "no open PR" — see
+// branchBatchResult for why that distinction matters.
 type batchedWatchStatuses struct {
 	byKey               map[string]*PRStatus
 	branchResolvedEmpty map[string]struct{}
-	numberedComplete    bool
-	searchingComplete   bool
-}
-
-// fetchBatchedWatchStatuses runs the numbered phase first and the branch phase
-// second, keeping their progress and completion independent. The returned
-// statuses always contain every phase that completed; the error describes the
-// phase that did not. Watches whose (owner, repo) is already cached as missing
-// are filtered out before hitting GraphQL, and any newly-discovered missing
-// repos in the response are fed into the negative cache so subsequent polls
-// short-circuit before acquiring the gh throttle.
-//
-// Each phase is gated by its own service-level singleflight keyed by that
-// phase's sorted ref set, so a searching-target change neither restarts a
-// completed numbered read nor discards its retained chunk progress.
-//
-// The upstream fetch detaches from the leader's cancellation via
-// derivedFetchContext so one caller (WS) disconnecting mid-flight
-// doesn't cascade context.Canceled to all co-waiters — same pattern as
-// GetPRFeedback / GetPRStatus. The leader's deadline is preserved so
-// the fetch can't outlive the request budget.
-func (s *Service) fetchBatchedWatchStatuses(
-	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string,
-	numbered, searching []*PRWatch, explicitRefresh bool,
-) (*batchedWatchStatuses, error) {
-	combined := &batchedWatchStatuses{
-		byKey:               make(map[string]*PRStatus, len(numbered)+len(searching)),
-		branchResolvedEmpty: make(map[string]struct{}, len(searching)),
-	}
-	numberedStatuses, err := s.fetchBatchedNumberedPhase(ctx, client, exec, cacheScope, numbered, explicitRefresh)
-	if err != nil {
-		return combined, err
-	}
-	for key, status := range numberedStatuses {
-		combined.byKey[key] = status
-	}
-	combined.numberedComplete = true
-	if err := s.fetchBatchedSearchingPhase(ctx, client, exec, cacheScope, searching, combined, explicitRefresh); err != nil {
-		return combined, err
-	}
-	combined.searchingComplete = true
-	return combined, nil
 }
 
 func (s *Service) fetchBatchedNumberedPhase(
