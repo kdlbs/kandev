@@ -20,6 +20,10 @@ The plugin system supplies the authenticated Host connection. Session Cost owns 
 The [core projection decision](../../../decisions/2026-09-13-core-session-usage-projections.md) records the selected storage boundary.
 New names in this document are proposed implementation symbols, not existing APIs.
 
+The [retained history design](usage-history.md) replaces live-task accounting ownership and broad read-time reconciliation.
+Its [work package](../../../plans/usage-history/plan.md) owns the new retention, attribution, summary, and collector-compatibility implementation.
+The earlier package's completion does not establish that these changes exist yet.
+
 ## Requirement mapping
 
 | Requirement | Design section |
@@ -67,7 +71,7 @@ Create `session_usage_buckets` for dated measurements.
 Both contain these logical fields:
 
 - Server-assigned source namespace and stable source record key.
-- Stable usage identity, transcript identity, nullable session reference and mandatory task reference.
+- Stable usage and transcript identities. Retained accounting uses [durable subjects](usage-history.md#retained-identity-and-lifecycle), with optional live task/session links.
 - Model, client/provider identity and source contract version.
 - Source revision, payload digest, observed timestamp and successful collection timestamp.
 - Nullable input, output, cache-read, cache-write, reasoning and normalized total counts.
@@ -76,7 +80,8 @@ Both contain these logical fields:
 
 Buckets also contain a half-open UTC interval and the original source-local date.
 The uniqueness key includes source, stable usage identity, model, provider and coverage key.
-Scope queries use task/workspace joins and indexes on session, task, model and interval.
+Retained scope queries use captured ownership and indexes on work identity, model/provider, and coverage.
+The [retained design](usage-history.md#sql-reads-and-performance-evidence) defines summary-backed reads without live-task joins or archive-wide reconciliation.
 Token counts and cost use checked 64-bit integers. Existing monetary units use 10,000 subcents per USD.
 The tokscale adapter converts decimal amounts once, with explicit rounding and overflow rejection.
 
@@ -283,7 +288,8 @@ Different currencies never share a rate. The first release supports USD without 
 
 ### Aggregation and sorting
 
-The service computes all breakdowns after source selection and before pagination.
+The retained projector persists source selection before queries aggregate summaries or canonical facts.
+SQL queries filter and group before pagination under the [bounded read design](usage-history.md#sql-reads-and-performance-evidence).
 API requests include grouping, an allowlisted sort field, direction and cursor.
 Responses include numeric rows, full filtered totals, rate availability and period completeness.
 The totals row describes all filtered records, not just the visible page.
@@ -320,10 +326,11 @@ No selected workspace uses the existing workspace-selection state.
 ## Persistence and security
 
 Schema initialization and migrations follow the existing repository lifecycle for both supported databases.
-Task deletion cascades usage. Session deletion nulls its live reference while preserving a stable attribution key and task history.
+Task archive, deletion, and session pruning preserve retained accounting under the [lifecycle design](usage-history.md#retained-identity-and-lifecycle).
+The task-scoped native ledger retains its original cascade, after an accepted retained copy exists.
 Plugin uninstall leaves core measurements intact but removes plugin-private checkpoints under existing rules.
 
-Host writes derive source identity from the connection and validate session ownership through task services.
+Host writes derive source identity from the connection and validate live or retained bindings through the accounting service.
 Browser reads apply the same user/workspace restrictions as existing statistics handlers.
 A browser cannot use a plugin's instance-global read authority to access another user's session.
 Batch limits, checked arithmetic and bounded error payloads apply before persistence.

@@ -38,7 +38,7 @@ This capability adds source-aware measurements and a statistics projection over 
 - **AC-COSTS-TOKEN-USAGE-001.2:** Repeated measurements shall not increase totals twice. Older revisions shall not replace newer measurements. Explicit newer corrections shall replace prior values.
 - **AC-COSTS-TOKEN-USAGE-001.3:** Overlapping sources shall not contribute twice. Ambiguous coverage shall remain visibly incomplete rather than produce an invented combined total.
 - **AC-COSTS-TOKEN-USAGE-001.4:** Kandev shall preserve unknown values separately from measured zero, token categories, source provenance, and estimated versus reported cost.
-- **AC-COSTS-TOKEN-USAGE-001.5:** Plugin disablement, uninstall, or restart shall not remove saved usage. Task deletion shall remove its usage. Session pruning shall retain task-level history.
+- **AC-COSTS-TOKEN-USAGE-001.5:** Plugin disablement, uninstall, restart, task archive/deletion, and session pruning shall preserve accounting history under [retained usage](usage-history.md).
 - **AC-COSTS-TOKEN-USAGE-001.6:** Unauthorized reads and writes shall fail without exposing measurements or changing totals. A collector shall not impersonate another source.
 - **AC-COSTS-TOKEN-USAGE-001.7:** Existing native ledger records shall remain intact. The new statistics view shall use available native records without adding overlapping external measurements.
 
@@ -109,4 +109,5 @@ This capability adds source-aware measurements and a statistics projection over 
 ## Implementation Plans
 
 - [Token Usage work package](../../../plans/token-usage/plan.md)
+- [Retained Usage History extension](../../../plans/usage-history/plan.md). Earlier implementation does not satisfy its new lifecycle and scale requirements.
 - [System design](../system-design/token-usage.md)

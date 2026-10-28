@@ -15,6 +15,13 @@ legacy_specs:
 
 # Implementation Plan: Native Token Usage
 
+## Retained-history follow-up
+
+This completed package records the earlier task-scoped implementation and its verification.
+The [Retained Usage History package](../usage-history/plan.md) owns the later accepted deletion, actor/org, interoperability, and scale changes.
+Its pending work orders supersede earlier task-deletion policy and archive-wide query implementation.
+Existing done statuses and results do not claim those new outcomes. Do not repeat completed collection or UI work unchanged.
+
 ## Overview
 
 Build the accounting service first, then expose its Host API.
