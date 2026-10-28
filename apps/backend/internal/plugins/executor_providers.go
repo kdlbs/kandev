@@ -191,7 +191,10 @@ func (s *Service) ResolveExecutorConnection(ctx context.Context, req *pluginsdk.
 		copy.Context = trusted
 		var callErr error
 		response, callErr = remote.ResolveExecutorConnection(callCtx, copy)
-		return callErr
+		if callErr != nil {
+			return callErr
+		}
+		return s.checkLeaseTransport(copy.GetContext(), response)
 	})
 	return response, err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/plugins/executortunnel"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -145,6 +146,7 @@ type Service struct {
 	executorProviderDispatches      map[string]map[uint64]context.CancelFunc
 	executorProviderAdmissionClosed map[string]bool
 	executorProviderDispatchID      uint64
+	tunnels                         *executortunnel.Registry
 	secrets                         SecretVault
 
 	// revokeGitCredentialProvider invalidates leases for a repository provider
@@ -250,6 +252,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		executorProviderOps:             make(map[string]*activeExecutorProviderOperation),
 		executorProviderDispatches:      make(map[string]map[uint64]context.CancelFunc),
 		executorProviderAdmissionClosed: make(map[string]bool),
+		tunnels:                         executortunnel.NewRegistry(),
 	}
 	return service
 }

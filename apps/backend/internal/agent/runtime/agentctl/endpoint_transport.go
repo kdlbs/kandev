@@ -26,7 +26,18 @@ const (
 	connectionLeaseHeaderLimit   = 16 * 1024
 	httpsScheme                  = "https"
 	httpScheme                   = "http"
+
+	// LeaseTransportHostTunnel names a lease whose traffic rides a host-opened
+	// provider tunnel instead of an HTTPS endpoint.
+	LeaseTransportHostTunnel = "host_tunnel"
+	// tunnelAuthorityHost is a synthetic, never-resolved authority. The .invalid
+	// TLD cannot resolve, and the dialer ignores it.
+	tunnelAuthorityHost = "executor-tunnel.invalid"
 )
+
+// TunnelDialer opens a new byte stream to the environment port this client
+// talks to. It is owned by the host and bound to one environment generation.
+type TunnelDialer func(context.Context) (net.Conn, error)
 
 var errCrossOriginRedirect = errors.New("remote executor redirect changed authority")
 
@@ -39,6 +50,12 @@ type ConnectionLease struct {
 	WebSocketSubprotocols []string
 	ExpiresAt             time.Time
 	Generation            string
+	// Transport is empty or "https" for an HTTPS endpoint, or LeaseTransportHostTunnel.
+	// A host-tunnel lease carries no BaseURL.
+	Transport string
+	// Dial opens a stream for a host-tunnel lease. The host binds it to the
+	// lease's environment, ownership generation and port.
+	Dial TunnelDialer
 }
 
 // ConnectionLeaseResolver obtains a fresh provider-issued connection lease.
@@ -209,6 +226,15 @@ func (m *connectionLeaseManager) refresh(ctx context.Context, wait chan struct{}
 	return cloneConnectionLease(lease), nil
 }
 
+func (m *connectionLeaseManager) tunnelDialer() TunnelDialer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cached == nil {
+		return nil
+	}
+	return m.cached.Dial
+}
+
 func (m *connectionLeaseManager) currentAuthority() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -233,12 +259,27 @@ func cloneConnectionLease(lease *ConnectionLease) *ConnectionLease {
 		WebSocketSubprotocols: append([]string(nil), lease.WebSocketSubprotocols...),
 		ExpiresAt:             lease.ExpiresAt,
 		Generation:            lease.Generation,
+		Transport:             lease.Transport,
+		Dial:                  lease.Dial,
 	}
 }
 
 func validateConnectionLease(input ConnectionLease, now time.Time) (*ConnectionLease, error) {
-	if _, err := parseLeaseEndpoint(input.BaseURL); err != nil {
-		return nil, err
+	switch input.Transport {
+	case LeaseTransportHostTunnel:
+		if input.BaseURL != "" {
+			return nil, errors.New("remote executor tunnel lease cannot carry an endpoint")
+		}
+		if input.Dial == nil {
+			return nil, errors.New("remote executor tunnel lease has no dialer")
+		}
+		input.BaseURL = httpScheme + "://" + tunnelAuthorityHost
+	case "", httpsScheme:
+		if _, err := parseLeaseEndpoint(input.BaseURL); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("remote executor connection lease has an unknown transport")
 	}
 	if err := validateLeaseLifetime(input, now); err != nil {
 		return nil, err
@@ -483,6 +524,13 @@ func newEndpointRoundTripper(manager *connectionLeaseManager, initial *url.URL, 
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, errors.New("remote executor connection has an invalid authority")
+		}
+		if host == tunnelAuthorityHost {
+			dial := manager.tunnelDialer()
+			if dial == nil {
+				return nil, errors.New("remote executor tunnel is unavailable")
+			}
+			return dial(ctx)
 		}
 		ips, err := dependencies.lookupIP(ctx, host)
 		if err != nil {

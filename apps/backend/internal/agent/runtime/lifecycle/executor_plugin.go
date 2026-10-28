@@ -67,6 +67,14 @@ type PluginExecutorProviderOperations interface {
 	DestroyExecutorEnvironment(context.Context, *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error)
 }
 
+// PluginExecutorTunnelOperations is implemented by a provider host that can open
+// host-initiated tunnel streams. A launch whose lease asks for host_tunnel
+// fails closed when the operations value does not implement it.
+type PluginExecutorTunnelOperations interface {
+	OpenExecutorTunnel(ctx context.Context, requestContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, allowedPorts []uint32) (net.Conn, error)
+	CloseExecutorTunnels(installationID, environmentID string)
+}
+
 type PluginExecutorProfileLoader interface {
 	ExecutorProviderProfileForLaunch(context.Context, string, string) (*models.ExecutorProviderLaunchProfile, error)
 	ExecutorProviderProfileForRecovery(context.Context, string, string, string, string, int64, map[string]string, map[string]string) (*models.ExecutorProviderLaunchProfile, error)
@@ -701,12 +709,42 @@ func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.Ex
 		if err != nil {
 			return nil, errors.New("provider connection lease expiry is invalid")
 		}
+		dial, err := r.tunnelDialer(lease.GetTransport(), operationContext, resource, runtimePort)
+		if err != nil {
+			return nil, err
+		}
 		return &agentctl.ConnectionLease{
+			Transport: lease.GetTransport(), Dial: dial,
 			BaseURL: lease.GetBaseUrl(), HTTPHeaders: stringMapToHeader(lease.GetHttpHeaders()),
 			WebSocketHeaders:      stringMapToHeader(lease.GetWebsocketHeaders()),
 			WebSocketSubprotocols: append([]string(nil), lease.GetWebsocketSubprotocols()...),
 			ExpiresAt:             expiresAt, Generation: lease.GetGeneration(),
 		}, nil
+	}
+}
+
+// tunnelDialer binds a host_tunnel lease to the environment, ownership
+// generation and port of the call that resolved it. The allowed ports are the
+// agentctl control port and the instance port being resolved.
+func (r *PluginRemoteExecutor) tunnelDialer(transport string, operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32) (agentctl.TunnelDialer, error) {
+	if transport != agentctl.LeaseTransportHostTunnel {
+		return nil, nil
+	}
+	tunnels, ok := r.operations.(PluginExecutorTunnelOperations)
+	if !ok {
+		return nil, errors.New("provider connection lease requires a host tunnel that is unavailable")
+	}
+	allowed := []uint32{pluginExecutorRuntimePort, port}
+	return func(ctx context.Context) (net.Conn, error) {
+		return tunnels.OpenExecutorTunnel(ctx, proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext), resource, port, allowed)
+	}, nil
+}
+
+// closePluginExecutorTunnels closes every open tunnel stream of an environment
+// before its provider resource is destroyed.
+func (r *PluginRemoteExecutor) closePluginExecutorTunnels(operationContext *pluginsdk.ExecutorProviderRequestContext) {
+	if tunnels, ok := r.operations.(PluginExecutorTunnelOperations); ok && operationContext != nil {
+		tunnels.CloseExecutorTunnels(operationContext.GetInstallationId(), operationContext.GetEnvironmentId())
 	}
 }
 
@@ -815,6 +853,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	cleanupCtx = recoveryclaim.WithClaim(cleanupCtx, claim)
 	cleanupContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	cleanupContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
+	r.closePluginExecutorTunnels(cleanupContext)
 	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: cleanupContext, Resource: resource, CleanupReason: launchCleanupReason(stage), CleanupClaim: claim.OperationID,
 	})
