@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/config"
@@ -21,6 +22,7 @@ type serviceArgs struct {
 	HomeDir     string
 	NoBootStart bool
 	Follow      bool
+	Lines       int
 	Intent      string
 	DryRun      bool
 	ShowHelp    bool
@@ -43,6 +45,8 @@ const (
 	managedMarker               = "managed by kandev"
 	serviceUnitName             = "kandev.service"
 	defaultServiceLogLevel      = "info"
+	defaultServiceLogLines      = 200
+	maxServiceLogLines          = 1000000
 	defaultSystemServiceHomeDir = "/var/lib/kandev"
 )
 
@@ -52,8 +56,11 @@ Usage:
   kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--shell <bash|zsh|path|none>] [--no-boot-start]
   kandev service uninstall [--system]
   kandev service start|stop|restart|status [--system]
-  kandev service logs [-f] [--system]
+  kandev service logs [-f|--follow] [--system] [--lines N|-n N]
   kandev service config [--system]
+
+  --lines N, --lines=N, or -n N selects 0 to 1000000 lines (default 200).
+  Use -n 0 --follow to follow only new output. On macOS the count is per log file.
 `
 
 var (
@@ -126,7 +133,7 @@ func parseServiceArgs(argv []string) (serviceArgs, error) {
 	if !validServiceAction(action) {
 		return serviceArgs{}, ParseError{Message: fmt.Sprintf("unknown service action %q", action)}
 	}
-	out := serviceArgs{Action: action}
+	out := serviceArgs{Action: action, Lines: defaultServiceLogLines}
 	for i := 1; i < len(argv); i++ {
 		next, err := parseServiceFlag(argv, i, action, &out)
 		if err != nil {
@@ -182,6 +189,20 @@ func parseServiceFlag(argv []string, i int, action string, out *serviceArgs) (in
 		out.NoBootStart = true
 	case arg == "-f" || arg == "--follow":
 		out.Follow = true
+	case arg == "--lines" || arg == "-n":
+		if action != actionLogs {
+			return i, ParseError{Message: "--lines is valid only for kandev service logs"}
+		}
+		value, err := takeValue(argv, i, arg)
+		if err != nil {
+			return i, err
+		}
+		return i + 1, parseServiceLogLines(value, out)
+	case strings.HasPrefix(arg, "--lines="):
+		if action != actionLogs {
+			return i, ParseError{Message: "--lines is valid only for kandev service logs"}
+		}
+		return i, parseServiceLogLines(strings.TrimPrefix(arg, "--lines="), out)
 	case arg == "--dry-run" && action == actionSelfUpdate:
 		out.DryRun = true
 	case arg == "--intent" && action == actionSelfUpdate:
@@ -229,6 +250,20 @@ func parseServiceFlag(argv []string, i int, action string, out *serviceArgs) (in
 		return i, ParseError{Message: fmt.Sprintf("unknown flag %q for kandev service %s", arg, action)}
 	}
 	return i, nil
+}
+
+func parseServiceLogLines(value string, out *serviceArgs) error {
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return ParseError{Message: "--lines must be a decimal integer between 0 and 1000000"}
+		}
+	}
+	lines, err := strconv.ParseUint(value, 10, 64)
+	if value == "" || err != nil || lines > maxServiceLogLines {
+		return ParseError{Message: "--lines must be a decimal integer between 0 and 1000000"}
+	}
+	out.Lines = int(lines)
+	return nil
 }
 
 func parseServicePort(argv []string, i int, out *serviceArgs) (int, error) {
@@ -285,7 +320,7 @@ func runLinuxService(args serviceArgs, build BuildInfo) int {
 }
 
 func buildJournalArgs(args serviceArgs) []string {
-	journalArgs := []string{"-n", "200", "--no-pager"}
+	journalArgs := []string{"-n", strconv.Itoa(args.Lines), "--no-pager"}
 	if args.System {
 		journalArgs = append([]string{"-u", serviceUnitName}, journalArgs...)
 	} else {
@@ -410,9 +445,9 @@ func runLaunchdService(args serviceArgs, build BuildInfo) int {
 		return runCommandExit("launchctl", "print", target)
 	case "logs":
 		logDir := filepath.Join(serviceHomeDir(args), "logs")
-		tailArgs := []string{"-n", "200", filepath.Join(logDir, "service.out"), filepath.Join(logDir, "service.err")}
+		tailArgs := []string{"-n", strconv.Itoa(args.Lines), filepath.Join(logDir, "service.out"), filepath.Join(logDir, "service.err")}
 		if args.Follow {
-			tailArgs = []string{"-f", "-n", "200", filepath.Join(logDir, "service.out"), filepath.Join(logDir, "service.err")}
+			tailArgs = append([]string{"-f"}, tailArgs...)
 		}
 		return runCommandExit("tail", tailArgs...)
 	}
