@@ -626,7 +626,7 @@ In **Commits**, each row starts collapsed. Select a row to inspect its files
 inline; the saved flat or tree Changes layout applies to this list. Select
 the icon labeled **Open commit** to open the historical commit detail. Its flat file index can
 be collapsed independently of the file sections, and selecting an index entry
-opens that file's diff. These controls also work on phones.
+opens that file's diff. Use **Copy identifier** beside the short identifier in the commit detail to copy the full identifier. These controls also work on phones.
 
 Changes-panel Git operations use Kandev's control path, not the agent's shell. They can work when a restricted agent mode blocks shell writes to Git metadata. If the error says that `.git/index.lock` already exists or is held, stop other Git operations and inspect the lock before retrying. Remove a stale lock only after you confirm that no Git process owns it. The Changes panel uses the same worktree, so it does not bypass an active lock. If the agent cannot create `.git/index.lock` because of its permission mode, use the Changes panel. Read [Git operations](git-operations.md#prerequisites-and-trust-boundary) before you change the agent mode.
 

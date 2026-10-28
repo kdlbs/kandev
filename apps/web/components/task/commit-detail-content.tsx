@@ -28,6 +28,7 @@ import type {
   CommitFileNavigationRequest,
 } from "@/lib/state/diff-target-types";
 import { CommitFileToolbar } from "./commit-file-toolbar";
+import { CommitCopyIdentifier } from "./commit-copy-identifier";
 import { useTranslation } from "react-i18next";
 
 export type CommitDetailHeaderCommit = {
@@ -89,7 +90,7 @@ function CommitHeaderMeta({
       {commitSha && (
         <>
           {values.length > 0 && <span className="mx-1.5">&middot;</span>}
-          <code className="font-mono text-[11px]">{commitSha.slice(0, 7)}</code>
+          <CommitCopyIdentifier key={commitSha} sha={commitSha} />
         </>
       )}
     </p>
