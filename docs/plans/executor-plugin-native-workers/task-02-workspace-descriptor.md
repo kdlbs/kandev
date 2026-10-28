@@ -45,6 +45,7 @@ M: ~450 source, ~700 test lines.
 
 ## Failing-first tests
 
+- Two environments of one installation record one normalized path (POSIX trailing and repeated separators; Windows case and separator forms): the second commit gets `conflict` and its resource is cleaned (sqlite and PostgreSQL race).
 - Workspace path table per platform: relative, root, UNC, NUL, dot segments, over-length, platform mismatch.
 - Attach returns a different path or identity: `conflict`, no inventory change, session not started.
 - Descriptor field in a response from a provider that did not declare the capability: `conflict` and cleanup.
@@ -60,7 +61,7 @@ Run from the repository root:
 ```
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ## Likely files and risks

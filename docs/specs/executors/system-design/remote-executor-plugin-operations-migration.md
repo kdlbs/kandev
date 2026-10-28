@@ -39,7 +39,7 @@ absent; no host record changes (AC 001.2).
 **Events.** A host callback `PublishProviderEvent` (alongside the existing executor callbacks, same dispatch-generation and
 installation binding) validates the closed kind, severity, subject, message code, and parameters, applies a token bucket of
 30 per minute per installation and a five-minute dedupe on the dedupe key, and calls the existing notification service for the
-workspace administrators. It stores nothing new. Free text is rejected by schema, so an event cannot carry a log line or secret
+instance administrators (an installation is instance-wide). It stores nothing new. Free text is rejected by schema, so an event cannot carry a log line or secret
 (AC 001.3, 001.4).
 
 ## Maintenance
@@ -48,8 +48,7 @@ workspace administrators. It stores nothing new. Free text is rejected by schema
 `POST /api/v1/plugins/executor-providers/:installation/maintenance` takes `{action, subject_id, reason_code, idempotency_key}`
 with the closed action set. The host writes the audit record before and after the call (actor, installation, action, subject,
 outcome) and keeps a short-lived idempotency map keyed by installation and key whose entry holds the request digest, so a replay
-with a different body is rejected (AC 001.7). The audit sink is the existing structured audit log line; if the owner wants a
-persisted audit trail, that is a separate change (open question). This absorbs the former deferred provider-maintenance item.
+with a different body is rejected (AC 001.7). The audit sink is a structured log line, the owner's answer of 2026-10-28; a persisted audit trail would be a separate change. A replay with the same key and body inside 24 hours returns the recorded outcome (the map entry holds digest and outcome); a different body is `conflict`. This absorbs the former deferred provider-maintenance item.
 An unavailable or version-mismatched provider returns `unavailable`; launches are unaffected (AC 001.8).
 
 ## Launch policy
@@ -59,9 +58,11 @@ Profile field `launch_policy` (`none`|`preferred`|`required`) and `policy_id` ar
 workspace descriptor gains `applied_launch_policy`; the host rejects one weaker than the profile requires (AC 001.3). The host
 passes `launch_policy` and `policy_id` in the agentctl bootstrap. Enforcement is in agentctl: for `required`, the process
 manager refuses to start an agent process without the wrapper and reports `launch_policy_unenforced`; there is no unwrapped
-fallback (AC 001.4). The existing `common/launchwrapper` package on main provides the spec and executable handling; the
-node-policy files exist only on the native reference branch and are ported by the work order, test-first, from that
-read-only reference. Wrapper discovery stays in the provider (AC 001.5).
+fallback (AC 001.4). The existing `common/launchwrapper` package on main provides the spec and executable handling. Its node-policy files exist only on the fork reference
+(`nova28/kandev`, branch `feature/nomad-native-executor`, head `f0c3b0ab18`: `apps/backend/internal/common/launchwrapper/node_policy.go`, `node_policy_unix.go`, `node_policy_other.go`) and are
+ported by the work order, test-first, from that read-only reference; if the reference is unavailable the work order writes them from this section. The provider hands agentctl the wrapper spec through the
+instance environment (AC 001.5). On `preferred`, agentctl tries the wrapper at every agent start and reports `wrapped` or `unwrapped`; the host stores the last outcome. The strength order and
+rejection rule are AC 001.3.
 
 ## Preparation hints
 
@@ -75,15 +76,16 @@ never seen, selected only through hints.
 
 ## Migration and coexistence
 
-**Authority.** The envelope for plugin rows already names the installation; built-in rows get an explicit `authority: builtin`
-metadata key on write, and rows without the key read as `builtin`. A record has exactly one authority and only
+**Source and target.** The source is a profile of one built-in executor type on main (`local_docker`, `remote_docker`, `sprites`, `ssh`, `k8s`); main has no other remote built-in, and the native executor that D3 names exists only on the fork reference. The target is a `plugin_remote` profile.
+
+**Authority.** The envelope for plugin rows already names the installation; a built-in row gets `authority: builtin` only when the migration touches it, and rows without the key read as `builtin`, so nothing is written to untouched rows. A record has exactly one authority and only
 `transitionAuthority`, called by the migration operation under the cleanup claim, can change it; there is no code path that renames
 an executor type (AC 001.2).
 
 **Enumeration.** `GET /api/v1/executors/:id/migration/environments` reads built-in rows by executor type, classifying `active`
 (live session), `drainable` (no live session, resources present), and `orphaned` (no owner). It is read-only (AC 001.1).
 
-**Operation.** A **new** state machine stored on the executor profile metadata: `freezing`, `draining`, `switching`, `done`,
+**Operation.** A **new** state machine, reached through the start and rollback routes of AC 001.3 and 001.5 and stored on the executor profile metadata: `freezing`, `draining`, `switching`, `done`,
 `rolled_back`. `freezing` sets `migrating`, which the allocation gate treats like an admission denial (`executor_migrating`),
 committed with the profile revision so a launch admitted earlier finishes and is drained and a later one is refused (AC 001.3).
 `draining` waits for sessions to stop and runs the built-in cleanup (with the drain receipt where the built-in supports one).
@@ -107,13 +109,14 @@ treats idempotently by key. SQLite and PostgreSQL: the profile revision CAS cove
 | Interleaving | Required outcome | Tests (level) |
 | --- | --- | --- |
 | Migration freeze races a new launch (MIGRATION 001.3) | earlier launch finishes and drains; later gets `executor_migrating` | sqlite and PostgreSQL race; lifecycle unit |
-| Backend restart in each migration step (001.4) | resumes from the recorded step; no double freeze | barrier e2e; unit per step |
+| Backend restart in each migration step (001.4) | resumes from the recorded step; no double freeze | barrier e2e (`after_migration_step`); unit per step |
 | Rollback with retained plugin environments (001.5, 001.6) | not adopted; still listed; survive plugin disable | store and lifecycle unit |
-| Two operators send one maintenance key with different bodies (OPS 001.7) | second rejected | route unit |
+| Two operators send one maintenance key with different bodies (OPS 001.7) | second rejected `conflict`; same body inside 24 h returns the recorded outcome with one provider call | route unit |
 | Event flood from a provider (OPS 001.4) | rate-limited and deduped; others delivered | callback unit with fake clock |
 | Oversize status or log response (OPS 001.1, 001.5) | rejected, not truncated | route and lifecycle unit |
 | Provider restarts mid-read (OPS 001.8) | `unavailable`; launches unaffected | fixture over the process boundary |
 | `required` policy with no wrapper present (LAUNCHPOLICY 001.4) | agentctl refuses; no unwrapped start | agentctl process test |
+| `preferred` policy, wrapper absent on one start and present on the next (001.4) | each start reports its own outcome; latest recorded | agentctl process test |
 | Provider reports weaker applied policy (001.3) | rejected before ready; cleanup | lifecycle unit |
 | New strategy label and hint key (PREPARATION 001.4) | recorded, no host change | fixture over the process boundary |
 | Returned repository set differs from the intent (001.3) | `repository_inventory_mismatch` cleanup | lifecycle unit |

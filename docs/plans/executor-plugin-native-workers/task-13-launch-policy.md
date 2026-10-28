@@ -26,7 +26,7 @@ Add the profile `launch_policy`, validation before allocation, the applied polic
 
 ## Size
 
-M: ~350 source, ~600 test lines. Ports the node-policy files from the read-only native reference.
+M: ~350 source, ~600 test lines. Ports the node-policy files from the fork reference named in plan.md (read-only); if it is unavailable, writes them from the design.
 
 ## In scope
 
@@ -43,6 +43,7 @@ M: ~350 source, ~600 test lines. Ports the node-policy files from the read-only 
 
 ## Failing-first tests
 
+- Strength rule: for `required`, a descriptor that is not `applied` with the profile's policy ID is rejected; `none` and `preferred` accept any. `preferred` reports `wrapped` or `unwrapped` on each start.
 - Agentctl process test: `required` with no wrapper refuses and reports; `preferred` starts unwrapped and reports it.
 - Unsupported policy rejected before allocation; weaker descriptor rejected with cleanup.
 

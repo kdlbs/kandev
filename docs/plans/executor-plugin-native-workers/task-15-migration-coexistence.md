@@ -32,6 +32,7 @@ L: ~600 source, ~900 test lines.
 
 ## In scope
 
+- Source is a profile of one of `local_docker`, `remote_docker`, `sprites`, `ssh`, `k8s`; `POST` and `GET /api/v1/executors/:profile/migration` for start, rollback (allowed in freezing, draining, switching), and step; no automatic drain timeout; `authority` written only on records the operation touches; no live-scenario gate in the host.
 - Read-only enumeration route; `authority` metadata with tolerant decode; `transitionAuthority` under the cleanup claim.
 - Migration state machine on profile metadata with `executor_migrating` in the allocation gate.
 - Rollback and retention reads.

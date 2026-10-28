@@ -34,6 +34,7 @@ L: ~500 source, ~900 test lines.
 
 ## In scope
 
+- `admitLaunch` order: capability gate, label validation, `Admit` outside any transaction with a 5 s deadline, then one transaction that takes the scope lock, counts, and writes the reservation with the operation; the hook never counts. A resume keeps its reservation and takes none; the new launch that no longer fits gets `admission_denied` (`scope_full`). Test enumerates every caller of `validateLaunch`.
 - `admission.go` hook interface and default allow-all; one shared call function used by all three launch paths.
 - Reservation written with the operation record; exactly-once release; PostgreSQL advisory lock on the admission scope.
 - Label validation; applied-class check; resume keeps its class.

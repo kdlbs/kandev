@@ -46,6 +46,7 @@ M: ~300 source, ~500 test lines.
 
 ## Failing-first tests
 
+- Ordering: equal positions order by repository ID in byte order, a missing position sorts last, an unset branch is the empty string; the same inputs give the same digest.
 - Seeded secrets of every class never reach agent_env or intent (fails: field absent).
 - Digest includes intent; changed intent under one operation ID conflicts.
 - Inventory with missing, extra, duplicate, or out-of-workspace repository: cleanup with named reason.
@@ -58,7 +59,7 @@ M: ~300 source, ~500 test lines.
 Run from the repository root:
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ## Likely files and risks

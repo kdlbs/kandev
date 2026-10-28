@@ -41,7 +41,7 @@ golden file) and fails on removal or reuse, mirroring the runtime-flag retired i
 `requires_host_capabilities` becomes a list of `{name, version}` objects in `executor_providers[]`, validated in
 `internal/plugins/manifest/executor_provider.go`. Rules: closed names, no duplicates, integer version in the registry
 range, dependency closure (`provider_maintenance` needs `provider_operations`; `workspace_sharing` needs
-`workspace_descriptor`; `pending_placement` needs `destroy_checkpoints`; `launch_policy` needs `workspace_descriptor`;
+`workspace_descriptor`; `pending_placement` needs `destroy_checkpoints` and `provision_refusal`; `launch_policy` needs `workspace_descriptor`;
 `preparation_hints` needs `repository_intent`; `typed_profile_values` and `secret_references` need none; `provision_refusal` needs `destroy_checkpoints`). `state_schema` is `{current, min_readable}`, absent meaning `1/1`. `min_kandev_version` must be at least the highest `introduced_in` release among the declared capabilities (AC 002.6); the existing generic minimum-version check then makes an older host refuse the package with a clear message. Cross-field
 rules from the native design (preparation mode, API URL mode, destroy timeout) stay and consult the same registry.
 
@@ -50,38 +50,62 @@ rules from the native design (preparation mode, API URL mode, destroy timeout) s
 1. **Install, upgrade, enable:** the validator output plus the registry check, before activation (AC 002.1). A failure leaves
    the working installation active, reusing the upgrade-rollback path from the base design.
 2. **Profile validation:** `ValidateExecutorProfile` gains additive request field `host_capabilities` (the registry rows) and
-   response field `implemented_capabilities`. The host stores the last accepted echo in memory per dispatch generation. A
-   mismatch marks the provider `unavailable` with reason `capability_mismatch` (AC 002.2). An older provider returns no echo,
-   so it is treated as declaring none (AC 002.4).
+   response field `implemented_capabilities`. The echo is captured from every `ValidateExecutorProfile` response: the
+   activation probe in `validateExecutorProviderContracts` (`internal/plugins/executor_providers.go`) and each profile save or launch validation. The host keeps the last accepted echo in memory per
+   (installation, dispatch generation). A second echo of the same generation that differs from the first, or an echo that differs from the manifest, marks the
+   provider `unavailable` with reason `capability_mismatch` until the generation changes (AC 002.2). An absent or empty echo is
+   treated as declaring none (AC 002.4). After a plugin restart the new generation has no echo, so the gate in step 3 runs one
+   profile validation first; a provider that declares nothing keeps launching. Concurrent validations of one generation compare equal and the first accepted echo stays.
 3. **Allocation gate:** `checkCapabilityAgreement` runs first in `validateLaunch`, before the admission hook and before any
-   provider call, on first launch, delayed launch, and resume. It is a pure function over manifest, registry, and echo
-   (AC 002.3, 002.5).
+   provider call, on first launch, delayed launch, and resume. It compares manifest, registry, and the in-memory echo (AC 002.3). Only the manifest-and-registry half is a pure
+   function (AC 002.5); `checkStateWritable` runs in the same step and is described under Data model.
 
 ## Snapshot
 
 At admission the host writes `negotiated_capabilities` (sorted `name@version` strings) and `provider_state_version` into the
-`plugin_executor` envelope, replacing the earlier `required_capabilities` list from the native design (same position, richer
-content; a row with only the old key reads as version 1 for each name, AC 003.6). Recovery, attach, destroy, lease
+`plugin_executor` envelope, in the same position as the existing `capabilities` key, which keeps its meaning. A record without `negotiated_capabilities` reads as the empty set (AC 003.6). Recovery, attach, destroy, lease
 validation, and response validation read the snapshot. A host that no longer supports a recorded version maps the
 provider to `unavailable` for that environment through the existing availability path (AC 003.5).
 
 ## State schema versions
 
-The provider returns `state_schema_version` beside `state_json` in every accepted provision, recovery, attach, and checkpoint
-response; the host records it and rejects a decrease within one generation (AC 003.4). The host never reads the
-state body. Upgrade and rollback run `checkStateReadable`: one indexed query counts non-terminal plugin environments of the
-installation whose recorded version is outside the new `[min_readable, current]`; a non-zero count rejects the change before
-activation and reports only the count (AC 003.3). The same query blocks retirement of a version that retained environments
-record (AC 004.4).
+Main already carries the mechanism: the manifest field `supported_state_versions` (`internal/plugins/manifest/manifest.go`), the descriptor
+`state_version`, the envelope fields `supported_state_versions` and `state_version`, the upgrade guard
+`validateExecutorProviderUpgradeInventory` in `executor_lifecycle_guard.go`, and the attach rule that rejects a changed version. This design
+maps onto it and adds no parallel record: `state_schema {current, min_readable}` is a second spelling of the list (expanded by the validator,
+never both, AC 003.2); the guard also runs on rollback and range changes (AC 003.3); a version rises only through a provision, recovery, or
+checkpoint response, never on attach, never downward, and never outside the readable list (AC 003.4). The host never reads the state body.
+The same query blocks retirement of a state version that retained environments record (AC 004.4).
 
 ## State budget
 
-The 32 KiB envelope holds host fields (capability snapshot, owners, placement, repositories, descriptor) and provider state together. The
-manifest `state_budget_bytes` (default 16 KiB, at most 24 KiB) reserves the rest for host fields. The host measures the state body on
-every accepted response, rejects an over-budget one as `state_too_large` before it writes (AC 003.7), and records the largest size per
-installation for the status read (AC 003.8). A combined worst-case test (16 owners, 32 repositories, pending placement, maximum
-snapshot, 16 KiB state) proves the host fields never push a valid state over the cap. Whether a real provider's state fits is a
-vendor-repository check; the fixture proves a representative 12 KiB state (D7).
+The envelope cap `pluginExecutorInventoryMaxBytes` is 32768 bytes on the marshaled JSON and stays. For a provider that declares any capability the
+envelope is split into a host reserve of 20480 bytes and provider state of at most 12288 bytes. Every host-written field has a per-field maximum
+enforced where it is written, so the reserve cannot be exceeded by data the provider influences:
+
+| Host field | Maximum (bytes) |
+| --- | --- |
+| existing fields, with `profile_config` plus `secret_references` at most 4096 together (checked at profile validation) | 5888 |
+| workspace descriptor (`workspace_path` at most 1024, identity 128, preparation, platform), stored once in the envelope; the resource descriptor copy is stripped before persisting | 1792 |
+| `negotiated_capabilities`, `provider_state_version` | 1024 |
+| `repositories`: 32 entries of `id` (at most 36), `relative_path` (at most 96), `head_commit` (at most 64) only; the branch is verified but not stored | 8192 |
+| `owners` (16 entries) and share fields | 2048 |
+| `placement`, `admission`, drain fields, `authority`, `launch_policy` outcome | 1536 |
+
+The maxima sum to exactly 20480. The budget table lives in code (`hostFieldBudget`), and a unit test asserts that its sum is at most 20480. A relative path over 96 bytes or an `id` over 36 bytes in a provider response
+is rejected with `state_too_large` before persisting. Default `state_budget_bytes` is 8192; the maximum 12288 plus the 20480 reserve equals the cap.
+The state is measured on its JSON-escaped form, because escaping can inflate it up to six times for control characters.
+
+The code for every rejection is `state_too_large`. It is a host-originated failure code, not a member of the closed provider error set
+(`invalid_config`, `denied`, `unsupported`, `not_found`, `expired`, `conflict`, `unavailable`, `rate_limited`, `cleanup_pending`): a provider cannot return
+it, and the launch path reports it as the failure code. Cleanup after a rejection writes only the fixed-size terminal transition (phase and claim
+fields, at most 256 bytes) onto the last persisted envelope, so a rejected write cannot recurse; if even that write fails, the record is retained as
+`cleanup_pending`. A host-side write (attach, placement, drain outcome, owner change) that would exceed the cap despite the maxima is refused whole,
+logged, and leaves the stored envelope unchanged; launch paths then run the cleanup above, and ownership writes return `conflict` to their caller.
+
+The worst-case test builds an envelope with every field at its maximum and a 12288-byte state made of bytes that escape to the longest form, marshals
+it, and asserts at most 32768 bytes; a second test does the same at the default budget. Whether a real provider's state fits is a vendor-repository check;
+the fixture proves a representative 12 KiB state (D7).
 
 ## Deprecation and retirement
 
@@ -91,31 +115,42 @@ releases. Retirement moves the pair to `Retired`; a manifest requiring it fails 
 
 ## Data model
 
-No new table and no DDL. Envelope fields `negotiated_capabilities` and `provider_state_version` are added; decode tolerates
-their absence. The readability count uses the existing `executors_running` rows filtered by installation and the envelope's
-state version. SQLite and PostgreSQL run the same query; the count is advisory at the moment of the check, and a launch that
-records an old version between the check and activation is caught by the allocation gate (AC 002.3).
+No new table and no DDL. The envelope field `negotiated_capabilities` is added and `state_version` is reused as the provider state version; decode tolerates
+absence. The readability count scans `executors_running` rows of executor type `plugin_remote` that are not terminal, filters by installation, and reads the
+envelope's `state_version` (SQLite `json_extract(metadata, '$.plugin_executor.state_version')`, PostgreSQL `(metadata::jsonb -> 'plugin_executor' ->> 'state_version')`); no index is
+added because the scan is bounded by active and retained plugin environments.
+
+**Fence between activation and launch.** `checkStateWritable` runs in the admission write that creates the envelope and re-reads the installation's current readable list. Both the admission
+write and the activation write (which runs `checkStateReadable` and switches the manifest) take the per-installation lock: on SQLite the immediate-mode writer, on PostgreSQL
+`pg_advisory_xact_lock(hashtextextended('plugin_state_readability:'||installation_id, 0))`. Whichever commits first wins: an admission that commits first is counted and the upgrade is
+rejected with the count; an activation that commits first makes the later admission fail its writability check with `capability_mismatch` and no allocation. A response that arrives
+under a replaced dispatch generation is already rejected by the generation fence, so a version can never be recorded outside the active range.
 
 ## Interleavings and failing-first tests
 
 | Interleaving | Required outcome | Tests (level) |
 | --- | --- | --- |
-| Upgrade activation racing a new launch that records an old state version (003.3) | launch fails the gate or the upgrade is rejected; never an unreadable record | lifecycle unit with injected ordering; sqlite and PostgreSQL |
+| Upgrade activation racing a new launch that records an old state version (003.3) | the per-installation lock decides: admission first, so the upgrade is rejected with the count; activation first, so the launch fails `capability_mismatch` with no allocation; never an unreadable record | lifecycle unit with injected ordering; sqlite and PostgreSQL multi-connection |
 | Plugin process restarts with a different implemented set (002.2) | provider unavailable; retained environments kept | fixture over the process boundary |
 | Manifest declares version 2 of a name the host supports at 1 (002.1) | install rejected naming the range | validator table |
 | Older provider returns no echo (002.4) | treated as declaring none; manifest requiring any rejected | lifecycle unit |
+| Plugin restart, then a launch before any validation (002.3) | one profile validation runs first; a provider declaring nothing still launches | lifecycle unit |
+| Two validations of one generation return different echoes (002.2) | `capability_mismatch` until the generation changes | lifecycle unit |
 | Rollback to a plugin whose range excludes recorded state (003.3) | rejected before activation; working install active | upgrade unit |
 | Manifest lowers `min_kandev_version` below a capability's release (002.6) | install rejected naming both | validator table |
-| State above budget, or host fields plus state above the cap (003.7) | `state_too_large`, resource cleaned, nothing persisted | lifecycle unit; combined worst-case test |
+| State above budget, or host fields plus state above the cap (003.7) | `state_too_large`, resource cleaned, nothing persisted; the cleanup write is fixed-size | lifecycle unit; combined worst-case test at the maximum budget and at the default |
+| Host-side write over the cap (003.8) | refused whole, stored envelope unchanged | store unit |
 | Retired pair removed from the list (004.3) | golden-file test fails | registry test |
-| Record with only the old `required_capabilities` key (003.6) | reads as version 1 and keeps working | store decode test |
+| Record with only the existing `capabilities` and `state_version` keys (003.6) | reads as the empty negotiated set and keeps working | store decode test |
+| Manifest declares both `state_schema` and `supported_state_versions` (003.2) | install rejected | validator table |
+| Attach response with a raised state version (003.4) | rejected; recorded version unchanged | lifecycle unit |
 
 All tests are written first and fail on current main (the field, the echo, and the registry do not exist). Remaining ACs are
 validator and registry table tests plus the unchanged fixture conformance test.
 
 ## Observability
 
-`executor_plugin_capability_rejected_total` (`capability`, `phase`: install, upgrade, enable, allocate, echo),
+`executor_plugin_capability_rejected_total` (`capability`, `phase`: install, upgrade, enable, allocate, echo), `executor_plugin_state_too_large_total` (`source`: provider_state, host_field, host_write),
 `executor_plugin_state_readability_blocked_total` (`action`: upgrade, rollback, retire). No installation or environment label.
 
 ## Security

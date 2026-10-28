@@ -29,7 +29,7 @@ Port the generic agentctl seal-and-drain, persist a claim-bound receipt before d
 
 ## Size
 
-M: ~400 source, ~600 test lines. Port from fork/feature/nomad-native-executor (read-only).
+M: ~400 source, ~600 test lines. Port from the fork reference named in plan.md (read-only).
 
 ## In scope
 
@@ -46,6 +46,7 @@ M: ~400 source, ~600 test lines. Port from fork/feature/nomad-native-executor (r
 
 ## Failing-first tests
 
+- Outcome mapping: refused connection or identity mismatch gives `unreachable`, lost reply or 60 s deadline `uncertain`, rollback with no runtime `not_attempted`; a successor claim on a sealed runtime receives a fresh receipt.
 - Drain reply lost: no receipt, outcome `uncertain`, record stays cleanup_pending until absence (fails: no drain exists on main).
 - Same claim retried: same receipt. Earlier-claim receipt rejected.
 - Stop, shutdown, plugin disable: no seal (negative tests).
@@ -61,7 +62,7 @@ Run from the repository root:
 ```
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ## Likely files and risks

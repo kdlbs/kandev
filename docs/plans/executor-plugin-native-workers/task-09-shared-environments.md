@@ -34,6 +34,7 @@ L: ~500 source, ~900 test lines.
 
 ## In scope
 
+- Holder row carries the owner set; every other owner has its own row with its own instance port; attach and release are single transactions across the holder and the owner row; releases come only from archive, delete, reset, and failed launch, never from Stop; a release loser retries up to three times.
 - Owner set and `share_epoch` in the envelope; `attachSharedOwner` and `releaseOwner` as single revision-checked writes.
 - Replace the unconditional rejection in `validateLaunch` with the capability-gated path; keep the rejection (with `missing_capability`) otherwise.
 - `sharing_supported` and `max_owners` in profile validation; `owner_count` in destroy.
@@ -49,6 +50,7 @@ L: ~500 source, ~900 test lines.
 
 ## Failing-first tests
 
+- Stop on a shared owner does not release it. Releasing an owner not in the set is a no-op. The 17th attach is `capacity_refused`.
 - Two owners release concurrently (sqlite and PostgreSQL multi-connection `-race`; fixture over the process boundary).
 - Attach races the last release: attach wins or gets `environment_closing` and provisions anew.
 - Stale `share_epoch` rejected by the fixture; destroy with owners remaining refused by the host.

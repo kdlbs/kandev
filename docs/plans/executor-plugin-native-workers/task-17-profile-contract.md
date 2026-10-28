@@ -43,6 +43,7 @@ M: ~450 source, ~800 test lines.
 
 ## In scope
 
+- Secret references carry the existing store ID only (no version, no revision counter); reuse the inventory's `secret_references`; replacing a secret creates a new ID and a retained environment keeps the old one through the existing retention check.
 - Manifest keywords, one shared value-validation function, `validateProfileAgainstSchema` at save and launch, defaults in the profile editor.
 - `typed_config` and `secret_refs` messages, gated by `typed_profile_values` and `secret_references`; recorded reference IDs and recovery re-resolution.
 

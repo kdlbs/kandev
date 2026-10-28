@@ -35,6 +35,7 @@ L: ~600 source, ~900 test lines.
 
 ## In scope
 
+- New worker-to-host reachability probe: one-use probe token, `GET /api/v1/runtime/ping` (204), agentctl control route `POST /runtime/probe-host-api`, 10 s and two attempts, cleanup reason `api_unreachable`.
 - Add the OpenExecutorTunnel stream, the lease transport field, the host tunnel dialer used by agentctl and gateway proxies, and provider-forwarded API URL handling.
 
 ## Out of scope
@@ -48,6 +49,7 @@ L: ~600 source, ~900 test lines.
 
 ## Failing-first tests
 
+- Probe fails then provisioning rolls back with `api_unreachable`; token reused or older than 60 s is refused. Duplicate or late acknowledgement, data before acknowledgement, and the 65th concurrent open (`rate_limited`, others unaffected).
 - No bytes before ack; unacknowledged stream closes at 15 s as unavailable (fails: no stream exists).
 - Disallowed port refused before opening.
 - host_tunnel lease from a provider without the capability rejected.
@@ -66,7 +68,7 @@ Run from the repository root:
 ```
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ## Likely files and risks

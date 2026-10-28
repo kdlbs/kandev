@@ -49,20 +49,21 @@ It is built from the validated, filled config by schema type and is omitted unle
 
 ## Secret references
 
-`ExecutorProfileSnapshot` gains additive `map<string, ExecutorSecretRef> secret_refs` (`id`, `version`). The host derives the ID
-from its existing secret store identifier and the version from the store's revision counter. At allocation it records at most 16
-`{property, id}` pairs in the envelope. On recovery and destroy it re-resolves each recorded ID: a missing secret is a named
-failure before any provider call, otherwise the current value goes in `secret_values` only for the duration of the call.
+`ExecutorProfileSnapshot` gains additive `map<string, ExecutorSecretRef> secret_refs` (`id` only). The ID is the secret store identifier that the profile already holds
+(`models.ExecutorProfileSecretID`), and the inventory already records property-to-ID pairs in `secret_references`, which this design reuses (no `secret_ref_ids` field). Replacing a secret
+creates a new store entry and a new ID, and there is no revision counter, so a reference has no version. An environment keeps its allocation-time ID; the existing retention check
+(`retainedPluginExecutorReferences`) stops the profile service from deleting a secret that a retained environment still names. On recovery and destroy the host reveals the recorded
+ID through `loadRecordedExecutorProviderSecrets`: a missing secret is a named failure before any provider call, otherwise the value goes in `secret_values` only for the duration of the call.
 
 ## Data model
 
-No new table and no DDL. The envelope gains `profile_snapshot_digest` and `secret_ref_ids`. Decode tolerates absence.
+No new table and no DDL. The envelope gains `profile_snapshot_digest`; `secret_references` already exists. Decode tolerates absence.
 
 ## Interleavings and failing-first tests
 
 | Interleaving | Required outcome | Tests (level) |
 | --- | --- | --- |
-| Secret rotated between allocation and recovery (003.3) | same ID, new version, current value sent | lifecycle unit with fake store |
+| Secret replaced between allocation and recovery (003.3) | recorded ID kept alive by retention; its value sent; new allocations see the new ID | lifecycle unit with fake store |
 | Secret deleted before recovery (003.3) | named failure, no provider call, record retained | lifecycle unit |
 | Provider upgrade changes a default (001.4) | existing environment keeps its recorded snapshot | lifecycle unit |
 | Hostile pattern input (001.3) | linear-time rejection or match at a 1 MiB input | validator test with a time bound |

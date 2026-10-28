@@ -52,12 +52,12 @@ Proposed upstream; branch from `origin/main`. The native executor on the contrib
 
 | Order | Work order | Wave | Depends on | Size |
 | --- | --- | --- | --- | --- |
-| 00 | [Record the owner decisions as an ADR](task-00-record-owner-decisions.md) | 1 | - | S: ~150 doc lines, 0 code. |
-| 01 | [Capability registry, negotiation, and versioning (M7)](task-01-capability-registry-versioning.md) | 1 | 00 | M: ~550 source, ~900 test lines. |
+| 00 | [Record the owner decisions as an ADR](task-00-record-owner-decisions.md) | 1 | - | S: ~120 doc lines, 0 code. |
+| 01 | [Capability registry, negotiation, and versioning (M7)](task-01-capability-registry-versioning.md) | 1 | 00 | M: ~650 source, ~1000 test lines. |
 | 17 | [Profile schema keywords, typed values, and secret references](task-17-profile-contract.md) | 2 | 01 | M: ~450 source, ~800 test lines. Runs beside 02 to 08. |
-| 02 | [Workspace descriptor (R1)](task-02-workspace-descriptor.md) | 2 | 01 | M: ~350 source, ~600 test lines. |
+| 02 | [Workspace descriptor (R1)](task-02-workspace-descriptor.md) | 2 | 01 | M: ~450 source, ~700 test lines. |
 | 03 | [Destroy- and recover-scoped checkpoints (R4)](task-03-destroy-recover-checkpoints.md) | 2 | 02 | M: ~250 source, ~500 test lines. |
-| 04 | [Drain receipt into destroy (R3)](task-04-drain-receipt.md) | 3 | 03 | M: ~400 source, ~600 test lines. Port from fork/feature/nomad-native-executor (read-only). |
+| 04 | [Drain receipt into destroy (R3)](task-04-drain-receipt.md) | 3 | 03 | M: ~400 source, ~600 test lines. Port from the fork reference (see Reference). |
 | 05 | [Durable bootstrap continuation and ready publication (R5)](task-05-durable-bootstrap-publication.md) | 3 | 04 | L: ~500 source, ~900 test lines. |
 | 06 | [Negotiated transport and API forwarding (R2)](task-06-host-tunnel-api-forwarding.md) | 4 | 05 | L: ~600 source, ~900 test lines. |
 | 07 | [Repository intent and provider-prepared workspace (R7)](task-07-repository-intent.md) | 4 | 06 | M: ~300 source, ~500 test lines. |
@@ -69,18 +69,32 @@ Proposed upstream; branch from `origin/main`. The native executor on the contrib
 | 13 | [Launch-wrapper and sandbox requirement (M5)](task-13-launch-policy.md) | 8 | 12 | M: ~350 source, ~600 test lines. |
 | 14 | [Extensible workspace preparation (M6)](task-14-preparation-hints.md) | 8 | 13, 07 | M: ~250 source, ~450 test lines. |
 | 15 | [Migration and coexistence (M8)](task-15-migration-coexistence.md) | 9 | 14 | L: ~600 source, ~900 test lines. |
-| 16 | [Fixture provider proving every capability (R8, M1-M8)](task-16-fixture-provider-proof.md) | 10 | 15, 17 | M: ~450 source, ~700 test lines. |
+| 16 | [Fixture provider proving every capability (R8, M1-M8)](task-16-fixture-provider-proof.md) | 10 | 15, 17 | M: ~300 source, ~650 test lines, with one Playwright spec. |
 
-Total forecast: about 7.8k source and 12.6k test lines, eighteen work orders. Task 00 records the owner decisions and the
+Total forecast: about 7.5k source and 12.6k test lines, eighteen work orders (00 to 17). Task 00 records the owner decisions and the
 answers to the medium-term open questions. Process-level interleaving tests in tasks 03 to 05 and 09 to 15 use fakes first and
 gain their barrier versions in task 08. Each capability work order extends the fixture for its own capability, test-first;
 task 16 is the cross-capability conformance run and the public documentation pass.
+
+## Reference (read-only)
+
+The native implementation lives on the contributor fork `nova28/kandev`, branch `feature/nomad-native-executor`, head `f0c3b0ab18` (fork PR 10). It is a source for ports (agentctl seal-and-drain, the launch-wrapper node-policy files `node_policy.go`, `node_policy_unix.go`, and `node_policy_other.go`) and is never merged. If it is unavailable, the work order writes the code from its design section. This is the only place in the plan that names it.
+
+## Release slices
+
+Each slice is shippable alone, keeps contract version 1, and ends with its fixture additions and a conformance run, so a later slice never changes an earlier one. A requirement of an unshipped slice stays `draft`.
+
+1. Capability and native worker core: 00, 01, 02, 03, 04, 05, 06, 07, 08, then 17 (profile contract, which needs only 01 and can ship with this slice).
+2. Shared environments, admission, and pending placement: 09, 10, 11.
+3. Operations, launch policy, and preparation hints: 12, 13, 14.
+4. Migration and coexistence: 15.
+5. Fixture proof and public documentation: 16 runs after each slice for that slice's capabilities and once at the end for the cross-capability pass.
 
 ## Scope
 
 ### In scope
 
-The three new requirement documents and the native worker requirements: REQ-EXECUTORS-NATIVE-WORKER-001 to 008,
+The six requirement documents (native workers, native worker recovery and proof, capability versioning, shared environments with admission and placement, operations and migration, and the profile contract): REQ-EXECUTORS-NATIVE-WORKER-001 to 008,
 REQ-EXECUTORS-PLUGIN-CAPABILITY-001 to 004, SHARED-001, ADMISSION-001, PLACEMENT-001 and 002, PROFILE-001 to 003, OPS-001, LAUNCHPOLICY-001,
 PREPARATION-001, and MIGRATION-001, with their acceptance criteria.
 
@@ -94,12 +108,12 @@ hostile-workload isolation, a concrete per-node mirror, public relay, SDK module
 - Cross-process lifecycle changes (R2, R5, M3): the handshake-consumed window (AC-EXECUTORS-NATIVE-WORKER-007.5) is a rare, explicit cleanup, not a recovery.
 - Both SQL dialects: every new SQL path (checkpoints, publication, owner sets, admission reservations, migration steps) needs the advisory-lock pattern and a gated PostgreSQL test.
 - Proto additions must stay additive; run the SDK round-trip tests in task 01 and keep contract version 1.
-- The 32 KiB envelope holds owners, placement, capability snapshot, repositories, and provider state together; task 01 adds a combined-size test.
+- The 32 KiB envelope holds owners, placement, capability snapshot, repositories, and provider state together; the per-field maxima (host reserve 20480, state at most 12288) are in the versioning design, and task 01 adds the combined worst-case test.
 - Size: the forecast is far above the original estimate line recorded on the board card; the work orders are separable, and task 16 carries the proof.
 - The plugin skeleton findings are mapped one by one in the profile-contract design ("Resolution of the plugin skeleton findings").
 - Public docs (`plugins-authoring.md`, `plugins-manifest.md`) change in task 16 through `/docs-maintainer`.
 
 ## Verification strategy
 
-Each work order lists exact commands. Task 11 adds a user-visible status and needs Playwright evidence; the rest has no UI
+Each work order lists exact commands, run from the repository root with `(cd apps/backend && ...)` because the only Go module is `apps/backend`. Task 11 adds a user-visible status and needs Playwright evidence; task 16 adds one parametrized Playwright spec for the remaining host-originated failure copy; the rest has no other UI
 surface, and task 16 provides process-boundary evidence through the installed fixture plugin.

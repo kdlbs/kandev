@@ -33,6 +33,7 @@ L: ~650 source, ~1000 test lines.
 
 ## In scope
 
+- Idempotency map entry holds digest and outcome for 24 hours (same body returns the recorded outcome, different body `conflict`, forgotten after restart); audit is a structured log line before and after; events go to instance administrators.
 - Three read RPCs and admin routes with host-enforced size caps and log redaction.
 - `PublishProviderEvent` with schema, token bucket, dedupe, and notification delivery.
 - `ApplyProviderMaintenance` with closed actions, audit lines, and an idempotency digest.

@@ -28,6 +28,7 @@ S: ~150 source, ~300 test lines.
 
 ## In scope
 
+- The nine closed barrier names (the five of the first release plus after the pending placement is persisted, before a placement poll commits, after a cancel is marked, and after a migration step is recorded); arming an armed name returns `conflict`; the first caller reaching an armed name fires it; releasing an unarmed barrier does nothing.
 - Add the closed set of host crash barriers and the e2e-mock-only arming route, and use them to prove the process-level interleavings of tasks 02 to 06.
 
 ## Out of scope
@@ -50,7 +51,7 @@ S: ~150 source, ~300 test lines.
 Run from the repository root:
 
 ```bash
-go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/lifecycle -count=1)
 ```
 
 ## Likely files and risks
