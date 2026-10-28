@@ -9,7 +9,7 @@ import {
 } from "../../helpers/task-pagination";
 
 // @covers AC-UI-TASK-PAGINATION-PRESENTATION-001.1 AC-UI-TASK-PAGINATION-PRESENTATION-001.2
-for (const width of [320, 393]) {
+for (const width of [320, 393, 430]) {
   test(`phone pagination remains reachable at ${width}px`, async ({
     testPage,
     apiClient,

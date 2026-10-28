@@ -46,7 +46,9 @@ caller if required. No new strings or locale changes are expected.
 precede the pagination. Previous, direct page controls, ellipses, and Next stay
 in their existing logical order, wrapping onto another line when needed. Every
 visible action remains fully contained and tappable. The task list supplies the
-vertical scroll. No horizontal scrolling, drawer, or new fixed control is added.
+vertical scroll. The footer reserves bottom clearance for the existing floating
+add button and safe area. No horizontal scrolling, drawer, or new fixed control
+is added.
 
 **UI-02, desktop, page 4 of 7:** the range and selector retain their current
 layout; first, Previous, page numbers, Next, and last remain a compact single
@@ -66,7 +68,7 @@ ordinary first-page and action controls must pass before the containment failure
 ## E2E tests
 
 `apps/web/e2e/tests/task/mobile-task-pagination.spec.ts` uses `mobile-chrome`
-with 70 isolated backend-created rows and 10 rows per page. At 320 and 393px,
+with 70 isolated backend-created rows and 10 rows per page. At 320, 393, and 430px,
 use real taps to reach page 4; after every page change scroll the list vertically
 back to its footer before measuring or capturing it. Assert visible enabled
 controls are nonoverlapping, 44px in both dimensions, fully within both their
@@ -86,11 +88,14 @@ and direct-page actions. A small shared helper may be owned at
 ## Verification results
 
 Independent native RED failed on page 4 at 320 and 393px after the page 1
-controls and navigation passed. The repaired component passed two component
+controls and navigation passed. The initially repaired component passed two component
 tests, two mobile browser cases, and one desktop browser case; the expanded
 mobile matrix also passed at 640, 767, 768, 1023, and 1024px. Scoped lint and
-the canonical 6 GiB web typecheck passed. The work order records commands and
-actual results. Inspected phone screenshots show the scrolled footer.
+the canonical 6 GiB web typecheck passed. A subsequent 430px native hit test
+found Next covered by the existing floating add button. After local footer
+clearance, three native phone cases and the desktop/narrow-fine control passed,
+as did the affected component suite and scoped lint. Inspected phone screenshots
+show the scrolled footer.
 
 ## Risks
 

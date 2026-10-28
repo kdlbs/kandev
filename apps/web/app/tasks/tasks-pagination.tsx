@@ -55,7 +55,7 @@ export function TasksPagination({
   return (
     <div
       data-testid="tasks-pagination"
-      className="flex flex-col gap-3 px-1 pb-2 text-sm lg:flex-row lg:flex-wrap lg:items-center lg:justify-between"
+      className="flex flex-col gap-3 px-1 pb-2 text-sm max-md:pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:flex-row lg:flex-wrap lg:items-center lg:justify-between"
     >
       <div className="flex-1 text-muted-foreground">
         {t("tasks:showingRange", { start, end, count: total })}

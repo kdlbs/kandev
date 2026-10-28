@@ -41,8 +41,9 @@ The existing `/tasks` list is the phone entry point. Its inline pagination is a
 short, frequently used control set: wrapping is a narrow exception to the usual
 one-dimensional mobile layout because it preserves immediate page actions and
 avoids a second navigation surface. The list's single vertical scroll region
-and normal page flow supply clearance; there is no fixed control requiring a
-new safe-area treatment. The native mobile column navigator in
+retains ownership. The local footer reserves phone bottom space for the existing
+floating add button and its safe-area inset, so a final action can scroll clear.
+The native mobile column navigator in
 `components/kanban/mobile-column-tabs.tsx` is the nearest curated navigation
 exemplar for visible context and previous/next actions; its hierarchy drawer is
 unnecessary for this small, already visible page window. State and handlers are
@@ -52,7 +53,7 @@ required.
 ## Verification
 
 A real managed backend supplies isolated synthetic tasks without starting agents.
-Native mobile Chromium exercises 320px and 393px phone viewports on page 4 of 7,
+Native mobile Chromium exercises 320px, 393px, and 430px phone viewports on page 4 of 7,
 including a vertical-only scroll to the visible footer after each navigation.
 It proves actual target containment, 44px targets, no unintended horizontal
 scroll, Next from 4 to 5, and previous and direct-page selection. Capture the

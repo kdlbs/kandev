@@ -37,7 +37,7 @@ copy, dependencies, harness changes, and public documentation changes.
 
 ## Acceptance
 
-- At 320 and 393px the actual page 4 of 7 footer has contained, nonoverlapping
+- At 320, 393, and 430px the actual page 4 of 7 footer has contained, nonoverlapping
   44px actions, no unintended horizontal scroll, and working Next, Previous,
   and direct-page actions; the range and current-page status follow navigation.
 - At 1280px desktop retain the single row, first/last and direct actions, compact
@@ -55,7 +55,9 @@ copy, dependencies, harness changes, and public documentation changes.
 
 [UI-01 and UI-02 in the plan](plan.md#ui-composition) define the contract.
 Phone: range and rows-per-page precede the same ordered action set, which wraps
-in the list's vertical scroll region; no horizontal pan or overlay. Desktop:
+in the list's vertical scroll region, with local bottom clearance for the
+existing floating add button and its safe-area inset; no horizontal pan or new
+overlay. Desktop:
 existing compact single row including first/last. Verify actual footer geometry
 and actions for AC .1-.3, not class strings or an unscrolled screenshot.
 
@@ -154,3 +156,14 @@ Reassess if implementation expands the user-visible behavior.
   heap passed. Phone screenshots were captured after scrolling to the actual
   footer and inspected at both widths. Public documentation search found no
   pagination presentation needing revision; no user-facing copy was added.
+- Additional 430px native RED: after page 1 controls and taps through page 4,
+  the actual footer screenshot shows the floating add button covering Next; the
+  enabled-control center hit test failed (handle 29538, exit 1). The same
+  no-build run had matching source, artifact, and tool fingerprints before and
+  after. Reserve a local phone-only bottom inset of 6rem plus the bottom safe
+  area, restoring existing desktop padding at 768px. A fresh build and mobile
+  matrix then passed 3 cases, including the 430px hit test and actual Next tap;
+  the affected desktop/narrow-fine E2E passed 1 case with verified identical
+  no-build inputs and artifacts. The component suite passed 2 tests and scoped
+  lint passed after the clearance change. Screenshots of all three actual phone
+  footers were retained with checksums.
