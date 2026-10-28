@@ -40,6 +40,11 @@ type ControlClient struct {
 
 var ErrControlCredentialsRejected = errors.New("agentctl control credentials rejected")
 
+// ErrHandshakeRejected is the agentctl reply that a bootstrap nonce is invalid
+// or already spent; it is the only evidence that separates a spent nonce from a
+// transport failure.
+var ErrHandshakeRejected = errors.New("agentctl handshake rejected")
+
 const createInstanceHTTPTimeout = 120 * time.Second
 
 // McpServerConfig holds configuration for an MCP server.
@@ -246,9 +251,9 @@ func (c *ControlClient) Handshake(ctx context.Context, nonce string) (string, er
 			Error string `json:"error"`
 		}
 		if decErr := json.NewDecoder(resp.Body).Decode(&errResp); decErr == nil && errResp.Error != "" {
-			return "", fmt.Errorf("handshake rejected: %s (status %d)", errResp.Error, resp.StatusCode)
+			return "", handshakeStatusError(resp.StatusCode, fmt.Errorf("handshake rejected: %s (status %d)", errResp.Error, resp.StatusCode))
 		}
-		return "", fmt.Errorf("handshake failed: status %d", resp.StatusCode)
+		return "", handshakeStatusError(resp.StatusCode, fmt.Errorf("handshake failed: status %d", resp.StatusCode))
 	}
 
 	var result struct {
@@ -819,4 +824,12 @@ func (c *ControlClient) AckTurnOutcome(ctx context.Context, instanceID string, t
 		return fmt.Errorf("failed to ack turn outcome: status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// handshakeStatusError marks the status agentctl answers a refused nonce with.
+func handshakeStatusError(status int, err error) error {
+	if status == http.StatusForbidden {
+		return fmt.Errorf("%w: %w", ErrHandshakeRejected, err)
+	}
+	return err
 }

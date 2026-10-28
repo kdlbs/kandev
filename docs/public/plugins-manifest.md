@@ -452,6 +452,18 @@ provider must start the agent runtime with its idle reaper disabled
 declaring this capability can set `destroy_timeout_seconds` (30 to 300, default
 30) to bound the destroy call; a value above 30 requires `drain_receipt`.
 
+With `durable_bootstrap`, Kandev keeps the one-time agent runtime bootstrap
+nonce in its runtime secret store until the launch is published, so a backend
+restart in the middle of a launch can be recovered. On restart the host takes
+the environment's recovery claim and repeats the agent runtime handshake with
+the stored nonce. If the runtime accepts it, the host finishes the launch and
+publishes the environment as ready. If the runtime rejects the nonce as already
+consumed, the launch cannot be resumed and the host cleans the environment up
+with the cleanup reason `bootstrap_consumed`. If publication finds that the
+stored evidence no longer matches, the environment is retained and nothing is
+adopted. The provider performs no extra calls for this; it only has to keep the
+agent runtime reachable at the connection lease it returned.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.

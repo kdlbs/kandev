@@ -787,6 +787,7 @@ func startAgentInfrastructure(
 		repos.Task.SetPluginStateWritableChecker(services.Plugins.CheckExecutorStateWritable)
 		pluginExecutor := lifecycle.NewPluginRemoteExecutor(services.Plugins, log)
 		pluginExecutor.SetRecoveryDependencies(services.Task, repos.Task)
+		pluginExecutor.SetRuntimeSecretStore(lifecycleMgr.RuntimeSecretStore())
 		lifecycleMgr.RegisterExecutorBackend(pluginExecutor)
 		services.Plugins.SetExecutorProviderHostHandler(lifecycleMgr)
 	}

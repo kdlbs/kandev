@@ -49,10 +49,14 @@ type pluginExecutorOperationsFake struct {
 	destroyErr         error
 	beforeDestroy      func()
 	destroyDeadline    time.Time
+	onProvision        func()
 }
 
 func (f *pluginExecutorOperationsFake) ProvisionExecutorEnvironment(_ context.Context, req *pluginsdk.ProvisionExecutorEnvironmentRequest) (*pluginsdk.ProvisionExecutorEnvironmentResponse, error) {
 	f.provisionRequest = req
+	if f.onProvision != nil {
+		f.onProvision()
+	}
 	return f.provisionResponse, f.provisionErr
 }
 
