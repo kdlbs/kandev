@@ -41,7 +41,7 @@ golden file) and fails on removal or reuse, mirroring the runtime-flag retired i
 `requires_host_capabilities` becomes a list of `{name, version}` objects in `executor_providers[]`, validated in
 `internal/plugins/manifest/executor_provider.go`. Rules: closed names, no duplicates, integer version in the registry
 range, dependency closure (`provider_maintenance` needs `provider_operations`; `workspace_sharing` needs
-`workspace_descriptor`; `pending_placement` needs `destroy_checkpoints` and `provision_refusal`; `launch_policy` needs `workspace_descriptor`;
+`workspace_descriptor`; `pending_placement` needs `destroy_checkpoints`, `provision_refusal`, and `durable_bootstrap` (a queued launch outlives the backend process, so its bootstrap nonce must be persisted); `launch_policy` needs `workspace_descriptor`;
 `preparation_hints` needs `repository_intent`; `typed_profile_values` and `secret_references` need none; `provision_refusal` needs `destroy_checkpoints`). `state_schema` is `{current, min_readable}`, absent meaning `1/1`. `min_kandev_version` must be at least the highest `introduced_in` release among the declared capabilities (AC 002.6); the existing generic minimum-version check then makes an older host refuse the package with a clear message. Cross-field
 rules from the native design (preparation mode, API URL mode, destroy timeout) stay and consult the same registry.
 
@@ -55,9 +55,9 @@ rules from the native design (preparation mode, API URL mode, destroy timeout) s
    (installation, dispatch generation). A second echo of the same generation that differs from the first, or an echo that differs from the manifest, marks the
    provider `unavailable` with reason `capability_mismatch` until the generation changes (AC 002.2). An absent or empty echo is
    treated as declaring none (AC 002.4). After a plugin restart the new generation has no echo, so the gate in step 3 runs one
-   profile validation first, with a 10 second deadline; a provider that declares nothing keeps launching. Concurrent first validations of one generation share one call (single-flight per installation and generation) and the first accepted echo stays. A validation that errors, times out, or returns `unavailable` is not an empty echo: nothing is cached, the launch is refused as `unavailable` with no allocation, and the next launch tries again (no negative cache). The echo is stored per (installation, generation, provider key), and each is compared with the declaration of its own `executor_providers[]` entry.
+   profile validation first, with a 10 second deadline; a manifest that declares no capability skips the echo gate entirely (no echo required, no validation run for it) and keeps launching. Concurrent first validations of one generation share one call (single-flight per installation and generation) and the first accepted echo stays. A validation that errors, times out, or returns `unavailable` is not an empty echo: nothing is cached, the launch is refused as `unavailable` with no allocation, and the next launch tries again (no negative cache). Single-flight is keyed by (installation, generation, provider key), the same key as the stored echo, and each echo is compared with the declaration of its own `executor_providers[]` entry.
 3. **Allocation gate:** `checkCapabilityAgreement` runs first in `validateLaunch`, before the admission hook and before any
-   provider call, on first launch, delayed launch, and resume. It compares manifest, registry, and the in-memory echo (AC 002.3). Only the manifest-and-registry half is a pure
+   provider call, on first launch, delayed launch (the continuation of a pending placement, against the recorded negotiated set), and resume. It compares manifest, registry, and the in-memory echo (AC 002.3). Only the manifest-and-registry half is a pure
    function (AC 002.5); `checkStateWritable` runs in the same step and is described under Data model.
 
 ## Snapshot
@@ -85,14 +85,14 @@ enforced where it is written, so the reserve cannot be exceeded by data the prov
 
 | Host field | Maximum (bytes) |
 | --- | --- |
-| existing fields, with `profile_config` plus `secret_references` at most 4096 together (checked at profile validation) | 5888 |
+| existing fields, with `profile_config` plus `secret_references` at most 4096 together (checked at profile save and launch validation as the field error `profile_too_large`, AC PROFILE 001.8) | 5888 |
 | workspace descriptor (`workspace_path` at most 1024, identity 128, preparation, platform), stored once in the envelope; the resource descriptor copy is stripped before persisting | 1792 |
 | `negotiated_capabilities`, `state_version`, `profile_snapshot_digest` (64) | 1024 |
 | `repositories`: 32 entries of `id` (at most 36), `relative_path` (at most 96), `head_commit` (at most 64) only; the branch is verified but not stored | 8192 |
-| `owners` (16 entries) and share fields | 2048 |
-| `placement`, `admission`, drain fields, `authority`, `launch_policy` outcome | 1536 |
+| `owners` (16 entries) and share fields (`share_epoch`, `closing`, `holder_row`, `role`) | 2048 |
+| `placement`, `admission` (`admission_scope`, `reservation`, `applied_resource_class`), drain fields, `authority`, `launch_policy` outcome, claim fields (kind, last sequence, digest), `cleanup_requested`, `handshake_started`, `phase` | 1536 |
 
-The maxima sum to exactly 20480. The budget table lives in code (`hostFieldBudget`), and a unit test asserts that its sum is at most 20480. A relative path over 96 bytes or an `id` over 36 bytes in a provider response
+The maxima sum to exactly 20480. Every envelope field the host writes has an entry in `hostFieldBudget` (a test fails when a field has no entry); `supported_state_versions` is capped at 16 entries inside the first row, and the strategy label of AC PREPARATION 001.3 is stored once as `preparation_strategy` (at most 64 bytes) inside the workspace descriptor row. A checkpoint's provider state replaces the recorded state and is measured against `state_budget_bytes` exactly like a provision response (`state_too_large` otherwise). The budget table lives in code (`hostFieldBudget`), and a unit test asserts that its sum is at most 20480. A relative path over 96 bytes or an `id` over 36 bytes in a provider response
 is rejected with `state_too_large` before persisting. Default `state_budget_bytes` is 8192; the maximum 12288 plus the 20480 reserve equals the cap.
 Every maximum in the table is counted on the marshaled, JSON-escaped form of the field, including key names and separators, because escaping inflates `&`, `<`, `>`, and control characters up to six times; the per-entry limits on `repositories` apply to the escaped value of `id`, `relative_path`, and `head_commit` (a value whose escaped form exceeds its limit is rejected with `state_too_large`). At 32 entries and the entry limits (36, 96, 64) the field is at most 7872 bytes with keys and fits its 8192 maximum. The state is measured on its JSON-escaped form for the same reason.
 

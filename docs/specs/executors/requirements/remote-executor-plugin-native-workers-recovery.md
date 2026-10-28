@@ -29,8 +29,6 @@ Continuation of [native worker capabilities](remote-executor-plugin-native-worke
 - **AC-EXECUTORS-NATIVE-WORKER-006.6:** The host shall settle an environment absent only after the provider confirms absence and the latest accepted checkpoint has been persisted. A missing checkpoint shall never be read as absence.
 - **AC-EXECUTORS-NATIVE-WORKER-006.7:** After a crash between a provider side effect and its checkpoint, recovery shall re-issue destroy idempotently from the recorded state, and the provider shall return progress or confirmed absence. The host shall not allocate a replacement.
 
-Requirements 007 (durable bootstrap continuation and ready publication) and 008 (crash barrier and fixture proof) are in [native worker recovery and proof](remote-executor-plugin-native-workers-recovery.md); they keep their IDs.
-
 ### REQ-EXECUTORS-NATIVE-WORKER-007: Durable bootstrap continuation and ready publication
 
 **Intent:** A backend restart during launch resumes the admitted operation instead of destroying or duplicating it.

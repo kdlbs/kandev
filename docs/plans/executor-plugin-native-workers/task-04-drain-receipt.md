@@ -17,6 +17,7 @@ acceptance_criteria:
   - AC-EXECUTORS-NATIVE-WORKER-005.6
   - AC-EXECUTORS-NATIVE-WORKER-005.7
   - AC-EXECUTORS-NATIVE-WORKER-005.8
+  - AC-EXECUTORS-NATIVE-WORKER-005.9
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---

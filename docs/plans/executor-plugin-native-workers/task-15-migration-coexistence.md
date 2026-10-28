@@ -16,6 +16,7 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-MIGRATION-001.5
   - AC-EXECUTORS-PLUGIN-MIGRATION-001.6
   - AC-EXECUTORS-PLUGIN-MIGRATION-001.7
+  - AC-EXECUTORS-PLUGIN-MIGRATION-001.8
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-operations-migration.md
 ---
@@ -32,9 +33,9 @@ L: ~600 source, ~900 test lines.
 
 ## In scope
 
-- Source is a profile of one of `local_docker`, `remote_docker`, `sprites`, `ssh`, `k8s`; `POST` and `GET /api/v1/executors/:profile/migration` for start, rollback (allowed in freezing, draining, switching), and step; no automatic drain timeout; `authority` written only on records the operation touches; no live-scenario gate in the host.
+- Source is a profile of one of `local_docker`, `remote_docker`, `sprites`, `ssh`, `k8s`; `POST` and `GET /api/v1/executors/profiles/:profile_id/migration` for start, rollback (allowed in freezing, draining, switching), and step; no automatic drain timeout; `authority` written only on records the operation touches; no live-scenario gate in the host.
 - Read-only enumeration route; `authority` metadata with tolerant decode; `transitionAuthority` under the cleanup claim.
-- Migration state machine on profile metadata with `executor_migrating` in the allocation gate.
+- Migration state machine in the new `executor_profile_migrations` table (row revision CAS), with `checkMigrationFreeze` in the common launch entry that built-in launches pass, evaluated in the transaction that creates the environment record; the `migrated_to` write and the `done` step in one revision-guarded transaction; `executor_migrating` as the refusal.
 - Rollback and retention reads.
 
 ## Out of scope

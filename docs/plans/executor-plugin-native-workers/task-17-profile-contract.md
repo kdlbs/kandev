@@ -17,6 +17,8 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-PROFILE-001.4
   - AC-EXECUTORS-PLUGIN-PROFILE-001.5
   - AC-EXECUTORS-PLUGIN-PROFILE-001.6
+  - AC-EXECUTORS-PLUGIN-PROFILE-001.7
+  - AC-EXECUTORS-PLUGIN-PROFILE-001.8
   - AC-EXECUTORS-PLUGIN-PROFILE-002.1
   - AC-EXECUTORS-PLUGIN-PROFILE-002.2
   - AC-EXECUTORS-PLUGIN-PROFILE-002.3
@@ -44,6 +46,7 @@ M: ~450 source, ~800 test lines.
 ## In scope
 
 - Secret references carry the existing store ID only (no version, no revision counter); reuse the inventory's `secret_references`; replacing a secret creates a new ID and a retained environment keeps the old one through the existing retention check.
+- `unknown_property` for undeclared keys (exempting the six existing keys of `kandevExecutorProfileKeys` plus the new host keys, only for providers declaring a capability) and `profile_too_large` over the 4096-byte config plus secret-references budget, at save and launch; existing over-limit profiles are not rewritten.
 - Manifest keywords, one shared value-validation function, `validateProfileAgainstSchema` at save and launch, defaults in the profile editor.
 - `typed_config` and `secret_refs` messages, gated by `typed_profile_values` and `secret_references`; recorded reference IDs and recovery re-resolution.
 

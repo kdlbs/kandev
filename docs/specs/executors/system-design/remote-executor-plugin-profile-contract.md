@@ -37,7 +37,7 @@ as `\A(?:...)\z`. `resource_state_schema` keeps its closed form and does not acc
 **New** `validateProfileAgainstSchema(schema, config)` runs when a profile is saved and again in `validateLaunch`, before any
 provider call. It fills absent optional values from `default`, converts types, checks `required`, `enum`, bounds, length, and
 pattern, and returns `ExecutorProviderFieldError` values with codes `required`, `invalid_type`, `not_in_enum`, `out_of_range`,
-`too_short`, `too_long`, `pattern_mismatch`. The filled snapshot is what the operation digest covers, and the allocation
+`too_short`, `too_long`, `pattern_mismatch`, `unknown_property`, and the profile-level `profile_too_large` (AC 001.8: the marshaled config plus `secret_references` over 4096 bytes, checked after the fill, for providers that declare any capability; existing over-limit profiles are not rewritten and fail at their next launch). The filled snapshot is what the operation digest covers, and the allocation
 records it in the inventory snapshot, so a default change on upgrade does not touch existing environments. The editor reads
 defaults from the same schema.
 
@@ -55,9 +55,9 @@ creates a new store entry and a new ID, and there is no revision counter, so a r
 (`retainedPluginExecutorReferences`) stops the profile service from deleting a secret that a retained environment still names. On recovery and destroy the host reveals the recorded
 ID through `loadRecordedExecutorProviderSecrets`: a missing secret is the named failure `secret_reference_missing` before any provider call, otherwise the value goes in `secret_values` only for the duration of the call.
 
-**State check.** After every call that received `secret_values`, the host compares the returned state and checkpoint bytes with each revealed value of at least 8 bytes and, on an exact match, rejects the response as `secret_in_state` without persisting and runs the existing cleanup. Transformed copies (encoded or split) are a provider obligation, not detected.
+**State check.** After every call that received `secret_values`, the host compares the returned state and checkpoint bytes with each revealed value of at least 8 bytes (AC 003.5; shorter values are not scanned) and, on an exact match, rejects the response as `secret_in_state` without persisting and runs the existing cleanup. Transformed copies (encoded or split) are a provider obligation, not detected.
 
-**Config rules.** Absent and empty are equal except for a `string` with `min_length` 0; an empty required value takes its default; lengths are code points; `bool` is `true|false`, numbers are decimal text; undeclared keys are `unknown_property` except the host-owned keys named in AC 001.7.
+**Config rules.** Absent and empty are equal except for a `string` with `min_length` 0; an empty required value takes its default; lengths are code points; `bool` is `true|false`, numbers are decimal text; for a provider that declares any capability, undeclared keys are `unknown_property` except the host-owned keys named in AC 001.7 (the six existing kandev keys, held in `kandevExecutorProfileKeys` in `executor_provider_profiles.go`, plus the new keys); the exemption list reads that constant so the two cannot drift. A string with an explicit `minLength` of 0 keeps an empty value even when required.
 
 ## Data model
 
