@@ -35,6 +35,10 @@ for each experiment. PR #4457 already met the distinct 50% E2E-step target.
 
 ## First candidate: independent frontend and Windows work
 
+The [October 26 continuation](ci-performance.md#october-26-cache-and-partition-continuation)
+defines the proposed cache repairs and duration allocation within these same two frontend jobs.
+Its work orders preserve this delivery target and the current job counts.
+
 Run the existing frontend static checks and build independently of two built-in
 Vitest file shards. Keep the same package script (including pretest generation),
 production NODE_ENV guard, isolated projects, container, cache discovery and
