@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -202,8 +203,60 @@ func TestDeliveryFailureDrainDropsOrdinaryOutput(t *testing.T) {
 	updates <- adapter.AgentEvent{Type: adapter.EventTypeComplete}
 	close(updates)
 	manager.deliveryFailureDrain = time.Second
-	manager.drainAfterDeliveryFailure(updates, make(chan struct{}))
+	_, _, _ = manager.drainAfterDeliveryFailure(updates, make(chan struct{}), "submission-1")
 	// The manager is not configured for durable delivery, so the terminal is a
 	// no-op; the drain must still consume every update without publishing them.
 	require.Equal(t, 0, len(updates))
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.2
+func TestDeliveryFailureTimeoutSuppressesFailedOutput(t *testing.T) {
+	manager := newAllToolManager(t, 1024)
+	seedDispatchingSubmission(t, manager.deliveryJournal, "submission-1")
+	seedDispatchingSubmission(t, manager.deliveryJournal, "submission-2")
+	manager.TrackDeliverySubmission("submission-1", 1)
+	manager.TrackDeliverySubmission("submission-2", 2)
+	manager.deliveryFailureDrain = 50 * time.Millisecond
+
+	updates := make(chan adapter.AgentEvent)
+	done := make(chan struct{})
+	manager.wg.Add(1)
+	go func() {
+		manager.forwardUpdates(&stubAdapter{updatesCh: updates}, make(chan struct{}))
+		close(done)
+	}()
+
+	updates <- adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, PromptGeneration: 1, Text: strings.Repeat("x", 4096)}
+	waitForDeliveryFailure(t, manager)
+	time.Sleep(100 * time.Millisecond)
+
+	// The drain timeout has expired. Ordinary output of the failed submission
+	// must not be published and must not clear the sticky failure.
+	updates <- adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, PromptGeneration: 1, Text: "must be dropped"}
+	time.Sleep(100 * time.Millisecond)
+	events, _, err := manager.deliveryJournal.Replay(context.Background(), "stream", 0, 10)
+	if !errors.Is(err, journal.ErrStreamNotFound) {
+		require.NoError(t, err)
+	}
+	require.Empty(t, events, "ordinary output of the failed submission was published after the drain timeout")
+	require.NotNil(t, manager.DeliveryHealth().Failure, "ordinary output cleared the failed writer")
+
+	// A different submission proves the consumer is still usable and releases
+	// the sticky failure only through its own committed event.
+	updates <- adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, PromptGeneration: 2, Text: "next instruction"}
+	updates <- adapter.AgentEvent{Type: adapter.EventTypeComplete, PromptGeneration: 2}
+	close(updates)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("forwarding did not finish after the successor submission")
+	}
+	events, _, err = manager.deliveryJournal.Replay(context.Background(), "stream", 0, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	require.Equal(t, "next instruction", decodeEventText(t, events[0].Payload))
+	require.Equal(t, "submission-2", events[0].SubmissionID)
+	require.Equal(t, adapter.EventTypeComplete, events[1].Type)
+	require.Equal(t, "submission-2", events[1].SubmissionID)
+	require.Nil(t, manager.DeliveryHealth().Failure)
 }

@@ -209,9 +209,9 @@ cannot be replayed.
 Kandev prepares large tool output before it enters the delivery stream. A tool
 result that is too large for direct display keeps its category, status, and
 identity, together with a bounded preview and an explicit truncation notice. A
-failed delivery write does not cancel the agent turn by itself. Kandev keeps
-reading the turn, commits the real terminal when storage permits, and otherwise
-preserves the uncertain outcome. Delivery health is checked in the background,
+failed delivery write causes Kandev to request cancellation of the current turn.
+Kandev keeps reading, commits the real terminal when storage permits, and
+otherwise preserves the uncertain outcome. Delivery health is checked in the background,
 so the recovery card can appear promptly even when the agent is quiet or the
 browser is closed. A live agent process does not prove that output delivery
 still works.

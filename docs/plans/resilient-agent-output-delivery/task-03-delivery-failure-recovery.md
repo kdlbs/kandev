@@ -220,3 +220,9 @@ Additional review-remediation regressions passed:
 - `TestDeliveryFailureDrainsActualTerminal` now dispatches a distinct second instruction through the same consumer after the cancellation terminal and verifies both submissions settle exactly once.
 
 `TestDeliveryHealthRecoveryWithinTenSeconds` advances fake probe time and asserts the real reconciliation starts within the shared ten-second window after the failure becomes observable.
+
+Review-fixup additions:
+
+- `TestDeliveryFailureTimeoutSuppressesFailedOutput` proves ordinary output from the failed submission stays dropped after the drain timeout and that only its terminal or a different submission's committed event releases the sticky failure.
+- `TestDeliveryHealthStateOnlyFailureUsesReconciler` covers retained peers that report `storage_error` without a failure snapshot and verifies the existing reconciler publishes the uncertain phase.
+- Desktop and phone E2E were rerun after the merge; Retry, Stop, draft retention, no-resend, and distinct-next-instruction behavior remain green.

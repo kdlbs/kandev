@@ -140,6 +140,7 @@ type Manager struct {
 	deliveryActiveID            string
 	deliveryHealth              DeliveryHealth
 	deliveryFailureRevision     atomic.Uint64
+	deliveryFailedSubmissionID  string
 	deliveryFailureDrain        time.Duration
 	deliveryPausedWriters       int
 	deliveryBlocked             bool
@@ -2480,47 +2481,75 @@ func (m *Manager) createAdapter() error {
 	return nil
 }
 
-// forwardUpdates forwards updates from the adapter to the manager's channel
+// forwardUpdates forwards updates from the adapter to the manager's channel.
 func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-chan struct{}) {
 	defer m.wg.Done()
 	defer m.closeDeliveryEventWriter()
 
 	updatesCh := agentAdapter.Updates()
+	var suppressedSubmissionID string
+	suppressOrdinaryOutput := false
+	var pending *adapter.AgentEvent
 	for {
-		select {
-		case update, ok := <-updatesCh:
-			if !ok {
-				return
-			}
-			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
-			persisted, err := m.persistDeliveryEvent(update)
-			if err != nil {
-				m.logger.Error("failed to commit durable delivery event", zap.Error(err))
-				// Capture the failure before cancellation, then keep the sole
-				// adapter consumer alive through a bounded drain so an actual
-				// terminal can still settle the retained submission.
-				m.cancelDeliveryAfterStorageFailure(update.DeliverySubmissionID)
-				if !m.drainAfterDeliveryFailure(updatesCh, stopCh) {
-					return
-				}
-				continue
-			}
-			update = persisted
-			if update.Type == "" {
-				continue
-			}
-			m.recordTerminalOutcome(&update)
-			if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
-				m.signalDeliveryWakeup()
-				continue
-			}
+		var update adapter.AgentEvent
+		var ok bool
+		if pending != nil {
+			update, ok = *pending, true
+			pending = nil
+		} else {
 			select {
-			case m.updatesCh <- update:
+			case update, ok = <-updatesCh:
 			case <-stopCh:
+				m.drainDeliveryUpdates(updatesCh)
 				return
 			}
+		}
+		if !ok {
+			return
+		}
+		update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
+		if suppressOrdinaryOutput && !isTerminalDeliveryEvent(update) {
+			if update.DeliverySubmissionID == "" || update.DeliverySubmissionID == suppressedSubmissionID {
+				continue
+			}
+		}
+		persisted, err := m.persistDeliveryEvent(update)
+		if err != nil {
+			m.logger.Error("failed to commit durable delivery event", zap.Error(err))
+			// Capture the failure before cancellation, then keep the sole
+			// adapter consumer alive through a bounded drain so an actual
+			// terminal can still settle the retained submission.
+			suppressedSubmissionID = update.DeliverySubmissionID
+			suppressOrdinaryOutput = true
+			m.cancelDeliveryAfterStorageFailure(update.DeliverySubmissionID)
+			cont, terminalCommitted, carried := m.drainAfterDeliveryFailure(updatesCh, stopCh, suppressedSubmissionID)
+			if !cont {
+				return
+			}
+			if terminalCommitted {
+				suppressedSubmissionID = ""
+				suppressOrdinaryOutput = false
+			}
+			pending = carried
+			continue
+		}
+		if suppressOrdinaryOutput && (isTerminalDeliveryEvent(persisted) ||
+			(persisted.DeliverySubmissionID != "" && persisted.DeliverySubmissionID != suppressedSubmissionID)) {
+			suppressedSubmissionID = ""
+			suppressOrdinaryOutput = false
+		}
+		update = persisted
+		if update.Type == "" {
+			continue
+		}
+		m.recordTerminalOutcome(&update)
+		if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
+			m.signalDeliveryWakeup()
+			continue
+		}
+		select {
+		case m.updatesCh <- update:
 		case <-stopCh:
-			m.drainDeliveryUpdates(updatesCh)
 			return
 		}
 	}

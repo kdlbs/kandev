@@ -152,13 +152,17 @@ func (m *Manager) appendDeliveryWithRecovery(ctx context.Context, j *journal.Jou
 func (m *Manager) deliveryEventsCommitted(events []journal.Event) {
 	m.deliveryActiveMu.Lock()
 	defer m.deliveryActiveMu.Unlock()
-	// A real commit re-establishes a usable writer; a capacity read alone never
-	// clears a sticky failure snapshot.
-	if m.deliveryHealth.Failure != nil {
-		m.deliveryHealth.Failure = nil
-		m.deliveryBlocked = false
-		if m.deliveryHealth.State == deliveryFailedState {
-			m.deliveryHealth.State = deliveryHealthyState
+	// A real commit re-establishes a usable writer, but ordinary output from the
+	// failed submission cannot clear the sticky failure. Only its terminal or a
+	// commit from a different submission may release admission.
+	for _, event := range events {
+		clear := event.Terminal
+		if m.deliveryFailedSubmissionID != "" && event.SubmissionID != "" &&
+			event.SubmissionID != m.deliveryFailedSubmissionID {
+			clear = true
+		}
+		if clear {
+			m.clearDeliveryFailureLocked()
 		}
 	}
 	for _, event := range events {

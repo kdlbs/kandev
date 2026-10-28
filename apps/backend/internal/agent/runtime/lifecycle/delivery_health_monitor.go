@@ -66,8 +66,7 @@ func (sm *StreamManager) monitorDeliveryHealth(ctx context.Context, owner delive
 	if cooldown <= 0 {
 		cooldown = defaultDeliveryHealthCooldown
 	}
-	var lastRevision uint64
-	var nextAllowed time.Time
+	state := &deliveryHealthProbeState{}
 	first := true
 	for {
 		if ctx.Err() != nil {
@@ -80,7 +79,7 @@ func (sm *StreamManager) monitorDeliveryHealth(ctx context.Context, owner delive
 		if !owner.current() {
 			return
 		}
-		sm.probeDeliveryHealth(ctx, owner, timeout, cooldown, &lastRevision, &nextAllowed)
+		sm.probeDeliveryHealth(ctx, owner, timeout, cooldown, state)
 	}
 }
 
@@ -117,14 +116,23 @@ func (sm *StreamManager) releaseDeliveryAttachment(executionID string, attachmen
 	}
 }
 
+// deliveryHealthProbeState tracks one connection's last observed failure
+// signal. Older retained peers report an unhealthy state without a failure
+// snapshot, so the state flag is independent of a snapshot revision.
+type deliveryHealthProbeState struct {
+	failureRevision uint64
+	hadUnhealthy    bool
+	nextAllowed     time.Time
+}
+
 // probeDeliveryHealth performs one bounded, non-overlapping status request and
-// enters reconciliation only for a correlated failure of the current owner.
+// enters reconciliation for a correlated failure snapshot or an unhealthy
+// legacy state reported by an older retained peer.
 func (sm *StreamManager) probeDeliveryHealth(
 	ctx context.Context,
 	owner deliveryHealthOwner,
 	timeout, cooldown time.Duration,
-	lastRevision *uint64,
-	nextAllowed *time.Time,
+	state *deliveryHealthProbeState,
 ) {
 	submissionID := owner.submission()
 	promptGeneration := owner.promptGeneration()
@@ -139,12 +147,14 @@ func (sm *StreamManager) probeDeliveryHealth(
 			zap.String("execution_id", owner.execution.ID), zap.Error(err))
 		return
 	}
-	if status.DeliveryHealth.Failure == nil {
-		if *lastRevision != 0 {
+	reason := deliveryPressureRecoveryReason(status)
+	if reason == "" {
+		if state.hadUnhealthy {
 			// A prior failure is no longer reported, either because the actual
 			// terminal committed or the producer recovered. Re-run the existing
 			// reconciler so it can publish recovery and clear the durable fence.
-			*lastRevision = 0
+			state.hadUnhealthy = false
+			state.failureRevision = 0
 			result := owner.reconcile(ctx)
 			sm.logger.Info("durable delivery failure cleared",
 				zap.String("execution_id", owner.execution.ID),
@@ -153,40 +163,47 @@ func (sm *StreamManager) probeDeliveryHealth(
 		return
 	}
 	failure := status.DeliveryHealth.Failure
-	sm.logger.Debug("delivery health failure observed",
-		zap.String("execution_id", owner.execution.ID),
-		zap.String("failure_submission_id", failure.SubmissionID),
-		zap.String("current_submission_id", submissionID),
-		zap.String("reason", failure.Reason),
-		zap.Uint64("revision", failure.Revision))
-	if !deliveryFailureCorrelates(owner, failure, submissionID, promptGeneration) {
-		sm.logger.Debug("delivery health failure did not correlate with the current owner",
+	if failure != nil {
+		sm.logger.Debug("delivery health failure observed",
 			zap.String("execution_id", owner.execution.ID),
 			zap.String("failure_submission_id", failure.SubmissionID),
 			zap.String("current_submission_id", submissionID),
-			zap.String("failure_stream_id", failure.StreamID),
-			zap.String("current_stream_id", owner.execution.DeliveryStreamID),
-			zap.Uint64("failure_generation", failure.HarnessGeneration),
-			zap.Uint64("current_generation", owner.execution.DeliveryHarnessGeneration),
-			zap.Uint64("failure_prompt_generation", failure.PromptGeneration),
-			zap.Uint64("current_prompt_generation", promptGeneration))
-		return
+			zap.String("reason", failure.Reason),
+			zap.Uint64("revision", failure.Revision))
+		if !deliveryFailureCorrelates(owner, failure, submissionID, promptGeneration) {
+			sm.logger.Debug("delivery health failure did not correlate with the current owner",
+				zap.String("execution_id", owner.execution.ID),
+				zap.String("failure_submission_id", failure.SubmissionID),
+				zap.String("current_submission_id", submissionID),
+				zap.String("failure_stream_id", failure.StreamID),
+				zap.String("current_stream_id", owner.execution.DeliveryStreamID),
+				zap.Uint64("failure_generation", failure.HarnessGeneration),
+				zap.Uint64("current_generation", owner.execution.DeliveryHarnessGeneration),
+				zap.Uint64("failure_prompt_generation", failure.PromptGeneration),
+				zap.Uint64("current_prompt_generation", promptGeneration))
+			return
+		}
 	}
 	if !owner.current() || owner.submission() != submissionID {
 		return
 	}
 	now := sm.deliveryHealthNow()
-	if failure.Revision == *lastRevision && now.Before(*nextAllowed) {
+	if failure != nil {
+		if failure.Revision == state.failureRevision && now.Before(state.nextAllowed) {
+			return
+		}
+		state.failureRevision = failure.Revision
+	} else if state.hadUnhealthy && now.Before(state.nextAllowed) {
 		return
 	}
-	*lastRevision = failure.Revision
-	*nextAllowed = now.Add(cooldown)
+	state.hadUnhealthy = true
+	state.nextAllowed = now.Add(cooldown)
 	result := owner.reconcile(ctx)
 	sm.logger.Warn("observed durable delivery failure",
 		zap.String("execution_id", owner.execution.ID),
-		zap.String("submission_id", failure.SubmissionID),
-		zap.String("reason", failure.Reason),
-		zap.Uint64("revision", failure.Revision),
+		zap.String("submission_id", submissionID),
+		zap.String("reason", reason),
+		zap.Uint64("revision", state.failureRevision),
 		zap.String("outcome", string(result.Outcome)))
 }
 

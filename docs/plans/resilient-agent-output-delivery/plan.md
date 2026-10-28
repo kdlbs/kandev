@@ -1,6 +1,6 @@
 ---
 created: 2026-10-27
-status: draft
+status: complete
 requirements:
   - REQ-PLATFORM-BOUNDED-TOOL-DATA-001
   - REQ-PLATFORM-BOUNDED-TOOL-DATA-002
@@ -24,7 +24,7 @@ legacy_specs: []
 Prevent oversized tool reports from breaking execution and make writer failure visible without waiting for another output event.
 Raise event capacity with aligned replay budgets, prepare every tool category, preserve real terminal evidence, and prove desktop/phone recovery.
 Three work orders execute sequentially. The complete package is the release unit.
-This design turn authorizes no production changes, permanent tests, delegation, commit, or live-session repair.
+All three work orders are implemented and verified in the same package pull request.
 
 Platform owns this package because it owns durable delivery between agentctl and the backend.
 The frontend consumes that contract through existing chat and recovery surfaces.
@@ -226,8 +226,12 @@ Review remediation on 2026-10-27:
 - Desktop and phone E2E use genuine oversized-output failures rather than
   seeded recovery UI. They exercise Retry, Stop, reload, draft retention, and
   prove the original instruction is not resent.
+- After the drain timeout, ordinary output from the failed submission remains
+  suppressed; only its terminal or a committed event from a different
+  submission releases the sticky failure. Retained peers that report only an
+  unhealthy state still enter the existing reconciler.
 
-The implementation remains unstaged and uncommitted for review.
+The implementation is committed and published for review; focused unit, race, desktop, and phone checks passed.
 
 ## Risks
 
@@ -238,12 +242,11 @@ The implementation remains unstaged and uncommitted for review.
 - A new event field or metadata contract adds compatibility risk. Reuse existing representations and hash fixtures.
 - Old retained producers do not gain preparation by backend adoption. They require honest compatibility and health handling.
 - Returning from the native-event consumer can hide the actual cancellation. Terminal write failure still requires uncertainty.
-- Status results can arrive after replacement. Every state change needs captured owner and prompt identity.
+- Status results can arrive after replacement. Every state change needs a captured owner and prompt identity.
 
 ## Delivery boundary
 
-Leave this package unstaged and uncommitted for review.
-A later explicit implementation request starts Task 01 with TDD.
+All three work orders are complete in this package pull request.
 After acceptance, promote the bounded-tool pair and new failure design.
 The broader durable-delivery requirement and companion packages retain their independent maturity gates.
 No generic review, QA, or full-verification work order is added.

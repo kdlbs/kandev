@@ -55,6 +55,7 @@ func (m *Manager) recordDeliveryWriteFailure(err error, update adapter.AgentEven
 	}
 	m.deliveryActiveMu.Lock()
 	m.deliveryHealth.Failure = snapshot
+	m.deliveryFailedSubmissionID = snapshot.SubmissionID
 	m.deliveryHealth.State = deliveryFailedState
 	m.deliveryBlocked = true
 	m.deliveryActiveMu.Unlock()
@@ -99,23 +100,29 @@ func classifyDeliveryFailure(err error) string {
 // clearDeliveryFailure marks the writer usable again only after a real commit.
 func (m *Manager) clearDeliveryFailure() {
 	m.deliveryActiveMu.Lock()
+	m.clearDeliveryFailureLocked()
+	m.deliveryActiveMu.Unlock()
+}
+
+func (m *Manager) clearDeliveryFailureLocked() {
 	if m.deliveryHealth.Failure != nil {
 		m.deliveryHealth.Failure = nil
+		m.deliveryFailedSubmissionID = ""
 		m.deliveryBlocked = false
 		if m.deliveryHealth.State == deliveryFailedState {
 			m.deliveryHealth.State = deliveryHealthyState
 		}
 	}
-	m.deliveryActiveMu.Unlock()
 }
 
 // drainAfterDeliveryFailure keeps the sole adapter consumer alive through a
-// bounded cancellation drain. It drops uncommitted ordinary output and tries
-// to commit only an actual terminal, which is the only event that may settle
-// the retained submission. It returns true when the normal forwarding loop may
-// resume with the same open writer; a closed adapter channel or shutdown ends
-// the consumer instead.
-func (m *Manager) drainAfterDeliveryFailure(updates <-chan adapter.AgentEvent, stopCh <-chan struct{}) bool {
+// bounded cancellation drain. Ordinary output from the failed submission stays
+// suppressed; a terminal or a different submission may resume the normal loop.
+func (m *Manager) drainAfterDeliveryFailure(
+	updates <-chan adapter.AgentEvent,
+	stopCh <-chan struct{},
+	failedSubmissionID string,
+) (continueForwarding bool, terminalCommitted bool, pending *adapter.AgentEvent) {
 	timeout := m.deliveryFailureDrain
 	if timeout <= 0 {
 		timeout = defaultDeliveryFailureDrainTimeout
@@ -131,36 +138,36 @@ func (m *Manager) drainAfterDeliveryFailure(updates <-chan adapter.AgentEvent, s
 		select {
 		case update, ok := <-updates:
 			if !ok {
-				return false
+				return false, false, nil
 			}
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			if !isTerminalDeliveryEvent(update) {
-				// Ordinary output after a failed write must never be published as
-				// if delivery continued from the last accepted sequence.
+				if update.DeliverySubmissionID != "" && update.DeliverySubmissionID != failedSubmissionID {
+					// A successor submission owns its own output; leave the drain
+					// and carry it back to the normal loop.
+					return true, false, &update
+				}
 				continue
 			}
-			m.commitDrainedTerminal(update)
-			// The writer remains open. Resume forwarding so a later recovered
-			// prompt on this retained runtime still reaches the journal.
-			return true
+			return true, m.commitDrainedTerminal(update), nil
 		case <-stopCh:
-			return false
+			return false, false, nil
 		case <-lifetimeDone:
-			return false
+			return false, false, nil
 		case <-timer.C:
-			// No terminal was observed yet. Keep the consumer and the sticky
-			// failure; admission stays fenced until a real commit or recovery.
-			return true
+			// No terminal was observed yet. Keep the consumer and sticky
+			// failure; ordinary output of the failed submission stays dropped.
+			return true, false, nil
 		}
 	}
 }
 
-func (m *Manager) commitDrainedTerminal(update adapter.AgentEvent) {
+func (m *Manager) commitDrainedTerminal(update adapter.AgentEvent) bool {
 	persisted, err := m.persistDeliveryEvent(update)
 	if err != nil {
 		m.logger.Error("failed to commit the actual terminal after delivery failure",
 			zap.String("submission_id", update.DeliverySubmissionID), zap.Error(err))
-		return
+		return false
 	}
 	m.recordTerminalOutcome(&persisted)
 	m.signalDeliveryWakeup()
@@ -168,4 +175,5 @@ func (m *Manager) commitDrainedTerminal(update adapter.AgentEvent) {
 	m.logger.Info("committed the actual terminal after delivery failure",
 		zap.String("submission_id", update.DeliverySubmissionID),
 		zap.Uint64("sequence", persisted.DeliverySequence))
+	return true
 }

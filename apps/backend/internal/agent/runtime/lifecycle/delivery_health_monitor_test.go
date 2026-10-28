@@ -509,3 +509,56 @@ func TestDeliveryHealthRecoveryWithinTenSeconds(t *testing.T) {
 		t.Fatalf("recovery took %s from monitor start", reconciledAt.Sub(start))
 	}
 }
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.4
+func TestDeliveryHealthStateOnlyFailureUsesReconciler(t *testing.T) {
+	execution := newDeliveryReconciliationTestExecution()
+	sm := newDeliveryReconciliationTestManager(newReconciliationTestClock())
+	peer := newDeliveryReconciliationTestPeer()
+	peer.streamOpen = true
+	peer.status = func(context.Context, int) (*agentctl.StatusResponse, error) {
+		status := &agentctl.StatusResponse{AgentStatus: "running"}
+		status.DeliveryHealth.State = "storage_error"
+		return status, nil
+	}
+	phases := make(chan DeliveryReconciliationPhase, 4)
+	sm.onDeliveryReconciliationPhase = func(_ *AgentExecution, _ DeliveryReconciliationIdentity, phase DeliveryReconciliationPhase) {
+		phases <- phase
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reconciles := 0
+	owner := deliveryHealthOwner{
+		execution: execution,
+		probe:     func(ctx context.Context) (*agentctl.StatusResponse, error) { return peer.GetStatus(ctx) },
+		current:   func() bool { return true },
+		reconcile: func(ctx context.Context) DeliveryReconciliationResult {
+			reconciles++
+			return sm.reconcileDeliveryWithPeer(ctx, execution, peer)
+		},
+		submission:       func() string { return "submission-1" },
+		promptGeneration: func() uint64 { return 1 },
+	}
+	waits := 0
+	sm.deliveryHealthWait = func(context.Context, time.Duration) error {
+		waits++
+		if waits >= 2 {
+			cancel()
+		}
+		return nil
+	}
+	sm.monitorDeliveryHealth(ctx, owner)
+	if reconciles != 1 {
+		t.Fatalf("reconciles = %d, want one state-only recovery probe", reconciles)
+	}
+	seen := map[DeliveryReconciliationPhase]bool{}
+	for len(phases) > 0 {
+		seen[<-phases] = true
+	}
+	if !seen[DeliveryReconciliationPhaseReconnecting] || !seen[DeliveryReconciliationPhaseUncertain] ||
+		seen[DeliveryReconciliationPhaseRecovered] {
+		t.Fatalf("published phases = %v, want reconnecting and uncertain", seen)
+	}
+	sm.Wait()
+}
