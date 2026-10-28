@@ -165,3 +165,36 @@ describe("Files node bulk and search copy", () => {
     expect(toastMock).not.toHaveBeenCalled();
   });
 });
+
+describe("Files keyboard access", () => {
+  // jsdom does not synthesize the browser's keyboard contextmenu event. The
+  // native browser test covers Shift+F10; this checks each real row's focus and menu.
+  it.each(["tree", "search"] as const)(
+    "focuses and selects Copy path on a %s row",
+    async (surface) => {
+      const write = vi.spyOn(clipboard, "copyToClipboard").mockResolvedValue(true);
+      const open = vi.fn();
+      const callbacks = surface === "tree" ? renderRow(file) : null;
+      if (surface === "search")
+        render(
+          <SearchResultsList
+            searchResults={[file.path]}
+            fileStatuses={new Map()}
+            onOpenFile={open}
+          />,
+        );
+      const row = screen.getByTestId(surface === "tree" ? TREE_NODE_ID : "file-search-result");
+      expect(row.tabIndex).toBe(0);
+      row.focus();
+      expect(document.activeElement).toBe(row);
+      fireEvent.contextMenu(row);
+      const item = screen.getByRole(MENU_ITEM_ROLE, { name: COPY_PATH_LABEL });
+      item.focus();
+      fireEvent.keyDown(item, { key: "Enter" });
+      await waitFor(() => expect(write).toHaveBeenCalledExactlyOnceWith(file.path));
+      expect(open).not.toHaveBeenCalled();
+      if (callbacks)
+        for (const callback of Object.values(callbacks)) expect(callback).not.toHaveBeenCalled();
+    },
+  );
+});

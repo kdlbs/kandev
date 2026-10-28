@@ -129,7 +129,7 @@ function getTreeNodeRowClass(
   isDropTarget: boolean,
 ) {
   return cn(
-    "group flex w-full items-center gap-1 border border-transparent px-2 py-0.5 text-left text-sm cursor-pointer",
+    "group flex w-full items-center gap-1 border border-transparent px-2 py-0.5 text-left text-sm cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
     isSelected ? "border-primary/50 bg-card text-foreground hover:bg-muted/70" : "hover:bg-muted",
     isActive && !isSelected && "bg-muted",
     isActiveFolder && !isSelected && "bg-muted/50",
@@ -263,6 +263,7 @@ export const TreeNodeItem = React.memo(function TreeNodeItem(props: TreeNodeRowP
       data-selected={isSelected ? "true" : "false"}
       aria-selected={isSelected}
       role="treeitem"
+      tabIndex={0}
       className={cn(
         getTreeNodeRowClass(isActive, isActiveFolder, isSelected, props.isDragging, isDropTarget),
         showTouchActions &&
@@ -374,8 +375,9 @@ export function SearchResultsList({
           <div
             data-testid="file-search-result"
             data-path={path}
+            tabIndex={0}
             className={cn(
-              "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
+              "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
               "hover:bg-muted",
               showTouchActions && "relative min-h-11 pr-11",
             )}

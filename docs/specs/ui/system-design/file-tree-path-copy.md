@@ -27,7 +27,7 @@ A menu selection invokes the shared hook once with the exact node path. `isBulk`
 
 ## Responsive presentation
 
-Desktop uses the existing context menu. Phone and coarse-pointer rows use the existing 44px visible overflow trigger and DropdownMenu, matching the shipped file-tree chat-context surface. The node remains the primary row target; Copy path is a secondary item alongside existing actions. The shared responsive menu supplies its inset, safe-area-aware presentation and scrolling. This short contextual choice does not warrant a new surface. Verify the trigger and item geometry, viewport containment, and no horizontal overflow in a rendered phone scenario.
+Desktop tree and filename-search rows are keyboard focusable with a visible focus indicator; the existing context menu supports keyboard opening and selection. Desktop uses the existing context menu. Phone and coarse-pointer rows use the existing 44px visible overflow trigger and DropdownMenu, matching the shipped file-tree chat-context surface. The node remains the primary row target; Copy path is a secondary item alongside existing actions. The shared responsive menu supplies its inset, safe-area-aware presentation and scrolling. This short contextual choice does not warrant a new surface. Verify the trigger and item geometry, viewport containment, and no horizontal overflow in a rendered phone scenario.
 
 ## Failure and recovery
 

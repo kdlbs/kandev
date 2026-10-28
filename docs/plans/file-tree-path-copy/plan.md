@@ -48,7 +48,7 @@ Create `apps/web/e2e/tests/task/file-tree-path-copy.spec.ts` (`chromium`) and `a
 
 ## Verification results
 
-Focused Vitest passed 60 tests across eight files; scoped ESLint passed. Real-backend Chromium and mobile-chrome flows each passed with actual clipboard reads; the final capture runs passed one test each. Specification and public-doc checks are recorded in the work order. Hosted validation remains external to this package.
+Focused Vitest passed 60 tests across eight files; scoped ESLint passed. Real-backend Chromium and mobile-chrome flows each passed with actual clipboard reads; the final capture runs passed one test each. Specification and public-doc checks are recorded in the work order. The review correction also passed 24 focused tests, scoped ESLint, and the desktop and phone native E2E capture runs, including trusted keyboard access and causal search waits. Hosted validation remains external to this package.
 
 ## Risks
 

@@ -7,6 +7,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 export async function setupPathCopyTask(
@@ -72,11 +73,23 @@ export async function setupPathCopyTask(
   const filePath = `${root}/${fileName}`;
   const folderPath = `${root}/${folderName}`;
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  if (!task.session_id) throw new Error("Path copy task did not return a session ID");
+  const gateway = watchWs(page);
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
-  return { session, root, filePath, folderPath, fileName, repoPath, contents };
+  return {
+    session,
+    sessionId: task.session_id,
+    gateway,
+    root,
+    filePath,
+    folderPath,
+    fileName,
+    repoPath,
+    contents,
+  };
 }
 
 export async function expectClipboard(page: Page, expected: string) {

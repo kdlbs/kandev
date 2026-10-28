@@ -11,7 +11,7 @@ test("copies multi-root Files paths from the visible phone row menu", async ({
   prCapture,
 }) => {
   test.setTimeout(120_000);
-  const { session, root, filePath, folderPath, fileName, repoPath, contents } =
+  const { session, sessionId, gateway, root, filePath, folderPath, fileName, repoPath, contents } =
     await setupPathCopyTask(testPage, apiClient, seedData, backend);
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
   await session.fileTree.waitForFileTreeNode(root);
@@ -62,8 +62,13 @@ test("copies multi-root Files paths from the visible phone row menu", async ({
   await copyNode(filePath);
   await expect(testPage.getByTestId("mobile-file-viewer-panel")).toHaveCount(0);
   await session.fileSearchButton().tap();
+  const search = gateway.waitForResponse("workspace.files.search", {
+    requestWhere: (payload) => payload.session_id === sessionId && payload.query === fileName,
+  });
   await session.fileSearchInput().fill(fileName);
-  await expect(session.fileSearchResult(filePath)).toBeVisible({ timeout: 30_000 });
+  await search;
+  await expect(session.fileSearchResult(filePath)).toBeVisible();
+  await testPage.evaluate(() => navigator.clipboard.writeText("clipboard sentinel"));
   await copyNode(filePath, true);
   await expect(testPage.getByTestId("mobile-file-viewer-panel")).toHaveCount(0);
   expect(
