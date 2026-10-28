@@ -12,7 +12,7 @@ Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md
 ## Quick path
 
 1. Export a regular Kanban workflow from **Settings > Workspaces > Workflows**.
-2. Copy or save the YAML.
+2. Copy the YAML or download it as `workflows.yaml`.
 3. Import it into the destination workspace.
 4. Review profile mapping and skipped names before using the workflow.
 
@@ -20,13 +20,13 @@ Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md
 
 Open **Settings → Workspaces → select a workspace → Workflows**.
 
-- **Export All** opens a YAML dialog for the saved Kanban workflows visible on that settings page. Unsaved drafts and Office-style workflows are excluded. Choose **Copy** to put the text on the clipboard.
+- **Export All** opens a YAML dialog for the saved Kanban workflows visible on that settings page. Unsaved drafts and Office-style workflows are excluded. Choose **Copy** to put the text on the clipboard or **Download** to save `workflows.yaml`.
 - A workflow card's **Export** button exports only that workflow.
 - **Import** accepts a `.yml` or `.yaml` file, or pasted YAML. It previews the workflows that will be created and skipped. Exact direct step-profile matches are selected automatically; each unmatched direct step has a profile picker.
 - The browser import does not create workflows until every affected step has a valid profile selection. If no eligible profile exists, use **Retry** after creating or enabling a profile in **Settings > Agents**. Canceling the picker leaves the workspace unchanged.
 - The result reports created and skipped workflow names.
 
-Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
+Export does not change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
 
 > **Network security:** With authentication disabled, these HTTP routes are open. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing them to a network.
 
