@@ -181,6 +181,9 @@ type ExecutorProvider struct {
 	SupportedStateVersions []int                `yaml:"supported_state_versions" json:"supported_state_versions"`
 	StateSchema            *ExecutorStateSchema `yaml:"state_schema,omitempty" json:"state_schema,omitempty"`
 	StateBudgetBytes       int                  `yaml:"state_budget_bytes,omitempty" json:"state_budget_bytes,omitempty"`
+	// DestroyTimeoutSeconds is the deadline of the destroy call; a value over
+	// the default requires the drain_receipt capability.
+	DestroyTimeoutSeconds int `yaml:"destroy_timeout_seconds,omitempty" json:"destroy_timeout_seconds,omitempty"`
 	// RequiresHostCapabilities lists the opt-in host capabilities this
 	// provider needs, each pinned to one version of the host registry.
 	RequiresHostCapabilities []HostCapabilityRequirement  `yaml:"requires_host_capabilities,omitempty" json:"requires_host_capabilities,omitempty"`

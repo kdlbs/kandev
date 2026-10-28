@@ -439,6 +439,19 @@ Kandev treats an environment as absent only when the provider confirms absence
 and at least one checkpoint of that claim was stored, so a provider must
 checkpoint before it reports `confirmed_absent`.
 
+With `drain_receipt`, Kandev seals and drains the agent runtime before it asks
+the provider to destroy an environment that is being cleaned up (task or
+session archive or delete, and launch rollback). An ordinary stop, a backend
+shutdown, and a plugin disable never seal the runtime. The destroy request then
+carries `drain_outcome` (`drained`, `unreachable`, `uncertain`, or
+`not_attempted`) and, only for `drained`, a `drain_receipt`. A receipt proves
+the runtime stopped; it is never proof that the environment is absent. The
+provider bootstrap payload also carries `idle_timeout_seconds: 0`, and the
+provider must start the agent runtime with its idle reaper disabled
+(`KANDEV_ACP_IDLE_TIMEOUT=0`) so the runtime stays drainable. A provider
+declaring this capability can set `destroy_timeout_seconds` (30 to 300, default
+30) to bound the destroy call; a value above 30 requires `drain_receipt`.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.

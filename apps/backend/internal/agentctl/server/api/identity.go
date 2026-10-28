@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
@@ -13,7 +14,7 @@ import (
 // set comparison rather than a version match, so a future agentctl build can
 // add capabilities without breaking older backends, and an older agentctl
 // can be correctly refused by a newer backend that requires one it lacks.
-var SurvivalCapabilities = []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability}
+var SurvivalCapabilities = []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, agentctltypes.RuntimeDrainVersion}
 
 // handleIdentity reports this launch's opaque identity and capability
 // scope. It is deliberately exempt from bearer-token auth (see

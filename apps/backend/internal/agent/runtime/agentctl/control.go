@@ -439,6 +439,56 @@ type IdentityInfo struct {
 	UnownedPeriodMS int64 `json:"unowned_period_ms"`
 }
 
+// RuntimeDrainRequest and RuntimeDrainReceipt are the agentctl seal-and-drain
+// wire types shared with the agentctl control server.
+type (
+	RuntimeDrainRequest = agentctltypes.RuntimeDrainRequest
+	RuntimeDrainReceipt = agentctltypes.RuntimeDrainReceipt
+)
+
+// SealAndDrainRuntime asks agentctl to stop accepting work and stop its
+// managed process groups, and validates the reply before treating it as
+// evidence. A transport error, non-200 status, or reply that does not match
+// the request yields no receipt.
+func (c *ControlClient) SealAndDrainRuntime(ctx context.Context, drain RuntimeDrainRequest) (*RuntimeDrainReceipt, error) {
+	body, err := json.Marshal(drain)
+	if err != nil {
+		return nil, fmt.Errorf("marshal runtime drain request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/runtime/seal-and-drain", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("runtime seal-and-drain failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &RuntimeDrainRejectedError{StatusCode: resp.StatusCode}
+	}
+	var receipt RuntimeDrainReceipt
+	if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+		return nil, fmt.Errorf("decode runtime drain receipt: %w", err)
+	}
+	if receipt.RequestID != drain.RequestID || receipt.ServerIdentity != drain.ExpectedServerIdentity ||
+		!receipt.Sealed || !receipt.Drained || receipt.Scope != agentctltypes.RuntimeDrainScope ||
+		receipt.Version != agentctltypes.RuntimeDrainVersion || receipt.CompletedAt.IsZero() {
+		return nil, errors.New("runtime seal-and-drain returned incomplete or mismatched evidence")
+	}
+	return &receipt, nil
+}
+
+// RuntimeDrainRejectedError is a seal-and-drain reply that agentctl sent with
+// a non-200 status. A 409 means the runtime identity differs from the expected
+// one or another request owns the drain.
+type RuntimeDrainRejectedError struct{ StatusCode int }
+
+func (e *RuntimeDrainRejectedError) Error() string {
+	return fmt.Sprintf("runtime seal-and-drain rejected: status %d", e.StatusCode)
+}
+
 // ServerDetails carries the control-server values an adopting backend
 // records but that are withheld from the unauthenticated identity endpoint.
 type ServerDetails struct {

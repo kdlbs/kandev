@@ -54,6 +54,7 @@ type Manager struct {
 	reaperStop     chan struct{}
 	reaperStopOnce sync.Once
 	reaperWG       sync.WaitGroup
+	reaperWait     waitGroupCompletion
 
 	// abandonWG tracks the teardown goroutines CreateInstance spawns when a
 	// caller vanishes mid-creation. They run off m.mu so a slow tracker stop
@@ -70,6 +71,8 @@ type Manager struct {
 	// either is counted before the flag is set or sees the flag and refuses.
 	abandonWG       sync.WaitGroup
 	activeCreations sync.WaitGroup
+	abandonWait     waitGroupCompletion
+	creationWait    waitGroupCompletion
 	shuttingDown    bool
 
 	// afterTrackerStart runs immediately after StartAllWorkspaceTrackers and is
@@ -98,11 +101,12 @@ type provisionalInstance struct {
 	listener net.Listener
 	procMgr  processManager
 
-	cleanupMu      sync.Mutex
-	listenerClosed bool
-	processStopped bool
-	cleaned        bool
-	lastCleanupErr error
+	cleanupMu       sync.Mutex
+	admissionClosed bool
+	listenerClosed  bool
+	processStopped  bool
+	cleaned         bool
+	lastCleanupErr  error
 }
 
 // NewManager creates a new instance manager.
@@ -405,8 +409,24 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 // cleanup reads it under.
 func (b *provisionalInstance) setProcessManager(mgr processManager) {
 	b.cleanupMu.Lock()
-	defer b.cleanupMu.Unlock()
 	b.procMgr = mgr
+	sealed := b.admissionClosed
+	b.cleanupMu.Unlock()
+	if sealed && mgr != nil {
+		mgr.CloseAdmission()
+	}
+}
+
+// sealAdmission records the seal even when the process manager has not been
+// constructed yet; setProcessManager applies it on arrival.
+func (b *provisionalInstance) sealAdmission() {
+	b.cleanupMu.Lock()
+	b.admissionClosed = true
+	mgr := b.procMgr
+	b.cleanupMu.Unlock()
+	if mgr != nil {
+		mgr.CloseAdmission()
+	}
 }
 
 // abandonPartialInstanceTimeout bounds the admission wait inside
@@ -741,27 +761,49 @@ func (m *Manager) stopHTTPServer(ctx context.Context, id string, port int, serve
 	return nil
 }
 
-// Shutdown stops all instances gracefully.
+// Shutdown stops all instances gracefully. Creation and process admission are
+// sealed before any bounded wait, so a caller whose deadline expires leaves the
+// manager refusing new work; a later call resumes the drain.
 func (m *Manager) Shutdown(ctx context.Context) error {
-	// Stop the idle reaper first so it doesn't fire StopInstance concurrently
-	// with our explicit per-instance shutdown loop.
-	m.stopReaperOnce()
-
-	// Refuse new creations before draining, so nothing can register another
-	// teardown goroutine behind the Wait below.
 	m.mu.Lock()
 	m.shuttingDown = true
+	instances := make([]*Instance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		instances = append(instances, inst)
+	}
+	sealed := make([]*provisionalInstance, 0, len(m.provisional))
+	for _, bundle := range m.provisional {
+		sealed = append(sealed, bundle)
+	}
 	m.mu.Unlock()
+	for _, inst := range instances {
+		if inst.manager != nil {
+			inst.manager.CloseAdmission()
+		}
+	}
+	for _, bundle := range sealed {
+		bundle.sealAdmission()
+	}
+
+	// Stop the idle reaper so it doesn't fire StopInstance concurrently with
+	// our explicit per-instance shutdown loop.
+	if err := m.stopReaperOnce(ctx); err != nil {
+		return fmt.Errorf("wait for instance idle reaper: %w", err)
+	}
 
 	// Wait for admitted creations. Each one either publishes before the
 	// snapshot below or is refused and registers its teardown on abandonWG
 	// before it finishes, so the drain that follows covers it.
-	m.activeCreations.Wait()
+	if err := waitGroupContext(ctx, &m.activeCreations, &m.creationWait); err != nil {
+		return fmt.Errorf("wait for admitted instance creation: %w", err)
+	}
 
 	// Drain any in-flight abandonment teardowns. They own trackers and a port
 	// that are no longer reachable through m.instances, so nothing below would
 	// wait for them otherwise.
-	m.abandonWG.Wait()
+	if err := waitGroupContext(ctx, &m.abandonWG, &m.abandonWait); err != nil {
+		return fmt.Errorf("wait for provisional instance cleanup: %w", err)
+	}
 
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.instances))
@@ -805,9 +847,34 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 // reaper drain consumed it before the main shutdown loop starts. The
 // reaper polls reaperStop between instances, so the worst-case drain is
 // one StopInstance round (15s), not N×timeout.
-func (m *Manager) stopReaperOnce() {
+func (m *Manager) stopReaperOnce(ctx context.Context) error {
 	m.reaperStopOnce.Do(func() {
 		close(m.reaperStop)
 	})
-	m.reaperWG.Wait()
+	return waitGroupContext(ctx, &m.reaperWG, &m.reaperWait)
+}
+
+type waitGroupCompletion struct {
+	once sync.Once
+	done chan struct{}
+}
+
+// waitGroupContext bounds a shutdown caller's wait without pretending that
+// work stopped when its deadline expires. One memoized waiter per WaitGroup
+// may outlive this call; retries reuse its completion channel instead of
+// leaking another waiter goroutine on each expired deadline.
+func waitGroupContext(ctx context.Context, wg *sync.WaitGroup, completion *waitGroupCompletion) error {
+	completion.once.Do(func() {
+		completion.done = make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(completion.done)
+		}()
+	})
+	select {
+	case <-completion.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

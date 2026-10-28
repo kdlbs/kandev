@@ -284,7 +284,7 @@ func run(cfg *config.Config, log *logger.Logger) {
 		}
 		// Shutdown all instances first so any final ACP frames they emit during
 		// teardown are still captured by the (still-live) debug writers.
-		if err := instMgr.Shutdown(ctx); err != nil {
+		if err := controlServer.ShutdownInstances(ctx); err != nil {
 			log.Error("error shutting down instance manager", zap.Error(err))
 		}
 		// Then flush + close all debug-log writers as the final logging step.

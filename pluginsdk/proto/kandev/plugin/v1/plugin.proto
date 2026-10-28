@@ -2005,6 +2005,21 @@ message DestroyExecutorEnvironmentRequest {
   ExecutorResourceDescriptor resource = 2;
   string cleanup_reason = 3;
   string cleanup_claim = 4;
+  // drain_outcome is one of drained, unreachable, uncertain or not_attempted.
+  // It is set only for a provider that requires the drain_receipt capability.
+  string drain_outcome = 5;
+  // drain_receipt is present only when drain_outcome is drained.
+  ExecutorDrainReceipt drain_receipt = 6;
+}
+
+// ExecutorDrainReceipt is the host's record that the recorded runtime stopped
+// its managed process groups under one cleanup claim. It is not evidence that
+// the provider resource is absent.
+message ExecutorDrainReceipt {
+  string receipt_id = 1;
+  string cleanup_claim = 2;
+  string runtime_identity = 3;
+  string completed_at = 4;
 }
 
 message DestroyExecutorEnvironmentResponse {

@@ -51,17 +51,21 @@ func (f *pluginExecutorRecoveryProfileLoaderFake) ExecutorProviderProfileForReco
 }
 
 type pluginExecutorInventoryStoreFake struct {
-	record       *models.ExecutorRunning
-	session      *models.TaskSession
-	checkpoints  int
-	claimRequest models.TaskEnvironmentRecoveryClaimRequest
-	claimErr     error
-	claim        *models.TaskEnvironmentRecoveryClaim
-	deleted      bool
-	releaseCount int
+	record        *models.ExecutorRunning
+	session       *models.TaskSession
+	checkpoints   int
+	claimRequest  models.TaskEnvironmentRecoveryClaimRequest
+	claimErr      error
+	claim         *models.TaskEnvironmentRecoveryClaim
+	deleted       bool
+	releaseCount  int
+	checkpointErr error
 }
 
 func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ context.Context, record *models.ExecutorRunning) error {
+	if f.checkpointErr != nil {
+		return f.checkpointErr
+	}
 	if f.record != nil {
 		current, err := decodePluginExecutorInventory(f.record.Metadata)
 		if err != nil || f.record.AgentExecutionID != record.AgentExecutionID || record.ExpectedPluginExecutorRevision != current.Revision {

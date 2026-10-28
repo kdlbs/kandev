@@ -102,7 +102,8 @@ func TestNonDeclaringProviderKeepsTheLegacyCapAndError(t *testing.T) {
 func TestOversizedProvisionStateIsRefusedAndTheResourceCleaned(t *testing.T) {
 	fake := &capabilityConfirmerFake{}
 	fake.provisionResponse = &pluginsdk.ProvisionExecutorEnvironmentResponse{Resource: &pluginsdk.ExecutorResourceDescriptor{
-		ResourceHandle: "allocated", StateVersion: 1,
+		ResourceHandle: "allocated", StateVersion: 1, Platform: "linux-amd64",
+		WorkspacePath: "/workspace", WorkspaceIdentity: "workspace-1",
 		StateJson: `{"id":"` + strings.Repeat("x", pluginExecutorDefaultStateBudget) + `"}`,
 	}}
 	fake.destroyResponse = &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true}

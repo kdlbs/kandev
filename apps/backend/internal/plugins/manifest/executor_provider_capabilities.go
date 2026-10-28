@@ -17,6 +17,11 @@ const (
 	MinExecutorStateBudgetBytes = 1024
 	MaxExecutorStateBudgetBytes = 12288
 
+	// DefaultExecutorDestroyTimeoutSeconds is the destroy deadline; a provider
+	// that requires drain_receipt can raise it up to MaxExecutorDestroyTimeoutSeconds.
+	DefaultExecutorDestroyTimeoutSeconds = 30
+	MaxExecutorDestroyTimeoutSeconds     = 300
+
 	maxLaunchPolicyIDs    = 16
 	maxStateSchemaVersion = 16
 )
@@ -83,6 +88,7 @@ func (m *Manifest) validateHostCapabilities(prefix string, provider *ExecutorPro
 	}
 	errs = append(errs, m.validateCapabilityMinimumRelease(prefix, reqs)...)
 	errs = append(errs, validateStateBudget(prefix, provider)...)
+	errs = append(errs, validateDestroyTimeout(prefix, provider)...)
 	errs = append(errs, validateLaunchPolicyIDs(prefix, provider)...)
 	return errs
 }
@@ -122,6 +128,25 @@ func validateStateBudget(prefix string, provider *ExecutorProvider) []error {
 	}
 	if provider.StateBudgetBytes < MinExecutorStateBudgetBytes || provider.StateBudgetBytes > MaxExecutorStateBudgetBytes {
 		return []error{fmt.Errorf("%s.state_budget_bytes must be between %d and %d", prefix, MinExecutorStateBudgetBytes, MaxExecutorStateBudgetBytes)}
+	}
+	return nil
+}
+
+func validateDestroyTimeout(prefix string, provider *ExecutorProvider) []error {
+	timeout := provider.DestroyTimeoutSeconds
+	if timeout == 0 {
+		if declaresCapability(provider, "drain_receipt") {
+			provider.DestroyTimeoutSeconds = DefaultExecutorDestroyTimeoutSeconds
+		}
+		return nil
+	}
+	if timeout < DefaultExecutorDestroyTimeoutSeconds || timeout > MaxExecutorDestroyTimeoutSeconds {
+		return []error{fmt.Errorf("%s.destroy_timeout_seconds must be between %d and %d",
+			prefix, DefaultExecutorDestroyTimeoutSeconds, MaxExecutorDestroyTimeoutSeconds)}
+	}
+	if timeout > DefaultExecutorDestroyTimeoutSeconds && !declaresCapability(provider, "drain_receipt") {
+		return []error{fmt.Errorf("%s.destroy_timeout_seconds over %d requires the drain_receipt capability",
+			prefix, DefaultExecutorDestroyTimeoutSeconds)}
 	}
 	return nil
 }

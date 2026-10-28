@@ -117,3 +117,22 @@ hostile-workload isolation, a concrete per-node mirror, public relay, SDK module
 
 Each work order lists exact commands, run from the repository root with `(cd apps/backend && ...)` because the only Go module is `apps/backend`. Task 11 adds a user-visible status and needs Playwright evidence; task 16 adds one parametrized Playwright spec for the remaining host-originated failure copy; the rest has no other UI
 surface, and task 16 provides process-boundary evidence through the installed fixture plugin.
+
+## Build record
+
+Slice 1 only, on top of c76077772b. The fork branch holds one mixed commit (478831ab84), so generic code is ported by explicit path and adapted; no cherry-pick hash applies.
+
+| Commit | Work order | Content |
+| --- | --- | --- |
+| b97f9e8f4b | 00 | ADR recording D1, D2, D3, D6 |
+| d5ba501d0d, e8e5d9690b, 1bc9ea87eb, 921ed172ef | 01 | Capability registry, manifest syntax, echo gate, allocation gate, envelope budget, readability lock |
+| a328d60fd3 | 17 | Profile schema keywords, typed values, secret references, profile budget |
+| c50f3a8c34 | 02 | Workspace descriptor, immutability and per-installation uniqueness |
+| 2350fdaa32 | 03 | Claim-scoped destroy and recover checkpoints with sequence fencing |
+| (WO 04 commit) | 04 | Runtime seal and drain, `drain_receipt`, `destroy_timeout_seconds`, idle-reaper bootstrap field |
+
+### Deviations
+- WO 03, AC 006.8: envelope claim state is first written by the first checkpoint's transaction (pending owner review).
+- WO 03: settlement requires at least one checkpoint stored for the claim, not the latest one (pending owner review).
+- WO 04: the receipt message `ExecutorDrainReceipt` and the extra envelope field `drain_claim` are assumptions. The runtime identity is bound by the authenticated control token plus the freshly read server identity. Only a refused connection and 401/403/409 classify as `unreachable`; every other failure is `uncertain`. The `after_drain` crash barrier belongs to WO 08. The provider maps `idle_timeout_seconds: 0` to `KANDEV_ACP_IDLE_TIMEOUT=0`. The fork's Nomad port-busy wait is not ported.
+- PostgreSQL tests for WO 01 to 03 are written and env-gated but not run locally (no PostgreSQL or Docker).
