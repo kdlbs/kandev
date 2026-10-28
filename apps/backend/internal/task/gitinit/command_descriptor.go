@@ -61,19 +61,31 @@ func commandContext(ctx context.Context, _ string, targetDirectory *os.File, git
 	if err != nil {
 		return nil, fmt.Errorf("resolve kandev executable: %w", err)
 	}
-	commandArgs := append([]string{helperArgument, gitPath}, gitArgs...)
+	helper := helperArgument
+	if subproc.ManagedGitIsolation() {
+		helper = helperIsolatedArgument
+	}
+	commandArgs := append([]string{helper, gitPath}, gitArgs...)
 	command := exec.CommandContext(ctx, executable, commandArgs...)
 	command.ExtraFiles = []*os.File{targetDirectory}
 	command.Env = withHelperEnvironment(os.Environ())
 	return command, nil
 }
 
-func runInheritedDirectory(gitPath string, gitArgs []string) int {
+func runInheritedDirectory(gitPath string, gitArgs []string, isolated bool) int {
 	if err := unix.Fchdir(inheritedDirectoryFD); err != nil {
 		fmt.Fprintf(os.Stderr, "git init helper: enter inherited directory: %v\n", err)
 		return 1
 	}
-	if err := subproc.ExecGit(gitPath, gitArgs, withoutHelperEnvironment(os.Environ())); err != nil {
+	env := withoutHelperEnvironment(os.Environ())
+	// The helper is a separate process, so the starter hands it the mode.
+	subproc.SetManagedGitIsolation(isolated)
+	vector, err := subproc.ManagedGitArgs(context.Background(), env, gitArgs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git init helper: managed Git policy: %v\n", err)
+		return 1
+	}
+	if err := subproc.ExecGit(gitPath, vector, subproc.ManagedGitEnv(env)); err != nil {
 		fmt.Fprintf(os.Stderr, "git init helper: execute git: %v\n", err)
 		return 1
 	}

@@ -2960,6 +2960,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			WorktreeBranchPrefix:       info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate:     info.WorktreeBranchTemplate,
 			PullBeforeWorktree:         info.PullBeforeWorktree,
+			RunGitHooks:                info.RunGitHooks,
 			RemoteSyncHandled:          info.RemoteSyncHandled,
 			RefreshRepository:          info.RefreshRepository,
 			RefreshRepositoryWithState: info.RefreshRepositoryWithState,
@@ -3038,6 +3039,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		req.RunGitHooks = repoInfo.RunGitHooks
 		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
 		req.RefreshRepository = repoInfo.RefreshRepository
 		req.RefreshRepositoryWithState = repoInfo.RefreshRepositoryWithState

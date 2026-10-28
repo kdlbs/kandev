@@ -1,0 +1,53 @@
+{
+  "background": {
+    "Args": [
+      "status",
+      "--porcelain"
+    ],
+    "Env": [
+      "GCM_GUI_PROMPT=0",
+      "GCM_INTERACTIVE=Never",
+      "GIT_ASKPASS=exit 1",
+      "GIT_SSH_COMMAND=ssh -oBatchMode=yes",
+      "GIT_TERMINAL_PROMPT=0",
+      "HOME=\u003cBIN\u003e",
+      "SSH_ASKPASS=exit 1",
+      "SSH_ASKPASS_REQUIRE=never"
+    ],
+    "Count": 1
+  },
+  "interactive": {
+    "Args": [
+      "status",
+      "--porcelain"
+    ],
+    "Env": [
+      "GCM_GUI_PROMPT=0",
+      "GCM_INTERACTIVE=Never",
+      "GIT_ASKPASS=exit 1",
+      "GIT_SSH_COMMAND=ssh -oBatchMode=yes",
+      "GIT_TERMINAL_PROMPT=0",
+      "HOME=\u003cBIN\u003e",
+      "SSH_ASKPASS=exit 1",
+      "SSH_ASKPASS_REQUIRE=never"
+    ],
+    "Count": 1
+  },
+  "lifecycle": {
+    "Args": [
+      "status",
+      "--porcelain"
+    ],
+    "Env": [
+      "GCM_GUI_PROMPT=0",
+      "GCM_INTERACTIVE=Never",
+      "GIT_ASKPASS=exit 1",
+      "GIT_SSH_COMMAND=ssh -oBatchMode=yes",
+      "GIT_TERMINAL_PROMPT=0",
+      "HOME=\u003cBIN\u003e",
+      "SSH_ASKPASS=exit 1",
+      "SSH_ASKPASS_REQUIRE=never"
+    ],
+    "Count": 1
+  }
+}

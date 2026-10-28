@@ -19,6 +19,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/netutil"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -257,12 +258,17 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 		return nil, fmt.Errorf("instance with ID %s is still cleaning up", id)
 	}
 
+	if err := m.checkGitIsolationModeLocked(req.GitIsolation); err != nil {
+		return nil, err
+	}
+
 	lease, listener, err := m.allocatePortAndListener(id)
 	if err != nil {
 		return nil, err
 	}
 	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
 	m.provisional[id] = bundle
+	subproc.SetManagedGitIsolation(req.GitIsolation)
 	m.activeCreations.Add(1)
 	return &createAdmission{bundle: bundle, agentEnv: agentEnv}, nil
 }
@@ -384,6 +390,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               req.BaseBranches,
 		ComparisonTargets:          req.ComparisonTargets,
+		GitHooks:                   req.GitHooks,
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
@@ -455,6 +462,7 @@ func (m *Manager) cleanupProvisionalInstance(ctx context.Context, bundle *provis
 	m.mu.Lock()
 	if m.provisional[bundle.id] == bundle {
 		delete(m.provisional, bundle.id)
+		m.releaseGitIsolationModeLocked()
 	}
 	m.mu.Unlock()
 
@@ -695,6 +703,7 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 	}
 	if stopErr == nil {
 		delete(m.instances, id)
+		m.releaseGitIsolationModeLocked()
 	}
 	m.mu.Unlock()
 
@@ -803,4 +812,41 @@ func (m *Manager) stopReaperOnce() {
 		close(m.reaperStop)
 	})
 	m.reaperWG.Wait()
+}
+
+// ErrGitIsolationMismatch refuses a create whose managed Git isolation mode
+// differs from the mode of the live instances of this agentctl process.
+var ErrGitIsolationMismatch = errors.New("managed Git isolation mode mismatch")
+
+// checkGitIsolationModeLocked refuses a create whose mode differs from the mode
+// held by the live set (published plus provisional instances). The mode is
+// written by admitCreate together with the provisional bundle. Callers hold m.mu.
+func (m *Manager) checkGitIsolationModeLocked(requested bool) error {
+	if len(m.instances)+len(m.provisional) == 0 {
+		return nil
+	}
+	if held := subproc.ManagedGitIsolation(); held != requested {
+		return fmt.Errorf("%w: this agentctl process is in %s mode and the request is for %s mode; "+
+			"the instances of this agentctl process must be stopped first, and agentctl must be "+
+			"restarted if none can be stopped (restart Kandev for the local agentctl; stop that "+
+			"agentctl process or recreate the environment with agent survival or a remote executor)",
+			ErrGitIsolationMismatch, gitIsolationModeName(held), gitIsolationModeName(requested))
+	}
+	return nil
+}
+
+// releaseGitIsolationModeLocked returns the process to off mode once the live
+// set is empty. Callers hold m.mu and call it in the critical section that
+// removed an entry.
+func (m *Manager) releaseGitIsolationModeLocked() {
+	if len(m.instances)+len(m.provisional) == 0 {
+		subproc.SetManagedGitIsolation(false)
+	}
+}
+
+func gitIsolationModeName(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
 }

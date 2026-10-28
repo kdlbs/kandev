@@ -289,6 +289,24 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.managedGitIsolation",
+			EnvVar:      "KANDEV_FEATURES_MANAGED_GIT_ISOLATION",
+			Kind:        KindFeature,
+			Label:       "Managed Git repository-code isolation",
+			Description: "Runs Kandev-managed Git without the hooks, file-system monitor, filters, text converters and merge drivers a repository supplies, unless the repository opts in to Run Git hooks.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Hooks stop running for every repository that has not opted in to Run Git hooks, including " +
+				"repositories whose hooks ran before. Turn on Run Git hooks per repository to keep them. Existing " +
+				"agent environments keep their earlier mode until they are reset.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ManagedGitIsolation },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ManagedGitIsolation = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.coordinator",
 			EnvVar:      "KANDEV_FEATURES_COORDINATOR",
 			Kind:        KindFeature,

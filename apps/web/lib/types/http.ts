@@ -347,6 +347,8 @@ export type Repository = {
   worktree_branch_prefix: string;
   worktree_branch_template?: string;
   pull_before_worktree: boolean;
+  /** Re-enables repository Git hooks for Kandev-managed Git; hooks stay off by default. */
+  run_git_hooks?: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;

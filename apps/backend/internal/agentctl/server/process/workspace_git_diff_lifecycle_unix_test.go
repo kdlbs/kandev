@@ -24,6 +24,8 @@ func TestCapDiffOutputCancellationClosesReader(t *testing.T) {
 	dir := t.TempDir()
 	gitPath := filepath.Join(dir, "git")
 	if err := os.WriteFile(gitPath, []byte(`#!/bin/sh
+while [ "${1:-}" = "-c" ]; do shift 2; done
+if [ "$1" = config ]; then exit 1; fi
 if [ "$1" = diff ]; then
   (trap '' TERM INT; while :; do sleep 1; done) &
   printf '%s\n' "$!" > "$GIT_TEST_CHILD_PID"

@@ -74,7 +74,9 @@ type GitOperator struct {
 	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
 	// Empty for the workspace-root operator. Stamped on emitted commit
 	// notifications so the frontend can group commits per repo.
-	repoName                   string
+	repoName string
+	// gitHooks is true when this repository opted into running its Git hooks.
+	gitHooks                   bool
 	remoteContribution         *models.RemoteContribution
 	remoteContributionErr      error
 	contributionDestination    *models.ContributionDestination
@@ -227,7 +229,7 @@ func (g *GitOperator) runGitCommandWithEnvironment(
 	environment := withEnvironmentOverrides(filterGitEnv(g.environmentValues()), environmentOverrides)
 	var stdout, stderr bytes.Buffer
 	err, execCtxErr := subproc.RunGitAfterAcquire(
-		ctx,
+		subproc.WithGitHooks(ctx, g.gitHooks),
 		subproc.GitInteractive,
 		gitOperatorTimeout(args),
 		func(execCtx context.Context) *exec.Cmd {

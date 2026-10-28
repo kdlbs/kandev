@@ -409,6 +409,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if branches := collectBaseBranches(req); len(branches) > 0 {
 		metadata[MetadataKeyBaseBranches] = branches
 	}
+	delete(metadata, MetadataKeyGitHooks)
 	setSelectedCheckoutMetadata(req, metadata)
 	applyTrustedRepositoryContextToMetadata(metadata, req)
 	return metadata
@@ -603,6 +604,26 @@ func sameContributionDestinationTarget(left, right models.ContributionDestinatio
 		left.TargetRepository.RemoteURL == right.TargetRepository.RemoteURL
 }
 
+// workspaceEntryKey returns the agentctl workspace-entry key for the
+// repository at index. The empty key is the workspace root; remote executors
+// key later repositories (and every plugin remote repository) by their
+// materialized directory name. ok is false when the repository has no key.
+func workspaceEntryKey(req *LaunchRequest, index int, spec RepoLaunchSpec) (key string, ok bool) {
+	key = baseBranchMetadataKey(spec)
+	if req != nil && models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
+		if req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0 {
+			key = remoteWorkspaceRepositoryDirectory(spec)
+		} else {
+			key = ""
+		}
+		if key == "" && (req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0) {
+			return "", false
+		}
+		return key, true
+	}
+	return key, key != ""
+}
+
 // collectBaseBranches builds the per-workspace-entry base-branch map that
 // agentctl reads to scope diff stats. Entries at the workspace root use the
 // empty key; plugin remote entries use their materialized directory names.
@@ -618,17 +639,8 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 		if spec.BaseBranch == "" {
 			continue
 		}
-		key := baseBranchMetadataKey(spec)
-		if req != nil && models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
-			if req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0 {
-				key = remoteWorkspaceRepositoryDirectory(spec)
-			} else {
-				key = ""
-			}
-			if key == "" && (req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0) {
-				continue
-			}
-		} else if key == "" {
+		key, ok := workspaceEntryKey(req, index, spec)
+		if !ok {
 			continue
 		}
 		out[key] = spec.BaseBranch
@@ -637,6 +649,72 @@ func collectBaseBranches(req *LaunchRequest) map[string]string {
 		if _, ok := out[""]; !ok {
 			out[""] = req.BaseBranch
 		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// collectGitHooks builds the per-workspace-entry map of repositories that opted
+// into running their Git hooks. Only opted-in entries are present; agentctl
+// treats every absent entry as hooks off and never falls back to the root key.
+// A single repository is always addressed by the root key. Plugin remote
+// workspaces carry no map.
+func collectGitHooks(req *LaunchRequest) map[string]bool {
+	if req == nil || !subproc.ManagedGitIsolation() {
+		return nil
+	}
+	return gitHooksForSpecs(req, req.RepoSpecs())
+}
+
+// gitHooksFromWorkspaceRepositories projects the repository records read for a
+// resume or recovery into the same map a fresh launch produces.
+func gitHooksFromWorkspaceRepositories(specs []WorkspaceRepositorySpec, executorType string) map[string]bool {
+	if !subproc.ManagedGitIsolation() {
+		return nil
+	}
+	launchSpecs := make([]RepoLaunchSpec, 0, len(specs))
+	for _, spec := range specs {
+		launchSpecs = append(launchSpecs, RepoLaunchSpec{
+			RepoName: spec.RepoName, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch,
+			BranchSlug: spec.BranchSlug, RunGitHooks: spec.RunGitHooks,
+		})
+	}
+	return gitHooksForSpecs(&LaunchRequest{ExecutorType: executorType}, launchSpecs)
+}
+
+func gitHooksForSpecs(req *LaunchRequest, specs []RepoLaunchSpec) map[string]bool {
+	if req.ExecutorType == string(models.ExecutorTypePluginRemote) {
+		return nil
+	}
+	// A key is on only when every repository deriving it opted in: a key
+	// shared with a repository that did not opt in stays off.
+	owners := make(map[string]int, len(specs)+1)
+	optedIn := make(map[string]int, len(specs)+1)
+	for index, spec := range specs {
+		keys := make([]string, 0, 2)
+		if len(specs) == 1 {
+			keys = append(keys, "")
+		}
+		if key, ok := workspaceEntryKey(req, index, spec); ok {
+			keys = append(keys, key)
+		}
+		for _, key := range keys {
+			owners[key]++
+			if spec.RunGitHooks {
+				optedIn[key]++
+			}
+		}
+	}
+	out := make(map[string]bool, len(optedIn))
+	for key, count := range optedIn {
+		if count != owners[key] {
+			zap.L().Warn("git hooks opt-in not applied: workspace entry key is shared with a repository that did not opt in",
+				zap.String("key", key))
+			continue
+		}
+		out[key] = true
 	}
 	if len(out) == 0 {
 		return nil
@@ -1489,6 +1567,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
 		ComparisonTargets:              comparisonTargets,
+		GitHooks:                       collectGitHooks(reqWithWorktree),
 		ProviderGatewayAuth:            providerGatewayAuth,
 	}
 	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {
@@ -1670,6 +1749,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorktreeBranchTemplate:     req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       req.WorktreeBranchTicket,
 		PullBeforeWorktree:         req.PullBeforeWorktree,
+		RunGitHooks:                req.RunGitHooks,
 		RemoteSyncHandled:          req.RemoteSyncHandled,
 		RefreshRepository:          req.RefreshRepository,
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
@@ -1710,6 +1790,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 				WorktreeBranchTicket:       r.WorktreeBranchTicket,
 				PullBeforeWorktree:         r.PullBeforeWorktree,
+				RunGitHooks:                r.RunGitHooks,
 				RemoteSyncHandled:          r.RemoteSyncHandled,
 				RefreshRepository:          r.RefreshRepository,
 				RefreshRepositoryWithState: r.RefreshRepositoryWithState,

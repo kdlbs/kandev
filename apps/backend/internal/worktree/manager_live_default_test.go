@@ -157,6 +157,7 @@ func TestResolveBaseRefWithFallbackUsesLiveRemoteDefault(t *testing.T) {
 
 func newLiveDefaultTestManager(t *testing.T) *Manager {
 	t.Helper()
+	disableManagedGitIsolation(t)
 	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)

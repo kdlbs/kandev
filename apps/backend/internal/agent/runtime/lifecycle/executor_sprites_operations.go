@@ -499,6 +499,7 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		GitHooks:                   req.GitHooks,
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,

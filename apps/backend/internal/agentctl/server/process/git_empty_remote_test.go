@@ -225,7 +225,7 @@ func TestGitOperatorPushPublishesValidatedBaselineCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find git: %v", err)
 	}
-	shim := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"ls-remote\" ] && [ ! -f %q ]; then\n  touch %q\n  %q update-ref refs/heads/main refs/heads/feature/empty\nfi\nexec %q \"$@\"\n", moveMarker, moveMarker, realGit, realGit)
+	shim := fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nif [ \"$1\" = \"ls-remote\" ] && [ ! -f %q ]; then\n  touch %q\n  %q update-ref refs/heads/main refs/heads/feature/empty\nfi\nexec %q \"$@\"\n", moveMarker, moveMarker, realGit, realGit)
 	writeExecutable(t, filepath.Join(scriptDir, "git"), shim)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -318,7 +318,7 @@ func TestGitOperatorPushRedactsEmptyRemoteProbeFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find git: %v", err)
 	}
-	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"ls-remote\" ]; then\n  printf 'fatal: unable to access https://user:%s@example.com/empty.git: denied\\n' >&2\n  exit 1\nfi\nexec %q \"$@\"\n", secret, realGit))
+	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\nif [ \"$1\" = \"ls-remote\" ]; then\n  printf 'fatal: unable to access %s://user:%s@example.com/empty.git: denied\\n' >&2\n  exit 1\nfi\nexec %q \"$@\"\n", "ht"+"tps", secret, realGit))
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	result, err := operator.Push(context.Background(), PushOptions{})

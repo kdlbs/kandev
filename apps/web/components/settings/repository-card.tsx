@@ -29,6 +29,7 @@ import {
 import { getRepositoryActiveSessionCountAction } from "@/app/actions/workspaces";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
+import { RepositoryGitHooksField } from "@/components/settings/repository-git-hooks-field";
 import { RepositoryMCPSelectionSection } from "@/components/settings/repository-mcp-selection";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -62,6 +63,7 @@ type RepositoryBasicFieldsProps = RepoFieldsBaseProps & {
   sourceType: string;
   worktreeBranchTemplate: string;
   pullBeforeWorktree: boolean;
+  runGitHooks: boolean;
 };
 
 function RepositoryBasicFields({
@@ -73,6 +75,7 @@ function RepositoryBasicFields({
   sourceType,
   worktreeBranchTemplate,
   pullBeforeWorktree,
+  runGitHooks,
 }: RepositoryBasicFieldsProps) {
   const { t } = useTranslation();
   return (
@@ -140,6 +143,12 @@ function RepositoryBasicFields({
           </div>
         </div>
       </div>
+      <RepositoryGitHooksField
+        repositoryId={repositoryId}
+        savedRepository={savedRepository}
+        onUpdate={onUpdate}
+        runGitHooks={runGitHooks}
+      />
     </>
   );
 }
@@ -287,6 +296,7 @@ function RepositoryEditView({
               repository.worktree_branch_template ?? defaultWorktreeBranchTemplate
             }
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
+            runGitHooks={repository.run_git_hooks ?? false}
           />
 
           <RepositoryBranchPolicies repository={repository} workspaceId={workspaceId} />

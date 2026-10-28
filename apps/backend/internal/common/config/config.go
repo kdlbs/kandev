@@ -570,6 +570,10 @@ type FeaturesConfig struct {
 	// an adoption handshake, which is untested there).
 	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
 
+	// ManagedGitIsolation stops Kandev-managed Git from running hooks and other
+	// repository-supplied programs unless a repository opts in. Off in prod.
+	ManagedGitIsolation bool `mapstructure:"managed_git_isolation" json:"managedGitIsolation"`
+
 	// Coordinator gates workspace coordinators: a per-workspace agent
 	// configuration whose copilot conversation proposes ordinary, unstarted
 	// tasks for a human to approve. Off in prod/dev until the feature is

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -533,11 +534,10 @@ func (m *Manager) addMissingCheckoutGitWorktreeWithStrategy(
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repositoryPath
 	if usePinnedWorkingDirectory {
-		gitArgs := append([]string(nil), cmd.Args[1:]...)
-		shell := exec.CommandContext(ctx, "/bin/sh", "-c", `cd "$1" && shift && exec "$@"`, "kandev", processPath, cmd.Path)
-		shell.Args = append(shell.Args, gitArgs...)
-		shell.Dir = repositoryPath
-		shell.Env = cmd.Env
+		shell, err := pinnedWorkingDirectoryCommand(ctx, cmd, processPath, repositoryPath)
+		if err != nil {
+			return err
+		}
 		cmd = shell
 	}
 	// Windows ProcessPath yields a lexical path; Unix descriptor targets pass this file to Git.
@@ -549,6 +549,21 @@ func (m *Manager) addMissingCheckoutGitWorktreeWithStrategy(
 		return ClassifyGitError(string(output), err)
 	}
 	return nil
+}
+
+// pinnedWorkingDirectoryCommand runs a Git command from inside processPath
+// through a shell. The shell hides Git from the managed Git seam, so the policy
+// vector and environment are applied here.
+func pinnedWorkingDirectoryCommand(ctx context.Context, gitCmd *exec.Cmd, processPath, repositoryPath string) (*exec.Cmd, error) {
+	gitArgs, err := subproc.ManagedGitArgsIn(ctx, repositoryPath, gitCmd.Env, gitCmd.Args[1:])
+	if err != nil {
+		return nil, err
+	}
+	shell := exec.CommandContext(ctx, "/bin/sh", "-c", `cd "$1" && shift && exec "$@"`, "kandev", processPath, gitCmd.Path)
+	shell.Args = append(shell.Args, gitArgs...)
+	shell.Dir = repositoryPath
+	shell.Env = subproc.ManagedGitEnv(gitCmd.Env)
+	return shell, nil
 }
 
 func (m *Manager) verifyMissingCheckoutResult(

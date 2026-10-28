@@ -846,6 +846,16 @@ func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error
 	return err
 }
 
+// gitHooksEnabled reports whether the repository at the exact workspace entry
+// key opted into running Git hooks. The map is a launch-time snapshot, so an
+// absent key means hooks off and the root key is never a fallback.
+func (m *Manager) gitHooksEnabled(entryKey string) bool {
+	if m.cfg == nil {
+		return false
+	}
+	return m.cfg.GitHooks[entryKey]
+}
+
 // getBaseBranches returns a snapshot of cfg.BaseBranches under the
 // dedicated baseBranchesMu so callers (rescan, lazy-subpath, the
 // UpdateBaseBranches re-stamp loop) read a consistent map even when a
@@ -1562,6 +1572,7 @@ func (m *Manager) GitOperator() *GitOperator {
 	if m.gitOperator == nil {
 		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
 		m.gitOperator.setEnvironmentProvider(m.gitEnvironment)
+		m.gitOperator.gitHooks = m.gitHooksEnabled("")
 		if binding, ok := m.cfg.RemoteContributions[""]; ok {
 			m.gitOperator.setRemoteContribution(&binding)
 		}
@@ -1602,6 +1613,7 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 	}
 	op := NewGitOperatorForRepo(full, cleaned, m.logger, tracker)
 	op.setEnvironmentProvider(m.gitEnvironment)
+	op.gitHooks = m.gitHooksEnabled(cleaned)
 	if binding, ok := m.cfg.RemoteContributions[cleaned]; ok {
 		op.setRemoteContribution(&binding)
 	}

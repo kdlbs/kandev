@@ -1317,6 +1317,7 @@ export class ApiClient {
       provider_scope?: string;
       default_branch?: string;
       pull_before_worktree?: boolean;
+      run_git_hooks?: boolean;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;

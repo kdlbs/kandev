@@ -280,6 +280,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		UPDATE repositories
 		SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'
 		WHERE TRIM(COALESCE(worktree_branch_template, '')) = ''`)
+	_ = r.migrate.Apply("repositories.run_git_hooks", `ALTER TABLE repositories ADD COLUMN run_git_hooks INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)

@@ -100,6 +100,8 @@ func newStandaloneControlServer(t *testing.T, healthy bool) *standaloneControlSe
 				return
 			}
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case r.URL.Path == "/identity" && r.Method == http.MethodGet:
+			writeManagedGitIdentity(w)
 		case r.URL.Path == "/api/v1/instances" && r.Method == http.MethodPost:
 			var req agentctlclient.CreateInstanceRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)

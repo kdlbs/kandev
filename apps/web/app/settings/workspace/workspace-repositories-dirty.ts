@@ -27,6 +27,7 @@ const repositoryFields: Array<keyof RepositoryWithScripts> = [
   "default_branch",
   "worktree_branch_prefix",
   "pull_before_worktree",
+  "run_git_hooks",
   "setup_script",
   "cleanup_script",
   "dev_script",

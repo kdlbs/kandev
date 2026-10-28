@@ -102,6 +102,7 @@ func installNumstatOutputShim(t *testing.T, phase, output string) {
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 	script := fmt.Sprintf(`#!/bin/sh
+while [ "${1:-}" = "-c" ]; do shift 2; done
 numstat=0
 nul=0
 cached=0

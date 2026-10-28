@@ -79,6 +79,7 @@ type RepositoryDTO struct {
 	WorktreeBranchPrefix   string                       `json:"worktree_branch_prefix"`
 	WorktreeBranchTemplate string                       `json:"worktree_branch_template"`
 	PullBeforeWorktree     bool                         `json:"pull_before_worktree"`
+	RunGitHooks            bool                         `json:"run_git_hooks"`
 	SetupScript            string                       `json:"setup_script"`
 	CleanupScript          string                       `json:"cleanup_script"`
 	DevScript              string                       `json:"dev_script"`
@@ -956,6 +957,7 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		WorktreeBranchPrefix:   repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: repository.WorktreeBranchTemplate,
 		PullBeforeWorktree:     repository.PullBeforeWorktree,
+		RunGitHooks:            repository.RunGitHooks,
 		SetupScript:            repository.SetupScript,
 		CleanupScript:          repository.CleanupScript,
 		DevScript:              repository.DevScript,

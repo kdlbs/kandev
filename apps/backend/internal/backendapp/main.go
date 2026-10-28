@@ -220,6 +220,7 @@ var ready atomic.Bool
 func Run(args []string, build BuildInfo) int {
 	setBuildInfo(build)
 	ready.Store(false)
+	defer subproc.RemoveManagedGitHooksDir()
 
 	parsedFlags, usage, err := parseBackendFlags(args)
 	if err != nil {
@@ -433,6 +434,7 @@ func startServices( //nolint:cyclop
 	if !applyStartupRuntimeFlags(ctx, cfg, repos, log) {
 		return false
 	}
+	subproc.SetManagedGitIsolation(cfg.Features.ManagedGitIsolation)
 
 	agentRegistry, _, err := registry.Provide(log, cfg.Features.CodexAppServer)
 	if err != nil {

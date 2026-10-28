@@ -1590,6 +1590,7 @@ type RepoLaunchSpec struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RunGitHooks            bool
 	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
@@ -1646,6 +1647,7 @@ type WorkspaceRepositorySpec struct {
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
 	PullBeforeWorktree      bool
+	RunGitHooks             bool
 	RemoteSyncHandled       bool
 	BranchSlug              string
 	BranchIdentitySlug      string
@@ -1799,7 +1801,8 @@ type LaunchRequest struct {
 	WorktreeBranchTemplate string // Branch name template for worktree branches
 	WorktreeBranchTicket   string // External ticket value for branch templates
 	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
+	RunGitHooks            bool
+	RemoteSyncHandled      bool // Authenticated provider refresh already completed
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository          func(context.Context) error
@@ -1860,6 +1863,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       r.WorktreeBranchTicket,
 		PullBeforeWorktree:         r.PullBeforeWorktree,
+		RunGitHooks:                r.RunGitHooks,
 		RemoteSyncHandled:          r.RemoteSyncHandled,
 		RefreshRepository:          r.RefreshRepository,
 		RefreshRepositoryWithState: r.RefreshRepositoryWithState,
