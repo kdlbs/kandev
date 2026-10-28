@@ -1,0 +1,56 @@
+---
+created: 2026-10-28
+status: complete
+requirements:
+  - REQ-WORKSPACES-ROOT-REVERT-001
+system_design:
+  - ../../specs/workspaces/system-design/root-commit-revert-availability.md
+legacy_specs: []
+---
+
+# Implementation plan: Root commit revert availability
+
+## Overview
+
+Hide Revert for a latest local commit only when its parent is explicitly absent. First independently reproduce the visible defect with a rendered test and an ordinary-commit dispatch control; then preserve ancestry through the existing types and apply one eligibility decision to every row action surface.
+
+Qualification at baseline `a7509ba288ece945cdbce63fd8981f48ee5309e6` observed two root Revert controls in real `mergeCommits` and `CommitRow` rendered under HappyDOM with a menu primitive double; the ordinary selected-repository dispatch control passed. The independent backend qualification observed root `HEAD~1` failure and ordinary success. Neither is a native browser result. Materialized checkout and current main were both `d179ce206fd46c7793bda916b025d753036c7f3b` after the sidebar-only merge. Permanent tests must be authored independently of the private qualification fixtures.
+
+## Scope
+
+- In scope: local ancestry projection, row eligibility, independently authored regression tests, and focused native desktop/coarse/phone verification.
+- Out of scope: new root undo, backend/ref changes, new copy, provider policy, broad Git refactors, and unrelated work.
+
+## Technical approach
+
+`changes-panel-helpers.ts` types for `LocalCommitForMerge`, `MergedCommit`, `mapLocalCheckoutCommit`, and `separateCommitHistories` retain optional `parent_sha`; `commit-row.tsx` `CommitItem` does likewise. Both local mappers already spread runtime fields. Guard the effective revert action once at `CommitRow` and use it for row/context actions and action-presence checks; preserve existing source, pushed, latest, amend, reset, and repository dispatch gates. Inspect both `changes-timeline-history-row.tsx` and `changes-panel-repo-groups.tsx` adapters without changing them unless evidence requires it. Follow the system design for transport and compatibility.
+
+## Rendered behavior
+
+In the existing Changes commit row, root has Amend and Reset when otherwise eligible but no Revert. A parented latest local row retains all eligible actions; older, pushed, and provider-only rows keep current restrictions. Desktop context menu and hover actions, and the existing coarse/phone long-press menu, share that result. This is an eligibility change, not a new mobile composition. AC .1-.3 map to the rendered regression and browser checks below.
+
+## Tests
+
+Add `apps/web/components/task/root-commit-revert.test.tsx` using real mappers and `CommitRow`, independently constructed records, and a menu double only where required by HappyDOM. A causal root assertion must fail before the fix while an ordinary local parented commit dispatches its SHA and repository. Cover empty, parented, missing metadata, older, pushed, provider-only, same-SHA local/provider, unified and separate histories, handler-only empty-menu handling, Amend and Reset. Add mapping assertions in the same test if practical. Check both history adapters using actual rendered integration or focused existing test patterns.
+
+## E2E tests
+
+Add focused `apps/web/e2e/tests/git/root-commit-revert.spec.ts` (chromium, including `coarseDesktopTestPage`) and `mobile-root-commit-revert.spec.ts` (mobile-chrome), sharing a small sibling helper only if needed. Use deterministic environment-keyed session commit state, open Changes, exercise actual desktop context/hover and real touch long-press menu, and prove root absence with ordinary and other-action controls. Desktop validates selected-repository dispatch separately in the component regression; browser tests verify actual surfaces. Build freshly through the managed runner. Capture only actual rendered UI if capture is used; report any infrastructure limitation rather than presenting a DOM double as browser proof.
+
+## Work orders
+
+- [x] [Task 01: Guard root commit revert](task-01-guard-root-commit-revert.md)
+
+## Verification results
+
+Implemented and checked as recorded in [Task 01](task-01-guard-root-commit-revert.md#results). The root regression failed before the fix while its ordinary dispatch control passed. Desktop, coarse-pointer and phone tests exercised the actual rendered actions.
+
+## Risks
+
+- Empty and absent metadata have different compatibility meanings; null or default coercion can hide legacy actions.
+- A test that substitutes the menu primitive does not establish native touch behavior. A stale build cannot establish current browser behavior.
+- Git HEAD may move after the list was read; backend validation remains authoritative.
+
+## Public documentation
+
+`docs/public/git-operations.md` already describes the parent-dependent `HEAD~1` operation, and `docs/public/sessions-and-review.md` describes the selected-repository behavior without promising root undo. No public documentation change is needed for this narrow eligibility correction; revisit if implementation changes the operation or copy.
