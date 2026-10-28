@@ -307,24 +307,23 @@ func (r *PluginRemoteExecutor) honorCleanupRequestedAfterRecovery(ctx context.Co
 }
 
 // recordCleanupRequested persists that a cleanup lost the claim race, so the
-// sweep runs it once the claim is released. The write is revision-fenced and
-// retried once against the latest record.
+// sweep runs it once the claim is released. The store records it without
+// waiting on the claim the other holder owns.
 func (r *PluginRemoteExecutor) recordCleanupRequested(ctx context.Context, record *models.ExecutorRunning) {
-	for attempt := 0; attempt < 2; attempt++ {
-		current, err := r.currentPluginExecutorRecord(ctx, record.SessionID, record.AgentExecutionID)
-		if err != nil {
-			return
-		}
-		inventory, err := decodePluginExecutorInventory(current.Metadata)
-		if err != nil || inventory.CleanupRequested {
-			return
-		}
-		inventory.CleanupRequested = true
-		if err := r.checkpointPluginExecutorRecord(ctx, current, inventory); err == nil {
-			return
-		}
+	recorder, ok := r.inventoryStore.(PluginExecutorCleanupRequester)
+	if !ok {
+		r.logger.Warn("plugin executor cleanup request cannot be recorded", zap.String("session_id", record.SessionID))
+		return
 	}
-	r.logger.Warn("plugin executor cleanup request was not recorded", zap.String("session_id", record.SessionID))
+	if err := recorder.RecordPluginExecutorCleanupRequested(ctx, record.SessionID, record.AgentExecutionID); err != nil {
+		r.logger.Warn("plugin executor cleanup request was not recorded", zap.String("session_id", record.SessionID), zap.Error(err))
+	}
+}
+
+// PluginExecutorCleanupRequester is the repository's claim-independent write
+// of the cleanup-requested marker.
+type PluginExecutorCleanupRequester interface {
+	RecordPluginExecutorCleanupRequested(ctx context.Context, sessionID, executionID string) error
 }
 
 // publishPendingReady completes a creating-to-ready publication that a crash
