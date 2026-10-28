@@ -82,3 +82,53 @@ describe("external file target", () => {
     ).toBeNull();
   });
 });
+
+describe("legacy single worktree", () => {
+  it("preserves the default only with matching primary evidence", () => {
+    const legacy = { ...session, worktrees: undefined };
+    const anonymous: Worktree = { id: "wt-a", sessionId: "s", path: "/task/a" };
+    expect(resolveExternalFileTarget(legacy, [anonymous], { repositoryId: "repo-a" })).toEqual({});
+    expect(
+      resolveExternalFileTarget({ ...legacy, worktrees: [] }, [anonymous], {
+        repositoryId: "repo-a",
+      }),
+    ).toEqual({});
+    expect(resolveExternalFileTarget(legacy, [anonymous], { repositoryId: "repo-b" })).toBeNull();
+    expect(
+      resolveExternalFileTarget(legacy, [anonymous], {
+        repositoryId: "repo-a",
+        repositoryName: "unknown",
+      }),
+    ).toBeNull();
+    expect(
+      resolveExternalFileTarget(legacy, [{ ...anonymous, id: "wt-other" }], {
+        repositoryId: "repo-a",
+      }),
+    ).toBeNull();
+    expect(
+      resolveExternalFileTarget(legacy, [{ ...anonymous, repositoryId: "repo-b" }], {
+        repositoryId: "repo-a",
+      }),
+    ).toBeNull();
+    expect(
+      resolveExternalFileTarget(legacy, [anonymous, { ...anonymous, id: "wt-other" }], {
+        repositoryId: "repo-a",
+      }),
+    ).toBeNull();
+    expect(
+      resolveExternalFileTarget({ ...legacy, worktree_id: undefined }, [anonymous], {
+        repositoryId: "repo-a",
+      }),
+    ).toBeNull();
+    expect(
+      resolveExternalFileTarget(
+        {
+          ...legacy,
+          worktrees: [{ id: "assoc", session_id: legacy.id, worktree_id: "wt-a", position: 0 }],
+        },
+        [anonymous],
+        { repositoryId: "repo-a" },
+      ),
+    ).toBeNull();
+  });
+});

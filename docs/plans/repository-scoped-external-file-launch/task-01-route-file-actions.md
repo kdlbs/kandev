@@ -79,6 +79,26 @@ Replace the lint placeholder with the complete actual owned TS/TSX file list, in
 
 The new Review fixture mounts `StateProvider`, store, `TooltipProvider`, real dropdown, opener and request; stub only HTTP-domain `openSessionInEditor` and unrelated display dependencies. Use two explicit associations with same `src/shared.ts`, distinct worktree and repository IDs and paths, a legacy primary `worktree_path`, no `workspace_path`, and click the actual VS Code menuitem. Add explicit Review ID without name and relevant legacy-primary controls. Add phone overflow with identical secondary assertion. The editor consumer suite renders actual Monaco dropdown and overflow, and CodeMirror overflow; assert HTTP payload and guard against the session-primary ID overriding a named secondary. Cover same-path, ID with absent or unresolvable redundant name, name-only placement, independently proven ID/name conflict, duplicate/missing association or placement, unknown and nested name-only scope, missing session, single/legacy/checkout fallback, multiple unscoped worktrees, external vs embedded item, folder and copy controls. Reuse `workspaceRelativeFilePath` and `isWorkspaceTreePath` where their contracts fit; do not use `getSessionWorkspacePath` legacy worktree fallback as the root for named placement or add path aliases. Tests must assert observable requests or disabled state, not copy implementation logic.
 
+## Bounded legacy review follow-up: complete
+
+The initial work remains complete. A separately authorized follow-up must preserve the existing omitted-ID default only when the file is unscoped, its nonempty ID equals `session.repository_id`, API `session.worktrees` is absent or empty, the known worktree list has exactly one entry with a usable nonempty ID and no repository ID, and that worktree's ID equals nonempty `session.worktree_id`. Return `{}` so the real opener omits `worktree_id`. Any different known worktree ID, nonempty conflicting worktree repository ID, multiple known worktrees, named scope, unknown file ID, or API association prevents this special fallback. Other unique association behavior remains as designed. Do not introduce broad defaulting, inventory recovery, backend changes, or new UI copy.
+
+Before production edits, independently add a test to the existing `components/editors/file-actions-repository-target.test.tsx` that renders actual `CodeMirrorToolbar` overflow with a session primary repository ID, no file scope, no API associations, legacy `worktree_id`, and the one WS worktree without repository ID. Open the actual menu and assert the external item is enabled, then click it and assert the real opener and `useRequest` reach the HTTP-domain stub with the original file path and omitted `worktree_id`. Current code must fail specifically because the actual item is disabled; record native handle, exit and nonzero collection. Add focused resolver cases for the exact positive predicate and every stated negative control; do not accept an explicit worktree ID as the oracle because the server can lack the association.
+
+After a separate implementation request and exclusive HEAVY grant, use the already installed pinned tools and run sequentially:
+
+```bash
+(cd apps/web && pnpm exec vitest run --project browser-locales components/editors/file-actions-repository-target.test.tsx -t 'legacy single worktree' --maxWorkers=1 --no-file-parallelism)
+# Record the causal RED before production changes.
+(cd apps/web && pnpm exec vitest run --project browser-locales components/editors/file-actions-repository-target.test.tsx hooks/domains/session/use-external-file-target.test.ts --maxWorkers=1 --no-file-parallelism)
+(cd apps/web && pnpm exec eslint --max-warnings 0 components/editors/file-actions-repository-target.test.tsx hooks/domains/session/use-external-file-target.ts hooks/domains/session/use-external-file-target.test.ts)
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck)
+```
+
+Confirm actual changed TS files before lint; include any additional changed owned test/helper. Refresh memory before typecheck, follow the approved cap and resource/error checkpoint, stage actual additions before applicable ratchets and current documentation-coverage evaluation, and run normal hooks without bypass. Record counts, exits and actual joined handles. Run only checks affected by the correction, not broad passing-suite replays. No new screenshot or capture build is needed for the unchanged menu composition and pure target-data case.
+
+Results: rendered CodeMirror RED collected one selected test and failed on the disabled external item; the corrected real opener reached the HTTP-domain boundary with omitted worktree ID. The two affected suites passed 12 tests, scoped ESLint passed on the three changed TS files, and the 6144 MiB canonical typecheck passed. Current staged ratchet, documentation and normal-hook results are recorded in the delivery checkpoint.
+
 ## Files likely touched
 
 - `apps/web/components/review/review-diff-toolbar.tsx` and new rendered test.

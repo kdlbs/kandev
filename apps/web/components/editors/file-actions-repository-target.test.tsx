@@ -26,6 +26,7 @@ import { EditorToolbarOverflowActions } from "./editor-toolbar-overflow";
 
 const sid = sessionId("editor-session");
 const filePath = "src/shared.ts";
+const disabledAttribute = "data-disabled";
 const session = {
   id: sid,
   task_id: taskId("editor-task"),
@@ -69,11 +70,49 @@ const props = {
 const originalRect = HTMLElement.prototype.getBoundingClientRect;
 const originalObserver = globalThis.ResizeObserver;
 
+function editorInitialState(withSession: boolean, legacy: boolean) {
+  return {
+    ...defaultState,
+    taskSessions: {
+      ...defaultState.taskSessions,
+      items: withSession ? { [sid]: legacy ? { ...session, worktrees: undefined } : session } : {},
+    },
+    worktrees: legacy
+      ? { items: { "wt-a": { id: "wt-a", sessionId: sid, path: "/task/a" } } }
+      : defaultState.worktrees,
+    editors: {
+      ...defaultState.editors,
+      loaded: true,
+      folderOpeningAvailable: true,
+      items: [
+        {
+          id: "vscode",
+          name: "VS Code",
+          type: "vscode",
+          kind: "built_in",
+          enabled: true,
+          installed: true,
+        },
+        {
+          id: "embedded",
+          name: "Embedded",
+          type: "vscode",
+          kind: "internal_vscode",
+          enabled: true,
+          installed: true,
+        },
+      ],
+    },
+    userSettings: { ...defaultState.userSettings, loaded: true },
+  };
+}
+
 function mount(
   editor: "monaco" | "codemirror" | "overflow",
   narrow: boolean,
   name = "b",
   withSession = true,
+  legacy = false,
 ) {
   class Observer {
     constructor(private callback: ResizeObserverCallback) {}
@@ -100,34 +139,7 @@ function mount(
     }
     return originalRect.call(this);
   };
-  const initialState = {
-    ...defaultState,
-    taskSessions: { ...defaultState.taskSessions, items: withSession ? { [sid]: session } : {} },
-    editors: {
-      ...defaultState.editors,
-      loaded: true,
-      folderOpeningAvailable: true,
-      items: [
-        {
-          id: "vscode",
-          name: "VS Code",
-          type: "vscode",
-          kind: "built_in",
-          enabled: true,
-          installed: true,
-        },
-        {
-          id: "embedded",
-          name: "Embedded",
-          type: "vscode",
-          kind: "internal_vscode",
-          enabled: true,
-          installed: true,
-        },
-      ],
-    },
-    userSettings: { ...defaultState.userSettings, loaded: true },
-  };
+  const initialState = editorInitialState(withSession, legacy);
   return render(
     <StateProvider initialState={initialState}>
       <ToastProvider>
@@ -209,12 +221,27 @@ describe("editor file target routing", () => {
     const view = mount("overflow", true);
     await openMenu(true, view.container);
     const external = screen.getByRole("menuitem", { name: /VS Code/ });
-    expect(external.hasAttribute("data-disabled")).toBe(false);
+    expect(external.hasAttribute(disabledAttribute)).toBe(false);
     fireEvent.click(external);
     await waitFor(() => expect(boundary.open).toHaveBeenCalledOnce());
     expect(boundary.open.mock.calls[0][1]).toMatchObject({
       file_path: filePath,
       worktree_id: "wt-b",
+    });
+  });
+
+  // @covers AC-UI-EXTERNAL-FILE-TARGET-001.4
+  it("legacy single worktree retains the omitted-ID default", async () => {
+    boundary.open.mockResolvedValue({});
+    const view = mount("codemirror", true, "", true, true);
+    await openMenu(true, view.container);
+    const external = screen.getByRole("menuitem", { name: /VS Code/ });
+    expect(external.hasAttribute(disabledAttribute)).toBe(false);
+    fireEvent.click(external);
+    await waitFor(() => expect(boundary.open).toHaveBeenCalledOnce());
+    expect(boundary.open.mock.calls[0][1]).toMatchObject({
+      file_path: filePath,
+      worktree_id: undefined,
     });
   });
 
@@ -226,7 +253,7 @@ describe("editor file target routing", () => {
     const view = mount("codemirror", true, "unknown");
     await openMenu(true, view.container);
     const external = screen.getByRole("menuitem", { name: /VS Code/ });
-    expect(external.getAttribute("data-disabled")).not.toBeNull();
+    expect(external.getAttribute(disabledAttribute)).not.toBeNull();
     fireEvent.click(external);
     expect(boundary.open).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("menuitem", { name: /Embedded/ }));
@@ -247,7 +274,7 @@ describe("editor file target routing", () => {
     const view = mount("codemirror", true, "b", false);
     await openMenu(true, view.container);
     const external = screen.getByRole("menuitem", { name: /VS Code/ });
-    expect(external.getAttribute("data-disabled")).not.toBeNull();
+    expect(external.getAttribute(disabledAttribute)).not.toBeNull();
     fireEvent.click(external);
     expect(boundary.open).not.toHaveBeenCalled();
   });

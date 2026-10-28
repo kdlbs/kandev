@@ -7,6 +7,12 @@ import { isWorkspaceTreePath, workspaceRelativeFilePath } from "@/lib/workspace-
 type FileTarget = { worktreeId?: string } | null;
 type TargetInput = { repositoryId?: string | null; repositoryName?: string | null };
 
+function isLegacySingleWorktree(session: TaskSession, worktrees: Worktree[]): boolean {
+  if (session.worktrees?.length || worktrees.length !== 1 || !session.worktree_id) return false;
+  const worktree = worktrees[0];
+  return !worktree.repositoryId && worktree.id === session.worktree_id;
+}
+
 function targetForRepositoryId(
   session: TaskSession,
   worktrees: Worktree[],
@@ -19,8 +25,9 @@ function targetForRepositoryId(
     if (namedMatches.length === 1 && namedMatches[0].id !== matches[0].id) return null;
     return { worktreeId: matches[0].id };
   }
-  if (matches.length || name || worktrees.length || session.repository_id !== id) return null;
-  return {};
+  if (matches.length || name || session.repository_id !== id) return null;
+  if (worktrees.length === 0 || isLegacySingleWorktree(session, worktrees)) return {};
+  return null;
 }
 
 function unscopedTarget(session: TaskSession, worktrees: Worktree[]): FileTarget {

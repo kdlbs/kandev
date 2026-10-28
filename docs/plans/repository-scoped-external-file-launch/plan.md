@@ -49,6 +49,10 @@ The new `components/review/review-diff-toolbar.external-editor.test.tsx` proves 
 
 Existing `review-diff-toolbar.test.tsx`, `monaco-editor-toolbar.test.tsx`, and both `use-open-session-in-editor` suites are reviewed `browser` project tests. New unreviewed suites belong to `browser-locales`, also HappyDOM. Each project run must actually collect tests and retain its native process handle, exit and counts. The existing E2E `apps/web/e2e/tests/settings/vscode-open-file.spec.ts` exercises the editor action, but does not establish the multi-repository target; targeted rendered boundary tests provide this correction's evidence under the data exception. No native editor process or browser end-to-end outcome is claimed.
 
+## Bounded legacy review follow-up
+
+A source-supported legacy state can leave one live worktree without a repository ID while the session's primary repository ID is available to the unscoped CodeMirror overflow. The current resolver disables that external action. The [system design](../../specs/ui/system-design/repository-scoped-external-file-launch.md#legacy-single-worktree-follow-up) pins the exact existing-default fallback and exclusions; the existing work order owns the independently authored RED and focused GREEN checks. This is a data-only correction to the existing menu, so the earlier responsive capture and mobile parity assessment remain applicable. No new screenshot or capture build is required. The follow-up was implemented after separate authorization; the causal RED, focused verification and delivery record are in the existing work order.
+
 ## Public documentation
 
 `docs/public/developer-tools.md` is a how-to/reference for editor use and already describes **Open with**. Update that paragraph during implementation to explain repository-scoped external file selection and that unavailable/ambiguous targets disable the external action; do not imply embedded runtime root mapping is fixed. Review `docs/public/sessions-and-review.md`, root `README.md`, `docs/screenshots.md`, relevant specs and decisions for contradictions. No screenshot or new page is required.
