@@ -118,8 +118,8 @@ test.describe("Workflow automation", () => {
     });
 
     // --- Send another message in Review: verify manual step stays ---
-    // Wait for agent to become idle before sending (auto-start cascade may still be settling)
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    // Wait for the persisted idle state and editable composer after the auto-start cascade.
+    await session.waitForChatIdle({ timeout: 15_000, requireEditable: true });
 
     await session.sendMessage("/e2e:simple-message");
 

@@ -6,6 +6,7 @@ import type { AppState } from "@/lib/state/store";
 import type { PRFeedback } from "@/lib/types/github";
 
 export type PRFeedbackIdentity = {
+  host?: string;
   workspaceId: string;
   owner: string;
   repo: string;
@@ -70,6 +71,7 @@ export class PRFeedbackResourceScope {
       pr.owner,
       pr.repo,
       pr.prNumber,
+      ...(pr.host && pr.host !== "github.com" ? [pr.host] : []),
     ]);
   }
 

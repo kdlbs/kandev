@@ -80,6 +80,7 @@ func checkoutOptionsGitServer(t *testing.T) (string, string, string, *atomic.Boo
 	bare := filepath.Join(root, "repo.git")
 	checkoutOptionsGit(t, root, "clone", "--bare", source, bare)
 	checkoutOptionsGit(t, bare, "config", "uploadpack.allowFilter", "true")
+	checkoutOptionsGit(t, bare, "config", "http.receivepack", "true")
 	checkoutOptionsGit(t, bare, "config", "uploadpack.allowAnySHA1InWant", "true")
 	git, err := exec.LookPath("git")
 	if err != nil {

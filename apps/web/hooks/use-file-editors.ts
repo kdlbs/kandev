@@ -1,8 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  isFileRenameRetargeting,
+  isRenameReserved,
+  waitForRenameRelease,
+} from "./file-rename-continuity";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import {
@@ -16,13 +21,11 @@ import { getFilePreviewKind } from "@/lib/utils/file-types";
 import { normalizeWorkspaceFilePath } from "@/lib/workspace-file-path";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useOpenFileAction, useMarkdownPreviewAction } from "./file-editor-open-actions";
 import { useSaveDeleteActions, type PendingFileSave } from "./use-file-save-delete";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { useOpenFileWorkspaceSync } from "./file-editors-sync";
-import { t } from "@/lib/i18n";
 import {
-  fetchFileEditorState,
-  getPreviewItemIdToRemoveOnReplace,
   isFileEditorPanelAlreadyRestored,
   isRestoreWriteCurrent,
   type FileEditorRequestToken,
@@ -119,8 +122,11 @@ function buildPersistedTabs(
 }
 
 type RestoreTabsParams = {
+  store: ReturnType<typeof useAppStoreApi>;
   activeSessionId: string;
   activeSessionIdRef: React.MutableRefObject<string | null>;
+  activeEditorVisitRef: React.MutableRefObject<symbol | null>;
+  visit: symbol | null;
   savedTabs: Array<{
     path: string;
     name: string;
@@ -137,25 +143,88 @@ type RestoreTabsParams = {
   ) => void;
 };
 
+async function loadRestoredTab(
+  savedTab: RestoreTabsParams["savedTabs"][number],
+  params: RestoreTabsParams,
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+): Promise<boolean> {
+  const { activeSessionId, activeSessionIdRef, setFileState } = params;
+  try {
+    const itemId = buildRepoScopedItemId(savedTab.path, savedTab.repo);
+    const response = await requestFileContent(
+      client,
+      activeSessionId,
+      savedTab.path,
+      savedTab.repo,
+    );
+    const hash = await calculateHash(response.content);
+    if (!isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef))
+      return false;
+    setFileState(itemId, {
+      path: savedTab.path,
+      repo: savedTab.repo,
+      name: savedTab.name,
+      content: response.content,
+      originalContent: response.content,
+      originalHash: hash,
+      isDirty: false,
+      isBinary: response.is_binary,
+      resolvedPath: response.resolved_path,
+      renderedPreview:
+        getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
+          ? savedTab.renderedPreview
+          : undefined,
+    });
+  } catch {
+    /* useFileLoader will retry when executor is ready */
+  }
+  return true;
+}
+
+function finishRestoredTabs(
+  params: RestoreTabsParams,
+  dockApi: ReturnType<typeof useDockviewStore.getState>["api"],
+) {
+  const { activeSessionId, activeSessionIdRef, activeEditorVisitRef, visit, savedActiveTab } =
+    params;
+  _restorationInProgress = false;
+  if (
+    !visit ||
+    activeEditorVisitRef.current !== visit ||
+    !isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef) ||
+    useDockviewStore.getState().api !== dockApi
+  )
+    return;
+  const targetPanel = dockApi?.getPanel(savedActiveTab);
+  if (targetPanel) targetPanel.api.setActive();
+  const current = useDockviewStore.getState();
+  if (current.api === dockApi && !current.isRestoringLayout) {
+    saveOpenFileTabs(activeSessionId, buildPersistedTabs(current.api, current.openFiles));
+  }
+}
+
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
   const {
     activeSessionId,
     activeSessionIdRef,
     savedTabs,
-    savedActiveTab,
+    store,
     setFileState,
     addFileEditorPanel,
   } = params;
+  while (savedTabs.some((tab) => isRenameReserved(store, activeSessionId, tab.path, tab.repo))) {
+    await waitForRenameRelease(store, activeSessionId, savedTabs);
+  }
+  if (!isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef)) {
+    if (_restoredSessionId === activeSessionId) _restorationInProgress = false;
+    return;
+  }
   const client = getWebSocketClient();
   if (!client) {
     if (retryCount < 5) {
       setTimeout(() => loadAndRestoreTabs(params, retryCount + 1), 200);
       return;
     }
-    _restorationInProgress = false;
-    return;
-  }
-  if (_restoredSessionId !== activeSessionId) {
     _restorationInProgress = false;
     return;
   }
@@ -191,46 +260,18 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
     });
   }
   for (const savedTab of savedTabs) {
-    try {
-      const itemId = buildRepoScopedItemId(savedTab.path, savedTab.repo);
-      const response = await requestFileContent(
-        client,
-        activeSessionId,
-        savedTab.path,
-        savedTab.repo,
-      );
-      const hash = await calculateHash(response.content);
-      if (!isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef)) {
-        if (_restoredSessionId === activeSessionId) _restorationInProgress = false;
-        return;
-      }
-      setFileState(itemId, {
-        path: savedTab.path,
-        repo: savedTab.repo,
-        name: savedTab.name,
-        content: response.content,
-        originalContent: response.content,
-        originalHash: hash,
-        isDirty: false,
-        isBinary: response.is_binary,
-        resolvedPath: response.resolved_path,
-        renderedPreview:
-          getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
-            ? savedTab.renderedPreview
-            : undefined,
-      });
-    } catch {
-      /* useFileLoader will retry when executor is ready */
+    if (!(await loadRestoredTab(savedTab, params, client))) {
+      if (_restoredSessionId === activeSessionId) _restorationInProgress = false;
+      return;
     }
   }
-  const targetPanel = dockApi?.getPanel(savedActiveTab);
-  if (targetPanel) targetPanel.api.setActive();
-  _restorationInProgress = false;
+  finishRestoredTabs(params, dockApi);
 }
 
 type FileEditorEffectsParams = {
   activeSessionId: string | null;
   activeSessionIdRef: React.MutableRefObject<string | null>;
+  activeEditorVisitRef: React.MutableRefObject<symbol | null>;
   setFileState: (path: string, state: FileEditorState) => void;
   addFileEditorPanel: (
     path: string,
@@ -245,12 +286,14 @@ type FileEditorEffectsParams = {
 function useFileEditorEffects({
   activeSessionId,
   activeSessionIdRef,
+  activeEditorVisitRef,
   setFileState,
   addFileEditorPanel,
   clearFileStates,
   removeFileState,
   api,
 }: FileEditorEffectsParams) {
+  const store = useAppStoreApi();
   useEffect(() => {
     if (!activeSessionId || _restoredSessionId === activeSessionId) return;
     _restoredSessionId = activeSessionId;
@@ -265,8 +308,11 @@ function useFileEditorEffects({
       return;
     }
     void loadAndRestoreTabs({
+      store,
       activeSessionId,
       activeSessionIdRef,
+      activeEditorVisitRef,
+      visit: activeEditorVisitRef.current,
       savedTabs,
       savedActiveTab,
       setFileState,
@@ -277,7 +323,7 @@ function useFileEditorEffects({
 
   useEffect(() => {
     const unsub = useDockviewStore.subscribe((state, prevState) => {
-      if (state.openFiles === prevState.openFiles) return;
+      if (state.openFiles === prevState.openFiles || isFileRenameRetargeting()) return;
       const sessionId = activeSessionIdRef.current;
       if (!sessionId || _restorationInProgress || state.isRestoringLayout) return;
       saveOpenFileTabs(sessionId, buildPersistedTabs(state.api, state.openFiles));
@@ -288,7 +334,7 @@ function useFileEditorEffects({
   useEffect(() => {
     if (!api || !activeSessionId) return;
     const disposable = api.onDidActivePanelChange((event) => {
-      if (_restorationInProgress) return;
+      if (_restorationInProgress || isFileRenameRetargeting()) return;
       if (event) setActiveTabForSession(activeSessionId, event.id);
     });
     return () => disposable.dispose();
@@ -317,7 +363,7 @@ function useFileEditorEffects({
   }, [api, removeFileState]);
 }
 
-type FileEditorActionsParams = {
+export type FileEditorActionsParams = {
   activeSessionIdRef: React.MutableRefObject<string | null>;
   activeEditorVisitRef: React.MutableRefObject<symbol | null>;
   setFileState: (path: string, state: FileEditorState) => void;
@@ -332,182 +378,6 @@ type FileEditorActionsParams = {
   setSavingFiles: React.Dispatch<React.SetStateAction<Map<string, PendingFileSave>>>;
   toast: ReturnType<typeof useToast>["toast"];
 };
-
-function addFileEditorPanelWithPreviewCleanup(
-  filePath: string,
-  name: string,
-  repo: string | undefined,
-  addFileEditorPanel: FileEditorActionsParams["addFileEditorPanel"],
-  removeFileState: FileEditorActionsParams["removeFileState"],
-) {
-  const itemId = buildRepoScopedItemId(filePath, repo);
-  const previewItemIdToRemove = getPreviewItemIdToRemoveOnReplace(
-    useDockviewStore.getState().api,
-    itemId,
-  );
-  addFileEditorPanel(filePath, name, { repo });
-  if (previewItemIdToRemove) removeFileState(previewItemIdToRemove);
-}
-
-function markActiveFileRequest(
-  ref: React.MutableRefObject<FileEditorRequestToken | null>,
-  fileKey: string,
-): FileEditorRequestToken {
-  const requestToken = {
-    fileKey,
-    generation: (ref.current?.generation ?? 0) + 1,
-  };
-  ref.current = requestToken;
-  return requestToken;
-}
-
-type OpenFileActionParams = Pick<
-  FileEditorActionsParams,
-  "activeSessionIdRef" | "setFileState" | "removeFileState" | "addFileEditorPanel" | "toast"
-> & {
-  activeFileRequestRef: React.MutableRefObject<FileEditorRequestToken | null>;
-};
-
-function useOpenFileAction({
-  activeSessionIdRef,
-  activeFileRequestRef,
-  setFileState,
-  removeFileState,
-  addFileEditorPanel,
-  toast,
-}: OpenFileActionParams) {
-  return useCallback(
-    async (filePath: string, repo?: string) => {
-      const client = getWebSocketClient();
-      const currentSessionId = activeSessionIdRef.current;
-      if (!client || !currentSessionId) return;
-      const fileKey = buildRepoScopedItemId(filePath, repo);
-      const files = getOpenFiles();
-      if (files.has(fileKey)) {
-        const existing = files.get(fileKey);
-        const tabName = filePath.split("/").pop() || filePath;
-        addFileEditorPanelWithPreviewCleanup(
-          filePath,
-          tabName,
-          existing?.repo,
-          addFileEditorPanel,
-          removeFileState,
-        );
-        return;
-      }
-      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
-      try {
-        const state = await fetchFileEditorState({
-          client,
-          sessionId: currentSessionId,
-          filePath,
-          repo,
-          activeSessionIdRef,
-          activeRequestRef: activeFileRequestRef,
-          requestToken,
-        });
-        if (!state) return;
-        // Create the panel BEFORE setting file state. The openFiles subscription
-        // triggers tab persistence — it needs the dockview panel to already exist
-        // so buildPersistedTabs can detect whether the file is preview or pinned.
-        addFileEditorPanelWithPreviewCleanup(
-          filePath,
-          state.name,
-          repo,
-          addFileEditorPanel,
-          removeFileState,
-        );
-        setFileState(fileKey, state);
-      } catch (error) {
-        toast({
-          title: t("task:failedToOpenFile"),
-          description: error instanceof Error ? error.message : t("common:unknownError"),
-          variant: "error",
-        });
-      }
-    },
-    [
-      activeSessionIdRef,
-      activeFileRequestRef,
-      addFileEditorPanel,
-      removeFileState,
-      setFileState,
-      toast,
-    ],
-  );
-}
-
-type MarkdownPreviewActionParams = Pick<
-  FileEditorActionsParams,
-  | "activeSessionIdRef"
-  | "setFileState"
-  | "updateFileState"
-  | "removeFileState"
-  | "addFileEditorPanel"
-  | "toast"
-> & {
-  activeFileRequestRef: React.MutableRefObject<FileEditorRequestToken | null>;
-};
-
-function useMarkdownPreviewAction({
-  activeSessionIdRef,
-  activeFileRequestRef,
-  setFileState,
-  updateFileState,
-  removeFileState,
-  addFileEditorPanel,
-  toast,
-}: MarkdownPreviewActionParams) {
-  return useCallback(
-    async (filePath: string, repo?: string) => {
-      const client = getWebSocketClient();
-      const currentSessionId = activeSessionIdRef.current;
-      if (!client || !currentSessionId) return;
-      const fileKey = buildRepoScopedItemId(filePath, repo);
-      const files = getOpenFiles();
-      if (files.has(fileKey)) {
-        updateFileState(fileKey, { renderedPreview: true });
-        const name = filePath.split("/").pop() || filePath;
-        addFileEditorPanelWithPreviewCleanup(
-          filePath,
-          name,
-          files.get(fileKey)?.repo,
-          addFileEditorPanel,
-          removeFileState,
-        );
-        return;
-      }
-      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
-      try {
-        const state = await fetchFileEditorState({
-          client,
-          sessionId: currentSessionId,
-          filePath,
-          repo,
-          activeSessionIdRef,
-          activeRequestRef: activeFileRequestRef,
-          requestToken,
-        });
-        if (!state) return;
-        addFileEditorPanelWithPreviewCleanup(
-          filePath,
-          state.name,
-          repo,
-          addFileEditorPanel,
-          removeFileState,
-        );
-        setFileState(fileKey, { ...state, renderedPreview: true });
-      } catch (error) {
-        toast({
-          title: t("task:failedToOpenFile"),
-          description: error instanceof Error ? error.message : t("common:unknownError"),
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionIdRef, setFileState, updateFileState, addFileEditorPanel, removeFileState, toast],
-  );
-}
 
 function useFileEditorActions({
   activeSessionIdRef,
@@ -594,6 +464,7 @@ export function useFileEditors(detailActive = true) {
   useFileEditorEffects({
     activeSessionId,
     activeSessionIdRef,
+    activeEditorVisitRef,
     setFileState,
     addFileEditorPanel,
     clearFileStates,

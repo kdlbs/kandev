@@ -538,7 +538,7 @@ export function useReviewSources(
     loading: prDiffLoading,
     error: prDiffError,
     refresh: refreshPRDiff,
-  } = usePRDiff(pr?.owner ?? null, pr?.repo ?? null, pr?.pr_number ?? null, pr?.last_synced_at);
+  } = useReviewPRDiff(pr);
 
   const { allFiles, sourceCounts } = useMemo(
     () =>
@@ -631,3 +631,13 @@ function readTruncatedFilesCount(
 }
 
 export type { CumulativeFile, UncommittedFile };
+
+function useReviewPRDiff(pr: Parameters<typeof usePRReviewRepositoryIdentity>[2]) {
+  return usePRDiff(
+    pr?.owner ?? null,
+    pr?.repo ?? null,
+    pr?.pr_number ?? null,
+    pr?.last_synced_at,
+    pr?.github_host,
+  );
+}

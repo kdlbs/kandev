@@ -172,6 +172,32 @@ order I should work in.
   `bulkMove`, leave no sequence of written positions in which an omission would
   later be visible. An invocation whose snapshot is empty shall be a no-op.
 
+### REQ-TASKS-BOARD-BULK-MOVE-SCOPE-001: Bulk step moves stay in the selected workflow
+
+**Intent:** A board selection moves to a step of its own workflow, including
+when several workflows are displayed together.
+
+#### Acceptance criteria
+
+- **AC-TASKS-BOARD-BULK-MOVE-SCOPE-001.1:** On desktop, a nonempty eligible
+  selection from one workflow on the All Workflows board can move to an offered
+  step of that workflow, even if another workflow is hydrated or none is
+  hydrated. A single-workflow board retains the same outcome. On phone, the
+  existing selection control and bulk-actions sheet provide the same step move
+  for the focused workflow. Tapping the move control opens the destination
+  choices without sending a move. An explicit tap on one offered step sends
+  exactly one move to that step and leaves the task in its original workflow.
+- **AC-TASKS-BOARD-BULK-MOVE-SCOPE-001.2:** Every eligible selected task and
+  the chosen destination must have one known, consistent workflow. If any
+  eligible task or destination has an unknown, ambiguous, or conflicting scope,
+  or eligible tasks span workflows, the move shall not be sent and no task
+  shall be changed. A board step move shall never change a task's workflow.
+- **AC-TASKS-BOARD-BULK-MOVE-SCOPE-001.3:** Eligibility and order remain subject
+  to AC-TASKS-BOARD-PRIORITY-SORT-FILTER-002.10 and 002.11 and placement remains
+  subject to AC-TASKS-KANBAN-TASK-REORDERING-001.29. Backend rejection remains
+  visible through the existing error path; rejected moves keep the selection
+  and do not apply a local move.
+
 ## Out of scope
 
 Each exclusion below is a decision, not an omission.

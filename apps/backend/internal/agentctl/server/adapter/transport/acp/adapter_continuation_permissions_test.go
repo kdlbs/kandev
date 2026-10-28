@@ -90,7 +90,22 @@ func TestCursorContinuationEvidencePermissionRequiresTrackedTool(t *testing.T) {
 		Options: []PermissionOption{{OptionID: "allow", Kind: streams.PermissionOptionKindAllowOnce}},
 	})
 	require.NoError(t, err)
-	require.False(t, a.continuationSafetySnapshot(turn).SafeFor(7), "approval cannot establish an unobserved tool outcome")
+	snapshot := a.continuationSafetySnapshot(turn)
+	require.False(t, snapshot.PermissionsResolved, "approval cannot resolve a permission whose tool is unobserved")
+	require.False(t, snapshot.SafeFor(7), "approval cannot establish an unobserved tool outcome")
+}
+
+func TestCursorContinuationEvidenceResolvedPermissionAllowsPendingTool(t *testing.T) {
+	a, turn, req := continuationPermissionFixture(t)
+	a.SetPermissionHandler(func(context.Context, *PermissionRequest) (*PermissionResponse, error) {
+		return &PermissionResponse{OptionID: "allow"}, nil
+	})
+	_, err := a.handlePermissionRequest(t.Context(), req)
+	require.NoError(t, err)
+	snapshot := a.continuationSafetySnapshot(turn)
+	require.True(t, snapshot.Pending, "the observed tool remains unfinished")
+	require.True(t, snapshot.PermissionsResolved)
+	require.True(t, snapshot.SafeFor(7))
 }
 
 func TestCursorContinuationEvidencePermissionBeforeToolNotification(t *testing.T) {

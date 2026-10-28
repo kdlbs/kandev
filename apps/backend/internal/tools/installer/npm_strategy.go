@@ -49,7 +49,7 @@ func (s *NpmStrategy) Install(ctx context.Context) (*InstallResult, error) {
 		return nil, fmt.Errorf("failed to create directory %s: %w", s.binDir, err)
 	}
 
-	args := append([]string{installSubcommand, "--prefix", s.binDir}, s.packages...)
+	args := append([]string{installSubcommand, "--global=false", "--location=project", "--prefix", s.binDir}, s.packages...)
 	s.logger.Info("installing via npm", zap.Strings("packages", s.packages), zap.String("prefix", s.binDir))
 
 	output, err := combinedOutput(ctx, s.runner, CommandSpec{

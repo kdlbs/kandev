@@ -29,6 +29,7 @@ generation and the shared description-write protocol used by adjacent writers.
 | `AC-UI-PR-WALKTHROUGH-001.12` | [Rendering errors](#rendering-errors) |
 | `AC-UI-PR-WALKTHROUGH-001.13` | [Generation completion](#generation-completion), [Output verification](#output-verification) |
 | `AC-UI-PR-WALKTHROUGH-001.14` | [Runner supervision](#runner-supervision), [Generation diagnostics](#generation-diagnostics) |
+| `AC-UI-PR-WALKTHROUGH-001.15` | [Generation diagnostics](#generation-diagnostics), [Failure and recovery](#failure-and-recovery) |
 
 ## Components and responsibilities
 
@@ -82,7 +83,7 @@ The adapter uses a 600-second monotonic deadline shared by both attempts. Only a
 
 Timeout without verified completion, invalid receipts, unexpected non-zero exits, and external cancellation fail without retry. Cancellation wins over observed completion. A cancelled job never becomes successful merely because files exist.
 
-The outer generation job uses a 20-minute limit. Preparation steps use two minutes for checkout, four for history fetching, one for context, and one for installation. Independent verification has a 30-second limit. These budgets reserve at least one minute for artifact upload, apart from scheduler overhead. Infrastructure cancellation remains a failure even if diagnostic upload cannot finish.
+The outer generation job uses a 25-minute limit. Preparation steps use two minutes for checkout, four for history fetching, three for context, one for installation, and eleven for the model-backed attempt. Independent verification has a 30-second limit. These budgets reserve time for artifact upload, apart from scheduler overhead. A failed model-backed attempt is advisory, so it reports a warning instead of failing the pull request check. Infrastructure cancellation remains visible as a cancelled job.
 
 ## Git history preparation
 
@@ -98,7 +99,7 @@ Each attempt retains stdout, stderr, the draft, output files when present, and a
 
 Stop reasons distinguish render completion, incomplete zero exit, unexpected exit, cleanup failure, deadline, cancellation, and launch failure. Verification results distinguish cleanup failure from verifier failure and cancellation. Logs include timestamps and errors without environment dumps. Diagnostic capture runs in the adapter's cleanup path, including timeout and cancellation.
 
-The workflow summary reports stage durations and the final generation result. It does not expose a completion marker as proof. Artifact upload retains the existing `always()` path. Publication still requires the generation job to succeed.
+The workflow summary reports stage durations and the final generation result. It does not expose a completion marker as proof. Artifact upload retains the existing `always()` path. Staging, upload, and a missing artifact are advisory when generation produced no verified pair, so diagnostics capture cannot fail a skipped check; they stay strict once a verified pair must reach publication. The generation job emits `generated=true` only after the runner returns a verified output pair, and emits `generated=false` with a warning annotation for every other outcome.
 
 ## Runner and hosting configuration
 
@@ -186,6 +187,9 @@ loop.
 
 ## Failure and recovery
 
+- Generation is advisory. Any outcome other than a verified output pair reports
+  a warning annotation, keeps the generation job successful, and skips
+  publication and linking. The uploaded artifact keeps the diagnostics.
 - A missing public object prevents reconciliation from changing the body. The
   next successful generation or publication remains responsible for creating
   the link.
@@ -226,9 +230,11 @@ contributor head.
 ## Observability
 
 The walkthrough workflow summary records whether linking was unchanged,
-repaired, retried after a body race, or skipped because the canonical object
-was unavailable. A failed post-write readback includes the final marker
-validation error in the job log.
+repaired, retried after a body race, skipped because generation produced no
+verified pair, or skipped because the canonical object was unavailable.
+Advisory generation failures appear as a warning annotation on the pull request
+check. A failed post-write readback includes the final marker validation error in
+the job log.
 
 Contract tests cover event routing, trusted checkout, shared concurrency,
 canonical URL validation, no-op reconciliation, fail-closed malformed markers,
@@ -239,6 +245,7 @@ preview marker blocks.
 ## Related decisions
 
 - [Complete generation after a verified render](../../../decisions/2026-09-30-pr-walkthrough-render-completion.md)
+- [Treat PR walkthrough generation as best effort](../../../decisions/2026-10-27-advisory-pr-walkthrough-generation.md)
 - [Own a top-level PR walkthrough callout](../../../decisions/2026-08-22-pr-walkthrough-description-link.md)
 - [Use 12-character SHA prefixes for PR walkthrough URLs](../../../decisions/2026-08-23-pr-walkthrough-short-urls.md)
 - [Use the workflow SHA for trusted PR walkthrough inputs](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md)

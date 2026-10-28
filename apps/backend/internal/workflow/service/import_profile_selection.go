@@ -152,15 +152,11 @@ func validateImportExport(export *models.WorkflowExport) error {
 
 func collectImportProfileSteps(
 	export *models.WorkflowExport,
-	existingNames map[string]bool,
-) ([]string, []ImportProfileStep) {
-	skipped := make([]string, 0)
+	workflowIndexes []int,
+) []ImportProfileStep {
 	steps := make([]ImportProfileStep, 0)
-	for workflowIndex, workflow := range export.Workflows {
-		if existingNames[workflow.Name] {
-			skipped = append(skipped, workflow.Name)
-			continue
-		}
+	for _, workflowIndex := range workflowIndexes {
+		workflow := export.Workflows[workflowIndex]
 		for _, step := range workflow.Steps {
 			if step.AgentProfile == nil {
 				continue
@@ -174,7 +170,7 @@ func collectImportProfileSteps(
 			})
 		}
 	}
-	return skipped, steps
+	return steps
 }
 
 func (s *Service) importProfileCandidates(ctx context.Context) ([]ImportProfileCandidate, error) {
@@ -354,11 +350,11 @@ func (s *Service) importProfilePreviewData(
 		return nil, err
 	}
 
-	skipped, steps := collectImportProfileSteps(export, existingNames)
+	selection := selectWorkflowImports(export, existingNames)
 	preview := &ImportProfilePreview{
-		Skipped:  skipped,
+		Skipped:  selection.skipped,
 		Profiles: make([]ImportProfileCandidate, 0),
-		Steps:    steps,
+		Steps:    collectImportProfileSteps(export, selection.indexes),
 	}
 	if len(preview.Steps) == 0 {
 		return preview, nil
@@ -458,15 +454,13 @@ func (s *Service) resolveSelectedImportProfile(
 func (s *Service) resolveImportProfileBindings(
 	ctx context.Context,
 	export *models.WorkflowExport,
-	existingNames map[string]bool,
+	workflowIndexes []int,
 	byKey map[string]ImportProfileBinding,
 ) (map[int]map[int]string, []ImportProfileConflict, error) {
 	conflicts := make([]ImportProfileConflict, 0)
 	directProfileIDs := make(map[int]map[int]string)
-	for workflowIndex, workflow := range export.Workflows {
-		if existingNames[workflow.Name] {
-			continue
-		}
+	for _, workflowIndex := range workflowIndexes {
+		workflow := export.Workflows[workflowIndex]
 		for _, step := range workflow.Steps {
 			if step.AgentProfile == nil {
 				continue
@@ -503,16 +497,13 @@ func (s *Service) resolveImportProfileBindings(
 func (s *Service) prepareImportedWorkflows(
 	ctx context.Context,
 	export *models.WorkflowExport,
-	existingNames map[string]bool,
+	selection workflowImportSelection,
 	directProfileIDs map[int]map[int]string,
 ) ([]preparedImportedWorkflow, *ImportResult, error) {
-	prepared := make([]preparedImportedWorkflow, 0, len(export.Workflows))
-	result := &ImportResult{}
-	for index, workflow := range export.Workflows {
-		if existingNames[workflow.Name] {
-			result.Skipped = append(result.Skipped, workflow.Name)
-			continue
-		}
+	prepared := make([]preparedImportedWorkflow, 0, len(selection.indexes))
+	result := &ImportResult{Skipped: selection.skipped}
+	for _, index := range selection.indexes {
+		workflow := export.Workflows[index]
 		item, err := s.prepareImportedWorkflow(ctx, workflow, directProfileIDs[index])
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to import workflow %q: %w", workflow.Name, err)
@@ -558,7 +549,8 @@ func (s *Service) ImportWorkflowsWithBindings(
 	if err != nil {
 		return nil, err
 	}
-	directProfileIDs, conflicts, err := s.resolveImportProfileBindings(ctx, export, existingNames, byKey)
+	selection := selectWorkflowImports(export, existingNames)
+	directProfileIDs, conflicts, err := s.resolveImportProfileBindings(ctx, export, selection.indexes, byKey)
 	if err != nil {
 		return nil, err
 	}
@@ -566,7 +558,7 @@ func (s *Service) ImportWorkflowsWithBindings(
 		return nil, &ImportProfileResolutionError{Conflicts: conflicts}
 	}
 
-	prepared, result, err := s.prepareImportedWorkflows(ctx, export, existingNames, directProfileIDs)
+	prepared, result, err := s.prepareImportedWorkflows(ctx, export, selection, directProfileIDs)
 	if err != nil {
 		return nil, err
 	}

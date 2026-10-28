@@ -589,6 +589,9 @@ func mapQuickChatSessionState(item taskservice.QuickChatSession) map[string]any 
 	if item.AgentProfileID != "" {
 		state["agentProfileId"] = item.AgentProfileID
 	}
+	if item.CreationID != "" {
+		state["creationId"] = item.CreationID
+	}
 	return state
 }
 

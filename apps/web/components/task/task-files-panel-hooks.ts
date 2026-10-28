@@ -1,18 +1,22 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, type RefObject } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useFileOperations } from "@/hooks/use-file-operations";
+import type { RenameAdapter } from "@/hooks/file-rename-continuity";
 import type { OpenFileTab } from "@/lib/types/backend";
 
-export function useFilesPanelData(onOpenFile: (file: OpenFileTab) => void) {
+export function useFilesPanelData(
+  onOpenFile: (file: OpenFileTab) => void,
+  adapter?: RefObject<RenameAdapter | null>,
+) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const {
     createFile: baseCreateFile,
     deleteFile: hookDeleteFile,
     renameFile: hookRenameFile,
     downloadFile: hookDownloadFile,
-  } = useFileOperations(activeSessionId ?? null);
+  } = useFileOperations(activeSessionId ?? null, { dockview: false, adapter });
 
   const handleCreateFile = useCallback(
     async (path: string): Promise<boolean> => {

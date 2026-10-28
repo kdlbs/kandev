@@ -87,12 +87,14 @@ describe("PR workspace request scope", () => {
     await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
     expect(mocks.request).toHaveBeenCalledWith("github.pr_files.get", {
       workspace_id: "ws-1",
+      expected_host: "github.com",
       owner: "acme",
       repo: "site",
       number: 42,
     });
     expect(mocks.request).toHaveBeenCalledWith("github.pr_commits.get", {
       workspace_id: "ws-1",
+      expected_host: "github.com",
       owner: "acme",
       repo: "site",
       number: 42,

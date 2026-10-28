@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type Ref, type RefObject } from "react";
 import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
@@ -15,6 +15,11 @@ import type {
   LateClarificationState,
 } from "@/hooks/use-late-clarification-message";
 import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useClarificationResizeState } from "./clarification-draft-context";
+
+const MIN_PANEL_HEIGHT = 120;
+const EMPTY_HOST_REFS: readonly RefObject<HTMLElement | null>[] = [];
 
 type ClarificationPanelSectionProps = {
   pending: boolean;
@@ -26,13 +31,11 @@ type ClarificationPanelSectionProps = {
    * Detached requests remain answerable even if their row refresh lags.
    */
   agentDisconnected?: boolean;
-  /**
-   * Caps the expanded overlay's height as a percentage of the viewport.
-   * Drives both the rendered CSS max-height and the resize hook's drag clamp
-   * - the two MUST agree, or the drag handle silently stops responding before
-   * its own visible ceiling.
-   */
-  maxHeightVh: number;
+  initialMaxHeightVh: number;
+  allocationRef?: RefObject<HTMLElement | null>;
+  anchorRef?: RefObject<HTMLElement | null>;
+  reservedSiblingRefs?: readonly RefObject<HTMLElement | null>[];
+  reservedHeightPx?: number;
   // Shared late-message state keeps the recovery surface available when a
   // host unmounts and the transcript mounts a new form for the same bundle.
   onOutcome?: (outcome: ClarificationOutcome) => void;
@@ -73,31 +76,51 @@ export function ClarificationPanelSection({
   onResolved,
   shortcutScopeRef,
   agentDisconnected = false,
-  maxHeightVh,
+  initialMaxHeightVh,
+  allocationRef,
+  anchorRef,
+  reservedSiblingRefs = EMPTY_HOST_REFS,
+  reservedHeightPx = 0,
   onOutcome,
   onLateAnswer,
   lateAnswerState,
 }: ClarificationPanelSectionProps) {
   const { t } = useTranslation();
   const disclosure = useComposerDisclosureContext();
+  const { isMobile } = useResponsiveBreakpoint();
   const pendingId = pendingIdFromMessages(messages);
+  const sizingState = useClarificationResizeState(pendingId);
   const [collapsed, setCollapsed] = useCollapsedForBundle(pendingId);
   const contentId = useId();
-  const { height, containerRef, resetHeight, resizeHandleProps } = useResizableClarificationOverlay(
-    maxHeightVh / 100,
-  );
+  const {
+    height,
+    maxHeight,
+    maxHostHeight,
+    minHeight,
+    canExpand,
+    canReset,
+    containerRef,
+    expandHeight,
+    resetHeight,
+    resetAllHeights,
+    resizeHandleProps,
+  } = useResizableClarificationOverlay({
+    initialMaxHeightVh,
+    allocationRef: disclosure?.clarificationAllocationRef ?? allocationRef,
+    anchorRef,
+    reservedSiblingRefs,
+    reservedHeightPx: disclosure?.clarificationAllocationRef
+      ? (disclosure.clarificationReservedHeightPx ?? reservedHeightPx)
+      : reservedHeightPx,
+    isPhone: isMobile,
+    sizingState,
+  });
 
   // A newly opened clarification starts expanded and auto-sized. Collapsing
   // an active one leaves its form state and user-selected height intact.
   useEffect(() => {
-    if (!pending) resetHeight();
-  }, [pending, resetHeight]);
-
-  // A new bundle (different pending_id) replacing a still-pending one must
-  // not inherit the previous bundle's dragged height.
-  useEffect(() => {
-    resetHeight();
-  }, [pendingId, resetHeight]);
+    if (!pending) resetAllHeights();
+  }, [pending, resetAllHeights]);
 
   if (!pending) return null;
 
@@ -113,7 +136,13 @@ export function ClarificationPanelSection({
       contentId={contentId}
       disclosure={disclosure}
       height={height}
-      maxHeightVh={maxHeightVh}
+      maxHeight={maxHeight}
+      maxHostHeight={maxHostHeight}
+      minHeight={minHeight}
+      canExpand={canExpand}
+      canReset={canReset}
+      onExpand={expandHeight}
+      onReset={resetHeight}
       messages={messages}
       onCollapse={() => setCollapsed(true)}
       onOutcome={onOutcome}
@@ -132,11 +161,15 @@ type ClarificationPanelContentProps = {
   actionLabel: string;
   agentDisconnected: boolean;
   collapsed: boolean;
-  containerRef: RefObject<HTMLDivElement | null>;
+  containerRef: Ref<HTMLDivElement>;
   contentId: string;
   disclosure: ReturnType<typeof useComposerDisclosureContext>;
   height: number | null;
-  maxHeightVh: number;
+  maxHeight: number;
+  maxHostHeight: number | null;
+  minHeight: number;
+  canExpand: boolean;
+  canReset: boolean;
   messages: readonly Message[] | null | undefined;
   onCollapse: () => void;
   onOutcome?: (outcome: ClarificationOutcome) => void;
@@ -144,10 +177,74 @@ type ClarificationPanelContentProps = {
   lateAnswerState?: LateClarificationState;
   onResolved: () => void;
   onToggleCollapse: () => void;
+  onExpand: () => void;
+  onReset: () => void;
   questionCount: number;
   resizeHandleProps: Parameters<typeof ResizeHandle>[0];
   shortcutScopeRef: RefObject<HTMLElement | null>;
 };
+
+function clarificationContainerClassName(compact: boolean, footerScrollFallback: boolean): string {
+  if (compact) return "h-11";
+  if (footerScrollFallback) return "flex min-h-0 flex-col";
+  return "flex min-h-[7.5rem] flex-col overflow-hidden overscroll-contain";
+}
+
+function clarificationScrollRegionClassName(
+  compact: boolean,
+  footerScrollFallback: boolean,
+): string {
+  if (compact) return "hidden";
+  if (footerScrollFallback) return "min-h-0 flex-1 overflow-visible px-1";
+  return "min-h-0 flex-1 overflow-y-auto px-1";
+}
+
+function ClarificationCollapsedHeader({
+  actionLabel,
+  collapsed,
+  contentId,
+  onToggleCollapse,
+  questionCount,
+}: Pick<
+  ClarificationPanelContentProps,
+  "actionLabel" | "collapsed" | "contentId" | "onToggleCollapse" | "questionCount"
+>) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 pl-4">
+      <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+        <IconMessageQuestion className="h-4 w-4 flex-shrink-0 text-blue-500" />
+        <span className="truncate">{t("chat:clarificationNeeded")}</span>
+        {questionCount > 0 && (
+          <span
+            data-testid="clarification-question-count"
+            className="truncate text-xs font-normal text-muted-foreground"
+          >
+            {t("task:questionCount", { count: questionCount })}
+          </span>
+        )}
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-11 w-11 flex-shrink-0 cursor-pointer rounded-none"
+        aria-label={actionLabel}
+        aria-expanded={!collapsed}
+        aria-controls={contentId}
+        title={actionLabel}
+        data-testid="clarification-collapse-toggle"
+        onClick={onToggleCollapse}
+      >
+        {collapsed ? (
+          <IconChevronUp className="h-4 w-4" />
+        ) : (
+          <IconChevronDown className="h-4 w-4" />
+        )}
+      </Button>
+    </div>
+  );
+}
 
 function ClarificationPanelContent({
   actionLabel,
@@ -157,7 +254,11 @@ function ClarificationPanelContent({
   contentId,
   disclosure,
   height,
-  maxHeightVh,
+  maxHeight,
+  maxHostHeight,
+  minHeight,
+  canExpand,
+  canReset,
   messages,
   onCollapse,
   onOutcome,
@@ -165,12 +266,24 @@ function ClarificationPanelContent({
   lateAnswerState,
   onResolved,
   onToggleCollapse,
+  onExpand,
+  onReset,
   questionCount,
   resizeHandleProps,
   shortcutScopeRef,
 }: ClarificationPanelContentProps) {
-  const { t } = useTranslation();
   const compact = collapsed || questionCount === 0;
+  const footerScrollFallback =
+    Boolean(disclosure) && maxHostHeight !== null && maxHostHeight < MIN_PANEL_HEIGHT;
+  const containerStyle = compact
+    ? undefined
+    : {
+        minHeight: `${minHeight}px`,
+        ...(footerScrollFallback ? {} : { maxHeight: `${maxHeight}px` }),
+        // Threads owns the outer vertical scroll boundary in its bounded footer.
+        overscrollBehaviorY: disclosure ? ("auto" as const) : undefined,
+        ...(height !== null && !footerScrollFallback ? { height } : {}),
+      };
 
   return (
     <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
@@ -178,58 +291,24 @@ function ClarificationPanelContent({
       <div
         ref={containerRef}
         data-testid="clarification-overlay-container"
-        className={
-          compact ? "h-11" : "flex min-h-[7.5rem] flex-col overflow-hidden overscroll-contain"
-        }
-        style={
-          compact
-            ? undefined
-            : {
-                maxHeight: `${maxHeightVh}vh`,
-                // Threads owns the outer vertical scroll boundary in its bounded footer.
-                overscrollBehaviorY: disclosure ? "auto" : undefined,
-                ...(height !== null ? { height } : {}),
-              }
-        }
+        data-host-max-height={maxHostHeight ?? ""}
+        data-scroll-owner={footerScrollFallback ? "thread-footer" : "clarification-panel"}
+        className={clarificationContainerClassName(compact, footerScrollFallback)}
+        style={containerStyle}
       >
         {compact && (
-          <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 pl-4">
-            <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-              <IconMessageQuestion className="h-4 w-4 flex-shrink-0 text-blue-500" />
-              <span className="truncate">{t("chat:clarificationNeeded")}</span>
-              {questionCount > 0 && (
-                <span
-                  data-testid="clarification-question-count"
-                  className="truncate text-xs font-normal text-muted-foreground"
-                >
-                  {t("task:questionCount", { count: questionCount })}
-                </span>
-              )}
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-11 w-11 flex-shrink-0 cursor-pointer rounded-none"
-              aria-label={actionLabel}
-              aria-expanded={!collapsed}
-              aria-controls={contentId}
-              title={actionLabel}
-              data-testid="clarification-collapse-toggle"
-              onClick={onToggleCollapse}
-            >
-              {collapsed ? (
-                <IconChevronUp className="h-4 w-4" />
-              ) : (
-                <IconChevronDown className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
+          <ClarificationCollapsedHeader
+            actionLabel={actionLabel}
+            collapsed={collapsed}
+            contentId={contentId}
+            onToggleCollapse={onToggleCollapse}
+            questionCount={questionCount}
+          />
         )}
         <div
           id={contentId}
           data-testid="clarification-scroll-region"
-          className={compact ? "hidden" : "min-h-0 flex-1 overflow-y-auto px-1"}
+          className={clarificationScrollRegionClassName(compact, footerScrollFallback)}
         >
           <ClarificationInputOverlay
             messages={messages}
@@ -243,6 +322,10 @@ function ClarificationPanelContent({
             agentDisconnected={agentDisconnected}
             onDismiss={onCollapse}
             onCollapse={onCollapse}
+            onExpandPanel={onExpand}
+            onResetPanel={onReset}
+            canExpandPanel={canExpand}
+            canResetPanel={canReset}
             collapseContentId={contentId}
           />
         </div>

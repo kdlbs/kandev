@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -119,6 +120,38 @@ func TestHandleUpdateTask_LaunchPromptOnATaskWithoutOne(t *testing.T) {
 	payload := errorPayload(t, resp)
 	assert.Equal(t, ws.ErrorCodeConflict, payload.Code)
 	assert.Contains(t, payload.Message, "no pending deferred launch")
+}
+
+func TestHandleUpdateTask_InvalidStateDoesNotChangeLaunchPrompt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedPendingLaunchTask(t, repo)
+	h := updateTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPUpdateTask, map[string]interface{}{
+		"task_id":                pendingLaunchTaskID,
+		"state":                  "invalid-state",
+		"deferred_launch_prompt": "replacement brief",
+	})
+	resp, err := h.handleUpdateTask(context.Background(), msg)
+	require.NoError(t, err)
+	assert.Equal(t, ws.ErrorCodeValidation, errorPayload(t, resp).Code)
+	assert.Equal(t, "stale brief", launchPrompt(t, repo))
+}
+
+func TestHandleUpdateTask_OverlongTitleDoesNotChangeLaunchPrompt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedPendingLaunchTask(t, repo)
+	h := updateTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPUpdateTask, map[string]interface{}{
+		"task_id":                pendingLaunchTaskID,
+		"title":                  strings.Repeat("x", service.TaskTitleMaxLength+1),
+		"deferred_launch_prompt": "replacement brief",
+	})
+	resp, err := h.handleUpdateTask(context.Background(), msg)
+	require.NoError(t, err)
+	assert.Equal(t, ws.ErrorCodeValidation, errorPayload(t, resp).Code)
+	assert.Equal(t, "stale brief", launchPrompt(t, repo))
 }
 
 // Omitting the field leaves the pending launch alone — the ordinary

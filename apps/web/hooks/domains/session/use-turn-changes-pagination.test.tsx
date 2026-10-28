@@ -5,6 +5,7 @@ import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 const mockHistory = vi.hoisted(() => {
   type Summary = TurnChangeSetSummary;
   type State = {
+    connection: { status: string };
     taskSessions: { items: Record<string, object> };
     turnChanges: {
       bySession: Record<string, Summary[]>;
@@ -19,6 +20,7 @@ const mockHistory = vi.hoisted(() => {
     mergeTurnChangeSummary: (sessionId: string, summary: Summary) => void;
   };
   const state: State = {
+    connection: { status: "disconnected" },
     taskSessions: { items: { "session-1": {} } },
     turnChanges: {
       bySession: { "session-1": [] as Summary[] },

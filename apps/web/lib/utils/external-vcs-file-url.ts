@@ -1,3 +1,4 @@
+import { githubOrigin } from "@/lib/github/host";
 export type ExternalVcsProvider = "github" | "gitlab" | "azure_devops";
 
 export type ExternalVcsRepository = {
@@ -203,20 +204,34 @@ function repositoryPathMatches(parts: string[], owner: string, name: string): bo
   );
 }
 
+function githubRepositoryOrigin(repository: ExternalVcsRepository) {
+  return githubOrigin(repository.provider_host ?? "github.com");
+}
+
+function githubSSHRemote(
+  repository: ExternalVcsRepository,
+  identity: SSHCloneIdentity,
+): URL | null {
+  if (repository.provider.toLowerCase() !== "github") return null;
+  const origin = githubRepositoryOrigin(repository);
+  if (
+    !origin ||
+    identity.hostname !== new URL(origin).hostname ||
+    !repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)
+  )
+    return null;
+  return new URL(
+    `${origin}/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`,
+  );
+}
+
 function sshRemoteForRepository(repository: ExternalVcsRepository): URL | null {
   const identity = parseSSHCloneIdentity(repository.remote_url);
   if (!identity) return null;
   const provider = repository.provider.toLowerCase();
 
-  if (
-    provider === "github" &&
-    identity.hostname === "github.com" &&
-    repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)
-  ) {
-    return new URL(
-      `https://github.com/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`,
-    );
-  }
+  const githubRemote = githubSSHRemote(repository, identity);
+  if (githubRemote) return githubRemote;
 
   if (provider === "gitlab") {
     const origin = parseProviderOrigin(repository.provider_host);
@@ -256,10 +271,9 @@ function githubRemoteMatches(
   remote: URL,
   parts: string[],
 ): boolean {
-  const origin = parseProviderOrigin(repository.provider_host) ?? "https://github.com";
+  const origin = githubRepositoryOrigin(repository);
   return (
     remote.origin === origin &&
-    origin === "https://github.com" &&
     repositoryPathMatches(parts, repository.provider_owner, repository.provider_name)
   );
 }

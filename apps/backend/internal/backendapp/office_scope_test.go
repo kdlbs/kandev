@@ -186,6 +186,8 @@ func officeMixedParamCases() []officeScopeCase {
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels", ""},
 		{"task-label-remove", http.MethodDelete, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels/:labelName",
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels/l-user-a", ""},
+		{"task-label-remove-query", http.MethodDelete, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels",
+			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels?name=area%2Fbackend", ""},
 		{"task-quorum", http.MethodGet, "/api/v1/office/workspaces/:wsId/tasks/:taskId/quorum",
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/quorum", ""},
 	}

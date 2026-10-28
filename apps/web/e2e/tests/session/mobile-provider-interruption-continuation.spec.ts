@@ -2,8 +2,10 @@ import { test, expect } from "../../fixtures/test-base";
 import path from "node:path";
 import {
   createContinuationFixture,
+  hasAttestedContinuationRefusal,
   waitForContinuationMessage,
   assertNativeContinuationTrace,
+  assertNativeNoContinuationTrace,
   assertContinuationSettingRetired,
 } from "../../helpers/provider-interruption-continuation";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -12,14 +14,14 @@ import { watchWs } from "../../helpers/causal-waits";
 
 test.setTimeout(300_000);
 
-test("phone: completed foreground tools continue without opt-in", async ({
+test("phone: mixed completed and pending foreground tools continue without opt-in", async ({
   testPage,
   backend,
   apiClient,
   seedData,
   prCapture,
 }) => {
-  const fixture = await createContinuationFixture(backend, apiClient, seedData, "shell");
+  const fixture = await createContinuationFixture(backend, apiClient, seedData, "pending-v3");
   try {
     await testPage.goto(`/t/${fixture.taskId}`);
     const session = new SessionPage(testPage);
@@ -31,7 +33,7 @@ test("phone: completed foreground tools continue without opt-in", async ({
     );
     expect(completion.content).toContain("original=1 continuation=1");
     expect(completion.content).toContain("native=");
-    assertNativeContinuationTrace(fixture.tracePath, "shell");
+    assertNativeContinuationTrace(fixture.tracePath, "pending-v3");
     await expect(session.activeChat()).toContainText(
       "Mock interruption: partial history preserved.",
     );
@@ -63,7 +65,7 @@ test("phone: continuation Cancel is visible while running and preserves history"
   seedData,
 }) => {
   const gateway = watchWs(testPage);
-  const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold");
+  const fixture = await createContinuationFixture(backend, apiClient, seedData, "pending-v3-hold");
   try {
     await testPage.goto(`/t/${fixture.taskId}`);
     const session = new SessionPage(testPage);
@@ -102,7 +104,7 @@ test("phone: continuation Cancel is visible while running and preserves history"
     const bounds = await session.recoveryCancelRetryButton().boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage);
-    assertNativeContinuationTrace(fixture.tracePath, "read-hold");
+    assertNativeContinuationTrace(fixture.tracePath, "pending-v3-hold");
     const cancelResponse = gateway.waitForResponse("session.recover", {
       timeout: 35_000,
       requestWhere: (payload) =>
@@ -129,7 +131,82 @@ test("phone: continuation Cancel is visible while running and preserves history"
         return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
       })
       .toBe("WAITING_FOR_INPUT");
-    assertNativeContinuationTrace(fixture.tracePath, "read-hold");
+    assertNativeContinuationTrace(fixture.tracePath, "pending-v3-hold");
+    await assertNoDocumentHorizontalOverflow(testPage);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("phone: pending-tool continuation can be cancelled before dispatch", async ({
+  testPage,
+  backend,
+  apiClient,
+  seedData,
+}) => {
+  const gateway = watchWs(testPage);
+  const fixture = await createContinuationFixture(backend, apiClient, seedData, "pending-v3", {
+    prepareOnly: true,
+  });
+  try {
+    await testPage.goto(`/t/${fixture.taskId}?sessionId=${fixture.sessionId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.sendMessageViaButton("/continuation-pending-v3");
+    await expect(session.transientRetryCard()).toContainText("Continuing in", { timeout: 30_000 });
+    const bounds = await session.recoveryCancelRetryButton().boundingBox();
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    assertNativeNoContinuationTrace(fixture.tracePath, "pending-v3");
+    const cancelResponse = gateway.waitForResponse("session.recover", {
+      timeout: 35_000,
+      requestWhere: (payload) =>
+        payload.action === "cancel_retry" &&
+        payload.task_id === fixture.taskId &&
+        payload.session_id === fixture.sessionId,
+    });
+    await session.recoveryCancelRetryButton().tap();
+    expect((await cancelResponse).payload.cancelled).toBe(true);
+    const cancelled = await waitForContinuationMessage(
+      apiClient,
+      fixture.sessionId,
+      (message) => message.metadata?.recovery_disposition === "cancelled",
+    );
+    expect(cancelled.metadata?.runtime_retained).toBe(true);
+    await expect(session.transientRetryCard()).toBeHidden();
+    await expect(session.activeChat()).toContainText(
+      "Mock interruption: partial history preserved.",
+    );
+    assertNativeNoContinuationTrace(fixture.tracePath, "pending-v3");
+    await assertNoDocumentHorizontalOverflow(testPage);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("phone: legacy pending tools show refusal details without recovery controls", async ({
+  testPage,
+  backend,
+  apiClient,
+  seedData,
+}) => {
+  const fixture = await createContinuationFixture(backend, apiClient, seedData, "pending");
+  try {
+    await testPage.goto(`/t/${fixture.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const failure = await waitForContinuationMessage(
+      apiClient,
+      fixture.sessionId,
+      (message) => message.metadata?.runtime_retained === true,
+    );
+    expect(hasAttestedContinuationRefusal(failure, "unsafe_work", 0)).toBe(true);
+    await expect(session.activeChat()).toContainText(
+      "Kandev cannot continue automatically because a tool is pending or its outcome is uncertain.",
+    );
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
+    await expect(session.transientRetryCard()).toBeHidden();
+    assertNativeNoContinuationTrace(fixture.tracePath, "pending");
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();

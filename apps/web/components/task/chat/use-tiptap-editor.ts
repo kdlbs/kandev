@@ -21,7 +21,7 @@ import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
 import {
   extractEntityReferences,
   getMarkdownText,
-  textToHtml,
+  textToEditorContent,
   handleEditorPaste,
 } from "./tiptap-helpers";
 import type { ImagePasteIssue } from "./clipboard-attachments";
@@ -462,7 +462,7 @@ function syncEditorValue({
   }
 
   isSyncingRef.current = true;
-  editor.commands.setContent(textToHtml(value));
+  editor.commands.setContent(textToEditorContent(value));
   isSyncingRef.current = false;
   initialSyncDoneRef.current = true;
 }
@@ -596,7 +596,7 @@ function useEditorImperativeHandle(
         if (v === "") {
           editor.commands.clearContent();
         } else {
-          editor.commands.setContent(textToHtml(v));
+          editor.commands.setContent(textToEditorContent(v));
         }
         isSyncingRef.current = false;
         onChange(v);

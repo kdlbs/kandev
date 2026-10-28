@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/plugins"
@@ -77,8 +78,8 @@ type pluginCredentialService interface {
 }
 
 type githubCloneCredentialService interface {
-	ResolveGitCredential(
-		context.Context, string, string, string, string,
+	ResolveGitCredentialForHost(
+		context.Context, string, string, string, string, string,
 	) (username, password string, err error)
 }
 
@@ -108,9 +109,7 @@ func (p repositoryCloneCredentialProvider) ResolveGitCredential(
 		if p.github == nil {
 			return "", "", repoclone.ErrWorkspaceCredentialUnavailable
 		}
-		return p.github.ResolveGitCredential(
-			ctx, request.WorkspaceID, providerID, request.Owner, request.Name,
-		)
+		return p.resolveGitHubCloneCredential(ctx, request, providerID)
 	}
 	if p.plugins == nil {
 		return "", "", repoclone.ErrWorkspaceCredentialUnavailable
@@ -240,9 +239,16 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context
 	if _, err := a.authorizeTaskRepository(ctx, scope.TaskID, scope.RepositoryID); err != nil {
 		return err
 	}
-	if !strings.EqualFold(scope.ProviderID, gitCredentialGitHubProviderID) ||
-		!strings.EqualFold(scope.Host, gitCredentialGitHubHost) {
+	if !strings.EqualFold(scope.ProviderID, gitCredentialGitHubProviderID) {
 		return a.authorizeRepositoryIdentity(ctx, scope)
+	}
+	repository, err := a.repo.GetRepository(ctx, scope.RepositoryID)
+	if err != nil {
+		return err
+	}
+	host, _, err := repositoryHTTPSIdentity(repository)
+	if err != nil || !strings.EqualFold(host, scope.Host) {
+		return fmt.Errorf("repository host does not match lease scope")
 	}
 	owner, repo, err := gitCredentialScopeOwnerRepo(scope.Path)
 	if err != nil {
@@ -258,6 +264,9 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context
 	// still proves github.com. This fallback is upstream-only. Preserve any
 	// provider identity carried by the lease before using that legacy proof;
 	// fork credentials must pass the destination check above.
+	if !strings.EqualFold(scope.Host, gitCredentialGitHubHost) {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
 	return a.authorizeLegacyGitHubRepositoryIdentity(ctx, scope)
 }
 
@@ -327,4 +336,28 @@ func repositoryHTTPSIdentity(repository *taskmodels.Repository) (string, string,
 		return "", "", err
 	}
 	return identity.Host, identity.Path, nil
+}
+
+func (p repositoryCloneCredentialProvider) resolveGitHubCloneCredential(ctx context.Context, request repoclone.GitCredentialRequest, providerID string) (string, string, error) {
+	raw := request.ProviderHost
+	if raw == "" {
+		raw = gitCredentialGitHubHost
+	}
+	host, err := githubhost.Parse(raw)
+	if err != nil {
+		return "", "", err
+	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(request.CloneURL, host.WebURL()); err != nil {
+		return "", "", fmt.Errorf("GitHub clone credential origin: %w", err)
+	}
+	cloneURL, err := url.Parse(request.CloneURL)
+	if err != nil || !strings.EqualFold(strings.TrimSuffix(strings.TrimPrefix(cloneURL.Path, "/"), ".git"), request.Owner+"/"+request.Name) {
+		return "", "", fmt.Errorf("GitHub clone credential repository does not match the requested scope")
+	}
+	return p.github.ResolveGitCredentialForHost(ctx, request.WorkspaceID, providerID, host.String(), request.Owner, request.Name)
+}
+
+func isValidGitHubProviderHost(raw string) bool {
+	_, err := githubhost.Parse(raw)
+	return err == nil
 }

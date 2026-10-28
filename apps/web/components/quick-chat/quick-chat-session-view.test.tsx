@@ -8,6 +8,7 @@ const sessionRows = vi.hoisted(
       {
         task_id?: string;
         agent_profile_id?: string;
+        state?: string;
         is_passthrough?: boolean;
         metadata?: Record<string, unknown> | null;
       }
@@ -108,6 +109,25 @@ it("unmounts retired configuration content before hydration or automatic resumpt
   expect(useSessionResumption).not.toHaveBeenCalled();
   expect(screen.queryByTestId(TEST_IDS.quickChatContent)).toBeNull();
   expect(screen.getByRole("status").textContent).toBe("configChat:restartingSession");
+});
+
+it("does not block a Configuration Chat opening prompt on its optimistic CREATED row", () => {
+  sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID, state: "CREATED" };
+
+  render(
+    <QuickChatSessionView
+      session={{
+        ...session,
+        kind: "config",
+        taskId: HYDRATED_TASK_ID,
+        initialPrompt: "/ask-single",
+      }}
+    />,
+  );
+
+  expect(quickChatContentSpy).toHaveBeenCalledWith(
+    expect.objectContaining({ initialPrompt: "/ask-single", startupPending: false }),
+  );
 });
 
 // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2

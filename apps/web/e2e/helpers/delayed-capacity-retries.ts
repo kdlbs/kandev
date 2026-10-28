@@ -4,6 +4,7 @@ import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import { SessionPage } from "../pages/session-page";
+import { watchWs, type WsWatcher } from "./causal-waits";
 import {
   advanceCapacityRetries,
   driveCapacityRetries,
@@ -16,6 +17,26 @@ import {
   waitForRetainedTurnFailure,
 } from "./transient-turn-runtime-continuity";
 
+async function driveDelayedCapacityRetries(
+  ws: WsWatcher,
+  backend: BackendContext,
+  api: ApiClient,
+  sessionId: string,
+) {
+  await driveCapacityRetries(backend, api, sessionId, 5, () =>
+    ws.waitForEvent("session.message.updated", {
+      where: (payload) => {
+        const metadata = payload.metadata as Record<string, unknown> | undefined;
+        return (
+          payload.session_id === sessionId &&
+          metadata?.recovery_phase === "waiting" &&
+          metadata.attempt === 6
+        );
+      },
+    }),
+  );
+}
+
 export async function delayedCapacitySuccess(
   page: Page,
   backend: BackendContext,
@@ -24,6 +45,7 @@ export async function delayedCapacitySuccess(
   options: { mobile: boolean; capture: PrAssetCapture },
 ) {
   const { mobile, capture } = options;
+  const ws = watchWs(page);
   const fixture = await createRetainedCapacityFixture(backend, api, seed, "completed-tools", {
     initialPrompt: "/capacity-completed-tools:6",
     controlRetryClock: true,
@@ -35,7 +57,7 @@ export async function delayedCapacitySuccess(
     await expect(session.transientRetryCard()).toBeVisible();
     await expect(session.transientRetryCard()).toContainText("of 11");
     await expect(session.activeChat().getByTestId("retry-window-deadline")).toBeVisible();
-    await driveCapacityRetries(backend, api, fixture.sessionId, 5);
+    await driveDelayedCapacityRetries(ws, backend, api, fixture.sessionId);
     await expect(session.transientRetryCard()).toContainText("Attempt 6 of 11");
     await page.reload();
     await session.waitForLoad();
@@ -135,6 +157,7 @@ export async function delayedCapacityCancellation(
   seed: SeedData,
   mobile: boolean,
 ) {
+  const ws = watchWs(page);
   const fixture = await createRetainedCapacityFixture(backend, api, seed, "completed-tools", {
     initialPrompt: "/capacity-completed-tools:100",
     controlRetryClock: true,
@@ -143,7 +166,7 @@ export async function delayedCapacityCancellation(
     const session = new SessionPage(page);
     await page.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
-    await driveCapacityRetries(backend, api, fixture.sessionId, 5);
+    await driveDelayedCapacityRetries(ws, backend, api, fixture.sessionId);
     await expect(session.transientRetryCard()).toContainText("Attempt 6 of 11");
     const cancel = session.activeChat().getByTestId("recovery-cancel-retry-button");
     if (mobile) await cancel.tap();
@@ -169,6 +192,7 @@ export async function delayedCapacityRestart(
   api: ApiClient,
   seed: SeedData,
 ) {
+  const ws = watchWs(page);
   const fixture = await createRetainedCapacityFixture(backend, api, seed, "completed-tools", {
     initialPrompt: "/capacity-completed-tools:100",
     controlRetryClock: true,
@@ -177,7 +201,7 @@ export async function delayedCapacityRestart(
     const session = new SessionPage(page);
     await page.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
-    await driveCapacityRetries(backend, api, fixture.sessionId, 5);
+    await driveDelayedCapacityRetries(ws, backend, api, fixture.sessionId);
     await expect(session.transientRetryCard()).toContainText("Attempt 6 of 11");
     await backend.restart({ KANDEV_DEBUG_PPROF_ENABLED: "true" });
     await freezeCapacityRetries(backend);

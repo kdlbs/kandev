@@ -30,7 +30,7 @@ func classifySyncErr(err error) authcircuit.FailureClass {
 	if err == nil {
 		return authcircuit.FailureClassNone
 	}
-	if errors.Is(err, errGitHubClientNotConfigured) || errors.Is(err, errGitLabClientNotConfigured) {
+	if errors.Is(err, github.ErrGitHubHostMismatch) || errors.Is(err, errGitHubClientNotConfigured) || errors.Is(err, errGitLabClientNotConfigured) {
 		return authcircuit.FailureClassConfig
 	}
 

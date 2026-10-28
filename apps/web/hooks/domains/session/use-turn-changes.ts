@@ -7,6 +7,7 @@ import {
   listTurnChangeHistory,
 } from "@/lib/api/domains/turn-changes-api";
 import type { TurnChangeHistoryPage, TurnChangeSetSummary } from "@/lib/types/turn-changes";
+import { useWebSocketClient } from "@/lib/ws/connection";
 
 const PAGE_SIZE = 50;
 const EMPTY_SUMMARIES: TurnChangeSetSummary[] = [];
@@ -54,7 +55,38 @@ export function clearTurnChangeRequestsForTest(): void {
   inFlightPages.clear();
 }
 
-export function useSessionTurnChanges(sessionId: string | null) {
+function useTurnChangeReconciliation(
+  sessionId: string | null,
+  detailActive: boolean,
+  load: (offset: number) => Promise<void>,
+  setError: (error: unknown) => void,
+) {
+  const client = useWebSocketClient();
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  useEffect(() => {
+    if (!detailActive || !sessionId || !client || connectionStatus !== "connected") return;
+    let disposed = false;
+    const subscription = client.subscribeSessionWithReady(sessionId);
+    void subscription.ready
+      .then(async () => {
+        const earlier = inFlightPages.get(`${sessionId}:0`);
+        if (earlier) await earlier.catch(() => undefined);
+        if (!disposed) await load(0);
+      })
+      .catch((err: unknown) => {
+        if (!disposed) setError(err);
+      });
+    return () => {
+      disposed = true;
+      subscription.unsubscribe();
+    };
+  }, [client, connectionStatus, detailActive, sessionId, load, setError]);
+}
+
+export function useSessionTurnChanges(
+  sessionId: string | null,
+  { detailActive = true }: { detailActive?: boolean } = {},
+) {
   const store = useAppStoreApi();
   const summaries = useAppStore((state) => selectTurnChangeSummaries(state.turnChanges, sessionId));
   const loaded = useAppStore((state) =>
@@ -85,6 +117,7 @@ export function useSessionTurnChanges(sessionId: string | null) {
   useEffect(() => {
     if (sessionId && !loaded) void load(0);
   }, [sessionId, loaded, load]);
+  useTurnChangeReconciliation(sessionId, detailActive, load, setError);
 
   const loadMore = useCallback(() => {
     if (nextOffset !== null) void load(nextOffset);

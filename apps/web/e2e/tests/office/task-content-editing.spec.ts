@@ -1,6 +1,6 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
-import { watchWs } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for in-place title and description editing on the Office task
@@ -74,6 +74,7 @@ test.describe("task title and description editing", () => {
     await testPage.getByTestId("office-task-title").dblclick();
     const input = testPage.getByTestId("office-task-title-input");
     await input.fill("  Renamed via inline edit  ");
+    const titleSaved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/tasks/${task.id}$`));
     await input.press("Enter");
 
     // AC-3: renders the trimmed draft immediately and closes the editor.
@@ -81,6 +82,7 @@ test.describe("task title and description editing", () => {
     await expect(testPage.getByTestId("office-task-title")).toHaveText("Renamed via inline edit");
 
     // AC-26: persisted, and only the title field changed.
+    expect((await titleSaved).ok()).toBe(true);
     const persisted = (await apiClient.getTask(task.id)) as unknown as Record<string, unknown>;
     expect(persisted.title).toBe("Renamed via inline edit");
   });

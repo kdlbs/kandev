@@ -18,6 +18,7 @@ test.describe("Coordinator Needs you and Queue", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 1280, height: 1200 });
     const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
       name: "Planner",
       agent_profile_id: seedData.agentProfileId,
@@ -63,7 +64,19 @@ test.describe("Coordinator Needs you and Queue", () => {
     await expect(card.getByText("The agent is waiting for your answer")).toBeVisible();
     // AC-COORDINATOR-RELAY-001.1: with phase 3 effective (the e2e profile), Answer here
     // replaces the phase 1 "Your answer, on the task" text for an answerable question.
-    await expect(card.getByRole("button", { name: "Answer here" })).toBeVisible();
+    const answerHere = card.getByRole("button", { name: "Answer here" });
+    await expect(answerHere).toBeVisible();
+    await answerHere.click();
+    const answerPanel = card.getByTestId("question-answer");
+    const container = answerPanel.getByTestId("clarification-overlay-container");
+    await expect(container).toBeVisible();
+    const hostMax = Number(await container.getAttribute("data-host-max-height"));
+    expect(hostMax).toBeGreaterThan(Math.round((await testPage.evaluate(() => innerHeight)) * 0.5));
+    await expect(answerPanel.getByTestId("clarification-panel-expand")).toBeEnabled();
+    await answerPanel.getByTestId("clarification-panel-expand").click();
+    await expect(container).toHaveCSS("height", `${hostMax}px`);
+    await answerPanel.getByTestId("clarification-panel-reset").click();
+    await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
 
     const askAboutThis = card.getByRole("button", { name: "Ask about this" });
     await expect(askAboutThis).toBeVisible();

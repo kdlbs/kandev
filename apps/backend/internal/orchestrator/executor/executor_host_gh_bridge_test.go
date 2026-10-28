@@ -420,6 +420,8 @@ func TestExplicitGitHubTokensAreScopedToTheirGitHubHost(t *testing.T) {
 		env  map[string]string
 		want bool
 	}{
+		{name: "public token for GHE cloud", host: "acme.ghe.com", env: map[string]string{envGHToken: "cloud"}, want: true},
+		{name: "enterprise token does not bypass GHE cloud", host: "acme.ghe.com", env: map[string]string{"GH_ENTERPRISE_TOKEN": "server"}},
 		{name: "public token for public host", host: "github.com", env: map[string]string{envGHToken: "public"}, want: true},
 		{name: "enterprise token for enterprise host", host: "ghe.example", env: map[string]string{"GH_ENTERPRISE_TOKEN": "enterprise"}, want: true},
 		{name: "public token does not bypass enterprise host", host: "ghe.example", env: map[string]string{envGHToken: "public"}},

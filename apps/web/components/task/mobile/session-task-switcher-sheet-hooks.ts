@@ -6,6 +6,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { linkToTask } from "@/lib/links";
 import { useRouter } from "@/lib/routing/client-router";
+import { mapWorkflowItem } from "@/lib/routing/route-bootstrap";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import {
@@ -320,12 +321,7 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
           ...state.workflows.items.filter(
             (w: { workspaceId: string }) => w.workspaceId !== newWorkspaceId,
           ),
-          ...newWorkspaceWorkflows.map((w) => ({
-            id: w.id,
-            workspaceId: w.workspace_id,
-            name: w.name,
-            hidden: w.hidden,
-          })),
+          ...newWorkspaceWorkflows.map(mapWorkflowItem),
         ],
         activeId: firstWorkflow.id,
         taskWorkflowCoverage,

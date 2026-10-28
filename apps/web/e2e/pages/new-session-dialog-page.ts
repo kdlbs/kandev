@@ -1,8 +1,21 @@
 import type { Locator, Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../helpers/animations";
 
 /** Focused page object for agent-profile controls in the New Session dialog. */
 export class NewSessionDialogPage {
   constructor(private readonly page: Page) {}
+
+  advancedTrigger(): Locator {
+    return this.page.getByTestId("new-session-advanced-settings-trigger");
+  }
+
+  mcpTrigger(): Locator {
+    return this.page.getByTestId("new-session-mcp-select");
+  }
+
+  mcpPicker(): Locator {
+    return this.page.getByTestId("new-session-mcp-options");
+  }
 
   /** Agent profile combobox inside the new-session or handoff dialog. */
   agentSelector(): Locator {
@@ -25,6 +38,7 @@ export class NewSessionDialogPage {
     } else {
       await selector.click();
     }
+    await waitForFiniteAnimations(this.page.getByRole("listbox", { name: "Suggestions" }));
     const option = this.agentOptions().filter({ hasText: profileName });
     if (touch) {
       await option.tap();

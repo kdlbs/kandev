@@ -1,5 +1,7 @@
 "use client";
 
+import { githubResourceKey } from "@/lib/github/host";
+
 import { IconCircle, IconCircleCheck } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { useTranslation } from "react-i18next";
@@ -117,7 +119,12 @@ export function IssueList({
       emptyMessage={t("github:noIssuesMatchThisFilter")}
     >
       {items.map((issue) => {
-        const key = `${issue.repo_owner}/${issue.repo_name}#${issue.number}`;
+        const key = githubResourceKey(
+          issue.repo_owner,
+          issue.repo_name,
+          issue.number,
+          issue.github_host,
+        );
         return (
           <IssueRow
             key={key}

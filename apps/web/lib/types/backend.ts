@@ -136,6 +136,7 @@ export type TaskEventPayload = {
     updated_at?: string;
   }>;
   primary_session_id?: string | null;
+  quick_chat_creation_id?: string;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
@@ -301,6 +302,8 @@ export type WorkflowPayload = {
   description?: string;
   prompt?: string;
   agent_profile_id?: string;
+  source?: string;
+  source_path?: string;
   hidden?: boolean;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
   style?: "kanban" | "office" | "custom";

@@ -7,6 +7,7 @@ import {
   isCurrentWorkspaceContext,
   retryAfterMilliseconds,
 } from "@/lib/state/workspace-context";
+import { mapWorkflowItem } from "@/lib/routing/route-bootstrap";
 import type { AppState } from "@/lib/state/store";
 import type { StoreApi } from "zustand";
 import { useForegroundRefresh } from "./use-foreground-refresh";
@@ -108,17 +109,7 @@ function useWorkflowsFetchEffect(
         if (cancelled || staleWorkspaceContext) {
           return;
         }
-        const mapped = response.workflows.map((workflow) => ({
-          id: workflow.id,
-          workspaceId: workflow.workspace_id,
-          name: workflow.name,
-          description: workflow.description,
-          prompt: workflow.prompt,
-          sortOrder: workflow.sort_order ?? 0,
-          agent_profile_id: workflow.agent_profile_id,
-          hidden: workflow.hidden,
-          style: workflow.style,
-        }));
+        const mapped = response.workflows.map(mapWorkflowItem);
         setWorkflows(
           mapped,
           reconcileTaskWorkflowCoverage(state, response.task_workflow_coverage, overviewRead),

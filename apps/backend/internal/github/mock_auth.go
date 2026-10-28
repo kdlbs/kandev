@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 // MockAuthState supplies workspace-scoped principals while delegating API
 // behavior to the existing shared MockClient data set.
 type MockAuthState struct {
-	mu           sync.RWMutex
-	client       *MockClient
-	capabilities map[string]map[GitHubAppCapability]bool
-	cliAccounts  []GHAccount
+	registrationHost func(context.Context, string) (string, error)
+	mu               sync.RWMutex
+	client           *MockClient
+	capabilities     map[string]map[GitHubAppCapability]bool
+	cliAccounts      []GHAccount
 }
 
 func NewMockAuthState(client *MockClient) *MockAuthState {
@@ -41,9 +44,11 @@ func (m *MockAuthState) ResolveAutomation(
 		login, _ = m.client.GetAuthenticatedUser(context.Background())
 	}
 	return &ResolvedCredential{
-		Client: &mockPrincipalClient{MockClient: m.client, login: login},
+		Client:     &mockPrincipalClient{MockClient: m.client, login: login},
+		GitHubHost: defaultAuthFlowHost(connection.GitHubHost),
 		Principal: AuthPrincipal{
 			Kind: kind, Source: connection.Source, Login: login, InstallationID: installationID,
+			GitHubHost: defaultAuthFlowHost(connection.GitHubHost),
 		},
 		Capabilities: m.workspaceCapabilities(connection.WorkspaceID),
 		RateTracker:  NewRateTracker(nil, nil),
@@ -52,17 +57,26 @@ func (m *MockAuthState) ResolveAutomation(
 }
 
 func (m *MockAuthState) ResolveUser(
-	_ context.Context,
+	ctx context.Context,
 	connection *UserConnection,
 	_ ResolveCredentialRequest,
 ) (*ResolvedCredential, error) {
 	if m == nil || m.client == nil || connection == nil {
 		return nil, ErrGitHubPersonalRequired
 	}
+	host := defaultGitHubHost
+	if m.registrationHost != nil {
+		var err error
+		host, err = m.registrationHost(ctx, connection.AppRegistrationID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &ResolvedCredential{
-		Client: &mockPrincipalClient{MockClient: m.client, login: connection.Login},
+		GitHubHost: host,
+		Client:     &mockPrincipalClient{MockClient: m.client, login: connection.Login},
 		Principal: AuthPrincipal{
-			Kind: AuthPrincipalHuman, Source: ConnectionSourceGitHubAppUser,
+			Kind: AuthPrincipalHuman, Source: ConnectionSourceGitHubAppUser, GitHubHost: host,
 			Login: connection.Login, UserID: connection.UserID,
 		},
 		Capabilities: allTokenCapabilities(),
@@ -141,6 +155,19 @@ func (s *Service) enableMockAuth(client *MockClient) *MockAuthState {
 		return s.mockAuth
 	}
 	state := NewMockAuthState(client)
+	state.registrationHost = func(ctx context.Context, id string) (string, error) {
+		if id == "" || s.store == nil {
+			return defaultGitHubHost, nil
+		}
+		registration, err := s.store.GetAppRegistration(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if registration == nil {
+			return "", ErrGitHubNotConfigured
+		}
+		return defaultAuthFlowHost(registration.GitHubHost), nil
+	}
 	s.mockAuth = state
 	s.ghAccountLister = state.ListCLIAccounts
 	if s.resolver != nil {
@@ -164,6 +191,7 @@ func (s *Service) enableMockAuth(client *MockClient) *MockAuthState {
 		}
 		return &mockPrincipalClient{MockClient: client, login: login}
 	}
+	s.hostTokenClientFactory = func(token string, _ githubhost.Host) Client { return s.tokenClientFactory(token) }
 	return state
 }
 

@@ -135,3 +135,22 @@ export async function assertLatestTurnCardInView(session: SessionPage) {
     )
     .toBeLessThanOrEqual(0);
 }
+
+export async function assertTurnCardMessageGap(card: Locator) {
+  const gap = await card.evaluate((element) => {
+    const list = element.closest<HTMLElement>(".chat-message-list");
+    if (!list) return null;
+    const nextMessage = Array.from(
+      list.querySelectorAll<HTMLElement>(
+        "[data-testid='user-message-bubble'], [data-agent-message-body][data-message-id]",
+      ),
+    ).find((message) =>
+      Boolean(element.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING),
+    );
+    if (!nextMessage) return null;
+    return nextMessage.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+  });
+
+  expect(gap).not.toBeNull();
+  expect(gap!).toBeGreaterThanOrEqual(16);
+}

@@ -733,6 +733,7 @@ func (s *Service) startCreatedSessionWithComposedPromptAndLifecycleOwnership(
 
 type startCreatedSessionOptions struct {
 	lifecycleLockHeld              bool
+	onQuickChatStartAttemptClaimed func(string)
 	refuseIfAgentRunning           bool
 	initialCreatePrompt            bool
 	beforeInitialPromptDispatch    func() error
@@ -1082,15 +1083,16 @@ func (s *Service) startCreatedSession(
 		}()
 	}
 	launchOptions := executor.LaunchOptions{
-		AgentProfileID:       effectiveProfileID,
-		ExecutorID:           executorID,
-		Prompt:               effectivePrompt,
-		StartAgent:           true,
-		RefuseIfAgentRunning: options.refuseIfAgentRunning,
-		McpMode:              mcpMode,
-		Attachments:          attachments,
-		TurnID:               initialTurnID,
-		OnExecutionAdmitted:  options.onExecutionAdmitted,
+		AgentProfileID:        effectiveProfileID,
+		ExecutorID:            executorID,
+		Prompt:                effectivePrompt,
+		StartAgent:            true,
+		RefuseIfAgentRunning:  options.refuseIfAgentRunning,
+		McpMode:               mcpMode,
+		Attachments:           attachments,
+		TurnID:                initialTurnID,
+		OnExecutionAdmitted:   options.onExecutionAdmitted,
+		OnStartAttemptClaimed: options.onQuickChatStartAttemptClaimed,
 	}
 	if err := s.configureInitialPromptDispatch(
 		ctx, sessionID, initialTurnID, initialTurnCreated, effectivePrompt, attachments, options, &launchOptions,

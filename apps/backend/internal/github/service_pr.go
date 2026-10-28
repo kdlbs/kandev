@@ -43,6 +43,7 @@ func (s *Service) SubmitReviewForWorkspace(
 	if err != nil {
 		return AuthPrincipal{}, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
 		return AuthPrincipal{}, err
 	}
@@ -90,6 +91,7 @@ func (s *Service) RequestReviewersForWorkspace(
 	if err != nil {
 		return AuthPrincipal{}, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
 		return AuthPrincipal{}, err
 	}
@@ -150,6 +152,7 @@ func (s *Service) MergePRForWorkspace(
 	if err != nil {
 		return AuthPrincipal{}, "", err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
 		return AuthPrincipal{}, "", err
 	}
@@ -203,6 +206,7 @@ func (s *Service) GetRepoMergeMethodsForWorkspace(
 	if err != nil {
 		return RepoMergeMethods{}, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	return s.getRepoMergeMethods(ctx, resolved.Client, resolved.CacheScope, owner, repo)
 }
 
@@ -273,7 +277,15 @@ func (s *Service) GetPRForWorkspace(
 		}
 		return nil, err
 	}
-	return resolved.Client.GetPR(ctx, owner, repo, number)
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
+	pr, err := resolved.Client.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
+		return nil, err
+	}
+	return pr, nil
 }
 
 // GetPRForAutomation fetches pull-request details through the workspace-owned
@@ -289,7 +301,14 @@ func (s *Service) GetPRForAutomation(
 	if err != nil {
 		return nil, err
 	}
-	return resolved.Client.GetPR(ctx, owner, repo, number)
+	pr, err := resolved.Client.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
+		return nil, err
+	}
+	return pr, nil
 }
 
 // GetIssue fetches basic issue details from GitHub. The create-task dialog is
@@ -314,7 +333,15 @@ func (s *Service) GetIssueForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return resolved.Client.GetIssue(ctx, owner, repo, number)
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
+	issue, err := resolved.Client.GetIssue(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
+		return nil, err
+	}
+	return issue, nil
 }
 
 // GetPRFeedback fetches live PR feedback from GitHub. Cached briefly with
@@ -341,7 +368,8 @@ func (s *Service) GetPRFeedbackForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return s.getPRFeedback(ctx, resolved.Client, resolved.CacheScope, workspaceID, owner, repo, number)
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
+	return s.getPRFeedback(withGitHubOperationFence(ctx, s, workspaceID, resolved), resolved.Client, resolved.CacheScope, workspaceID, owner, repo, number)
 }
 
 func (s *Service) getPRFeedback(
@@ -375,6 +403,9 @@ func (s *Service) getPRFeedback(
 		// than on every panel render served from cache, and it inherits
 		// fetchCtx so a client disconnecting mid-flight can't abort the write
 		// that its own fetch just earned.
+		if err := requireGitHubOperationCurrent(fetchCtx); err != nil {
+			return nil, err
+		}
 		s.persistPRFeedbackState(fetchCtx, workspaceID, feedback)
 		return feedback, nil
 	})
@@ -405,7 +436,8 @@ func (s *Service) GetPRStatusForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return s.getPRStatus(ctx, resolved.Client, resolved.CacheScope, owner, repo, number)
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
+	return s.getPRStatus(withGitHubOperationFence(ctx, s, workspaceID, resolved), resolved.Client, resolved.CacheScope, owner, repo, number)
 }
 
 func (s *Service) getPRStatus(
@@ -424,7 +456,14 @@ func (s *Service) getPRStatus(
 	})
 	key := scopedCacheKey(cacheScope, prStatusCacheKey(owner, repo, number))
 	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
-		return client.GetPRStatus(fetchCtx, owner, repo, number)
+		status, err := client.GetPRStatus(fetchCtx, owner, repo, number)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireGitHubOperationCurrent(fetchCtx); err != nil {
+			return nil, err
+		}
+		return status, nil
 	})
 	if err != nil {
 		return nil, err
@@ -450,9 +489,10 @@ func derivedFetchContext(ctx context.Context) (context.Context, context.CancelFu
 
 // PRRef identifies a pull request by owner/repo/number.
 type PRRef struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
+	ExpectedHost string `json:"expected_host,omitempty"`
+	Owner        string `json:"owner"`
+	Repo         string `json:"repo"`
+	Number       int    `json:"number"`
 }
 
 // prStatusBatchConcurrency bounds how many upstream GetPRStatus calls run in
@@ -475,10 +515,28 @@ func (s *Service) GetPRStatusesBatch(ctx context.Context, refs []PRRef) (map[str
 func (s *Service) GetPRStatusesBatchForWorkspace(
 	ctx context.Context, workspaceID, userID string, refs []PRRef,
 ) (map[string]*PRStatus, error) {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	selected, err := s.selectedGitHubHost(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range refs {
+		if refs[i].ExpectedHost != "" && refs[i].ExpectedHost != selected.String() {
+			return nil, ErrGitHubHostMismatch
+		}
+		refs[i].ExpectedHost = selected.String()
+	}
+	if err := requireExpectedGitHubHost(ctx, selected); err != nil {
+		return nil, err
+	}
+	ctx = withExpectedGitHubHost(ctx, selected.String())
 	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
 	if err != nil {
 		return nil, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -503,7 +561,7 @@ func (s *Service) GetPRStatusesBatchForWorkspace(
 			allowed = append(allowed, ref)
 		}
 	}
-	return s.getPRStatusesBatchWithClient(ctx, resolved.Client, resolved.CacheScope, allowed)
+	return s.getPRStatusesBatchWithClient(withGitHubOperationFence(ctx, s, workspaceID, resolved), resolved.Client, resolved.CacheScope, allowed)
 }
 
 func (s *Service) getPRStatusesBatchWithClient(
@@ -539,7 +597,7 @@ func (s *Service) getPRStatusesBatchWithClient(
 				return
 			}
 			mu.Lock()
-			result[prStatusCacheKey(r.Owner, r.Repo, r.Number)] = status
+			result[githubResourceResponseKey(r.ExpectedHost, r.Owner, r.Repo, r.Number)] = status
 			mu.Unlock()
 		}(ref)
 	}
@@ -567,6 +625,7 @@ func (s *Service) GetPRFilesForWorkspace(
 	if err != nil {
 		return nil, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	return resolved.Client.ListPRFiles(ctx, owner, repo, number)
 }
 
@@ -606,6 +665,7 @@ func (s *Service) GetPRCommitsForWorkspace(
 	if err != nil {
 		return PRCommitsResult{}, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	pr, err := resolved.Client.GetPR(ctx, owner, repo, number)
 	if err != nil {
 		return PRCommitsResult{}, fmt.Errorf("get PR #%d for commit history: %w", number, err)
@@ -639,6 +699,7 @@ func (s *Service) GetPRCommitDetailForWorkspace(
 	if err != nil {
 		return PRCommitDetail{}, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	return resolved.Client.GetPRCommitDetail(ctx, owner, repo, sha)
 }
 

@@ -171,6 +171,7 @@ export type MockCheckRun = {
 export type MockGitHubConnectionStatus = "active" | "invalid" | "suspended" | "revoked";
 
 export type MockGitHubWorkspaceConnection = {
+  github_host?: string;
   source: "pat" | "gh_cli" | "github_app_installation" | "legacy_shared";
   status: MockGitHubConnectionStatus;
   login?: string;
@@ -205,6 +206,7 @@ export type MockGitHubCLIAccount = {
 };
 
 export type MockGitHubAppRegistration = {
+  github_host?: string;
   id: string;
   display_name: string;
   app_id: number;
@@ -2152,7 +2154,11 @@ export class ApiClient {
     return this.request<Record<string, unknown>>(
       "PUT",
       `/api/v1/github/mock/app-registrations/${encodeURIComponent(registration.id)}`,
-      { display_name: registration.display_name, app_id: registration.app_id },
+      {
+        display_name: registration.display_name,
+        app_id: registration.app_id,
+        ...(registration.github_host ? { github_host: registration.github_host } : {}),
+      },
     );
   }
 
@@ -3298,6 +3304,7 @@ export class ApiClient {
     workflowStepId: string,
     agentProfileId: string,
     opts?: {
+      executor_profile_id?: string;
       repos?: Array<{ owner: string; name: string }>;
       prompt?: string;
       review_scope?: string;
@@ -3310,6 +3317,7 @@ export class ApiClient {
       workflow_id: workflowId,
       workflow_step_id: workflowStepId,
       agent_profile_id: agentProfileId,
+      ...(opts?.executor_profile_id ? { executor_profile_id: opts.executor_profile_id } : {}),
       repos: opts?.repos ?? [],
       prompt: opts?.prompt ?? "",
       review_scope: opts?.review_scope ?? "user_and_teams",

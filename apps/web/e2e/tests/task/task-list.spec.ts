@@ -4,7 +4,7 @@ import { waitForHttp } from "../../helpers/causal-waits";
 
 async function selectListOption(page: Page, testId: string, optionLabel: string) {
   await page.getByTestId(testId).click();
-  await page.getByRole("listbox").getByRole("option", { name: optionLabel }).click();
+  await page.getByRole("listbox").getByRole("option", { name: optionLabel, exact: true }).click();
 }
 
 async function taskRowTitles(page: Page): Promise<string[]> {
@@ -174,9 +174,12 @@ test.describe("Task List", () => {
     });
     await expect.poll(() => taskRowTitles(testPage)).toEqual(["Alpha sort task", "Zulu sort task"]);
 
-    const settings = await apiClient.getUserSettings();
-    expect(settings.settings.tasks_list_sort).toBe("title_asc");
-    expect(settings.settings.tasks_list_group).toBe("workflow_step");
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_sort)
+      .toBe("title_asc");
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_group)
+      .toBe("workflow_step");
     await testPage.reload();
     await expect(testPage.getByTestId("tasks-list-group")).toContainText("Workflow step");
   });

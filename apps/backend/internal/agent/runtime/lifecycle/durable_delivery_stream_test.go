@@ -51,36 +51,50 @@ type canonicalProjectionFailureDeliveryRepository struct {
 
 func (r *canonicalProjectionFailureDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
 	context.Context, *models.AgentDeliveryEvent, *models.AgentDeliveryEffect,
-) (bool, error) {
-	return false, r.projectionErr
+) (models.CanonicalAgentDeliveryProjectionResult, error) {
+	return models.CanonicalAgentDeliveryProjectionResult{}, r.projectionErr
 }
 
 type canonicalProjectionDeliveryRepository struct {
 	recordingAgentDeliveryRepository
 }
 
+type canonicalProjectionWithoutIdentityDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+}
+
 type canonicalBatchProjectionDeliveryRepository struct {
 	recordingAgentDeliveryRepository
 	batchCalls int
+	emptyIDs   bool
 }
 
 func (r *canonicalProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
 	_ context.Context, event *models.AgentDeliveryEvent, _ *models.AgentDeliveryEffect,
-) (bool, error) {
+) (models.CanonicalAgentDeliveryProjectionResult, error) {
 	r.projected = append(r.projected, event)
-	return false, nil
+	return models.CanonicalAgentDeliveryProjectionResult{CanonicalMessageID: "projected-message"}, nil
+}
+
+func (r *canonicalProjectionWithoutIdentityDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
+	_ context.Context, event *models.AgentDeliveryEvent, _ *models.AgentDeliveryEffect,
+) (models.CanonicalAgentDeliveryProjectionResult, error) {
+	r.projected = append(r.projected, event)
+	return models.CanonicalAgentDeliveryProjectionResult{}, nil
 }
 
 func (r *canonicalBatchProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvents(
 	_ context.Context, events []*models.AgentDeliveryEvent, _ []*models.AgentDeliveryEffect,
-) ([]bool, error) {
+) ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 	r.batchCalls++
 	r.projected = append(r.projected, events...)
-	appendMessages := make([]bool, len(events))
+	results := make([]models.CanonicalAgentDeliveryProjectionResult, len(events))
 	for index := range events {
-		appendMessages[index] = index > 0
+		if !r.emptyIDs {
+			results[index] = models.CanonicalAgentDeliveryProjectionResult{CanonicalMessageID: "projected-message", Appended: index > 0}
+		}
 	}
-	return appendMessages, nil
+	return results, nil
 }
 
 func (r *immutableDeliveryRepository) ReceiveAgentDeliveryEvent(
@@ -311,6 +325,45 @@ func TestCanonicalProjectionNotifiesWhenAckTransportFails(t *testing.T) {
 	}
 }
 
+func TestCanonicalProjectionDoesNotNotifyWithoutCommittedMessageID(t *testing.T) {
+	event := agentctl.AgentEvent{
+		Type: streams.EventTypeMessageChunk, Text: "legacy output",
+		DeliveryStreamID: "stream-pruned-legacy", DeliveryIncarnationID: "incarnation-pruned-legacy",
+		DeliveryHarnessGeneration: 1, DeliverySequence: 1,
+	}
+	execution := &AgentExecution{
+		SessionID: "session-1", DeliveryMode: DurableDeliveryV1,
+		DeliveryStreamID: event.DeliveryStreamID, DeliveryIncarnationID: event.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: event.DeliveryHarnessGeneration,
+	}
+	newRepository := &canonicalProjectionDeliveryRepository{}
+	var newCallbacks int
+	newManager := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { newCallbacks++ },
+	}, nil, nil)
+	if err := newManager.processAgentEvent(context.Background(), execution, nil, newRepository, event, 0); err != nil {
+		t.Fatalf("process newly committed event: %v", err)
+	}
+	if newCallbacks != 1 {
+		t.Fatalf("new committed message callbacks = %d, want 1", newCallbacks)
+	}
+
+	legacyRepository := &canonicalProjectionWithoutIdentityDeliveryRepository{}
+	var legacyCallbacks int
+	legacyManager := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { legacyCallbacks++ },
+	}, nil, nil)
+	if err := legacyManager.processAgentEvent(context.Background(), execution, nil, legacyRepository, event, 0); err != nil {
+		t.Fatalf("process already-projected legacy event: %v", err)
+	}
+	if legacyCallbacks != 0 {
+		t.Fatalf("legacy callbacks = %d, want no notification without a committed message ID", legacyCallbacks)
+	}
+	if len(legacyRepository.projected) != 1 {
+		t.Fatalf("legacy projection calls = %d, want 1", len(legacyRepository.projected))
+	}
+}
+
 func TestCanonicalProjectionBatchNotifiesOnceWithAccumulatedContent(t *testing.T) {
 	repository := &canonicalBatchProjectionDeliveryRepository{}
 	var callbacks []agentctl.AgentEvent
@@ -360,6 +413,47 @@ func TestCanonicalProjectionBatchNotifiesOnceWithAccumulatedContent(t *testing.T
 	}
 	if !callback.CanonicalProjection || callback.CanonicalMessageAppend {
 		t.Fatalf("callback projection metadata = projection:%t append:%t, want true:false", callback.CanonicalProjection, callback.CanonicalMessageAppend)
+	}
+}
+
+func TestCanonicalProjectionBatchSkipsRowsWithoutCommittedMessageID(t *testing.T) {
+	prepared := []preparedAgentEvent{{
+		event: agentctl.AgentEvent{
+			Type: streams.EventTypeMessageChunk, Text: "already-pruned output",
+			DeliveryStreamID: "stream-1", DeliverySequence: 1,
+		},
+		durableEvent: &models.AgentDeliveryEvent{StreamID: "stream-1", Sequence: 1},
+	}}
+	execution := &AgentExecution{SessionID: "session-1"}
+	positiveRepository := &canonicalBatchProjectionDeliveryRepository{}
+	var positiveCallbacks []agentctl.AgentEvent
+	positiveManager := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(_ *AgentExecution, event agentctl.AgentEvent) {
+			positiveCallbacks = append(positiveCallbacks, event)
+		},
+	}, nil, nil)
+	if err := positiveManager.projectCanonicalAgentEvents(context.Background(), execution, prepared, positiveRepository, nil, 0); err != nil {
+		t.Fatalf("project canonical positive-control batch: %v", err)
+	}
+	if len(positiveCallbacks) != 1 || positiveCallbacks[0].Text != "already-pruned output" {
+		t.Fatalf("positive-control callbacks = %+v, want the persisted content", positiveCallbacks)
+	}
+
+	repository := &canonicalBatchProjectionDeliveryRepository{emptyIDs: true}
+	var callbacks []agentctl.AgentEvent
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(_ *AgentExecution, event agentctl.AgentEvent) {
+			callbacks = append(callbacks, event)
+		},
+	}, nil, nil)
+	if err := sm.projectCanonicalAgentEvents(context.Background(), execution, prepared, repository, nil, 0); err != nil {
+		t.Fatalf("project canonical batch: %v", err)
+	}
+	if len(callbacks) != 0 {
+		t.Fatalf("callbacks = %d, want no notification without a committed message ID", len(callbacks))
+	}
+	if repository.batchCalls != 1 {
+		t.Fatalf("batch projection calls = %d, want 1", repository.batchCalls)
 	}
 }
 

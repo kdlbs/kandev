@@ -19,6 +19,7 @@ import { QuickChatContent } from "./quick-chat-content";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { useTranslation } from "react-i18next";
 import { ConfigChatRestartStatus } from "@/components/config-chat/config-chat-restart-status";
+import { isQuickChatStartupPending } from "./quick-chat-startup-state";
 
 function useIsQuickChatPassthrough(sessionId: string) {
   return useAppStore((state) => {
@@ -101,8 +102,10 @@ function preventQuickChatAutoResume(
   taskId: string | null,
   taskSession: TaskSession | null,
   summary: TaskStatusSummary | null | undefined,
+  acceptedStartupPending: boolean,
 ): boolean {
   return Boolean(
+    acceptedStartupPending ||
     (taskId && !taskSession) ||
     (summary?.active_error &&
       (summary.active_error.scope === "task" || summary.active_error.session_id === sessionId)) ||
@@ -150,6 +153,12 @@ function ActiveQuickChatSessionView({
     task,
     quickChatTaskId,
   );
+  const acceptedStartupPending =
+    session.kind === "chat" &&
+    isQuickChatStartupPending({
+      startupPending: session.startupPending,
+      sessionState: taskSession?.state,
+    });
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
     skipAutomaticRecovery: !automaticRecovery,
     preventAutoResume: preventQuickChatAutoResume(
@@ -157,6 +166,7 @@ function ActiveQuickChatSessionView({
       taskId,
       taskSession,
       statusSummary,
+      acceptedStartupPending,
     ),
   });
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
@@ -190,6 +200,7 @@ function ActiveQuickChatSessionView({
           }
           initialPrompt={session.initialPrompt}
           onInitialPromptAttempted={onInitialPromptAttempted}
+          startupPending={acceptedStartupPending}
           initialDraft={initialDraft}
           transformOutgoing={transformOutgoing}
           hideStartupRows={hideStartupRows}

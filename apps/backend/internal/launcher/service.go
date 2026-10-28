@@ -15,6 +15,8 @@ type serviceArgs struct {
 	Action      string
 	System      bool
 	RunAs       string
+	Shell       string
+	ShellSet    bool
 	Port        int
 	HomeDir     string
 	NoBootStart bool
@@ -33,6 +35,7 @@ const (
 	actionLogs                  = "logs"
 	actionStatus                = "status"
 	actionStop                  = "stop"
+	actionRun                   = "run"
 	actionSelfUpdate            = "self-update"
 	flagHelp                    = "--help"
 	goosLinux                   = "linux"
@@ -46,7 +49,7 @@ const (
 const serviceHelp = `kandev service — install kandev as an OS-managed service
 
 Usage:
-  kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--no-boot-start]
+  kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--shell <bash|zsh|path|none>] [--no-boot-start]
   kandev service uninstall [--system]
   kandev service start|stop|restart|status [--system]
   kandev service logs [-f] [--system]
@@ -66,6 +69,17 @@ func runService(argv []string, build BuildInfo) int {
 	}
 	if args.ShowHelp {
 		fmt.Print(serviceHelp)
+		return 0
+	}
+	if err := prepareServiceShellArgs(&args, runtime.GOOS); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 2
+	}
+	if args.Action == actionRun {
+		if err := runNativeServiceShell(args); err != nil {
+			fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+			return 1
+		}
 		return 0
 	}
 	if args.Action == actionConfig {
@@ -131,7 +145,7 @@ func parseServiceArgs(argv []string) (serviceArgs, error) {
 
 func validServiceAction(action string) bool {
 	switch action {
-	case actionInstall, actionUninstall, string(CommandStart), actionStop, actionRestart, actionStatus, actionLogs, actionConfig,
+	case actionInstall, actionUninstall, string(CommandStart), actionStop, actionRestart, actionStatus, actionLogs, actionConfig, actionRun,
 		actionSelfUpdate:
 		return true
 	default:
@@ -190,6 +204,27 @@ func parseServiceFlag(argv []string, i int, action string, out *serviceArgs) (in
 		return parseServiceHomeDir(argv, i, out)
 	case strings.HasPrefix(arg, "--home-dir="):
 		out.HomeDir = expandHome(strings.TrimPrefix(arg, "--home-dir="))
+	case arg == "--shell":
+		if action != actionInstall && action != actionRun {
+			return i, ParseError{Message: "--shell is valid only for kandev service install"}
+		}
+		value, err := takeValue(argv, i, "--shell")
+		if err != nil {
+			return i, err
+		}
+		out.Shell = value
+		out.ShellSet = true
+		return i + 1, nil
+	case strings.HasPrefix(arg, "--shell="):
+		if action != actionInstall && action != actionRun {
+			return i, ParseError{Message: "--shell is valid only for kandev service install"}
+		}
+		value := strings.TrimPrefix(arg, "--shell=")
+		if value == "" {
+			return i, ParseError{Message: "--shell requires a value"}
+		}
+		out.Shell = value
+		out.ShellSet = true
 	default:
 		return i, ParseError{Message: fmt.Sprintf("unknown flag %q for kandev service %s", arg, action)}
 	}
@@ -264,6 +299,10 @@ func buildJournalArgs(args serviceArgs) []string {
 }
 
 func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
+	if args.ShellSet {
+		fmt.Fprintln(os.Stderr, "[kandev] --shell is supported only for macOS user services")
+		return 1
+	}
 	self, err := executablePath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -387,6 +426,11 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 		return 1
 	}
 	homeDir, homeSource := resolveServiceHome(args)
+	shellPath, err := selectManagedLaunchdShell(args, plistPath, homeDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
 	logDir := filepath.Join(homeDir, "logs")
 	bundleDir := serviceBundleDir(self)
 	systemUser, err := resolveAndValidateSystemIdentity(args, plistPath, nativeServiceManagerLaunchd, homeDir)
@@ -409,6 +453,7 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 		HomeDirFromConfig: homeSource == config.SourceConfiguration,
 		ConfigHomeFile:    args.Startup != nil && args.Startup.Source.HomeFile,
 		LogLevel:          serviceLogLevel(args.Startup),
+		Shell:             shellPath,
 	}
 	metadata := buildNativeServiceMetadata(nativeServiceManagerLaunchd, args, input, plistPath)
 	prepared, err := prepareNativeServiceMetadata(metadata)
@@ -477,6 +522,7 @@ type nativeServiceUnitInput struct {
 	HomeDirFromConfig bool
 	ConfigHomeFile    bool
 	LogLevel          string
+	Shell             string
 }
 
 const (
@@ -665,6 +711,14 @@ func renderLaunchdPlist(input nativeServiceUnitInput) string {
 	if input.System && input.SystemUser != "" {
 		userBlock = "  <key>UserName</key>\n  <string>" + escapeXML(input.SystemUser) + "</string>\n"
 	}
+	programArguments := []string{input.Executable, "--headless"}
+	if input.Shell != "" {
+		programArguments = []string{input.Executable, "service", actionRun, "--shell", input.Shell}
+	}
+	var programXML strings.Builder
+	for _, argument := range programArguments {
+		programXML.WriteString("    <string>" + escapeXML(argument) + "</string>\n")
+	}
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!-- managed by kandev — regenerated by ` + "`kandev service install`" + ` -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -674,9 +728,7 @@ func renderLaunchdPlist(input nativeServiceUnitInput) string {
   <string>com.kdlbs.kandev</string>
   <key>ProgramArguments</key>
   <array>
-    <string>` + escapeXML(input.Executable) + `</string>
-    <string>--headless</string>
-  </array>
+` + programXML.String() + `  </array>
   <key>EnvironmentVariables</key>
   <dict>
 ` + envXML.String() + `  </dict>

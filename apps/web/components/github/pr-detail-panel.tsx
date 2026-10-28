@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { githubOrigin, githubResourceKey } from "@/lib/github/host";
 import { useTranslation } from "react-i18next";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { IconCheck } from "@tabler/icons-react";
@@ -118,23 +119,28 @@ function computeLiveReviewState(feedback: PRFeedback, fallbackState: TaskPR["rev
   if (reviews.length === 0) {
     return requestedReviewers.length > 0 ? "pending" : fallbackState || "";
   }
+  return summarizeBindingReviews(reviews);
+}
+
+function summarizeBindingReviews(reviews: PRFeedback["reviews"]): TaskPR["review_state"] {
   const latestByAuthor = new Map<string, { state: string; createdAt: number }>();
   for (const review of reviews) {
-    const current = latestByAuthor.get(review.author);
     const createdAt = new Date(review.created_at).getTime();
-    if (!current || createdAt > current.createdAt) {
-      latestByAuthor.set(review.author, { state: review.state, createdAt });
+    const author = review.author || `<anon>:${createdAt}`;
+    const state = review.state.toUpperCase();
+    const current = latestByAuthor.get(author);
+    const binding = state === "APPROVED" || state === "CHANGES_REQUESTED";
+    if (!binding && current) continue;
+    if (!current || createdAt >= current.createdAt) {
+      latestByAuthor.set(author, { state, createdAt });
     }
   }
-  let hasChangesRequested = false;
-  let allApproved = true;
+  let hasApproval = false;
   for (const review of latestByAuthor.values()) {
-    if (review.state === "CHANGES_REQUESTED") hasChangesRequested = true;
-    if (review.state !== "APPROVED") allApproved = false;
+    if (review.state === "CHANGES_REQUESTED") return "changes_requested";
+    if (review.state === "APPROVED") hasApproval = true;
   }
-  if (hasChangesRequested) return "changes_requested";
-  if (allApproved) return "approved";
-  return "pending";
+  return hasApproval ? "approved" : "pending";
 }
 
 function derivePanelMetrics(taskPR: TaskPR, feedback: PRFeedback | null): PRPanelMetrics {
@@ -213,7 +219,12 @@ function ApproveButton({
     try {
       await submitPRReview(
         workspaceId,
-        { owner: taskPR.owner, repo: taskPR.repo, number: taskPR.pr_number },
+        {
+          owner: taskPR.owner,
+          repo: taskPR.repo,
+          number: taskPR.pr_number,
+          expected_host: taskPR.github_host ?? "github.com",
+        },
         "APPROVE",
       );
       toast({ description: t("github:prApproved"), variant: "success" });
@@ -245,10 +256,13 @@ function ApproveButton({
   );
 }
 
-function githubPerson(login: string, avatarUrl?: string, isBot?: boolean) {
+function githubPerson(login: string, avatarUrl?: string, isBot?: boolean, host = "github.com") {
   return {
     name: login,
-    url: login ? `https://github.com/${login}` : undefined,
+    url:
+      login && githubOrigin(host)
+        ? `${githubOrigin(host)}/${encodeURIComponent(login)}`
+        : undefined,
     avatarUrl: avatarUrl || undefined,
     isBot,
   };
@@ -261,7 +275,12 @@ function mapGitHubIdentity(taskPR: TaskPR, feedback: PRFeedback | null) {
     url: live?.html_url || taskPR.pr_url,
     state: live?.state ?? taskPR.state,
     draft: live?.draft,
-    author: githubPerson(live?.author_login ?? taskPR.author_login),
+    author: githubPerson(
+      live?.author_login ?? taskPR.author_login,
+      undefined,
+      undefined,
+      taskPR.github_host,
+    ),
     description: live?.body,
   };
 }
@@ -295,7 +314,7 @@ function mapGitHubReviews(
   const state = feedback?.pr.state ?? taskPR.state;
   return (feedback?.reviews ?? []).map((review) => ({
     id: String(review.id),
-    author: githubPerson(review.author, review.author_avatar),
+    author: githubPerson(review.author, review.author_avatar, undefined, taskPR.github_host),
     state: review.state,
     body: review.body || undefined,
     createdAt: review.created_at,
@@ -327,13 +346,13 @@ function mapGitHubChecks(feedback: PRFeedback | null) {
   }));
 }
 
-export function mapGitHubComments(feedback: PRFeedback | null) {
+export function mapGitHubComments(feedback: PRFeedback | null, host = "github.com") {
   return (feedback?.comments ?? []).map((comment) => {
     const url = comment.html_url?.trim();
     return {
       id: String(comment.id),
       parentId: comment.in_reply_to ? String(comment.in_reply_to) : undefined,
-      author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot),
+      author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot, host),
       body: comment.body,
       createdAt: comment.created_at,
       ...(url ? { url } : {}),
@@ -355,7 +374,7 @@ function mapGitHubDetail(
 ): ChangeRequestDetailModel {
   return {
     providerId: "github",
-    reviewKey: `${taskPR.owner}/${taskPR.repo}#${taskPR.pr_number}`,
+    reviewKey: githubResourceKey(taskPR.owner, taskPR.repo, taskPR.pr_number, taskPR.github_host),
     number: taskPR.pr_number,
     ...mapGitHubIdentity(taskPR, feedback),
     ...mapGitHubDates(taskPR, feedback),
@@ -364,11 +383,11 @@ function mapGitHubDetail(
     pendingReviewCount: metrics.pendingReviewCount,
     reviews: mapGitHubReviews(taskPR, feedback, review.requestingReviewers, review.labels),
     requestedReviewers: review.requestedReviewers.map((reviewer) => ({
-      ...githubPerson(reviewer.login),
+      ...githubPerson(reviewer.login, undefined, undefined, taskPR.github_host),
       kind: reviewer.type,
     })),
     checks: mapGitHubChecks(feedback),
-    comments: mapGitHubComments(feedback),
+    comments: mapGitHubComments(feedback, taskPR.github_host),
     lastSyncedAt: taskPR.last_synced_at ?? undefined,
   };
 }
@@ -437,6 +456,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
     taskPR.owner,
     taskPR.repo,
     taskPR.pr_number,
+    taskPR.github_host,
   );
   const { addAsContext } = useAddPRFeedbackAsContext(sessionId, taskPR.pr_number);
   const { toast } = useToast();

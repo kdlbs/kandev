@@ -885,7 +885,14 @@ describe("ActionMessage retained provider turn recovery feedback", () => {
     {
       disposition: "refused",
       attempts: 0,
-      copy: "Automatic retry stopped. You can send another message.",
+      reason: "future_reason",
+      copy: "Automatic continuation is unavailable. You can send another message.",
+    },
+    {
+      disposition: "refused",
+      attempts: undefined,
+      reason: undefined,
+      copy: "Automatic continuation is unavailable. You can send another message.",
     },
     {
       disposition: "cancelled",
@@ -899,14 +906,15 @@ describe("ActionMessage retained provider turn recovery feedback", () => {
     },
   ])(
     "shows $disposition without replacing the provider error",
-    ({ disposition, attempts, copy }) => {
+    ({ disposition, attempts, reason, copy }) => {
       const providerError = retryMessage({
         content: CAPACITY_ERROR,
         metadata: {
           variant: "error",
           runtime_retained: true,
           recovery_disposition: disposition,
-          attempts_started: attempts,
+          ...(attempts === undefined ? {} : { attempts_started: attempts }),
+          ...(reason === undefined ? {} : { recovery_reason: reason }),
           recovery_actions: false,
         },
       });
@@ -917,6 +925,38 @@ describe("ActionMessage retained provider turn recovery feedback", () => {
       expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).toBe(copy);
     },
   );
+
+  it("uses generic copy for unsupported errors and shows only attempts that started", () => {
+    const providerError = retryMessage({
+      content: CAPACITY_ERROR,
+      metadata: {
+        variant: "error",
+        runtime_retained: true,
+        recovery_disposition: "refused",
+        recovery_reason: "unsupported_restore",
+        attempts_started: 2,
+        provider_error: {
+          source: "acp_prompt",
+          provider_id: "mock-agent",
+          error_kind: "server_error",
+          rpc_code: -32603,
+        },
+        recovery_actions: false,
+      },
+    });
+
+    renderAction(providerError, "WAITING_FOR_INPUT");
+
+    expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).toContain(
+      "Kandev cannot continue automatically because this interruption does not support automatic continuation.",
+    );
+    expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).not.toContain(
+      "live agent runtime is unavailable",
+    );
+    expect(screen.getByTestId("retained-turn-recovery-attempts").textContent).toBe(
+      "2 automatic attempts started.",
+    );
+  });
 });
 
 function recoveryHistoryMessage(stamp: string): Message {

@@ -74,6 +74,7 @@ and repository-context identity.
 - [Diagnostic logging](requirements/diagnostic-logging.md)
 - [Runtime failure attribution](requirements/runtime-failure-attribution.md)
 - [Durable agent delivery](requirements/durable-agent-delivery.md) (draft)
+- [Durable agent text segmentation](requirements/durable-agent-text-segmentation.md) (draft)
 - [Duration-aware E2E sharding and CI reliability](requirements/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](requirements/external-e2e-runner-capacity.md)
 - [Expected runtime log severity](requirements/expected-runtime-log-severity.md)

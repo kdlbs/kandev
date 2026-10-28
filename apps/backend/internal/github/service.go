@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"strings"
 	"sync"
 	"time"
@@ -127,6 +128,8 @@ type Service struct {
 	connectionMutationLocks     [64]sync.Mutex
 	legacyCredentialMu          sync.Mutex
 	legacyCredentialRevision    string
+	prWatchLifecycleLocksMu     sync.Mutex
+	prWatchLifecycleLocks       map[string]*prWatchLifecycleLock
 	client                      Client
 	authMethod                  string
 	secrets                     SecretProvider
@@ -153,32 +156,33 @@ type Service struct {
 	// a single task by ID) because reset must walk the task tree and clean
 	// up subtasks, runs, and worktrees too. Wired post-construction via
 	// SetCascadeTaskDeleter to avoid an import cycle with the task service.
-	cascadeTaskDeleter    watchreset.TaskDeleter
-	taskSessionChecker    TaskSessionChecker
-	syncGroup             singleflight.Group
-	taskEventSubs         []bus.Subscription
-	searchCache           *ttlCache
-	prStatusCache         *ttlCache
-	prFeedbackCache       *ttlCache
-	workflowRunsCache     *ttlCache
-	workflowJobsCache     *ttlCache
-	mergeMethodsCache     *ttlCache
-	accessibleReposCache  *ttlCache
-	repoErrorCache        *ttlCache
-	forkParentCache       *ttlCache
-	protectionCache       *branchProtectionCache
-	rateTracker           *RateTracker
-	rateCoordinator       *RateCoordinator
-	prDiscoveryHealth     *prDiscoveryHealthStore
-	prDiscoveryAttemptsMu sync.Mutex
-	prDiscoveryAttempts   map[string]*prDiscoveryAttemptResult
-	promptResolver        PromptResolver
-	tokenClientFactory    func(string) Client
-	ghAccountLister       func(context.Context) ([]GHAccount, error)
-	mockAuth              *MockAuthState
-	workspaceAuthorizer   func(context.Context, string) error
-	freshDefaultsMu       sync.Mutex
-	freshDefaultsDone     bool
+	cascadeTaskDeleter     watchreset.TaskDeleter
+	taskSessionChecker     TaskSessionChecker
+	syncGroup              singleflight.Group
+	taskEventSubs          []bus.Subscription
+	searchCache            *ttlCache
+	prStatusCache          *ttlCache
+	prFeedbackCache        *ttlCache
+	workflowRunsCache      *ttlCache
+	workflowJobsCache      *ttlCache
+	mergeMethodsCache      *ttlCache
+	accessibleReposCache   *ttlCache
+	repoErrorCache         *ttlCache
+	forkParentCache        *ttlCache
+	protectionCache        *branchProtectionCache
+	rateTracker            *RateTracker
+	prDiscoveryHealth      *prDiscoveryHealthStore
+	prDiscoveryAttemptsMu  sync.Mutex
+	prDiscoveryAttempts    map[string]*prDiscoveryAttemptResult
+	promptResolver         PromptResolver
+	tokenClientFactory     func(string) Client
+	hostTokenClientFactory func(string, githubhost.Host) Client
+	ghAccountLister        func(context.Context) ([]GHAccount, error)
+	mockAuth               *MockAuthState
+	workspaceAuthorizer    func(context.Context, string) error
+	freshDefaultsMu        sync.Mutex
+	freshDefaultsDone      bool
+	rateCoordinator        *RateCoordinator
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -269,6 +273,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		rateCoordinator:              rateCoordinator,
 		prDiscoveryHealth:            newPRDiscoveryHealth(eventBus, log),
 		prDiscoveryAttempts:          make(map[string]*prDiscoveryAttemptResult),
+		prWatchLifecycleLocks:        make(map[string]*prWatchLifecycleLock),
 		tokenClientFactory:           func(token string) Client { return NewPATClient(token) },
 		ghAccountLister:              ListGHAccounts,
 		cleanupFailureCounts:         make(map[string]int),

@@ -15,6 +15,7 @@ import (
 type quickChatFixture struct {
 	id             string
 	workspaceID    string
+	externalID     string
 	workflowID     string
 	title          string
 	agentProfileID string
@@ -41,6 +42,7 @@ func seedQuickChatTask(t *testing.T, svc *Service, sqlxDB *sqlx.DB, fixture quic
 	if err := svc.tasks.CreateTask(ctx, &models.Task{
 		ID:          fixture.id,
 		WorkspaceID: workspaceID,
+		ExternalID:  fixture.externalID,
 		WorkflowID:  fixture.workflowID,
 		Title:       fixture.title,
 		State:       v1.TaskStateTODO,
@@ -175,6 +177,41 @@ func TestListQuickChatSessionsEmptyWorkspace(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Fatalf("items = %#v, want empty", items)
+	}
+}
+
+func TestListQuickChatSessionsProjectsCreationIDForOwningPrincipal(t *testing.T) {
+	svc, sqlxDB := createOfficeIntegrationServiceWithDB(t)
+	ctx := context.Background()
+	if err := svc.workspaces.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-qc-token", Name: "Token", OwnerID: "user-a",
+	}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	creationID := "a7c0fd51-6526-4732-95bc-c6e25f745e7f"
+	externalID, err := NewQuickChatCreationExternalID("user-a", creationID)
+	if err != nil {
+		t.Fatalf("NewQuickChatCreationExternalID: %v", err)
+	}
+	seedQuickChatTask(t, svc, sqlxDB, quickChatFixture{
+		id: "task-token", workspaceID: "ws-qc-token", title: "Token chat",
+		externalID: externalID, updatedAt: time.Now().UTC(),
+	})
+
+	items, err := svc.ListQuickChatSessions(ctxAs("user-a"), "ws-qc-token")
+	if err != nil {
+		t.Fatalf("owner ListQuickChatSessions: %v", err)
+	}
+	if len(items) != 1 || items[0].CreationID != creationID {
+		t.Fatalf("owner creation projection = %+v; want token %q", items, creationID)
+	}
+
+	unscoped, err := svc.ListQuickChatSessions(context.Background(), "ws-qc-token")
+	if err != nil {
+		t.Fatalf("unscoped ListQuickChatSessions: %v", err)
+	}
+	if len(unscoped) != 1 || unscoped[0].CreationID != "" {
+		t.Fatalf("unscoped creation projection = %+v; want token omitted", unscoped)
 	}
 }
 

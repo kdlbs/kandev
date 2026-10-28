@@ -115,6 +115,37 @@ describe("useUpdateAvailableToast delivery", () => {
     expect(mockClearNotification).toHaveBeenCalledWith(null);
   });
 
+  it("localizes standard Kandev update notifications even when the backend includes English copy", async () => {
+    const { i18n, preloadLocale } = await import("@/lib/i18n");
+    await preloadLocale("pseudo");
+    try {
+      mockNotification = updateNotification();
+      mockNativeIsAvailable.mockReturnValue(true);
+      renderHook(() => useUpdateAvailableToast());
+      const toast = mockToast.mock.calls[0]?.[0];
+      expect(toast.title).toBe("Ķàńďēv ũƥďàţē àvàĩĺàƀĺē");
+      expect(toast.description).toContain("Ķàńďēv v1.2.3 ĩś àvàĩĺàƀĺē");
+      expect(mockNativeShow).toHaveBeenCalledWith(
+        expect.objectContaining({ title: toast.title, body: toast.description }),
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("retains legacy notification copy when no release version is available", () => {
+    mockNotification = {
+      ...updateNotification(),
+      version: undefined,
+      title: "Legacy title",
+      body: "Legacy body",
+    };
+    renderHook(() => useUpdateAvailableToast());
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Legacy title", description: "Legacy body" }),
+    );
+  });
+
   it("also attempts native delivery without replacing the toast", () => {
     mockNotification = updateNotification();
     mockNativeIsAvailable.mockReturnValue(true);

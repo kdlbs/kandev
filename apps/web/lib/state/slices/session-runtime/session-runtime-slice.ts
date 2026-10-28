@@ -11,6 +11,7 @@ import {
 } from "./workspace-restoration";
 import { buildSessionViewActions } from "./session-runtime-view-actions";
 import { buildSessionGitCheckoutActions } from "./session-runtime-git-checkout-actions";
+import { buildBackgroundOutputActions, reconcileOutputWindows } from "./background-output-window";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -54,6 +55,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionPollMode.bySessionId[sessionId];
   delete state.embeddedVscodeSupport.bySessionId[sessionId];
   delete state.backgroundWork.workloadsBySessionId[sessionId];
+  delete state.backgroundWork.outputWindowsBySessionId[sessionId];
   delete state.backgroundWork.activeWorkIdBySessionId[sessionId];
   delete state.backgroundWork.loadingBySessionId[sessionId];
 }
@@ -142,6 +144,8 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   workspaceRestoration: { byEnvironmentId: {} },
   backgroundWork: {
     workloadsBySessionId: {},
+    outputWindowsBySessionId: {},
+    nextOutputWindowGeneration: 1,
     activeWorkIdBySessionId: {},
     loadingBySessionId: {},
   },
@@ -351,6 +355,7 @@ function isTerminalRunState(s?: string) {
 
 function buildBackgroundWorkActions(set: ImmerSet) {
   return {
+    ...buildBackgroundOutputActions(set),
     setBackgroundWorkloads: (
       sessionId: string,
       workloads: Parameters<SessionRuntimeSlice["setBackgroundWorkloads"]>[1],
@@ -375,6 +380,7 @@ function buildBackgroundWorkActions(set: ImmerSet) {
           }
           return incoming;
         });
+        reconcileOutputWindows(draft.backgroundWork, sessionId, existingList, merged);
         draft.backgroundWork.workloadsBySessionId[sessionId] = merged;
         draft.backgroundWork.loadingBySessionId[sessionId] = false;
       }),
@@ -384,6 +390,7 @@ function buildBackgroundWorkActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
+        const previous = [...list];
         const idx = list.findIndex((w) => w.work_id === workload.work_id);
         if (idx >= 0) {
           const existing = list[idx]!;
@@ -401,40 +408,12 @@ function buildBackgroundWorkActions(set: ImmerSet) {
         } else {
           list.push(workload);
         }
+        reconcileOutputWindows(draft.backgroundWork, sessionId, previous, list);
         draft.backgroundWork.workloadsBySessionId[sessionId] = list;
-      }),
-    appendBackgroundWorkloadOutput: (
-      sessionId: string,
-      chunk: Parameters<SessionRuntimeSlice["appendBackgroundWorkloadOutput"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const workload = list.find((w) => w.work_id === chunk.work_id);
-        if (workload && chunk.chunk) {
-          const currentOutput = workload.output || "";
-          const newOutput = currentOutput + chunk.chunk;
-          const maxLen = 200 * 1024;
-          if (newOutput.length > maxLen) {
-            workload.output = newOutput.slice(newOutput.length - maxLen);
-            workload.output_truncated = true;
-          } else {
-            workload.output = newOutput;
-          }
-          workload.output_offset = chunk.offset;
-          if (chunk.truncated) {
-            workload.output_truncated = true;
-          }
-        }
       }),
     setActiveBackgroundWorkload: (sessionId: string, workId: string) =>
       set((draft) => {
         draft.backgroundWork.activeWorkIdBySessionId[sessionId] = workId;
-      }),
-    clearBackgroundWork: (sessionId: string) =>
-      set((draft) => {
-        delete draft.backgroundWork.workloadsBySessionId[sessionId];
-        delete draft.backgroundWork.activeWorkIdBySessionId[sessionId];
-        delete draft.backgroundWork.loadingBySessionId[sessionId];
       }),
     setBackgroundWorkLoading: (sessionId: string, loading: boolean) =>
       set((draft) => {

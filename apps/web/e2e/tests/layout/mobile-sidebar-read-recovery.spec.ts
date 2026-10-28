@@ -3,6 +3,7 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { seedIdleSession } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { expectTouchControl } from "../../helpers/control-sizing";
 
 test("mobile task drawer retains rows while workspace context refresh recovers", async ({
   testPage,
@@ -30,6 +31,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
     }
     await route.fulfill({
       status: 503,
+      headers: { "Retry-After": "120" },
       contentType: "application/json",
       json: { error: "workspace context temporarily unavailable" },
     });
@@ -51,10 +53,11 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
   await expect(drawer.getByTestId("sidebar-task-load-error")).toBeVisible();
   await waitForFiniteAnimations(drawer);
-  const retry = drawer.getByRole("button", { name: "Retry", exact: true });
-  const retryBox = await retry.boundingBox();
-  if (!retryBox) throw new Error("mobile sidebar retry control is not visible");
-  expect(retryBox.height).toBeGreaterThanOrEqual(44);
+  const retry = drawer
+    .getByTestId("sidebar-task-load-error")
+    .getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
+  await expectTouchControl(retry, "mobile sidebar retry");
 
   readPhase = "recovering";
   const recoveredWorkflowRead = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
@@ -62,6 +65,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   });
   try {
     await retry.tap();
+    await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
   } finally {
     recovery.resolve();
   }
@@ -74,7 +78,7 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   testPage,
   apiClient,
   seedData,
-}) => {
+}, testInfo) => {
   const task = await apiClient.createTask(seedData.workspaceId, "Mobile page retained task", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -137,10 +141,14 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   await expect(drawer.getByTestId("sidebar-task-page-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
 
-  const retry = drawer.getByRole("alert").getByRole("button", { name: "Retry", exact: true });
-  const retryBox = await retry.boundingBox();
-  if (!retryBox) throw new Error("mobile sidebar retry control is not visible");
-  expect(retryBox.height).toBeGreaterThanOrEqual(44);
+  await waitForFiniteAnimations(drawer);
+  const retry = drawer
+    .getByTestId("sidebar-task-page-load-error")
+    .getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
+  await retry.scrollIntoViewIfNeeded();
+  await expectTouchControl(retry, "mobile sidebar page retry");
+  await testPage.screenshot({ path: testInfo.outputPath("sidebar-page-retry-mobile.png") });
 
   sidebarPageUnavailable = false;
   const recoveredSidebarPageRead = waitForHttp(

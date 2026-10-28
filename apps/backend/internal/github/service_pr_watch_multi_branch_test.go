@@ -514,7 +514,7 @@ func TestApplyBatchedNumberedWatch_AssociatesExactPRWhenSiblingExists(t *testing
 
 	result := svc.applyBatchedNumberedWatch(ctx, "legacy", watch, map[string]*PRStatus{
 		prStatusCacheKey("owner", "repo", 1299): status,
-	}, now)
+	}, now, false)
 	if result.SyncFailed {
 		t.Fatal("batched sync should not fail")
 	}
@@ -538,10 +538,14 @@ func TestApplyBatchedNumberedWatch_MissingPRDataDoesNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePRWatch: %v", err)
 	}
+	commentAt := now.Add(-time.Hour)
+	if err := store.UpdatePRWatchTimestamps(ctx, watch.ID, commentAt, &commentAt, "success", "approved"); err != nil {
+		t.Fatalf("seed prior PR watch watermark: %v", err)
+	}
 
 	result := svc.applyBatchedNumberedWatch(ctx, "legacy", watch, map[string]*PRStatus{
 		prStatusCacheKey("owner", "repo", 1299): &PRStatus{ChecksState: "pending"},
-	}, now)
+	}, now, false)
 	if !result.SyncFailed {
 		t.Fatal("batched sync should fail without PR data")
 	}
@@ -552,5 +556,12 @@ func TestApplyBatchedNumberedWatch_MissingPRDataDoesNotPanic(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("expected no task PR row without PR data, got %+v", got)
+	}
+	updated, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("GetPRWatch: %v", err)
+	}
+	if updated.LastCommentAt == nil || !updated.LastCommentAt.Equal(commentAt) {
+		t.Fatalf("last comment watermark = %v, want preserved %v", updated.LastCommentAt, commentAt)
 	}
 }
