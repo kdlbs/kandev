@@ -168,7 +168,7 @@ func (m *Manager) ReadExecutorRuntimeArtifact(ctx context.Context, request *plug
 	if _, err := m.pluginExecutorCallbackRequest(ctx, request.GetContext()); err != nil {
 		return err
 	}
-	if request.GetArtifactId() != "agentctl" || send == nil {
+	if request.GetArtifactId() != pluginExecutorAgentctlPurpose || send == nil {
 		return errors.New("plugin executor runtime artifact request is invalid")
 	}
 	platform, err := parsePluginExecutorPlatform(request.GetPlatform())

@@ -69,15 +69,17 @@ type ExecutorProvider struct {
 	RequiredCapabilities []ExecutorProviderCapabilityRequirement `json:"-"`
 	StateBudgetBytes     int                                     `json:"-"`
 	// DestroyTimeoutSeconds is the manifest's destroy deadline; zero means the default.
-	DestroyTimeoutSeconds int                          `json:"-"`
-	DisplayName           string                       `json:"display_name"`
-	Description           string                       `json:"description"`
-	LocalizedMessages     map[string]string            `json:"localized_messages,omitempty"`
-	ProfileSchema         map[string]any               `json:"profile_schema"`
-	ResourceStateSchema   map[string]any               `json:"-"`
-	Capabilities          ExecutorProviderCapabilities `json:"capabilities"`
-	Available             bool                         `json:"available"`
-	AvailabilityCause     string                       `json:"availability_cause,omitempty"`
+	DestroyTimeoutSeconds int `json:"-"`
+	// RuntimeAPIURL is host_public (or empty) or provider_forwarded.
+	RuntimeAPIURL       string                       `json:"-"`
+	DisplayName         string                       `json:"display_name"`
+	Description         string                       `json:"description"`
+	LocalizedMessages   map[string]string            `json:"localized_messages,omitempty"`
+	ProfileSchema       map[string]any               `json:"profile_schema"`
+	ResourceStateSchema map[string]any               `json:"-"`
+	Capabilities        ExecutorProviderCapabilities `json:"capabilities"`
+	Available           bool                         `json:"available"`
+	AvailabilityCause   string                       `json:"availability_cause,omitempty"`
 }
 
 // ExecutorProviderCapabilityRequirement is one host capability a provider
