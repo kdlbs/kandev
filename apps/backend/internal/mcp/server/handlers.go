@@ -16,10 +16,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// askQuestionKeepAliveInterval controls progress notifications during the
-// blocking ask_user_question call. Managed defaults keep it below client idle
-// deadlines. Tests can shorten it for fast transport tests.
-var askQuestionKeepAliveInterval = 20 * time.Second
+// toolKeepAliveInterval controls progress notifications during every Kandev
+// tool call. Managed defaults keep it below client idle deadlines. Tests can
+// shorten it for fast transport tests.
+var toolKeepAliveInterval = 15 * time.Second
+
+// toolKeepAliveSendTimeout bounds one progress notification send.
+const toolKeepAliveSendTimeout = 5 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
 // Pulled out so goconst stays happy and renames stay safe.
@@ -816,15 +819,6 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			payload[retryKeyArg] = retryKey
 		}
 
-		// Waiting on a human answer routinely outlasts the agent MCP client's
-		// idle timeout on the in-flight tool call. Stream periodic progress
-		// notifications until the backend responds; mcp-go flushes them onto the
-		// POST/SSE response, resetting the client's idle timer so the call is not
-		// aborted mid-question.
-		stop := make(chan struct{})
-		defer close(stop)
-		go emitKeepAlivePings(ctx, stop, askQuestionKeepAliveInterval, s.clarificationKeepAlive(ctx, req))
-
 		// Use the MCP request context from the agent. This ensures that if the agent's
 		// MCP client times out, we'll detect it and not update the session state.
 		var result map[string]interface{}
@@ -882,8 +876,7 @@ func readQuestionContext(req mcp.CallToolRequest) string {
 }
 
 // emitKeepAlivePings invokes send on every interval tick until stop is closed or
-// ctx is cancelled. It is the transport-agnostic core of the ask_user_question
-// keepalive, split out so the timing loop is unit-testable without a live MCP
+// ctx is cancelled. It is the transport-agnostic core of the tool keepalive, split out so the timing loop is unit-testable without a live MCP
 // session.
 func emitKeepAlivePings(ctx context.Context, stop <-chan struct{}, interval time.Duration, send func()) {
 	if interval <= 0 || send == nil {
@@ -898,34 +891,13 @@ func emitKeepAlivePings(ctx context.Context, stop <-chan struct{}, interval time
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			select {
+			case <-stop:
+				return
+			default:
+			}
 			send()
 		}
-	}
-}
-
-// clarificationKeepAlive builds the keepalive callback that streams a
-// notifications/progress message to the agent. The progress token mirrors the one
-// the client attached to the tool call when present, so spec-compliant clients
-// associate the updates with the in-flight request; clients that omitted a token
-// ignore the unknown one. Returns a no-op when no MCP server is bound to the
-// context (e.g. direct unit-test invocation of the handler).
-func (s *Server) clarificationKeepAlive(ctx context.Context, req mcp.CallToolRequest) func() {
-	srv := server.ServerFromContext(ctx)
-	if srv == nil {
-		return func() {}
-	}
-	var token mcp.ProgressToken = fmt.Sprintf("ask_user_question:%s", s.sessionID)
-	if req.Params.Meta != nil && req.Params.Meta.ProgressToken != nil {
-		token = req.Params.Meta.ProgressToken
-	}
-	var progress float64
-	return func() {
-		progress++
-		_ = srv.SendNotificationToClient(ctx, "notifications/progress", map[string]any{
-			"progressToken": token,
-			"progress":      progress,
-			messageArg:      "Waiting for your response in Kandev",
-		})
 	}
 }
 
@@ -1168,7 +1140,7 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 // the event fallback path (new turn) instead of the primary path (same turn).
 func (s *Server) notifyClarificationTimeout() {
 	payload := map[string]string{"session_id": s.sessionID}
-	if err := s.backend.RequestPayload(context.Background(), ws.ActionMCPClarificationTimeout, payload, nil); err != nil {
+	if err := s.backend.RequestPayload(WithNoWait(context.Background()), ws.ActionMCPClarificationTimeout, payload, nil); err != nil {
 		s.logger.Warn("failed to notify backend of clarification timeout",
 			zap.String("session_id", s.sessionID),
 			zap.Error(err))

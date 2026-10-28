@@ -2418,6 +2418,8 @@
   "modelSelectionRemediationUnknown": "請檢查執行器設定檔。",
   "modelSelectionRequested": "請求的模型",
   "modelSelectionWarning": "執行器無法使用已儲存的模型選擇。",
+  "turnEndedDetached": "Kandev 無法存取期間，該輪次已結束。",
+  "pausedOfflineBudget": "由於 Kandev 無法存取的時間超出離線預算，該輪次已暫停。",
   "branchRecreatedWarning": "儲存的分支不可用，因此已建立新分支。",
   "branchRecreatedOriginal": "原始分支",
   "branchRecreatedNew": "新分支",

@@ -2418,6 +2418,8 @@
   "modelSelectionRemediationUnknown": "Verifique a configuração do executor.",
   "modelSelectionRequested": "Modelo pedido",
   "modelSelectionWarning": "O executor não conseguiu usar a seleção de modelo guardada.",
+  "turnEndedDetached": "O turno terminou enquanto o Kandev estava inacessível.",
+  "pausedOfflineBudget": "O turno foi pausado porque o Kandev ficou inacessível além do orçamento offline.",
   "branchRecreatedWarning": "A branch guardada não estava disponível, por isso foi criada uma nova branch.",
   "branchRecreatedOriginal": "Branch original",
   "branchRecreatedNew": "Nova branch",

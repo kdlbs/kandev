@@ -663,6 +663,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    req.McpMode,
 		RequiresProcessKill:        requiresProcessKill,
+		OfflineBudgetMinutes:       offlineBudgetFromMetadata(req.Metadata),
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),

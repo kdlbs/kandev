@@ -218,6 +218,16 @@ func run(cfg *config.Config, log *logger.Logger) {
 		// Create MCP backend client for bidirectional communication through agent stream
 		// MCP requests from agents are sent through the agent stream WebSocket to the backend
 		mcpBackendClient := mcpserver.NewChannelBackendClient(instLog)
+		mcpBackendClient.SetAttachmentSnapshotter(func() mcpserver.AttachmentSnapshot {
+			snap := procMgr.AttachmentSnapshot()
+			return mcpserver.AttachmentSnapshot{
+				Attached:  snap.Attached,
+				Ready:     snap.Ready,
+				Exhausted: snap.Exhausted,
+				Epoch:     snap.Epoch,
+				ChangeCh:  snap.ChangeCh,
+			}
+		})
 
 		// Create MCP server using the channel-based backend client
 		var mcpSrv *mcpserver.Server

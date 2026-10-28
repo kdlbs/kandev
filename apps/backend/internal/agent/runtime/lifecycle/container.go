@@ -148,6 +148,7 @@ func buildContainerCreateInstanceRequest(
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
 		RequiresProcessKill:        requiresProcessKill,
+		OfflineBudgetMinutes:       offlineBudgetFromMetadata(config.Metadata),
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        config.ProviderGatewayAuth,
 		BaseBranches:               config.BaseBranches,

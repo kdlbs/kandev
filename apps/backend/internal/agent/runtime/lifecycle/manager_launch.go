@@ -1437,6 +1437,10 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		env[providerKeyEnvVar] = providerKey
 	}
 
+	if err := validateOfflineBudgetMetadata(metadata); err != nil {
+		return nil, nil, nil, err
+	}
+
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
 		IsPassthrough:                  reqWithWorktree.IsPassthrough,
@@ -2161,6 +2165,10 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	finalEnv, err := m.buildEnvForExecution(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo)
 	if err != nil {
+		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	if err := applyToolTimeoutFloor(finalEnv, agentConfig, reqWithWorktree.Metadata); err != nil {
 		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}

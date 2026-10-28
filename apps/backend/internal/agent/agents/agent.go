@@ -285,6 +285,12 @@ type PassthroughOptions struct {
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
+	// ToolTimeoutEnvKey names the environment variable that bounds one MCP
+	// tool call in this harness, and ToolTimeoutUnit is its unit. Empty means
+	// the harness has no such variable and no floor is applied.
+	ToolTimeoutEnvKey string
+	ToolTimeoutUnit   time.Duration
+
 	// ContainerEnv provides agent-specific environment required only when the
 	// process runs inside a container runtime. These values are independent of
 	// session mode and never reach host or SSH processes.

@@ -207,6 +207,27 @@ agent. Backend tools and credential services require connectivity to Kandev.
 If the retained journal is unavailable, Kandev blocks unsafe prompt admission.
 It does not silently use a less durable path.
 
+### Offline budget
+
+While an agent cannot reach Kandev, its Kandev tool calls wait for the
+connection instead of failing, and nothing is queued or replayed. Each call
+sends a periodic keepalive so the harness does not time it out. If a call was
+already sent when the connection dropped, the agent receives an "outcome
+unknown" error and should check the result before retrying.
+
+The wait is limited by an offline budget of 15 minutes. To change it for an
+executor profile, set the key `offline_budget_minutes` to a whole number from
+1 to 1440. Any other value fails the profile save or launch with an error that
+names the key. When the budget runs out, Kandev cancels the running turn and
+records a "paused" notice in the conversation when the connection returns. A
+turn that ends while Kandev is unreachable is also marked with a notice.
+
+Upgrade note: for agents with a managed harness tool timeout, Kandev sets it
+to the offline budget plus 10 minutes so the budget elapses first. A profile
+that sets `MCP_TOOL_TIMEOUT` explicitly must exceed the budget by at least one
+minute (16 minutes at the default budget). A smaller or invalid value now fails
+launch; raise it or remove it.
+
 ### Model selection in remote executors
 
 The host model probe helps edit a profile, but it is not the launch authority.

@@ -1002,6 +1002,8 @@
   "modelSelectionRemediationUnknown": "실행기 구성을 확인하세요.",
   "modelSelectionRequested": "요청된 모델",
   "modelSelectionWarning": "실행기가 저장된 모델 선택을 사용할 수 없었습니다.",
+  "turnEndedDetached": "Kandev에 연결할 수 없는 동안 턴이 종료되었습니다.",
+  "pausedOfflineBudget": "Kandev에 연결할 수 없는 시간이 오프라인 예산을 초과하여 턴이 일시 중지되었습니다.",
   "branchRecreatedWarning": "저장된 브랜치를 사용할 수 없어 새 브랜치가 만들어졌습니다.",
   "branchRecreatedOriginal": "원래 브랜치",
   "branchRecreatedNew": "새 브랜치",
