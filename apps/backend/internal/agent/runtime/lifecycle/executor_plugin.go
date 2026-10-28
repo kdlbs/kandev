@@ -29,25 +29,27 @@ import (
 )
 
 const (
-	pluginExecutorInventoryMaxBytes    = 32 << 10
-	pluginExecutorRuntimePort          = 8765
-	pluginExecutorWorkspacePath        = "/workspace"
-	pluginExecutorPhaseAllocating      = "allocating"
-	pluginExecutorPhaseArtifactStaging = "artifact_staging"
-	pluginExecutorPhaseBootstrapping   = "bootstrapping"
-	pluginExecutorPhaseProvisioned     = "provisioned"
-	pluginExecutorPhaseReady           = "ready"
-	pluginExecutorPhaseCleanupPending  = "cleanup_pending"
-	pluginExecutorPhaseExpired         = "expired"
-	pluginExecutorPhaseAbsent          = "absent"
-	pluginExecutorStateRunning         = "running"
-	pluginExecutorStateSuspended       = "suspended"
-	pluginExecutorStateTerminated      = "terminated"
-	pluginExecutorStateUnknown         = "unknown"
-	pluginExecutorStateUnavailable     = "unavailable"
-	pluginExecutorRetentionBounded     = "bounded"
-	pluginExecutorCleanupReasonTask    = "task_cleanup"
-	pluginExecutorCleanupReasonLaunch  = "launch_failed"
+	pluginExecutorInventoryMaxBytes     = 32 << 10
+	pluginExecutorRuntimePort           = 8765
+	pluginExecutorWorkspacePath         = "/workspace"
+	pluginExecutorPhaseAllocating       = "allocating"
+	pluginExecutorPhaseArtifactStaging  = "artifact_staging"
+	pluginExecutorPhaseBootstrapping    = "bootstrapping"
+	pluginExecutorPhaseProvisioned      = "provisioned"
+	pluginExecutorPhaseReady            = "ready"
+	pluginExecutorPhaseCleanupPending   = "cleanup_pending"
+	pluginExecutorPhaseExpired          = "expired"
+	pluginExecutorPhaseAbsent           = "absent"
+	pluginExecutorPhaseCleanupProgress  = "cleanup_progress"
+	pluginExecutorPhaseRecoveryProgress = "recovery_progress"
+	pluginExecutorStateRunning          = "running"
+	pluginExecutorStateSuspended        = "suspended"
+	pluginExecutorStateTerminated       = "terminated"
+	pluginExecutorStateUnknown          = "unknown"
+	pluginExecutorStateUnavailable      = "unavailable"
+	pluginExecutorRetentionBounded      = "bounded"
+	pluginExecutorCleanupReasonTask     = "task_cleanup"
+	pluginExecutorCleanupReasonLaunch   = "launch_failed"
 )
 
 type PluginExecutorLaunch struct {
@@ -124,6 +126,7 @@ type pluginExecutorInventory struct {
 	ExpiresAt              string                                `json:"expires_at,omitempty"`
 	ExpiryCheckAt          string                                `json:"expiry_check_at,omitempty"`
 	LastInspectionState    string                                `json:"last_inspection_state,omitempty"`
+	Claim                  *pluginExecutorClaimState             `json:"claim,omitempty"`
 	Revision               uint64                                `json:"revision"`
 	Generation             uint64                                `json:"generation"`
 	EnvironmentGeneration  int64                                 `json:"environment_generation"`

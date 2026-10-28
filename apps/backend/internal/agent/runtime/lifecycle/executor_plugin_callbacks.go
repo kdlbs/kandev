@@ -96,6 +96,9 @@ func (m *Manager) validatePluginExecutorOwnership(ctx context.Context, req *Exec
 }
 
 func (m *Manager) CheckpointExecutorResource(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest) error {
+	if phase := strings.TrimSpace(request.GetPhase()); isPluginExecutorClaimPhase(phase) {
+		return m.checkpointPluginExecutorClaim(ctx, request, phase)
+	}
 	req, err := m.pluginExecutorCallbackRequest(ctx, request.GetContext())
 	if err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -29,6 +30,9 @@ func (r *Repository) CheckpointPluginExecutorInventory(ctx context.Context, runn
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockPluginEnvelopeWrite(ctx, tx, running); err != nil {
+		return err
+	}
 	if err := r.validatePluginExecutorCheckpointOwner(ctx, tx, running, metadataJSON); err != nil {
 		return err
 	}
@@ -364,17 +368,23 @@ func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface
 
 func validPluginExecutorInventoryTransition(current, incoming map[string]interface{}) bool {
 	from, to := pluginExecutorInventoryPhase(current), pluginExecutorInventoryPhase(incoming)
-	allowed := map[string]map[string]bool{
-		"allocating":       {"allocating": true, "artifact_staging": true, "bootstrapping": true, "provisioned": true, "ready": true, "cleanup_pending": true, "absent": true},
-		"artifact_staging": {"artifact_staging": true, "bootstrapping": true, "provisioned": true, "cleanup_pending": true, "absent": true},
-		"bootstrapping":    {"bootstrapping": true, "provisioned": true, "ready": true, "cleanup_pending": true, "absent": true},
-		"provisioned":      {"provisioned": true, "bootstrapping": true, "ready": true, "cleanup_pending": true, "expired": true, "absent": true},
-		"ready":            {"ready": true, "cleanup_pending": true, "expired": true, "absent": true},
-		"cleanup_pending":  {"cleanup_pending": true, "absent": true},
-		"expired":          {"expired": true, "absent": true},
-		"absent":           {"absent": true},
-	}
-	return allowed[from][to]
+	return slices.Contains(pluginExecutorPhaseTransitions[from], to)
+}
+
+// pluginExecutorPhaseTransitions lists the phases each phase may move to. The
+// progress phases are reachable from any live phase and never regress to a
+// launch phase, except that recovery may complete into one.
+var pluginExecutorPhaseTransitions = map[string][]string{
+	pluginPhaseAllocating:       {pluginPhaseAllocating, pluginPhaseArtifactStaging, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
+	pluginPhaseArtifactStaging:  {pluginPhaseArtifactStaging, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
+	pluginPhaseBootstrapping:    {pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
+	pluginPhaseProvisioned:      {pluginPhaseProvisioned, pluginPhaseBootstrapping, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseExpired, pluginPhaseAbsent},
+	pluginPhaseReady:            {pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseExpired, pluginPhaseAbsent},
+	pluginPhaseCleanupPending:   {pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseAbsent},
+	pluginPhaseCleanupProgress:  {pluginPhaseCleanupProgress, pluginPhaseCleanupPending, pluginPhaseAbsent},
+	pluginPhaseRecoveryProgress: {pluginPhaseRecoveryProgress, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseAbsent},
+	pluginPhaseExpired:          {pluginPhaseExpired, pluginPhaseCleanupProgress, pluginPhaseAbsent},
+	pluginPhaseAbsent:           {pluginPhaseAbsent},
 }
 
 func pluginExecutorInventoryPhase(metadata map[string]interface{}) string {
