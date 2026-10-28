@@ -23,17 +23,22 @@ func (r *Repository) RecordPluginExecutorCleanupRequested(ctx context.Context, s
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var taskID string
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM executors_running WHERE session_id = ?`), sessionID).Scan(&taskID); errors.Is(err, sql.ErrNoRows) {
+	// The first read is unlocked: it only names the task and installation whose
+	// locks must be taken before the execution row, the order a claim checkpoint
+	// uses. The locked read below revalidates the execution.
+	var taskID, metadataJSON string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, metadata FROM executors_running WHERE session_id = ?`), sessionID).Scan(&taskID, &metadataJSON); errors.Is(err, sql.ErrNoRows) {
 		return models.ErrExecutionRotated
 	} else if err != nil {
 		return err
 	}
-	_, current, _, err := readPluginExecutorInventoryForUpdate(ctx, tx, sessionID)
-	if err != nil {
-		return err
+	unlocked := make(map[string]interface{})
+	if metadataJSON != "" {
+		if err := json.Unmarshal([]byte(metadataJSON), &unlocked); err != nil {
+			return fmt.Errorf("decode existing executor inventory metadata: %w", err)
+		}
 	}
-	if err := r.lockPluginEnvelopeWrite(ctx, tx, &models.ExecutorRunning{TaskID: taskID, Metadata: current}); err != nil {
+	if err := r.lockPluginEnvelopeWrite(ctx, tx, &models.ExecutorRunning{TaskID: taskID, Metadata: unlocked}); err != nil {
 		return err
 	}
 	currentExecution, current, currentUpdatedAt, err := readPluginExecutorInventoryForUpdate(ctx, tx, sessionID)
