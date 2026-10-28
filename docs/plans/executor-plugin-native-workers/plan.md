@@ -21,11 +21,16 @@ requirements:
   - REQ-EXECUTORS-PLUGIN-LAUNCHPOLICY-001
   - REQ-EXECUTORS-PLUGIN-PREPARATION-001
   - REQ-EXECUTORS-PLUGIN-MIGRATION-001
+  - REQ-EXECUTORS-PLUGIN-PLACEMENT-002
+  - REQ-EXECUTORS-PLUGIN-PROFILE-001
+  - REQ-EXECUTORS-PLUGIN-PROFILE-002
+  - REQ-EXECUTORS-PLUGIN-PROFILE-003
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
   - ../../specs/executors/system-design/remote-executor-plugin-capability-versioning.md
   - ../../specs/executors/system-design/remote-executor-plugin-shared-admission-placement.md
   - ../../specs/executors/system-design/remote-executor-plugin-operations-migration.md
+  - ../../specs/executors/system-design/remote-executor-plugin-profile-contract.md
 legacy_specs: []
 ---
 
@@ -39,7 +44,7 @@ versioning (M7) comes first because every other capability is a registry entry. 
 workspace descriptor (R1), destroy and recover checkpoints (R4), drain receipt (R3), durable bootstrap and ready publication
 (R5), transport (R2), repository intent (R7), crash barrier (R8). Then the medium-term items: shared environments (M1),
 admission context (M2), pending placement (M3), provider operations and maintenance (M4), launch policy (M5), extensible
-preparation (M6), migration (M8), and the fixture proof. A provider that declares nothing keeps today's behavior.
+preparation (M6), migration (M8), and the fixture proof. Task 17 (profile schema, typed values, secret references) closes the plugin skeleton findings 1 to 3 and can proceed beside tasks 02 to 08. A provider that declares nothing keeps today's behavior.
 
 Proposed upstream; branch from `origin/main`. The native executor on the contributor fork is a read-only reference.
 
@@ -49,6 +54,7 @@ Proposed upstream; branch from `origin/main`. The native executor on the contrib
 | --- | --- | --- | --- | --- |
 | 00 | [Record the owner decisions as an ADR](task-00-record-owner-decisions.md) | 1 | - | S: ~150 doc lines, 0 code. |
 | 01 | [Capability registry, negotiation, and versioning (M7)](task-01-capability-registry-versioning.md) | 1 | 00 | M: ~550 source, ~900 test lines. |
+| 17 | [Profile schema keywords, typed values, and secret references](task-17-profile-contract.md) | 2 | 01 | M: ~450 source, ~800 test lines. Runs beside 02 to 08. |
 | 02 | [Workspace descriptor (R1)](task-02-workspace-descriptor.md) | 2 | 01 | M: ~350 source, ~600 test lines. |
 | 03 | [Destroy- and recover-scoped checkpoints (R4)](task-03-destroy-recover-checkpoints.md) | 2 | 02 | M: ~250 source, ~500 test lines. |
 | 04 | [Drain receipt into destroy (R3)](task-04-drain-receipt.md) | 3 | 03 | M: ~400 source, ~600 test lines. Port from fork/feature/nomad-native-executor (read-only). |
@@ -58,14 +64,14 @@ Proposed upstream; branch from `origin/main`. The native executor on the contrib
 | 08 | [Provider-neutral crash barrier (R8)](task-08-crash-barrier.md) | 5 | 07 | S: ~150 source, ~300 test lines. |
 | 09 | [Workspace reuse and shared environments (M1)](task-09-shared-environments.md) | 6 | 08 | L: ~500 source, ~900 test lines. |
 | 10 | [Launch and resume admission context (M2)](task-10-admission-context.md) | 6 | 09 | L: ~500 source, ~900 test lines. |
-| 11 | [Queued and pending placement (M3)](task-11-pending-placement.md) | 7 | 10 | L: ~600 source, ~1000 test lines, with web and Playwright. |
+| 11 | [Queued and pending placement and refused provision (M3)](task-11-pending-placement.md) | 7 | 10 | L: ~600 source, ~1000 test lines, with web and Playwright. |
 | 12 | [Provider status, inventory, events, logs, and maintenance (M4)](task-12-provider-operations-maintenance.md) | 8 | 11 | L: ~650 source, ~1000 test lines. |
 | 13 | [Launch-wrapper and sandbox requirement (M5)](task-13-launch-policy.md) | 8 | 12 | M: ~350 source, ~600 test lines. |
 | 14 | [Extensible workspace preparation (M6)](task-14-preparation-hints.md) | 8 | 13, 07 | M: ~250 source, ~450 test lines. |
 | 15 | [Migration and coexistence (M8)](task-15-migration-coexistence.md) | 9 | 14 | L: ~600 source, ~900 test lines. |
-| 16 | [Fixture provider proving every capability (R8, M1-M8)](task-16-fixture-provider-proof.md) | 10 | 15 | M: ~450 source, ~700 test lines. |
+| 16 | [Fixture provider proving every capability (R8, M1-M8)](task-16-fixture-provider-proof.md) | 10 | 15, 17 | M: ~450 source, ~700 test lines. |
 
-Total forecast: about 7.2k source and 11.6k test lines, seventeen work orders. Task 00 records the owner decisions and the
+Total forecast: about 7.8k source and 12.6k test lines, eighteen work orders. Task 00 records the owner decisions and the
 answers to the medium-term open questions. Process-level interleaving tests in tasks 03 to 05 and 09 to 15 use fakes first and
 gain their barrier versions in task 08. Each capability work order extends the fixture for its own capability, test-first;
 task 16 is the cross-capability conformance run and the public documentation pass.
@@ -75,7 +81,7 @@ task 16 is the cross-capability conformance run and the public documentation pas
 ### In scope
 
 The three new requirement documents and the native worker requirements: REQ-EXECUTORS-NATIVE-WORKER-001 to 008,
-REQ-EXECUTORS-PLUGIN-CAPABILITY-001 to 004, SHARED-001, ADMISSION-001, PLACEMENT-001, OPS-001, LAUNCHPOLICY-001,
+REQ-EXECUTORS-PLUGIN-CAPABILITY-001 to 004, SHARED-001, ADMISSION-001, PLACEMENT-001 and 002, PROFILE-001 to 003, OPS-001, LAUNCHPOLICY-001,
 PREPARATION-001, and MIGRATION-001, with their acceptance criteria.
 
 ### Out of scope
@@ -90,6 +96,7 @@ hostile-workload isolation, a concrete per-node mirror, public relay, SDK module
 - Proto additions must stay additive; run the SDK round-trip tests in task 01 and keep contract version 1.
 - The 32 KiB envelope holds owners, placement, capability snapshot, repositories, and provider state together; task 01 adds a combined-size test.
 - Size: the forecast is far above the original estimate line recorded on the board card; the work orders are separable, and task 16 carries the proof.
+- The plugin skeleton findings are mapped one by one in the profile-contract design ("Resolution of the plugin skeleton findings").
 - Public docs (`plugins-authoring.md`, `plugins-manifest.md`) change in task 16 through `/docs-maintainer`.
 
 ## Verification strategy

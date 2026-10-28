@@ -24,7 +24,7 @@ leases, and inventory; the provider contract version stays 1.
 | --- | --- |
 | REQ-EXECUTORS-PLUGIN-CAPABILITY-001 | Registry; Manifest syntax |
 | REQ-EXECUTORS-PLUGIN-CAPABILITY-002 | Negotiation points |
-| REQ-EXECUTORS-PLUGIN-CAPABILITY-003 | Snapshot; State schema versions |
+| REQ-EXECUTORS-PLUGIN-CAPABILITY-003 | Snapshot; State schema versions; State budget |
 | REQ-EXECUTORS-PLUGIN-CAPABILITY-004 | Deprecation and retirement |
 
 ## Registry
@@ -42,7 +42,7 @@ golden file) and fails on removal or reuse, mirroring the runtime-flag retired i
 `internal/plugins/manifest/executor_provider.go`. Rules: closed names, no duplicates, integer version in the registry
 range, dependency closure (`provider_maintenance` needs `provider_operations`; `workspace_sharing` needs
 `workspace_descriptor`; `pending_placement` needs `destroy_checkpoints`; `launch_policy` needs `workspace_descriptor`;
-`preparation_hints` needs `repository_intent`). `state_schema` is `{current, min_readable}`, absent meaning `1/1`. Cross-field
+`preparation_hints` needs `repository_intent`; `typed_profile_values` and `secret_references` need none; `provision_refusal` needs `destroy_checkpoints`). `state_schema` is `{current, min_readable}`, absent meaning `1/1`. `min_kandev_version` must be at least the highest `introduced_in` release among the declared capabilities (AC 002.6); the existing generic minimum-version check then makes an older host refuse the package with a clear message. Cross-field
 rules from the native design (preparation mode, API URL mode, destroy timeout) stay and consult the same registry.
 
 ## Negotiation points
@@ -74,6 +74,15 @@ installation whose recorded version is outside the new `[min_readable, current]`
 activation and reports only the count (AC 003.3). The same query blocks retirement of a version that retained environments
 record (AC 004.4).
 
+## State budget
+
+The 32 KiB envelope holds host fields (capability snapshot, owners, placement, repositories, descriptor) and provider state together. The
+manifest `state_budget_bytes` (default 16 KiB, at most 24 KiB) reserves the rest for host fields. The host measures the state body on
+every accepted response, rejects an over-budget one as `state_too_large` before it writes (AC 003.7), and records the largest size per
+installation for the status read (AC 003.8). A combined worst-case test (16 owners, 32 repositories, pending placement, maximum
+snapshot, 16 KiB state) proves the host fields never push a valid state over the cap. Whether a real provider's state fits is a
+vendor-repository check; the fixture proves a representative 12 KiB state (D7).
+
 ## Deprecation and retirement
 
 Marking `deprecated_in` makes install warn and name the replacement; the status read lists it with `retire_in`. The window is
@@ -96,6 +105,8 @@ records an old version between the check and activation is caught by the allocat
 | Manifest declares version 2 of a name the host supports at 1 (002.1) | install rejected naming the range | validator table |
 | Older provider returns no echo (002.4) | treated as declaring none; manifest requiring any rejected | lifecycle unit |
 | Rollback to a plugin whose range excludes recorded state (003.3) | rejected before activation; working install active | upgrade unit |
+| Manifest lowers `min_kandev_version` below a capability's release (002.6) | install rejected naming both | validator table |
+| State above budget, or host fields plus state above the cap (003.7) | `state_too_large`, resource cleaned, nothing persisted | lifecycle unit; combined worst-case test |
 | Retired pair removed from the list (004.3) | golden-file test fails | registry test |
 | Record with only the old `required_capabilities` key (003.6) | reads as version 1 and keeps working | store decode test |
 
