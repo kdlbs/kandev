@@ -574,3 +574,31 @@ func TestStartOneShotPreservesConfiguredTempEnvironment(t *testing.T) {
 	}
 	assertNoAgentTempRoot(t, serviceTemp)
 }
+
+func TestBuildAdapterConfigPreservesPromptSuggestionsAndBackgroundWork(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		suggestions bool
+		background  bool
+	}{
+		{name: "suggestions only", suggestions: true},
+		{name: "background only", background: true},
+		{name: "both enabled", suggestions: true, background: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Manager{
+				cfg: &config.InstanceConfig{
+					AgentArgs: []string{"cat"}, WorkDir: t.TempDir(), AgentEnv: []string{"PATH=/usr/bin"},
+					Protocol: agent.ProtocolACP, PromptSuggestions: tc.suggestions,
+					AgentBackgroundWorkEnabled: tc.background,
+				},
+				logger: newTestLogger(t),
+			}
+			require.NoError(t, m.buildAdapterConfig())
+			t.Cleanup(func() { _ = m.adapter.Close() })
+			shared := m.adapterCfg.ToSharedConfig()
+			require.Equal(t, tc.suggestions, shared.PromptSuggestions)
+			require.Equal(t, tc.background, shared.AgentBackgroundWorkEnabled)
+		})
+	}
+}

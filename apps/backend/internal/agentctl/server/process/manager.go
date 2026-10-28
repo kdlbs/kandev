@@ -1966,6 +1966,7 @@ func (m *Manager) buildAdapterConfig() error {
 		AgentBackgroundWorkEnabled: m.cfg.AgentBackgroundWorkEnabled,
 		PromptCancelJoinTimeout:    m.cfg.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
+		PromptSuggestions:          m.cfg.PromptSuggestions,
 	}
 
 	// Configure one-shot mode when a continue command is provided.

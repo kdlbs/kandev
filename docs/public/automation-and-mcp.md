@@ -590,6 +590,8 @@ field and expected shape for the selected component and source form. Ambiguous
 forms report separate alternatives. Agents can correct a rejected call using
 that feedback and discovered examples; rejected values and file contents are
 not included in the diagnostic.
+If a rich-output call fails, select its error icon to read the diagnostic
+before you correct the call.
 
 | Component | Purpose |
 | --- | --- |

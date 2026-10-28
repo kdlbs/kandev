@@ -189,6 +189,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
+		Meta:       a.promptSuggestionSessionMeta(),
 	})
 	if err != nil {
 		for _, server := range filteredServers {
@@ -624,6 +625,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		SessionId:  acp.SessionId(sessionID),
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
+		Meta:       a.promptSuggestionSessionMeta(),
 	})
 
 	if err != nil {

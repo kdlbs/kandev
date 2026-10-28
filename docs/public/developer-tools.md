@@ -161,6 +161,14 @@ Disabling a custom utility blocks new calls until it is re-enabled; calls alread
 
 Utility calls run as ephemeral processes on the Kandev backend host. Kandev resolves one profile snapshot at call start, records its profile ID with the call, and applies its permissions without asking for interactive approval. If the profile does not auto-approve a permission request, the call is rejected promptly. Profile edits affect the next call; an in-flight call keeps its snapshot.
 
+### Prompt suggestions
+
+Turn on **Suggest next prompt** in **Settings > Task behavior > Conversation** to see the reply you are most likely to send next as dimmed text in the empty chat composer of a task or Quick Chat. Press **Tab** (or tap **Use reply** on a phone) to fill it in for editing, press your submit shortcut to send it as is, or press **Escape** to dismiss it. Typing hides the suggestion; clearing the composer shows it again until the next turn.
+
+Suggestions come only from agents with native support. Today that means sessions that run Claude Code, whether the Claude agent or a custom ACP agent that wraps Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache. Kandev detects Claude Code from the agent's ACP handshake, so the model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a Claude session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
+
+Kandev never generates a suggestion of its own. For agents without native support, and for turns where Claude Code stays silent, the composer works as usual.
+
 ### Configuration Chat
 
 The same settings page configures the **Configuration Chat Agent** for each workspace. Choose a profile, choose **No default**, or rely on the workspace default profile. Kandev remembers the first explicit selection as that workspace's configuration-chat default.

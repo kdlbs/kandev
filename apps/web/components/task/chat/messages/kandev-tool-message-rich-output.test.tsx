@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { KandevToolMessage } from "./kandev-tool-message";
 import { richOutputExamples } from "@/lib/rich-output/examples";
 import { kandevToolCall } from "./kandev-tool-message.test-helpers";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 const UNAVAILABLE = "This presentation is unavailable.";
 const RICH_OUTPUT_TEST_ID = 'data-testid="rich-output"';
 const COPILOT_TOOL_TITLE = "kandev-show_rich_output_kandev";
@@ -154,16 +155,22 @@ describe("Copilot rich output compatibility", () => {
   });
 
   it.each(["pending", "error"] as const)("keeps the existing %s activity surface", (status) => {
-    const copilot = renderToStaticMarkup(<KandevToolMessage comment={copilotToolCall(status)} />);
+    const copilot = renderToStaticMarkup(
+      <TooltipProvider>
+        <KandevToolMessage comment={copilotToolCall(status)} />
+      </TooltipProvider>,
+    );
     const canonical = renderToStaticMarkup(
-      <KandevToolMessage
-        comment={kandevToolCall({
-          toolName: "mcp__kandev__show_rich_output_kandev",
-          input: { kind: "other", raw_input: COPILOT_CALLOUT_ARGS },
-          output: { content: "Rich output accepted." },
-          status,
-        })}
-      />,
+      <TooltipProvider>
+        <KandevToolMessage
+          comment={kandevToolCall({
+            toolName: "mcp__kandev__show_rich_output_kandev",
+            input: { kind: "other", raw_input: COPILOT_CALLOUT_ARGS },
+            output: { content: "Rich output accepted." },
+            status,
+          })}
+        />
+      </TooltipProvider>,
     );
 
     expect(copilot).toBe(canonical);

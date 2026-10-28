@@ -1644,3 +1644,19 @@ trace-retention declaration introduced by the automatic merge; one remains.
 Normal merge hooks, commit and push follow. The preceding head's 95 green
 checks are historical; fresh GitHub CI must verify the new head. The user owns
 the merge, and NOTIFICATION_GUIDE.md remains uncommitted.
+
+Main advanced during verification to
+`3f3aabc53f23cc8b08f0bf2b1b766b88fbeaf7f2`, adding prompt suggestions and
+rich-output error disclosure. Its ACP replacement update conflicts with the
+standalone SDK entries in go.mod. Keep the new ACP version and both the
+standalone SDK requirement/local replacement. Go module tidy produces no extra
+changes and verification passes. The initial three-conflict merge is recorded
+in `8febdc23fbab`; the final integration also includes this newer main revision.
+Full typecheck and 135 focused review, notification, prompt-suggestion and
+rich-output tests pass. Backend rich-output race checks pass. All thirty fresh
+browser cases pass with retries disabled: twenty-three pseudo-locale, three
+desktop and four phone review, stall and rich-output cases. Docs/spec validation
+passes 414 decisions and 1,800 specifications. Module tidy and verification
+pass without further changes. Direct coverage passes 36 work orders and 118
+linked documents. These results validate the later ACP combination, rather
+than relying on the earlier browser run.

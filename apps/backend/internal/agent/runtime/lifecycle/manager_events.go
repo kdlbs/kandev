@@ -1597,6 +1597,11 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 
 func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	switch event.Type {
+	case streams.EventTypePromptSuggestion:
+		// Bound only to its originating prompt; an unknown origin gets no turn.
+		if event.TurnID == "" {
+			event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
 	case streams.EventTypeUsageObservation:
 		if event.TurnID == "" {
 			if event.PromptGeneration != 0 {

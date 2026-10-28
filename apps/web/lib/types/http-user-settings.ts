@@ -220,6 +220,7 @@ export type UserSettings = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -306,6 +307,7 @@ export type UserSettingsUpdatePayload = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
