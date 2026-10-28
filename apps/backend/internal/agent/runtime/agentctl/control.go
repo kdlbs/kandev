@@ -487,8 +487,8 @@ func (c *ControlClient) SealAndDrainRuntime(ctx context.Context, drain RuntimeDr
 }
 
 // RuntimeDrainRejectedError is a seal-and-drain reply that agentctl sent with
-// a non-200 status. A 409 means the runtime identity differs from the expected
-// one or another request owns the drain.
+// a non-200 status. A 412 means the runtime identity differs from the expected
+// one; a 409 means another request owns the drain.
 type RuntimeDrainRejectedError struct{ StatusCode int }
 
 func (e *RuntimeDrainRejectedError) Error() string {

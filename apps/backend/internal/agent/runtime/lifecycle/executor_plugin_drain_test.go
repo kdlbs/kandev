@@ -105,8 +105,10 @@ func TestDrainOutcomeMapping(t *testing.T) {
 		called bool
 	}{
 		{"refused connection", &net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}, nil, "unreachable", true},
-		{"identity mismatch", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusConflict}, nil, "unreachable", true},
-		{"credential no longer accepted", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusUnauthorized}, nil, "unreachable", true},
+		{"identity mismatch", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusPreconditionFailed}, nil, "unreachable", true},
+		{"drain in progress under another claim", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusConflict}, nil, "uncertain", true},
+		{"credential not accepted", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusUnauthorized}, nil, "uncertain", true},
+		{"credential forbidden", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusForbidden}, nil, "uncertain", true},
 		{"lost reply", errors.New("EOF"), nil, "uncertain", true},
 		{"deadline", context.DeadlineExceeded, nil, "uncertain", true},
 		{"agentctl drain failed", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusInternalServerError}, nil, "uncertain", true},
@@ -349,5 +351,23 @@ func TestTaskTeardownStopDrainsBeforeDestroy(t *testing.T) {
 	}
 	if len(drainer.calls) != 1 || operations.destroyRequest.GetDrainOutcome() != "drained" {
 		t.Fatalf("task teardown drains=%v destroy outcome=%q, want one drain then a drained destroy", drainer.calls, operations.destroyRequest.GetDrainOutcome())
+	}
+}
+
+func TestSameClaimRetryDrainsAgainAfterANonDrainedOutcome(t *testing.T) {
+	runtime, operations, _, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, nil)
+	operations.destroyResponse = &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: false}
+	drainer.err = context.DeadlineExceeded
+	_ = destroyClaimEnvironment(runtime)
+	if got := operations.destroyRequest.GetDrainOutcome(); got != "uncertain" {
+		t.Fatalf("first drain_outcome = %q, want uncertain", got)
+	}
+	drainer.err = nil
+	_ = destroyClaimEnvironment(runtime)
+	if len(drainer.calls) != 2 {
+		t.Fatalf("drain calls = %d, want the retry to drain again", len(drainer.calls))
+	}
+	if got := operations.destroyRequest.GetDrainOutcome(); got != "drained" || operations.destroyRequest.GetDrainReceipt().GetReceiptId() == "" {
+		t.Fatalf("retry drain_outcome = %q receipt=%v, want a drained receipt", got, operations.destroyRequest.GetDrainReceipt())
 	}
 }

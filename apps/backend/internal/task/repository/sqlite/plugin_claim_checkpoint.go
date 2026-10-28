@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"time"
 
@@ -22,10 +23,12 @@ const (
 )
 
 // pluginClaimState is the claim record kept in the envelope: which claim last
-// wrote, and the highest sequence and digest it was accepted at.
+// wrote, and the highest sequence and digest it was accepted at. AcquiredAt
+// separates two acquisitions of one claim id.
 type pluginClaimState struct {
 	Kind        string `json:"kind"`
 	OperationID string `json:"operation_id"`
+	AcquiredAt  string `json:"acquired_at"`
 	Sequence    uint64 `json:"sequence"`
 	Digest      string `json:"digest"`
 }
@@ -71,7 +74,13 @@ func lockPluginInventory(ctx context.Context, tx *sqlx.Tx, driverName, environme
 	return nil
 }
 
+// lockPluginEnvelopeWrite orders the locks of an envelope write as the owner
+// task row, the installation descriptors, then the environment inventory, the
+// order ready publication takes them in.
 func (r *Repository) lockPluginEnvelopeWrite(ctx context.Context, tx *sqlx.Tx, running *models.ExecutorRunning) error {
+	if err := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), running.TaskID); err != nil && !errors.Is(err, kandevdb.ErrTaskRowNotFound) {
+		return err
+	}
 	view := decodePluginEnvelopeView(running.Metadata)
 	if view.Descriptor != nil && view.InstallationID != "" && !pluginExecutorPhaseTerminal(view.Phase) {
 		if err := lockPluginWorkspaceDescriptors(ctx, tx, r.db.DriverName(), view.InstallationID); err != nil {
@@ -123,6 +132,9 @@ func (r *Repository) CheckpointPluginExecutorClaimInventory(ctx context.Context,
 	if err := r.validatePluginExecutorCheckpointOwner(claimedCtx, tx, running, metadataJSON); err != nil {
 		return false, mapPluginClaimError(err)
 	}
+	if err := recoveryclaim.ValidateAcquisitionTx(ctx, r.db, tx, cp.Claim); err != nil {
+		return false, mapPluginClaimError(err)
+	}
 	proceed, err := r.checkPluginClaimSequence(ctx, tx, running, cp, observedRevision)
 	if err != nil || !proceed {
 		return false, err
@@ -133,7 +145,7 @@ func (r *Repository) CheckpointPluginExecutorClaimInventory(ctx context.Context,
 	if err := r.checkPluginWorkspaceUnique(ctx, tx, running); err != nil {
 		return false, err
 	}
-	if err := setPluginClaimState(running.Metadata, pluginClaimState{Kind: cp.Kind, OperationID: cp.Claim.OperationID, Sequence: cp.Sequence, Digest: cp.Digest}); err != nil {
+	if err := setPluginClaimState(running.Metadata, pluginClaimState{Kind: cp.Kind, OperationID: cp.Claim.OperationID, AcquiredAt: claimAcquiredAt(cp.Claim), Sequence: cp.Sequence, Digest: cp.Digest}); err != nil {
 		return false, err
 	}
 	if err := checkpointPluginExecutorInventoryRow(ctx, tx, r.db, running, observedRevision, now); err != nil {
@@ -154,9 +166,13 @@ func mapPluginClaimError(err error) error {
 	return err
 }
 
+func claimAcquiredAt(claim *models.TaskEnvironmentRecoveryClaim) string {
+	return claim.CreatedAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+}
+
 // checkPluginClaimSequence applies the per-claim sequence rule against the
 // stored envelope and reports whether the write should proceed. A claim other
-// than the one that last wrote starts a fresh sequence.
+// than the acquisition that last wrote starts a fresh sequence.
 func (r *Repository) checkPluginClaimSequence(ctx context.Context, tx *sqlx.Tx, running *models.ExecutorRunning, cp models.PluginExecutorClaimCheckpoint, observedRevision uint64) (bool, error) {
 	executionID, current, _, err := readPluginExecutorInventoryForUpdate(ctx, tx, running.SessionID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -168,7 +184,7 @@ func (r *Repository) checkPluginClaimSequence(ctx context.Context, tx *sqlx.Tx, 
 	if executionID != running.AgentExecutionID {
 		return false, models.ErrExecutionRotated
 	}
-	if last := decodePluginClaimState(current); last != nil && last.OperationID == cp.Claim.OperationID {
+	if last := decodePluginClaimState(current); last != nil && last.OperationID == cp.Claim.OperationID && last.AcquiredAt == claimAcquiredAt(cp.Claim) {
 		switch {
 		case cp.Sequence < last.Sequence:
 			return false, fmt.Errorf("%w: sequence %d is older than the accepted %d", models.ErrExecutorConflict, cp.Sequence, last.Sequence)

@@ -509,6 +509,24 @@ func loadClaim(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID stri
 	return claim, nil
 }
 
+// ValidateAcquisitionTx is ValidateTx plus a check that claim is the
+// acquisition currently stored, not an earlier one released and acquired again
+// under the same operation id. Creation times compare at microsecond precision,
+// the coarsest the supported databases store.
+func ValidateAcquisitionTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, claim *models.TaskEnvironmentRecoveryClaim) error {
+	if err := ValidateTx(ctx, db, tx, claim); err != nil {
+		return err
+	}
+	current, err := loadClaim(ctx, db, tx, claim.TaskEnvironmentID)
+	if err != nil {
+		return err
+	}
+	if !current.CreatedAt.Truncate(time.Microsecond).Equal(claim.CreatedAt.Truncate(time.Microsecond)) {
+		return fmt.Errorf("%w: operation %s was acquired again", ErrClaimMismatch, claim.OperationID)
+	}
+	return nil
+}
+
 func sameClaim(left, right *models.TaskEnvironmentRecoveryClaim) bool {
 	return left != nil && right != nil && left.TaskEnvironmentID == right.TaskEnvironmentID &&
 		left.OwnerTaskID == right.OwnerTaskID && left.OwnershipGeneration == right.OwnershipGeneration &&

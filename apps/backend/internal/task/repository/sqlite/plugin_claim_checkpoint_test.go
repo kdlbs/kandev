@@ -172,3 +172,35 @@ func TestPluginExecutorClaimCheckpointRace(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	exerciseClaimCheckpointRace(t, repo, repo, seedDescriptorEnvironmentSQLite)
 }
+
+// A claim re-acquired with the same operation id is a new acquisition: the
+// provider's destroy call starts its sequence again, and the previous
+// acquisition's accepted sequence must not fence it.
+func exerciseReacquiredClaimStartsAFreshSequence(t *testing.T, repo *Repository, seed descriptorSeeder) {
+	t.Helper()
+	seedProvisionedForClaims(t, repo, seed)
+	first := acquireClaimForDescriptorEnvironment(t, repo, "op-1:cleanup")
+	if _, err := claimCheckpoint(t, repo, first, models.PluginClaimKindCleanup, "cleanup_progress", 1, "d1", 2); err != nil {
+		t.Fatalf("first acquisition: %v", err)
+	}
+	if _, err := claimCheckpoint(t, repo, first, models.PluginClaimKindCleanup, "cleanup_progress", 2, "d2", 3); err != nil {
+		t.Fatalf("first acquisition, sequence 2: %v", err)
+	}
+	if err := repo.ReleaseTaskEnvironmentRecoveryClaim(context.Background(), first); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	second := acquireClaimForDescriptorEnvironment(t, repo, "op-1:cleanup")
+	if second.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatal("two acquisitions of one claim id must be distinguishable")
+	}
+	if applied, err := claimCheckpoint(t, repo, second, models.PluginClaimKindCleanup, "cleanup_progress", 1, "e1", 4); err != nil || !applied {
+		t.Fatalf("sequence 1 of the re-acquired claim: applied=%v err=%v, want accepted", applied, err)
+	}
+	if _, err := claimCheckpoint(t, repo, first, models.PluginClaimKindCleanup, "cleanup_progress", 3, "d3", 5); !errors.Is(err, models.ErrExecutorClaimNotFound) {
+		t.Fatalf("delayed writer of the first acquisition: err = %v, want not_found", err)
+	}
+}
+
+func TestReacquiredClaimStartsAFreshSequence(t *testing.T) {
+	exerciseReacquiredClaimStartsAFreshSequence(t, newRepoForSessionTests(t), seedDescriptorEnvironmentSQLite)
+}

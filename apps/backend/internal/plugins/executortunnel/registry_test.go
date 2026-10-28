@@ -66,7 +66,7 @@ func openAcked(t *testing.T, registry *Registry, providers chan *fakeProvider, o
 }
 
 func TestOpenSendsNothingUntilTheProviderAcknowledgesTheBinding(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 1)
 	done := openAsync(registry, openRequest(newFakeOpener(t, providers), 1, controlPort))
 	provider := <-providers
@@ -99,7 +99,7 @@ func TestOpenSendsNothingUntilTheProviderAcknowledgesTheBinding(t *testing.T) {
 }
 
 func TestOpenTimesOutAsUnavailableWhenNoAckArrives(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	registry.ackTimeout = 50 * time.Millisecond
 	providers := make(chan *fakeProvider, 1)
 	done := openAsync(registry, openRequest(newFakeOpener(t, providers), 1, controlPort))
@@ -117,7 +117,7 @@ func TestOpenTimesOutAsUnavailableWhenNoAckArrives(t *testing.T) {
 }
 
 func TestDataBeforeAckAndSecondAckAreProtocolErrors(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 2)
 	opener := newFakeOpener(t, providers)
 
@@ -142,7 +142,7 @@ func TestDataBeforeAckAndSecondAckAreProtocolErrors(t *testing.T) {
 }
 
 func TestOversizedProviderFrameClosesTheStream(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 1)
 	conn, provider := openAcked(t, registry, providers, newFakeOpener(t, providers), 1, controlPort)
 	provider.data(make([]byte, MaxFrameBytes+1))
@@ -153,7 +153,7 @@ func TestOversizedProviderFrameClosesTheStream(t *testing.T) {
 }
 
 func TestHostWritesAreSplitIntoFramesNoLargerThanTheLimit(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 1)
 	conn, provider := openAcked(t, registry, providers, newFakeOpener(t, providers), 1, controlPort)
 	defer func() { _ = conn.Close() }()
@@ -170,7 +170,7 @@ func TestHostWritesAreSplitIntoFramesNoLargerThanTheLimit(t *testing.T) {
 }
 
 func TestDisallowedPortIsRefusedBeforeAnyStreamOpens(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 1)
 	_, err := registry.Open(context.Background(), openRequest(newFakeOpener(t, providers), 1, 22))
 	if !errors.Is(err, ErrPortNotAllowed) {
@@ -184,7 +184,7 @@ func TestDisallowedPortIsRefusedBeforeAnyStreamOpens(t *testing.T) {
 }
 
 func TestSixtyFifthOpenIsRateLimitedAndOthersAreUnaffected(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, MaxStreamsPerEnvironment+2)
 	opener := newFakeOpener(t, providers)
 	conns := make([]net.Conn, 0, MaxStreamsPerEnvironment)
@@ -221,7 +221,7 @@ func TestSixtyFifthOpenIsRateLimitedAndOthersAreUnaffected(t *testing.T) {
 }
 
 func TestCloseEnvironmentClosesStreamsAndNotifiesTheProvider(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 2)
 	opener := newFakeOpener(t, providers)
 	connA, providerA := openAcked(t, registry, providers, opener, 1, controlPort)
@@ -239,7 +239,7 @@ func TestCloseEnvironmentClosesStreamsAndNotifiesTheProvider(t *testing.T) {
 }
 
 func TestClientCloseCancelsTheProviderStream(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 1)
 	conn, provider := openAcked(t, registry, providers, newFakeOpener(t, providers), 1, controlPort)
 	_ = conn.Close()
@@ -248,7 +248,7 @@ func TestClientCloseCancelsTheProviderStream(t *testing.T) {
 }
 
 func TestCloseInstallationClosesEveryEnvironmentOfThePlugin(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 2)
 	opener := newFakeOpener(t, providers)
 	_, providerA := openAcked(t, registry, providers, opener, 1, controlPort)
@@ -264,7 +264,7 @@ func TestCloseInstallationClosesEveryEnvironmentOfThePlugin(t *testing.T) {
 }
 
 func TestGenerationChangeClosesOlderStreamsAndRefusesStaleOpens(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 3)
 	opener := newFakeOpener(t, providers)
 	_, old := openAcked(t, registry, providers, opener, 1, controlPort)
@@ -279,7 +279,7 @@ func TestGenerationChangeClosesOlderStreamsAndRefusesStaleOpens(t *testing.T) {
 }
 
 func TestSameGenerationOpensDoNotCloseExistingStreams(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 2)
 	opener := newFakeOpener(t, providers)
 	_, first := openAcked(t, registry, providers, opener, 3, controlPort)
@@ -290,7 +290,7 @@ func TestSameGenerationOpensDoNotCloseExistingStreams(t *testing.T) {
 }
 
 func TestProviderCloseFrameEndsReadsWithEOFOrItsErrorCode(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 2)
 	opener := newFakeOpener(t, providers)
 	conn, provider := openAcked(t, registry, providers, opener, 1, controlPort)
@@ -311,7 +311,7 @@ func TestProviderCloseFrameEndsReadsWithEOFOrItsErrorCode(t *testing.T) {
 }
 
 func TestReadDeadlinesApplyToTunnelConnections(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 1)
 	conn, _ := openAcked(t, registry, providers, newFakeOpener(t, providers), 1, controlPort)
 	defer func() { _ = conn.Close() }()
@@ -336,7 +336,7 @@ func waitFor(t *testing.T, condition func() bool) {
 }
 
 func TestReleaseBetweenAckAndStartDoesNotLeakAConnection(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	tun := &tunnel{registry: registry, key: Key{InstallationID: testInstallation, EnvironmentID: testEnvironment, Generation: 1}, cancel: func() {}}
 	if err := registry.admit(tun); err != nil {
 		t.Fatalf("admit: %v", err)
@@ -348,7 +348,7 @@ func TestReleaseBetweenAckAndStartDoesNotLeakAConnection(t *testing.T) {
 }
 
 func TestAckForAnotherBindingIsRefused(t *testing.T) {
-	registry := NewRegistry()
+	registry := newTestRegistry(t)
 	providers := make(chan *fakeProvider, 1)
 	done := openAsync(registry, openRequest(newFakeOpener(t, providers), 1, controlPort))
 	provider := <-providers

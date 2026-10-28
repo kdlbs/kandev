@@ -77,7 +77,7 @@ func (m *ControlServer) decodeRuntimeDrainRequest(c *gin.Context) (agentctltypes
 		return req, false
 	}
 	if req.ExpectedServerIdentity == "" || req.ExpectedServerIdentity != m.cfg.ServerIdentity {
-		c.JSON(http.StatusConflict, gin.H{errKey: "runtime identity mismatch"})
+		c.JSON(http.StatusPreconditionFailed, gin.H{errKey: "runtime identity mismatch"})
 		return req, false
 	}
 	if req.DeadlineMS < int64(minRuntimeDrainDeadline/time.Millisecond) ||
