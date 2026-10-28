@@ -434,4 +434,3 @@ test("compare CLI reads complete artifact sets and exits nonzero on an outcome r
     rmSync(root, { recursive: true, force: true });
   }
 });
-
