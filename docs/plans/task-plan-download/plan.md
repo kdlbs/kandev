@@ -77,7 +77,8 @@ On phone and coarse pointers the new control's actual hit area is at least
 44px; desktop fine pointer is 28px high. A narrow fine-pointer phone also gets
 the phone target. Keep all actions reachable and contained, allowing local
 header composition to fit without page-level horizontal scrolling; no new
-overlay. Empty or whitespace draft leaves Download visibly disabled. A
+overlay. At narrow desktop panel widths, the header's action row scrolls
+locally so each action can be reached. Empty or whitespace draft leaves Download visibly disabled. A
 synchronous initiation failure uses existing localized error feedback without
 changing content. These views map to criteria `.1` through `.5`; actual desktop
 and phone capture and geometry checks are required, not inferred from sketches.
@@ -118,14 +119,15 @@ retries. No live developer instance.
 After ROOT's later execution release, the mounted-header RED failed on the
 missing Download button. Targeted Plan tests, lint, i18n, typecheck, spec and
 public-doc checks passed; fresh same-worktree web, backend and fixture builds
-preceded the browser runs. Final Chromium and mobile-chrome runs each passed
-two tests with one worker and zero retries. Captures and command receipts are
+preceded the browser runs. After the narrow-header correction, Chromium passed
+three tests and mobile-chrome passed two, each with one worker and zero retries.
+Captures and command receipts are
 recorded in the [work order](task-01-download-plan-draft.md#results).
 
 ## Risks
 
 - `PanelHeaderBarSplit` clips its action slot; translated labels and narrow
-  phone widths need rendered proof that all controls remain usable.
+  widths require the Plan header's local scroll behavior and rendered proof.
 - Editor serialization can normalize test input; compare downloaded bytes to
   the actual current draft rather than assuming keystrokes equal Markdown.
 - Public `sessions-and-review.md` has concurrent unrelated PR edits. Refresh

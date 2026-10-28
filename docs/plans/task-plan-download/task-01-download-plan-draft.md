@@ -64,7 +64,8 @@ Phone:    | [Implement v] [Download] [Hist] |
 The header stays above the scrolling editor; phone navigation remains in its
 existing place. Download is disabled for empty/whitespace content; a helper
 failure shows localized feedback. Spacing is illustrative, action reachability
-and the sizing/containment contract are mandatory.
+and the sizing/containment contract are mandatory. At a narrow desktop panel
+width the action row scrolls locally, including by keyboard and touch.
 
 ## Execution gate and TDD
 
@@ -169,8 +170,9 @@ fixtures remain intact. Targeted ESLint, `i18n:check`, `i18n:ratchet`, the
 Same-worktree `build:e2e`, backend `build build-e2e-delivery-fixture`, and
 `e2e-plugin-ui e2e-plugin-package` completed before `--no-build`.
 
-Chromium passed two tests, including narrow fine-pointer geometry;
-mobile-chrome passed two, including wide coarse-pointer geometry. Each run
+Chromium passed three tests, including narrow fine-pointer geometry and the
+180px desktop panel; mobile-chrome passed two, including a narrow coarse-pointer
+workbench and touch scrolling. Each run
 used one worker and zero retries, with exact file contents and filename checked
 on desktop and phone. The first 900px coarse tablet attempt could not find a
 Plan panel in the existing tablet layout, so the coarse workbench test uses
@@ -182,3 +184,16 @@ Command logs are under `/tmp/kandev-plan-download-check-*`,
 `/tmp/kandev-plan-download-e2e-desktop2-IRvtGy`, and
 `/tmp/kandev-plan-download-e2e-phone4-qeDGh0`; the initial RED is under
 `/tmp/kandev-plan-download-red-nNx4cd`. No live developer instance was used.
+
+The current-head review identified action clipping at a user-narrowed desktop
+panel. An independently authored 180px real-panel regression first failed on
+the published build: the overflowed action row did not respond to horizontal
+wheel input (`/tmp/kandev-plan-download-narrow-red2-hmdw3u`). The Plan header
+now shrinks and scrolls its own action row; no shared primitive changed. The
+focused regression verifies wheel scrolling, keyboard traversal and hit targets,
+menu/history activation and exact download bytes. A coarse-pointer regression
+verifies 44px targets, touch scrolling, menu/history access and download.
+The final desktop and phone runs are in
+`/tmp/kandev-plan-download-fix-desktop-aQwTZk` and
+`/tmp/kandev-plan-download-fix-mobile-final-xJkTRV`; fresh captures, manifests,
+and hashes are retained under `/tmp/kandev-plan-download-fix-captures-042`.

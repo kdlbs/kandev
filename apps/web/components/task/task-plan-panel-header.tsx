@@ -95,6 +95,7 @@ export function PlanPanelHeader({
   return (
     <PanelHeaderBarSplit
       left={null}
+      rightClassName="min-w-0 shrink overflow-x-auto overflow-y-hidden overscroll-x-contain scrollbar-hide"
       right={
         <>
           {implementState.visible && (

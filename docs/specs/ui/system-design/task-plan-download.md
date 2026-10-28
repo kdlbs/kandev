@@ -50,8 +50,10 @@ The existing main header is shared with `SessionMobileLayout.MobilePlanPanel`.
 Keep one explicit control alongside Implement and Revisions; do not add an
 overlay or redesign neighboring actions. Use existing button primitives and
 phone/coarse-pointer sizing, with phone width independently considered even on
-a fine pointer. Ensure the right slot does not clip actions at a narrow phone
-width or cause page-level horizontal overflow. Preserve the editor's scroll
+a fine pointer. The Plan header's action slot shrinks and scrolls horizontally
+when its panel is narrower than the action cluster, so keyboard focus and
+pointer or touch scrolling can reach each control without page-level horizontal
+overflow. Preserve the editor's scroll
 ownership, safe areas, focus and touch activation. Translate the visible or
 accessible label at render time; allow localized labels to fit without
 shrinking text. Geometry and rendered behavior are verified in the work order.
