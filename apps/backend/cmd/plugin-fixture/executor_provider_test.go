@@ -216,3 +216,26 @@ func fixtureHTTPSRequest(t *testing.T, plugin *fixturePlugin, lease *pluginsdk.E
 	require.NoError(t, err)
 	return string(body)
 }
+
+func TestPluginExecutorFixtureSameOperationSameInputReusesAndChangedInputConflicts(t *testing.T) {
+	plugin := newFixturePluginAt(t.TempDir())
+	t.Cleanup(func() { require.NoError(t, plugin.Close()) })
+	profile := &pluginsdk.ExecutorProfileSnapshot{ProfileId: "profile-1", Config: map[string]string{"region": "eu-west-1"}}
+	request := func(digest string) *pluginsdk.ProvisionExecutorEnvironmentRequest {
+		return &pluginsdk.ProvisionExecutorEnvironmentRequest{Profile: profile, Context: &pluginsdk.ExecutorProviderRequestContext{
+			PluginId: "kandev-plugin-e2e", InstallationId: "installation-1", ProviderKey: executorProviderKey,
+			ContractVersion: 1, EnvironmentId: "environment-1", OperationId: "operation-1", InputDigest: digest,
+		}}
+	}
+	_, err := plugin.ProvisionExecutorEnvironment(context.Background(), request("digest-intent-a"))
+	require.NoError(t, err)
+	_, err = plugin.ProvisionExecutorEnvironment(context.Background(), request("digest-intent-a"))
+	require.NoError(t, err)
+	require.Equal(t, 1, plugin.executorAllocationCount(), "a retry with the same intent must not allocate again")
+
+	_, err = plugin.ProvisionExecutorEnvironment(context.Background(), request("digest-intent-b"))
+	var actionErr *pluginsdk.ActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, pluginsdk.ActionErrorConflict, actionErr.Code)
+	require.Equal(t, 1, plugin.executorAllocationCount())
+}

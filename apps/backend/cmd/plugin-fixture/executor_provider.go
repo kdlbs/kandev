@@ -232,7 +232,7 @@ func (p *fixturePlugin) allocateFixtureExecutor(request *pluginsdk.ExecutorProvi
 	}
 	if existing, ok := p.executorState.Environments[request.GetOperationId()]; ok {
 		if existing.EnvironmentID != request.GetEnvironmentId() || existing.InputDigest != request.GetInputDigest() {
-			return fixtureExecutorResource{}, errors.New("plugin-fixture: operation identity changed after allocation")
+			return fixtureExecutorResource{}, pluginsdk.CategorizeActionError(pluginsdk.ActionErrorConflict, errors.New("plugin-fixture: operation identity changed after allocation"))
 		}
 		return existing, nil
 	}
