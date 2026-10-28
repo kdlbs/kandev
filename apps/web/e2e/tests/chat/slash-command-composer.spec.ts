@@ -353,9 +353,7 @@ test.describe("Slash command composer", () => {
     const previousExecutionId = await waitForAgentExecutionId(testPage, sessionId);
     await expect
       .poll(() =>
-        availableCommands.frames.some(
-          (frame) => frame.sessionId === sessionId && frame.count > 0,
-        ),
+        availableCommands.frames.some((frame) => frame.sessionId === sessionId && frame.count > 0),
       )
       .toBe(true);
     await seedAvailableCommands(testPage, sessionId, [PLAN_COMMAND]);

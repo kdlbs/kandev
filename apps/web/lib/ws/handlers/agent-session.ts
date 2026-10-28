@@ -163,6 +163,7 @@ function maybePromoteAgentctlReady(
   store.getState().setSessionAgentctlStatus(sessionId, {
     status: "ready",
     agentExecutionId: current?.agentExecutionId,
+    startingExecutionId: undefined,
     updatedAt: timestamp,
   });
 }
@@ -953,7 +954,10 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
           );
         if (agentctl?.startingExecutionId) {
           const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
-          store.getState().setSessionAgentctlStatus(sessionId, status);
+          store.getState().setSessionAgentctlStatus(sessionId, {
+            ...status,
+            startingExecutionId: undefined,
+          });
         }
       }
 

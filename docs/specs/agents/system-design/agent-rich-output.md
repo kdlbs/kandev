@@ -277,14 +277,10 @@ presentation; malformed component failures show the localized unavailable state.
 
 ## Native components and local state
 
-The native Chart component retains direct Recharts axes, grid, and tooltip children, local
-legend filtering, formatting helpers, deferred plot mounting, and motion
-preferences. Library tree composition must not insert wrappers inside the
-Recharts plot's discovery boundary.
-
-Chart visibility checks every entry in each intersection observer batch. Any
-intersecting entry makes the plot eligible; background tabs defer its first
-mount until visible. Eligibility remains true after the first intersection.
+Chart has Recharts axes, grid, tooltip children, legend filtering, formatting
+and motion. Observer batches check every entry; intersection grants persistent
+plot eligibility. First mount waits for a visible tab. Do not wrap Recharts
+children inside its discovery boundary.
 
 Within the FilePreview registry adapter, key the native FilePreview component by
 the serialized `(sessionId, repo, path)` tuple. Its element identity separates
