@@ -323,3 +323,12 @@ two navigation/setup work orders.
   detail, full browser adoption coverage, orphan-sweep integration, desktop
   acceptance, PostgreSQL coverage and final acceptance. This plan closes none
   of those by declaration.
+
+
+## Proposed UX follow-up (2026-10-26)
+
+The user requested a less crowded SSH manager after testing this implementation.
+The [focused management package](../ssh-connections-ux/plan.md) proposes a new
+collection/overview/access composition while preserving this package's verified
+security and continuation work. The follow-up remains pending. The completed
+results above describe this package, not the proposed UI.

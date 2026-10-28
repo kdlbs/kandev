@@ -37,7 +37,9 @@ export async function exerciseSSHIdentityDependencies(
   await page.goto(`/settings/executors/ssh-connections?tab=identities&id=${identity.id}`);
   const dependency = page.getByRole("link", { name: "Connection: Build server", exact: true });
   await expect(dependency).toBeVisible();
-  await expect(page.getByRole("button", { name: "Delete identity", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "More actions", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: "Delete identity", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
   if (touch)
     expect((await requireBox(dependency, "dependency link")).height).toBeGreaterThanOrEqual(44);
   await assertNoDocumentHorizontalOverflow(page);
@@ -49,5 +51,5 @@ export async function exerciseSSHIdentityDependencies(
   if (touch) await dependency.tap();
   else await dependency.click();
   await expect(page).toHaveURL(new RegExp(`id=${route.destination.id}`));
-  await expect(page.getByLabel("Host", { exact: true })).toHaveValue("build.example.invalid");
+  await expect(page.getByText("builder@build.example.invalid:22", { exact: true })).toBeVisible();
 }

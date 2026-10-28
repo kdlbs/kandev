@@ -15,13 +15,14 @@ export async function exerciseSSHContextSetup(page: Page, touch: boolean) {
   await page.getByLabel("Name", { exact: true }).fill(target);
   await page.getByLabel("Host", { exact: true }).fill("fixture.invalid");
   await page.getByLabel("SSH user", { exact: true }).fill("builder");
-  const create = page.getByRole("button", { name: "Save draft and create identity", exact: true });
+  const create = page.getByRole("button", { name: "Create identity", exact: true });
   expect(
     (await requireBox(create, "identity creation action")).height + 0.01,
   ).toBeGreaterThanOrEqual(touch ? 44 : 28);
   await create.click();
   await expect(page).toHaveURL(/return_identity_connection=/);
   await page.goBack();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue(target);
   await create.click();
   await page.getByLabel("Name", { exact: true }).fill("Cancelled identity");
@@ -44,9 +45,9 @@ export async function exerciseSSHContextSetup(page: Page, touch: boolean) {
   await expect(page.getByRole("button", { name: "Test executor", exact: true })).toBeDisabled();
   await assertNoDocumentHorizontalOverflow(page);
   await page.getByRole("button", { name: "Manage connections", exact: true }).click();
-  await page.getByRole("button", { name: target, exact: true }).click();
+  await page.getByRole("link").filter({ hasText: target }).click();
   await page.reload();
-  await expect(page.getByLabel("Host", { exact: true })).toHaveValue("fixture.invalid");
+  await expect(page.getByText("builder@fixture.invalid:22", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Return to executor", exact: true })).toHaveCount(
     0,
   );
@@ -83,7 +84,7 @@ export async function exerciseSSHExplicitSelection(page: Page, touch: boolean) {
   await page.goBack();
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Preserved executor");
   await page.getByRole("button", { name: "Manage connections", exact: true }).click();
-  await page.getByRole("button", { name: destination.name, exact: true }).click();
+  await page.getByRole("link").filter({ hasText: destination.name }).click();
   const use = page.getByRole("button", { name: "Use connection", exact: true });
   expect((await requireBox(use, "Use connection")).height + 0.01).toBeGreaterThanOrEqual(
     touch ? 44 : 28,

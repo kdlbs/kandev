@@ -36,11 +36,12 @@ for (const width of [390, 767, 768, 1280]) {
       await expect(
         testPage.getByRole("button", { name: "Inspect host key", exact: true }),
       ).toBeVisible();
-      await testPage
-        .getByRole("button", { name: "Save draft and create a bastion", exact: true })
-        .click();
+      await testPage.getByRole("button", { name: "Edit", exact: true }).click();
+      await testPage.getByText("Use a bastion", { exact: true }).click();
+      await testPage.getByRole("button", { name: "Create bastion", exact: true }).click();
       await expect(testPage).toHaveURL(/return_connection=/);
       await testPage.getByRole("button", { name: "Return to destination", exact: true }).click();
+      await testPage.getByRole("button", { name: "Edit", exact: true }).click();
       await expect(testPage.getByLabel("Host", { exact: true })).toHaveValue("example.invalid");
       await assertNoDocumentHorizontalOverflow(testPage);
     } finally {

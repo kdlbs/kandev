@@ -87,12 +87,17 @@ test("only administrators can read or manage SSH identities and connections", as
     await expect(page.getByText("Administrator SSH key", { exact: true })).toHaveCount(0);
     const adminPage = await admin.newPage();
     await adminPage.goto(`/settings/ssh-connections?tab=identities&id=${key.id}`);
-    await expect(adminPage.getByLabel("Name", { exact: true })).toHaveValue(
-      "Administrator SSH key",
-    );
+    await expect(
+      adminPage.getByRole("heading", { name: "Administrator SSH key", exact: true }),
+    ).toBeVisible();
+    await expect(adminPage.getByLabel("Name", { exact: true })).toHaveCount(0);
     await expect(
       adminPage.getByRole("button", { name: "Copy public key", exact: true }),
     ).toBeVisible();
+    await adminPage.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(adminPage.getByLabel("Name", { exact: true })).toHaveValue(
+      "Administrator SSH key",
+    );
     const remaining = await admin.request.get(`${root}/identities`);
     expect(((await remaining.json()) as { id: string }[]).map((item) => item.id)).toEqual([key.id]);
   } finally {

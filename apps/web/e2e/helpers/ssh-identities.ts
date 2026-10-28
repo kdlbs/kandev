@@ -54,7 +54,7 @@ export async function exerciseSSHIdentitySetup(page: Page, baseUrl: string, touc
   expect(imported.kind).toBe("managed");
   expect(imported.public_key.startsWith("ssh-rsa ")).toBe(true);
   expect(JSON.stringify(imported).includes("PRIVATE KEY")).toBe(false);
-  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(importedName);
+  await expect(page.getByRole("heading", { name: importedName, exact: true })).toBeVisible();
   await expect(material).toHaveCount(0);
   await expect(password).toHaveCount(0);
   await assertNoDocumentHorizontalOverflow(page);

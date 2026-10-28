@@ -1,36 +1,48 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import type { SSHRoute } from "@/lib/types/http-ssh-connections";
+import type { SSHRoute, SSHEnrollment } from "@/lib/types/http-ssh-connections";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
 import { generateUUID } from "@/lib/uuid";
-import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
-import { settingsActionClassName, settingsControlClassName } from "../settings-control";
+import { settingsControlClassName } from "../settings-control";
 import { ManagerConfirmation } from "./confirmation";
 import { ConnectionPicker } from "./picker";
-export function EnrollmentPanel({ route, manager }: { route: SSHRoute; manager: SSHManager }) {
-  return <EnrollmentForm key={route.stamp} route={route} manager={manager} />;
+type EnrollmentProps = {
+  route: SSHRoute;
+  manager: SSHManager;
+  onCompleted?: (result: SSHEnrollment) => void;
+};
+export function EnrollmentPanel({ route, manager, onCompleted }: EnrollmentProps) {
+  return (
+    <EnrollmentForm key={route.stamp} route={route} manager={manager} onCompleted={onCompleted} />
+  );
 }
-function EnrollmentForm({ route, manager }: { route: SSHRoute; manager: SSHManager }) {
+function EnrollmentForm({ route, manager, onCompleted }: EnrollmentProps) {
   const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [bootstrap, setBootstrap] = useState("");
   const [mode, setMode] = useState("password");
-  const [copied, setCopied] = useState<boolean | null>(null);
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
   const identity = manager.identities.find((item) => item.id === route.destination.identity_id);
   if (!identity?.public_key) return null;
   const install = async () => {
     try {
-      await manager.enroll(route, {
+      const result = await manager.enroll(route, {
         request_id: generateUUID(),
         expected_stamp: route.stamp,
         key_fingerprint: identity.fingerprint,
         mode: mode === "password" ? "password" : "identity",
         ...(mode === "password" ? { password } : { bootstrap_identity_id: bootstrap }),
       });
+      if (active.current) onCompleted?.(result);
     } finally {
       setPassword("");
     }
@@ -38,30 +50,9 @@ function EnrollmentForm({ route, manager }: { route: SSHRoute; manager: SSHManag
   const latest =
     route.latest_enrollment?.stamp === route.stamp ? route.latest_enrollment : undefined;
   return (
-    <section
-      className="mt-6 min-w-0 space-y-3"
-      aria-label={t("settings:sshManager.enrollment.title")}
-    >
+    <section className="min-w-0 space-y-4" aria-label={t("settings:sshManager.enrollment.title")}>
       <h3 className="text-sm font-medium">{t("settings:sshManager.enrollment.title")}</h3>
       <p className="text-sm text-muted-foreground">{t("settings:sshManager.enrollment.manual")}</p>
-      <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">
-        {identity.public_key}
-      </pre>
-      <Button
-        type="button"
-        variant="outline"
-        className={settingsActionClassName()}
-        onClick={() => {
-          void copyToClipboard(identity.public_key).then(setCopied);
-        }}
-      >
-        {t("settings:sshManager.copyPublicKey")}
-      </Button>
-      {copied !== null && (
-        <p role="status" className="text-sm">
-          {t(copied ? "settings:sshManager.copied" : "settings:sshManager.copyFailed")}
-        </p>
-      )}
       <EnrollmentStatus latest={latest} />
       {!route.destination.fingerprint ? (
         <p className="text-sm text-muted-foreground">
@@ -109,7 +100,7 @@ function EnrollmentForm({ route, manager }: { route: SSHRoute; manager: SSHManag
   );
 }
 
-function EnrollmentStatus({ latest }: { latest: SSHRoute["latest_enrollment"] }) {
+export function EnrollmentStatus({ latest }: { latest: SSHRoute["latest_enrollment"] }) {
   const { t } = useTranslation();
   if (!latest) return null;
   return (

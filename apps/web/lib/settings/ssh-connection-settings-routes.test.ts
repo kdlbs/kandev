@@ -40,3 +40,12 @@ describe("SSH setup links", () => {
     expect(href).toBe("/settings/executors/ssh-connections?tab=identities&id=a");
   });
 });
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.9, 004.11
+it("retains only supported detail sections and explicit edit mode", () => {
+  const valid = sshConnectionSettingsPath(new URLSearchParams("id=a&section=access&mode=edit"));
+  expect(valid).toBe("/settings/executors/ssh-connections?id=a&section=access&mode=edit");
+  expect(sshConnectionSettingsPath(new URLSearchParams("id=a&section=password&mode=trust"))).toBe(
+    "/settings/executors/ssh-connections?id=a",
+  );
+});

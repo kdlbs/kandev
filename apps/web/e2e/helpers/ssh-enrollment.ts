@@ -49,7 +49,10 @@ export async function exerciseSSHEnrollmentConfirmation(page: Page, identity: SS
       await request.fulfill({ json: saved.latest_enrollment });
     },
   );
-  await page.goto("/settings/ssh-connections?tab=connections&id=confirmation-fixture");
+  await page.goto(
+    "/settings/ssh-connections?tab=connections&id=confirmation-fixture&section=access",
+  );
+  await page.getByRole("button", { name: "Install key", exact: true }).click();
   const password = page.getByLabel("One-time password", { exact: true });
   const install = page.getByRole("button", { name: "Enroll key", exact: true });
   await password.fill("disposable-browser-password");
@@ -68,7 +71,7 @@ export async function exerciseSSHEnrollmentConfirmation(page: Page, identity: SS
   await install.click();
   confirmation = page.getByRole("dialog", { name: "Authorize this key on the remote account?" });
   await confirmation.getByRole("button", { name: "Enroll key", exact: true }).click();
-  await expect(password).toHaveValue("");
+  await expect(password).toHaveCount(0);
   await expect(
     page.getByText(
       "Destination: The remote account rejected this identity. Authorize its public key or choose another identity.",

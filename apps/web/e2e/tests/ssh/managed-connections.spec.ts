@@ -106,9 +106,11 @@ test("managed key enrollment survives restart and launches a reusable SSH execut
     );
     await waitForLatestSessionDone(apiClient, task.id, 1, "Managed SSH launch");
     await testPage.goto(`/settings/executors/ssh-connections?tab=identities&id=${key.id}`);
+    await testPage.getByRole("button", { name: "More actions", exact: true }).click();
     await expect(
-      testPage.getByRole("button", { name: "Delete identity", exact: true }),
+      testPage.getByRole("menuitem", { name: "Delete identity", exact: true }),
     ).toBeDisabled();
+    await testPage.keyboard.press("Escape");
     await expect(
       testPage.getByRole("link", { name: `Session: ${task.session_id}`, exact: true }),
     ).toHaveAttribute("href", `/t/${task.id}?sessionId=${task.session_id}`);

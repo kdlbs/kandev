@@ -139,3 +139,54 @@ it("refreshes dependencies after another administrator binds the identity before
   expect(result.current.error).toBe("ssh_resource_in_use");
   expect(result.current.busy).toBe(false);
 });
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.10, 004.3
+it("reconciles a failed test instead of retaining the old ready snapshot", async () => {
+  const route = {
+    destination: { id: "route", verified_route: "stamp" },
+    stamp: "stamp",
+  } as import("@/lib/types/http-ssh-connections").SSHRoute;
+  vi.mocked(api.listManagedSSHConnections).mockResolvedValue([route]);
+  const { result } = renderHook(useSSHConnections);
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  vi.mocked(api.listManagedSSHConnections).mockResolvedValue([
+    { ...route, destination: { ...route.destination, verified_route: "" } },
+  ]);
+  vi.mocked(api.testManagedSSH).mockRejectedValue(
+    new ApiError("Rejected", 422, { error: "ssh_authentication_rejected" }),
+  );
+  await act(async () => {
+    await expect(result.current.test(route)).rejects.toThrow();
+  });
+  expect(result.current.routes[0].destination.verified_route).toBe("");
+  expect(result.current.error).toBe("ssh_authentication_rejected");
+  expect(result.current.busy).toBe(false);
+});
+
+it("keeps failed probe evidence scoped to its route stamp until a successful retry", async () => {
+  const route = {
+    destination: { id: "route", verified_route: "stamp" },
+    stamp: "stamp",
+  } as import("@/lib/types/http-ssh-connections").SSHRoute;
+  vi.mocked(api.listManagedSSHConnections).mockResolvedValue([route]);
+  const { result } = renderHook(useSSHConnections);
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  vi.mocked(api.listManagedSSHConnections).mockRejectedValue(new Error("offline"));
+  vi.mocked(api.testManagedSSH).mockRejectedValue(
+    new ApiError("Offline", 503, { error: "ssh_network_unreachable" }),
+  );
+  await act(async () => {
+    await expect(result.current.test(route)).rejects.toThrow();
+  });
+  expect(
+    (result.current as unknown as { failedTests: Record<string, string> }).failedTests,
+  ).toEqual({ route: "stamp" });
+  vi.mocked(api.listManagedSSHConnections).mockResolvedValue([route]);
+  vi.mocked(api.testManagedSSH).mockResolvedValue(route);
+  await act(async () => {
+    await result.current.test(route);
+  });
+  expect(
+    (result.current as unknown as { failedTests: Record<string, string> }).failedTests,
+  ).toEqual({});
+});

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: executors
 created: 2026-09-19
 owners:
@@ -18,9 +18,10 @@ storage protection; authentication supplies management and task permissions.
 Source: [issue #3735](https://github.com/kdlbs/kandev/issues/3735).
 The maintainer selected unattended key availability, administrator-managed
 installation-wide connections, and assisted enrollment on 2026-09-19.
-This is a proposed extension to the [SSH executor](ssh-executor.md), not a claim
-that managed credentials already ship. Its existing external-file and agent
-modes retain their current contract.
+This extends the [SSH executor](ssh-executor.md) behind the experimental
+SSH Connection Manager feature flag, which remains off by default. Existing
+external-file and agent modes retain their current contract. Implementation
+and validation records live in the linked plans.
 
 ## Terms
 
@@ -180,6 +181,37 @@ modes retain their current contract.
   remain separate actions. Reload may discard unsaved executor drafts; secrets
   shall never be included in navigation or draft recovery state.
 
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.8:** Connection and identity collections
+  shall show named rows with endpoint or credential-kind context and setup
+  status. Opening a row shall show one focused detail view on desktop and
+  phone. Separate records with identical names shall remain distinguishable
+  without merging or deleting them. Executors shall expose SSH management as
+  a secondary header action, including when no profile exists.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.9:** A saved connection shall initially show
+  its endpoint, identity, optional bastion, and current saved verification state
+  as a readable overview. Metadata fields shall become editable through an
+  explicit Edit action. A verified connection shall not initially display
+  bootstrap credential fields, a raw public-key block, or a destructive action.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.10:** Incomplete setup shall identify the
+  next permitted step and distinguish saving details, trusting a host, and
+  testing access. Key installation shall be an explicit optional action.
+  Authentication rejection shall offer diagnostics and authorization options
+  without assuming that installation is required. After verified enrollment,
+  the form shall be replaced by its result and a connection-test action.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.11:** Opening access setup, diagnostics,
+  identity creation, a menu, or a settings tab shall not itself authenticate,
+  trust a host, install a key, or save an executor. Uncertain enrollment outcomes
+  and changed host fingerprints shall remain visible until resolved. Leaving
+  an enrollment form shall clear bootstrap secrets, including when its tab
+  remains mounted. Reopening shall require fresh secret input.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.12:** The manager shall use Kandev's shared
+  settings hierarchy, header tabs, save behavior, typography, and control sizes.
+  Ordinary desktop controls shall measure 28px at the standard root font, with
+  a 1px rendering tolerance. Phone and coarse-pointer actions shall have at
+  least 44px hit areas. Long names, public keys, and translated labels shall
+  fit without horizontal document scrolling. Optional explanatory detail shall
+  not obscure required trust, custody, failure, or deletion consequences.
+
 ### REQ-EXECUTORS-SSH-CONNECTIONS-005: Compatibility and rollout
 
 **Intent:** Introduce managed access without replacing working operator configuration.
@@ -231,3 +263,4 @@ remains [#3710](https://github.com/kdlbs/kandev/issues/3710).
 - [System design](../system-design/ssh-connection-manager.md)
 - [Implementation plan](../../../plans/ssh-connection-manager/plan.md)
 - [Executor navigation follow-up](../../../plans/ssh-connections-executor-navigation/plan.md)
+- [SSH management UX revision](../../../plans/ssh-connections-ux/plan.md)

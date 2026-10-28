@@ -1,100 +1,89 @@
 "use client";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import type { SSHIdentity } from "@/lib/types/http-ssh-connections";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
-import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { SettingsPageTemplate } from "../settings-page-template";
-import { settingsActionClassName, settingsControlClassName } from "../settings-control";
-import { ManagerConfirmation } from "./confirmation";
+import { SettingsGroup, SettingsRow } from "../settings-group";
+import { settingsControlClassName } from "../settings-control";
 import { IdentityDependencies } from "./identity-dependencies";
+import { PublicKeyDetails } from "./public-key-details";
+
 export function IdentityDetails({
   identity,
   manager,
-  onDeleted,
+  editing = false,
+  onSaved,
 }: {
   identity: SSHIdentity;
   manager: SSHManager;
+  editing?: boolean;
   onDeleted: () => void;
+  onSaved?: () => void;
 }) {
   const { t } = useTranslation();
   const [label, setLabel] = useState(identity.label);
-  const [copied, setCopied] = useState<boolean | null>(null);
-  const usage = manager.routes.filter((r) => r.destination.identity_id === identity.id).length;
-  const dependencies = identity.dependencies ?? [];
+  const value = (text: string) => <span className="text-sm break-all text-right">{text}</span>;
   return (
     <SettingsPageTemplate
-      title={t("settings:sshManager.identities")}
+      title={identity.label}
       showPageChrome={false}
+      contentFrame="none"
+      showSaveButton={editing}
       isDirty={label !== identity.label}
       saveId={`ssh-identity:${identity.id}`}
       saveRevision={`${identity.version}:${label}`}
       saveStatus={manager.busy ? "loading" : "idle"}
       canSave={Boolean(label.trim()) && !manager.busy}
-      onSave={() => manager.renameIdentity(identity, label)}
+      onSave={async () => {
+        await manager.renameIdentity(identity, label);
+        onSaved?.();
+      }}
       onDiscard={() => setLabel(identity.label)}
     >
-      <div className="space-y-4 min-w-0">
-        <div className="space-y-1">
-          <Label htmlFor="ssh-identity-name">{t("settings:sshManager.label")}</Label>
-          <Input
-            id="ssh-identity-name"
-            className={settingsControlClassName()}
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            maxLength={200}
-            disabled={manager.busy}
+      <div className="space-y-8">
+        <SettingsGroup
+          title={t("settings:sshManager.identity")}
+          description={t(
+            identity.kind === "managed"
+              ? "settings:sshManager.custody"
+              : "settings:sshManager.externalIdentity",
+          )}
+        >
+          <SettingsRow
+            label={t("settings:sshManager.label")}
+            controlId={editing ? "ssh-identity-name" : undefined}
+            control={
+              editing ? (
+                <Input
+                  id="ssh-identity-name"
+                  className={settingsControlClassName()}
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  maxLength={200}
+                  disabled={manager.busy}
+                />
+              ) : (
+                value(identity.label)
+              )
+            }
           />
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {identity.kind === "managed"
-            ? t("settings:sshManager.custody")
-            : t("settings:sshManager.externalIdentity")}
-        </p>
-        {identity.reference && <p className="break-all font-mono text-xs">{identity.reference}</p>}
-        {identity.public_key && (
-          <>
-            <Label>{t("settings:sshManager.publicKey")}</Label>
-            <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">
-              {identity.public_key}
-            </pre>
-            <p className="break-all font-mono text-xs">{identity.fingerprint}</p>
-            <Button
-              type="button"
-              className={settingsActionClassName()}
-              variant="outline"
-              onClick={() => {
-                void copyToClipboard(identity.public_key).then(setCopied);
-              }}
-            >
-              {t("settings:sshManager.copyPublicKey")}
-            </Button>
-            {copied !== null && (
-              <p role="status">
-                {copied ? t("settings:sshManager.copied") : t("settings:sshManager.copyFailed")}
-              </p>
-            )}
-          </>
+          {identity.reference && (
+            <SettingsRow
+              label={t("settings:sshManager.reference")}
+              control={value(identity.reference)}
+            />
+          )}
+        </SettingsGroup>
+        {!editing && identity.public_key && (
+          <SettingsGroup title={t("settings:sshManager.publicKey")}>
+            <div className="py-4">
+              <PublicKeyDetails publicKey={identity.public_key} />
+            </div>
+          </SettingsGroup>
         )}
-        <p className="text-sm text-muted-foreground">
-          {t("settings:sshManager.usedBy", { count: usage })}
-        </p>
-        <ManagerConfirmation
-          label={t("settings:sshManager.deleteIdentity")}
-          title={t("settings:sshManager.deleteIdentity")}
-          description={t("settings:sshManager.deleteIdentityWarning")}
-          target={identity.id}
-          busy={manager.busy || usage > 0 || dependencies.length > 0}
-          destructive
-          onConfirm={async () => {
-            await manager.deleteIdentity(identity);
-            onDeleted();
-          }}
-        />
-        <IdentityDependencies dependencies={dependencies} />
+        {!editing && <IdentityDependencies dependencies={identity.dependencies ?? []} />}
       </div>
     </SettingsPageTemplate>
   );

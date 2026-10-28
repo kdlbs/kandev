@@ -27,6 +27,7 @@ import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { SettingsGroup } from "@/components/settings/settings-group";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
 
@@ -281,11 +282,11 @@ export default function ExecutorsHubPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">{t("common:executors")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("executors:hubDescription")}</p>
-      </div>
-      <SSHConnectionsEntry />
+      <SettingsPageHeader
+        title={t("common:executors")}
+        description={t("executors:hubDescription")}
+        actions={<SSHConnectionsEntry />}
+      />
       <Separator />
       {!canManageKubernetes && <KubernetesReadOnlyNotice />}
       {builtInProfiles.length > 0 && (

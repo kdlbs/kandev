@@ -2,6 +2,7 @@ const createIdentityLabel = "settings:sshManager.createIdentityForConnection";
 const targetHost = "example.invalid";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { ManagerDetail } from "./manager-detail";
 import { ConnectionDetails } from "./connection-details";
 import { SettingsSaveProvider } from "../settings-save-provider";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
@@ -151,4 +152,26 @@ it("does not submit the same draft twice while its save is pending", async () =>
     await pending;
   });
   expect(result.onCreateIdentity).toHaveBeenCalledTimes(1);
+});
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.3, 004.11
+it("starts a new draft when a bookmark contains both a selected record and new=1", () => {
+  window.history.replaceState({}, "", "/settings/executors/ssh-connections?id=target&new=1");
+  const manager = { busy: false, identities: [], routes: [saved] } as unknown as SSHManager;
+  const navigation = {
+    identities: false,
+    creating: true,
+    editing: false,
+    selected: "target",
+    back: vi.fn(),
+    saved: vi.fn(),
+    createBastion: vi.fn(),
+    createIdentity: vi.fn(),
+  } as unknown as import("./use-manager-navigation").ManagerNavigation;
+  render(
+    <SettingsSaveProvider>
+      <ManagerDetail manager={manager} navigation={navigation} />
+    </SettingsSaveProvider>,
+  );
+  expect((screen.getByLabelText("settings:sshManager.host") as HTMLInputElement).value).toBe("");
 });

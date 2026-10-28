@@ -10,6 +10,8 @@ const queryKeys = [
   "return_connection",
   "return_identity_connection",
   "select_identity",
+  "section",
+  "mode",
 ] as const;
 type ManagerQueryKey = (typeof queryKeys)[number];
 
@@ -21,6 +23,8 @@ export function sshConnectionSettingsPath(
   const query = new URLSearchParams();
   for (const key of queryKeys) {
     const value = key in changes ? changes[key] : current.get(key);
+    if (key === "section" && !["overview", "access", "diagnostics"].includes(value ?? "")) continue;
+    if (key === "mode" && value !== "edit") continue;
     if (value) query.set(key, value);
   }
   return `${SSH_CONNECTIONS_SETTINGS_HREF}${query.size ? `?${query}` : ""}`;

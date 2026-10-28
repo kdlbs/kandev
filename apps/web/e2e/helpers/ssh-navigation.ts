@@ -12,6 +12,14 @@ export async function exerciseSSHNavigation(page: Page, touch: boolean) {
   expect((await requireBox(entry, "SSH manager entry")).height).toBeGreaterThanOrEqual(
     touch ? 44 : 28,
   );
+  const titleBox = await requireBox(
+    page.getByRole("heading", { name: "Executors", exact: true }),
+    "Executors title",
+  );
+  const entryBox = await requireBox(entry, "SSH header action");
+  if ((page.viewportSize()?.width ?? 1280) >= 768)
+    expect(Math.abs(entryBox.y - titleBox.y)).toBeLessThanOrEqual(1);
+  else expect(entryBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
   await entry.click();
   await expect(page).toHaveURL(manager);
   await expect(page.getByRole("button", { name: "New connection", exact: true })).toBeVisible();

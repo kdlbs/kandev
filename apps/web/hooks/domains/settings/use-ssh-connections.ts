@@ -10,6 +10,7 @@ import type {
   SSHObservation,
   SSHRoute,
 } from "@/lib/types/http-ssh-connections";
+import { useSSHAuthentication } from "./use-ssh-authentication";
 export function sshManagerError(error: unknown): string {
   if (
     error instanceof ApiError &&
@@ -81,7 +82,9 @@ export function useSSHConnections() {
     },
     [reload],
   );
+  const authentication = useSSHAuthentication(perform, reload);
   return {
+    failedTests: authentication.failedTests,
     identities,
     routes,
     loaded,
@@ -100,7 +103,7 @@ export function useSSHConnections() {
     enroll: (route: SSHRoute, request: EnrollSSHKey) =>
       perform(() => api.enrollManagedSSH(route, request)),
     preflight: (route: SSHRoute) => perform(() => api.preflightManagedSSH(route), false),
-    test: (route: SSHRoute) => perform(() => api.testManagedSSH(route)),
+    test: authentication.test,
   };
 }
 export type SSHManager = ReturnType<typeof useSSHConnections>;

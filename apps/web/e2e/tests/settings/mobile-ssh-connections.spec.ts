@@ -47,11 +47,12 @@ for (const width of [390, 820]) {
 
       await testPage.getByRole("button", { name: "Save changes", exact: true }).tap();
       await expect(testPage).toHaveURL(/id=/);
-      await testPage
-        .getByRole("button", { name: "Save draft and create a bastion", exact: true })
-        .tap();
+      await testPage.getByRole("button", { name: "Edit", exact: true }).click();
+      await testPage.getByText("Use a bastion", { exact: true }).click();
+      await testPage.getByRole("button", { name: "Create bastion", exact: true }).tap();
       await expect(testPage).toHaveURL(/return_connection=/);
       await testPage.getByRole("button", { name: "Return to destination", exact: true }).tap();
+      await testPage.getByRole("button", { name: "Edit", exact: true }).click();
       await expect(testPage.getByLabel("Host", { exact: true })).toHaveValue("example.invalid");
       await assertNoDocumentHorizontalOverflow(testPage);
     } finally {

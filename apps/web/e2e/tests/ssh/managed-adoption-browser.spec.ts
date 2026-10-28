@@ -87,14 +87,21 @@ for (const topology of ["direct", "bastion", "unpinned"] as const) {
         await page.goto(`/settings/executors/ssh/${executor.id}`);
         await activate(page, "Move to a shared connection", touch);
         if (topology !== "unpinned")
-          await expect(page.getByText(probe.fingerprint!, { exact: true })).toBeVisible();
+          await expect(
+            page
+              .getByRole("button", { name: "Move to a shared connection", exact: true })
+              .locator("..")
+              .getByText(probe.fingerprint!, { exact: true }),
+          ).toBeVisible();
         await activate(page, "Create connection drafts", touch);
         await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
         expect((await apiClient.getExecutor(executor.id)).config).toEqual(config);
         await confirm(page, "Create connection drafts", touch);
         await expect(page).toHaveURL(/adopt_connection=/);
         const destinationId = new URL(page.url()).searchParams.get("id")!;
-        const destinationUrl = page.url();
+        const destinationUrl = new URL(page.url());
+        destinationUrl.searchParams.set("section", "access");
+        await page.goto(destinationUrl.toString());
         const response = await fetch(
           `${backend.baseUrl}/api/v1/ssh/managed/connections/${destinationId}`,
         );
@@ -107,17 +114,17 @@ for (const topology of ["direct", "bastion", "unpinned"] as const) {
         ).toBeDisabled();
         if (draft.bastion) {
           await page.goto(
-            `/settings/executors/ssh-connections?tab=connections&id=${draft.bastion.id}`,
+            `/settings/executors/ssh-connections?tab=connections&id=${draft.bastion.id}&section=access`,
           );
           await activate(page, "Inspect host key", touch);
           await confirm(page, "Trust this host key", touch);
           await verifyAccess(page, touch);
-          await page.goto(destinationUrl);
+          await page.goto(destinationUrl.toString());
         }
         if (topology === "unpinned") {
           await expect(
             page.getByRole("button", { name: "Test SSH access", exact: true }),
-          ).toBeDisabled();
+          ).toHaveCount(0);
           await activate(page, "Inspect host key", touch);
           await confirm(page, "Trust this host key", touch);
         }

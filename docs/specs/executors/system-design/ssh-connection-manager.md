@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-SSH-CONNECTIONS-001
@@ -32,13 +32,16 @@ Implementation status is tracked in the linked plans. Preserve the
 | `REQ-EXECUTORS-SSH-CONNECTIONS-004` | API contracts; Settings and mobile composition; Diagnostics |
 | `REQ-EXECUTORS-SSH-CONNECTIONS-005` | Compatibility; Rollout; Audit and persistence |
 
-## Current integration points
+## Original integration seams
 
-- `internal/agent/runtime/lifecycle/executor_ssh_connection.go` owns
+These seams describe the pre-manager code that the extraction replaced.
+The dependency direction below remains the intended architecture.
+
+- `internal/agent/runtime/lifecycle/executor_ssh_connection.go` owned
   `SSHConnConfig`, `SSHTarget`, `ResolveSSHTarget`, `DialSSH`, agent/file auth,
   config expansion, and ProxyJump. Its connection/dial tests cover those rules.
 - `internal/ssh/handlers.go` owns `/api/v1/ssh/test`, `ssh.test`, sessions,
-  `resolveSSHTarget`, and readiness probes. It imports lifecycle today.
+  `resolveSSHTarget`, and readiness probes. It imported lifecycle before extraction.
 - `SSHExecutor` launch/resume/status/cleanup consumes SSH credentials through
   config/metadata. `SSHPreparer` currently reports configuration validation
   without dialing. Keep preparation metadata validation consistent with the
@@ -85,10 +88,11 @@ keys are evidence, never implicitly trusted.
 
 Connection service exposes distinct authorized operations: manage identity,
 manage connection, observe/trust, preflight, authenticate, and enroll. Runtime
-consumers use `DialForExecutor` with a server-resolved executor binding, or
-`DialRecordedRuntime` with stored runtime identity. Neither accepts free-form
-caller overrides. These are proposed names. Handshake cleanup closes agent
-sockets and releases private buffers; it does not forward an agent, export a
+consumers use `AdmitRuntime` to validate the saved executor/session binding
+and create or recover a protected runtime reference. `DialRuntime` revalidates
+that reference, route stamp and credential generations before it dials. These
+internal capabilities do not accept free-form caller routing overrides.
+Handshake cleanup closes agent sockets and releases private buffers; it does not forward an agent, export a
 key, or put secrets in subprocess environments.
 
 ## Identity custody
@@ -408,75 +412,12 @@ connection_changed. Success time never substitutes for a fresh failed probe.
 
 ## Settings and mobile composition
 
-The 2026-10-23 navigation revision places management under Settings > Executors >
-SSH connections. Keep the accepted installation-wide custody and administrator
-boundary. This changes navigation and setup continuity, not SSH configuration,
-API paths, storage, runtime resolution, or feature defaults. The existing local
-implementation is recorded in the [original plan](../../../plans/ssh-connection-manager/plan.md);
-the [follow-up plan](../../../plans/ssh-connections-executor-navigation/plan.md)
-owns implementation of this revision. Its two work orders are pending.
-
-### Navigation and compatibility
-
-Use `/settings/executors/ssh-connections` as the canonical page. Register it as a
-static route; exclude its segment from dynamic profile matching. Replace the
-old `/settings/ssh-connections` renderer with the existing `SettingsRedirect`
-using only the canonical pathname: its query/hash merge preserves old tab, id,
-new, adoption, and return parameters. Replace history so Back skips the alias.
-The redirect performs no API mutation. Both entry paths resolve through the
-existing feature/admin gate before mounting management data hooks.
-
-Remove the peer SSH row from `settings-menu-sections.ts`. Keep Executors active;
-add a gated SSH connections navigation row inside the Executors page, visible
-with an empty profile list. Do not add a second sidebar peer or a speculative
-Connections category. Settings discovery keeps its stable `ssh-connections` ID,
-adds parent `executors`, and uses the canonical href. Breadcrumbs include the
-Executors parent. Centralize href/query construction for manager, binding,
-adoption, and setup-return callers in a small frontend route helper.
-
-### Setup continuity
-
-Keep Connections and Identities within the manager. At the connection identity
-field, add an explicit Save draft and create identity action. Save metadata
-through the current coordinator, then open the existing identity form with a
-connection-return context. Save failure stays on the connection. Success returns
-the new identity as an unsaved selection; Cancel returns without changing it.
-Generation/import remains an explicit command. Never save credentials as draft
-metadata. Preserve outer adoption and bastion-return context across this detour.
-
-Manage connections in the managed executor editor carries a typed, in-memory
-continuation with the editor route, draft name, selected connection ID, new-profile
-owner ID, and baseline binding evidence. Keep it outside the pathname-keyed save
-provider; never persist it or put it in URLs.
-Clear it on save, discard, exit from the flow, logout, or reload. Return restores
-metadata, reloads current records and clears executor-check success. A changed
-baseline requires reload/reconciliation instead of overwriting the new record.
-Return to executor preserves selection; Use connection is explicit and offered
-only for a ready route. Final binding still requires an executor check and Save.
-Missing continuation opens the normal editor without fabricated draft state.
-
-### Desktop, phone, and interaction states
-
-Reuse `SettingsLayoutClient`, `SettingsPageTemplate`, the save coordinator and
-shared control classes. Desktop uses the existing list/detail composition.
-Phone uses Executors page > connection list > focused detail or identity form;
-Back returns one level. Temporary identity/bastion selection uses the existing
-inset Drawer, not a nested setup dialog. The inspected precedents are
-`settings-layout-client.tsx` and `kanban/mobile-menu-sheet.tsx`.
-
-Use `useResponsiveBreakpoint` below 768px, one settings scroll owner and safe-area
-space for Save. Ordinary fine-pointer controls stay 28px; touch targets are at
-least 44px, including coarse tablets. Restore focus to the opening field/row,
-announce asynchronous status, and contain long fingerprints within their region.
-Use current tokens and keyboard focus styles; no new animation system.
-
-Keep empty, loading, retry, denied/disabled, stale-version and cancelled states
-explicit. Preserve metadata on errors. Serialize mutation submissions; ignore
-late responses after dismissal and clear secret inputs on completion, navigation
-and dismissal. Guard metadata navigation through the existing coordinator;
-never replay generate/import/enroll/test/trust via Save. No route transition
-performs host authentication or enrollment. Localize all new copy in en, pt-pt,
-zh-cn, zh-hk, zh-tw, ja and ko; generate the Traditional Chinese pair.
+The [SSH management interaction design](ssh-connection-management-ui.md) owns
+navigation, setup continuity, collection/detail composition, and desktop/phone
+presentation for this same executor-owned capability. It includes the proposed
+2026-10-26 UX revision and preserves the existing security and runtime contracts.
+The [navigation package](../../../plans/ssh-connections-executor-navigation/plan.md)
+is complete; the [UX package](../../../plans/ssh-connections-ux/plan.md) is pending.
 
 ## Rollout
 
