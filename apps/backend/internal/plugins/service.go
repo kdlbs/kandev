@@ -139,6 +139,8 @@ type Service struct {
 	executorProviderInventoryReader ExecutorProviderInventoryReader
 	capabilityGate                  capabilityGate
 	executorProviderOpMu            sync.Mutex
+	stateReadableMu                 sync.Mutex
+	stateReadableOverride           map[string]map[string][]int
 	executorProviderOps             map[string]*activeExecutorProviderOperation
 	executorProviderDispatches      map[string]map[uint64]context.CancelFunc
 	executorProviderAdmissionClosed map[string]bool

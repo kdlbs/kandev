@@ -142,3 +142,24 @@ func seedPostgresPluginExecutorInventory(t *testing.T, repo *Repository) {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 }
+
+func TestPluginStateReadabilityPostgres(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	seedPostgresPluginExecutorInventory(t, repo)
+	secondDB := openSecondPostgresConnection(t, dsn, db)
+	secondRepo, err := NewWithDB(secondDB, secondDB, nil)
+	if err != nil {
+		t.Fatalf("init second postgres repo: %v", err)
+	}
+	t.Run("lock excludes admission across connections", func(t *testing.T) {
+		exerciseReadabilityLockExclusion(t, repo, secondRepo)
+	})
+	t.Run("writable checker", func(t *testing.T) {
+		exerciseWritableChecker(t, repo)
+	})
+}

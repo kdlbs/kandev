@@ -32,6 +32,9 @@ func (r *Repository) CheckpointPluginExecutorInventory(ctx context.Context, runn
 	if err := r.validatePluginExecutorCheckpointOwner(ctx, tx, running, metadataJSON); err != nil {
 		return err
 	}
+	if err := r.checkPluginStateWritable(ctx, tx, running); err != nil {
+		return err
+	}
 	if err := checkpointPluginExecutorInventoryRow(ctx, tx, r.db, running, observedRevision, now); err != nil {
 		return err
 	}
