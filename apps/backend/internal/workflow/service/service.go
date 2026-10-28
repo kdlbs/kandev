@@ -1042,6 +1042,12 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 	matchDirectProfile bool,
 	suppressLookup bool,
 ) *models.WorkflowStep {
+	events := models.ConvertPositionToStepID(sp.Events, posToID)
+	if s.lookupProfile != nil && !suppressLookup {
+		events = models.ConvertReviewProfileToIDWithLookup(events, func(profile *models.AgentProfilePortable) string { return s.matchPortableProfile(profile, "") })
+	} else {
+		events = models.ConvertReviewProfileToID(events, matchProfile)
+	}
 	step := &models.WorkflowStep{
 		ID:                          posToID[sp.Position],
 		WorkflowID:                  workflowID,
@@ -1049,7 +1055,7 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		Position:                    sp.Position,
 		Color:                       sp.Color,
 		Prompt:                      sp.Prompt,
-		Events:                      models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
+		Events:                      events,
 		IsStartStep:                 sp.IsStartStep,
 		ShowInCommandPanel:          sp.ShowInCommandPanel,
 		AllowManualMove:             sp.AllowManualMove,
@@ -1063,9 +1069,6 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		CompleteTaskOnEnter:         sp.CompleteTaskOnEnter,
 		WIPLimit:                    sp.WIPLimit,
 		PullFromStepID:              sp.PullFromStepID(posToID),
-	}
-	if s.lookupProfile != nil && !suppressLookup {
-		step.Events = models.ConvertReviewProfileToIDWithLookup(models.ConvertPositionToStepID(sp.Events, posToID), func(profile *models.AgentProfilePortable) string { return s.matchPortableProfile(profile, "") })
 	}
 	if matchDirectProfile && sp.AgentProfile != nil {
 		if s.lookupProfile != nil && !suppressLookup {

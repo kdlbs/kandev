@@ -128,3 +128,8 @@ Verification passed on the updated base:
 
 The E2E regression followed the backend red tests because the browser fixture
 could not express a version 3 profile until the portable parser was extended.
+
+Review fixup: review-action imports now choose the option-aware conversion
+before resolving profiles, avoiding a redundant legacy catalog lookup. The
+new regression failed before the fix and passed afterward. The full workflow
+service test package and changed-Go lint passed after the correction.

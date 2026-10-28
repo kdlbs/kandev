@@ -75,6 +75,7 @@ frontend tests and typecheck, public-doc validators, and changed-Go lint passed.
 The combined Chromium workflow sync and import/export suites passed 14 tests
 on the updated base. The first typecheck exceeded the default Node heap; the
 same check passed with an 8 GiB heap. See the work order for commands.
+The review fixup also passed the workflow service suite and changed-Go lint.
 
 ## Risks
 

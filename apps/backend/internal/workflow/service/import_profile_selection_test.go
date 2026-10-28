@@ -50,6 +50,25 @@ func TestRawImportPassesProfileOptionsToLookup(t *testing.T) {
 	require.Equal(t, "low-profile", steps[0].AgentProfileID)
 }
 
+func TestImportReviewUsesOnlyOptionAwareLookup(t *testing.T) {
+	svc, _, _ := setupTestServiceWithProvider(t)
+	svc.SetAgentProfileFuncs(nil, func(string, string, string, string) string {
+		t.Fatal("review import must not use the legacy matcher when the option-aware lookup is available")
+		return ""
+	})
+	svc.SetAgentProfileLookup(func(profile *models.AgentProfilePortable, _ string) models.ProfileMatch {
+		require.NotNil(t, profile.ConfigOptions)
+		require.Equal(t, "low", (*profile.ConfigOptions)["reasoning_effort"])
+		return models.ProfileMatch{ID: "review-profile"}
+	})
+	step := models.StepPortable{Name: "Review", Position: 0, Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
+		Type:   models.OnEnterRunCodeReview,
+		Config: map[string]interface{}{models.ReviewAgentProfilePortableKey: map[string]interface{}{"agent_name": "Codex", "config_options": map[string]interface{}{"reasoning_effort": "low"}}},
+	}}}}
+	converted := svc.stepFromPortable("workflow", step, map[int]string{0: "step"}, "")
+	require.Equal(t, "review-profile", converted.Events.OnEnter[0].Config[models.ReviewAgentProfileConfigKey])
+}
+
 func (f *importProfileCatalogFixture) ListEligibleProfiles(context.Context) ([]ImportProfileCandidate, error) {
 	return append([]ImportProfileCandidate(nil), f.profiles...), nil
 }
