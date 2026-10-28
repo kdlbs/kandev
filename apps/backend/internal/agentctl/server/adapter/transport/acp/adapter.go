@@ -147,11 +147,12 @@ type Adapter struct {
 	// `capabilities.Meta` map would race.
 	promptQueueing bool
 
-	// claudeCodeAgent records that the initialize response advertised the
-	// `_meta.claudeCode` namespace, i.e. a Claude Code bridge that can emit
-	// native prompt suggestions. Negotiated, not named: custom ACP agents
-	// wrapping Claude Code qualify; other harnesses never do.
-	claudeCodeAgent bool
+	// promptSuggestionSupport caches the generic native-suggestion support
+	// resolved from the initialize response. It is support only: effective
+	// enablement also requires the launch request. Derived once under `mu`
+	// rather than re-read from `capabilities` because the untyped metadata map
+	// would race with concurrent readers.
+	promptSuggestionSupport bool
 
 	// Update channel
 	updatesCh chan AgentEvent
@@ -642,38 +643,48 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	}
 	a.capabilities = resp.AgentCapabilities
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
-	claudeCodeAgent := agentAdvertisesClaudeCode(resp.AgentCapabilities)
+	promptSuggestionSupport, suggestionEvidence := claudePromptSuggestionSupport(
+		a.agentInfo.Name, a.agentInfo.Version, resp.AgentCapabilities,
+	)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
 		attribute.String("agent_version", a.agentInfo.Version),
 		attribute.Bool("supports_load_session", a.capabilities.LoadSession),
 		attribute.Bool("supports_prompt_queueing", promptQueueing),
+		attribute.Bool("supports_prompt_suggestions", promptSuggestionSupport),
+		attribute.String("prompt_suggestion_evidence", string(suggestionEvidence)),
 	)
 
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
 		zap.String("agent_version", a.agentInfo.Version),
 		zap.Bool("supports_load_session", a.capabilities.LoadSession),
-		zap.Bool("supports_prompt_queueing", promptQueueing))
+		zap.Bool("supports_prompt_queueing", promptQueueing),
+		zap.Bool("supports_prompt_suggestions", promptSuggestionSupport),
+		zap.String("prompt_suggestion_evidence", string(suggestionEvidence)))
 
 	// Cache auth methods so we can re-emit them on auth_required without re-running initialize.
 	authMethods := convertAuthMethods(resp.AuthMethods)
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
 	a.promptQueueing = promptQueueing
-	a.claudeCodeAgent = claudeCodeAgent
+	a.promptSuggestionSupport = promptSuggestionSupport
 	a.mu.Unlock()
 
-	// Emit agent capabilities event with prompt capabilities and auth methods
+	// Emit agent capabilities event with prompt capabilities and auth methods.
+	// Raw support is provider evidence; the legacy field keeps its effective
+	// launch-enablement meaning.
+	nativePromptSuggestionsSupported := promptSuggestionSupport
 	a.sendUpdate(AgentEvent{
-		Type:                      streams.EventTypeAgentCapabilities,
-		SupportsImage:             a.capabilities.PromptCapabilities.Image,
-		SupportsAudio:             a.capabilities.PromptCapabilities.Audio,
-		SupportsEmbeddedContext:   a.capabilities.PromptCapabilities.EmbeddedContext,
-		SupportsPromptQueueing:    promptQueueing,
-		SupportsPromptSuggestions: a.cfg.PromptSuggestions && claudeCodeAgent,
-		AuthMethods:               authMethods,
+		Type:                             streams.EventTypeAgentCapabilities,
+		SupportsImage:                    a.capabilities.PromptCapabilities.Image,
+		SupportsAudio:                    a.capabilities.PromptCapabilities.Audio,
+		SupportsEmbeddedContext:          a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:           promptQueueing,
+		SupportsPromptSuggestions:        a.cfg.PromptSuggestions && promptSuggestionSupport,
+		NativePromptSuggestionsSupported: &nativePromptSuggestionsSupported,
+		AuthMethods:                      authMethods,
 	})
 
 	if err := a.applyProviderGatewayAuth(ctx); err != nil {

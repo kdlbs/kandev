@@ -34,7 +34,10 @@ export function registerAgentCapabilitiesHandlers(store: StoreApi<AppState>): Ws
 }
 
 /** Mirrors the backend's prompt_suggestion_source metadata so the composer
- *  shows or hides native suggestions without a reload. */
+ *  shows or hides native suggestions without a reload. The effective
+ *  `supports_prompt_suggestions` value is the only capability input here:
+ *  `native_prompt_suggestions_supported` is provider evidence and must never
+ *  enable the composer on its own. */
 function syncPromptSuggestionSource(store: StoreApi<AppState>, payload: AgentCapabilitiesPayload) {
   const session = store.getState().taskSessions.items[payload.session_id];
   if (!session) return;

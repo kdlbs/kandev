@@ -10,55 +10,153 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
-func newPromptSuggestionAdapter(advertisesClaudeCode, requested bool) *Adapter {
+func newPromptSuggestionAdapter(supported, requested bool) *Adapter {
 	a := newTestAdapterForAgent("custom-acp")
 	a.cfg.PromptSuggestions = requested
-	a.claudeCodeAgent = advertisesClaudeCode
+	a.promptSuggestionSupport = supported
 	a.sessionID = "session-1"
 	return a
 }
 
-// TestAgentAdvertisesClaudeCode verifies native suggestions are negotiated from
-// the initialize advertisement, not from the agent's identity.
-func TestAgentAdvertisesClaudeCode(t *testing.T) {
+// TestNativePromptSuggestionSupport verifies support comes from feature-specific
+// initialize evidence, never from the agent identity, a vendor namespace, or
+// another capability.
+func TestNativePromptSuggestionSupport(t *testing.T) {
+	legacyMeta := map[string]any{"claudeCode": map[string]any{"promptQueueing": true}}
+	featureMeta := func(value any) map[string]any {
+		return map[string]any{"claudeCode": map[string]any{"promptSuggestions": value}}
+	}
 	cases := []struct {
-		name string
-		meta map[string]any
-		want bool
+		name    string
+		agent   string
+		version string
+		meta    map[string]any
+		want    bool
+		wantWhy claudePromptSuggestionEvidence
 	}{
-		{name: "claude code namespace", meta: map[string]any{"claudeCode": map[string]any{"promptQueueing": true}}, want: true},
-		{name: "empty claude code namespace", meta: map[string]any{"claudeCode": map[string]any{}}, want: true},
-		{name: "no meta"},
-		{name: "other vendor", meta: map[string]any{"opencode": map[string]any{}}},
-		{name: "malformed namespace", meta: map[string]any{"claudeCode": true}},
+		{
+			name: "explicit true with an arbitrary custom bridge", agent: "research-bridge", version: "9.9.9",
+			meta: featureMeta(true), want: true, wantWhy: claudeSuggestionEvidenceExplicit,
+		},
+		{
+			name: "explicit true with the legacy identity", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion, meta: featureMeta(true),
+			want: true, wantWhy: claudeSuggestionEvidenceExplicit,
+		},
+		{
+			name: "explicit false denies the verified legacy tuple", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion,
+			meta: map[string]any{"claudeCode": map[string]any{
+				"promptSuggestions": false, "promptQueueing": true,
+			}},
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "string declaration is malformed", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion,
+			meta: map[string]any{"claudeCode": map[string]any{
+				"promptSuggestions": "true", "promptQueueing": true,
+			}},
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "numeric declaration is malformed", meta: featureMeta(1),
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "null declaration is malformed", meta: featureMeta(nil),
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "object declaration is malformed", meta: featureMeta(map[string]any{}),
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "verified legacy tuple", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion, meta: legacyMeta,
+			want: true, wantWhy: claudeSuggestionEvidenceVerifiedLegacy,
+		},
+		{
+			name: "queueing alone with an arbitrary identity", agent: "custom-acp", version: "1.0.0", meta: legacyMeta,
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			// A Claude-looking reported name is not the verified package identity.
+			name: "claude-looking identity outside the verified tuple", agent: "claude-code", version: "1.0.0", meta: legacyMeta,
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "official name with an unverified version", agent: verifiedClaudeSuggestionBridgeName,
+			version: "0.99.0", meta: legacyMeta,
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "official bridge name without metadata", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion,
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "verified identity with an empty namespace", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion, meta: map[string]any{"claudeCode": map[string]any{}},
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "verified identity with promptQueueing false", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion,
+			meta:    map[string]any{"claudeCode": map[string]any{"promptQueueing": false}},
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "verified identity with a non-boolean promptQueueing", agent: verifiedClaudeSuggestionBridgeName,
+			version: verifiedClaudeSuggestionBridgeVersion,
+			meta:    map[string]any{"claudeCode": map[string]any{"promptQueueing": "true"}},
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "unrelated vendor metadata", meta: map[string]any{"opencode": map[string]any{}},
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
+		{
+			name: "malformed namespace", meta: map[string]any{"claudeCode": true},
+			wantWhy: claudeSuggestionEvidenceUnsupported,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := agentAdvertisesClaudeCode(acpsdk.AgentCapabilities{Meta: tc.meta})
-			if got != tc.want {
-				t.Fatalf("agentAdvertisesClaudeCode = %v, want %v", got, tc.want)
+			got, why := claudePromptSuggestionSupport(tc.agent, tc.version, acpsdk.AgentCapabilities{Meta: tc.meta})
+			if got != tc.want || why != tc.wantWhy {
+				t.Fatalf("claudePromptSuggestionSupport = (%v, %q), want (%v, %q)", got, why, tc.want, tc.wantWhy)
 			}
 		})
 	}
 }
 
-// TestPromptSuggestionSessionMeta verifies only a Claude Code agent that the
-// instance asked for suggestions receives the suggestion _meta.
+// TestPromptSuggestionSessionMeta verifies the configuration contract for every
+// support/request pair: supported sessions get an explicit option, and only a
+// requested session filters raw suggestion messages.
 func TestPromptSuggestionSessionMeta(t *testing.T) {
-	want := map[string]any{
+	wantEnabled := map[string]any{
 		"claudeCode": map[string]any{
 			"options":            map[string]any{"promptSuggestions": true},
 			"emitRawSDKMessages": []any{map[string]any{"type": "prompt_suggestion"}},
 		},
 	}
-	if got := newPromptSuggestionAdapter(true, true).promptSuggestionSessionMeta(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("meta = %#v, want %#v", got, want)
+	wantDisabled := map[string]any{
+		"claudeCode": map[string]any{
+			"options": map[string]any{"promptSuggestions": false},
+		},
 	}
-	if got := newPromptSuggestionAdapter(true, false).promptSuggestionSessionMeta(); got != nil {
-		t.Fatalf("meta without request = %#v, want nil", got)
+	if got := newPromptSuggestionAdapter(true, true).promptSuggestionSessionMeta(); !reflect.DeepEqual(got, wantEnabled) {
+		t.Fatalf("meta = %#v, want %#v", got, wantEnabled)
+	}
+	if got := newPromptSuggestionAdapter(true, false).promptSuggestionSessionMeta(); !reflect.DeepEqual(got, wantDisabled) {
+		t.Fatalf("meta without request = %#v, want explicit disable %#v", got, wantDisabled)
 	}
 	if got := newPromptSuggestionAdapter(false, true).promptSuggestionSessionMeta(); got != nil {
-		t.Fatalf("meta for a non-Claude-Code agent = %#v, want nil", got)
+		t.Fatalf("meta for an unsupported agent = %#v, want nil", got)
+	}
+	if got := newPromptSuggestionAdapter(false, false).promptSuggestionSessionMeta(); got != nil {
+		t.Fatalf("meta for an unsupported, unrequested agent = %#v, want nil", got)
 	}
 }
 
@@ -90,22 +188,25 @@ func TestHandleClaudeSDKMessageEmitsPromptSuggestion(t *testing.T) {
 }
 
 // TestHandleClaudeSDKMessageIgnoresUnusableMessages verifies other message
-// types, other sessions, empty text, and disabled instances emit nothing.
+// types, other sessions, empty text, unsupported or unrequested instances, and
+// malformed payloads emit nothing.
 func TestHandleClaudeSDKMessageIgnoresUnusableMessages(t *testing.T) {
 	cases := []struct {
-		name    string
-		enabled bool
-		params  json.RawMessage
+		name      string
+		supported bool
+		requested bool
+		params    json.RawMessage
 	}{
-		{name: "other type", enabled: true, params: claudeSDKMessage("session-1", "result", "x")},
-		{name: "other session", enabled: true, params: claudeSDKMessage("session-2", "prompt_suggestion", "x")},
-		{name: "empty text", enabled: true, params: claudeSDKMessage("session-1", "prompt_suggestion", "   ")},
-		{name: "not requested", enabled: false, params: claudeSDKMessage("session-1", "prompt_suggestion", "x")},
-		{name: "malformed", enabled: true, params: json.RawMessage(`{`)},
+		{name: "other type", supported: true, requested: true, params: claudeSDKMessage("session-1", "result", "x")},
+		{name: "other session", supported: true, requested: true, params: claudeSDKMessage("session-2", "prompt_suggestion", "x")},
+		{name: "empty text", supported: true, requested: true, params: claudeSDKMessage("session-1", "prompt_suggestion", "   ")},
+		{name: "not requested", supported: true, params: claudeSDKMessage("session-1", "prompt_suggestion", "x")},
+		{name: "not supported", requested: true, params: claudeSDKMessage("session-1", "prompt_suggestion", "x")},
+		{name: "malformed", supported: true, requested: true, params: json.RawMessage(`{`)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newPromptSuggestionAdapter(true, tc.enabled)
+			a := newPromptSuggestionAdapter(tc.supported, tc.requested)
 			a.finishPromptTurn(startPromptForSuggestion(a, 1))
 			a.handleClaudeSDKMessage(tc.params)
 			if events := drainEvents(a); len(events) != 0 {

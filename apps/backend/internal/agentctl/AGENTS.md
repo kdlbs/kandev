@@ -94,20 +94,17 @@ OpenCode v1 and v2 share the `opencode-acp` identity and can access the same ses
 
 ### Native prompt suggestions (Claude)
 
-When the instance config has `PromptSuggestions` and the agent advertised the
-`_meta.claudeCode` namespace on `initialize` (negotiated, not named, so a custom
-ACP agent wrapping Claude Code qualifies), `session/new`, `session/load`, and
-`session/resume` carry this `_meta`:
-`claudeCode.options.promptSuggestions` plus
-`claudeCode.emitRawSDKMessages: [{type: "prompt_suggestion"}]`.
-claude-agent-acp then forwards Claude Code's suggestion as the
-`_claude/sdkMessage` extension notification. The Kandev ACP SDK fork routes
-client-side `_` notifications to `HandleExtensionNotification`.
-`adapter_prompt_suggestion.go` emits `prompt_suggestion` only for the active
-ACP session and only while no `session/prompt` is in flight. A suggestion that
-arrives after a newer prompt belongs to a superseded turn and is dropped. The
-backend decides the flag at launch (`lifecycle/prompt_suggestions.go`).
-Design: `docs/specs/ui/system-design/composer-prompt-suggestions.md`.
+`supports_prompt_suggestions` is effective enablement; the optional
+`native_prompt_suggestions_supported` is support alone (nil = unknown) and must
+never enable the composer. `dialect_claude_prompt_suggestions.go` accepts
+literal `_meta.claudeCode.promptSuggestions: true`, or, when absent, only the
+exact official bridge `@agentclientprotocol/claude-agent-acp` `0.81.2` with
+`promptQueueing: true`; false or malformed denies support, and names,
+namespaces, queueing, and models never qualify. Supported sessions configure
+new/load/resume with `claudeCode.options.promptSuggestions` plus the requested
+raw `prompt_suggestion` filter; `adapter_prompt_suggestion.go` owns window and
+origin handling. Failed or same-ID transitions keep the prior window ambiguous.
+Design: `docs/specs/agents/system-design/native-prompt-suggestion-capability.md`.
 
 ### ACP permission identity and injected MCP approval
 

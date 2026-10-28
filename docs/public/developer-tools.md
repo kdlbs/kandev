@@ -165,7 +165,11 @@ Utility calls run as ephemeral processes on the Kandev backend host. Kandev reso
 
 Turn on **Suggest next prompt** in **Settings > Task behavior > Conversation** to see the reply you are most likely to send next as dimmed text in the empty chat composer of a task or Quick Chat. Press **Tab** (or tap **Use reply** on a phone) to fill it in for editing, press your submit shortcut to send it as is, or press **Escape** to dismiss it. Typing hides the suggestion; clearing the composer shows it again until the next turn.
 
-Suggestions come only from agents with native support. Today that means sessions that run Claude Code, whether the Claude agent or a custom ACP agent that wraps Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache. Kandev detects Claude Code from the agent's ACP handshake, so the model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a Claude session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
+Suggestions come only from agents whose adapter establishes native support. Today the only implemented source is Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache.
+
+Kandev recognizes the official Claude ACP bridge it pins (`@agentclientprotocol/claude-agent-acp` version 0.81.2) when it reports the expected package identity and metadata shape. This includes a custom Kandev agent definition that launches that bridge. A bridge with any other name or version qualifies only when it explicitly declares the vendor extension `agentCapabilities._meta.claudeCode.promptSuggestions: true` and implements the matching suggestion options and raw-message forwarding. That declaration is a Kandev opt-in contract, not a standard ACP capability, and upstream bridges do not advertise it yet.
+
+The model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a supported session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
 
 Kandev never generates a suggestion of its own. For agents without native support, and for turns where Claude Code stays silent, the composer works as usual.
 

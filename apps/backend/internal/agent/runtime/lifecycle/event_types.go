@@ -295,12 +295,16 @@ type AgentStreamEventData struct {
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
 
 	// Agent capabilities (from "agent_capabilities" event)
-	SupportsImage             bool                     `json:"supports_image"`
-	SupportsAudio             bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
-	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
-	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
+	SupportsImage             bool `json:"supports_image"`
+	SupportsAudio             bool `json:"supports_audio"`
+	SupportsEmbeddedContext   bool `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
+	// NativePromptSuggestionsSupported is provider support only, independent of
+	// the user preference. Nil means an older producer or another transport did
+	// not report it; it must never be treated as effective enablement.
+	NativePromptSuggestionsSupported *bool                    `json:"native_prompt_suggestions_supported,omitempty"`
+	AuthMethods                      []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)
 	CurrentModelID string                     `json:"current_model_id,omitempty"`
@@ -679,16 +683,20 @@ func (p SessionModeEventPayload) GetSessionID() string {
 
 // AgentCapabilitiesEventPayload is the payload for agent capabilities events.
 type AgentCapabilitiesEventPayload struct {
-	TaskID                    string                   `json:"task_id"`
-	SessionID                 string                   `json:"session_id"`
-	AgentID                   string                   `json:"agent_id"`
-	SupportsImage             bool                     `json:"supports_image"`
-	SupportsAudio             bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
-	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
-	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods"`
-	Timestamp                 string                   `json:"timestamp"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentID                   string `json:"agent_id"`
+	SupportsImage             bool   `json:"supports_image"`
+	SupportsAudio             bool   `json:"supports_audio"`
+	SupportsEmbeddedContext   bool   `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool   `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool   `json:"supports_prompt_suggestions,omitempty"`
+	// NativePromptSuggestionsSupported carries provider support only. It is
+	// forwarded unchanged so consumers can distinguish it from effective
+	// enablement; nil means the producer did not report it.
+	NativePromptSuggestionsSupported *bool                    `json:"native_prompt_suggestions_supported,omitempty"`
+	AuthMethods                      []streams.AuthMethodInfo `json:"auth_methods"`
+	Timestamp                        string                   `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
