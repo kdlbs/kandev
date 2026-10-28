@@ -76,6 +76,9 @@ func runMaintenance(argv []string, _ BuildInfo) int {
 		fmt.Print(maintenanceHelp)
 		return 0
 	}
+	if args.JSON {
+		ignoreBrokenPipeSignal()
+	}
 
 	cfg, err := loadBootstrapConfigWithHome(args.HomeDir)
 	if err != nil {

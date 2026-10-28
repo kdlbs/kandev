@@ -59,7 +59,7 @@ export PATH="/home/jcfs/.local/share/mise/installs/pnpm/9.15.9:/home/jcfs/.local
 export GOTOOLCHAIN=local
 (cd apps && KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/kandev-039-install.XXXXXXXX)" ../scripts/run-quiet install -- pnpm install --frozen-lockfile)
 (cd apps/backend && KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/kandev-039-go-test.XXXXXXXX)" GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=512MiB ../../scripts/run-quiet backend-test -- go test -race -trimpath -tags fts5 -p=1 -count=1 ./internal/launcher -run 'Test(ParseMaintenance|RunMaintenance|Maintenance|PrintMaintenance)')
-KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/kandev-039-go-lint.XXXXXXXX)" GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=3GiB scripts/run-quiet go-lint -- bash scripts/lint-go-changed apps/backend/internal/launcher/maintenance_database.go apps/backend/internal/launcher/maintenance_database_json.go apps/backend/internal/launcher/maintenance_database_json_test.go
+KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/kandev-039-go-lint.XXXXXXXX)" GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=3GiB scripts/run-quiet go-lint -- bash scripts/lint-go-changed apps/backend/internal/launcher/maintenance_database.go apps/backend/internal/launcher/maintenance_database_json.go apps/backend/internal/launcher/maintenance_database_json_test.go apps/backend/internal/launcher/maintenance_database_sigpipe_unix_test.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 node --test scripts/validate-public-docs.test.mjs
@@ -106,6 +106,7 @@ NODE
 - `apps/backend/internal/launcher/maintenance_database.go`
 - `apps/backend/internal/launcher/maintenance_database_json.go`
 - `apps/backend/internal/launcher/maintenance_database_json_test.go`
+- `apps/backend/internal/launcher/maintenance_database_sigpipe_unix_test.go`
 - `apps/backend/internal/launcher/maintenance_database_test.go` (existing fixtures and text regressions)
 - `docs/public/cli.md`
 - This plan and work order for final status and results.
@@ -138,3 +139,9 @@ The documented jq query returned `1` from a disposable fixture output.
 `list-docs validate`, specification lint, public-doc validator tests (63/63),
 public-doc validation (54 pages), and `git diff --check` passed. No actual user
 database or runtime was used. Hosted checks and reviews are pending.
+
+CodeRabbit SIGPIPE correction: the Unix subprocess test first confirmed its
+control child died from SIGPIPE and observed maintenance terminate by SIGPIPE
+without a diagnostic. With the existing platform helper invoked for JSON after
+help and usage handling, the closed-pipe test and focused launcher race suite
+passed; changed-Go lint passed. No domain behavior changed.

@@ -51,7 +51,9 @@ launcher tests passed with `-race -trimpath -tags fts5 -p=1 -count=1`;
 changed-Go lint passed. The documented jq query returned `1` for an isolated
 fixture. Specification catalog and lint, public-doc validators (63 tests), and
 `git diff --check` passed. See the work order for commands and results.
-Hosted CI and reviews remain pending publication.
+A subsequent SIGPIPE review correction passed a real closed-stdout subprocess
+regression, the focused launcher race suite, and changed-Go lint. Hosted CI
+and reviews remain pending.
 
 ## Risks
 
