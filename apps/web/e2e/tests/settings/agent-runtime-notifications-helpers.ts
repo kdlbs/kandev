@@ -6,6 +6,37 @@ import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
 import { compactRuntimeSettings, retainRuntimePolicyDraft } from "./agent-runtime-settings-helpers";
 
+export async function localizedReleaseNotice(
+  page: Page,
+  baseURL: string,
+  capture?: PrAssetCapture,
+) {
+  await page.context().addCookies([{ name: "kandev_locale", value: "pt-pt", url: baseURL }]);
+  const runtime = await installRuntimeUpdateFixture(page);
+  await page.goto("/settings/preferences/appearance");
+  await expect(page.locator("html")).toHaveAttribute("lang", "pt-pt");
+  await runtime.emit("system.update_available", {
+    occurrence_id: "release-localized-v99.0.1",
+    version: "v99.0.1",
+    title: "Kandev update available",
+    body: "Kandev v99.0.1 is available. Open Settings > System > Updates to review it.",
+  });
+  const toast = page.getByTestId("toast-message").filter({ hasText: "v99.0.1" });
+  await expect(toast).toHaveCount(1);
+  await expect(toast).toContainText("Atualização do Kandev disponível");
+  await expect(toast).toContainText(
+    "O Kandev v99.0.1 está disponível. Abra Definições > Sistema > Atualizações para o rever.",
+  );
+  await waitForFiniteAnimations(toast);
+  const box = await toast.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  await capture?.screenshot("localized-release-notice", {
+    caption: "Application update notices use the active language and retain the release version.",
+  });
+}
+
 export async function runtimeAwareness(page: Page, mobile = false, capture?: PrAssetCapture) {
   let statuses: AgentUpdateStatus[] = [
     {

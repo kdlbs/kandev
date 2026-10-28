@@ -502,6 +502,7 @@
       "message_time_display",
       "preferred_shell",
       "prevent_auto_start_agent_on_open",
+      "prompt_suggestions",
       "quick_chat_tab_order_by_workspace",
       "release_notes_last_seen_version",
       "repository_ids",

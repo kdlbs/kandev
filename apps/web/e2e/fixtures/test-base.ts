@@ -3,7 +3,10 @@ import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, reportUnexpectedBackendFailure, type BackendContext } from "./backend";
-import { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
+import {
+  clearSeedRepositoryRemoteDefault,
+  restoreSeedRepositoryOrigin,
+} from "./seed-repository-origin";
 export { restoreSeedRepositoryOrigin } from "./seed-repository-origin";
 import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
@@ -625,6 +628,7 @@ export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir
       { env: makeGitEnv(tmpDir), stdio: "ignore" },
     );
   }
+  clearSeedRepositoryRemoteDefault(seedData, makeGitEnv(tmpDir));
 }
 
 /** Points the seed repository at a valid cached checkout with an unreachable origin. */

@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
 vi.mock("./file-context-menu", () => ({
   FileContextMenu: ({
     children,

@@ -268,12 +268,13 @@ command for the same file the backend uses (`--home-dir`, `database.path`,
 normal launcher):
 
 ```text
-kandev maintenance database [--execute] [--compact]
+kandev maintenance database [--execute] [--compact] [--json]
     [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
 ```
 
 | Option                      | Meaning                                                                                                                                                    |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--json`                    | Print one machine-readable JSON outcome to stdout. The default remains a read-only dry run.                                                           |
 | `--execute`                 | Perform retention deletes. Without it, the command is a read-only dry run (the default).                                                                   |
 | `--compact`                 | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
 | `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`).                                                                   |
@@ -299,6 +300,49 @@ A legacy-schema dry run does not migrate the database.
 Delivery samples default to at most 200 candidates, even without `--candidate-limit`.
 They are not exact database-wide totals.
 Retired-session evidence shares the candidate row budget across its sampled tables.
+
+**JSON output.** Use `--json` to read the same bounded report in a script:
+
+```bash
+set -o pipefail
+kandev maintenance database --json | jq '.report.total_candidate_rows'
+```
+
+The output is one JSON object followed by a newline. `mode` is `dry_run` or
+`execute`. `report` contains `generated_at` (UTC RFC3339),
+`database_size_bytes`, `candidates`, `delivery_retention`,
+`total_candidate_rows`, and `total_estimated_bytes`. The three `candidates`
+keys are `duplicate_git_snapshots`, `obsolete_plan_revisions`, and
+`orphaned_message_payloads`. Each group has integer `rows` and
+`estimated_bytes` and boolean `sample_limit_reached`.
+
+`delivery_retention` has boolean `available` and string `unavailable_reason`
+(empty when available; otherwise `schema_unavailable` or `format_unsupported`).
+When available, its `candidates` contains groups
+`projected_delivery_payloads`, `settled_delivery_prompts`,
+`retired_delivery_event_receipts`, `retired_delivery_session_evidence`, and
+`orphaned_delivery_identities` with the same fields; otherwise `candidates` is
+omitted. Totals sum the reported groups, including bounded samples, and are not
+necessarily database-wide counts. Estimated bytes are row-content estimates,
+not promised disk savings.
+
+An executed outcome adds `execution` with `backup_path`, `partial`, and the
+counts `deleted_git_snapshots`, `deleted_plan_revisions`,
+`deleted_message_payloads`, `deleted_delivery_event_payloads`,
+`deleted_settled_delivery_prompts`, `retired_delivery_event_receipts`,
+`purged_retired_delivery_rows`, `delivery_orphan_jobs_scheduled`, and
+`delivery_retirement_jobs_completed`. A successful compaction adds
+`compaction` with `size_before_bytes`, `size_after_bytes`, and
+`rollback_path`; otherwise that section is omitted. All byte sizes are bytes,
+counts are integers, and omitted sections are not null. Future fields may be
+added; scripts should ignore unknown fields.
+
+`partial` indicates that bounded maintenance work may remain: any candidate
+sample limit, pending delivery work, or a delivery execution error can set it.
+It is not a general success indicator. Check the exit status: if an error
+occurs after work commits, stdout still reports the committed outcome, stderr
+reports the failure, and the exit status is 1. A failure before an outcome may leave stdout empty. A failed stdout
+write can leave incomplete JSON and also produces a nonzero exit.
 
 **Execute.** `--execute` requires exclusive access to the database: it takes
 the same ownership lock a live backend takes at boot, so it refuses to run

@@ -12,6 +12,8 @@ import {
   assertRestartSubmissionBlocked,
 } from "./session-tab-restart-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 // @covers AC-TASKS-SESSION-TAB-RESTART-001.6
 test("blocks sending throughout restart while keeping the draft editable", async ({
   testPage,
@@ -94,7 +96,7 @@ test("keeps history and recovery available after restarting an interrupted turn"
   expect(before.target.state).toBe("RUNNING");
   const stop = fixture.wire.waitForResponse("session.stop");
   const launch = fixture.wire
-    .waitForResponse("session.launch", { timeoutAfter: stop })
+    .waitForResponse("session.launch", { timeout: 30_000, timeoutAfter: stop })
     .catch((error: unknown) => error);
   const wireStart = fixture.traffic.frames.length;
   await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
@@ -163,8 +165,6 @@ for (const restartSelected of [false, true]) {
     const editor = await fixture.session.fillMessage("Keep this unsent draft");
     const targetId = restartSelected ? sibling.id : fixture.sessionId;
     const before = await captureRestartBaseline(apiClient, fixture.task.id, targetId);
-    const stop = fixture.wire.waitForResponse("session.stop");
-    const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
     await fixture.session.sessionTabBySessionId(targetId).click({ button: "right" });
     const action = testPage.getByRole("menuitem", { name: "Restart session", exact: true });
     await expect(action).toBeVisible();
@@ -174,6 +174,14 @@ for (const restartSelected of [false, true]) {
         caption: "Restart the selected session while a live sibling remains available.",
       });
     }
+    const stop = fixture.wire.waitForResponse("session.stop", {
+      requestWhere: (payload) => payload.session_id === targetId,
+    });
+    const launch = fixture.wire.waitForResponse("session.launch", {
+      timeout: 30_000,
+      timeoutAfter: stop,
+      requestWhere: (payload) => payload.session_id === targetId && payload.intent === "resume",
+    });
     await action.click();
     await Promise.all([stop, launch]);
     await assertRestartRetained(apiClient, fixture.task.id, targetId, before);
@@ -201,7 +209,10 @@ test("offers keyboard restart from the preview tab and preserves phone boundary 
     await expect(tab).toBeVisible();
     const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
     const stop = fixture.wire.waitForResponse("session.stop");
-    const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
+    const launch = fixture.wire.waitForResponse("session.launch", {
+      timeout: 30_000,
+      timeoutAfter: stop,
+    });
     await tab.click({ button: "right" });
     await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).focus();
     await testPage.keyboard.press("Enter");

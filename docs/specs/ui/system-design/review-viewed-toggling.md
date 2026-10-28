@@ -56,8 +56,12 @@ one CSS pixel of rounding; layout changes cannot borrow earlier input.
 Intersection observations refresh the current geometry baseline without marking.
 This avoids comparing an older observer snapshot against a later touch-scroll
 position. Remove the listener and disconnect the observer together on cleanup.
-Preserve `useReviewDiffScrollInteraction` and `useReviewScrollAnchor` input and
-navigation suppression. No interaction-hook change is needed.
+Preserve `useReviewScrollAnchor` navigation suppression. The interaction hook
+also admits touch input at pointer-down anywhere inside the scroller. Chromium
+can scroll a touch gesture on the compositor without delivering `touchmove`.
+Touch contact authorizes a subsequent certified scroll crossing; it never marks
+a file by itself. Mouse and pen clicks on descendants do not release suppression.
+Existing wheel, keyboard, and direct-root pointer input continue to work.
 
 ## Shared state, identity, and persistence
 
@@ -87,6 +91,9 @@ suppression, disabled/stale/pending content, identity isolation and cleanup.
 Add desktop and mobile browser regressions using real scroll geometry and real
 checkbox mutations; do not force observer callbacks in browser tests. Include
 a below-viewport trailing file so the target start can pass the viewport top.
+Cover touch contact on diff descendants followed by a scroll crossing without
+`touchmove`, and preserve suppression for descendant mouse and pen clicks.
+Contact without a certified crossing must not mark a file.
 
 ## Implementation plan
 

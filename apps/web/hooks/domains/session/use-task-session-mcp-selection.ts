@@ -8,6 +8,7 @@ import {
   useMCPSelectionEditor,
   type MCPSelectionScopeRef,
 } from "../workspace/use-mcp-selection-editor";
+import { useMCPSelectionDraft } from "../workspace/use-mcp-selection-draft";
 import { isHandledApiError } from "@/lib/api/client";
 import type { MCPInheritedSelection, MCPSessionSelectionState } from "@/lib/types/http-mcp";
 
@@ -87,11 +88,13 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
     available ? ownerWorkspace : null,
     inheritedScopes,
   );
+  const draft = useMCPSelectionDraft(contextKey, editor.selection);
   const error = editor.saveError ?? editor.loadError ?? definitions.error;
+  const state = editor.selection?.mcp_state;
   usePendingSelectionRefresh(
-    editor.selection?.mcp_state,
+    state,
     editor.reload,
-    editor.saving || isHandledApiError(error),
+    editor.saving || Boolean(editor.saveError) || isHandledApiError(error),
   );
   const inherited = useMemo<MCPInheritedSelection[]>(
     () =>
@@ -103,22 +106,30 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
   );
   const save = useCallback(
     (ids: string[]) => {
-      void editor.save(ids).catch(() => undefined);
+      draft.setSelectedIds(ids);
+      void editor
+        .save(ids)
+        .then(draft.acknowledge)
+        .catch(() => undefined);
     },
-    [editor.save],
+    [editor.save, draft.setSelectedIds, draft.acknowledge],
   );
+  const savedSelectedIds = editor.selection?.definition_ids ?? [];
   if (!available) return null;
   return {
     contextKey,
+    ...(context.sessionId ? { assignmentSessionId: context.sessionId } : {}),
     workspaceId: ownerWorkspace,
     definitions: definitions.definitions,
     definitionsLoading: definitions.loading || editor.loading,
-    selectedIds: editor.selection?.definition_ids ?? [],
+    selectedIds: draft.selectedIds,
+    savedSelectedIds,
     inherited,
     onSelectedIdsChange: save,
-    state: editor.selection?.mcp_state,
-    disabled: editor.saving,
-    retry: () => save(editor.selection?.definition_ids ?? []),
+    state,
+    disabled: editor.saving || Boolean(editor.saveError),
+    reload: editor.reload,
+    retry: () => save(savedSelectedIds),
     retrying: editor.saving,
     error,
   };

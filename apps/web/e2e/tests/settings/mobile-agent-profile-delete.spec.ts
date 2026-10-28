@@ -26,9 +26,10 @@ test.describe("Agent profile deletion on mobile", () => {
 
     await testPage.goto("/settings/agents");
 
-    const row = testPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
+    const trigger = testPage.getByTestId(`profile-actions-menu-${profile.id}`);
+    const row = testPage.getByTestId("agent-profile-row").filter({ has: trigger });
+    await expect(row).toHaveCount(1);
     await expect(row).toBeVisible({ timeout: 15_000 });
-    const trigger = row.getByTestId(`profile-actions-menu-${profile.id}`);
     await trigger.tap();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
     const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');

@@ -1169,7 +1169,7 @@ func validateAttachments(items []v1.MessageAttachment) error {
 func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	var body httpCreateTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("invalid payload"))
 		return
 	}
 	labels, err := encodeTaskLabels(body.Labels)
@@ -1179,15 +1179,15 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 	if err := validateAttachments(body.Attachments); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage(err.Error()))
 		return
 	}
 	if body.WorkspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("workspace_id is required"))
 		return
 	}
 	if (body.StartAgent || body.PrepareSession) && body.AgentProfileID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_profile_id is required to start agent"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("agent_profile_id is required to start agent"))
 		return
 	}
 	repos, ok := convertCreateTaskRepositories(c, body.Repositories)
@@ -1215,7 +1215,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
 	if body.StartAgent && len(description) > models.MaxInitialPromptSubmissionBytes {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "initial task prompt exceeds the maximum size"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("initial task prompt exceeds the maximum size"))
 		return
 	}
 	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
@@ -1229,7 +1229,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// post-create attach can record group membership / blocker chain.
 	wsPolicy, policyErr := h.resolveWorkspacePolicy(c.Request.Context(), body)
 	if policyErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": policyErr.Error()})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage(policyErr.Error()))
 		return
 	}
 	metadata := wsPolicy.MergeMetadataBlock(body.Metadata)
@@ -1292,7 +1292,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		if respondTaskCreateAttachmentError(c, err) {
 			return
 		}
-		handleNotFound(c, h.logger, err, "task not created")
+		handleTaskCreateFailure(c, h.logger, err)
 		return
 	}
 	// Both Found outcomes have no side effects: skip every post-create step
@@ -1675,7 +1675,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 	var repos []dto.TaskRepositoryInput
 	for _, r := range inputs {
 		if r.RepositoryID == "" && r.LocalPath == "" && r.RemoteURL == "" && r.GitHubURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id, local_path, or remote_url is required"})
+			c.JSON(http.StatusBadRequest, rejectedCreateMessage("repository_id, local_path, or remote_url is required"))
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{

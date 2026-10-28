@@ -12,6 +12,41 @@ Columns: `PID BACKEND_PORT WEB_PORT AGENTCTL_PORT HOME_DIR REPO_PATH`.
 
 The user's live instance usually has `HOME_DIR=/home/<user>` or backend port `38429`. Never mutate it. Creating and downloading an owned diagnostic bundle is read-only.
 
+## Task database and ACP evidence
+
+For Kandev task issues, use the database and ACP logs as the primary evidence.
+Database messages contain persisted content, normalized payloads, metadata, and
+statuses. They are not raw ACP frames. Raw ACP logs show the original protocol
+notifications. Compare both sources to locate transport, normalization, or
+persistence errors.
+
+1. Identify the instance and exact task/session IDs. Locate its actual database
+   through runtime configuration or open process files. Do not assume a default path.
+2. Open SQLite with `mode=ro`, for example
+   `sqlite3.connect('file:/actual/path/kandev.db?mode=ro', uri=True)`.
+   Inspect the relevant table schema before querying. Never modify the live database.
+3. Query `task_session_messages` by `task_session_id` and the relevant message or
+   tool-call IDs. Select only needed columns and rows. Compare timestamps,
+   `metadata.status`, `metadata.tool_call_id`, and normalized inputs/outputs.
+   If a payload is externalized, inspect its referenced storage using the repository's decoding format.
+4. Resolve the native ACP session ID from `task_sessions.metadata.acp.session_id`
+   or the applicable `harness_session_generations` row. Select the generation that
+   matches the incident. Kandev session IDs and native ACP session IDs differ.
+5. Locate that session's raw and normalized ACP logs under the instance's log
+   directory. Match exact tool-call IDs and timestamps across frames and database
+   rows. Keep failed attempts and successful retries separate.
+6. Report the evidence paths, relevant frame lines, and any mismatches or gaps.
+   Missing or rotated ACP logs do not prove that an event never occurred.
+
+Limit reads to the affected task, sessions, and calls. Avoid full metadata or
+transcript dumps. ACP frames can contain secrets and unrelated prompt content.
+Do not reproduce sensitive values in reports.
+
+If the database is inaccessible, use `get_task_conversation_kandev` as a last resort.
+State why direct access failed. Its response is API-projected conversation
+history, not an independent database inspection or raw ACP capture. Continue
+with scoped ACP logs if available, and report any remaining evidence gaps.
+
 ## Launch Isolated Instance
 
 Use an isolated instance for browser/UI repros and API probing that mutates data:
@@ -56,8 +91,8 @@ console history. The task-session bundle currently accepts only the source
 values exposed by its active schema (`backend`, `frontend`, or `all`); do not
 assume that `runtime` or `acp` is available. Standard evidence does not include
 stored chat/session/agent messages. For a delivery-versus-visibility question,
-identify the exact sender and receiver sessions first, then use authorized task
-conversation or ACP evidence when that source is available. Inspect
+identify the exact sender and receiver sessions first, then follow the task
+database and ACP procedure above. Inspect
 `manifest.json` warnings before drawing conclusions; if the active diagnostic
 tool does not expose the requested chat/ACP source, report protocol evidence as
 unavailable instead of inferring delivery from ordinary logs.

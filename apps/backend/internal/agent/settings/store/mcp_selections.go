@@ -232,6 +232,15 @@ func replaceMCPSelectionsTx(
 	workspaceID, ownerID string,
 	definitionIDs []string,
 ) error {
+	origin := mcpconfig.SelectionOrigin{Scope: scope, WorkspaceID: workspaceID, OwnerID: ownerID}
+	if err := lockMCPSelectionOwner(ctx, tx, origin); err != nil {
+		return err
+	}
+	for _, id := range normalizedMCPSelectionIDs(definitionIDs) {
+		if err := lockMCPDefinition(ctx, tx, workspaceID, id); err != nil {
+			return err
+		}
+	}
 	table, err := selectionTable(scope)
 	if err != nil {
 		return err
@@ -369,6 +378,9 @@ func (r *sqliteRepository) DeleteMCPServerDefinitionWithSelections(ctx context.C
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockMCPDefinition(ctx, tx, workspaceID, id); err != nil {
+		return err
+	}
 	if err := deleteMCPSelectionRows(ctx, tx, id); err != nil {
 		return err
 	}
@@ -402,6 +414,9 @@ func (r *sqliteRepository) ImportLegacyMCPProfileWorkspace(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockMCPSelectionOwner(ctx, tx, mcpconfig.SelectionOrigin{Scope: mcpconfig.SelectionScopeProfile, WorkspaceID: workspaceID, OwnerID: profileID}); err != nil {
+		return err
+	}
 	for _, definition := range definitions {
 		if err := prepareMCPServerDefinition(definition); err != nil {
 			return err
@@ -426,25 +441,8 @@ func (r *sqliteRepository) ImportLegacyMCPProfileWorkspace(
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		DELETE FROM workspace_agent_profile_mcp_selections
-		WHERE workspace_id = ? AND profile_id = ?
-	`), workspaceID, profileID); err != nil {
+	if err := replaceMCPSelectionsTx(ctx, tx, mcpconfig.SelectionScopeProfile, workspaceID, profileID, definitionIDs); err != nil {
 		return err
-	}
-	seen := make(map[string]struct{}, len(definitionIDs))
-	for _, definitionID := range definitionIDs {
-		if _, ok := seen[definitionID]; ok || strings.TrimSpace(definitionID) == "" {
-			continue
-		}
-		seen[definitionID] = struct{}{}
-		if _, err := tx.ExecContext(ctx, tx.Rebind(`
-			INSERT INTO workspace_agent_profile_mcp_selections
-			(workspace_id, profile_id, mcp_server_id) VALUES (?, ?, ?)
-			ON CONFLICT DO NOTHING
-		`), workspaceID, profileID, definitionID); err != nil {
-			return err
-		}
 	}
 	if state.UpdatedAt.IsZero() {
 		state.UpdatedAt = time.Now().UTC()

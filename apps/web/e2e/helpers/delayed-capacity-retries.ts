@@ -9,6 +9,7 @@ import {
   advanceCapacityRetries,
   driveCapacityRetries,
   freezeCapacityRetries,
+  waitForCapacityRetry,
 } from "./capacity-retry-clock";
 import {
   createRetainedCapacityFixture,
@@ -58,6 +59,7 @@ export async function delayedCapacitySuccess(
     await expect(session.transientRetryCard()).toContainText("of 11");
     await expect(session.activeChat().getByTestId("retry-window-deadline")).toBeVisible();
     await driveDelayedCapacityRetries(ws, backend, api, fixture.sessionId);
+    await waitForCapacityRetry(api, fixture.sessionId, 6);
     await expect(session.transientRetryCard()).toContainText("Attempt 6 of 11");
     await page.reload();
     await session.waitForLoad();
@@ -167,6 +169,7 @@ export async function delayedCapacityCancellation(
     await page.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
     await driveDelayedCapacityRetries(ws, backend, api, fixture.sessionId);
+    await waitForCapacityRetry(api, fixture.sessionId, 6);
     await expect(session.transientRetryCard()).toContainText("Attempt 6 of 11");
     const cancel = session.activeChat().getByTestId("recovery-cancel-retry-button");
     if (mobile) await cancel.tap();
@@ -202,6 +205,7 @@ export async function delayedCapacityRestart(
     await page.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
     await driveDelayedCapacityRetries(ws, backend, api, fixture.sessionId);
+    await waitForCapacityRetry(api, fixture.sessionId, 6);
     await expect(session.transientRetryCard()).toContainText("Attempt 6 of 11");
     await backend.restart({ KANDEV_DEBUG_PPROF_ENABLED: "true" });
     await freezeCapacityRetries(backend);

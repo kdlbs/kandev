@@ -81,7 +81,9 @@ export function McpOriginSections({
               <div
                 key={item.definition.id}
                 data-testid={`mcp-inherited-server-${item.definition.id}`}
-                className="px-3 py-3"
+                data-mcp-definition-id={item.definition.id}
+                tabIndex={-1}
+                className="px-3 py-3 data-[mcp-highlighted=true]:ring-2 data-[mcp-highlighted=true]:ring-inset data-[mcp-highlighted=true]:ring-primary/60"
               >
                 <div className="flex items-start gap-2">
                   <span className="min-w-0 flex-1 wrap-anywhere text-[13px] font-medium">

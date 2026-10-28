@@ -145,6 +145,7 @@ export function buildDialogFormBodyProps(
     mcpDefinitions: setup.mcpDefinitions,
     mcpDefinitionsLoading: setup.mcpDefinitionsLoading,
     mcpInheritedSelections: setup.mcpInheritedSelections,
+    mcpSelectionRecovery: setup.mcpSelectionRecovery,
     initialWorkspaceLayoutMode: setup.initialWorkspaceLayoutMode,
   };
 }

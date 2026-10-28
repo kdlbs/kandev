@@ -1194,6 +1194,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AutoApprovePermissions:         autoApprove,
 			AutoApprovePermissionsOverride: autoApproveOverride,
 			McpMode:                        info.McpMode,
+			PromptSuggestions:              m.promptSuggestionsForLaunch(ctx, info.McpMode),
 			AgentConfig:                    agentConfig,
 			Metadata:                       metadata,
 			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),

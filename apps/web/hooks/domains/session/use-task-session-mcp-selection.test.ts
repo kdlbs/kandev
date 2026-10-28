@@ -1,7 +1,7 @@
 import { ApiError } from "@/lib/api/client";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { getMCPSelections, listMCPServers } from "@/lib/api/domains/mcp-api";
+import { getMCPSelections, listMCPServers, replaceMCPSelections } from "@/lib/api/domains/mcp-api";
 import type { MCPSelectionResponse } from "@/lib/types/http-mcp";
 import { useTaskSessionMCPSelection } from "./use-task-session-mcp-selection";
 
@@ -212,3 +212,21 @@ it.each(["deferred_restart", "failed"] as const)(
     expect(vi.mocked(getMCPSelections).mock.calls.length).toBe(count);
   },
 );
+
+it("retains a failed session draft and does not poll away its conflict", async () => {
+  const conflict = new ApiError("changed", 409, { code: "mcp_selection_conflict" });
+  vi.mocked(replaceMCPSelections).mockRejectedValue(conflict);
+  const { result } = renderHook(() => useTaskSessionMCPSelection(context));
+  await act(async () => {});
+  await act(async () => {
+    result.current?.onSelectedIdsChange(["docs"]);
+  });
+  expect(result.current?.selectedIds).toEqual(["docs"]);
+  expect(result.current?.savedSelectedIds).toEqual([]);
+  const count = vi.mocked(getMCPSelections).mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2500);
+  });
+  expect(vi.mocked(getMCPSelections).mock.calls.length).toBe(count);
+  expect(result.current?.error).toBe(conflict);
+});

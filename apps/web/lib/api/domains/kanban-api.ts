@@ -135,6 +135,11 @@ export async function createTask(
     autopilot?: boolean;
     /** Task-only replacements for fixed workflow step agent profiles. */
     workflow_agent_overrides?: Record<string, string>;
+    /**
+     * Caller-supplied create-idempotency identity. The native dialog sends its
+     * retained submission identity so a retried request resolves to one task.
+     */
+    external_id?: string;
   },
   options?: ApiRequestOptions,
 ) {
@@ -519,6 +524,28 @@ export async function bulkMoveSelectedTasks(
 
 export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
+}
+
+/**
+ * The by-external-id GET route's body: the task plus whether that task's own
+ * required synchronous creation work settled. The route is read-only and
+ * returns archived tasks too, so it is the safe way to ask what holds an
+ * identity without risking a create.
+ */
+export type TaskByExternalIDLookup = Task & {
+  creation_complete: boolean;
+};
+
+export async function fetchTaskByExternalId(
+  workspaceId: string,
+  externalId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ external_id: externalId });
+  return fetchJson<TaskByExternalIDLookup>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks/by-external-id?${query.toString()}`,
+    { ...options, cache: "no-store" },
+  );
 }
 
 export async function archiveTask(

@@ -10,7 +10,7 @@ test("sent task mentions keep their identity after refresh and rename", async ({
   seedData,
   prCapture,
 }) => {
-  const { target, source, bubble } = await sendTaskMentions(testPage, apiClient, seedData);
+  const { target, source, session, bubble } = await sendTaskMentions(testPage, apiClient, seedData);
   const chips = bubble.getByTestId("task-mention-chip");
   await expect(chips).toHaveCount(2);
   await expect(chips.first()).toHaveAttribute("href", `/t/${target.id}`);
@@ -27,6 +27,7 @@ test("sent task mentions keep their identity after refresh and rename", async ({
   }
   await apiClient.updateTaskTitle(target.id, "Resolved terminal retry investigation");
   await testPage.reload();
+  await session.showSessionContext();
   const chip = testPage
     .getByTestId("user-message-bubble")
     .getByRole("link", { name: `@${TASK_TITLE}`, exact: true })

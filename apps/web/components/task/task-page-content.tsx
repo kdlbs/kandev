@@ -26,12 +26,14 @@ import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskCanvasesStateForTask } from "@/hooks/domains/task/use-task-canvases";
+import { useSearchParams } from "@/lib/routing/client-router";
 import { FOREGROUND_EVENT_COALESCE_MS, useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import type { Layout } from "react-resizable-panels";
 import {
   deriveIsAgentWorking,
   buildArchivedValue,
   hasResolvedTaskDetails,
+  isCreationPendingSearch,
   resolveEffectiveTask,
   resolveLatestTaskProjection,
   resolveTaskContentState,
@@ -411,13 +413,18 @@ function useTaskPageData(
   } = useTaskDetails(fallbackTaskId ?? activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
-  const ensureSession = useEnsureTaskSession({
-    id: task?.id,
-    isArchived: task?.archived_at != null,
-    archiveStateKnown: task !== null,
-    workflowStepId: task?.workflow_step_id,
-    workflowId: task?.workflow_id,
-  });
+  const searchParams = useSearchParams();
+  const creationPending = isCreationPendingSearch(searchParams);
+  const ensureSession = useEnsureTaskSession(
+    {
+      id: task?.id,
+      isArchived: task?.archived_at != null,
+      archiveStateKnown: task !== null,
+      workflowStepId: task?.workflow_step_id,
+      workflowId: task?.workflow_id,
+    },
+    { enabled: !creationPending },
+  );
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 

@@ -21,7 +21,9 @@ export function useReviewDiffScrollInteraction(args: {
   }, [handleUserInput]);
   const handlePointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
-      if (event.target === event.currentTarget) suppressAutoMarkRef.current = false;
+      if (event.target === event.currentTarget || event.pointerType === "touch") {
+        suppressAutoMarkRef.current = false;
+      }
       handleUserInput();
     },
     [handleUserInput],

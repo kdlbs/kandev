@@ -139,19 +139,29 @@ export async function getMCPSelections(
   );
 }
 
+export type MCPSelectionWriteOptions = ApiRequestOptions & {
+  expected_definition_ids?: string[];
+  expected_revision?: number;
+};
+
 export async function replaceMCPSelections(
   scope: MCPSelectionScope,
   ownerId: string,
   workspaceId: string,
   definitionIds: string[],
-  options?: ApiRequestOptions,
+  options?: MCPSelectionWriteOptions,
 ): Promise<MCPSelectionResponse> {
   return fetchJson<MCPSelectionResponse>(ownerPath(scope, ownerId), {
     ...options,
     init: {
       ...(options?.init ?? {}),
       method: "PUT",
-      body: JSON.stringify({ workspace_id: workspaceId, definition_ids: definitionIds }),
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        definition_ids: definitionIds,
+        expected_definition_ids: options?.expected_definition_ids,
+        expected_revision: options?.expected_revision,
+      }),
     },
   });
 }

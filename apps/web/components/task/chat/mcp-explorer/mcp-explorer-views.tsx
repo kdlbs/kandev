@@ -98,6 +98,7 @@ export function ExplorerViews({
           <div className="mx-auto max-w-2xl pb-1">
             <MCPSessionSelectionBody
               {...selection}
+              assignmentActive={view === "customize"}
               query={query}
               onQueryChange={onQueryChange}
               testId="mcp-session-customization"

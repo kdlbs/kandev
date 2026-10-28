@@ -873,10 +873,9 @@ test.describe("i18n pseudo-locale coverage", () => {
     });
     await expect(testPage.getByTestId("toast-message").filter({ hasText: "v9.8.7" })).toBeVisible();
     await expect(testPage.getByTestId("toast-message").filter({ hasText: "v1.2.3" })).toBeVisible();
-    const toast = testPage
-      .getByTestId("toast-message")
-      .filter({ hasText: "Ķàńďēv ũƥďàţē àvàĩĺàƀĺē" })
-      .filter({ hasText: "v1.2.3" });
+    const toast = testPage.getByTestId("toast-message").filter({ hasText: /\bv1\.2\.3\b/ });
+    await expect(toast).toHaveCount(1);
+    await expect(toast).toContainText("Ķàńďēv ũƥďàţē àvàĩĺàƀĺē");
     await expect(toast).toContainText(
       "Ķàńďēv v1.2.3 ĩś àvàĩĺàƀĺē. Ōƥēń Śēţţĩńĝś > Śŷśţēḿ > Ũƥďàţēś ţō ŕēvĩēŵ ĩţ.",
     );

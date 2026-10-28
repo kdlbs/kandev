@@ -203,4 +203,3 @@ Verification passed:
 - Mobile Chrome recovery and loading specs: 6 passed.
 - Public-doc validation and specification validation.
 - `git diff --check`.
-

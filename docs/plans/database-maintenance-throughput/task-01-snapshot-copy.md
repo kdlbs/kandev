@@ -102,3 +102,46 @@ includes a clear no-progress reason and removes the incomplete destination.
 Post-remediation verification passed: persistence and deliveryretention race suites,
 non-CGO linux/amd64 agentctl build, and full backend golangci-lint against the PR base
 (0 issues). Remote checks remain pending for the next pushed head.
+
+## Concurrent committed WAL writes follow-up
+
+Preserve the results above. The new scope is limited to the existing copy primitive:
+pin a read snapshot only for an autocommit WAL source, keep independent commits
+unblocked, and release the copy-owned transaction before returning its connection.
+Already-open caller transactions and other journal modes retain their previous
+behavior. Copy increments, cancellation, Finish, the five-second no-progress bound,
+exclusive destination creation and publication remain unchanged.
+
+Disposable explicit overlays exercised the actual BackupSQLite entrypoint with
+an independent committed write between native copy steps. The baseline failed
+after eight commits when the bounded fixture cancelled it (0.336s); this is not
+a reproduction of the historical five-second operating error. The candidate
+completed with snapshot epoch 0, live epoch 3 and three independent commits.
+The same selected `-race` run verified cancellation removes incomplete output
+and returns a reader that sees current committed state (1.269s).
+
+Existing locked-copy cancellation, active-writer and stalled-copy controls
+passed. The existing memory/failure-cleanup case passed under `-race` (1.055s)
+with only its Windows-invalid filename changed in a disposable overlay; product
+source and assertions were unchanged. The original pre-migration POSIX-mode
+privacy check fails identically on pristine and candidate code on Windows.
+That assertion was not weakened and no pass is claimed for it. Original
+verification records above remain intact. No standing test, live backup, retry
+timer or new setting was added; the original job's writer remains unproved.
+
+## Retained WAL regression coverage
+
+The maintainer's five focused cases are retained in a cgo-only
+`internal/db/sqlite_backup_test.go`: independent commits during incremental
+copy, source reuse after success and cancellation, schema-read setup failure,
+caller-owned transaction preservation and non-WAL mode preservation. A separate
+cgo test file keeps non-CGO compilation independent of the native driver API.
+The cases passed under fts5/race detection (1.147s). They use temporary databases
+and deterministic native copy steps, with no live backup or new product setting.
+
+SQL guard now records the exact `pinSQLiteWALSnapshot` SQLite catalog boundary,
+consistent with the existing native-copy declaration. The function accepts only
+the native SQLite driver before its journal/schema queries; no general SQL
+rule or repository boundary is weakened. Hosted CI remains a separate result.
+The unchanged full `go run ./cmd/sqlguard ./internal` check passed after adding
+this symbol-specific declaration.

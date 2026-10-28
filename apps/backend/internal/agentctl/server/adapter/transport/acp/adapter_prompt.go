@@ -145,6 +145,7 @@ func (a *Adapter) sendPrompt(
 	// launch whose provider ends delivery with this prompt. Success settles
 	// before the complete event below; this covers error and cancel returns.
 	defer a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
+	a.markPromptSentForSuggestion(turn)
 
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 

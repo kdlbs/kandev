@@ -111,6 +111,7 @@ func (a *Adapter) claimPromptTurnCompletion(turn *promptTurnState) bool {
 // Transferred predecessors are harmless no-ops.
 func (a *Adapter) finishPromptTurn(turn *promptTurnState) {
 	a.promptTurnMu.Lock()
+	a.recordPromptFinishedForSuggestionLocked(turn)
 	if a.promptTurn == turn {
 		a.promptTurn = nil
 	}

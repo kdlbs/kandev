@@ -14,15 +14,17 @@ async function seedSharedViews(api: ApiClient, seed: SeedData) {
       workflow_id: seed.workflowId,
       workflow_step_id: seed.startStepId,
     });
-    const { session_id } = await api.seedTaskSession(task.id, {
-      state: "COMPLETED",
-      agentProfileId: seed.agentProfileId,
-      completedAt: new Date().toISOString(),
-    });
-    await api.seedSessionMessage(session_id, {
-      type: "message",
-      content: `Conversation for ${title}`,
-    });
+    if (title === "Shared sidebar anchor") {
+      const { session_id } = await api.seedTaskSession(task.id, {
+        state: "COMPLETED",
+        agentProfileId: seed.agentProfileId,
+        completedAt: new Date().toISOString(),
+      });
+      await api.seedSessionMessage(session_id, {
+        type: "message",
+        content: `Conversation for ${title}`,
+      });
+    }
     tasks.push(task);
   }
   await api.saveUserSettings({ enable_preview_on_click: false });

@@ -191,6 +191,36 @@ describe("useUpdateAvailableToast delivery", () => {
   });
 });
 
+describe("useUpdateAvailableToast application locale", () => {
+  beforeEach(resetUpdateToastHook);
+
+  // @covers AC-PLATFORM-I18N-001.1, AC-PLATFORM-NOTIFICATIONS-001.16
+  it("localizes application release copy for toast and native delivery in Portuguese", async () => {
+    const { activateLocale } = await import("@/lib/i18n");
+    await activateLocale("pt-pt");
+    mockNotification = {
+      ...updateNotification(),
+      body: "Kandev v1.2.3 is available. Open Settings > System > Updates to review it.",
+    };
+    mockNativeIsAvailable.mockReturnValue(true);
+    const { unmount } = renderHook(() => useUpdateAvailableToast());
+    const title = "Atualização do Kandev disponível";
+    const body =
+      "O Kandev v1.2.3 está disponível. Abra Definições > Sistema > Atualizações para o rever.";
+    try {
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title, description: body, placement: "top" }),
+      );
+      expect(mockNativeShow).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: "system.update_available:v1.2.3", title, body }),
+      );
+    } finally {
+      unmount();
+      await activateLocale("en");
+    }
+  });
+});
+
 describe("useUpdateAvailableToast occurrence behavior", () => {
   beforeEach(resetUpdateToastHook);
 

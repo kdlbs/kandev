@@ -1,4 +1,5 @@
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForCascadeArchiveCleanup } from "../../helpers/session-resume-recovery";
 
 export type SidebarPaginationSeedData = {
   workspaceId: string;
@@ -40,4 +41,13 @@ export async function archiveSidebarPaginationTasks(
       taskIds.slice(offset, offset + 10).map((taskId) => apiClient.archiveTask(taskId)),
     );
   }
+}
+
+export async function unarchiveSidebarPaginationTask(
+  apiClient: ApiClient,
+  tmpDir: string,
+  taskId: string,
+): Promise<void> {
+  await waitForCascadeArchiveCleanup(tmpDir, taskId);
+  await apiClient.unarchiveTask(taskId);
 }

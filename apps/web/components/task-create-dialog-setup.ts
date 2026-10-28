@@ -15,6 +15,11 @@ import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
+import {
+  isRecoverySubmitBlocked,
+  useTaskCreationRecovery,
+} from "@/components/task-create-dialog-recovery";
+import { resolveTaskCreationDraftId } from "@/lib/task-creation-receipt";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
@@ -144,6 +149,7 @@ type SubmitWiringArgs = {
   repositoryLocalPath: string;
   isSessionMode: boolean;
   isEditMode: boolean;
+  isCreateMode: boolean;
   autoTitle: boolean;
   editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
@@ -153,6 +159,17 @@ type SubmitWiringArgs = {
   initialWorkspaceLayout: InitialWorkspaceLayout | undefined;
 };
 
+function useRecoveryForSubmit(props: TaskCreateDialogProps, isCreateMode: boolean) {
+  const userId = useAppStore((state) => state.auth?.user?.id ?? null);
+  return useTaskCreationRecovery({
+    enabled: isCreateMode && !props.createTask,
+    open: props.open,
+    userId,
+    workspaceId: props.workspaceId,
+    draftId: resolveTaskCreationDraftId(props.parentTaskId),
+  });
+}
+
 function useSubmitHandlersWiring({
   props,
   fs,
@@ -161,6 +178,7 @@ function useSubmitHandlersWiring({
   repositoryLocalPath,
   isSessionMode,
   isEditMode,
+  isCreateMode,
   autoTitle,
   editDependencies,
   refreshBranchPolicies,
@@ -180,7 +198,8 @@ function useSubmitHandlersWiring({
   } = props;
   const { parentTaskId } = props;
   const taskId = props.taskId ?? editingTask?.id ?? null;
-  return useTaskSubmitHandlers({
+  const recovery = useRecoveryForSubmit(props, isCreateMode);
+  const submitHandlers = useTaskSubmitHandlers({
     isSessionMode,
     isEditMode,
     autoTitle,
@@ -243,7 +262,9 @@ function useSubmitHandlersWiring({
       !isSessionMode && taskId && workspaceId
         ? (definitionIds: string[]) => mcpSelectionEditor.save(definitionIds)
         : undefined,
+    recovery,
   });
+  return { submitHandlers, recovery };
 }
 
 function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository[]): string {
@@ -540,7 +561,7 @@ export function useTaskCreateDialogSetup(
   );
   const { mode: initialWorkspaceLayoutMode, layout: initialWorkspaceLayout } =
     resolveInitialWorkspaceLayoutForDialog(fs, data, isCreateMode, isTaskStarted);
-  const submitHandlers = useSubmitHandlersWiring({
+  const { submitHandlers } = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
     computed,
@@ -548,6 +569,7 @@ export function useTaskCreateDialogSetup(
     repositoryLocalPath,
     isSessionMode,
     isEditMode,
+    isCreateMode,
     autoTitle,
     editDependencies,
     refreshBranchPolicies,
@@ -556,13 +578,14 @@ export function useTaskCreateDialogSetup(
     mcpSelectionEditor: mcp.editor,
     initialWorkspaceLayout,
   });
+  const recoveryBlocksSubmit = isRecoverySubmitBlocked(submitHandlers.recovery?.receipt);
   const { guardedHandleSubmit, handleKeyDown } = useDialogSubmitShortcut(
     submitHandlers.handleSubmit,
     resolvedProps.submitBlockedReason ??
       savedBaseSubmitBlockedReason ??
       workflowAgentOverridesBlockedReason ??
       data.executorOwnershipBlockedReason,
-    !isTaskStarted && computed.noCompatibleAgent,
+    recoveryBlocksSubmit || (!isTaskStarted && computed.noCompatibleAgent),
   );
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
@@ -586,6 +609,7 @@ export function useTaskCreateDialogSetup(
     sessionRepoName,
     computed,
     submitHandlers,
+    recovery: submitHandlers.recovery,
     handleKeyDown,
     freshBranchAvailable,
     repositorySets,
@@ -599,6 +623,7 @@ export function useTaskCreateDialogSetup(
     mcpDefinitions: mcp.definitions,
     mcpDefinitionsLoading: mcp.definitionsLoading,
     mcpInheritedSelections: mcp.inheritedSelections,
+    mcpSelectionRecovery: { error: mcp.editor.saveError, reload: mcp.editor.reload },
     initialWorkspaceLayoutMode,
   };
 }
@@ -619,7 +644,7 @@ function useGuardedSubmit(
 }
 
 function useDialogSubmitShortcut(
-  handleSubmit: ReturnType<typeof useSubmitHandlersWiring>["handleSubmit"],
+  handleSubmit: ReturnType<typeof useTaskSubmitHandlers>["handleSubmit"],
   blockedReason: string | null | undefined,
   compatibilityBlocked: boolean,
 ) {

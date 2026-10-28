@@ -693,6 +693,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"preventAutoStartAgentOnOpen":     settings.PreventAutoStartAgentOnOpen,
 		"unreadDivider":                   settings.UnreadDivider,
 		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
+		"promptSuggestions":               settings.PromptSuggestions,
 		"autoFocusNewTasks":               settings.AutoFocusNewTasks,
 		"mcpTaskAgentProfileDefault":      usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"showAnchoredPromptBar":           settings.ShowAnchoredPromptBar,

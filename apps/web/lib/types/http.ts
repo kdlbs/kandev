@@ -441,6 +441,8 @@ export function primaryTaskRepository(
 
 export type Task = ActiveSubagentCountFields & {
   id: TaskId;
+  /** Caller-supplied create-idempotency identity, absent once released. */
+  external_id?: string;
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;
@@ -554,6 +556,14 @@ export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
   agent_profile_id?: AgentProfileId;
+  /**
+   * Native REST creation metadata. Required on a native create response;
+   * absent on custom plugin transports that keep their own contract.
+   * `creation_complete` is false only when the matching task exists but its
+   * required synchronous creation work has not settled.
+   */
+  deduplicated?: boolean;
+  creation_complete?: boolean;
 };
 
 // Backend workflow step DTO (flat fields, as returned from API)

@@ -36,6 +36,7 @@ import type {
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import type { TaskCreateRecovery } from "@/components/task-create-dialog-recovery";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
@@ -589,6 +590,8 @@ export type SubmitHandlersDeps = {
   onOpenChange: (open: boolean) => void;
   /** Create-mode transport override. Omitted to use Kandev's REST task endpoint. */
   createTask?: TaskCreateSubmit;
+  /** Native create-mode recovery owner. Custom transports bypass it. */
+  recovery?: TaskCreateRecovery;
   /** Refreshes selected branch-policy options after a stale task submission. */
   refreshBranchPolicies?: () => Promise<void>;
   preserveTaskCreateLastUsedOnClose?: () => void;
@@ -759,6 +762,7 @@ export type DialogFormBodyProps = {
   mcpDefinitions: MCPServerDefinition[];
   mcpDefinitionsLoading: boolean;
   mcpInheritedSelections: MCPInheritedSelection[];
+  mcpSelectionRecovery?: { error: unknown; reload: () => Promise<unknown> };
   /**
    * Called by a plugin composer action after it inserted text into the
    * description and wants the form submitted the native way. The dialog
