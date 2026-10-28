@@ -1,6 +1,7 @@
 import type { LastAgentError } from "./session-last-agent-error";
 import type { AgentErrorCause } from "./types/task-status-summary";
 import type { RuntimeStorageFailure, RuntimeStorageHealth } from "./types/http";
+import { parseStrictRfc3339Timestamp } from "./utils/strict-timestamp";
 
 export type { RuntimeStorageHealth };
 
@@ -62,10 +63,7 @@ export function normalizeAgentErrorStorage(value: unknown): AgentStorageEvidence
     record.location === "local_runtime" || record.location === "executor_runtime"
       ? record.location
       : "unknown";
-  const observedAt =
-    typeof record.observed_at === "string" && !Number.isNaN(Date.parse(record.observed_at))
-      ? record.observed_at
-      : undefined;
+  const observedAt = readStrictTimestamp(record.observed_at);
   const executorLabel = boundedLabel(record.executor_label);
   return {
     reason: record.reason as StorageReason,
@@ -215,6 +213,12 @@ function readRuntimeStorageLocation(value: unknown): RuntimeStorageHealth["locat
   return value === "local_runtime" || value === "executor_runtime" ? value : "unknown";
 }
 
+function readStrictTimestamp(value: unknown): string | undefined {
+  return typeof value === "string" && parseStrictRfc3339Timestamp(value) !== null
+    ? value
+    : undefined;
+}
+
 function readRuntimeStorageFailure(value: unknown): RuntimeStorageFailure | undefined {
   const storage = normalizeAgentErrorStorage(value);
   return storage ? storageEvidenceToWire(storage) : undefined;
@@ -248,10 +252,7 @@ function readRuntimeStorageOptionalFields(
     typeof record.executor_label === "string" && record.executor_label.trim()
       ? record.executor_label.trim().slice(0, 64)
       : undefined;
-  const observedAt =
-    typeof record.observed_at === "string" && !Number.isNaN(Date.parse(record.observed_at))
-      ? record.observed_at
-      : undefined;
+  const observedAt = readStrictTimestamp(record.observed_at);
   const deliveryState =
     typeof record.delivery_state === "string" ? record.delivery_state.slice(0, 64) : undefined;
   const failure = readRuntimeStorageFailure(record.failure_storage);

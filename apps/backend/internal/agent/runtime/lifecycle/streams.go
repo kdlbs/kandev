@@ -56,8 +56,10 @@ type StreamManager struct {
 	deliveryHealthRecoveryCooldown time.Duration
 	runtimeStorageProbeInterval    time.Duration
 	runtimeStorageSlots            chan struct{}
+	runtimeStorageAdvisories       sync.Map
 	onRuntimeStorageProbe          func(context.Context, *AgentExecution, RuntimeStorageProbeResult)
 	onRuntimeStoragePressure       func(context.Context, *AgentExecution, RuntimeStoragePressure)
+	onRuntimeStorageDetached       func(*AgentExecution, *deliveryStreamAttachment)
 	deliveryAttachments            sync.Map
 	isExecutionCurrent             func(*AgentExecution) bool
 	onDeliveryReconciliationPhase  func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
@@ -275,6 +277,7 @@ func (sm *StreamManager) ConnectWorkspaceStream(execution *AgentExecution, ready
 	}) && ready != nil {
 		close(ready)
 	}
+	sm.startRuntimeStorageAdvisory(execution)
 }
 
 // ConnectMCPStream opens the passthrough MCP proxy stream under goroutine

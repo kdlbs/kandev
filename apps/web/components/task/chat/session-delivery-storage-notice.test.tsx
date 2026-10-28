@@ -48,6 +48,8 @@ describe("SessionDeliveryStorageNotice", () => {
     expect(panel.textContent).toContain("task:storageAdvisoryObserved");
     const detailsButton = screen.getByTestId(DETAILS_TEST_ID);
     expect(detailsButton.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(detailsButton.className).toContain("cursor-pointer");
+    expect(screen.getByTestId(SETTINGS_TEST_ID).className).toContain("cursor-pointer");
   });
 
   it("names the executor and omits local settings for remote storage", () => {
@@ -103,6 +105,23 @@ describe("SessionDeliveryStorageNotice", () => {
     const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
     expect(panel.textContent).toContain("task:storageAdvisoryPressureGuidance");
     expect(panel.textContent).toContain("task:storageAdvisoryPressureCause");
+  });
+
+  it("does not recommend freeing disk space for an oversized output", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "normal",
+          write_pressure: true,
+          failure_storage: { reason: "event_too_large", location: "local_runtime" },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
+    expect(panel.textContent).toContain("task:storageAdvisoryPressureGuidanceOversized");
+    expect(panel.textContent).not.toContain("task:storageAdvisoryPressureGuidance ");
   });
 
   it("labels stale receipt age and hides non-warning states", () => {

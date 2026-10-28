@@ -146,9 +146,13 @@ func boundedFilesystemIdentity(
 	if identity == nil {
 		return ""
 	}
+	timer := time.NewTimer(diskCapacityIdentityTimeout)
+	defer timer.Stop()
 	select {
 	case identityCalls <- struct{}{}:
 	case <-ctx.Done():
+		return ""
+	case <-timer.C:
 		return ""
 	}
 	result := make(chan string, 1)
@@ -160,8 +164,6 @@ func boundedFilesystemIdentity(
 		}
 		result <- value
 	}()
-	timer := time.NewTimer(diskCapacityIdentityTimeout)
-	defer timer.Stop()
 	select {
 	case value := <-result:
 		return value

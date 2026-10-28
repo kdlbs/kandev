@@ -332,7 +332,7 @@ function StorageSettingsLink({ cause }: { cause: ReturnType<typeof storageCauseF
       data-testid="recovery-storage-settings-link"
       className={controlSizingClassName(
         "standard",
-        "mt-2 inline-flex w-full items-center justify-center rounded border border-border px-3 text-sm font-medium hover:bg-muted hover:underline focus-visible:ring-2 focus-visible:ring-ring md:w-auto",
+        "mt-2 inline-flex w-full cursor-pointer items-center justify-center rounded border border-border px-3 text-sm font-medium hover:bg-muted hover:underline focus-visible:ring-2 focus-visible:ring-ring md:w-auto",
       )}
     >
       {t("task:storageOpenSettings")}

@@ -146,7 +146,7 @@ func (m *Manager) applyRuntimeStorageProbe(
 	}
 	observation := buildRuntimeStorageObservation(execution, probe, previous, hadPrevious, state)
 	changed := !hadPrevious || previous.State != observation.State
-	refresh := observation.State == RuntimeStorageStateWarning
+	refresh := observation.State == RuntimeStorageStateWarning || observation.WritePressure
 	if changed || refresh {
 		state.nextRevision++
 		observation.Revision = state.nextRevision
@@ -463,4 +463,27 @@ func modelStorageDiagnostic(diagnostic *streams.DeliveryStorageDiagnostic) *mode
 		storage.ObservedAt = &observedAt
 	}
 	return models.NormalizeAgentErrorStorage(storage)
+}
+
+// retireRuntimeStorageObservation removes a cached advisory when its owning
+// execution or stream attachment ends. A nil attachment retires only entries
+// for that execution; a non-nil attachment must match as well.
+func (m *Manager) retireRuntimeStorageObservation(
+	execution *AgentExecution,
+	attachment *deliveryStreamAttachment,
+) {
+	if m == nil || m.runtimeStorage == nil || execution == nil {
+		return
+	}
+	state := m.runtimeStorage
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	observation, ok := state.observations[execution.SessionID]
+	if !ok || observation.execution != execution {
+		return
+	}
+	if attachment != nil && observation.attachment != attachment {
+		return
+	}
+	delete(state.observations, execution.SessionID)
 }

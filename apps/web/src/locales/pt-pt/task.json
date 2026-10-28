@@ -3019,5 +3019,8 @@
   "storageAdvisoryRemotePrefix": "{{executor}}:",
   "sessionBootstrapCauseDeliveryStorage": "Armazenamento de entrega",
   "sessionRecoveryDeliveryAttempt": "Tentativa de entrega",
-  "storageRecoveryDiskTitle": "Sessão interrompida por falta de espaço em disco"
+  "storageRecoveryDiskTitle": "Sessão interrompida por falta de espaço em disco",
+  "storageAdvisoryPressureGuidanceOversized": "A nova saída está bloqueada porque excedeu o limite de tamanho de entrega. Inicie um novo turno com menos saída.",
+  "storageAdvisoryPressureGuidanceLimit": "A nova saída está bloqueada por um limite de entrega configurado. Inspecione a saída retida e o progresso da entrega antes de retomar.",
+  "storageAdvisoryPressureGuidanceWriteFailed": "A nova saída está bloqueada por uma falha de escrita no armazenamento. Inspecione o armazenamento do runtime antes de retomar."
 }

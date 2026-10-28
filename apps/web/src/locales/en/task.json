@@ -3019,5 +3019,8 @@
   "storageAdvisoryRemotePrefix": "{{executor}}:",
   "sessionBootstrapCauseDeliveryStorage": "Delivery storage",
   "sessionRecoveryDeliveryAttempt": "Delivery attempt",
-  "storageRecoveryDiskTitle": "Session interrupted by low disk space"
+  "storageRecoveryDiskTitle": "Session interrupted by low disk space",
+  "storageAdvisoryPressureGuidanceOversized": "New output is blocked because it exceeded the delivery size limit. Start a new turn with smaller output.",
+  "storageAdvisoryPressureGuidanceLimit": "New output is blocked by a configured delivery limit. Inspect retained output and delivery progress before resuming.",
+  "storageAdvisoryPressureGuidanceWriteFailed": "New output is blocked by a storage write failure. Inspect runtime storage before resuming."
 }

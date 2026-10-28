@@ -66,9 +66,19 @@ function useReceiptElapsed(key: string): number {
   return Math.max(0, performance.now() - receipt.current.at);
 }
 
-function NoticeGuidance({ view }: { view: NoticeView }) {
+function NoticeGuidance({ health, view }: { health: RuntimeStorageHealth; view: NoticeView }) {
   const { t } = useTranslation();
   if (view.pressure) {
+    const reason = health.failure_storage?.reason;
+    if (reason === "event_too_large") {
+      return <>{t("task:storageAdvisoryPressureGuidanceOversized")}</>;
+    }
+    if (reason === "journal_limit_reached" || reason === "stream_limit_reached") {
+      return <>{t("task:storageAdvisoryPressureGuidanceLimit")}</>;
+    }
+    if (reason === "storage_write_failed") {
+      return <>{t("task:storageAdvisoryPressureGuidanceWriteFailed")}</>;
+    }
     return <>{t("task:storageAdvisoryPressureGuidance", { executor: view.executor })}</>;
   }
   if (view.remote) {
@@ -99,7 +109,7 @@ function NoticeDetails({ health, view }: { health: RuntimeStorageHealth; view: N
       className="text-muted-foreground min-w-0 space-y-1 text-xs"
     >
       <p className="min-w-0 break-words">
-        <NoticeGuidance view={view} />
+        <NoticeGuidance health={health} view={view} />
       </p>
       {reasonKey && (
         <p className="min-w-0 break-words">
@@ -209,7 +219,7 @@ function StorageNoticeRow({
               data-testid="session-delivery-storage-settings"
               className={controlSizingClassName(
                 "standard",
-                "inline-flex items-center rounded px-2 text-xs font-medium underline-offset-2 hover:bg-muted hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+                "inline-flex cursor-pointer items-center rounded px-2 text-xs font-medium underline-offset-2 hover:bg-muted hover:underline focus-visible:ring-2 focus-visible:ring-ring",
               )}
             >
               {t("task:storageAdvisorySettings")}
@@ -222,7 +232,7 @@ function StorageNoticeRow({
             onClick={onToggleDetails}
             className={controlSizingClassName(
               "standard",
-              "inline-flex items-center gap-1 rounded px-2 text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+              "inline-flex cursor-pointer items-center gap-1 rounded px-2 text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
             )}
           >
             {t("task:storageAdvisoryDetails")}

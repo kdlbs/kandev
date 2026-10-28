@@ -576,6 +576,7 @@ func NewManager(
 	mgr.streamManager.onDeliveryReconciliationPhase = mgr.recordDeliveryReconciliationPhase
 	mgr.streamManager.onRuntimeStorageProbe = mgr.applyRuntimeStorageProbe
 	mgr.streamManager.onRuntimeStoragePressure = mgr.applyRuntimeStoragePressure
+	mgr.streamManager.onRuntimeStorageDetached = mgr.retireRuntimeStorageObservation
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)

@@ -48,6 +48,11 @@ describe("session delivery storage", () => {
       reason: "disk_space_low",
       location: "unknown",
     });
+    for (const malformed of ["0", "2026-02-30T10:00:00Z", "2026-10-27 10:00:00Z"]) {
+      expect(
+        normalizeAgentErrorStorage({ reason: "disk_space_low", observed_at: malformed }),
+      ).toEqual({ reason: "disk_space_low", location: "unknown" });
+    }
   });
 
   it("reads a typed cause without inferring from text", () => {

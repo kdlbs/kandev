@@ -179,10 +179,15 @@ func TestDeliveryStoragePressureIsIndependentOfUsageThreshold(t *testing.T) {
 	if observation.FailureStorage == nil || observation.FailureStorage.Reason != models.AgentStorageReasonDiskQuotaExceeded {
 		t.Fatalf("failure storage = %+v", observation.FailureStorage)
 	}
+	beforeRefresh, _ := manager.RuntimeStorageObservation("session")
 	manager.applyRuntimeStorageProbe(context.Background(), execution, storageProbe(1000, 500))
 	observation, _ = manager.RuntimeStorageObservation("session")
 	if !observation.WritePressure || observation.FailureStorage == nil {
 		t.Fatal("a healthy capacity sample cleared a blocked writer")
+	}
+	if observation.Revision <= beforeRefresh.Revision {
+		t.Fatalf("sustained blocked writer did not refresh: %d -> %d",
+			beforeRefresh.Revision, observation.Revision)
 	}
 }
 
@@ -260,5 +265,28 @@ func TestDeliveryStorageReceiptAgeUsesBackendTime(t *testing.T) {
 	}
 	if age := runtimeStorageAgeSeconds(now.Add(time.Minute), now); age != 0 {
 		t.Fatalf("future receipt age = %d, want 0", age)
+	}
+}
+
+func TestDeliveryStorageAdvisoryStartsWithoutUpdatesStream(t *testing.T) {
+	manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	execution := &AgentExecution{ID: "passthrough-execution", TaskID: "task", SessionID: "session"}
+	manager.startRuntimeStorageAdvisory(execution)
+	if _, loaded := manager.runtimeStorageAdvisories.Load(execution.ID); !loaded {
+		t.Fatal("workspace-started advisory did not register without an updates stream")
+	}
+	manager.Wait()
+	if _, loaded := manager.runtimeStorageAdvisories.Load(execution.ID); loaded {
+		t.Fatal("advisory was not released on shutdown")
+	}
+}
+
+func TestDeliveryStorageObservationIsRetiredOnExecutionRemoval(t *testing.T) {
+	manager := &Manager{runtimeStorage: newRuntimeStorageProbeState()}
+	execution := &AgentExecution{ID: "execution", TaskID: "task", SessionID: "session"}
+	manager.applyRuntimeStorageProbe(context.Background(), execution, storageProbe(1000, 100))
+	manager.retireRuntimeStorageObservation(execution, nil)
+	if _, ok := manager.RuntimeStorageObservation("session"); ok {
+		t.Fatal("removed execution retained a cached observation")
 	}
 }
