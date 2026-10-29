@@ -9,6 +9,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"go.uber.org/zap"
 )
 
@@ -97,7 +98,7 @@ func (r *PluginRemoteExecutor) SweepPendingCleanup(ctx context.Context) error {
 			return errors.Join(append(sweepErrors, ctx.Err())...)
 		}
 		budget--
-		if err := r.sweepHandoff(ctx, handoff); err != nil {
+		if err := r.sweepHandoff(ctx, handoff); r.sweepFailure(err, handoff.ExecutionID) {
 			sweepErrors = append(sweepErrors, err)
 		}
 	}
@@ -114,11 +115,26 @@ func (r *PluginRemoteExecutor) SweepPendingCleanup(ctx context.Context) error {
 			continue
 		}
 		budget--
-		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record, nil); err != nil {
+		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record, nil); r.sweepFailure(err, record.AgentExecutionID) {
 			sweepErrors = append(sweepErrors, err)
 		}
 	}
 	return errors.Join(sweepErrors...)
+}
+
+// sweepFailure reports whether err is a failure of the pass. A task cleanup
+// job in an active state owns the task's resources and runs with its own
+// identity in the claim; the sweep has none, so it leaves the target to that
+// job, which retries until it settles or fails terminally.
+func (r *PluginRemoteExecutor) sweepFailure(err error, executionID string) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+		r.logger.Debug("plugin executor cleanup sweep left a target to its task cleanup job", zap.String("execution_id", executionID))
+		return false
+	}
+	return true
 }
 
 func (r *PluginRemoteExecutor) sweepHandoff(ctx context.Context, handoff *models.UnrecordedPluginExecutor) error {

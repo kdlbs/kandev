@@ -96,6 +96,14 @@ func (m *Manager) validatePluginExecutorOwnership(ctx context.Context, req *Exec
 }
 
 func (m *Manager) CheckpointExecutorResource(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest) error {
+	err := m.acceptExecutorResourceCheckpoint(ctx, request)
+	if err != nil {
+		m.logPluginExecutorCheckpointRefusal(ctx, request, strings.TrimSpace(request.GetPhase()), err)
+	}
+	return err
+}
+
+func (m *Manager) acceptExecutorResourceCheckpoint(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest) error {
 	if phase := strings.TrimSpace(request.GetPhase()); isPluginExecutorClaimPhase(phase) {
 		return m.checkpointPluginExecutorClaim(ctx, request, phase)
 	}
