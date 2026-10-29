@@ -13,6 +13,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 )
 
+const attemptDiagnosticNone = "none"
+
 var errAttemptExists = errors.New("inference attempt already exists")
 var errAttemptUnavailable = errors.New("inference attempt token is unavailable")
 
@@ -24,6 +26,7 @@ type attemptOwner struct {
 	state              inferenceOwnerState
 	volatileFresh      bool
 	storageUnavailable bool
+	diagnostics        AttemptDiagnostics
 }
 
 func newAttemptOwner(cfg *config.InstanceConfig, retained *journal.Journal) *attemptOwner {
@@ -31,6 +34,7 @@ func newAttemptOwner(cfg *config.InstanceConfig, retained *journal.Journal) *att
 		state: inferenceOwnerState{Version: 1, Attempts: make(map[string]*ownedAttempt)}}
 	o.volatileFresh = cfg.InferenceOwnerFresh && cfg.DurableJournalPath == "" && retained == nil
 	o.state.ContinuityKnown = o.volatileFresh
+	o.diagnostics = newAttemptDiagnostics(cfg, retained, o.volatileFresh)
 	o.loadRetainedOwner()
 	o.reconcileLocked()
 	o.persistLocked(false, "")
@@ -43,19 +47,28 @@ func (o *attemptOwner) loadRetainedOwner() {
 	}
 	data, found, err := o.journal.ReadInferenceOwner()
 	if err != nil {
-		o.storageUnavailable = true
+		o.ownerLoadUnavailable("journal_read_failed", attemptJournalErrorClass(err))
 		return
 	}
 	if !found {
 		o.state.ContinuityKnown = o.journal.Fresh()
+		o.diagnostics.InitialReason = "existing_journal_without_owner"
+		if o.state.ContinuityKnown {
+			o.diagnostics.InitialReason = "journal_fresh_empty"
+		}
 		return
 	}
 	var saved inferenceOwnerState
-	if json.Unmarshal(data, &saved) != nil || !validInferenceOwnerState(saved) {
-		o.storageUnavailable = true
+	if json.Unmarshal(data, &saved) != nil {
+		o.ownerLoadUnavailable("retained_decode_failed", "decode")
+		return
+	}
+	if !validInferenceOwnerState(saved) {
+		o.ownerLoadUnavailable("retained_state_invalid", "invalid_state")
 		return
 	}
 	o.state = saved
+	o.diagnostics.InitialReason = "retained_owner_loaded"
 	// Retained entries are evidence, never a complete census of a prior owner.
 	o.state.ContinuityKnown = false
 }
@@ -91,7 +104,7 @@ func (o *attemptOwner) snapshot() AttemptSnapshot {
 	defer o.mu.Unlock()
 	o.reconcileLocked()
 	result := AttemptSnapshot{OwnerID: o.id, InstanceID: o.cfg.InstanceID,
-		Known: o.state.ContinuityKnown, Attempts: make([]AttemptStatus, 0, len(o.state.Attempts))}
+		Known: o.state.ContinuityKnown, Attempts: make([]AttemptStatus, 0, len(o.state.Attempts)), Diagnostics: o.diagnosticSnapshot()}
 	for _, a := range o.state.Attempts {
 		result.Attempts = append(result.Attempts, a.Status)
 		if !a.Status.Known {
@@ -113,9 +126,11 @@ func (o *attemptOwner) get(id string) (AttemptStatus, bool) {
 
 func (o *attemptOwner) persistLocked(terminal bool, currentID string) {
 	if o.storageUnavailable {
+		o.diagnostics.LastPersistResult = "skipped_unavailable"
 		return
 	}
 	if o.journal == nil {
+		o.diagnostics.LastPersistResult = "not_configured"
 		if !o.volatileFresh {
 			o.state.ContinuityKnown = false
 		}
@@ -131,7 +146,13 @@ func (o *attemptOwner) persistLocked(terminal bool, currentID string) {
 	}
 	if err != nil {
 		o.state.ContinuityKnown = false
+		o.diagnostics.LastPersistResult = "write_failed"
+		if o.diagnostics.FirstPersistFailure == attemptDiagnosticNone {
+			o.diagnostics.FirstPersistFailure = attemptJournalErrorClass(err)
+		}
+		return
 	}
+	o.diagnostics.LastPersistResult = "ok"
 }
 
 func (o *attemptOwner) trimTerminalLocked(encodedBytes, target int64, currentID string) {
@@ -232,4 +253,63 @@ func (o *attemptOwner) finalSnapshot() AttemptSnapshot {
 	o.persistLocked(true, "")
 	o.mu.Unlock()
 	return o.snapshot()
+}
+
+func newAttemptDiagnostics(cfg *config.InstanceConfig, retained *journal.Journal, volatileFresh bool) AttemptDiagnostics {
+	d := AttemptDiagnostics{Version: 1, InitialReason: "volatile_unproven", JournalMode: "not_configured",
+		JournalErrorClass: attemptDiagnosticNone, FirstPersistFailure: attemptDiagnosticNone, LastPersistResult: "not_attempted",
+		ManagerMintedID: cfg.InferenceOwnerFresh, DeliveryHarnessGeneration: cfg.DeliveryHarnessGeneration,
+		DeliveryStreamPresent: cfg.DeliveryStreamID != ""}
+	if id, err := uuid.Parse(cfg.DeliveryIncarnationID); err == nil {
+		d.DeliveryIncarnationID = id.String()
+	}
+	if volatileFresh {
+		d.InitialReason = "volatile_fresh"
+	}
+	if cfg.DurableJournalPath != "" {
+		d.JournalMode, d.InitialReason = "configured_unavailable", "journal_unavailable"
+	}
+	if retained != nil {
+		fresh := retained.Fresh()
+		d.JournalFreshAtOwnerInit = &fresh
+		d.JournalMode = "existing"
+		if fresh {
+			d.JournalMode = "fresh"
+		}
+	}
+	return d
+}
+
+func (o *attemptOwner) ownerLoadUnavailable(reason, class string) {
+	o.storageUnavailable = true
+	o.diagnostics.InitialReason, o.diagnostics.JournalErrorClass = reason, class
+}
+
+func (o *attemptOwner) diagnosticSnapshot() *AttemptDiagnostics {
+	d := o.diagnostics
+	d.ContinuityKnown, d.StorageUnavailable = o.state.ContinuityKnown, o.storageUnavailable
+	if d.JournalFreshAtOwnerInit != nil {
+		fresh := *d.JournalFreshAtOwnerInit
+		d.JournalFreshAtOwnerInit = &fresh
+	}
+	return &d
+}
+
+func attemptJournalErrorClass(err error) string {
+	switch {
+	case err == nil:
+		return attemptDiagnosticNone
+	case errors.Is(err, journal.ErrJournalClosed):
+		return "closed"
+	case errors.Is(err, journal.ErrJournalCorrupt):
+		return "corrupt"
+	case errors.Is(err, journal.ErrJournalFull):
+		return "full"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	default:
+		return "other"
+	}
 }

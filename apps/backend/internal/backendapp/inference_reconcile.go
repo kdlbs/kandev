@@ -34,6 +34,9 @@ func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentrun
 		_ = b.capacity.SyncInferenceCapacity(ctx, false, func(map[string]sessioncapacity.InferenceBinding) error { return nil })
 		return
 	}
+	if !observedKnown {
+		b.logPopulationUnknown("inference_bindings", "snapshot_unknown_context", sessioncapacity.InferenceBinding{}, inferenceBindingDiagnosticFields(bindings)...)
+	}
 	original := maps.Clone(bindings)
 	known = b.reconcileHeldInference(ctx, bindings, observations) && known
 	known = b.importUnboundInference(ctx, bindings, observations) && known
@@ -94,7 +97,7 @@ func (b *sharedInferenceConsumer) observeInferenceRefs(ctx context.Context, refs
 			if snapshot.InstanceID != instance {
 				reason = "instance_mismatch"
 			}
-			b.logPopulationUnknown("inference_snapshot", reason, locator)
+			b.logPopulationUnknown("inference_snapshot", reason, locator, inferenceSnapshotDiagnosticFields(snapshot)...)
 			known = false
 		}
 		for _, status := range snapshot.Attempts {

@@ -20,8 +20,11 @@ type inferenceProcessOwner interface {
 // NewOwnedHandler uses the existing instance's storage and teardown admission.
 func NewOwnedHandler(cfg *config.InstanceConfig, owner inferenceProcessOwner, log *zap.Logger) *Handler {
 	h := NewHandler(cfg.WorkDir, log)
-	retained, _ := owner.DeliveryJournal()
+	retained, journalErr := owner.DeliveryJournal()
 	h.attempts = newAttemptOwner(cfg, retained)
+	if cfg.DurableJournalPath != "" && retained == nil {
+		h.attempts.diagnostics.JournalErrorClass = attemptJournalErrorClass(journalErr)
+	}
 	h.beginOperation = owner.BeginOwnedOperation
 	if finalOwner, ok := owner.(interface{ SetInferenceSnapshotter(func() AttemptSnapshot) }); ok {
 		finalOwner.SetInferenceSnapshotter(h.attempts.finalSnapshot)
