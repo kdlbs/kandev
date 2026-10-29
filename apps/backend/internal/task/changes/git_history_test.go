@@ -55,6 +55,32 @@ func TestTurnGitHistoryReadsAcceptedIntervalWithoutSQLPayloads(t *testing.T) {
 	}
 }
 
+func TestTurnGitHistoryImportsCheckpointCommitsWithMissingParents(t *testing.T) {
+	archive, repoDir, startTree, endTree := buildTurnArchiveFixture(t)
+	parent := strings.TrimSpace(runGitTest(t, repoDir, "rev-parse", archive.EndCommitOID))
+	startCommit := strings.TrimSpace(runGitTest(t, repoDir, "commit-tree", startTree, "-p", parent, "-m", "start capture"))
+	endCommit := strings.TrimSpace(runGitTest(t, repoDir, "commit-tree", endTree, "-p", parent, "-m", "end capture"))
+	objects := turnArchiveObjectList(t, repoDir, startTree, endTree, startCommit, endCommit)
+	pack := runGitWithInput(t, repoDir, strings.Join(objects, "\n")+"\n", "pack-objects", "--stdout", "-q")
+	archive.StartCommitOID, archive.EndCommitOID = startCommit, endCommit
+	archive.Pack, archive.Objects, archive.ObjectCount = pack, objects, int64(len(objects))
+
+	store := NewGitHistoryStore(t.TempDir(), nil)
+	receipt, err := store.Import(context.Background(), "repo-parentless", "checkout-parentless", archive)
+	if err != nil {
+		t.Fatalf("import checkpoint commits with source parents: %v", err)
+	}
+	if err := store.VerifyRefs(context.Background(), receipt); err != nil {
+		t.Fatalf("verify imported refs: %v", err)
+	}
+	patch, err := store.ReadPatch(context.Background(), receipt,
+		turnchanges.CheckpointArchive{StartTreeOID: startTree, EndTreeOID: endTree},
+		HistoricalFile{PathBytes: []byte("src/app.txt")}, false)
+	if err != nil || !strings.Contains(string(patch), "+new") {
+		t.Fatalf("historical patch = %q, %v", patch, err)
+	}
+}
+
 func TestTurnGitHistorySurvivesWorktreeRemovalAndDeletesOnlyOwnedRefs(t *testing.T) {
 	archive, repoDir, _, _ := buildTurnArchiveFixture(t)
 	store := NewGitHistoryStore(t.TempDir(), nil)
