@@ -103,6 +103,9 @@ func TestArchiveDuringProvisionIsCleanedUpUnderItsOwnClaimAfterARestart(t *testi
 		return repo.CheckpointPluginExecutorInventory(ctx, running)
 	}
 	request.RecordUnrecordedRuntimeInventory = func(ctx context.Context, metadata map[string]interface{}) error {
+		envelope, _ := metadata[MetadataKeyPluginExecutor].(pluginExecutorInventory)
+		envelope.NegotiatedCapabilities = []string{pluginExecutorCapabilityDrainReceipt + "@1"}
+		metadata[MetadataKeyPluginExecutor] = envelope
 		return repo.RecordUnrecordedPluginExecutor(ctx, &models.UnrecordedPluginExecutor{
 			ExecutionID: request.InstanceID, SessionID: request.SessionID, TaskID: request.TaskID,
 			EnvironmentID: request.TaskEnvironmentID, Running: launchRunning(request, metadata),
@@ -133,6 +136,11 @@ func TestArchiveDuringProvisionIsCleanedUpUnderItsOwnClaimAfterARestart(t *testi
 	}
 	if operations.destroyRequest == nil || operations.destroyRequest.GetResource().GetResourceHandle() != "opaque-resource" {
 		t.Fatalf("destroy request = %v, want the provisioned handle", operations.destroyRequest)
+	}
+	// No runtime ever started for a handed-off launch: the destroy carries the
+	// same not_attempted outcome, with no receipt, that a launch rollback sends.
+	if got := operations.destroyRequest.GetDrainOutcome(); got != pluginDrainOutcomeNotAttempted || operations.destroyRequest.GetDrainReceipt() != nil {
+		t.Fatalf("destroy drain = (%q, %v), want (%q, no receipt)", got, operations.destroyRequest.GetDrainReceipt(), pluginDrainOutcomeNotAttempted)
 	}
 	if left, _ := repo.ListUnrecordedPluginExecutors(ctx, request.TaskID, request.TaskEnvironmentID); len(left) != 0 {
 		t.Fatalf("handoff survived a confirmed destroy: %d", len(left))

@@ -155,7 +155,8 @@ deletes the record only after a confirmed destroy. A record whose execution has 
 through, or whose destroy is unconfirmed, stays and fails the cleanup. Records survive a restart. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
 resolve recorded secrets on each call; the host does not write them into the inventory and rejects provider state that echoes one. Under the e2e mock profile only, a `file://` or
 loopback-host remote parses as the synthetic `e2e-local` provider so a local rig can use a repository, passes the
-managed Git credential identity check, and is cloned on the host without credentials (`repoclone.E2ELocalRemote`);
+managed Git credential identity check, is cloned on the host without credentials (`repoclone.E2ELocalRemote`), and
+may use a loopback http Git credential broker URL (`repoclone.IsE2ELocalProvider`);
 production keeps the provider allowlist and the credentialed HTTPS clone.
 
 ## Destroy and recover checkpoints
