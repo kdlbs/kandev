@@ -51,18 +51,19 @@ type UnstoppableSessionRecorder interface {
 // StandaloneExecutor implements Runtime for standalone agentctl execution.
 // In this mode, a single agentctl control server manages multiple agent instances.
 type StandaloneExecutor struct {
-	ctl                 *agentctl.ControlClient
-	runtimeOwner        *agentctl.RuntimeOwner
-	host                string
-	port                int
-	authToken           string // per-launch auth token from launcher
-	logger              *logger.Logger
-	interactiveRunner   *process.InteractiveRunner
-	recoveryReadTimeout time.Duration
-	recoveryReadRetries int
-	unstoppableRecorder UnstoppableSessionRecorder
-	peerCapabilities    []string
-	peerCapabilitiesSet bool
+	inferenceStopConsumer agentctl.InferenceConsumer
+	ctl                   *agentctl.ControlClient
+	runtimeOwner          *agentctl.RuntimeOwner
+	host                  string
+	port                  int
+	authToken             string // per-launch auth token from launcher
+	logger                *logger.Logger
+	interactiveRunner     *process.InteractiveRunner
+	recoveryReadTimeout   time.Duration
+	recoveryReadRetries   int
+	unstoppableRecorder   UnstoppableSessionRecorder
+	peerCapabilities      []string
+	peerCapabilitiesSet   bool
 }
 
 // NewStandaloneExecutor creates a new standalone runtime.
@@ -150,6 +151,7 @@ func (r *StandaloneExecutor) stopWithRetry(ctx context.Context, instanceID strin
 }
 
 func (r *StandaloneExecutor) stopWithRetryClient(ctx context.Context, control *agentctl.ControlClient, instanceID string) error {
+	ctx = agentctl.WithInferenceStopObserver(ctx, r.inferenceStopConsumer)
 	timeout := r.recoveryReadTimeout
 	if timeout <= 0 {
 		timeout = defaultRecoveryReadTimeout

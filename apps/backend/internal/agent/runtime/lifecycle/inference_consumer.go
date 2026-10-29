@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
@@ -12,6 +13,17 @@ const inferenceOwnerSession = "session"
 
 func (m *Manager) SetInferenceConsumer(consumer agentctl.InferenceConsumer) {
 	m.inferenceConsumer = consumer
+	if m.executorRegistry == nil {
+		return
+	}
+	backend, err := m.executorRegistry.GetBackend(executor.NameStandalone)
+	if err != nil {
+		return
+	}
+	if standalone, ok := backend.(*StandaloneExecutor); ok {
+		standalone.inferenceStopConsumer = consumer
+	}
+
 }
 
 func (m *Manager) executeOwnedInference(ctx context.Context, execution *AgentExecution, client *agentctl.Client, req *utility.PromptRequest, profileID string) (*utility.PromptResponse, error) {
