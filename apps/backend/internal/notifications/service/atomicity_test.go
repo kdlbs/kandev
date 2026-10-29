@@ -162,7 +162,7 @@ func TestNotificationDefaultProviderCreationRetriesAfterFailure(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, saved, 2)
 			for _, provider := range saved {
-				require.ElementsMatch(t, []string{EventTaskSessionClarificationAsked, EventOfficeInboxItem, EventSystemUpdateAvailable}, subscriptions[provider.ID])
+				require.ElementsMatch(t, []string{EventTaskSessionClarificationAsked, EventOfficeInboxItem, EventSystemUpdateAvailable, EventTaskChildStallUndeliverable}, subscriptions[provider.ID])
 			}
 		})
 	}

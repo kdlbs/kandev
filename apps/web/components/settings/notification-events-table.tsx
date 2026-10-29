@@ -7,6 +7,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
+  NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
   NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
@@ -46,6 +47,10 @@ const EVENT_MESSAGE_KEYS: Record<string, { title: string; description: string }>
   [NOTIFICATION_EVENT_OFFICE_INBOX_ITEM]: {
     title: "settings:notificationEventOfficeInboxItem",
     description: "settings:notificationEventOfficeInboxItemDescription",
+  },
+  [NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE]: {
+    title: "settings:notificationEventChildStallUndeliverable",
+    description: "settings:notificationEventChildStallUndeliverableDescription",
   },
 };
 

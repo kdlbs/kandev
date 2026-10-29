@@ -600,6 +600,12 @@ type FeaturesConfig struct {
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
+
+	// ChildStallAlerts gates the child-turn stall/reminder producer that
+	// queues an attributed notice for a stalled child's current parent
+	// conversation. Off in every shipped profile: when off, the producer
+	// never starts and no alert is admitted to the queue.
+	ChildStallAlerts bool `mapstructure:"child_stall_alerts" json:"childStallAlerts"`
 }
 
 // LoggingConfig holds logging configuration.

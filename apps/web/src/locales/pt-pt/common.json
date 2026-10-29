@@ -273,6 +273,8 @@
   "notificationClarificationTitle": "O agente precisa da sua resposta",
   "notificationInboxItemBody": "Um novo item precisa da sua atenção.",
   "notificationInboxItemTitle": "Novo item na caixa de entrada",
+  "notificationChildStallBody": "Uma subtarefa parou e a tarefa principal não pode receber o alerta.",
+  "notificationChildStallTitle": "Subtarefa precisa de atenção",
   "notificationTurnFinishedBody": "O agente terminou um turno.",
   "notificationTurnFinishedTitle": "Turno do agente concluído",
   "notInstalled": "Não instalado",

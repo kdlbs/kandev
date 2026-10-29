@@ -277,6 +277,8 @@
   "notificationClarificationTitle": "Agent needs your answer",
   "notificationInboxItemBody": "A new item needs your attention.",
   "notificationInboxItemTitle": "New inbox item",
+  "notificationChildStallBody": "A child task stalled and its parent task cannot receive the alert.",
+  "notificationChildStallTitle": "Child task needs attention",
   "notificationTurnFinishedBody": "The agent finished a turn.",
   "notificationTurnFinishedTitle": "Agent turn finished",
   "notInstalled": "Not installed",

@@ -272,6 +272,8 @@
   "notificationClarificationTitle": "智能体需要您的回答",
   "notificationInboxItemBody": "有新条目需要您处理。",
   "notificationInboxItemTitle": "新的收件箱条目",
+  "notificationChildStallBody": "子任务已停滞，但父任务无法接收提醒。",
+  "notificationChildStallTitle": "子任务需要处理",
   "notificationTurnFinishedBody": "智能体完成了一轮。",
   "notificationTurnFinishedTitle": "智能体本轮已完成",
   "notInstalled": "未安装",

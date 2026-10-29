@@ -248,7 +248,7 @@ func (r *sqliteRepository) admitQueueCandidateTx(
 	if claim != nil && len(claim.IDs) > 0 {
 		return nil, ErrQueueFull
 	}
-	if policy == nil || !policy.Enabled {
+	if !admissionFoldEnabled(policy, candidate) {
 		return nil, ErrQueueFull
 	}
 	return r.admitFullQueueCandidateTx(ctx, tx, candidate, claim)
@@ -277,7 +277,7 @@ func (r *sqliteRepository) insertQueueCandidateTx(
 		}
 		return nil, err
 	}
-	if policy == nil || !policy.Enabled {
+	if !admissionFoldEnabled(policy, candidate) {
 		return candidate, nil
 	}
 	return r.mergeInsertedAdmissionCandidateTx(ctx, tx, candidate)
