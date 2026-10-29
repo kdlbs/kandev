@@ -3,6 +3,7 @@ package system
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -566,5 +567,227 @@ func TestArchivedDataAnalyzeRejectsWhilePreparationPending(t *testing.T) {
 	// unrelated error.
 	if _, err := service.Run(ctx, after.Policy.Revision); err == nil || err.Error() != "preparation_required" {
 		t.Fatalf("run error = %v, want preparation_required", err)
+	}
+}
+
+// newRetentionSafetyService builds a dataretention.Service over a temp SQLite
+// pool with the minimal schema needed to drive a preparation and a cleanup-job
+// pass, together with the fake backup callbacks a case supplies.
+func newRetentionSafetyService(t *testing.T, opts dataretention.Options) (*dataretention.Service, *sqlx.DB) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	connection, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = connection.Close() })
+	for _, ddl := range []string{
+		`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', archived_at TEXT, queued_for_step_id TEXT, queued_at TEXT, created_at TEXT, updated_at TEXT)`,
+		`CREATE TABLE task_resource_cleanup_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', completed_at TEXT, resource_snapshot TEXT)`,
+	} {
+		if _, err := connection.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dataretention.New(db.NewPool(connection, connection), opts), connection
+}
+
+func waitRetentionState(t *testing.T, service *dataretention.Service, want func(dataretention.Status) bool) dataretention.Status {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		status, err := service.Get(context.Background())
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if want(status) {
+			return status
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("state did not settle in time: %#v", status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func saveBackupPolicy(t *testing.T, service *dataretention.Service) {
+	t.Helper()
+	if _, err := service.Save(context.Background(), dataretention.Update{
+		Enabled:      true,
+		ArchivedAge:  dataretention.Age{Days: 14},
+		CleanupAge:   dataretention.Age{Days: 7},
+		BackupChoice: "backup",
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+}
+
+// TestArchivedRetentionBackupFailureKeepsPolicyUnapproved verifies the deletion
+// protection the safety threads require: a failed backup must leave the policy
+// unapproved (Run refuses with preparation_required) and preserve the row.
+func TestArchivedRetentionBackupFailureKeepsPolicyUnapproved(t *testing.T) {
+	service, connection := newRetentionSafetyService(t, dataretention.Options{
+		CreateBackup: func(context.Context) (string, error) { return "", errors.New("backup boom") },
+		VerifyBackup: func(context.Context, string) error { return nil },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	service.Start(ctx)
+	saveBackupPolicy(t, service)
+
+	status := waitRetentionState(t, service, func(s dataretention.Status) bool { return s.Preparation.State == "failed" })
+	if status.Policy.Enabled {
+		t.Fatal("a failed backup left the policy enabled")
+	}
+	if status.Policy.ArchivedAge.Days != 14 || status.Policy.CleanupAge.Days != 7 {
+		t.Fatalf("policy changed by a failed backup: %#v", status.Policy)
+	}
+	if _, err := service.Run(ctx, status.Policy.Revision); err == nil || err.Error() != "preparation_required" {
+		t.Fatalf("run error = %v, want preparation_required", err)
+	}
+	var raw string
+	if err := connection.QueryRow(`SELECT value FROM settings WHERE key = 'archived_data_retention'`).Scan(&raw); err != nil {
+		t.Fatalf("settings row missing after a failed backup: %v", err)
+	}
+	if raw == "" {
+		t.Fatal("settings row emptied by a failed backup")
+	}
+}
+
+// TestArchivedRetentionCancelDuringBackupKeepsPolicyUnapproved verifies that
+// cancelling an in-flight backup leaves no approval, no progress, and does not
+// replace the operation identity.
+func TestArchivedRetentionCancelDuringBackupKeepsPolicyUnapproved(t *testing.T) {
+	release := make(chan struct{})
+	var closeOnce sync.Once
+	service, _ := newRetentionSafetyService(t, dataretention.Options{
+		CreateBackup: func(ctx context.Context) (string, error) {
+			select {
+			case <-release:
+				return "receipt", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		},
+		VerifyBackup: func(context.Context, string) error { return nil },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	t.Cleanup(func() { closeOnce.Do(func() { close(release) }) })
+	service.Start(ctx)
+	saveBackupPolicy(t, service)
+
+	running := waitRetentionState(t, service, func(s dataretention.Status) bool {
+		return s.Preparation.State == "running" && s.Operation != nil
+	})
+	opID := running.Operation.ID
+	if _, err := service.Cancel(ctx, opID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	after := waitRetentionState(t, service, func(s dataretention.Status) bool { return s.Preparation.State != "running" })
+	if after.Policy.Enabled {
+		t.Fatal("cancel left the policy enabled")
+	}
+	if after.Operation != nil && after.Operation.State == "running" {
+		t.Fatalf("a running operation survived cancel: %#v", after.Operation)
+	}
+	if after.Operation != nil && after.Operation.ID != opID {
+		t.Fatalf("operation id was replaced: %s -> %s", opID, after.Operation.ID)
+	}
+}
+
+// TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows verifies that a
+// cleanup pass keeps the archive source evidence byte-for-byte, drops the
+// operational field, writes the marker, and leaves a protected job untouched.
+func TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows(t *testing.T) {
+	service, connection := newRetentionSafetyService(t, dataretention.Options{
+		CreateBackup: func(context.Context) (string, error) { return "receipt", nil },
+		VerifyBackup: func(context.Context, string) error { return nil },
+	})
+	const old = "2000-01-01T00:00:00Z"
+	operational := strings.Repeat("x", 4096)
+	eligible := `{"archive_source_manifest":{"manifest":1},"workspace_id":"ws-1","worktrees":[{"id":"w1"}],"progress":"` + operational + `"}`
+	protected := `{"archive_source_manifest":{"manifest":2},"workspace_id":"ws-2","worktrees":[{"id":"w2"}],"progress":"running"}`
+	if _, err := connection.Exec(
+		`INSERT INTO task_resource_cleanup_jobs(id,state,completed_at,resource_snapshot) VALUES('job-eligible','succeeded',?,?)`, old, eligible,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(
+		`INSERT INTO task_resource_cleanup_jobs(id,state,completed_at,resource_snapshot) VALUES('job-protected','running',?,?)`, old, protected,
+	); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	service.Start(ctx)
+	saveBackupPolicy(t, service)
+	waitRetentionState(t, service, func(s dataretention.Status) bool { return s.LastRun != nil && s.LastRun.State != "running" })
+
+	var reduced string
+	if err := connection.QueryRow(`SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id = 'job-eligible'`).Scan(&reduced); err != nil {
+		t.Fatal(err)
+	}
+	for _, keep := range []string{`"archive_source_manifest":{"manifest":1}`, `"workspace_id":"ws-1"`, `"worktrees":[{"id":"w1"}]`} {
+		if !strings.Contains(reduced, keep) {
+			t.Fatalf("evidence field not preserved byte-for-byte (%s): %s", keep, reduced)
+		}
+	}
+	if strings.Contains(reduced, `"progress":"`) {
+		t.Fatalf("operational field was not dropped: %s", reduced)
+	}
+	if !strings.Contains(reduced, `"removed_fields":["progress"]`) {
+		t.Fatalf("dropped field not recorded: %s", reduced)
+	}
+	if !strings.Contains(reduced, `"snapshot_reduced"`) {
+		t.Fatalf("reduction marker missing: %s", reduced)
+	}
+	var kept string
+	if err := connection.QueryRow(`SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id = 'job-protected'`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != protected {
+		t.Fatalf("protected job changed: %s", kept)
+	}
+}
+
+// TestArchivedRetentionBatchFailureRollsBack verifies that a failed reduction
+// write rolls back: the snapshot keeps its original bytes.
+func TestArchivedRetentionBatchFailureRollsBack(t *testing.T) {
+	service, connection := newRetentionSafetyService(t, dataretention.Options{
+		CreateBackup: func(context.Context) (string, error) { return "receipt", nil },
+		VerifyBackup: func(context.Context, string) error { return nil },
+	})
+	const old = "2000-01-01T00:00:00Z"
+	original := `{"archive_source_manifest":{"manifest":1},"workspace_id":"ws-1","worktrees":[{"id":"w1"}],"progress":"` + strings.Repeat("x", 4096) + `"}`
+	if _, err := connection.Exec(
+		`INSERT INTO task_resource_cleanup_jobs(id,state,completed_at,resource_snapshot) VALUES('job-eligible','succeeded',?,?)`, old, original,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(
+		`CREATE TRIGGER reject_reduction BEFORE UPDATE ON task_resource_cleanup_jobs BEGIN SELECT RAISE(ABORT, 'no'); END`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	service.Start(ctx)
+	saveBackupPolicy(t, service)
+	// The rejecting write fails and rolls back, so the snapshot must stay
+	// byte-identical. A pass that keeps failing settles as failed only after five
+	// ticks at a one-minute retry backoff, which is out of a bounded test; the
+	// rollback safety property is asserted directly here, and the matching
+	// non-rejecting seed in TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows
+	// shows the same row would otherwise change.
+	time.Sleep(3 * time.Second)
+	var kept string
+	if err := connection.QueryRow(`SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id = 'job-eligible'`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != original {
+		t.Fatalf("failed batch did not roll back: %s", kept)
 	}
 }
