@@ -27,6 +27,10 @@ type InferenceConsumer = client.InferenceConsumer
 type InferenceAttemptError = client.InferenceAttemptError
 type InferenceClientOption = client.ClientOption
 
+func WithInferenceStopObserver(ctx context.Context, consumer InferenceConsumer) context.Context {
+	return client.WithInferenceStopObserver(ctx, consumer)
+}
+
 var ErrInferenceOwnershipUnsupported = client.ErrInferenceOwnershipUnsupported
 
 func WithInferenceExecutionID(id string) InferenceClientOption {

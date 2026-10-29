@@ -248,7 +248,8 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	id := c.Param("id")
 
 	// First check if instance exists
-	if _, found := m.instMgr.GetInstance(id); !found {
+	inst, found := m.instMgr.GetInstance(id)
+	if !found {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "instance not found",
 		})
@@ -271,6 +272,7 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "instance stopped successfully",
+		"message":            "instance stopped successfully",
+		"inference_attempts": inst.FinalInferenceSnapshot(),
 	})
 }

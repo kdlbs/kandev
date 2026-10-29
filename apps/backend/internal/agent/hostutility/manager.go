@@ -342,6 +342,7 @@ func hostUtilityDeleteContext(parent context.Context) (context.Context, context.
 }
 
 func (m *Manager) deleteInstance(ctx context.Context, inst *instance) {
+	ctx = agentctlclient.WithInferenceStopObserver(ctx, m.inferenceConsumer)
 	if inst == nil {
 		return
 	}

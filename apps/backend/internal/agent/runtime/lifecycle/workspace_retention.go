@@ -3,9 +3,11 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-	"github.com/kandev/kandev/internal/agent/executor"
-	"github.com/kandev/kandev/internal/task/retention"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/retention"
 )
 
 type workspaceRetentionReader interface {
@@ -34,7 +36,7 @@ func (m *Manager) stopWorkspaceRuntime(ctx context.Context, backend ExecutorBack
 		}
 	}
 
-	return backend.StopInstance(ctx, instance, force)
+	return backend.StopInstance(agentctl.WithInferenceStopObserver(ctx, m.inferenceConsumer), instance, force)
 }
 
 func (m *Manager) stopWorkspaceRuntimeAndRelease(ctx context.Context, backend ExecutorBackend, instance *ExecutorInstance, force bool) error {
