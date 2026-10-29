@@ -23,11 +23,14 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/dataretention"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/storage"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 )
@@ -798,5 +801,119 @@ func TestArchivedRetentionBatchFailureRollsBack(t *testing.T) {
 	}
 	if kept != original {
 		t.Fatalf("failed batch did not roll back: %s", kept)
+	}
+}
+
+// newRetentionMessageService builds a dataretention.Service over the real task
+// schema (the same bootstrap internal/task/repository/sqlite's integration
+// fixture uses), so the message-metadata eligibility path is reachable.
+func newRetentionMessageService(t *testing.T, opts dataretention.Options) (*dataretention.Service, *sqlx.DB) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	conn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "retention-message.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := sqlx.NewDb(conn, "sqlite3")
+	t.Cleanup(func() { _ = d.Close() })
+	if _, err := tasksqlite.NewWithDB(d, d, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := officesqlite.NewWithDB(d, d, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messagequeue.NewSQLiteRepository(d, d); err != nil {
+		t.Fatal(err)
+	}
+	pool := db.NewPool(d, d)
+	if _, err := systemsettings.NewStore(pool); err != nil {
+		t.Fatal(err)
+	}
+	return dataretention.New(pool, opts), d
+}
+
+// TestArchivedRetentionMessageTargetProtectsLiveAndUnknown verifies the message
+// target against the real schema: an eligible finished task is reduced, while a
+// task with a live session (finished but not quiescent) and a task with an
+// unknown message author are retained byte-for-byte.
+func TestArchivedRetentionMessageTargetProtectsLiveAndUnknown(t *testing.T) {
+	service, d := newRetentionMessageService(t, dataretention.Options{
+		CreateBackup: func(context.Context) (string, error) { return "receipt", nil },
+		VerifyBackup: func(context.Context, string) error { return nil },
+	})
+	reducible := `{"tool_call_id":"id","normalized":{"kind":"shell_exec","shell_exec":{"output":{"stdout":"` + strings.Repeat("payload", 400) + `"}}},"result":"` + strings.Repeat("secret", 400) + `"}`
+	seed := `
+INSERT INTO tasks(id,workspace_id,title,state,created_at,updated_at) VALUES('agg','','r','COMPLETED','2020-01-01','2020-01-01'),('live','','r','COMPLETED','2020-01-01','2020-01-01'),('unknown','','r','COMPLETED','2020-01-01','2020-01-01');
+INSERT INTO task_sessions(id,task_id,state,started_at,completed_at,updated_at) VALUES('s-agg','agg','COMPLETED','2020-01-01','2020-01-01','2020-01-01'),('s-live','live','RUNNING','2020-01-01',NULL,'2020-01-01'),('s-unknown','unknown','COMPLETED','2020-01-01','2020-01-01','2020-01-01');
+INSERT INTO task_session_turns(id,task_id,task_session_id,started_at,completed_at,created_at,updated_at) VALUES('t-agg','agg','s-agg','2020-01-01','2020-01-01','2020-01-01','2020-01-01'),('t-live','live','s-live','2020-01-01','2020-01-01','2020-01-01','2020-01-01'),('t-unknown','unknown','s-unknown','2020-01-01','2020-01-01','2020-01-01','2020-01-01');`
+	if _, err := d.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO task_session_messages(id,task_session_id,task_id,turn_id,author_type,content,type,metadata,created_at,updated_at) VALUES('m-agg','s-agg','agg','t-agg','agent','','tool_execute',?,'2020-01-01','2020-01-01')`, reducible); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO task_session_messages(id,task_session_id,task_id,turn_id,author_type,content,type,metadata,created_at,updated_at) VALUES('m-live','s-live','live','t-live','agent','','tool_execute',?,'2020-01-01','2020-01-01')`, reducible); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO task_session_messages(id,task_session_id,task_id,turn_id,author_type,content,type,metadata,created_at,updated_at) VALUES('m-unknown','s-unknown','unknown','t-unknown','agent','','tool_unknown',?,'2020-01-01','2020-01-01')`, `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	service.Start(ctx)
+	saveBackupPolicy(t, service)
+	waitRetentionState(t, service, func(s dataretention.Status) bool { return s.LastRun != nil && s.LastRun.State != "running" })
+
+	metadata := func(id string) string {
+		t.Helper()
+		var raw string
+		if err := d.QueryRow(`SELECT COALESCE(metadata,'') FROM task_session_messages WHERE id = ?`, id).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	if got := metadata("m-agg"); got == reducible {
+		t.Fatalf("eligible finished task was not reduced: %s", got)
+	} else if strings.Contains(got, strings.Repeat("payload", 400)) {
+		t.Fatalf("eligible tool payload was not removed: %s", got)
+	}
+	if got := metadata("m-live"); got != reducible {
+		t.Fatalf("live task message changed: %s", got)
+	}
+	if got := metadata("m-unknown"); got != `{}` {
+		t.Fatalf("unknown/unsupported message changed: %s", got)
+	}
+}
+
+// TestArchivedRetentionSecondServiceSeesSavedState verifies that a second Service
+// over the same pool reads the saved policy and preparation rather than its own
+// defaults, which is the precondition for restart recovery. The recovery tick
+// itself is not asserted: a fresh Service's first reconcile waits up to the
+// one-minute idle timer and there is no public wake, so a bounded test cannot
+// observe it without a production notify hook (the blocking entry point).
+func TestArchivedRetentionSecondServiceSeesSavedState(t *testing.T) {
+	first, connection := newRetentionSafetyService(t, dataretention.Options{
+		CreateBackup: func(context.Context) (string, error) { return "receipt", nil },
+		VerifyBackup: func(context.Context, string) error { return nil },
+	})
+	if _, err := first.Save(context.Background(), dataretention.Update{
+		Enabled:      true,
+		ArchivedAge:  dataretention.Age{Days: 21},
+		CleanupAge:   dataretention.Age{Days: 9},
+		BackupChoice: "backup",
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	second := dataretention.New(db.NewPool(connection, connection), dataretention.Options{})
+	status, err := second.Get(context.Background())
+	if err != nil {
+		t.Fatalf("second get: %v", err)
+	}
+	if status.Policy.ArchivedAge.Days != 21 || status.Policy.CleanupAge.Days != 9 {
+		t.Fatalf("second service did not read the saved policy: %#v", status.Policy)
+	}
+	if status.Preparation.State != "pending" {
+		t.Fatalf("second service did not read the saved preparation: %q", status.Preparation.State)
 	}
 }
