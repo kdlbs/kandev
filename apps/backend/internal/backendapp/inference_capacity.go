@@ -73,8 +73,20 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	if !prepared.Retained {
 		return nil, &agentruntime.InferenceCapacityError{Reason: "ownership_retention_unsupported", Cause: agentruntime.ErrInferenceOwnershipUnsupported}
 	}
+	return b.executeSharedInference(ctx, client, &request, binding, identity)
+}
+
+func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, client *agentruntime.InferenceClient, request *utility.PromptRequest, binding sessioncapacity.InferenceBinding, identity agentruntime.InferenceIdentity) (*utility.PromptResponse, error) {
 	if err := b.waitInferenceCapacity(ctx, client, binding, identity); err != nil {
 		return nil, err
+	}
+	if all, finite := b.capacity.InferenceCapacityPolicy(); !all || !finite {
+		// The policy changed to an optional mode while this prompt was waiting.
+		// Release the prepared attempt and use the native prompt path with a
+		// fresh token instead of validating a shared reservation.
+		b.cancelUnsentPrepared(client, binding)
+		request.AttemptID = ""
+		return client.InferencePrompt(ctx, request)
 	}
 	if err := b.validateInferenceSettlement(ctx, binding); err != nil {
 		b.cancelAndSettle(client, binding)
@@ -84,7 +96,7 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "reservation_unconfirmed", Cause: err}
 	}
-	response, err := client.InferencePrompt(ctx, &request)
+	response, err := client.InferencePrompt(ctx, request)
 	return b.finishInferencePrompt(client, binding, response, err)
 }
 
