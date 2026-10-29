@@ -873,6 +873,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	// The adopted agentctl identity is process/runtime provenance, not a
+	// request preference. A fresh allocation must not inherit a stale adopted
+	// ID from the previous execution's metadata.
+	if _, ok := ri.Metadata[MetadataKeyRemoteDockerAgentctlInstanceID]; !ok {
+		delete(metadata, MetadataKeyRemoteDockerAgentctlInstanceID)
+	}
 	executorType := req.ExecutorType
 	if executorType != "" {
 		metadata[MetadataKeyExecutorType] = executorType

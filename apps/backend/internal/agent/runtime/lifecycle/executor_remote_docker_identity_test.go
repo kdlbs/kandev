@@ -98,3 +98,28 @@ func TestValidateExistingAgentIdentityAcceptsAdoptedDockerAgentctlID(t *testing.
 	}
 	require.NoError(t, validateExistingAgentIdentity(execution, association))
 }
+
+// @covers AC-EXECUTORS-REMOTE-DOCKER-001.12
+func TestFreshDockerLaunchDropsInheritedAdoptedIdentity(t *testing.T) {
+	stale := &ExecutorCreateRequest{
+		InstanceID: "fresh", TaskID: "task-1", SessionID: "session-1", ExecutorType: "remote_docker",
+		Metadata: map[string]interface{}{MetadataKeyRemoteDockerAgentctlInstanceID: "stale-adopted"},
+	}
+	fresh := (&ExecutorInstance{
+		InstanceID: "fresh", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeRemoteDocker, ReusedWorkspace: false,
+		Metadata: map[string]interface{}{MetadataKeyContainerID: "container-1"},
+	}).ToAgentExecution(stale)
+	require.NotContains(t, fresh.MetadataSnapshot(), MetadataKeyRemoteDockerAgentctlInstanceID,
+		"a fresh allocation must not inherit the previous execution's adopted identity")
+
+	reused := (&ExecutorInstance{
+		InstanceID: "fresh", TaskID: "task-1", SessionID: "session-1",
+		RuntimeName: agentruntime.RuntimeRemoteDocker, ReusedWorkspace: true,
+		Metadata: map[string]interface{}{
+			MetadataKeyContainerID:                    "container-1",
+			MetadataKeyRemoteDockerAgentctlInstanceID: "current-adopted",
+		},
+	}).ToAgentExecution(stale)
+	require.Equal(t, "current-adopted", reused.MetadataSnapshot()[MetadataKeyRemoteDockerAgentctlInstanceID])
+}
