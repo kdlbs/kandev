@@ -40,8 +40,14 @@ func (p *ChildStallProducer) reconcileDelivered(
 		p.resolveDeliveredCandidate(ctx, turn, state, now)
 		return
 	}
+	parentTask, err := p.store.GetTask(ctx, start.ParentTaskID)
+	if err != nil {
+		stats.observePending(turn)
+		return
+	}
+	parentGone := parentTask == nil || parentTask.ArchivedAt != nil || models.IsTerminalTaskState(parentTask.State)
 	if !p.sourceStillStalled(ctx, turn.ID) {
-		if p.noticeServesOtherLiveCandidate(ctx, state.QueueID, turn.ID) {
+		if !parentGone && p.noticeServesOtherLiveCandidate(ctx, state.QueueID, turn.ID) {
 			// Sibling candidates folded into the same entry are still stalled;
 			// keep the shared notice and let the dispatch boundary drop only
 			// this stale candidate. Removing the entry by id would drop every
@@ -52,12 +58,7 @@ func (p *ChildStallProducer) reconcileDelivered(
 		p.withdrawDeliveredNotice(ctx, turn, start, state, noticeOutcomeSourceDone, now)
 		return
 	}
-	parentTask, err := p.store.GetTask(ctx, start.ParentTaskID)
-	if err != nil {
-		stats.observePending(turn)
-		return
-	}
-	if parentTask == nil || parentTask.ArchivedAt != nil || models.IsTerminalTaskState(parentTask.State) {
+	if parentGone {
 		p.withdrawDeliveredNotice(ctx, turn, start, state, noticeOutcomeParentGone, now)
 		return
 	}
