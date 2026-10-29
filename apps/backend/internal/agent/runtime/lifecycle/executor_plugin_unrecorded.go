@@ -128,8 +128,11 @@ func (r *PluginRemoteExecutor) destroyHandedOffPluginExecutorResource(
 		}
 		resource = handed.Resource
 	}
+	fields := []zap.Field{zap.String("execution_id", handoff.ExecutionID), zap.String("environment_id", handoff.EnvironmentID)}
 	if err := r.destroyPluginExecutorRecord(ctx, record, inventory, resource, pluginExecutorCleanupReasonLaunch, profile); err != nil {
+		r.logger.Warn("plugin executor handoff destroy left the handoff recorded", append(fields, zap.Error(err))...)
 		return err
 	}
+	r.logger.Info("plugin executor handoff destroyed and settled", fields...)
 	return r.settleUnrecordedPluginExecutor(ctx, handoff)
 }
