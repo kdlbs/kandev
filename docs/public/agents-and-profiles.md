@@ -961,7 +961,7 @@ guarantee that a plugin component will load. Kandev uses the runtime selected
 for this profile and does not fall back to an unrelated global CLI or change a
 runtime pin.
 
-A selection loads the whole plugin through Copilot's native support. A plugin
+A selection asks Copilot to load the whole plugin through its native support. A plugin
 can run MCP servers, skills, agents, commands, hooks, and other executable
 components. Loading is additive, not an exclusive whitelist. Copilot can still
 load other plugins its own configuration enables, so review a plugin's

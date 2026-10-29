@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // prepareCopilotPluginArgs resolves the profile's stable plugin identities
@@ -27,7 +28,7 @@ func (m *Manager) prepareCopilotPluginArgs(
 	if err != nil {
 		return nil, err
 	}
-	return m.prepareCopilotPluginArgsForSelection(ctx, execution, env, baseArgs, selection)
+	return m.prepareCopilotPluginArgsForSelection(ctx, execution, env, baseArgs, execution.LaunchWrapper, selection)
 }
 
 func (m *Manager) prepareCopilotPluginArgsForSelection(
@@ -35,6 +36,7 @@ func (m *Manager) prepareCopilotPluginArgsForSelection(
 	execution *AgentExecution,
 	env map[string]string,
 	baseArgs []string,
+	wrapper launchwrapper.Spec,
 	selection []string,
 ) ([]string, error) {
 	if execution == nil || execution.AgentID != agents.CopilotACPAgentID {
@@ -57,7 +59,7 @@ func (m *Manager) prepareCopilotPluginArgsForSelection(
 		Env:            env,
 		WorkDir:        execution.WorkspacePath,
 		CLIFlags:       baseArgs,
-		CommandPrefix:  execution.LaunchWrapper.Argv,
+		CommandPrefix:  wrapper.Argv,
 		RuntimeVersion: version,
 		RuntimeCommand: spec.InteractiveCommand(version).Args(),
 	}
@@ -211,8 +213,8 @@ func (m *Manager) applyPassthroughCopilotPlugins(
 	if execution == nil || cmd == nil || execution.AgentID != agents.CopilotACPAgentID {
 		return nil
 	}
-	selection := execution.CopilotSelectedPlugins
-	if selection == nil && profile != nil {
+	var selection []string
+	if profile != nil {
 		selection = profile.CopilotSelectedPlugins
 	}
 	return m.applyPassthroughCopilotPluginsForSelection(ctx, execution, cmd, env, selection)
@@ -245,7 +247,7 @@ func (m *Manager) applyPassthroughCopilotPluginsForSelection(
 		Env:            env,
 		WorkDir:        execution.WorkspacePath,
 		CLIFlags:       cmd.Args(),
-		CommandPrefix:  execution.LaunchWrapper.Argv,
+		CommandPrefix:  cmd.wrapper.Argv,
 		RuntimeVersion: version,
 		RuntimeCommand: spec.InteractiveCommand(version).Args(),
 	}
@@ -259,4 +261,12 @@ func (m *Manager) applyPassthroughCopilotPluginsForSelection(
 	}
 	cmd.Command = agents.NewCommand(args...)
 	return nil
+}
+
+func capturePassthroughCopilotProfile(execution *AgentExecution, profile *AgentProfileInfo) {
+	if execution.AgentID != agents.CopilotACPAgentID || profile == nil {
+		return
+	}
+	execution.ExecutionProfileID = profile.ProfileID
+	execution.CopilotSelectedPlugins = append([]string{}, profile.CopilotSelectedPlugins...)
 }

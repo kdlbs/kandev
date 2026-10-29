@@ -1031,6 +1031,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	if err != nil {
 		return err
 	}
+	capturePassthroughCopilotProfile(execution, profileInfo)
 
 	execution.passthroughLifecycleMu.Lock()
 	execution.PassthroughProcessID = processInfo.ID
@@ -1395,6 +1396,7 @@ func (m *Manager) launchResumedPassthroughProcess(ctx context.Context, execution
 	if err != nil {
 		return fmt.Errorf("failed to start passthrough session: %w", err)
 	}
+	capturePassthroughCopilotProfile(execution, resolved.profile)
 
 	execution.PassthroughStartedAt = time.Now()
 	// Must precede PassthroughProcessID: handlePassthroughStatus reads
@@ -1654,6 +1656,7 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 		m.notifyFallbackInfrastructureFailure(runner, sessionID, "start fresh process", err)
 		return
 	}
+	capturePassthroughCopilotProfile(execution, resolved.profile)
 
 	execution.PassthroughStartedAt = time.Now()
 	execution.passthroughLaunchUsedResume = false

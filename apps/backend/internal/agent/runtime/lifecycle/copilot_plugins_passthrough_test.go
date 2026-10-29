@@ -62,8 +62,7 @@ func TestCopilotPluginPassthroughRejectsWrapper(t *testing.T) {
 		t.Fatalf("copilotPassthroughBaseCommand: %v", err)
 	}
 	execution := copilotExecution(t, "profile-1")
-	execution.LaunchWrapper = copilotWrapperForTest()
-	cmd := passthroughCommand{Command: base}
+	cmd := passthroughCommand{Command: base, wrapper: copilotWrapperForTest()}
 	err = mgr.applyPassthroughCopilotPlugins(context.Background(), execution, profile, &cmd,
 		map[string]string{"COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")})
 	var pluginErr *copilotplugins.Error

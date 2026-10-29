@@ -152,5 +152,10 @@ test, and had no subtests. No full enterprise-policy qualification is claimed.
   live Kandev instance, staging, commits, or pushes were changed by this worker.
 
 The user's later decision makes these diagnostic limitations non-blocking for
-WO-04. It does not turn them into passing policy tests. WO-04 still needs
-implementation; native loading is not enabled by this work-order status.
+WO-04. It does not turn them into passing policy tests. WO-04 subsequently
+delivered supported native process preparation.
+
+PR review also corrected first-seen permission-request handling in the offline
+diagnostic driver. The [WO-04 remediation results](task-04-qualified-process-loading.md#pr-review-remediation)
+record its regression and passing tagged race check. Native acceptance results
+above remain historical and were not rerun for this correction.

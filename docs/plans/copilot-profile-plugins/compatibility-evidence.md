@@ -2,7 +2,7 @@
 
 Date: 2026-10-28 (initial checks 2026-10-27)
 Owner: work order 00
-Status: diagnostic investigation complete; native loading implementation pending
+Status: diagnostic investigation and supported process preparation complete
 
 This record supports the implementation in
 [plan.md](plan.md). It does not claim behavior that this machine could not
@@ -20,8 +20,10 @@ roots, and valid launch contexts remain required.
 The original Linux evidence is preserved separately from the macOS follow-up.
 An early missing-selector pause did not prove native incompatibility.
 The user later chose no administrator/system-policy changes. A tempdir is not
-a managed macOS policy source. Current production code still has the old empty
-gate until completion WO-04; this ledger does not enable loading by itself.
+a managed macOS policy source. Before completion WO-04, production code retained
+the empty policy gate. WO-04 removed that gate and delivered supported native
+process preparation. Native policy and component activation remain Copilot's
+responsibility.
 
 ## Environment
 

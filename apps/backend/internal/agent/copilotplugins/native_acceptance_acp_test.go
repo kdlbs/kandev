@@ -467,6 +467,10 @@ func (d *nativeACPDriver) observeToolUpdate(frame acpdbg.Frame) {
 	if kind != "tool_call" && kind != "tool_call_update" {
 		return
 	}
+	d.mergeToolCall(update)
+}
+
+func (d *nativeACPDriver) mergeToolCall(update map[string]any) {
 	callID, _ := update["toolCallId"].(string)
 	if callID == "" {
 		return
@@ -502,6 +506,7 @@ func (d *nativeACPDriver) observeToolUpdate(frame acpdbg.Frame) {
 func (d *nativeACPDriver) handlePermissionRequest(frame acpdbg.Frame) error {
 	params, _ := frame["params"].(map[string]any)
 	toolCall, _ := params["toolCall"].(map[string]any)
+	d.mergeToolCall(toolCall)
 	callID, _ := toolCall["toolCallId"].(string)
 	call := d.toolCalls[callID]
 	server := ""

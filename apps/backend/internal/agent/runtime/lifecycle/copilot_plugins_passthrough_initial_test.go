@@ -111,7 +111,7 @@ func TestCopilotPluginInitialPassthroughRejectsUnsupportedExecutor(t *testing.T)
 
 func TestCopilotPluginInitialPassthroughRejectsWrapper(t *testing.T) {
 	mgr, execution, profile, pty, _ := newCopilotPassthroughInitialManager(t)
-	execution.LaunchWrapper = copilotWrapperForTest()
+	profile.CommandPrefix = "sandbox --"
 	err := mgr.startPassthroughSession(context.Background(), execution, profile)
 	var pluginErr *copilotplugins.Error
 	require.ErrorAs(t, err, &pluginErr)

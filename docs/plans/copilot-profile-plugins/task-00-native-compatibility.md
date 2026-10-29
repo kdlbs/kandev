@@ -131,7 +131,7 @@ qualification was not. These results preceded the macOS follow-up and new ADR.
 - Reproduced package/binary identity, flat inventory, external rows, live rows with `installedFrom`, installed rows with `cache_path`, JSONC state, manifest precedence, `--config-dir` precedence, and repeated ACP mounts for 1.0.88.
 - Reproduced flat inventory, built-in rows, live rows, installed rows with `cache_path` (after registering the non-default marketplace), and repeated ACP mounts for 1.0.104.
 - 1.0.103 remains unqualified because only supplied observations exist.
-- Authenticated `session/new`, plugin tool calls, plugin MCP loading, native veto observation, Windows, and macOS remain unverified. Inventory discovery is qualified for 1.0.88 and 1.0.104; explicit mount permission is not. Nonempty starts return `policy_unverified`, and other versions return `runtime_unsupported`.
+- At the original checkpoint, authenticated `session/new`, plugin tool calls, plugin MCP loading, native veto observation, Windows, and macOS remained unverified. Inventory discovery was qualified for 1.0.88 and 1.0.104. Nonempty starts returned `policy_unverified`, and other versions returned `runtime_unsupported`.
 - `git diff --check -- docs/plans/copilot-profile-plugins docs/specs/agents` passed.
 
 Completion execution additionally reproduced exact package/root observations
@@ -141,4 +141,4 @@ now records eight attempts, actual corrected 1.0.104 coexistence, target-disable
 sibling-called observations without authoritative denial, 1.0.88 endpoint calls,
 and the untested managed-policy control. Final offline/race/lint/cleanup checks
 and exact commands are recorded by completion WO-03. The diagnostic work is
-done; production loading is still pending in original WO-03/04.
+done. Completion WO-04 delivered supported native process preparation.

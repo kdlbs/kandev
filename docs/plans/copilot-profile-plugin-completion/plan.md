@@ -152,7 +152,7 @@ for conflicts without unrelated edits.
 
 | Provider/context | Transport/identity | Intended behavior | Evidence | Fallback |
 | --- | --- | --- | --- | --- |
-| Supported Copilot adapter | Local/worktree ACP, concrete profile | Validated native mounts | WO-03 diagnostics and WO-04 caller tests | Atomic preparation error or native rejection |
+| Supported Copilot adapter | Local/worktree ACP, concrete profile | Supported native preparation | WO-03 diagnostics and WO-04 caller tests | Atomic preparation error or native rejection |
 | Copilot profile terminal/utility/probe | Selected runtime, same snapshot | Same mounts and context | WO-04 real-boundary tests | No default-profile fallback |
 | Native disable/policy/consent | Native CLI authority | No Kandev bypass or retry | Actual diagnostic limits plus argv/no-retry tests | Native rejection |
 | Unknown Copilot version | Unsupported adapter | No global CLI fallback | Provider/discovery negatives | `runtime_unsupported` |
@@ -265,6 +265,13 @@ behavior and settings checks were delivered. The pre-existing SSH teardown
 race exception and native diagnostic limitations remain explicit.
 
 ## Verification results
+
+PR review remediation corrected passthrough selection refresh, replacement
+wrapper admission, restart retry mounts, and first-seen diagnostic permission
+requests. The [WO-04 results](task-04-qualified-process-loading.md#pr-review-remediation)
+record regression evidence and final local verification. Support records now
+distinguish delivered preparation from native policy and component activation.
+Remote CI and review completion remain delivery gates for the pushed head.
 
 - WO-01 reproduced all three macOS failures; focused Green, provider tests,
   changed-file lint, and whitespace passed.

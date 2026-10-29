@@ -239,5 +239,4 @@ state that Copilot governs component availability and authentication.
 
 WO-03 records the diagnostic investigation. WO-04 removes the artificial gate
 and completes caller/preflight coverage. WO-05 verifies settings and publishes
-the native-authority boundary. Requirements/designs remain draft until their
-full implementation, rather than privileged certification, is delivered.
+the native-authority boundary.

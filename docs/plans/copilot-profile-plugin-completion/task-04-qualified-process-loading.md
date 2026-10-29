@@ -150,6 +150,54 @@ Preparation eligibility is not native policy approval or guaranteed tool use.
 
 ## Results
 
+### PR review remediation
+
+Regression tests reproduced stale passthrough selections in both directions
+at initial, resume, and fallback process starts. Replacement-wrapper tests
+reproduced incorrect admission when adding or removing a wrapper in ACP and
+passthrough resets. A retry regression reproduced two plugin mounts after a
+plugin root moved. All four focused regressions passed after the fixes.
+
+New passthrough processes use the captured profile for command and mounts,
+then retain that selection after a successful start. Retained processes keep
+their original selection. Preflight checks the replacement wrapper before
+inventory or stop. ACP execution arguments retain only the base command so
+each retry can resolve current plugin roots.
+
+The tagged offline permission test also reproduced rejection of a first-seen
+tool call supplied in a permission request. The diagnostic driver now merges
+that state before its existing read-only, allow-once checks. Display titles
+remain separate from programmatic tool names. An initial unfiltered tagged
+run reached the live diagnostic's required-version guard. Offline verification
+uses the explicit selection below and does not run authenticated diagnostics.
+
+The first combined race selection also included unrelated native-resume
+database tests through `^TestNative`. A captured stack showed migration setup
+blocked in SQLite. That run was interrupted without a passing verdict. The
+separate package selections below passed.
+
+Final verification:
+
+```bash
+(cd apps/backend && go test -trimpath -count=1 ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run 'TestCopilotPlugin|TestSSHPassthrough.*Reset|TestPromotedPassthroughResumeAdoptsTerminalReadiness|TestPassthroughAdoption')
+(cd apps/backend && go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run 'TestCopilotPlugin(Supported|ResetPreflight|ProfileSnapshot|Passthrough|Restart|Empty|Executor|AgentWide|Wrapper|NativeAuthority)|TestSSHPassthrough.*Reset|TestPassthroughAdoption')
+(cd apps/backend && go test -trimpath -race -tags copilot_native -count=1 ./internal/agent/copilotplugins -run '^TestNative')
+(cd apps/web && pnpm exec vitest run components/linear/linear-watch-dialog-lifetime.test.tsx --retry=0)
+git ls-files --modified --others --exclude-standard -z -- 'apps/backend/**/*.go' | xargs -0 bash scripts/lint-go-changed
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+git diff --check
+```
+
+The focused Go and race selections passed. The unchanged frontend suite passed
+28 tests with retries disabled after its CI timeout. Public documentation
+passed 63 tests and validation of 54 pages. The catalog and specification
+checks passed. Scoped lint reported zero issues after another worktree released
+the shared linter lock. The delivery record retains the normal commit-hook
+receipt and the pushed head's CI/review result.
+
 Completed following the user's explicit implementation request. All Copilot
 acceptance paths are covered. The extended race command retains the demonstrated
 pre-existing macOS SSH teardown exception below; it is not reported as passing.

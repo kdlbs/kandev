@@ -1814,7 +1814,7 @@ func (m *Manager) prepareAgentRestart(
 			selected = profileInfo.CopilotSelectedPlugins
 		}
 		copilotPluginArgs, err = m.prepareCopilotPluginArgsForSelection(
-			ctx, execution, runtimeEnvironment, commands.args, selected,
+			ctx, execution, runtimeEnvironment, commands.args, commands.wrapper, selected,
 		)
 		if err != nil {
 			return agentRestartPreparation{}, err
@@ -1869,7 +1869,6 @@ func (m *Manager) resetAgentRestartState(executionID string, preparation agentRe
 		exec.ContinueArgs = commands.continueArgs
 		exec.LaunchWrapper = commands.wrapper
 		if preparation.copilotPluginArgsPrepared {
-			exec.AgentArgs = append([]string{}, preparation.copilotPluginArgs...)
 			exec.setRuntimeEnvironment(preparation.runtimeEnvironment)
 		}
 		m.resetStreamingStateWithHistory(exec)

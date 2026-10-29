@@ -351,6 +351,10 @@ Do not mix one profile revision's IDs with another revision's launch environment
 Capture the profile before composing its command and environment. A concurrent
 edit cannot replace only the selected IDs inside that admitted snapshot.
 The next preparation must capture the updated profile as a whole.
+Passthrough command selection and mounts use that same captured profile,
+including an explicit empty selection. Plugin admission checks the replacement
+command's wrapper. Stored ACP base arguments exclude generated plugin mounts
+so a later retry resolves current roots without retaining an earlier mount.
 
 Preflight Copilot plugin admission, roots, and arguments before stopping a live
 passthrough process for replacement. Reject isolated Copilot selections before

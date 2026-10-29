@@ -256,14 +256,9 @@ func TestNativePermissionAllowsAnnotatedSentinelWithoutACPKind(t *testing.T) {
 
 	var output bytes.Buffer
 	driver := &nativeACPDriver{
-		framer:   acpdbg.NewFramer(&output, bytes.NewReader(nil)),
-		recorder: recorder,
-		toolCalls: map[string]*nativeToolCall{
-			"call-1": {
-				name:     nativeTargetServer + "-" + nativeSentinelToolName,
-				rawInput: map[string]any{},
-			},
-		},
+		framer:         acpdbg.NewFramer(&output, bytes.NewReader(nil)),
+		recorder:       recorder,
+		toolCalls:      make(map[string]*nativeToolCall),
 		knownServers:   []string{nativeTargetServer},
 		allowedServers: map[string]bool{nativeTargetServer: true},
 		approved:       make(map[string]int),
@@ -274,7 +269,11 @@ func TestNativePermissionAllowsAnnotatedSentinelWithoutACPKind(t *testing.T) {
 		"jsonrpc": "2.0",
 		"id":      1,
 		"params": map[string]any{
-			"toolCall": map[string]any{"toolCallId": "call-1"},
+			"toolCall": map[string]any{
+				"toolCallId": "call-1",
+				"name":       nativeTargetServer + "-" + nativeSentinelToolName,
+				"rawInput":   map[string]any{},
+			},
 			"options": []any{
 				map[string]any{"kind": "allow_always", "optionId": "always"},
 				map[string]any{"kind": "allow_once", "optionId": "allow"},
