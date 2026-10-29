@@ -130,11 +130,17 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 		return
 	}
 	next := ownershipFor(o.cfg, o.id, prior.Revision, ownerBorn)
+	if !matchingHandoffIdentity(prior, next) {
+		o.admissionFailureReason = "retained_claim_identity_mismatch"
+		o.state.ContinuityKnown = false
+		o.storageUnavailable = true // Preserve the unclaimed predecessor bytes.
+		return
+	}
 	// A new owner only opens after the predecessor process is gone, so its
 	// exited or never-started children are settled here instead of waiting for
 	// a settler that no longer exists.
 	settleAbandonedPredecessorAttempts(o.state.Attempts, o.id)
-	if !settledCurrentOwnerState(o.state) || !matchingHandoffIdentity(prior, next) {
+	if !settledCurrentOwnerState(o.state) {
 		// Remaining unknown children stay in history and in the current
 		// inventory as unknown; they no longer block the session from starting.
 		o.diagnostics.InitialReason = "retained_claim_adopted_unproven"
