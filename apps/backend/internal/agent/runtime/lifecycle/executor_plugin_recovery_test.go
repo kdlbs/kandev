@@ -62,6 +62,7 @@ type pluginExecutorInventoryStoreFake struct {
 	checkpointErr error
 	onCheckpoint  func(*models.ExecutorRunning)
 	claimBusy     int
+	unrecorded    []*models.UnrecordedPluginExecutor
 }
 
 func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ context.Context, record *models.ExecutorRunning) error {
@@ -181,6 +182,27 @@ func (f *pluginExecutorInventoryStoreFake) GetExecutorRunningBySessionID(context
 	}
 	copy := *f.record
 	return &copy, nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) ListUnrecordedPluginExecutors(_ context.Context, taskID, environmentID string) ([]*models.UnrecordedPluginExecutor, error) {
+	var listed []*models.UnrecordedPluginExecutor
+	for _, item := range f.unrecorded {
+		if item.TaskID == taskID && item.EnvironmentID == environmentID {
+			listed = append(listed, item)
+		}
+	}
+	return listed, nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) DeleteUnrecordedPluginExecutor(_ context.Context, executionID string) error {
+	kept := f.unrecorded[:0]
+	for _, item := range f.unrecorded {
+		if item.ExecutionID != executionID {
+			kept = append(kept, item)
+		}
+	}
+	f.unrecorded = kept
+	return nil
 }
 
 func (f *pluginExecutorInventoryStoreFake) ListExecutorsRunningPluginRemote(context.Context) ([]*models.ExecutorRunning, error) {

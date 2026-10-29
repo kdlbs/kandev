@@ -523,24 +523,20 @@ func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, envir
 	if r.inventoryStore == nil {
 		return errors.New("plugin executor cleanup dependencies are unavailable")
 	}
+	adopted, adoptErr := r.adoptUnrecordedPluginExecutors(ctx, environment)
+	cleanupErrors := []error{adoptErr}
 	records, err := r.inventoryStore.ListExecutorsRunningPluginRemote(ctx)
 	if err != nil {
-		return fmt.Errorf("read plugin executor cleanup inventory: %w", err)
+		return errors.Join(append(cleanupErrors, fmt.Errorf("read plugin executor cleanup inventory: %w", err))...)
 	}
-	var cleanupErrors []error
 	seen := make(map[string]bool, len(records))
 	for _, record := range records {
 		seen[record.AgentExecutionID] = true
-		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record); err != nil {
+		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record, adopted[record.AgentExecutionID]); err != nil {
 			cleanupErrors = append(cleanupErrors, err)
 		}
 	}
-	for _, executionID := range r.unrecordedResourceExecutions(environment) {
-		if !seen[executionID] {
-			cleanupErrors = append(cleanupErrors, errors.New("plugin executor launch provisioned a resource that has no inventory record; cleanup cannot settle"))
-		}
-	}
-	return errors.Join(cleanupErrors...)
+	return errors.Join(append(cleanupErrors, unsettledUnrecordedPluginExecutors(adopted, seen)...)...)
 }
 
 // errPluginExecutorLaunchInProgress defers an environment cleanup while this
@@ -548,7 +544,7 @@ func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, envir
 // resource yet, so an "absent" answer would not be a settled outcome.
 var errPluginExecutorLaunchInProgress = errors.New("plugin executor launch is still in progress; cleanup is deferred")
 
-func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx context.Context, environment *models.TaskEnvironment, record *models.ExecutorRunning) error {
+func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx context.Context, environment *models.TaskEnvironment, record *models.ExecutorRunning, handoff *models.UnrecordedPluginExecutor) error {
 	if !pluginExecutorRecordMatchesEnvironment(environment, record) {
 		return nil
 	}
@@ -569,8 +565,8 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx contex
 	if err != nil {
 		return err
 	}
-	if held, ok := r.unrecorded.Load(record.AgentExecutionID); ok {
-		return r.destroyHandedOffPluginExecutorResource(ctx, record, inventory, held.(*unrecordedPluginResource), profile)
+	if handoff != nil {
+		return r.destroyHandedOffPluginExecutorResource(ctx, record, inventory, handoff, profile)
 	}
 	resource, shouldDestroy, err := r.recoverPluginExecutorCleanupResource(ctx, record, inventory, profile)
 	if err != nil || !shouldDestroy {

@@ -199,6 +199,9 @@ func (p *fixturePlugin) DestroyExecutorEnvironment(ctx context.Context, req *plu
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if refusal := p.checkpointFixtureCleanup(ctx, req); refusal != nil {
+		return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: refusal}, nil
+	}
 	if consumeFixtureFailureBarrier(p.dataDir, req.GetContext().GetOperationId(), fixtureBarrierUnconfirmedCleanupOnce) {
 		return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: fixtureProviderError("cleanup_unconfirmed", "provider.fixture.cleanupUnconfirmed")}, nil
 	}
@@ -557,4 +560,23 @@ func consumeFixtureFailureBarrier(dataDir, operationID, barrier string) bool {
 	}
 	_ = file.Close()
 	return true
+}
+
+// checkpointFixtureCleanup records cleanup_progress through the host before the
+// destroy mutates anything. A destroy under a cleanup claim whose checkpoint the
+// host refuses fails closed, as a real provider's does.
+func (p *fixturePlugin) checkpointFixtureCleanup(ctx context.Context, req *pluginsdk.DestroyExecutorEnvironmentRequest) *pluginsdk.ExecutorProviderError {
+	if req.GetCleanupClaim() == "" {
+		return nil
+	}
+	host, ok := p.Host().(pluginsdk.ExecutorProviderHost)
+	if !ok {
+		return fixtureProviderError("cleanup_checkpoint_refused", "provider.fixture.cleanupCheckpointRefused")
+	}
+	if _, err := host.ExecutorProvider().CheckpointExecutorResource(ctx, &pluginsdk.CheckpointExecutorResourceRequest{
+		Context: req.GetContext(), Resource: req.GetResource(), Phase: "cleanup_progress", Sequence: 1,
+	}); err != nil {
+		return fixtureProviderError("cleanup_checkpoint_refused", "provider.fixture.cleanupCheckpointRefused")
+	}
+	return nil
 }

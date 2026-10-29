@@ -93,6 +93,8 @@ type PluginExecutorInventoryStore interface {
 	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
 	GetTaskSession(context.Context, string) (*models.TaskSession, error)
 	ListExecutorsRunningPluginRemote(context.Context) ([]*models.ExecutorRunning, error)
+	ListUnrecordedPluginExecutors(context.Context, string, string) ([]*models.UnrecordedPluginExecutor, error)
+	DeleteUnrecordedPluginExecutor(context.Context, string) error
 }
 
 type pluginControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error)
@@ -116,7 +118,6 @@ type PluginRemoteExecutor struct {
 	hostAPIProbeInterval        time.Duration
 	cleanupClaimWait            time.Duration
 	launching                   sync.Map
-	unrecorded                  sync.Map
 	cleanupClaimRetry           time.Duration
 }
 
@@ -910,7 +911,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if err := checkpointPluginExecutor(cleanupCtx, req, inventory); err != nil {
 			r.logger.Warn("plugin executor launch cleanup is fenced and its retry information was not retained",
 				zap.String("execution_id", req.InstanceID), zap.Error(err))
-			return r.holdUnrecordedPluginExecutorResource(req, inventory, resource, stage, cause)
+			return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, resource, stage, cause)
 		}
 		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained"))
 	}
@@ -938,7 +939,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 			inventory.Resource = retained
 			inventory.Phase = pluginExecutorPhaseCleanupPending
 			if retainErr := checkpointPluginExecutor(cleanupCtx, req, inventory); retainErr != nil {
-				return r.holdUnrecordedPluginExecutorResource(req, inventory, resource, stage, cause)
+				return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, resource, stage, cause)
 			}
 			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; drain outcome was not persisted and cleanup remains pending"))
 		}
