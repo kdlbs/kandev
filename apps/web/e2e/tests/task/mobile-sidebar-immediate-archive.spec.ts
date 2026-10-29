@@ -25,6 +25,7 @@ test("phone picker keeps independent archive controls for rapid archives", async
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   await testPage.setViewportSize({ width: 320, height: 568 });
   await checkRapidIndependentArchives({
@@ -32,6 +33,7 @@ test("phone picker keeps independent archive controls for rapid archives", async
     api: apiClient,
     seed: seedData,
     mobile: true,
+    prCapture,
   });
 });
 

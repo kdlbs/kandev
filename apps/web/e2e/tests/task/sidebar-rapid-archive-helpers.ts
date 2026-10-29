@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, type Route } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
@@ -75,6 +76,21 @@ function taskOptions(seed: SeedData) {
   return { workflow_id: seed.workflowId, workflow_step_id: seed.startStepId };
 }
 
+async function captureRapidArchives(
+  surface: ArchiveSurface,
+  firstTargetTitle: string,
+  mobile: boolean,
+  prCapture: PrAssetCapture | undefined,
+) {
+  if (!prCapture?.capturing) return;
+  if (mobile) await surface.rowFor(firstTargetTitle).scrollIntoViewIfNeeded();
+  await prCapture.screenshot(mobile ? "rapid-archives-mobile" : "rapid-archives-desktop", {
+    caption: mobile
+      ? "A phone picker keeps independently accepted archives busy at the same time."
+      : "A desktop sidebar keeps independently accepted archives busy at the same time.",
+  });
+}
+
 async function releaseArchive(route: Route, outcome: "succeed" | "fail") {
   if (outcome === "succeed") {
     await route.continue();
@@ -99,8 +115,9 @@ export async function checkRapidIndependentArchives(options: {
   api: ApiClient;
   seed: SeedData;
   mobile: boolean;
+  prCapture?: PrAssetCapture;
 }) {
-  const { page, api, seed, mobile } = options;
+  const { page, api, seed, mobile, prCapture } = options;
   const { settings } = await api.getUserSettings();
   const baseline =
     typeof settings.confirm_task_archive === "boolean" ? settings.confirm_task_archive : undefined;
@@ -109,6 +126,7 @@ export async function checkRapidIndependentArchives(options: {
   const keep = await api.seedTask(seed.workspaceId, "Keep selected", taskOptions(seed));
   await api.seedTaskSession(keep.task_id, { state: "WAITING_FOR_INPUT" });
   const navigation = await api.seedTask(seed.workspaceId, "Navigation target", taskOptions(seed));
+  await api.seedTaskSession(navigation.task_id, { state: "WAITING_FOR_INPUT" });
   const targets: Array<{ title: string; taskId: string }> = [];
   for (const title of titles) {
     const seeded = await api.seedTask(seed.workspaceId, title, taskOptions(seed));
@@ -139,6 +157,7 @@ export async function checkRapidIndependentArchives(options: {
         surface.rowFor(target.title).getByTestId("task-state-removal-pending"),
       ).toBeVisible();
     }
+    await captureRapidArchives(surface, targets[0].title, mobile, prCapture);
 
     const archiveItem = await openArchiveMenuItem(surface, "Keep selected");
     await expect(archiveItem).not.toHaveAttribute("data-disabled", "");

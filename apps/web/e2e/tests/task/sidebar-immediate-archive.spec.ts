@@ -24,12 +24,14 @@ test("sidebar keeps independent archive controls for rapid individual archives",
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   await checkRapidIndependentArchives({
     page: testPage,
     api: apiClient,
     seed: seedData,
     mobile: false,
+    prCapture,
   });
 });
 
