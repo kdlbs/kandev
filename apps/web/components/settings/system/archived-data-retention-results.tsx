@@ -5,15 +5,14 @@ import type {
   ArchivedDataRetentionStatus,
   ArchivedDataTarget,
 } from "@/lib/types/archived-data-retention";
-import {
-  cutoff,
-  validArchivedDays,
-} from "@/hooks/domains/system/use-archived-data-retention-draft";
+import { validArchivedDays } from "@/hooks/domains/system/use-archived-data-retention-draft";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { RetentionSkippedItems, retentionDate, skippedTotal } from "./retention-shared";
 
 const dayMilliseconds = 24 * 60 * 60 * 1000;
+// parseTurnTimestamp returns nanoseconds, so the window day math stays in BigInt ns.
+const nanosecondsPerDay = BigInt(86_400_000_000_000);
 
 const targetLabel = {
   messages: "system:archivedData.targetMessages",
@@ -118,9 +117,8 @@ function windowEdited(storedCutoff: string, days: number, startedAt: string): bo
   if (!validArchivedDays({ days })) return true;
   const base = parseTurnTimestamp(startedAt);
   if (base === null) return true;
-  const day = BigInt(dayMilliseconds);
-  const expected = BigInt(Math.trunc(cutoff(new Date(Number(base)), days)));
-  return stored / day !== expected / day;
+  const expected = base - BigInt(days) * nanosecondsPerDay;
+  return stored / nanosecondsPerDay !== expected / nanosecondsPerDay;
 }
 
 function analysisIsStale(
