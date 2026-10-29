@@ -120,7 +120,7 @@ func (m *Manager) CheckpointExecutorResource(ctx context.Context, request *plugi
 		inventory.ExpiresAt = existing.ExpiresAt
 		inventory.WorkspaceDescriptor = existing.WorkspaceDescriptor
 	}
-	if inventory.WorkspaceDescriptor, err = resolvePluginExecutorWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, request.GetResource()); err != nil {
+	if inventory.WorkspaceDescriptor, err = resolvePluginExecutorEarlyWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, request.GetResource()); err != nil {
 		return err
 	}
 	inventory.ExpiresAt, err = pluginExecutorEarlierExpiry(inventory.ExpiresAt, request.GetResource().GetExpiresAt())

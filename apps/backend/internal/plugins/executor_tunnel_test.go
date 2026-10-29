@@ -246,3 +246,22 @@ func waitForTunnels(t *testing.T, service *Service, want int) {
 	}
 	t.Fatalf("active tunnels = %d, want %d", service.tunnels.Active(tunnelInstallationID, "environment-1"), want)
 }
+
+func TestOpenExecutorTunnelHeaderCarriesTheRecordedProfile(t *testing.T) {
+	service, impl := tunnelService(t, true)
+	request := tunnelRequest(1, tunnelControlPort)
+	request.Profile = &pluginsdk.ExecutorProfileSnapshot{
+		ProfileId: "profile-1", Config: map[string]string{"region": "eu-west-1"},
+		SecretValues: map[string]string{"credential": "recorded-secret-value-0123"},
+	}
+	conn, err := service.openExecutorTunnel(context.Background(), request)
+	if err != nil {
+		t.Fatalf("OpenExecutorTunnel() error = %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	profile := (<-impl.opened).GetProfile()
+	if profile.GetProfileId() != "profile-1" || profile.GetConfig()["region"] != "eu-west-1" ||
+		profile.GetSecretValues()["credential"] != "recorded-secret-value-0123" {
+		t.Fatalf("provider saw tunnel profile %+v, want the recorded snapshot", profile)
+	}
+}

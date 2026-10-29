@@ -116,6 +116,7 @@ func (r *PluginRemoteExecutor) drainBeforePluginDestroy(
 	inventory pluginExecutorInventory,
 	resource *pluginsdk.ExecutorResourceDescriptor,
 	provider models.ExecutorProvider,
+	snapshot *pluginsdk.ExecutorProfileSnapshot,
 	claim *models.TaskEnvironmentRecoveryClaim,
 ) (*models.ExecutorRunning, pluginExecutorInventory, pluginDrainDecision, error) {
 	if !negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
@@ -124,7 +125,7 @@ func (r *PluginRemoteExecutor) drainBeforePluginDestroy(
 	if decision, ok := storedPluginDrainDecision(inventory, claim.OperationID); ok {
 		return record, inventory, decision, nil
 	}
-	decision := r.drainRecordedRuntime(ctx, record, inventory, resource, provider, claim.OperationID)
+	decision := r.drainRecordedRuntime(ctx, record, inventory, resource, provider, snapshot, claim.OperationID)
 	inventory.DrainClaim = claim.OperationID
 	inventory.DrainOutcome = decision.outcome
 	inventory.DrainReceiptID = ""
@@ -167,6 +168,7 @@ func (r *PluginRemoteExecutor) drainRecordedRuntime(
 	inventory pluginExecutorInventory,
 	resource *pluginsdk.ExecutorResourceDescriptor,
 	provider models.ExecutorProvider,
+	snapshot *pluginsdk.ExecutorProfileSnapshot,
 	claimOperationID string,
 ) pluginDrainDecision {
 	if inventory.InstancePort == 0 || record.TransientAuthToken == "" || r.drainRuntime == nil {
@@ -180,7 +182,7 @@ func (r *PluginRemoteExecutor) drainRecordedRuntime(
 	defer cancel()
 	operationContext.Deadline = time.Now().Add(pluginExecutorDrainDeadline).UTC().Format(time.RFC3339Nano)
 	receipt, err := r.drainRuntime(
-		drainCtx, r.connectionResolver(operationContext, resource, pluginExecutorRuntimePort), r.logger,
+		drainCtx, r.connectionResolver(operationContext, resource, pluginExecutorRuntimePort, snapshot), r.logger,
 		record.TransientAuthToken, claimOperationID, pluginExecutorDrainDeadline,
 	)
 	if err != nil || receipt == nil {

@@ -26,6 +26,8 @@ type ExecutorTunnelRequest struct {
 	Port     uint32
 	// AllowedPorts are the agentctl control port and the recorded instance port.
 	AllowedPorts []uint32
+	// Profile is the recorded profile snapshot with secrets revealed for this stream.
+	Profile *pluginsdk.ExecutorProfileSnapshot
 }
 
 // openExecutorTunnel opens a host-initiated stream to one port of an
@@ -53,7 +55,7 @@ func (s *Service) openExecutorTunnel(ctx context.Context, request ExecutorTunnel
 			Generation: requestContext.GetEnvironmentGeneration(),
 		},
 		Port: request.Port, AllowedPorts: request.AllowedPorts,
-		Header: &pluginsdk.ExecutorTunnelHeader{Context: trusted, Resource: request.Resource},
+		Header: &pluginsdk.ExecutorTunnelHeader{Context: trusted, Resource: request.Resource, Profile: request.Profile},
 		Open:   opener,
 	})
 }
@@ -125,8 +127,8 @@ func (s *Service) checkLeaseTransport(requestContext *pluginsdk.ExecutorProvider
 }
 
 // OpenExecutorTunnel is the lifecycle-facing form of openExecutorTunnel.
-func (s *Service) OpenExecutorTunnel(ctx context.Context, requestContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, allowedPorts []uint32) (net.Conn, error) {
-	return s.openExecutorTunnel(ctx, ExecutorTunnelRequest{Context: requestContext, Resource: resource, Port: port, AllowedPorts: allowedPorts})
+func (s *Service) OpenExecutorTunnel(ctx context.Context, requestContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, allowedPorts []uint32, profile *pluginsdk.ExecutorProfileSnapshot) (net.Conn, error) {
+	return s.openExecutorTunnel(ctx, ExecutorTunnelRequest{Context: requestContext, Resource: resource, Port: port, AllowedPorts: allowedPorts, Profile: profile})
 }
 
 // CloseExecutorTunnels closes every tunnel of an environment, as on release.

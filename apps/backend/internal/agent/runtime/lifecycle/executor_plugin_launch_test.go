@@ -44,6 +44,7 @@ type pluginExecutorOperationsFake struct {
 	connectionResponse *pluginsdk.ResolveExecutorConnectionResponse
 	connectionErr      error
 	connectionPorts    []int
+	connectionRequests []*pluginsdk.ResolveExecutorConnectionRequest
 	destroyRequest     *pluginsdk.DestroyExecutorEnvironmentRequest
 	destroyResponse    *pluginsdk.DestroyExecutorEnvironmentResponse
 	destroyErr         error
@@ -85,6 +86,7 @@ func (f *pluginExecutorOperationsFake) InspectExecutorEnvironment(_ context.Cont
 
 func (f *pluginExecutorOperationsFake) ResolveExecutorConnection(_ context.Context, req *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
 	f.connectionPorts = append(f.connectionPorts, int(req.GetRuntimePort()))
+	f.connectionRequests = append(f.connectionRequests, req)
 	return f.connectionResponse, f.connectionErr
 }
 
@@ -251,7 +253,7 @@ func TestPluginExecutorConnectionResolverPreservesProviderRejection(t *testing.T
 		},
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{}, &pluginsdk.ExecutorResourceDescriptor{}, pluginExecutorRuntimePort)
+	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{}, &pluginsdk.ExecutorResourceDescriptor{}, pluginExecutorRuntimePort, nil)
 
 	_, err := resolver(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "connection_unavailable") || !strings.Contains(err.Error(), "provider.connection.unavailable") {

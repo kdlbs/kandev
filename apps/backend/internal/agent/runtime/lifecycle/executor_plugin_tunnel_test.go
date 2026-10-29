@@ -20,10 +20,11 @@ type tunnelOpen struct {
 	port    uint32
 	allowed []uint32
 	env     string
+	profile *pluginsdk.ExecutorProfileSnapshot
 }
 
-func (f *tunnelOperationsFake) OpenExecutorTunnel(_ context.Context, rc *pluginsdk.ExecutorProviderRequestContext, _ *pluginsdk.ExecutorResourceDescriptor, port uint32, allowed []uint32) (net.Conn, error) {
-	f.opened = append(f.opened, tunnelOpen{port: port, allowed: allowed, env: rc.GetEnvironmentId()})
+func (f *tunnelOperationsFake) OpenExecutorTunnel(_ context.Context, rc *pluginsdk.ExecutorProviderRequestContext, _ *pluginsdk.ExecutorResourceDescriptor, port uint32, allowed []uint32, profile *pluginsdk.ExecutorProfileSnapshot) (net.Conn, error) {
+	f.opened = append(f.opened, tunnelOpen{port: port, allowed: allowed, env: rc.GetEnvironmentId(), profile: profile})
 	client, server := net.Pipe()
 	_ = server.Close()
 	return client, nil
@@ -43,7 +44,8 @@ func TestHostTunnelLeaseDialsTheResolvedPortWithTheControlPortAllowed(t *testing
 	operations := &tunnelOperationsFake{pluginExecutorOperationsFake: pluginExecutorOperationsFake{connectionResponse: tunnelLeaseResponse()}}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	const instancePort = 40123
-	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{EnvironmentId: "env-1"}, &pluginsdk.ExecutorResourceDescriptor{}, instancePort)
+	snapshot := &pluginsdk.ExecutorProfileSnapshot{ProfileId: "profile-1", SecretValues: map[string]string{"credential": recordedProfileSecret}}
+	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{EnvironmentId: "env-1"}, &pluginsdk.ExecutorResourceDescriptor{}, instancePort, snapshot)
 
 	lease, err := resolver(context.Background())
 	if err != nil {
@@ -60,6 +62,9 @@ func TestHostTunnelLeaseDialsTheResolvedPortWithTheControlPortAllowed(t *testing
 	if len(operations.opened) != 1 || operations.opened[0].port != instancePort || operations.opened[0].env != "env-1" {
 		t.Fatalf("opened = %+v, want one stream to the instance port for env-1", operations.opened)
 	}
+	if operations.opened[0].profile != snapshot && operations.opened[0].profile.GetProfileId() != "profile-1" {
+		t.Fatalf("tunnel header profile = %+v, want the snapshot of the resolving call", operations.opened[0].profile)
+	}
 	got := operations.opened[0].allowed
 	if len(got) != 2 || got[0] != pluginExecutorRuntimePort || got[1] != instancePort {
 		t.Fatalf("allowed ports = %v, want [control instance]", got)
@@ -69,7 +74,7 @@ func TestHostTunnelLeaseDialsTheResolvedPortWithTheControlPortAllowed(t *testing
 func TestHostTunnelLeaseWithoutTunnelOperationsFailsClosed(t *testing.T) {
 	operations := &pluginExecutorOperationsFake{connectionResponse: tunnelLeaseResponse()}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{}, &pluginsdk.ExecutorResourceDescriptor{}, pluginExecutorRuntimePort)
+	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{}, &pluginsdk.ExecutorResourceDescriptor{}, pluginExecutorRuntimePort, nil)
 
 	if _, err := resolver(context.Background()); err == nil || !strings.Contains(err.Error(), "host tunnel") {
 		t.Fatalf("resolver() error = %v, want a host tunnel refusal", err)

@@ -72,11 +72,15 @@ func (r *PluginRemoteExecutor) inspectPluginExecutorExpiry(ctx context.Context, 
 	if err != nil || profile == nil || profile.Provider.Identity != inventory.ProviderIdentity || profile.Provider.InstallationID != inventory.InstallationID {
 		return r.pluginExecutorUnavailableStatus(ctx, record, inventory)
 	}
+	snapshot, err := pluginExecutorProfileSnapshot(*profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		return r.pluginExecutorUnavailableStatus(ctx, record, inventory)
+	}
 	operationContext := pluginExecutorRequestContextForRecord(record, inventory, *profile)
 	for attempt := 0; attempt < 2; attempt++ {
 		inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		inspection, inspectErr := r.operations.InspectExecutorEnvironment(inspectCtx, &pluginsdk.InspectExecutorEnvironmentRequest{
-			Context: operationContext, Resource: inventory.Resource,
+			Context: operationContext, Resource: inventory.Resource, Profile: snapshot,
 		})
 		cancel()
 		if !pluginExecutorInspectionUsable(inspection, inspectErr) {

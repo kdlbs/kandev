@@ -75,7 +75,7 @@ type PluginExecutorProviderOperations interface {
 // host-initiated tunnel streams. A launch whose lease asks for host_tunnel
 // fails closed when the operations value does not implement it.
 type PluginExecutorTunnelOperations interface {
-	OpenExecutorTunnel(ctx context.Context, requestContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, allowedPorts []uint32) (net.Conn, error)
+	OpenExecutorTunnel(ctx context.Context, requestContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, allowedPorts []uint32, profile *pluginsdk.ExecutorProfileSnapshot) (net.Conn, error)
 	CloseExecutorTunnels(installationID, environmentID string)
 }
 
@@ -238,6 +238,7 @@ type pluginExecutorLaunchState struct {
 	request          *ExecutorCreateRequest
 	profile          models.ExecutorProviderLaunchProfile
 	operationContext *pluginsdk.ExecutorProviderRequestContext
+	snapshot         *pluginsdk.ExecutorProfileSnapshot
 	apiURL           string
 	hostAPIURL       string
 	nonce            string
@@ -276,6 +277,10 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	}
 	operationContext := pluginExecutorRequestContext(ctx, req, profile, operationID, digest)
 	inventory := pluginExecutorLaunchInventory(req, profile, operationID, digest)
+	snapshot, err := pluginExecutorProfileSnapshot(profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		return nil, err
+	}
 	if pluginExecutorDurableBootstrap(inventory) {
 		if err := r.persistDurableNonce(ctx, req, nonce); err != nil {
 			return nil, err
@@ -286,7 +291,7 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 		return nil, fmt.Errorf("persist plugin executor allocation intent: %w", err)
 	}
 	return &pluginExecutorLaunchState{
-		request: req, profile: profile, operationContext: operationContext,
+		request: req, profile: profile, operationContext: operationContext, snapshot: snapshot,
 		apiURL: apiURL, hostAPIURL: hostAPIURL, nonce: nonce, inventory: inventory,
 		intent: intent, agentEnv: agentEnv,
 	}, nil
@@ -334,13 +339,9 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 	if err != nil {
 		return nil, errors.New("plugin executor bootstrap could not be encoded")
 	}
-	snapshot, err := pluginExecutorProfileSnapshot(launch.profile, launch.inventory.NegotiatedCapabilities)
-	if err != nil {
-		return nil, err
-	}
 	provisioned, err := r.operations.ProvisionExecutorEnvironment(ctx, &pluginsdk.ProvisionExecutorEnvironmentRequest{
 		Context:       launch.operationContext,
-		Profile:       snapshot,
+		Profile:       launch.snapshot,
 		BootstrapJson: bootstrap,
 		Repositories:  launch.intent,
 		AgentEnv:      launch.agentEnv,
@@ -404,7 +405,7 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 			return fail("handshake_checkpoint", err)
 		}
 	}
-	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort), r.logger, launch.nonce)
+	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort, launch.snapshot), r.logger, launch.nonce)
 	if err != nil {
 		return fail("control_handshake", err)
 	}
@@ -431,7 +432,7 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 		return fail("instance_create", err)
 	}
 	launch.inventory.InstancePort = instancePort
-	client, err := r.newAgentctlClient(ctx, r.connectionResolver(launch.operationContext, resource, instancePort), r.logger,
+	client, err := r.newAgentctlClient(ctx, r.connectionResolver(launch.operationContext, resource, instancePort, launch.snapshot), r.logger,
 		launch.request.InstanceID, token)
 	if err != nil {
 		return fail("instance_connect", err)
@@ -729,12 +730,12 @@ func checkpointPluginExecutor(ctx context.Context, req *ExecutorCreateRequest, i
 	return req.CheckpointRuntimeInventory(ctx, map[string]interface{}{MetadataKeyPluginExecutor: inventory})
 }
 
-func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, runtimePort uint32) agentctl.ConnectionLeaseResolver {
+func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, runtimePort uint32, snapshot *pluginsdk.ExecutorProfileSnapshot) agentctl.ConnectionLeaseResolver {
 	return func(ctx context.Context) (*agentctl.ConnectionLease, error) {
 		requestContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 		requestContext.Deadline = time.Now().Add(15 * time.Second).UTC().Format(time.RFC3339Nano)
 		response, err := r.operations.ResolveExecutorConnection(ctx, &pluginsdk.ResolveExecutorConnectionRequest{
-			Context: requestContext, Resource: resource, Purpose: pluginExecutorAgentctlPurpose, RuntimePort: runtimePort,
+			Context: requestContext, Resource: resource, Purpose: pluginExecutorAgentctlPurpose, RuntimePort: runtimePort, Profile: snapshot,
 		})
 		if err != nil || response == nil {
 			return nil, errors.New("provider connection lease is unavailable")
@@ -750,7 +751,7 @@ func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.Ex
 		if err != nil {
 			return nil, errors.New("provider connection lease expiry is invalid")
 		}
-		dial, err := r.tunnelDialer(lease.GetTransport(), operationContext, resource, runtimePort)
+		dial, err := r.tunnelDialer(lease.GetTransport(), operationContext, resource, runtimePort, snapshot)
 		if err != nil {
 			return nil, err
 		}
@@ -767,7 +768,7 @@ func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.Ex
 // tunnelDialer binds a host_tunnel lease to the environment, ownership
 // generation and port of the call that resolved it. The allowed ports are the
 // agentctl control port and the instance port being resolved.
-func (r *PluginRemoteExecutor) tunnelDialer(transport string, operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32) (agentctl.TunnelDialer, error) {
+func (r *PluginRemoteExecutor) tunnelDialer(transport string, operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, snapshot *pluginsdk.ExecutorProfileSnapshot) (agentctl.TunnelDialer, error) {
 	if transport != agentctl.LeaseTransportHostTunnel {
 		return nil, nil
 	}
@@ -777,7 +778,7 @@ func (r *PluginRemoteExecutor) tunnelDialer(transport string, operationContext *
 	}
 	allowed := []uint32{pluginExecutorRuntimePort, port}
 	return func(ctx context.Context) (net.Conn, error) {
-		return tunnels.OpenExecutorTunnel(ctx, proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext), resource, port, allowed)
+		return tunnels.OpenExecutorTunnel(ctx, proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext), resource, port, allowed, snapshot)
 	}, nil
 }
 
@@ -895,9 +896,30 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	cleanupContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	cleanupContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
 	r.closePluginExecutorTunnels(cleanupContext)
-	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
+	snapshot, snapshotErr := pluginExecutorProfileSnapshot(req.PluginExecutor.Profile, inventory.NegotiatedCapabilities)
+	if snapshotErr != nil {
+		inventory.Resource = retained
+		inventory.Phase = pluginExecutorPhaseCleanupPending
+		_ = checkpointPluginExecutor(cleanupCtx, req, inventory)
+		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; recorded profile is unavailable and cleanup remains pending"))
+	}
+	request := &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: cleanupContext, Resource: resource, CleanupReason: launchCleanupReason(stage), CleanupClaim: claim.OperationID,
-	})
+		Profile: snapshot,
+	}
+	if negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
+		inventory.DrainClaim = claim.OperationID
+		inventory.DrainOutcome = pluginDrainOutcomeNotAttempted
+		inventory.DrainReceiptID = ""
+		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
+			inventory.Resource = retained
+			inventory.Phase = pluginExecutorPhaseCleanupPending
+			_ = checkpointPluginExecutor(cleanupCtx, req, inventory)
+			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; drain outcome was not persisted and cleanup remains pending"))
+		}
+		pluginDrainDecision{outcome: pluginDrainOutcomeNotAttempted}.applyTo(request)
+	}
+	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, request)
 	if err == nil && response != nil && response.GetConfirmedAbsent() {
 		inventory.Resource = retained
 		inventory.Phase = pluginExecutorPhaseAbsent
