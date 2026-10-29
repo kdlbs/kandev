@@ -145,13 +145,14 @@ inside `StopInstance`. `DestroyTaskEnvironment` returns a retryable error while 
 record's launch in flight (an in-memory set keyed by execution ID), so it cannot settle "absent" before the provider
 publishes the resource. Recover results for `found` resources must carry `state_version`, on the launch-recovery
 and the cleanup path. When a failed launch can neither take the cleanup claim nor checkpoint the resource it
-provisioned, the launch keeps the handle in process (`unrecorded`, keyed by execution ID), logs the launch cause and a
+provisioned, the launch records the resource durably in `unrecorded_plugin_executors` (keyed by execution ID, no foreign key,
+written through `RecordUnrecordedRuntimeInventory` without the environment claim), logs the launch cause and a
 `handed_off` outcome, and returns a "not recorded" error without calling the provider: a provider checkpoints
 `cleanup_progress` under a persisted claim before it mutates, so a destroy under a claim that has no row would
-fail closed. The environment cleanup destroys the handed-off resource under its own claim, forgets the handle only
-after a confirmed destroy, and fails when it finds a handed-off resource but no inventory record. The handle is
-process-local; after a restart the `allocating` inventory row and the provider's recover-by-operation answer
-cover the resource. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
+fail closed. `DestroyTaskEnvironment` lists the environment's records, inserts the `allocating` inventory row a
+record needs when none exists (so claim checkpoints are accepted), destroys the resource under its own claim, and
+deletes the record only after a confirmed destroy. A record whose execution has no inventory record to destroy
+through, or whose destroy is unconfirmed, stays and fails the cleanup. Records survive a restart. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
 resolve recorded secrets on each call; the host does not write them into the inventory and rejects provider state that echoes one. Under the e2e mock profile only, a `file://` or
 loopback-host remote parses as the synthetic `e2e-local` provider so a local rig can use a repository, passes the
 managed Git credential identity check, and is cloned on the host without credentials (`repoclone.E2ELocalRemote`);

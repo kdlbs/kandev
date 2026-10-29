@@ -15,12 +15,19 @@ type pluginExecutorInventoryWriter interface {
 	CheckpointPluginExecutorInventory(context.Context, *models.ExecutorRunning) error
 }
 
+type pluginExecutorUnrecordedWriter interface {
+	RecordUnrecordedPluginExecutor(context.Context, *models.UnrecordedPluginExecutor) error
+}
+
 func (m *Manager) wirePluginExecutorInventoryPersistence(req *ExecutorCreateRequest, executorType string) {
 	if req == nil || executorType != string(models.ExecutorTypePluginRemote) || m.runningWriter == nil {
 		return
 	}
 	req.CheckpointRuntimeInventory = func(ctx context.Context, metadata map[string]interface{}) error {
 		return m.checkpointPluginExecutorRuntimeInventory(ctx, req, metadata)
+	}
+	req.RecordUnrecordedRuntimeInventory = func(ctx context.Context, metadata map[string]interface{}) error {
+		return m.recordUnrecordedPluginExecutorInventory(ctx, req, metadata)
 	}
 	if req.PreviousExecutionID == "" {
 		req.ReleaseRuntimeInventory = func(ctx context.Context) error {
@@ -44,13 +51,46 @@ func (m *Manager) checkpointPluginExecutorRuntimeInventory(
 	}
 	persistCtx, cancelPersist := kubernetesDurableContext(ctx)
 	defer cancelPersist()
-	metadata, err := mergePluginExecutorRuntimeMetadata(req.Metadata, runtimeMetadata)
-	if err != nil {
-		return err
-	}
 	prior, revision, err := m.readPriorPluginExecutorRuntimeInventory(persistCtx, req.SessionID)
 	if err != nil {
 		return err
+	}
+	running, err := pluginExecutorLaunchRunning(req, runtimeMetadata, prior)
+	if err != nil {
+		return err
+	}
+	if prior != nil {
+		running.ExpectedPluginExecutorRevision = revision
+	}
+	if err := writer.CheckpointPluginExecutorInventory(persistCtx, running); err != nil {
+		return fmt.Errorf("checkpoint plugin executor inventory: %w", err)
+	}
+	return nil
+}
+
+// recordUnrecordedPluginExecutorInventory hands the launch's inventory to the
+// environment cleanup when the inventory row could not be written.
+func (m *Manager) recordUnrecordedPluginExecutorInventory(ctx context.Context, req *ExecutorCreateRequest, runtimeMetadata map[string]interface{}) error {
+	writer, ok := m.runningWriter.(pluginExecutorUnrecordedWriter)
+	if !ok {
+		return errors.New("record unrecorded plugin executor: durable handoff is unavailable")
+	}
+	persistCtx, cancelPersist := kubernetesDurableContext(ctx)
+	defer cancelPersist()
+	running, err := pluginExecutorLaunchRunning(req, runtimeMetadata, nil)
+	if err != nil {
+		return err
+	}
+	return writer.RecordUnrecordedPluginExecutor(persistCtx, &models.UnrecordedPluginExecutor{
+		ExecutionID: req.InstanceID, SessionID: req.SessionID, TaskID: req.TaskID,
+		EnvironmentID: req.TaskEnvironmentID, Running: running,
+	})
+}
+
+func pluginExecutorLaunchRunning(req *ExecutorCreateRequest, runtimeMetadata map[string]interface{}, prior *models.ExecutorRunning) (*models.ExecutorRunning, error) {
+	metadata, err := mergePluginExecutorRuntimeMetadata(req.Metadata, runtimeMetadata)
+	if err != nil {
+		return nil, err
 	}
 	execution := &AgentExecution{
 		ID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
@@ -58,15 +98,9 @@ func (m *Manager) checkpointPluginExecutorRuntimeInventory(
 		RuntimeName: agentruntime.RuntimePluginRemote, Status: v1.AgentStatusStarting, metadata: metadata,
 	}
 	running := buildRunningFromExecution(execution, prior)
-	if prior != nil {
-		running.ExpectedPluginExecutorRevision = revision
-	}
 	running.Runtime = agentruntime.RuntimePluginRemote
 	running.Status = models.ExecutorRunningStatusStarting
-	if err := writer.CheckpointPluginExecutorInventory(persistCtx, running); err != nil {
-		return fmt.Errorf("checkpoint plugin executor inventory: %w", err)
-	}
-	return nil
+	return running, nil
 }
 
 func mergePluginExecutorRuntimeMetadata(current, runtime map[string]interface{}) (map[string]interface{}, error) {

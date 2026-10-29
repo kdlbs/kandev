@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
@@ -20,6 +21,13 @@ func launchCleanupRuntime(t *testing.T, busy int, checkpointErr error) (*PluginR
 	request := pluginExecutorLaunchRequest(testPluginExecutorLaunchProvider())
 	request.CheckpointRuntimeInventory = func(context.Context, map[string]interface{}) error { return checkpointErr }
 	request.ReleaseRuntimeInventory = func(context.Context) error { return nil }
+	request.RecordUnrecordedRuntimeInventory = func(_ context.Context, metadata map[string]interface{}) error {
+		store.unrecorded = append(store.unrecorded, &models.UnrecordedPluginExecutor{
+			ExecutionID: request.InstanceID, SessionID: request.SessionID, TaskID: request.TaskID,
+			EnvironmentID: request.TaskEnvironmentID, Running: launchRunning(request, metadata),
+		})
+		return nil
+	}
 	profile := request.PluginExecutor.Profile
 	inventory := pluginExecutorLaunchInventory(request, profile, request.InstanceID, "digest")
 	resource := &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-1"}
@@ -41,14 +49,14 @@ func TestLaunchCleanupWaitsForABusyClaimAndDestroysTheResource(t *testing.T) {
 // as the only holder of the resource handle. It hands the handle to the
 // environment cleanup instead of mutating the provider without a claim.
 func TestLaunchCleanupThatCannotRetainRetryInformationHandsTheResourceOff(t *testing.T) {
-	runtime, operations, _, err := launchCleanupRuntime(t, 1<<20, errors.New("claim held elsewhere"))
+	_, operations, store, err := launchCleanupRuntime(t, 1<<20, errors.New("claim held elsewhere"))
 	if operations.destroyRequest != nil {
 		t.Fatal("the launch destroyed a resource without holding a persisted claim")
 	}
 	if err == nil || !strings.Contains(err.Error(), "not recorded") {
 		t.Fatalf("error = %v, want the unrecorded resource to be reported", err)
 	}
-	if _, ok := runtime.unrecorded.Load("execution-plugin-1"); !ok {
+	if len(store.unrecorded) != 1 {
 		t.Fatal("the resource handle was dropped instead of handed to the environment cleanup")
 	}
 }

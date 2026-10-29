@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,10 +43,11 @@ func TestPluginExecutorPackagedRecovery(t *testing.T) {
 		ContractVersion: 1, EnvironmentId: "environment-1", OperationId: "operation-1", InputDigest: "input-digest-1",
 	}
 
+	checkpointHost := &acceptingCheckpointHost{}
 	startFixture := func() (*hcplugin.Client, *pluginsdk.RemotePlugin) {
 		client := hcplugin.NewClient(&hcplugin.ClientConfig{
 			HandshakeConfig:  pluginsdk.Handshake,
-			Plugins:          map[string]hcplugin.Plugin{pluginsdk.PluginMapKey: &pluginsdk.GRPCPlugin{}},
+			Plugins:          map[string]hcplugin.Plugin{pluginsdk.PluginMapKey: &pluginsdk.GRPCPlugin{Host: checkpointHost}},
 			AllowedProtocols: []hcplugin.Protocol{hcplugin.ProtocolGRPC},
 			AutoMTLS:         true,
 			Cmd:              fixtureCommand(binary, dataDir),
@@ -113,6 +115,38 @@ func TestPluginExecutorPackagedRecovery(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, destroyed.GetConfirmedAbsent())
+	require.Equal(t, []string{"cleanup_progress"}, checkpointHost.phases(), "the destroy checkpoints before it mutates")
+}
+
+// acceptingCheckpointHost stands in for the host side of a destroy under a
+// persisted cleanup claim: it accepts and records the provider's checkpoints.
+type acceptingCheckpointHost struct {
+	pluginsdk.Host
+	mu      sync.Mutex
+	checked []string
+}
+
+func (h *acceptingCheckpointHost) ExecutorProvider() pluginsdk.ExecutorProviderHostAPI { return h }
+
+func (h *acceptingCheckpointHost) CheckpointExecutorResource(_ context.Context, req *pluginsdk.CheckpointExecutorResourceRequest) (*pluginsdk.CheckpointExecutorResourceResponse, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.checked = append(h.checked, req.GetPhase())
+	return &pluginsdk.CheckpointExecutorResourceResponse{Accepted: true}, nil
+}
+
+func (h *acceptingCheckpointHost) ReportExecutorProgress(context.Context, *pluginsdk.ReportExecutorProgressRequest) (*pluginsdk.ReportExecutorProgressResponse, error) {
+	return &pluginsdk.ReportExecutorProgressResponse{Accepted: true}, nil
+}
+
+func (h *acceptingCheckpointHost) ReadExecutorRuntimeArtifact(context.Context, *pluginsdk.ReadExecutorRuntimeArtifactRequest, func(*pluginsdk.ExecutorRuntimeArtifactChunk) error) error {
+	return nil
+}
+
+func (h *acceptingCheckpointHost) phases() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.checked...)
 }
 
 func fixtureExecutorLeaseRequest(t *testing.T, ctx context.Context, dataDir string, lease *pluginsdk.ExecutorConnectionLease, value string) string {

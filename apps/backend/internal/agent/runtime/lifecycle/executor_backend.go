@@ -733,6 +733,10 @@ type ExecutorCreateRequest struct {
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
+	// RecordUnrecordedRuntimeInventory durably hands a provisioned resource to
+	// the environment cleanup when no inventory row could hold it. It does not
+	// depend on the environment claim.
+	RecordUnrecordedRuntimeInventory func(context.Context, map[string]interface{}) error
 	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
 	// values are transient and must never be copied to runtime metadata.
 	PluginExecutor *PluginExecutorLaunch
