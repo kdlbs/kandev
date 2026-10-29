@@ -36,13 +36,13 @@ func (s *Service) stepHistoryCleanup(ctx context.Context, r *record) (bool, erro
 		return true, nil
 	}
 	stats, err := s.opts.History.CompactOnce(ctx, r.Operation.Cutoff, historyCompactionBatch)
+	applyHistoryStats(r.Operation, stats, false)
 	if err != nil {
 		if s.opts.Log != nil {
 			s.opts.Log(ctx, "history compaction failed", err)
 		}
-		return false, err
+		return true, err
 	}
-	applyHistoryStats(r.Operation, stats, false)
 	if stats.Remaining == 0 && stats.ArchiveFailures == 0 {
 		r.Progress.HistoryDone = true
 	}

@@ -472,6 +472,9 @@ func (c *Coordinator) preserveTerminalRepositoryContent(
 	row.PreservationAttempts = receipt.Attempts
 	row.PreservationBytes = receipt.Bytes
 	row.PreservationReceipt = receipt.Receipt
+	if receipt.Source != "" {
+		row.ContentSource = receipt.Source
+	}
 	if !receipt.Complete && receipt.Cause != nil {
 		c.logger.Warn("turn change content preservation did not settle",
 			zap.String("change_set_id", changeSet.ID), zap.String("checkout_id", row.CheckoutID),

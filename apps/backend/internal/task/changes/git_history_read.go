@@ -225,8 +225,15 @@ func (s *GitHistoryStore) newHistoryDiffView(
 		return nil, nil, fmt.Errorf("%w: %v", ErrHistoryReadRetryable, err)
 	}
 	cleanup := func() { _ = os.RemoveAll(root) }
-	baseEnv := isolatedGitEnvironment()
-	if _, err := s.runGitAt(ctx, root, baseEnv, 1<<20, nil, "init", "-q"); err != nil {
+	if hashAlgorithm == "" {
+		hashAlgorithm = historyHashSHA1
+	}
+	baseEnv := isolatedGitEnvironmentWith(map[string]string{"GIT_DEFAULT_HASH": hashAlgorithm})
+	initArgs := []string{"init", "-q"}
+	if hashAlgorithm == historyHashSHA256 {
+		initArgs = append(initArgs, "--object-format=sha256")
+	}
+	if _, err := s.runGitAt(ctx, root, baseEnv, 1<<20, nil, initArgs...); err != nil {
 		cleanup()
 		return nil, nil, err
 	}

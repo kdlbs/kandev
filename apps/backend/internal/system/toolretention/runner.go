@@ -33,14 +33,14 @@ func (s *Service) stepCleanup(ctx context.Context, id string) error {
 	}
 	// History work owns its own transactions and Git I/O; run it before the
 	// settings write transaction so SQLite never spans external storage.
-	applied, err := s.stepHistoryCleanup(ctx, &before)
-	if err != nil {
-		return err
-	}
+	applied, historyErr := s.stepHistoryCleanup(ctx, &before)
 	if applied {
 		if err := s.storeScanProgress(ctx, before); err != nil {
 			return err
 		}
+	}
+	if historyErr != nil {
+		return historyErr
 	}
 	var changed []string
 	_, err = s.change(ctx, func(r *record, tx *sqlx.Tx) error {

@@ -65,11 +65,12 @@ type ArchiveReceipt struct {
 // GitHistoryStore owns backend-provided Git archives. One bare repository is
 // kept per durable repository identity, with distinct refs per turn/checkout.
 type GitHistoryStore struct {
-	root     string
-	now      func() time.Time
-	mu       sync.Mutex
-	keys     map[string]*sync.Mutex
-	maxBytes int64
+	root       string
+	now        func() time.Time
+	mu         sync.Mutex
+	keys       map[string]*sync.Mutex
+	capacityMu sync.Mutex
+	maxBytes   int64
 }
 
 func NewGitHistoryStore(root string, now func() time.Time) *GitHistoryStore {
@@ -115,6 +116,21 @@ func (s *GitHistoryStore) repositoryPath(sourceID string) string {
 
 // Import verifies and stores an accepted object export. It is idempotent for
 // the same endpoint pair: a verified archive is reused instead of duplicated.
+// ImportWithCapacity serializes installation-wide capacity admission with
+// import so concurrent repositories cannot overrun the bound.
+func (s *GitHistoryStore) ImportWithCapacity(
+	ctx context.Context,
+	repositoryID, checkoutID string,
+	archive *turnchanges.CheckpointArchive,
+) (ArchiveReceipt, error) {
+	s.capacityMu.Lock()
+	defer s.capacityMu.Unlock()
+	if !s.HasCapacity(ctx, int64(len(archive.Pack))) {
+		return ArchiveReceipt{}, fmt.Errorf("%w: installation archive capacity is exhausted", ErrHistoryContentUnavailable)
+	}
+	return s.Import(ctx, repositoryID, checkoutID, archive)
+}
+
 func (s *GitHistoryStore) Import(
 	ctx context.Context,
 	repositoryID, checkoutID string,
@@ -398,10 +414,33 @@ func (s *GitHistoryStore) DeleteRefs(ctx context.Context, receipt ArchiveReceipt
 	repoPath := s.repositoryPath(receipt.SourceID)
 	unlock := s.lockSource(receipt.SourceID)
 	defer unlock()
-	for _, ref := range []struct{ name, commit string }{
-		{receipt.StartRef, receipt.StartCommitOID},
-		{receipt.EndRef, receipt.EndCommitOID},
-	} {
+	return s.deleteRefsAt(ctx, repoPath, []historyRefExpectation{
+		{name: receipt.StartRef, commit: receipt.StartCommitOID},
+		{name: receipt.EndRef, commit: receipt.EndCommitOID},
+	})
+}
+
+// DeleteCommonRefs removes executor-owned checkpoint refs from a surviving
+// local common repository only when they still carry the accepted commits.
+func (s *GitHistoryStore) DeleteCommonRefs(ctx context.Context, gitDir string, refs ...historyRefExpectation) error {
+	if !s.Enabled() || gitDir == "" {
+		return nil
+	}
+	unlock := s.lockSource(filepath.Base(gitDir))
+	defer unlock()
+	return s.deleteRefsAt(ctx, gitDir, refs)
+}
+
+type historyRefExpectation struct {
+	name   string
+	commit string
+}
+
+func (s *GitHistoryStore) deleteRefsAt(ctx context.Context, repoPath string, refs []historyRefExpectation) error {
+	for _, ref := range refs {
+		if ref.name == "" || ref.commit == "" {
+			continue
+		}
 		current, err := s.readRef(ctx, repoPath, ref.name)
 		if err != nil {
 			if errors.Is(err, ErrHistoryContentUnavailable) {
@@ -773,4 +812,20 @@ func (s *GitHistoryStore) SourceObjects(ctx context.Context, repositoryID, check
 		return objects[:maxHistoryArchiveObjects]
 	}
 	return objects
+}
+
+// ExportPackAt repacks an accepted interval from a surviving common Git
+// directory for one retention backup.
+func (s *GitHistoryStore) ExportPackAt(
+	ctx context.Context, gitDir, startCommit, endCommit, startTree, endTree string,
+) ([]byte, []string, string, string, error) {
+	objects, err := s.archiveObjectClosure(ctx, gitDir, startTree, endTree, startCommit, endCommit)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	pack, err := s.archivePack(ctx, gitDir, objects)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	return pack, objects, startTree, endTree, nil
 }

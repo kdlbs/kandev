@@ -82,6 +82,7 @@ func (r *Repository) initTurnChangesSchema() error {
 			change_set_id TEXT NOT NULL DEFAULT '',
 			checkout_id TEXT NOT NULL DEFAULT '',
 			repository_id TEXT NOT NULL DEFAULT '',
+			source_git_dir TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL
 		)
 	`); err != nil {

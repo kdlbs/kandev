@@ -96,6 +96,8 @@ type PreservationReceipt struct {
 	Receipt string
 	// Deadline is the bounded recovery window for pending work.
 	Deadline *time.Time
+	// Source is the durable source selected by a successful attempt.
+	Source models.TurnChangeContentSource
 	// Cause is diagnostic only. It is never persisted or returned to clients.
 	Cause error
 }
@@ -180,12 +182,9 @@ func (s *ContentService) PreserveOnce(
 		if budgetErr == nil && taskBytes+int64(len(archive.Pack)) > MaxTaskHistoryArchiveBytes {
 			return s.settlePreservationFailure(row, attempts, ErrHistoryContentUnavailable)
 		}
-		if !s.history.HasCapacity(ctx, int64(len(archive.Pack))) {
-			return s.settlePreservationFailure(row, attempts, ErrHistoryContentUnavailable)
-		}
 	}
 	if err == nil {
-		receipt, importErr := s.history.Import(ctx, row.RepositoryID, row.CheckoutID, archive)
+		receipt, importErr := s.history.ImportWithCapacity(ctx, row.RepositoryID, row.CheckoutID, archive)
 		if importErr == nil {
 			return s.settlePreservationSuccess(row, receipt, attempts)
 		}
@@ -217,7 +216,7 @@ func (s *ContentService) settleCommonSource(
 		attempts, 0, "", complete); err != nil {
 		return PreservationReceipt{}, err
 	}
-	return PreservationReceipt{Complete: complete, Attempts: attempts, Reason: reason}, nil
+	return PreservationReceipt{Complete: complete, Attempts: attempts, Reason: reason, Source: models.TurnChangeSourceGitCommon}, nil
 }
 
 func (s *ContentService) preserveLegacy(
@@ -300,7 +299,7 @@ func (s *ContentService) settlePreservationSuccess(
 	}
 	return PreservationReceipt{
 		Complete: complete, Bytes: receipt.StoredBytes, Attempts: attempts,
-		Receipt: string(encoded), Reason: reason,
+		Receipt: string(encoded), Reason: reason, Source: models.TurnChangeSourceGitArchive,
 	}, nil
 }
 
@@ -548,8 +547,17 @@ func (s *ContentService) readCommon(
 	source *models.TurnFileContentSource,
 	variant models.TurnChangeContentVariant,
 ) (*models.TurnChangeContentPayload, error) {
-	if !s.history.Enabled() || source.Repository.SourceGitDir == "" {
+	if !s.history.Enabled() {
 		return nil, fmt.Errorf("%w: common Git history source is unavailable", ErrHistoryReadRetryable)
+	}
+	commonDir := source.Repository.SourceGitDir
+	if !s.history.CommonSourceUsable(ctx, commonDir, *source.Repository) {
+		// A restored backup may have moved a common interval into backend
+		// storage; read the verified archive fallback before reporting loss.
+		commonDir = s.history.repositoryPath(s.history.sourceKey(source.Repository.RepositoryID, source.Repository.CheckoutID))
+		if !s.history.CommonSourceUsable(ctx, commonDir, *source.Repository) {
+			return nil, fmt.Errorf("%w: common Git history source is unavailable", ErrHistoryContentUnavailable)
+		}
 	}
 	archive := turnchanges.CheckpointArchive{
 		HashAlgorithm: source.Repository.HashAlgorithm,
@@ -563,13 +571,13 @@ func (s *ContentService) readCommon(
 	var err error
 	switch variant {
 	case models.TurnChangeContentCanonicalPatch:
-		payload.Content, err = s.history.readPatchAt(ctx, source.Repository.SourceGitDir, archive, file, false)
+		payload.Content, err = s.history.readPatchAt(ctx, commonDir, archive, file, false)
 	case models.TurnChangeContentFilteredPatch:
-		payload.Content, err = s.history.readPatchAt(ctx, source.Repository.SourceGitDir, archive, file, true)
+		payload.Content, err = s.history.readPatchAt(ctx, commonDir, archive, file, true)
 	case models.TurnChangeContentOldRendering:
-		payload.Content, err = s.history.ReadBlobAt(ctx, source.Repository.SourceGitDir, source.File.OldBlobOID, source.Repository.HashAlgorithm)
+		payload.Content, err = s.history.ReadBlobAt(ctx, commonDir, source.File.OldBlobOID, source.Repository.HashAlgorithm)
 	case models.TurnChangeContentNewRendering:
-		payload.Content, err = s.history.ReadBlobAt(ctx, source.Repository.SourceGitDir, source.File.NewBlobOID, source.Repository.HashAlgorithm)
+		payload.Content, err = s.history.ReadBlobAt(ctx, commonDir, source.File.NewBlobOID, source.Repository.HashAlgorithm)
 	default:
 		return nil, repoerrors.ErrTurnChangeContentNotFound
 	}

@@ -312,6 +312,7 @@ type TurnHistoryCleanupIntent struct {
 	ChangeSetID    string    `db:"change_set_id" json:"change_set_id"`
 	CheckoutID     string    `db:"checkout_id" json:"checkout_id"`
 	RepositoryID   string    `db:"repository_id" json:"repository_id"`
+	SourceGitDir   string    `db:"source_git_dir" json:"source_git_dir,omitempty"`
 	CreatedAt      time.Time `db:"created_at" json:"created_at"`
 }
 

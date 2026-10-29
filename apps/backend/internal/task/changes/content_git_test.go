@@ -244,12 +244,16 @@ func TestTurnGitHistoryUsesSurvivingCommonSourceWithoutArchiving(t *testing.T) {
 		t.Fatalf("preservation source = %q", repository.preservationSource)
 	}
 	source := &models.TurnFileContentSource{
-		ChangeSet:  &models.TurnChangeSet{ID: row.TurnChangeSetID, Availability: models.TurnChangeAvailabilityReady},
-		Repository: &models.TurnRepositoryChangeSet{ContentSource: models.TurnChangeSourceGitCommon, SourceGitDir: filepath.Join(repoDir, ".git"), HashAlgorithm: "sha1", StartTreeOID: startTree, EndTreeOID: endTree},
-		File:       &models.TurnFileChange{ID: uuid.NewString(), PathBytes: []byte("src/app.txt"), ContentAvailability: models.TurnChangeAvailabilityReady},
+		ChangeSet: &models.TurnChangeSet{ID: row.TurnChangeSetID, Availability: models.TurnChangeAvailabilityReady},
+		Repository: &models.TurnRepositoryChangeSet{
+			ContentSource: models.TurnChangeSourceGitCommon, SourceGitDir: filepath.Join(repoDir, ".git"),
+			HashAlgorithm: "sha1", StartCommitOID: archive.StartCommitOID, StartTreeOID: startTree,
+			EndCommitOID: archive.EndCommitOID, EndTreeOID: endTree,
+		},
+		File: &models.TurnFileChange{ID: uuid.NewString(), PathBytes: []byte("src/app.txt"), ContentAvailability: models.TurnChangeAvailabilityReady},
 	}
 	payload, err := service.readCommon(context.Background(), source, models.TurnChangeContentCanonicalPatch)
-	if err != nil || !strings.Contains(string(payload.Content), "+new") {
+	if err != nil || payload == nil || !strings.Contains(string(payload.Content), "+new") {
 		t.Fatalf("common-source read = %q, %v", payload.Content, err)
 	}
 	// A removed worktree leaves the common directory usable.
@@ -272,7 +276,8 @@ func TestTurnGitHistoryCommonSourceSurvivesLinkedWorktreeRemoval(t *testing.T) {
 		ChangeSet: &models.TurnChangeSet{ID: archive.ChangeSetID, Availability: models.TurnChangeAvailabilityReady},
 		Repository: &models.TurnRepositoryChangeSet{
 			ContentSource: models.TurnChangeSourceGitCommon, SourceGitDir: filepath.Join(repoDir, ".git"),
-			HashAlgorithm: "sha1", StartTreeOID: startTree, EndTreeOID: endTree,
+			HashAlgorithm: "sha1", StartCommitOID: archive.StartCommitOID, StartTreeOID: startTree,
+			EndCommitOID: archive.EndCommitOID, EndTreeOID: endTree,
 		},
 		File: &models.TurnFileChange{ID: uuid.NewString(), PathBytes: []byte("src/app.txt"), ContentAvailability: models.TurnChangeAvailabilityReady},
 	}
@@ -280,7 +285,7 @@ func TestTurnGitHistoryCommonSourceSurvivesLinkedWorktreeRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload, err := service.readCommon(context.Background(), source, models.TurnChangeContentCanonicalPatch)
-	if err != nil || !strings.Contains(string(payload.Content), "+new") {
+	if err != nil || payload == nil || !strings.Contains(string(payload.Content), "+new") {
 		t.Fatalf("read after linked worktree removal = %q, %v", payload.Content, err)
 	}
 }

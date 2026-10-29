@@ -433,7 +433,7 @@ func (r *Repository) ClearTurnRepositoryPreservationReceipt(ctx context.Context,
 		return repoerrors.ErrTurnChangeRelationship
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE turn_repository_changes SET preservation_receipt = '', updated_at = ? WHERE id = ?
+		UPDATE turn_repository_changes SET preservation_receipt = '', preservation_bytes = 0, updated_at = ? WHERE id = ?
 	`), time.Now().UTC(), repositoryChangeID)
 	if err != nil {
 		return err
@@ -475,8 +475,8 @@ func (r *Repository) ListTurnRepositoryPreservationReadyPage(
 			rc.preservation_bytes, rc.preservation_receipt, rc.preservation_deadline, rc.availability, rc.reason, rc.content_complete
 		FROM turn_repository_changes rc
 		JOIN turn_change_sets cs ON cs.id = rc.change_set_id
-		WHERE cs.availability <> 'expired' AND rc.content_source = 'git_archive'
-			AND rc.preservation_state = 'ready' AND rc.preservation_receipt <> ''
+		WHERE cs.availability <> 'expired' AND rc.content_source IN ('git_archive','git_common')
+			AND rc.preservation_state = 'ready'
 			AND rc.id > ?
 		ORDER BY rc.id
 		LIMIT ?
@@ -521,7 +521,7 @@ func (r *Repository) ListTurnPreservationJobs(ctx context.Context, limit int) ([
 	}
 	var rows []*models.TurnRepositoryChangeSet
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
-		SELECT rc.id, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.hash_algorithm,
+		SELECT rc.id, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.repository_subpath, rc.hash_algorithm,
 			rc.start_commit_oid, rc.start_tree_oid, rc.end_commit_oid, rc.end_tree_oid,
 			rc.source_git_dir, rc.content_source, rc.preservation_state, rc.preservation_reason, rc.preservation_attempts,
 			rc.preservation_bytes, rc.preservation_receipt, rc.preservation_deadline,
@@ -569,14 +569,14 @@ func (r *Repository) UpdateTurnChangeSetContentStatus(
 // task cascade removes the only row that names those refs.
 func (r *Repository) StageTurnHistoryCleanupForTask(ctx context.Context, tx *sqlx.Tx, taskID string) error {
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO turn_history_cleanup_intents(id, source_id, start_ref, end_ref, start_commit_oid, end_commit_oid, change_set_id, checkout_id, repository_id, created_at)
+		INSERT INTO turn_history_cleanup_intents(id, source_id, start_ref, end_ref, start_commit_oid, end_commit_oid, change_set_id, checkout_id, repository_id, source_git_dir, created_at)
 		SELECT `+r.cleanupIntentIDExpression()+`, CASE WHEN rc.repository_id <> '' THEN rc.repository_id ELSE rc.checkout_id END,
 			'refs/kandev/history/' || rc.change_set_id || '/' || rc.checkout_id || '/start',
 			'refs/kandev/history/' || rc.change_set_id || '/' || rc.checkout_id || '/end',
-			rc.start_commit_oid, rc.end_commit_oid, rc.change_set_id, rc.checkout_id, rc.repository_id, ?
+			rc.start_commit_oid, rc.end_commit_oid, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.source_git_dir, ?
 		FROM turn_repository_changes rc
 		JOIN turn_change_sets cs ON cs.id = rc.change_set_id
-		WHERE cs.task_id = ? AND rc.content_source = 'git_archive'
+		WHERE cs.task_id = ? AND rc.content_source IN ('git_archive','git_common')
 	`), time.Now().UTC(), taskID)
 	return err
 }
@@ -584,14 +584,14 @@ func (r *Repository) StageTurnHistoryCleanupForTask(ctx context.Context, tx *sql
 // StageTurnHistoryCleanupForSession persists intent for one deleted session.
 func (r *Repository) StageTurnHistoryCleanupForSession(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO turn_history_cleanup_intents(id, source_id, start_ref, end_ref, start_commit_oid, end_commit_oid, change_set_id, checkout_id, repository_id, created_at)
+		INSERT INTO turn_history_cleanup_intents(id, source_id, start_ref, end_ref, start_commit_oid, end_commit_oid, change_set_id, checkout_id, repository_id, source_git_dir, created_at)
 		SELECT `+r.cleanupIntentIDExpression()+`, CASE WHEN rc.repository_id <> '' THEN rc.repository_id ELSE rc.checkout_id END,
 			'refs/kandev/history/' || rc.change_set_id || '/' || rc.checkout_id || '/start',
 			'refs/kandev/history/' || rc.change_set_id || '/' || rc.checkout_id || '/end',
-			rc.start_commit_oid, rc.end_commit_oid, rc.change_set_id, rc.checkout_id, rc.repository_id, ?
+			rc.start_commit_oid, rc.end_commit_oid, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.source_git_dir, ?
 		FROM turn_repository_changes rc
 		JOIN turn_change_sets cs ON cs.id = rc.change_set_id
-		WHERE cs.session_id = ? AND rc.content_source = 'git_archive'
+		WHERE cs.session_id = ? AND rc.content_source IN ('git_archive','git_common')
 	`), time.Now().UTC(), sessionID)
 	return err
 }
@@ -604,7 +604,7 @@ func (r *Repository) ListTurnHistoryCleanupIntents(ctx context.Context, limit in
 	var intents []*models.TurnHistoryCleanupIntent
 	err := r.ro.SelectContext(ctx, &intents, r.ro.Rebind(`
 		SELECT id, source_id, start_ref, end_ref, start_commit_oid, end_commit_oid,
-			change_set_id, checkout_id, repository_id, created_at
+			change_set_id, checkout_id, repository_id, source_git_dir, created_at
 		FROM turn_history_cleanup_intents ORDER BY created_at, id LIMIT ?
 	`), limit)
 	return intents, err
@@ -630,7 +630,39 @@ func (r *Repository) TaskPreservationBytes(ctx context.Context, changeSetID stri
 		SELECT COALESCE(SUM(rc.preservation_bytes), 0)
 		FROM turn_repository_changes rc
 		JOIN turn_change_sets cs ON cs.id = rc.change_set_id
-		WHERE cs.task_id = (SELECT task_id FROM turn_change_sets WHERE id = ?)
+		WHERE cs.availability <> 'expired'
+			AND cs.task_id = (SELECT task_id FROM turn_change_sets WHERE id = ?)
 	`), changeSetID)
 	return bytes, err
+}
+
+// ListExpiredCommonHistory returns expired local common-source intervals whose
+// executor refs still need removal.
+func (r *Repository) ListExpiredCommonHistory(ctx context.Context, limit int) ([]*models.TurnRepositoryChangeSet, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var rows []*models.TurnRepositoryChangeSet
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT rc.id, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.hash_algorithm,
+			rc.start_commit_oid, rc.start_tree_oid, rc.end_commit_oid, rc.end_tree_oid,
+			rc.start_ref, rc.end_ref, rc.source_git_dir, rc.content_source, rc.preservation_state,
+			rc.preservation_reason, rc.preservation_attempts, rc.preservation_bytes, rc.preservation_receipt,
+			rc.preservation_deadline, rc.availability, rc.reason, rc.content_complete
+		FROM turn_repository_changes rc
+		JOIN turn_change_sets cs ON cs.id = rc.change_set_id
+		WHERE cs.availability = 'expired' AND rc.content_source = 'git_common' AND rc.source_git_dir <> ''
+		ORDER BY cs.updated_at, rc.id LIMIT ?
+	`), limit)
+	return rows, err
+}
+
+func (r *Repository) ClearTurnRepositoryCommonCleanup(ctx context.Context, repositoryChangeID string) error {
+	if repositoryChangeID == "" {
+		return repoerrors.ErrTurnChangeRelationship
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE turn_repository_changes SET source_git_dir = '', cleanup_pending = FALSE, updated_at = ? WHERE id = ?
+	`), time.Now().UTC(), repositoryChangeID)
+	return err
 }

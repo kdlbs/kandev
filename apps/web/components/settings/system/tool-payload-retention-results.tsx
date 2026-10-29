@@ -109,19 +109,28 @@ function HistoryDetails({ operation }: { operation: ToolPayloadOperation }) {
   const { t } = useTranslation();
   const snapshots = operation.history_snapshots ?? 0;
   const historyTasks = operation.history_tasks ?? 0;
-  if (snapshots === 0 && historyTasks === 0) return null;
+  const expired = operation.expired_change_sets ?? 0;
+  const refsDeleted = operation.deleted_archive_refs ?? 0;
+  const retrying = operation.archive_failures ?? 0;
+  if (
+    snapshots === 0 &&
+    historyTasks === 0 &&
+    expired === 0 &&
+    refsDeleted === 0 &&
+    retrying === 0
+  ) {
+    return null;
+  }
   return (
     <>
-      <p>{t("system:toolPayload.historyProgress", { snapshots, tasks: historyTasks })}</p>
+      {(snapshots > 0 || historyTasks > 0) && (
+        <p>{t("system:toolPayload.historyProgress", { snapshots, tasks: historyTasks })}</p>
+      )}
       <HistoryByteLines
         sqlBytes={operation.history_sql_bytes ?? 0}
         gitBytes={operation.history_git_bytes ?? 0}
       />
-      <HistoryCleanupLines
-        expired={operation.expired_change_sets ?? 0}
-        refsDeleted={operation.deleted_archive_refs ?? 0}
-        retrying={operation.archive_failures ?? 0}
-      />
+      <HistoryCleanupLines expired={expired} refsDeleted={refsDeleted} retrying={retrying} />
     </>
   );
 }

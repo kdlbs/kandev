@@ -32,6 +32,8 @@ type HistoryRepository interface {
 	ListTurnRepositoryPreservationReadyPage(ctx context.Context, afterID string, limit int) ([]*models.TurnRepositoryChangeSet, string, error)
 	ClearTurnRepositoryPreservationReceipt(ctx context.Context, repositoryChangeID string) error
 	ListTurnHistoryCleanupIntents(ctx context.Context, limit int) ([]*models.TurnHistoryCleanupIntent, error)
+	ListExpiredCommonHistory(ctx context.Context, limit int) ([]*models.TurnRepositoryChangeSet, error)
+	ClearTurnRepositoryCommonCleanup(ctx context.Context, repositoryChangeID string) error
 	DeleteTurnHistoryCleanupIntent(ctx context.Context, id string) error
 }
 
@@ -111,9 +113,12 @@ func (s *HistoryService) CompactOnce(
 		return result, errors.New("history compaction is not configured")
 	}
 	now := s.now().UTC()
-	candidates, _, err := s.repository.ListTurnHistoryRetentionCandidatesPage(ctx, cutoff, now, "", limit)
+	candidates, err := s.collectCandidateBatch(ctx, cutoff, now, limit)
 	if err != nil {
 		return result, err
+	}
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
 	}
 	ids := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -144,13 +149,38 @@ func (s *HistoryService) CompactOnce(
 	return result, nil
 }
 
+func (s *HistoryService) collectCandidateBatch(
+	ctx context.Context, cutoff, now time.Time, limit int,
+) ([]*models.TurnHistoryRetentionCandidate, error) {
+	after := ""
+	for page := 0; page < 50; page++ {
+		rows, next, err := s.repository.ListTurnHistoryRetentionCandidatesPage(ctx, cutoff, now, after, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) > 0 {
+			return rows, nil
+		}
+		if next == "" || next == after {
+			return nil, nil
+		}
+		after = next
+	}
+	return nil, nil
+}
+
+func (s *HistoryService) hasHistoryCandidates(ctx context.Context, cutoff, now time.Time) (bool, error) {
+	rows, err := s.collectCandidateBatch(ctx, cutoff, now, 1)
+	return len(rows) > 0, err
+}
+
 func (s *HistoryService) remainingWork(ctx context.Context, cutoff, now time.Time) (int64, error) {
 	remaining := int64(0)
-	candidates, _, err := s.repository.ListTurnHistoryRetentionCandidatesPage(ctx, cutoff, now, "", 1)
+	present, err := s.hasHistoryCandidates(ctx, cutoff, now)
 	if err != nil {
 		return 0, err
 	}
-	if len(candidates) > 0 {
+	if present {
 		remaining = 1
 	}
 	cleanups, err := s.repository.ListExpiredTurnHistoryRepositories(ctx, 1)
@@ -167,6 +197,13 @@ func (s *HistoryService) remainingWork(ctx context.Context, cutoff, now time.Tim
 	if len(intents) > 0 {
 		remaining = 1
 	}
+	common, err := s.repository.ListExpiredCommonHistory(ctx, 1)
+	if err != nil {
+		return 0, err
+	}
+	if len(common) > 0 {
+		remaining = 1
+	}
 	return remaining, nil
 }
 
@@ -177,11 +214,11 @@ func (s *HistoryService) HasWork(ctx context.Context, cutoff time.Time) (bool, e
 		return false, errors.New("history compaction is not configured")
 	}
 	now := s.now().UTC()
-	candidates, err := s.repository.ListTurnHistoryRetentionCandidates(ctx, cutoff, now, 1)
+	present, err := s.hasHistoryCandidates(ctx, cutoff, now)
 	if err != nil {
 		return false, err
 	}
-	if len(candidates) > 0 {
+	if present {
 		return true, nil
 	}
 	cleanups, err := s.repository.ListExpiredTurnHistoryRepositories(ctx, 1)
@@ -195,7 +232,14 @@ func (s *HistoryService) HasWork(ctx context.Context, cutoff time.Time) (bool, e
 	if err != nil {
 		return false, err
 	}
-	return len(intents) > 0, nil
+	if len(intents) > 0 {
+		return true, nil
+	}
+	common, err := s.repository.ListExpiredCommonHistory(ctx, 1)
+	if err != nil {
+		return false, err
+	}
+	return len(common) > 0, nil
 }
 
 func (s *HistoryService) cleanupOwnedRefs(ctx context.Context, result *HistoryCleanupResult) error {
@@ -205,8 +249,12 @@ func (s *HistoryService) cleanupOwnedRefs(ctx context.Context, result *HistoryCl
 	if err := s.cleanupIndependentIntents(ctx, result); err != nil {
 		return err
 	}
+	if err := s.cleanupCommonRefs(ctx, result); err != nil {
+		return err
+	}
 	var failures []error
 	sourceIDs := make(map[string]struct{})
+	clearIDs := make([]string, 0)
 	for page := 0; page < 50; page++ {
 		rows, err := s.repository.ListExpiredTurnHistoryRepositories(ctx, 100)
 		if err != nil {
@@ -215,13 +263,22 @@ func (s *HistoryService) cleanupOwnedRefs(ctx context.Context, result *HistoryCl
 		if len(rows) == 0 {
 			break
 		}
-		progress, pageFailures := s.cleanupExpiredRefPage(ctx, rows, result, sourceIDs)
+		progress, pageFailures, pageClearIDs := s.cleanupExpiredRefPage(ctx, rows, result, sourceIDs)
 		failures = append(failures, pageFailures...)
+		clearIDs = append(clearIDs, pageClearIDs...)
 		if progress == 0 {
 			break
 		}
 	}
-	s.reclaimExpiredSources(ctx, result, sourceIDs, &failures)
+	if reclaimErr := s.reclaimExpiredSources(ctx, result, sourceIDs); reclaimErr != nil {
+		return errors.Join(append(failures, reclaimErr)...)
+	}
+	for _, id := range clearIDs {
+		if err := s.repository.ClearTurnRepositoryPreservationReceipt(ctx, id); err != nil {
+			failures = append(failures, err)
+			result.ArchiveFailures++
+		}
+	}
 	return errors.Join(failures...)
 }
 
@@ -230,9 +287,10 @@ func (s *HistoryService) cleanupExpiredRefPage(
 	rows []*models.TurnRepositoryChangeSet,
 	result *HistoryCleanupResult,
 	sourceIDs map[string]struct{},
-) (int, []error) {
+) (int, []error, []string) {
 	progress := 0
 	var failures []error
+	clearIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
 			continue
@@ -251,25 +309,20 @@ func (s *HistoryService) cleanupExpiredRefPage(
 				continue
 			}
 		}
-		if clearErr := s.repository.ClearTurnRepositoryPreservationReceipt(ctx, row.ID); clearErr != nil {
-			failures = append(failures, clearErr)
-			result.ArchiveFailures++
-			continue
-		}
 		result.DeletedArchiveRefs++
 		progress++
+		clearIDs = append(clearIDs, row.ID)
 	}
-	return progress, failures
+	return progress, failures, clearIDs
 }
 
 func (s *HistoryService) reclaimExpiredSources(
 	ctx context.Context,
 	result *HistoryCleanupResult,
 	sourceIDs map[string]struct{},
-	failures *[]error,
-) {
+) error {
 	if len(sourceIDs) == 0 {
-		return
+		return nil
 	}
 	ids := make([]string, 0, len(sourceIDs))
 	for id := range sourceIDs {
@@ -278,50 +331,30 @@ func (s *HistoryService) reclaimExpiredSources(
 	freed, err := s.store.Reclaim(ctx, ids)
 	result.ReclaimedBytes += freed
 	if err != nil {
-		*failures = append(*failures, err)
 		result.ArchiveFailures++
 	}
+	return err
 }
 
-func (s *HistoryService) cleanupIndependentIntents(ctx context.Context, result *HistoryCleanupResult) error {
-	sourceIDs := make(map[string]struct{})
-	defer func() {
-		if len(sourceIDs) == 0 {
-			return
-		}
-		ids := make([]string, 0, len(sourceIDs))
-		for id := range sourceIDs {
-			ids = append(ids, id)
-		}
-		freed, err := s.store.Reclaim(ctx, ids)
-		result.ReclaimedBytes += freed
-		if err != nil {
-			result.ArchiveFailures++
-		}
-	}()
+func (s *HistoryService) cleanupCommonRefs(ctx context.Context, result *HistoryCleanupResult) error {
 	for page := 0; page < 50; page++ {
-		intents, err := s.repository.ListTurnHistoryCleanupIntents(ctx, 100)
-		if err != nil {
+		rows, err := s.repository.ListExpiredCommonHistory(ctx, 100)
+		if err != nil || len(rows) == 0 {
 			return err
 		}
-		if len(intents) == 0 {
-			return nil
-		}
 		progress := 0
-		for _, intent := range intents {
-			if intent == nil {
+		for _, row := range rows {
+			if row == nil {
 				continue
 			}
-			receipt := ArchiveReceipt{
-				SourceID: intent.SourceID, StartRef: intent.StartRef, EndRef: intent.EndRef,
-				StartCommitOID: intent.StartCommitOID, EndCommitOID: intent.EndCommitOID,
-			}
-			sourceIDs[intent.SourceID] = struct{}{}
-			if deleteErr := s.store.DeleteRefs(ctx, receipt); deleteErr != nil && !errors.Is(deleteErr, ErrHistoryContentUnavailable) {
+			deleteErr := s.store.DeleteCommonRefs(ctx, row.SourceGitDir,
+				historyRefExpectation{name: row.StartReachabilityRef, commit: row.StartCommitOID},
+				historyRefExpectation{name: row.EndReachabilityRef, commit: row.EndCommitOID})
+			if deleteErr != nil && !errors.Is(deleteErr, ErrHistoryContentUnavailable) {
 				result.ArchiveFailures++
 				continue
 			}
-			if deleteErr := s.repository.DeleteTurnHistoryCleanupIntent(ctx, intent.ID); deleteErr != nil {
+			if clearErr := s.repository.ClearTurnRepositoryCommonCleanup(ctx, row.ID); clearErr != nil {
 				result.ArchiveFailures++
 				continue
 			}
@@ -333,6 +366,59 @@ func (s *HistoryService) cleanupIndependentIntents(ctx context.Context, result *
 		}
 	}
 	return nil
+}
+
+func (s *HistoryService) cleanupIndependentIntents(ctx context.Context, result *HistoryCleanupResult) error {
+	sourceIDs := make(map[string]struct{})
+	clearIDs := make([]string, 0)
+	for page := 0; page < 50; page++ {
+		intents, err := s.repository.ListTurnHistoryCleanupIntents(ctx, 100)
+		if err != nil {
+			return err
+		}
+		if len(intents) == 0 {
+			break
+		}
+		progress := 0
+		for _, intent := range intents {
+			if intent == nil {
+				continue
+			}
+			var deleteErr error
+			if intent.SourceGitDir != "" {
+				deleteErr = s.store.DeleteCommonRefs(ctx, intent.SourceGitDir,
+					historyRefExpectation{name: intent.StartRef, commit: intent.StartCommitOID},
+					historyRefExpectation{name: intent.EndRef, commit: intent.EndCommitOID})
+			} else {
+				sourceIDs[intent.SourceID] = struct{}{}
+				deleteErr = s.store.DeleteRefs(ctx, ArchiveReceipt{
+					SourceID: intent.SourceID, StartRef: intent.StartRef, EndRef: intent.EndRef,
+					StartCommitOID: intent.StartCommitOID, EndCommitOID: intent.EndCommitOID,
+				})
+			}
+			if deleteErr != nil && !errors.Is(deleteErr, ErrHistoryContentUnavailable) {
+				result.ArchiveFailures++
+				continue
+			}
+			result.DeletedArchiveRefs++
+			progress++
+			clearIDs = append(clearIDs, intent.ID)
+		}
+		if progress == 0 {
+			break
+		}
+	}
+	if reclaimErr := s.reclaimExpiredSources(ctx, result, sourceIDs); reclaimErr != nil {
+		return reclaimErr
+	}
+	var failures []error
+	for _, id := range clearIDs {
+		if err := s.repository.DeleteTurnHistoryCleanupIntent(ctx, id); err != nil {
+			failures = append(failures, err)
+			result.ArchiveFailures++
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // VerifyPreservedRefs checks archive evidence for backup preparation.
@@ -371,6 +457,7 @@ type HistoryBackupSource struct {
 	ChangeSetID    string   `json:"change_set_id"`
 	CheckoutID     string   `json:"checkout_id"`
 	RepositoryID   string   `json:"repository_id"`
+	ContentSource  string   `json:"content_source"`
 	HashAlgorithm  string   `json:"hash_algorithm"`
 	StartCommitOID string   `json:"start_commit_oid"`
 	StartTreeOID   string   `json:"start_tree_oid"`
@@ -524,14 +611,17 @@ func snapshotHistoryInventory(ctx context.Context, snapshotPath string) ([]snaps
 			ChangeSetID         string `db:"change_set_id"`
 			CheckoutID          string `db:"checkout_id"`
 			RepositoryID        string `db:"repository_id"`
+			ContentSource       string `db:"content_source"`
+			SourceGitDir        string `db:"source_git_dir"`
 			PreservationReceipt string `db:"preservation_receipt"`
 		}
 		err := reader.SelectContext(ctx, &rows, `
-			SELECT rc.id, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.preservation_receipt
+			SELECT rc.id, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.content_source,
+				rc.source_git_dir, rc.preservation_receipt
 			FROM turn_repository_changes rc
 			JOIN turn_change_sets cs ON cs.id = rc.change_set_id
-			WHERE cs.availability <> 'expired' AND rc.content_source = 'git_archive'
-				AND rc.preservation_state = 'ready' AND rc.preservation_receipt <> '' AND rc.id > ?
+			WHERE cs.availability <> 'expired' AND rc.content_source IN ('git_archive','git_common')
+				AND rc.preservation_state = 'ready' AND rc.id > ?
 			ORDER BY rc.id LIMIT 500
 		`, after)
 		if err != nil {
@@ -542,7 +632,11 @@ func snapshotHistoryInventory(ctx context.Context, snapshotPath string) ([]snaps
 		}
 		for _, row := range rows {
 			source := HistoryBackupSource{ChangeSetID: row.ChangeSetID, CheckoutID: row.CheckoutID, RepositoryID: row.RepositoryID}
-			sources = append(sources, snapshotHistorySource{key: historySourceKey(source), receiptDigest: sha256Hex([]byte(row.PreservationReceipt))})
+			digest := sha256Hex([]byte(row.PreservationReceipt))
+			if row.ContentSource == string(models.TurnChangeSourceGitCommon) {
+				digest = sha256Hex([]byte("common:" + row.SourceGitDir))
+			}
+			sources = append(sources, snapshotHistorySource{key: historySourceKey(source), receiptDigest: digest})
 			after = row.ID
 		}
 		if len(rows) < 500 {
@@ -558,13 +652,28 @@ func isLegacySnapshotSchemaError(err error) bool {
 }
 
 func (s *HistoryService) publishBackupSource(ctx context.Context, stage string, row *models.TurnRepositoryChangeSet) (HistoryBackupSource, error) {
-	receipt, err := decodeArchiveReceipt(row.PreservationReceipt)
-	if err != nil {
-		return HistoryBackupSource{}, err
-	}
-	pack, objects, startTree, endTree, err := s.store.ExportPack(ctx, receipt)
-	if err != nil {
-		return HistoryBackupSource{}, err
+	var pack []byte
+	var objects []string
+	var startTree, endTree, receiptDigest string
+	if row.ContentSource == models.TurnChangeSourceGitCommon {
+		var exportErr error
+		pack, objects, startTree, endTree, exportErr = s.store.ExportPackAt(ctx, row.SourceGitDir,
+			row.StartCommitOID, row.EndCommitOID, row.StartTreeOID, row.EndTreeOID)
+		if exportErr != nil {
+			return HistoryBackupSource{}, exportErr
+		}
+		receiptDigest = sha256Hex([]byte("common:" + row.SourceGitDir))
+	} else {
+		receipt, err := decodeArchiveReceipt(row.PreservationReceipt)
+		if err != nil {
+			return HistoryBackupSource{}, err
+		}
+		var exportErr error
+		pack, objects, startTree, endTree, exportErr = s.store.ExportPack(ctx, receipt)
+		if exportErr != nil {
+			return HistoryBackupSource{}, exportErr
+		}
+		receiptDigest = sha256Hex([]byte(row.PreservationReceipt))
 	}
 	digest := sha256Hex(pack)
 	packFile := digest + ".pack"
@@ -572,10 +681,10 @@ func (s *HistoryService) publishBackupSource(ctx context.Context, stage string, 
 		return HistoryBackupSource{}, err
 	}
 	return HistoryBackupSource{
-		PackFile: packFile, PackSHA256: digest, ReceiptDigest: sha256Hex([]byte(row.PreservationReceipt)),
+		PackFile: packFile, PackSHA256: digest, ReceiptDigest: receiptDigest,
 		ObjectCount: int64(len(objects)), Bytes: int64(len(pack)),
 		ChangeSetID: row.TurnChangeSetID, CheckoutID: row.CheckoutID, RepositoryID: row.RepositoryID,
-		HashAlgorithm: row.HashAlgorithm, StartCommitOID: row.StartCommitOID, StartTreeOID: startTree,
+		ContentSource: string(row.ContentSource), HashAlgorithm: row.HashAlgorithm, StartCommitOID: row.StartCommitOID, StartTreeOID: startTree,
 		EndCommitOID: row.EndCommitOID, EndTreeOID: endTree, Objects: objects,
 	}, nil
 }

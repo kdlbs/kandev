@@ -448,6 +448,11 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(ctx context.Context, rows 
 		if row.PreservationState == models.TurnChangePreservationPending {
 			continue
 		}
+		// Common Git checkpoints are root commits. Keep their refs until the
+		// shared compaction owner explicitly expires the interval.
+		if row.ContentSource == models.TurnChangeSourceGitCommon {
+			continue
+		}
 		cleanupFailed := false
 		for _, endpoint := range []struct {
 			boundary turnchanges.CheckpointBoundary

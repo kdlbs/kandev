@@ -370,7 +370,8 @@ func writeHistoryBackupSnapshot(t *testing.T, path string, rows ...*models.TurnR
 	for _, statement := range []string{
 		`CREATE TABLE turn_change_sets(id TEXT PRIMARY KEY, availability TEXT NOT NULL)`,
 		`CREATE TABLE turn_repository_changes(id TEXT PRIMARY KEY, change_set_id TEXT NOT NULL, checkout_id TEXT NOT NULL,
-			repository_id TEXT NOT NULL, content_source TEXT NOT NULL, preservation_state TEXT NOT NULL, preservation_receipt TEXT NOT NULL)`,
+			repository_id TEXT NOT NULL, content_source TEXT NOT NULL, source_git_dir TEXT NOT NULL DEFAULT '',
+			preservation_state TEXT NOT NULL, preservation_receipt TEXT NOT NULL)`,
 	} {
 		if _, err := database.Exec(statement); err != nil {
 			t.Fatal(err)
@@ -384,9 +385,10 @@ func writeHistoryBackupSnapshot(t *testing.T, path string, rows ...*models.TurnR
 		if _, err := database.Exec(`INSERT OR IGNORE INTO turn_change_sets(id, availability) VALUES(?, 'ready')`, changeSetID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.Exec(`INSERT INTO turn_repository_changes(id, change_set_id, checkout_id, repository_id, content_source, preservation_state, preservation_receipt)
-			VALUES(?, ?, ?, ?, ?, ?, ?)`, row.ID+string(rune(index)), changeSetID, row.CheckoutID, row.RepositoryID,
-			models.TurnChangeSourceGitArchive, models.TurnChangePreservationReady, row.PreservationReceipt); err != nil {
+		if _, err := database.Exec(`INSERT INTO turn_repository_changes(id, change_set_id, checkout_id, repository_id,
+			content_source, source_git_dir, preservation_state, preservation_receipt)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, row.ID+string(rune(index)), changeSetID, row.CheckoutID, row.RepositoryID,
+			row.ContentSource, row.SourceGitDir, models.TurnChangePreservationReady, row.PreservationReceipt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -465,5 +467,71 @@ func TestHistoryCompactionBackupRejectsTruncatedManifest(t *testing.T) {
 	}
 	if err := service.VerifyRetentionBackup(context.Background(), snapshotPath, digest); err == nil {
 		t.Fatal("truncated checkpoint manifest passed verification")
+	}
+}
+
+func (f *fakeHistoryRepository) ListExpiredCommonHistory(context.Context, int) ([]*models.TurnRepositoryChangeSet, error) {
+	return nil, nil
+}
+
+func (f *fakeHistoryRepository) ClearTurnRepositoryCommonCleanup(context.Context, string) error {
+	return nil
+}
+
+func (f *batchHistoryRepository) ListExpiredCommonHistory(context.Context, int) ([]*models.TurnRepositoryChangeSet, error) {
+	return nil, nil
+}
+
+func (f *batchHistoryRepository) ClearTurnRepositoryCommonCleanup(context.Context, string) error {
+	return nil
+}
+
+func (f *refCleanupHistoryRepository) ListExpiredCommonHistory(context.Context, int) ([]*models.TurnRepositoryChangeSet, error) {
+	return nil, nil
+}
+
+func (f *refCleanupHistoryRepository) ClearTurnRepositoryCommonCleanup(context.Context, string) error {
+	return nil
+}
+
+func TestHistoryCompactionBackupRestoresCommonSourceAfterRepositoryLoss(t *testing.T) {
+	archive, repoDir, startTree, endTree := buildTurnArchiveFixture(t)
+	store := NewGitHistoryStore(t.TempDir(), nil)
+	row := &models.TurnRepositoryChangeSet{
+		ID: uuid.NewString(), TurnChangeSetID: archive.ChangeSetID, CheckoutID: archive.CheckoutID,
+		RepositoryID: "repo-common-backup", HashAlgorithm: "sha1", SourceGitDir: filepath.Join(repoDir, ".git"),
+		StartCommitOID: archive.StartCommitOID, StartTreeOID: startTree,
+		EndCommitOID: archive.EndCommitOID, EndTreeOID: endTree,
+		ContentSource: models.TurnChangeSourceGitCommon, PreservationState: models.TurnChangePreservationReady,
+	}
+	service := NewHistoryService(&fakeHistoryRepository{preserved: []*models.TurnRepositoryChangeSet{row}}, store, nil)
+	snapshotPath := filepath.Join(t.TempDir(), "manual-common.db")
+	writeHistoryBackupSnapshot(t, snapshotPath, row)
+	digest, _ := sha256File(snapshotPath)
+	if err := service.PublishRetentionBackup(context.Background(), snapshotPath, digest); err != nil {
+		t.Fatalf("publish common backup: %v", err)
+	}
+	if err := service.VerifyRetentionBackup(context.Background(), snapshotPath, digest); err != nil {
+		t.Fatalf("verify common backup: %v", err)
+	}
+	if err := os.RemoveAll(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RestoreRetentionBackup(context.Background(), snapshotPath); err != nil {
+		t.Fatalf("restore common backup: %v", err)
+	}
+	source := &models.TurnFileContentSource{
+		ChangeSet: &models.TurnChangeSet{ID: row.TurnChangeSetID, Availability: models.TurnChangeAvailabilityReady},
+		Repository: func() *models.TurnRepositoryChangeSet {
+			copy := *row
+			return &copy
+		}(),
+		File: &models.TurnFileChange{ID: uuid.NewString(), PathBytes: []byte("src/app.txt"), ContentAvailability: models.TurnChangeAvailabilityReady},
+	}
+	content := NewContentService(&fakeContentRepository{}, nil)
+	content.SetHistoryStore(store)
+	payload, err := content.readCommon(context.Background(), source, models.TurnChangeContentCanonicalPatch)
+	if err != nil || payload == nil || !strings.Contains(string(payload.Content), "+new") {
+		t.Fatalf("restored common read = %+v, %v", payload, err)
 	}
 }
