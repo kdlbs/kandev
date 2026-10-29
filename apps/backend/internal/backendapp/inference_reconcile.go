@@ -234,11 +234,18 @@ func (b *sharedInferenceConsumer) ackInferenceObservations(ctx context.Context, 
 		if _, held := bindings[key]; held || !observed.status.Retained {
 			continue
 		}
-		prior, owned := original[key]
-		if !owned || !matchesInferenceProof(prior, &observed.status) {
+		status := observed.status
+		if definitelySettledInference(&status) {
+			// Settled tokens whose binding was already removed still need their ACK
+			// retried. They are not replayable and belong to this live instance.
+			_, _ = observed.ref.Client.ReleaseInferenceAttempt(ctx, status.AttemptID)
 			continue
 		}
-		_, _ = observed.ref.Client.ReleaseInferenceAttempt(ctx, observed.status.AttemptID)
+		prior, owned := original[key]
+		if !owned || !matchesInferenceProof(prior, &status) {
+			continue
+		}
+		_, _ = observed.ref.Client.ReleaseInferenceAttempt(ctx, status.AttemptID)
 	}
 }
 
