@@ -97,6 +97,9 @@ All short IDs use the `AC-TASKS-REMOVAL-NAVIGATION` prefix.
 - `use-task-removal-completed-removals.test.ts`: an independent archive, deletion,
   or delayed session reply that fully settles before the stale candidate reply
   arrives never becomes the destination (001.6).
+- `use-task-removal-cascade-ancestry.test.ts`: a cascade removal observed during
+  another archive's selection keeps its descendants out of the destination,
+  including after release and immediately before the final switch (001.6).
 - `task-removal-candidates.test.ts`, `use-task-removal.test.ts` and
   `use-task-removal-sidebar-fallback.test.ts`: retain recent-use order, authoritative
   liveness, bounded fallback pages, cascade ancestry, and a candidate that becomes
@@ -149,6 +152,12 @@ interaction profiles, not a controlled CPU comparison.
   failed all three cases with `expected 'task-b' to be 'task-c'`, because an
   independent archive or deletion that fully settled during the delayed read was
   selected. GREEN after the selection attempt retains observed removals.
+- RED before the cascade-ancestry correction:
+  `(cd apps/web && pnpm exec vitest run hooks/use-task-removal-cascade-ancestry.test.ts)`
+  failed all four cases with `expected 'task-child' to be 'task-cached-candidate'`,
+  because a server-page descendant of a cascade removal was selected. GREEN after
+  cascade coverage is retained and candidate ancestry is checked immediately
+  before the switch.
 - Permanent regression names:
   `does not select another independently pending archive after a delayed candidate read`,
   `does not select another independently pending archive after a delayed session load`,
@@ -158,7 +167,7 @@ interaction profiles, not a controlled CPU comparison.
 
 - Targeted suites:
   `(cd apps/web && pnpm exec vitest run lib/state/task-removal.test.ts hooks/use-task-removal.test.ts hooks/use-task-removal-coordinator.test.ts hooks/use-task-removal-completed-removals.test.ts hooks/task-removal-candidates.test.ts hooks/use-task-removal-sidebar-fallback.test.ts hooks/use-task-menu-actions.test.ts hooks/use-task-actions.test.ts components/task/task-session-sidebar-archive-actions.test.tsx components/task/mobile/session-task-switcher-sheet-archive-actions.test.ts components/task/task-item-archive-pending.test.tsx components/task/task-switcher-row-render-identity.test.tsx components/task/task-switcher-context-menu.test.tsx components/task/task-management-surface.test.tsx)`:
-  14 files and 121 tests passed.
+  15 files and 125 tests passed.
 - Supporting suites (task commands, mobile sheet, sidebar rename ownership,
   task switcher, context-menu variants): 18 files and 149 tests passed.
 - `(cd apps/web && pnpm exec tsc --noEmit)`: clean.

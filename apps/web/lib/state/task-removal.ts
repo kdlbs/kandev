@@ -19,6 +19,8 @@ export type TaskRemovalOperation = {
   requestIds: string[];
   outcomesByTaskId: Record<string, TaskRemovalOutcome>;
   departure: TaskRemovalDeparture | null;
+  /** True when the accepted request also covers the task's cached descendants. */
+  cascade?: boolean;
 };
 
 export type TaskRemovalState = {
@@ -34,6 +36,7 @@ export type BeginTaskRemovalInput = {
   taskIds: string[];
   requestIds: string[];
   departure: TaskRemovalDeparture | null;
+  cascade?: boolean;
 };
 
 export function createTaskRemovalState(): TaskRemovalState {
@@ -68,6 +71,7 @@ export function beginTaskRemoval(
     requestIds,
     outcomesByTaskId,
     departure: input.departure,
+    cascade: input.cascade === true,
   };
 
   const pendingTokenByTaskId = { ...state.pendingTokenByTaskId };
@@ -159,6 +163,24 @@ export function pendingTaskRemovalTaskIds(
     if (pendingTaskRemovalAction(state, taskId, workspaceId) !== null) pending.add(taskId);
   }
   return pending;
+}
+
+/**
+ * Task ids captured by accepted cascade removals. Their descendants may not
+ * have their own token when they were absent from cached boards, so ancestry
+ * checks use this coverage to keep a server-page child out of the destination.
+ */
+export function cascadeTaskRemovalTaskIds(
+  state: TaskRemovalState | undefined,
+  workspaceId: string | null,
+): Set<string> {
+  const covered = new Set<string>();
+  if (!state) return covered;
+  for (const operation of Object.values(state.operationsByToken)) {
+    if (operation.workspaceId !== workspaceId || operation.cascade !== true) continue;
+    for (const taskId of operation.taskIds) covered.add(taskId);
+  }
+  return covered;
 }
 
 export function taskRemovalCoversTask(state: TaskRemovalState, taskId: string): boolean {

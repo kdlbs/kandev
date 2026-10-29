@@ -155,8 +155,14 @@ Done on 2026-10-29.
   attempt even after its token is released, so a delayed liveness or session
   reply cannot resurrect an already removed task. The observation reuses the
   store's removal transitions and is disposed when the attempt settles.
+- Cascade removals record their captured task ids on the accepted operation. The
+  selection attempt keeps that coverage for its lifetime, validates candidate
+  ancestry against it during selection and again immediately before the switch,
+  and therefore rejects a descendant that appears only in the server-page
+  fallback even when the descendant has no token of its own.
 - Added `hooks/task-removal-candidates.test.ts`,
   `hooks/use-task-removal-completed-removals.test.ts`,
+  `hooks/use-task-removal-cascade-ancestry.test.ts`,
   `components/task/task-session-sidebar-archive-actions.test.tsx`, and a row-menu
   archive boundary test. The completed-removal suite awaits an independent
   archive, deletion, and delayed session reply to completion before delivering
@@ -180,6 +186,10 @@ Verification:
   `expected 'task-b' to be 'task-c'`. They pass after the attempt retains every
   observed removal, including a completed archive, deletion, and delayed session
   reply.
+- RED before the cascade-ancestry fix: `(cd apps/web && pnpm exec vitest run
+  hooks/use-task-removal-cascade-ancestry.test.ts)` failed all four cases with
+  `expected 'task-child' to be 'task-cached-candidate'`. They pass after cascade
+  coverage is retained and checked during selection and before the switch.
 - `(cd apps/web && pnpm exec vitest run lib/state/task-removal.test.ts
   hooks/use-task-removal.test.ts hooks/use-task-removal-coordinator.test.ts
   hooks/use-task-removal-completed-removals.test.ts hooks/task-removal-candidates.test.ts
@@ -190,7 +200,7 @@ Verification:
   components/task/task-switcher-row-render-identity.test.tsx
   components/task/task-switcher-context-menu.test.tsx
   components/task/task-management-surface.test.tsx)`:
-  14 files and 121 tests passed.
+  15 files and 125 tests passed.
 - `(cd apps/web && pnpm exec tsc --noEmit)`: clean.
 - `(cd apps/web && pnpm exec eslint <changed files>)`: clean, no warnings.
 - Desktop archive/redirect/delete/Threads specs: 14 tests passed.

@@ -42,7 +42,7 @@ export async function taskIsLive(taskId: string): Promise<boolean> {
   }
 }
 
-async function taskHasSafeRemovalAncestry(
+export async function taskHasSafeRemovalAncestry(
   taskId: string,
   excludedTaskIds: ReadonlySet<string>,
   workspaceId?: string | null,
@@ -87,6 +87,8 @@ export async function selectNextTaskAfterRemoval(
     workspaceId?: string | null;
     validateTaskAncestry?: boolean;
     isTaskPendingRemoval?: (taskId: string) => boolean;
+    /** Live ancestry check for removals observed while the attempt runs. */
+    isTaskAncestrySafe?: (taskId: string) => Promise<boolean>;
   },
 ): Promise<KanbanState["tasks"][number] | null> {
   const {
@@ -94,7 +96,10 @@ export async function selectNextTaskAfterRemoval(
     workspaceId,
     validateTaskAncestry = false,
     isTaskPendingRemoval,
+    isTaskAncestrySafe,
   } = options ?? {};
+  const checksAncestry = isTaskAncestrySafe !== undefined || validateTaskAncestry;
+  const ancestryExclusions = excludedTaskIds ?? new Set<string>();
   const candidates = orderedTaskCandidates(
     remainingTasks,
     removedTaskId,
@@ -103,12 +108,10 @@ export async function selectNextTaskAfterRemoval(
     isTaskPendingRemoval,
   );
   for (const task of candidates) {
-    if (validateTaskAncestry) {
-      const ancestrySafe = await taskHasSafeRemovalAncestry(
-        task.id,
-        excludedTaskIds ?? new Set(),
-        workspaceId,
-      );
+    if (checksAncestry) {
+      const ancestrySafe = isTaskAncestrySafe
+        ? await isTaskAncestrySafe(task.id)
+        : await taskHasSafeRemovalAncestry(task.id, ancestryExclusions, workspaceId);
       if (!ancestrySafe || isTaskPendingRemoval?.(task.id) === true) continue;
     }
     if (!(await isLive(task.id))) continue;

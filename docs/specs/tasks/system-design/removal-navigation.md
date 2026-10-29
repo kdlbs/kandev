@@ -290,7 +290,10 @@ immediately before selection, layout, or URL writes. A cached successful
 liveness read cannot override a newer local removal intent. A selection attempt
 also keeps every removal it observes for its own lifetime, so a candidate
 removed while a reply was outstanding does not become eligible again when its
-operation releases.
+operation releases. The attempt rechecks a candidate's ancestry against every
+cascade removal it observes, including immediately before the switch, so a
+descendant that appears only in the server-page fallback cannot become the
+destination.
 
 If a candidate becomes pending, exclude it for this selection attempt and
 continue through the existing candidate order and bounded server-page fallback.

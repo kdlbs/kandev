@@ -5,12 +5,17 @@ import type { KanbanState } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { linkToTask, linkToTaskOverview } from "@/lib/links";
 import { listTaskSessions } from "@/lib/api";
-import { selectNextTaskAfterRemoval, taskIsLive } from "./task-removal-candidates";
+import {
+  selectNextTaskAfterRemoval,
+  taskHasSafeRemovalAncestry,
+  taskIsLive,
+} from "./task-removal-candidates";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
 import { softNavigate } from "@/lib/routing/client-router";
 import {
+  cascadeTaskRemovalTaskIds,
   isTaskRemovalPending,
   ownsTaskRemovalDeparture,
   pendingTaskRemovalTaskIds,
@@ -314,14 +319,14 @@ async function switchToNextTask(params: {
   oldEnvId: string | null;
   useLayoutSwitch: boolean;
   loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
-  canCommit?: () => boolean;
+  canCommit?: () => boolean | Promise<boolean>;
 }): Promise<boolean> {
   const { store, nextTask, oldEnvId, useLayoutSwitch, loadTaskSessionsForTask, canCommit } = params;
   if (nextTask.primarySessionId) {
     if (useLayoutSwitch && !store.getState().environmentIdBySessionId[nextTask.primarySessionId]) {
       await loadTaskSessionsForTask(nextTask.id);
     }
-    if (canCommit && !canCommit()) return false;
+    if (canCommit && !(await canCommit())) return false;
     switchToSessionForTask({
       store,
       nextTask,
@@ -334,7 +339,7 @@ async function switchToNextTask(params: {
   }
 
   const sessions = await loadTaskSessionsForTask(nextTask.id);
-  if (canCommit && !canCommit()) return false;
+  if (canCommit && !(await canCommit())) return false;
   const sessionId = sessions[0]?.id ?? null;
   if (sessionId) {
     switchToSessionForTask({ store, nextTask, sessionId, oldEnvId, useLayoutSwitch });
@@ -456,6 +461,8 @@ function candidateIsStillEligible(
 
 type ObservedRemovalMembership = {
   seen: ReadonlySet<string>;
+  /** Task ids covered by cascade removals observed during this attempt. */
+  cascadeCoverage: ReadonlySet<string>;
   dispose: () => void;
 };
 
@@ -470,6 +477,7 @@ function observeRemovalMembership(
   workspaceId: string | null,
 ): ObservedRemovalMembership {
   const seen = pendingTaskRemovalTaskIds(store.getState().taskRemoval, workspaceId);
+  const cascadeCoverage = cascadeTaskRemovalTaskIds(store.getState().taskRemoval, workspaceId);
   let previousRemoval = store.getState().taskRemoval;
   const unsubscribe = store.subscribe((state) => {
     if (state.taskRemoval === previousRemoval) return;
@@ -477,9 +485,13 @@ function observeRemovalMembership(
     for (const taskId of pendingTaskRemovalTaskIds(state.taskRemoval, workspaceId)) {
       seen.add(taskId);
     }
+    for (const taskId of cascadeTaskRemovalTaskIds(state.taskRemoval, workspaceId)) {
+      cascadeCoverage.add(taskId);
+    }
   });
   return {
     seen,
+    cascadeCoverage,
     dispose: () => {
       if (typeof unsubscribe === "function") unsubscribe();
     },
@@ -511,6 +523,22 @@ async function switchAfterRemoval(params: {
   const isCandidatePending = (candidateTaskId: string) =>
     membership.seen.has(candidateTaskId) ||
     !candidateIsStillEligible(store, candidateTaskId, workspaceId);
+  // A cascade removal can cover descendants that have no token of their own
+  // because they were absent from the cached boards. Recheck ancestry against
+  // that coverage during selection and again immediately before the switch.
+  const shouldValidateAncestry = () =>
+    opts?.validateTaskAncestry === true || membership.cascadeCoverage.size > 0;
+  const ancestryExclusions = () => {
+    const covered = new Set(membership.cascadeCoverage);
+    if (opts?.validateTaskAncestry) {
+      for (const taskId of excludedForAttempt) covered.add(taskId);
+    }
+    return covered;
+  };
+  const isTaskAncestrySafe = async (candidateTaskId: string) => {
+    if (!shouldValidateAncestry()) return true;
+    return taskHasSafeRemovalAncestry(candidateTaskId, ancestryExclusions(), workspaceId);
+  };
 
   try {
     while (true) {
@@ -519,9 +547,9 @@ async function switchAfterRemoval(params: {
         taskId,
         cachedTasks: collectRemainingTasks(store),
         excludedTaskIds: excludedForAttempt,
-        validateTaskAncestry: opts?.validateTaskAncestry,
         isLive: taskIsLive,
         isTaskPendingRemoval: isCandidatePending,
+        isTaskAncestrySafe,
         selectCandidate: selectNextTaskAfterRemoval,
       });
       if (!candidate) return { candidateFound: false, switchedTaskId: null };
@@ -532,7 +560,12 @@ async function switchAfterRemoval(params: {
         oldEnvId,
         useLayoutSwitch,
         loadTaskSessionsForTask,
-        canCommit: () => removalDepartureIsOwned(store, opts) && !isCandidatePending(candidate.id),
+        canCommit: async () => {
+          if (!removalDepartureIsOwned(store, opts) || isCandidatePending(candidate.id)) {
+            return false;
+          }
+          return isTaskAncestrySafe(candidate.id);
+        },
       });
       if (switched) return { candidateFound: true, switchedTaskId: candidate.id };
       if (!removalDepartureIsOwned(store, opts)) {

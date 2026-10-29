@@ -339,7 +339,9 @@ describe("useTaskRemoval coordinator — delayed replacement reads", () => {
         mutate: () => firstMutation.promise,
       });
     });
-    expect(fetchTaskMock).toHaveBeenCalledWith(TASK_B, { cache: "no-store" });
+    await vi.waitFor(() =>
+      expect(fetchTaskMock).toHaveBeenCalledWith(TASK_B, { cache: "no-store" }),
+    );
 
     let secondArchive!: Promise<unknown>;
     act(() => {

@@ -152,7 +152,9 @@ describe("completed archive during a delayed candidate read", () => {
     const mutation = deferred<void>();
     const result = renderCoordinator(store);
     const removal = startSelectedRemoval(result, mutation.promise);
-    expect(fetchTaskMock).toHaveBeenCalledWith(TASK_B, { cache: "no-store" });
+    await vi.waitFor(() =>
+      expect(fetchTaskMock).toHaveBeenCalledWith(TASK_B, { cache: "no-store" }),
+    );
 
     await settleIndependentRemoval(store, result, "archive", TASK_B);
     expect(store.getState().kanban.tasks.some((task) => task.id === TASK_B)).toBe(false);
