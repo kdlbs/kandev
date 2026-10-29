@@ -37,4 +37,10 @@ var (
 	// ErrCommentBodyRequired is returned when a comment body is empty or
 	// whitespace-only.
 	ErrCommentBodyRequired = fmt.Errorf("comment body is required")
+	// ErrInvalidTaskRelations is returned when blocked_by or workspace_mode on
+	// a task create is malformed. Caller-correctable.
+	ErrInvalidTaskRelations = fmt.Errorf("invalid task relations")
+	// ErrBlockerOutOfScope is returned for every blocked_by entry the run may
+	// not depend on, whatever the cause, so the response is no existence oracle.
+	ErrBlockerOutOfScope = fmt.Errorf("%w: blocker out of scope", shared.ErrForbidden)
 )
