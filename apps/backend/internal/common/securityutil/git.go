@@ -127,6 +127,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"-z",
 		"--untracked-files=no",
 		"--absolute-git-dir",
+		"--git-common-dir",
 		"--show-object-format",
 		"--default=false",
 		"--raw",

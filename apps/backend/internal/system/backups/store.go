@@ -236,17 +236,9 @@ func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[stri
 		_ = os.Remove(stagedPath)
 		return nil, fmt.Errorf("verify staged restore: %w", err)
 	}
-	if s.RetentionSources != nil {
-		if err := s.RetentionSources.VerifyRetentionBackup(ctx, snapshotPath, ""); err != nil {
-			_ = os.Remove(stagedPath)
-			return nil, fmt.Errorf("verify retained checkpoint sources: %w", err)
-		}
-		if s.RetentionSources.HasRetentionBackup(snapshotPath) {
-			if err := s.RetentionSources.RestoreRetentionBackup(ctx, snapshotPath); err != nil {
-				_ = os.Remove(stagedPath)
-				return nil, fmt.Errorf("restore retained checkpoint sources: %w", err)
-			}
-		}
+	if err := s.restoreRetentionSources(ctx, snapshotPath); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, err
 	}
 	if s.PersistenceUnavailable != nil {
 		s.PersistenceUnavailable()
@@ -274,6 +266,21 @@ func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[stri
 		"restored_from":    filepath.Base(snapshotPath),
 		"restart_required": true,
 	}, nil
+}
+
+// restoreRetentionSources restores a published checkpoint sidecar when one
+// exists. Older snapshots without a sidecar remain restorable.
+func (s *Service) restoreRetentionSources(ctx context.Context, snapshotPath string) error {
+	if s.RetentionSources == nil || !s.RetentionSources.HasRetentionBackup(snapshotPath) {
+		return nil
+	}
+	if err := s.RetentionSources.VerifyRetentionBackup(ctx, snapshotPath, ""); err != nil {
+		return fmt.Errorf("verify retained checkpoint sources: %w", err)
+	}
+	if err := s.RetentionSources.RestoreRetentionBackup(ctx, snapshotPath); err != nil {
+		return fmt.Errorf("restore retained checkpoint sources: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) ensureSQLiteRestore() error {

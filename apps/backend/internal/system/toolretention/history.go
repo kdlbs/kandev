@@ -2,7 +2,12 @@ package toolretention
 
 import "context"
 
-const historyCompactionBatch = 200
+const (
+	historyCompactionBatch = 200
+	// historyArchiveFailureLimit bounds durable owned-ref cleanup retries so a
+	// permanently failing intent cannot keep the shared operation running.
+	historyArchiveFailureLimit = 5
+)
 
 // stepHistoryAnalysis adds the bounded history inventory once per analysis.
 func (s *Service) stepHistoryAnalysis(ctx context.Context, r *record) error {
@@ -42,6 +47,12 @@ func (s *Service) stepHistoryCleanup(ctx context.Context, r *record) (bool, erro
 			s.opts.Log(ctx, "history compaction failed", err)
 		}
 		return true, err
+	}
+	if stats.ArchiveFailures > 0 {
+		r.Progress.HistoryArchiveFailures++
+		if r.Progress.HistoryArchiveFailures >= historyArchiveFailureLimit {
+			r.Progress.HistoryDone = true
+		}
 	}
 	if stats.Remaining == 0 && stats.ArchiveFailures == 0 {
 		r.Progress.HistoryDone = true

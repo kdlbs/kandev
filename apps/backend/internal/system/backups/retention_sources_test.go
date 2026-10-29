@@ -60,3 +60,25 @@ func TestOrdinaryBackupAlsoPublishesCheckpointSources(t *testing.T) {
 		t.Fatalf("ordinary backup published %d checkpoint sidecars, want one complete artifact", len(sources.published))
 	}
 }
+
+func TestRestoreRetentionSourcesSkipsMissingSidecar(t *testing.T) {
+	service := &Service{RetentionSources: &fakeRetentionSources{}}
+	if err := service.restoreRetentionSources(context.Background(), "snapshot.db"); err != nil {
+		t.Fatalf("restore sidecar-free snapshot: %v", err)
+	}
+	sources := service.RetentionSources.(*fakeRetentionSources)
+	if len(sources.verified) != 0 || len(sources.restored) != 0 {
+		t.Fatalf("sidecar-free restore verified=%d restored=%d", len(sources.verified), len(sources.restored))
+	}
+}
+
+func TestRestoreRetentionSourcesVerifiesPublishedSidecar(t *testing.T) {
+	sources := &fakeRetentionSources{has: true}
+	service := &Service{RetentionSources: sources}
+	if err := service.restoreRetentionSources(context.Background(), "snapshot.db"); err != nil {
+		t.Fatalf("restore published sidecar: %v", err)
+	}
+	if len(sources.verified) != 1 || len(sources.restored) != 1 {
+		t.Fatalf("published restore verified=%d restored=%d", len(sources.verified), len(sources.restored))
+	}
+}

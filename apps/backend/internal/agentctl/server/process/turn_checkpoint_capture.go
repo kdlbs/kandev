@@ -132,7 +132,10 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	if _, err := g.turnCheckpointOutput(ctx, indexPath, "update-ref", ref, commitOID, zeroOID); err != nil {
 		return g.resolveTurnCheckpointRefRace(ctx, request, ref, hashAlgorithm, err)
 	}
-	commonDir, _ := g.turnCheckpointCommonDir(ctx)
+	commonDir, err := g.turnCheckpointCommonDir(ctx)
+	if err != nil {
+		return turnchanges.CheckpointResult{}, err
+	}
 	return turnchanges.CheckpointResult{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Boundary: request.Boundary,
 		CommitOID: commitOID, TreeOID: treeOID, HashAlgorithm: hashAlgorithm,

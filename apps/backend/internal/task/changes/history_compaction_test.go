@@ -371,7 +371,10 @@ func writeHistoryBackupSnapshot(t *testing.T, path string, rows ...*models.TurnR
 		`CREATE TABLE turn_change_sets(id TEXT PRIMARY KEY, availability TEXT NOT NULL)`,
 		`CREATE TABLE turn_repository_changes(id TEXT PRIMARY KEY, change_set_id TEXT NOT NULL, checkout_id TEXT NOT NULL,
 			repository_id TEXT NOT NULL, content_source TEXT NOT NULL, source_git_dir TEXT NOT NULL DEFAULT '',
-			preservation_state TEXT NOT NULL, preservation_receipt TEXT NOT NULL)`,
+			preservation_state TEXT NOT NULL, preservation_receipt TEXT NOT NULL,
+			hash_algorithm TEXT NOT NULL DEFAULT '', start_commit_oid TEXT NOT NULL DEFAULT '',
+			start_tree_oid TEXT NOT NULL DEFAULT '', end_commit_oid TEXT NOT NULL DEFAULT '',
+			end_tree_oid TEXT NOT NULL DEFAULT '')`,
 	} {
 		if _, err := database.Exec(statement); err != nil {
 			t.Fatal(err)
@@ -386,9 +389,11 @@ func writeHistoryBackupSnapshot(t *testing.T, path string, rows ...*models.TurnR
 			t.Fatal(err)
 		}
 		if _, err := database.Exec(`INSERT INTO turn_repository_changes(id, change_set_id, checkout_id, repository_id,
-			content_source, source_git_dir, preservation_state, preservation_receipt)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, row.ID+string(rune(index)), changeSetID, row.CheckoutID, row.RepositoryID,
-			row.ContentSource, row.SourceGitDir, models.TurnChangePreservationReady, row.PreservationReceipt); err != nil {
+			content_source, source_git_dir, preservation_state, preservation_receipt, hash_algorithm,
+			start_commit_oid, start_tree_oid, end_commit_oid, end_tree_oid)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, row.ID+string(rune(index)), changeSetID, row.CheckoutID, row.RepositoryID,
+			row.ContentSource, row.SourceGitDir, models.TurnChangePreservationReady, row.PreservationReceipt,
+			row.HashAlgorithm, row.StartCommitOID, row.StartTreeOID, row.EndCommitOID, row.EndTreeOID); err != nil {
 			t.Fatal(err)
 		}
 	}

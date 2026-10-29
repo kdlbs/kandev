@@ -80,18 +80,19 @@ type Update struct {
 }
 
 type progress struct {
-	SchemaVersion int    `json:"schema_version"`
-	Task          string `json:"task"`
-	TaskAfter     string `json:"task_after"`
-	Session       string `json:"session"`
-	SessionAfter  string `json:"session_after"`
-	Message       int64  `json:"message"`
-	UpperTask     string `json:"upper_task"`
-	UpperMessage  int64  `json:"upper_message"`
-	TaskCounted   bool   `json:"task_counted"`
-	HistoryDone   bool   `json:"history_done"`
-	Revision      int64  `json:"revision"`
-	Started       bool   `json:"started"`
+	SchemaVersion          int    `json:"schema_version"`
+	Task                   string `json:"task"`
+	TaskAfter              string `json:"task_after"`
+	Session                string `json:"session"`
+	SessionAfter           string `json:"session_after"`
+	Message                int64  `json:"message"`
+	UpperTask              string `json:"upper_task"`
+	UpperMessage           int64  `json:"upper_message"`
+	TaskCounted            bool   `json:"task_counted"`
+	HistoryDone            bool   `json:"history_done"`
+	HistoryArchiveFailures int64  `json:"history_archive_failures,omitempty"`
+	Revision               int64  `json:"revision"`
+	Started                bool   `json:"started"`
 }
 
 type record struct {

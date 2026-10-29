@@ -505,11 +505,17 @@ func (s *HistoryService) PublishRetentionBackup(ctx context.Context, snapshotPat
 		Version: historyBackupVersion, CreatedAt: s.now().UTC(),
 		DatabaseSHA256: databaseSHA256, Complete: true,
 	}
-	complete, err := s.publishBackupPages(ctx, stage, &manifest)
+	rows, err := loadSnapshotHistoryRows(ctx, snapshotPath)
 	if err != nil {
 		return err
 	}
-	manifest.Complete = complete
+	for _, row := range rows {
+		source, sourceErr := s.publishBackupSource(ctx, stage, row)
+		if sourceErr != nil {
+			return sourceErr
+		}
+		manifest.Sources = append(manifest.Sources, source)
+	}
 	sortHistoryBackupSources(manifest.Sources)
 	manifest.InventoryDigest = historyInventoryDigest(manifest)
 	encoded, err := json.Marshal(manifest)
@@ -523,31 +529,6 @@ func (s *HistoryService) PublishRetentionBackup(ctx context.Context, snapshotPat
 		return err
 	}
 	return os.Rename(stage, dir)
-}
-
-func (s *HistoryService) publishBackupPages(ctx context.Context, stage string, manifest *HistoryBackupManifest) (bool, error) {
-	after := ""
-	for page := 0; page < 50; page++ {
-		rows, next, err := s.repository.ListTurnRepositoryPreservationReadyPage(ctx, after, 200)
-		if err != nil {
-			return false, err
-		}
-		for _, row := range rows {
-			if row == nil {
-				continue
-			}
-			source, sourceErr := s.publishBackupSource(ctx, stage, row)
-			if sourceErr != nil {
-				return false, sourceErr
-			}
-			manifest.Sources = append(manifest.Sources, source)
-		}
-		if next == "" || next == after {
-			return true, nil
-		}
-		after = next
-	}
-	return false, nil
 }
 
 func sortHistoryBackupSources(sources []HistoryBackupSource) {
@@ -608,26 +589,37 @@ type snapshotHistorySource struct {
 }
 
 func snapshotHistoryInventory(ctx context.Context, snapshotPath string) ([]snapshotHistorySource, error) {
+	rows, err := loadSnapshotHistoryRows(ctx, snapshotPath)
+	if err != nil {
+		return nil, err
+	}
+	sources := make([]snapshotHistorySource, 0, len(rows))
+	for _, row := range rows {
+		source := HistoryBackupSource{
+			ChangeSetID: row.TurnChangeSetID, CheckoutID: row.CheckoutID, RepositoryID: row.RepositoryID,
+		}
+		sources = append(sources, snapshotHistorySource{key: historySourceKey(source), receiptDigest: historyReceiptDigest(row)})
+	}
+	return sources, nil
+}
+
+// loadSnapshotHistoryRows reads the complete checkpoint inventory from the
+// database image. It never consults the live repository: finalization can add
+// a ready row after the copy, and a manifest must describe that image.
+func loadSnapshotHistoryRows(ctx context.Context, snapshotPath string) ([]*models.TurnRepositoryChangeSet, error) {
 	reader, err := sqlx.Open("sqlite3", "file:"+db.EscapeSQLiteURIPath(snapshotPath)+"?mode=ro")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = reader.Close() }()
-	sources := make([]snapshotHistorySource, 0)
+	rows := make([]*models.TurnRepositoryChangeSet, 0)
 	after := ""
 	for page := 0; page < 100; page++ {
-		var rows []struct {
-			ID                  string `db:"id"`
-			ChangeSetID         string `db:"change_set_id"`
-			CheckoutID          string `db:"checkout_id"`
-			RepositoryID        string `db:"repository_id"`
-			ContentSource       string `db:"content_source"`
-			SourceGitDir        string `db:"source_git_dir"`
-			PreservationReceipt string `db:"preservation_receipt"`
-		}
-		err := reader.SelectContext(ctx, &rows, `
+		var pageRows []*models.TurnRepositoryChangeSet
+		err := reader.SelectContext(ctx, &pageRows, `
 			SELECT rc.id, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.content_source,
-				rc.source_git_dir, rc.preservation_receipt
+				rc.source_git_dir, rc.preservation_state, rc.preservation_receipt, rc.hash_algorithm,
+				rc.start_commit_oid, rc.start_tree_oid, rc.end_commit_oid, rc.end_tree_oid
 			FROM turn_repository_changes rc
 			JOIN turn_change_sets cs ON cs.id = rc.change_set_id
 			WHERE cs.availability <> 'expired' AND rc.content_source IN ('git_archive','git_common')
@@ -640,20 +632,20 @@ func snapshotHistoryInventory(ctx context.Context, snapshotPath string) ([]snaps
 			}
 			return nil, err
 		}
-		for _, row := range rows {
-			source := HistoryBackupSource{ChangeSetID: row.ChangeSetID, CheckoutID: row.CheckoutID, RepositoryID: row.RepositoryID}
-			digest := sha256Hex([]byte(row.PreservationReceipt))
-			if row.ContentSource == string(models.TurnChangeSourceGitCommon) {
-				digest = sha256Hex([]byte("common:" + row.SourceGitDir))
-			}
-			sources = append(sources, snapshotHistorySource{key: historySourceKey(source), receiptDigest: digest})
-			after = row.ID
+		rows = append(rows, pageRows...)
+		if len(pageRows) < 500 {
+			return rows, nil
 		}
-		if len(rows) < 500 {
-			break
-		}
+		after = pageRows[len(pageRows)-1].ID
 	}
-	return sources, nil
+	return nil, errors.New("retention backup checkpoint inventory exceeds its page bound")
+}
+
+func historyReceiptDigest(row *models.TurnRepositoryChangeSet) string {
+	if row.ContentSource == models.TurnChangeSourceGitCommon {
+		return sha256Hex([]byte("common:" + row.SourceGitDir))
+	}
+	return sha256Hex([]byte(row.PreservationReceipt))
 }
 
 func isLegacySnapshotSchemaError(err error) bool {

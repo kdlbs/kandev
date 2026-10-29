@@ -99,9 +99,12 @@ func (s *Service) scanBatch(ctx context.Context, q sqlx.QueryerContext, r *recor
 				break
 			}
 			state, code := stateSucceeded, ""
-			if r.Operation.HistoryTruncated {
+			switch {
+			case r.Operation.HistoryTruncated:
 				state, code = statePartial, "history_limit"
-			} else if r.Operation.Skipped["eligibility_budget"] > 0 {
+			case r.Progress.HistoryArchiveFailures >= historyArchiveFailureLimit:
+				state, code = statePartial, "history_archive_failures"
+			case r.Operation.Skipped["eligibility_budget"] > 0:
 				state, code = statePartial, "eligibility_budget"
 			}
 			finishOperation(r, state, code, s.opts.Now())

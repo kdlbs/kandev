@@ -243,6 +243,9 @@ func TestTurnGitHistoryUsesSurvivingCommonSourceWithoutArchiving(t *testing.T) {
 	if repository.preservationSource != models.TurnChangeSourceGitCommon {
 		t.Fatalf("preservation source = %q", repository.preservationSource)
 	}
+	if receipt.Source != models.TurnChangeSourceGitCommon || receipt.Receipt != "" {
+		t.Fatalf("preservation receipt = %+v, want the settled common source", receipt)
+	}
 	source := &models.TurnFileContentSource{
 		ChangeSet: &models.TurnChangeSet{ID: row.TurnChangeSetID, Availability: models.TurnChangeAvailabilityReady},
 		Repository: &models.TurnRepositoryChangeSet{
