@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -57,7 +58,9 @@ func TestOpenCodePluginLaunchPreparesHostAndInlineConfiguration(t *testing.T) {
 	require.FileExists(t, bootstrap)
 	info, err := os.Stat(bootstrap)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 
 	value := processEnvValue(manager.cfg.AgentEnv, openCodeConfigContentEnv)
 	require.NotEmpty(t, value)
