@@ -660,12 +660,36 @@ func TestMissingSignalSurvivesDeletedBoundSession(t *testing.T) {
 	}
 }
 
+// seedFinishedChildTurn adds a second child whose task already finished, so
+// its candidate no longer qualifies as a stall. Its turn keeps the stall start
+// that the reconcile path reads.
+func seedFinishedChildTurn(store *childStallStoreFake) *models.Turn {
+	store.tasks["child-done"] = &models.Task{
+		ID: "child-done", State: v1.TaskStateCompleted, ParentID: "parent",
+		WorkspaceID: "ws", WorkflowStepID: "step-1",
+	}
+	store.sessions["child-done-session"] = &models.TaskSession{
+		ID: "child-done-session", TaskID: "child-done", State: models.TaskSessionStateWaitingForInput,
+	}
+	turn := &models.Turn{
+		ID: "turn-2", TaskID: "child-done", TaskSessionID: "child-done-session",
+		CompletedAt: timePtrTime(childStallReconcileNow.Add(-time.Minute)),
+		Metadata: map[string]interface{}{
+			models.TurnMetaKeyChildStallStart: models.ChildStallStart{
+				ParentTaskID: "parent", WorkspaceID: "ws", TransitionID: 1,
+			}.ToMap(),
+		},
+	}
+	store.turns["turn-2"] = turn
+	return turn
+}
+
 // admitFoldedChildStallAlert admits one parent alert whose content and
 // descriptor carry the candidate's turn, so a folded entry holds the prompt
 // text a production alert holds.
 func admitFoldedChildStallAlert(
 	t *testing.T, ctx context.Context, queue *messagequeue.Service,
-	parentTaskID, sessionID, key, turnID string,
+	parentTaskID, sessionID, key, childID, turnID string,
 ) {
 	t.Helper()
 	identity, err := queue.ResolveSessionIdentity(ctx, parentTaskID, sessionID)
@@ -675,14 +699,14 @@ func admitFoldedChildStallAlert(
 	metadata := map[string]interface{}{
 		messagequeue.MetadataChildStallAlert: true,
 		messagequeue.MetadataChildStallAlerts: []interface{}{map[string]interface{}{
-			"child_task_id":    "child",
-			"child_task_title": "Child task",
+			"child_task_id":    childID,
+			"child_task_title": childID,
 			"turn_id":          turnID,
 			"cause":            "missing_completion_signal",
 		}},
-		messagequeue.MetadataSenderTaskID: "child",
+		messagequeue.MetadataSenderTaskID: childID,
 	}
-	content := formatChildStallPromptText("Child task", "child", turnID, "", "missing_completion_signal", "")
+	content := formatChildStallPromptText(childID, childID, turnID, "", "missing_completion_signal", "")
 	if _, _, err := queue.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, identity, key, content, "", messagequeue.QueuedByServer, false, nil, metadata, nil,
 	); err != nil {
@@ -698,15 +722,12 @@ func TestChildStallAlertPromptDropsStaleFoldedCandidate(t *testing.T) {
 	ctx := context.Background()
 	parent := &models.Task{ID: "parent", State: v1.TaskStateInProgress}
 	seedStalledChild(store, parent)
-	store.turns["turn-2"] = &models.Turn{
-		ID: "turn-2", TaskID: "child", TaskSessionID: "child-session",
-		CompletedAt: timePtrTime(childStallReconcileNow.Add(-30 * time.Second)),
-	}
+	seedFinishedChildTurn(store)
 	store.sessions["sess-parent"] = &models.TaskSession{
 		ID: "sess-parent", TaskID: "parent", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
 	}
-	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-live", "turn-1")
-	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-stale", "turn-2")
+	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-live", "child", "turn-1")
+	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-stale", "child-done", "turn-2")
 
 	entries := childSessionEntries(t, ctx, queue, "parent", "sess-parent")
 	if len(entries) != 1 {
@@ -737,14 +758,11 @@ func TestChildStallAlertPromptDiscardsAlertWithoutEligibleCandidate(t *testing.T
 	ctx := context.Background()
 	parent := &models.Task{ID: "parent", State: v1.TaskStateInProgress}
 	seedStalledChild(store, parent)
-	store.turns["turn-2"] = &models.Turn{
-		ID: "turn-2", TaskID: "child", TaskSessionID: "child-session",
-		CompletedAt: timePtrTime(childStallReconcileNow.Add(-30 * time.Second)),
-	}
+	seedFinishedChildTurn(store)
 	store.sessions["sess-parent"] = &models.TaskSession{
 		ID: "sess-parent", TaskID: "parent", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
 	}
-	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-stale", "turn-2")
+	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-stale", "child-done", "turn-2")
 
 	entries := childSessionEntries(t, ctx, queue, "parent", "sess-parent")
 	if len(entries) != 1 {
@@ -764,17 +782,12 @@ func TestReconcileDeliveredKeepsSharedNoticeForLiveSiblingCandidate(t *testing.T
 	ctx := context.Background()
 	parent := &models.Task{ID: "parent", State: v1.TaskStateInProgress}
 	seedStalledChild(store, parent)
-	stale := &models.Turn{
-		ID: "turn-2", TaskID: "child", TaskSessionID: "child-session",
-		CompletedAt: timePtrTime(childStallReconcileNow.Add(-30 * time.Second)),
-		Metadata:    map[string]interface{}{},
-	}
-	store.turns["turn-2"] = stale
+	stale := seedFinishedChildTurn(store)
 	store.sessions["sess-parent"] = &models.TaskSession{
 		ID: "sess-parent", TaskID: "parent", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
 	}
-	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-live", "turn-1")
-	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-stale", "turn-2")
+	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-live", "child", "turn-1")
+	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-stale", "child-done", "turn-2")
 
 	start, _ := models.LoadChildStallStart(stale.Metadata)
 	producer.reconcileDelivered(
@@ -783,6 +796,34 @@ func TestReconcileDeliveredKeepsSharedNoticeForLiveSiblingCandidate(t *testing.T
 
 	if ids := queueEntryIDs(t, ctx, queue, "parent", "sess-parent"); !containsID(ids, "alert-live") {
 		t.Fatalf("the live sibling's notice must survive the stale candidate, got %v", ids)
+	}
+	if resolved, _ := stale.Metadata[models.TurnMetaKeyChildStallResolved].(bool); !resolved {
+		t.Fatal("the stale candidate must be resolved")
+	}
+}
+
+// TestReconcileDeliveredKeepsSharedNoticeForSiblingWithoutTurnIdentity proves
+// that a folded sibling with no turn identity keeps the shared notice, because
+// that candidate's provenance is unclear and it therefore stays eligible.
+func TestReconcileDeliveredKeepsSharedNoticeForSiblingWithoutTurnIdentity(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	parent := &models.Task{ID: "parent", State: v1.TaskStateInProgress}
+	seedStalledChild(store, parent)
+	stale := seedFinishedChildTurn(store)
+	store.sessions["sess-parent"] = &models.TaskSession{
+		ID: "sess-parent", TaskID: "parent", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
+	}
+	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-anonymous", "child", "")
+	admitFoldedChildStallAlert(t, ctx, queue, "parent", "sess-parent", "alert-stale", "child-done", "turn-2")
+
+	start, _ := models.LoadChildStallStart(stale.Metadata)
+	producer.reconcileDelivered(
+		ctx, stale, start, deliveredState("alert-anonymous", "sess-parent"), childStallReconcileNow, &childStallPassStats{},
+	)
+
+	if ids := queueEntryIDs(t, ctx, queue, "parent", "sess-parent"); !containsID(ids, "alert-anonymous") {
+		t.Fatalf("the sibling without a turn identity must keep the shared notice, got %v", ids)
 	}
 	if resolved, _ := stale.Metadata[models.TurnMetaKeyChildStallResolved].(bool); !resolved {
 		t.Fatal("the stale candidate must be resolved")

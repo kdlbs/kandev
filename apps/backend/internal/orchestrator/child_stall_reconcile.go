@@ -103,10 +103,12 @@ func (p *ChildStallProducer) noticeServesOtherLiveCandidate(ctx context.Context,
 		return false
 	}
 	for _, descriptor := range messagequeue.ChildStallAlertDescriptors(entry) {
-		if descriptor.TurnID == "" || descriptor.TurnID == exceptTurnID {
+		if exceptTurnID != "" && descriptor.TurnID == exceptTurnID {
 			continue
 		}
-		if p.sourceStillStalled(ctx, descriptor.TurnID) {
+		// A candidate with no turn identity has unclear provenance, so it stays
+		// eligible and keeps the shared notice alive.
+		if descriptor.TurnID == "" || p.sourceStillStalled(ctx, descriptor.TurnID) {
 			return true
 		}
 	}

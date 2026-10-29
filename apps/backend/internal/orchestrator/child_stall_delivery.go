@@ -565,10 +565,6 @@ func formatChildStallPromptText(childTitle, childTaskID, turnID, stepName, cause
 	return b.String()
 }
 
-func childStallCauseInstruction(childID string, decision childstall.Decision) string {
-	return childStallCauseInstructionText(childID, string(decision.Cause), decision.QuestionID)
-}
-
 func childStallCauseInstructionText(childID, cause, questionID string) string {
 	switch childstall.Cause(cause) {
 	case childstall.CauseInputRequired:
