@@ -361,6 +361,14 @@ binding removal and retained-token ACK retain their existing order. This changes
 no SQL schema and adds no background poller; backend and agentctl must be updated
 together for the new gated inventory path.
 
+Upgrade compatibility also covers the old `unproven` phase when historical
+continuity is false and the retained attempt map contains no entries. The
+exclusive journal, matching session/incarnation/generation and owner CAS remain
+required. This transfers no attempt or reservation and leaves historical
+continuity false. New process admission durably marks even legacy owners active;
+active predecessors, any retained attempt entry, unknown children, identity
+conflicts and storage failures do not qualify for this compatibility case.
+
 `deferred_launch` is updated with a read-compare-write retry loop. The ceiling
 keys share the task record with other launch intents and are removed as a group
 after replay or a terminal drop. A prompt edit preserves unrelated keys and

@@ -19,16 +19,17 @@ var errAttemptExists = errors.New("inference attempt already exists")
 var errAttemptUnavailable = errors.New("inference attempt token is unavailable")
 
 type attemptOwner struct {
-	capacityRequired   bool
-	mu                 sync.Mutex
-	id                 string
-	cfg                *config.InstanceConfig
-	journal            *journal.Journal
-	state              inferenceOwnerState
-	volatileFresh      bool
-	storageUnavailable bool
-	diagnostics        AttemptDiagnostics
-	expectedOwnerID    string
+	capacityRequired       bool
+	mu                     sync.Mutex
+	id                     string
+	cfg                    *config.InstanceConfig
+	journal                *journal.Journal
+	state                  inferenceOwnerState
+	volatileFresh          bool
+	storageUnavailable     bool
+	diagnostics            AttemptDiagnostics
+	expectedOwnerID        string
+	admissionFailureReason string
 }
 
 func newAttemptOwner(cfg *config.InstanceConfig, retained *journal.Journal) *attemptOwner {

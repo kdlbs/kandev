@@ -122,9 +122,16 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 		return
 	}
 	next := ownershipFor(o.cfg, o.id, prior.Revision, ownerBorn)
-	complete := settledCurrentOwnerState(saved) && (prior.Phase == ownerClosed || unadmittedClaim(saved))
+	complete := settledCurrentOwnerState(saved) && (prior.Phase == ownerClosed || unadmittedClaim(saved) || legacyEmptyClaim(saved))
 	identity := matchingHandoffIdentity(prior, next)
 	if !complete || !identity || prior.Revision == math.MaxUint64 {
+		o.admissionFailureReason = "retained_claim_unsettled"
+		if !identity {
+			o.admissionFailureReason = "retained_claim_identity_mismatch"
+		}
+		if prior.Revision == math.MaxUint64 {
+			o.admissionFailureReason = "retained_revision_exhausted"
+		}
 		o.state.ContinuityKnown = false
 		o.storageUnavailable = true // Preserve the unclaimed predecessor bytes.
 		return
@@ -134,6 +141,19 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 	o.state.Ownership = next
 	// The following constructor write compares the predecessor identity in the
 	// same journal transaction. A competing claimant cannot also succeed.
+}
+
+// ActivationFailureReason is a body-free diagnostic for failed process admission.
+func (o *InferenceOwner) ActivationFailureReason() string {
+	o.attempts.mu.Lock()
+	defer o.attempts.mu.Unlock()
+	if o.attempts.admissionFailureReason != "" {
+		return o.attempts.admissionFailureReason
+	}
+	if o.attempts.storageUnavailable {
+		return "owner_storage_unavailable"
+	}
+	return "owner_claim_unavailable"
 }
 
 func (o *attemptOwner) activateLocked() error {
@@ -147,11 +167,13 @@ func (o *attemptOwner) activateLocked() error {
 	if claim.OwnerID != o.id || claim.Phase == ownerClosed {
 		return errAttemptUnavailable
 	}
-	if claim.Phase == ownerBorn {
+	if claim.Phase == ownerBorn || claim.Phase == ownerUnproven {
+		previousPhase := claim.Phase
 		claim.Phase = ownerActive
 		o.persistLocked(false, "")
 		if o.diagnostics.LastPersistResult != "ok" && o.journal != nil {
-			claim.Phase = ownerBorn
+			claim.Phase = previousPhase
+			o.admissionFailureReason = "owner_activation_persist_failed"
 			return errAttemptUnavailable
 		}
 	}
@@ -194,6 +216,15 @@ func unadmittedClaim(state inferenceOwnerState) bool {
 		}
 	}
 	return true
+}
+
+// Before current inventory was separated from historical continuity, teardown
+// left an empty legacy owner unproven solely because history was unknown. This
+// compatibility case transfers no concrete attempt or reservation. Journal
+// exclusivity, matching identity and the owner CAS still fence the new owner;
+// Activate marks every new owner active before admitting a process.
+func legacyEmptyClaim(state inferenceOwnerState) bool {
+	return state.Ownership.Phase == ownerUnproven && !state.ContinuityKnown && len(state.Attempts) == 0
 }
 
 func matchingHandoffIdentity(prior, next *inferenceOwnership) bool {
