@@ -27,7 +27,9 @@ func (s *Service) Analyze(ctx context.Context, u Update) (string, error) {
 		return "", err
 	}
 	r, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
-		if r.Operation != nil && r.Operation.State == stateRunning {
+		// A pending or running preparation owns the operation slot too, so an
+		// analysis must be refused rather than overwriting its identity.
+		if operationBusy(r) {
 			return errors.New("busy")
 		}
 		now := s.opts.Now()

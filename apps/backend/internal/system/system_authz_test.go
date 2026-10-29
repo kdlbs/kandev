@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/system/backups"
+	"github.com/kandev/kandev/internal/system/dataretention"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/storage"
@@ -496,5 +497,70 @@ func TestBackupsListLeaksOnlyMetadata(t *testing.T) {
 	}
 	if strings.Contains(list.Body.String(), fixture.backupsDir) {
 		t.Fatalf("listing disclosed the backups directory: %s", list.Body.String())
+	}
+}
+
+// TestArchivedDataAnalyzeRejectsWhilePreparationPending locks the O3 fix: an
+// analysis must not start while a preparation owns the operation slot, or its
+// caller-supplied operation id is overwritten by the pending preparation. The
+// approval gate must also keep refusing a cleanup pass.
+func TestArchivedDataAnalyzeRejectsWhilePreparationPending(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	connection, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = connection.Close() })
+	// The settings row and the two scan cursors startOperation reads, so a
+	// permitted analysis can actually start and the busy refusal is the only
+	// reason it is stopped.
+	for _, ddl := range []string{
+		`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', archived_at TEXT)`,
+		`CREATE TABLE task_resource_cleanup_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', completed_at TEXT)`,
+	} {
+		if _, err := connection.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := dataretention.New(db.NewPool(connection, connection))
+	ctx := context.Background()
+
+	// Enabling with a backup choice arms a pending preparation and leaves the
+	// policy unapproved.
+	saved, err := service.Save(ctx, dataretention.Update{
+		Enabled:      true,
+		ArchivedAge:  dataretention.Age{Days: 14},
+		CleanupAge:   dataretention.Age{Days: 7},
+		BackupChoice: "backup",
+	})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if saved.Preparation.State != "pending" {
+		t.Fatalf("preparation state = %q, want pending", saved.Preparation.State)
+	}
+
+	// An analysis is refused while the preparation is pending, and starts no
+	// operation that could displace it.
+	if _, err := service.Analyze(ctx, dataretention.Update{
+		ArchivedAge: dataretention.Age{Days: 14},
+		CleanupAge:  dataretention.Age{Days: 7},
+	}); err == nil {
+		t.Fatal("analysis was accepted while a preparation was pending")
+	}
+	after, err := service.Get(ctx)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after.Preparation.State != "pending" || after.Operation != nil {
+		t.Fatalf("state = %q operation = %#v; want a preserved pending preparation and no operation",
+			after.Preparation.State, after.Operation)
+	}
+
+	// The approval gate is untouched: the policy still cannot run a pass.
+	if _, err := service.Run(ctx, after.Policy.Revision); err == nil {
+		t.Fatal("cleanup ran without an approved preparation")
 	}
 }
