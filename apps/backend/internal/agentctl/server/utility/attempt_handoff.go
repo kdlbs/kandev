@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"runtime"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -121,20 +123,22 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 		o.diagnostics.InitialReason = "journal_fresh_empty"
 		return
 	}
-	next := ownershipFor(o.cfg, o.id, prior.Revision, ownerBorn)
-	complete := settledCurrentOwnerState(saved) && (prior.Phase == ownerClosed || unadmittedClaim(saved) || legacyEmptyClaim(saved))
-	identity := matchingHandoffIdentity(prior, next)
-	if !complete || !identity || prior.Revision == math.MaxUint64 {
-		o.admissionFailureReason = "retained_claim_unsettled"
-		if !identity {
-			o.admissionFailureReason = "retained_claim_identity_mismatch"
-		}
-		if prior.Revision == math.MaxUint64 {
-			o.admissionFailureReason = "retained_revision_exhausted"
-		}
+	if prior.Revision == math.MaxUint64 {
+		o.admissionFailureReason = "retained_revision_exhausted"
 		o.state.ContinuityKnown = false
 		o.storageUnavailable = true // Preserve the unclaimed predecessor bytes.
 		return
+	}
+	next := ownershipFor(o.cfg, o.id, prior.Revision, ownerBorn)
+	// A new owner only opens after the predecessor process is gone, so its
+	// exited or never-started children are settled here instead of waiting for
+	// a settler that no longer exists.
+	settleAbandonedPredecessorAttempts(o.state.Attempts, o.id)
+	if !settledCurrentOwnerState(o.state) || !matchingHandoffIdentity(prior, next) {
+		// Remaining unknown children stay in history and in the current
+		// inventory as unknown; they no longer block the session from starting.
+		o.diagnostics.InitialReason = "retained_claim_adopted_unproven"
+		o.state.ContinuityKnown = false
 	}
 	next.Revision = prior.Revision + 1
 	next.PredecessorOwnerID = prior.OwnerID
@@ -204,27 +208,34 @@ func (o *attemptOwner) writeClaim(data []byte, terminal bool) error {
 	return err
 }
 
-// A born owner cannot have admitted one of its own attempts. Earlier settled,
-// acknowledged records remain history and do not erase this birth proof.
-func unadmittedClaim(state inferenceOwnerState) bool {
-	if state.Ownership.Phase != ownerBorn {
-		return false
-	}
-	for _, attempt := range state.Attempts {
-		if attempt.Status.OwnerID == state.Ownership.OwnerID {
-			return false
+// settleAbandonedPredecessorAttempts runs only while this owner holds the
+// exclusive journal, so the predecessor agentctl has exited. A child that never
+// recorded a PID never started; a recorded child was reaped with its owner.
+func settleAbandonedPredecessorAttempts(attempts map[string]*ownedAttempt, ownerID string) {
+	for _, a := range attempts {
+		if a.Status.OwnerID == ownerID || a.Status.Settled {
+			continue
 		}
+		switch {
+		case a.PID == 0 && (a.Status.State == AttemptPrepared || a.Status.State == AttemptNotStarted):
+			a.Status.Known, a.Status.Settled, a.Status.State = true, true, AttemptNotStarted
+		case a.PID > 0 && predecessorInferenceTerminated(a.PID):
+			a.Status.Known, a.Status.Settled, a.Status.State = true, true, AttemptTerminated
+		default:
+			continue
+		}
+		a.Status.UpdatedAt = time.Now().UTC()
 	}
-	return true
 }
 
-// Before current inventory was separated from historical continuity, teardown
-// left an empty legacy owner unproven solely because history was unknown. This
-// compatibility case transfers no concrete attempt or reservation. Journal
-// exclusivity, matching identity and the owner CAS still fence the new owner;
-// Activate marks every new owner active before admitting a process.
-func legacyEmptyClaim(state inferenceOwnerState) bool {
-	return state.Ownership.Phase == ownerUnproven && !state.ContinuityKnown && len(state.Attempts) == 0
+// predecessorInferenceTerminated reports whether a child of an exited owner is
+// gone. On Windows every inference child runs in a kill-on-close Job held only
+// by its owner, so the kernel terminated the tree when that owner exited.
+func predecessorInferenceTerminated(pid int) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return recoveredInferenceTerminated(pid)
 }
 
 func matchingHandoffIdentity(prior, next *inferenceOwnership) bool {
