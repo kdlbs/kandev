@@ -121,11 +121,13 @@ owner has the raw independent replay failure and retained corrected proof source
 and output. No model, operating runtime, database, profile setting, Git ref or
 publication was changed by the implementation worker.
 
-## Original remaining integration
+## Subsequent integration
 
-C2b must bind and persist each server-issued attempt token to the existing shared
-overall/grade reservation, connect utility/manual-review/workflow-review callers,
-and release only from definite no-start/termination evidence. It must retain old
+[Task 02](task-02-shared-admission.md) delivers the shared admission and ordered
+settlement this owner seam enables. It binds and persists each server-issued
+attempt token to the existing shared overall/grade reservation, connects utility
+and lifecycle inference callers, and releases only from definite
+no-start/termination evidence. It must retain old
 owner unknowns across reconnection and use the existing recovery owner for an
 agentctl restart or unavailable history, explaining the unknown outcome. Old-peer
 fallback is native compatibility, not all-policy authority. No counter, grade

@@ -6,6 +6,7 @@ created: 2026-10-15
 owners: [backend]
 requirements:
   - REQ-AGENTS-INFERENCE-OWNERSHIP-001
+  - REQ-AGENTS-INFERENCE-OWNERSHIP-002
 ---
 
 # Inference child owner and settlement
@@ -84,6 +85,26 @@ helper is not itself a durable capacity policy. A 404 from old agentctl allows
 only legacy compatibility; missing observation/settlement remains unknown and
 must not authorize an all-policy admission or release another owner's slot.
 
-Overall/grade admission, utility/review consumer wiring and shared reservations
-remain the next increment. This owner seam supplies their population and release
-evidence and does not claim to complete the original shared-cap requirement.
+The shared capacity owner joins these attempts with task launches. In finite
+`all` policy the backend stores each exact binding (owner, instance, attempt,
+preparation, grade and model identity) through the existing settings-backed
+session-capacity store before sending the prompt. The reservation is admitted
+under the same controller mutex that reads the task and inference population, so
+existing ownership keeps its slot across settings changes and a missing or
+unknown population refuses new admission.
+
+A binding enters the counted population with its stable key. The deferred
+settlement order is terminal observation, provider settlement, binding removal,
+then retained-token acknowledgement. Worker leases keep a settled-but-not-yet
+released binding counted; refresh never invents a zero from a failed snapshot.
+The gated current inventory is separate from retained historical continuity, and
+a single unreadable execution is isolated instead of replacing the whole
+population with unknown.
+
+Host utility and lifecycle inference callers route through the shared consumer.
+Teardown forwards the owner's stop observation through the retained workspace
+stop path, so only a proven no-start or observed owned-process termination
+settles an attempt. Recovery of a still-tracked run owner uses the normal stop
+path and removes its census client only after terminal persistence. Population
+diagnostics use closed source/reason codes and bounded identifiers, and never
+become an admission decision or a release of another owner's slot.
