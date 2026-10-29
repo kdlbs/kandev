@@ -25,7 +25,6 @@ import (
 	"github.com/kandev/kandev/internal/runtimeprobe"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
-	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -910,10 +909,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if err := checkpointPluginExecutor(cleanupCtx, req, inventory); err != nil {
 			r.logger.Warn("plugin executor launch cleanup is fenced and its retry information was not retained",
 				zap.String("execution_id", req.InstanceID), zap.Error(err))
-			if errors.Is(claimErr, repoerrors.ErrTaskEnvironmentOwnershipChanged) {
-				return r.destroyUnrecordedPluginExecutorResource(ctx, req, operationContext, inventory, resource, stage, cause)
-			}
-			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information could not be retained"))
+			return r.destroyUnrecordedPluginExecutorResource(ctx, req, operationContext, inventory, resource, stage, cause)
 		}
 		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained"))
 	}
