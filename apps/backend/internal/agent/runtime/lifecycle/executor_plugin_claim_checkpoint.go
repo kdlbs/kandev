@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kdlbs/kandev/pluginsdk"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -167,7 +168,15 @@ func (m *Manager) activePluginExecutorClaim(
 		return nil, pluginExecutorInventory{}, nil, notFound
 	}
 	kind := pluginExecutorClaimKind(inventory.OperationID, claim)
-	if kind == "" || callback == nil || claimEcho == "" || claimEcho != claim.OperationID {
+	if kind == "" || callback == nil {
+		return nil, pluginExecutorInventory{}, nil, notFound
+	}
+	if claimEcho != claim.OperationID {
+		m.logger.Warn("plugin executor checkpoint refused: claim mismatch",
+			zap.String("phase", phase),
+			zap.String("environment_id", inventory.EnvironmentID),
+			zap.String("expected_claim", claim.OperationID),
+			zap.String("received_claim", claimEcho))
 		return nil, pluginExecutorInventory{}, nil, notFound
 	}
 	if kind != pluginExecutorClaimPhaseKind(phase) {

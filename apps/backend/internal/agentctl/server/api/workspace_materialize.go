@@ -212,12 +212,26 @@ func validateRepositoryLocator(locator string) error {
 	if isNetworkRepositoryScheme(parsed.Scheme) {
 		return validateNetworkRepositoryLocator(parsed)
 	}
+	if isE2ELocalFileLocator(parsed) {
+		return nil
+	}
 	// Git's SCP-like syntax permits only the conventional git user; accepting
 	// arbitrary users would make it impossible to distinguish credentials.
 	if strings.HasPrefix(locator, "git@") && strings.Count(locator, ":") == 1 && !strings.ContainsAny(locator, " \\t") {
 		return nil
 	}
 	return errors.New("unsupported locator")
+}
+
+// isE2ELocalFileLocator admits a host-less file:// locator, which is how the
+// e2e-local rig repositories are cloned, under the e2e mock profile only.
+const (
+	fileLocatorScheme = "file"
+	e2eMockEnv        = "KANDEV_E2E_MOCK"
+)
+
+func isE2ELocalFileLocator(locator *url.URL) bool {
+	return os.Getenv(e2eMockEnv) == queryParamTrue && locator.Scheme == fileLocatorScheme && locator.Host == "" && locator.Path != ""
 }
 
 func malformedRepositoryLocator(locator string) bool {
