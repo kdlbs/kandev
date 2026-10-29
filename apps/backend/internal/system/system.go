@@ -448,7 +448,7 @@ func reportDataRetention(ctx context.Context, eventBus bus.EventBus, log *logger
 		"state":         op.State,
 		"messages":      op.Messages,
 		"cleanup_jobs":  op.CleanupJobs,
-		"skipped":       op.Skipped,
+		"skipped":       op.Messages.SkippedTotal() + op.CleanupJobs.SkippedTotal(),
 		"analysis_only": op.AnalysisOnly,
 	}
 	job := &jobs.Job{ID: op.ID, Kind: "archived-data-retention-" + op.Kind, State: state, StartedAt: op.StartedAt, Result: result}

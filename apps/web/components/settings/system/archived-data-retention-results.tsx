@@ -24,6 +24,7 @@ const targetLabel = {
 // number would let one target's effect be read as the other's.
 function TargetResult({ target, labelKey }: { target: ArchivedDataTarget; labelKey: string }) {
   const { t } = useTranslation();
+  const skipped = skippedTotal(target.skipped);
   return (
     <div className="space-y-0.5">
       <p className="text-sm font-medium">{t(labelKey)}</p>
@@ -45,6 +46,17 @@ function TargetResult({ target, labelKey }: { target: ArchivedDataTarget; labelK
           {t("system:archivedData.targetOversized", { count: target.oversized })}
         </p>
       )}
+      {skipped > 0 && (
+        <>
+          <p className="text-xs text-muted-foreground">
+            {t("system:archivedData.skipped", { count: skipped })}
+          </p>
+          <RetentionSkippedItems
+            skipped={target.skipped}
+            labelKey="system:archivedData.skipReason"
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -53,7 +65,6 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
   const { t } = useTranslation();
   if (operation.kind === "backup")
     return <p className="text-sm">{t("system:archivedData.preparing")}</p>;
-  const skipped = skippedTotal(operation.skipped);
   // A completed pass with no scanned rows found nothing. An analysis never
   // reduces rows, so its zero reduced count must not hide the per-target report.
   const scanned = operation.messages.rows + operation.cleanup_jobs.rows;
@@ -79,15 +90,6 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
               : "system:archivedData.runDetails",
           )}
         </summary>
-        {skipped > 0 && (
-          <>
-            <p>{t("system:archivedData.skipped", { count: skipped })}</p>
-            <RetentionSkippedItems
-              skipped={operation.skipped}
-              labelKey="system:archivedData.skipReason"
-            />
-          </>
-        )}
         <p className="text-xs text-muted-foreground">
           {t("system:archivedData.window", {
             start: retentionDate(operation.started_at),

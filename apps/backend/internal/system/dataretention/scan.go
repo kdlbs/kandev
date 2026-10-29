@@ -200,7 +200,7 @@ func (s *Service) nextHistoryTask(ctx context.Context, q sqlx.QueryerContext, af
 func (s *Service) historyTaskEligible(ctx context.Context, q sqlx.QueryerContext, r *record, taskID string) (bool, error) {
 	eligible, err := tasksqlite.HistoryTaskEligible(ctx, q, s.driverName(), taskID, r.Operation.ArchivedCutoff)
 	if errors.Is(err, tasksqlite.ErrArchivedTaskEligibilityBudget) || errors.Is(err, tasksqlite.ErrPayloadEligibilityBudget) {
-		r.Operation.Skipped[skipEligibilityBudget]++
+		r.Operation.Messages.Skipped[skipEligibilityBudget]++
 		finishMessageTask(&r.Progress)
 		return false, nil
 	}
@@ -208,7 +208,7 @@ func (s *Service) historyTaskEligible(ctx context.Context, q sqlx.QueryerContext
 		return false, err
 	}
 	if !eligible {
-		r.Operation.Skipped[skipProtectedTasks]++
+		r.Operation.Messages.Skipped[skipProtectedTasks]++
 		finishMessageTask(&r.Progress)
 	}
 	return eligible, nil
@@ -256,7 +256,7 @@ func (s *Service) consumeMessagePage(ctx context.Context, q sqlx.QueryerContext,
 		target.TotalBytes += row.Bytes
 		if row.Bytes > models.ToolPayloadMaxBytes {
 			target.Oversized++
-			r.Operation.Skipped["oversize"]++
+			r.Operation.Messages.Skipped["oversize"]++
 			continue
 		}
 		*used += row.Bytes
@@ -285,7 +285,7 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 		return "", err
 	}
 	if reduced.Reason != "" {
-		r.Operation.Skipped[reduced.Reason]++
+		r.Operation.Messages.Skipped[reduced.Reason]++
 		return "", nil
 	}
 	target := &r.Operation.Messages
@@ -364,7 +364,7 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 		target.Rows++
 		target.TotalBytes += bytes
 		target.Oversized++
-		r.Operation.Skipped["oversize"]++
+		r.Operation.CleanupJobs.Skipped["oversize"]++
 		finishCleanupJob(&r.Progress)
 		return false, nil
 	}
@@ -380,7 +380,7 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	}
 	finishCleanupJob(&r.Progress)
 	if reduced.Reason != "" {
-		r.Operation.Skipped[reduced.Reason]++
+		r.Operation.CleanupJobs.Skipped[reduced.Reason]++
 		return false, nil
 	}
 	target.Eligible++
@@ -433,7 +433,7 @@ func (s *Service) stopChangedScan(ctx context.Context, id string) error {
 // partial, so an unbounded decision is never presented as a complete removal.
 func completeOperation(r *record, now time.Time) {
 	state, code := stateSucceeded, ""
-	if r.Operation.Skipped[skipEligibilityBudget] > 0 {
+	if r.Operation.Messages.Skipped[skipEligibilityBudget] > 0 {
 		state, code = statePartial, skipEligibilityBudget
 	}
 	finishOperation(r, state, code, now)

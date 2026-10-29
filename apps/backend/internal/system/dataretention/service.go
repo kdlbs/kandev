@@ -297,10 +297,11 @@ func (s *Service) startOperation(ctx context.Context, q sqlx.QueryerContext, r *
 		ID:             newOperationID(),
 		Kind:           kind,
 		State:          stateRunning,
+		Messages:       Target{Skipped: map[string]int64{}},
+		CleanupJobs:    Target{Skipped: map[string]int64{}},
 		ArchivedCutoff: archivedCutoff,
 		CleanupCutoff:  cleanupCutoff,
 		StartedAt:      now,
-		Skipped:        map[string]int64{},
 		PolicyRevision: r.Policy.Revision,
 	}
 	r.Progress = progress{

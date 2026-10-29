@@ -8,33 +8,43 @@ type Preparation struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// Target separates the two approved reductions in every counter and in the
-// settings surface, so one target's result is never reported as the other's.
+// Target separates the two approved reductions in every counter, including the
+// skipped-data counts, and in the settings surface, so one target's result is
+// never reported as the other's.
 type Target struct {
-	Rows       int64 `json:"rows"`
-	Reduced    int64 `json:"reduced"`
-	Bytes      int64 `json:"bytes"`
-	Eligible   int64 `json:"eligible"`
-	Oversized  int64 `json:"oversized"`
-	TotalBytes int64 `json:"total_bytes"`
+	Rows       int64            `json:"rows"`
+	Reduced    int64            `json:"reduced"`
+	Bytes      int64            `json:"bytes"`
+	Eligible   int64            `json:"eligible"`
+	Oversized  int64            `json:"oversized"`
+	TotalBytes int64            `json:"total_bytes"`
+	Skipped    map[string]int64 `json:"skipped"`
+}
+
+// SkippedTotal is the number of rows this target left untouched.
+func (t Target) SkippedTotal() int64 {
+	var total int64
+	for _, count := range t.Skipped {
+		total += count
+	}
+	return total
 }
 
 type Operation struct {
-	ID              string           `json:"id"`
-	Kind            string           `json:"kind"`
-	State           string           `json:"state"`
-	Messages        Target           `json:"messages"`
-	CleanupJobs     Target           `json:"cleanup_jobs"`
-	Skipped         map[string]int64 `json:"skipped"`
-	ArchivedCutoff  time.Time        `json:"archived_cutoff"`
-	CleanupCutoff   time.Time        `json:"cleanup_cutoff"`
-	PolicyRevision  int64            `json:"policy_revision"`
-	StartedAt       time.Time        `json:"started_at"`
-	FinishedAt      *time.Time       `json:"finished_at,omitempty"`
-	Error           string           `json:"error,omitempty"`
-	AnalysisOnly    bool             `json:"analysis_only,omitempty"`
-	Complete        bool             `json:"complete,omitempty"`
-	CompletedTarget string           `json:"completed_target,omitempty"`
+	ID              string     `json:"id"`
+	Kind            string     `json:"kind"`
+	State           string     `json:"state"`
+	Messages        Target     `json:"messages"`
+	CleanupJobs     Target     `json:"cleanup_jobs"`
+	ArchivedCutoff  time.Time  `json:"archived_cutoff"`
+	CleanupCutoff   time.Time  `json:"cleanup_cutoff"`
+	PolicyRevision  int64      `json:"policy_revision"`
+	StartedAt       time.Time  `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	Error           string     `json:"error,omitempty"`
+	AnalysisOnly    bool       `json:"analysis_only,omitempty"`
+	Complete        bool       `json:"complete,omitempty"`
+	CompletedTarget string     `json:"completed_target,omitempty"`
 }
 
 type Status struct {

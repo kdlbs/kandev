@@ -13,6 +13,7 @@ export type ArchivedDataTarget = {
   eligible: number;
   oversized: number;
   total_bytes: number;
+  skipped: Record<string, number>;
 };
 export type ArchivedDataOperation = {
   id: string;
@@ -20,7 +21,6 @@ export type ArchivedDataOperation = {
   state: "running" | "succeeded" | "failed" | "partial" | "cancelled";
   messages: ArchivedDataTarget;
   cleanup_jobs: ArchivedDataTarget;
-  skipped: Record<string, number>;
   archived_cutoff: string;
   cleanup_cutoff: string;
   policy_revision: number;

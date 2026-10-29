@@ -30,6 +30,14 @@ func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
 	if err := validateRecord(r); err != nil {
 		return record{}, err
 	}
+	if r.Operation != nil {
+		if r.Operation.Messages.Skipped == nil {
+			r.Operation.Messages.Skipped = map[string]int64{}
+		}
+		if r.Operation.CleanupJobs.Skipped == nil {
+			r.Operation.CleanupJobs.Skipped = map[string]int64{}
+		}
+	}
 	r.Supported = true
 	return r, nil
 }

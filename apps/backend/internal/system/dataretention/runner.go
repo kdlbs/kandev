@@ -67,7 +67,8 @@ func (s *Service) prepareFirstBatch(ctx context.Context, r record) (bool, error)
 		return false, nil
 	}
 	op := *r.Operation
-	op.Skipped = maps.Clone(op.Skipped)
+	op.Messages.Skipped = maps.Clone(op.Messages.Skipped)
+	op.CleanupJobs.Skipped = maps.Clone(op.CleanupJobs.Skipped)
 	r.Operation = &op
 	if _, err := s.scanBatch(ctx, s.pool.Reader(), &r, false); err != nil {
 		return false, err
