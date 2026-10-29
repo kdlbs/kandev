@@ -31,7 +31,7 @@ import (
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/storage"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
-	_ "github.com/mattn/go-sqlite3"
+	sqlite3driver "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 )
 
@@ -766,7 +766,9 @@ func TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows(t *testing.T)
 }
 
 // TestArchivedRetentionBatchFailureRollsBack verifies that a failed reduction
-// write rolls back: the snapshot keeps its original bytes.
+// write rolls back. A Go function registered on the test connection is called by
+// the rejecting trigger, so the case proves the write was actually attempted
+// rather than merely that it never ran.
 func TestArchivedRetentionBatchFailureRollsBack(t *testing.T) {
 	service, connection := newRetentionSafetyService(t, dataretention.Options{
 		CreateBackup: func(context.Context) (string, error) { return "receipt", nil },
@@ -779,8 +781,33 @@ func TestArchivedRetentionBatchFailureRollsBack(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	// Register a driver function the trigger calls, so the case observes the
+	// attempt. This is test-connection only; no production instrumentation.
+	attempted := make(chan struct{}, 8)
+	reserved, err := connection.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reserved.Raw(func(driverConn any) error {
+		sqliteConn, ok := driverConn.(*sqlite3driver.SQLiteConn)
+		if !ok {
+			return errors.New("unexpected driver connection")
+		}
+		return sqliteConn.RegisterFunc("retention_attempted", func() int {
+			select {
+			case attempted <- struct{}{}:
+			default:
+			}
+			return 1
+		}, false)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reserved.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := connection.Exec(
-		`CREATE TRIGGER reject_reduction BEFORE UPDATE ON task_resource_cleanup_jobs BEGIN SELECT RAISE(ABORT, 'no'); END`,
+		`CREATE TRIGGER reject_reduction BEFORE UPDATE ON task_resource_cleanup_jobs BEGIN SELECT retention_attempted(); SELECT RAISE(ABORT, 'no'); END`,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -788,13 +815,12 @@ func TestArchivedRetentionBatchFailureRollsBack(t *testing.T) {
 	t.Cleanup(cancel)
 	service.Start(ctx)
 	saveBackupPolicy(t, service)
-	// The rejecting write fails and rolls back, so the snapshot must stay
-	// byte-identical. A pass that keeps failing settles as failed only after five
-	// ticks at a one-minute retry backoff, which is out of a bounded test; the
-	// rollback safety property is asserted directly here, and the matching
-	// non-rejecting seed in TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows
-	// shows the same row would otherwise change.
-	time.Sleep(3 * time.Second)
+	// Wait for the write attempt itself, not a fixed sleep.
+	select {
+	case <-attempted:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the reducing write was never attempted")
+	}
 	var kept string
 	if err := connection.QueryRow(`SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id = 'job-eligible'`).Scan(&kept); err != nil {
 		t.Fatal(err)
