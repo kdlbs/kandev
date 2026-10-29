@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -114,6 +115,7 @@ type PluginRemoteExecutor struct {
 	hostAPIProbes               *runtimeprobe.Registry
 	hostAPIProbeInterval        time.Duration
 	cleanupClaimWait            time.Duration
+	launching                   sync.Map
 	cleanupClaimRetry           time.Duration
 }
 
@@ -224,6 +226,8 @@ func (r *PluginRemoteExecutor) CreateInstance(ctx context.Context, req *Executor
 	if err != nil {
 		return nil, err
 	}
+	r.launching.Store(req.InstanceID, struct{}{})
+	defer r.launching.Delete(req.InstanceID)
 	resource, err := r.provisionPluginExecutor(ctx, launch)
 	if err != nil {
 		return nil, err
@@ -555,7 +559,10 @@ func (r *PluginRemoteExecutor) StopInstance(ctx context.Context, instance *Execu
 		stopErr = instance.Client.Stop(ctx)
 		instance.Client.Close()
 	}
-	if shouldRunExecutorCleanup(instance.StopReason) {
+	// Archive and delete stops only stop agentctl. The task-environment cleanup
+	// job is the single authority that drains and destroys the environment; a
+	// stop that raced it for the cleanup claim could only be fenced by it.
+	if instance.StopReason == StopReasonLaunchRollback {
 		if err := r.cleanupPluginExecutorInstance(ctx, instance); err != nil {
 			return errors.Join(stopErr, err)
 		}
@@ -862,6 +869,11 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 		inventory.Phase = pluginExecutorPhaseCleanupPending
 		_ = checkpointPluginExecutor(ctx, req, inventory)
 		return withPluginExecutorProviderRefusal(provisionErr, errors.New("plugin executor allocation outcome is unknown; cleanup inventory was retained"))
+	}
+	if err := validatePluginExecutorResourceForProvider(profile.Provider, resource); err != nil {
+		inventory.Phase = pluginExecutorPhaseCleanupPending
+		_ = checkpointPluginExecutor(ctx, req, inventory)
+		return withPluginExecutorProviderRefusal(provisionErr, fmt.Errorf("plugin executor recovered resource was rejected and cleanup was retained: %w", err))
 	}
 	return r.cleanupAfterPluginExecutorFailure(ctx, req, operationContext, inventory, resource, "provision_recovered", provisionErr)
 }

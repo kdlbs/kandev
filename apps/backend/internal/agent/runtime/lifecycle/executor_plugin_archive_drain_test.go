@@ -30,14 +30,14 @@ func archiveDrainFixture(t *testing.T, mutate func(*pluginExecutorInventory)) (*
 func archiveInstance(store *pluginExecutorInventoryStoreFake) *ExecutorInstance {
 	return &ExecutorInstance{
 		InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
-		StopReason: StopReasonTaskArchived, Metadata: store.record.Metadata,
+		StopReason: StopReasonLaunchRollback, Metadata: store.record.Metadata,
 	}
 }
 
-func TestArchiveLoadsTheStoredAgentctlTokenAndDrainsBeforeDestroy(t *testing.T) {
+func TestRollbackLoadsTheStoredAgentctlTokenAndDrainsBeforeDestroy(t *testing.T) {
 	runtime, operations, store, drainer, _ := archiveDrainFixture(t, nil)
 	if err := runtime.StopInstance(context.Background(), archiveInstance(store), true); err != nil {
-		t.Fatalf("archive: %v", err)
+		t.Fatalf("rollback: %v", err)
 	}
 	if len(drainer.calls) != 1 {
 		t.Fatalf("archive drained %d times, want once", len(drainer.calls))
@@ -50,7 +50,7 @@ func TestArchiveLoadsTheStoredAgentctlTokenAndDrainsBeforeDestroy(t *testing.T) 
 	}
 }
 
-func TestArchiveUsesTheLiveInstanceTokenWithoutTheSecretStore(t *testing.T) {
+func TestRollbackUsesTheLiveInstanceTokenWithoutTheSecretStore(t *testing.T) {
 	runtime, operations, store, drainer, _ := archiveDrainFixture(t, nil)
 	runtime.SetRuntimeSecretStore(nil)
 	instance := archiveInstance(store)
@@ -73,11 +73,11 @@ func TestCascadeCleanupLoadsTheStoredAgentctlToken(t *testing.T) {
 	}
 }
 
-func TestArchiveWithoutAnyRecordedTokenStillDestroysWithNotAttempted(t *testing.T) {
-	runtime, operations, store, drainer, secretsFake := archiveDrainFixture(t, nil)
+func TestCascadeWithoutAnyRecordedTokenStillDestroysWithNotAttempted(t *testing.T) {
+	runtime, operations, _, drainer, secretsFake := archiveDrainFixture(t, nil)
 	delete(secretsFake.values, archiveAuthSecretID)
-	if err := runtime.StopInstance(context.Background(), archiveInstance(store), true); err != nil {
-		t.Fatalf("archive: %v", err)
+	if err := destroyClaimEnvironment(runtime); err != nil {
+		t.Fatalf("cascade: %v", err)
 	}
 	if len(drainer.calls) != 0 || operations.destroyRequest.GetDrainOutcome() != pluginDrainOutcomeNotAttempted {
 		t.Fatalf("drain calls = %d, outcome = %q", len(drainer.calls), operations.destroyRequest.GetDrainOutcome())
@@ -86,7 +86,7 @@ func TestArchiveWithoutAnyRecordedTokenStillDestroysWithNotAttempted(t *testing.
 
 // A retry carries the instance's launch-time snapshot, which is older than the
 // stored inventory that the first attempt advanced to cleanup_pending.
-func TestArchiveRetryBuildsItsInventoryFromTheStoredRecord(t *testing.T) {
+func TestRollbackRetryBuildsItsInventoryFromTheStoredRecord(t *testing.T) {
 	runtime, operations, store, _, _ := archiveDrainFixture(t, func(inventory *pluginExecutorInventory) {
 		inventory.Phase = pluginExecutorPhaseCleanupPending
 		inventory.Revision = 4

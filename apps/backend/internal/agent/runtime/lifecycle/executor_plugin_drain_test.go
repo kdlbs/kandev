@@ -340,7 +340,7 @@ func runtimeRecordForStop(t *testing.T, runtime *PluginRemoteExecutor) *models.E
 	return store.record
 }
 
-func TestTaskTeardownStopDrainsBeforeDestroy(t *testing.T) {
+func TestTaskTeardownDrainsBeforeDestroyOnlyInTheEnvironmentCleanup(t *testing.T) {
 	runtime, operations, _, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, nil)
 	record := runtimeRecordForStop(t, runtime)
 	if err := runtime.StopInstance(context.Background(), &ExecutorInstance{
@@ -348,6 +348,12 @@ func TestTaskTeardownStopDrainsBeforeDestroy(t *testing.T) {
 		RuntimeName: "plugin_remote", StopReason: StopReasonTaskDeleted, Metadata: record.Metadata,
 	}, false); err != nil {
 		t.Fatalf("StopInstance: %v", err)
+	}
+	if len(drainer.calls) != 0 || operations.destroyRequest != nil {
+		t.Fatalf("a delete stop drained or destroyed the environment: drains=%v destroy=%#v", drainer.calls, operations.destroyRequest)
+	}
+	if err := destroyClaimEnvironment(runtime); err != nil {
+		t.Fatalf("environment cleanup: %v", err)
 	}
 	if len(drainer.calls) != 1 || operations.destroyRequest.GetDrainOutcome() != "drained" {
 		t.Fatalf("task teardown drains=%v destroy outcome=%q, want one drain then a drained destroy", drainer.calls, operations.destroyRequest.GetDrainOutcome())
