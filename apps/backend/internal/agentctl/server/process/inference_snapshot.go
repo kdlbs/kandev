@@ -2,6 +2,9 @@ package process
 
 import "github.com/kandev/kandev/internal/agentctl/server/utility"
 
+// InferenceOwner returns the authority initialized before cancellable startup.
+func (m *Manager) InferenceOwner() *utility.InferenceOwner { return m.inferenceOwner }
+
 // SetInferenceSnapshotter connects the instance-owned inference journal before admission.
 func (m *Manager) SetInferenceSnapshotter(snapshotter func() utility.AttemptSnapshot) {
 	m.inferenceSnapshotMu.Lock()

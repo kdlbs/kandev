@@ -75,6 +75,7 @@ type PrepareAttemptRequest struct {
 }
 
 type inferenceOwnerState struct {
+	Ownership       *inferenceOwnership      `json:"ownership,omitempty"`
 	Version         int                      `json:"version"`
 	ContinuityKnown bool                     `json:"continuity_known"`
 	Attempts        map[string]*ownedAttempt `json:"attempts"`

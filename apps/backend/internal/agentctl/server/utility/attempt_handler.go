@@ -21,7 +21,11 @@ type inferenceProcessOwner interface {
 func NewOwnedHandler(cfg *config.InstanceConfig, owner inferenceProcessOwner, log *zap.Logger) *Handler {
 	h := NewHandler(cfg.WorkDir, log)
 	retained, journalErr := owner.DeliveryJournal()
-	h.attempts = newAttemptOwner(cfg, retained)
+	if source, ok := owner.(interface{ InferenceOwner() *InferenceOwner }); ok && source.InferenceOwner() != nil {
+		h.attempts = source.InferenceOwner().attempts
+	} else {
+		h.attempts = newAttemptOwner(cfg, retained)
+	}
 	if cfg.DurableJournalPath != "" && retained == nil {
 		h.attempts.diagnostics.JournalErrorClass = attemptJournalErrorClass(journalErr)
 	}

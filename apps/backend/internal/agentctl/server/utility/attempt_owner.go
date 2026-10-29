@@ -27,10 +27,15 @@ type attemptOwner struct {
 	volatileFresh      bool
 	storageUnavailable bool
 	diagnostics        AttemptDiagnostics
+	expectedOwnerID    string
 }
 
 func newAttemptOwner(cfg *config.InstanceConfig, retained *journal.Journal) *attemptOwner {
-	o := &attemptOwner{id: uuid.NewString(), cfg: cfg, journal: retained,
+	return newAttemptOwnerWithID(cfg, retained, uuid.NewString())
+}
+
+func newAttemptOwnerWithID(cfg *config.InstanceConfig, retained *journal.Journal, id string) *attemptOwner {
+	o := &attemptOwner{id: id, cfg: cfg, journal: retained,
 		state: inferenceOwnerState{Version: 1, Attempts: make(map[string]*ownedAttempt)}}
 	o.volatileFresh = cfg.InferenceOwnerFresh && cfg.DurableJournalPath == "" && retained == nil
 	o.state.ContinuityKnown = o.volatileFresh
@@ -52,6 +57,11 @@ func (o *attemptOwner) loadRetainedOwner() {
 	}
 	if !found {
 		o.state.ContinuityKnown = o.journal.Fresh()
+		phase := ownerUnproven
+		if o.state.ContinuityKnown {
+			phase = ownerActive
+		}
+		o.state.Ownership = ownershipFor(o.cfg, o.id, 1, phase)
 		o.diagnostics.InitialReason = "existing_journal_without_owner"
 		if o.state.ContinuityKnown {
 			o.diagnostics.InitialReason = "journal_fresh_empty"
@@ -69,12 +79,12 @@ func (o *attemptOwner) loadRetainedOwner() {
 	}
 	o.state = saved
 	o.diagnostics.InitialReason = "retained_owner_loaded"
-	// Retained entries are evidence, never a complete census of a prior owner.
-	o.state.ContinuityKnown = false
+	// Only a complete, durably closed predecessor can transfer census trust.
+	o.adoptRetainedClaim(saved)
 }
 
 func (o *attemptOwner) beginLocked(id, callID, preparationID string) (AttemptStatus, error) {
-	if o.storageUnavailable {
+	if o.activateLocked() != nil {
 		return AttemptStatus{AttemptID: id, State: AttemptUnknown, PromptDispatch: PromptPossiblySent}, errAttemptUnavailable
 	}
 	if existing := o.state.Attempts[id]; existing != nil {
@@ -106,6 +116,9 @@ func (o *attemptOwner) snapshot() AttemptSnapshot {
 	result := AttemptSnapshot{OwnerID: o.id, InstanceID: o.cfg.InstanceID,
 		Known: o.state.ContinuityKnown, Attempts: make([]AttemptStatus, 0, len(o.state.Attempts)), Diagnostics: o.diagnosticSnapshot()}
 	for _, a := range o.state.Attempts {
+		if o.historicalSettled(a) {
+			continue
+		}
 		result.Attempts = append(result.Attempts, a.Status)
 		if !a.Status.Known {
 			result.Known = false
@@ -142,9 +155,12 @@ func (o *attemptOwner) persistLocked(terminal bool, currentID string) {
 		data, err = json.Marshal(o.state)
 	}
 	if err == nil {
-		err = o.journal.WriteInferenceOwner(context.Background(), data, terminal)
+		err = o.writeClaim(data, terminal)
 	}
 	if err != nil {
+		if errors.Is(err, journal.ErrInferenceOwnerConflict) {
+			o.storageUnavailable = true
+		}
 		o.state.ContinuityKnown = false
 		o.diagnostics.LastPersistResult = "write_failed"
 		if o.diagnostics.FirstPersistFailure == attemptDiagnosticNone {
@@ -203,7 +219,7 @@ func (o *attemptOwner) reconcileLocked() {
 }
 
 func validInferenceOwnerState(state inferenceOwnerState) bool {
-	if state.Version != 1 || state.Attempts == nil {
+	if state.Version != 1 || state.Attempts == nil || !validOwnership(state.Ownership) {
 		return false
 	}
 	for id, a := range state.Attempts {
@@ -250,6 +266,7 @@ func (o *attemptOwner) finalSnapshot() AttemptSnapshot {
 			a.Status.UpdatedAt = time.Now().UTC()
 		}
 	}
+	o.closeClaimLocked()
 	o.persistLocked(true, "")
 	o.mu.Unlock()
 	return o.snapshot()

@@ -62,6 +62,8 @@ var (
 )
 
 type Config struct {
+	// InitialInferenceOwner is installed only with a genuinely new journal.
+	InitialInferenceOwner  []byte
 	ReadOnly               bool
 	ExistingOnly           bool
 	Path                   string
@@ -239,6 +241,14 @@ func (j *Journal) initialize() error {
 			}
 			if err := initializeFreshJournal(tx, meta); err != nil {
 				return err
+			}
+			if len(j.config.InitialInferenceOwner) > 0 {
+				if int64(len(j.config.InitialInferenceOwner)) > j.config.MaxEventBytes {
+					return fmt.Errorf("inference birth exceeds journal record limit")
+				}
+				if err := meta.Put(keyInferenceOwner, j.config.InitialInferenceOwner); err != nil {
+					return err
+				}
 			}
 			j.fresh = true
 			return nil
