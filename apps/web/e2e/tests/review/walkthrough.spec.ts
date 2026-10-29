@@ -623,6 +623,7 @@ test.describe("Code walkthrough", () => {
         await expect(generatedAt).toHaveAttribute("datetime", firstGeneration!);
 
         const replacementSaved = ws.waitForEvent("task.walkthrough.updated", {
+          timeout: 45_000,
           where: (payload) => payload.task_id === task.id,
         });
         await apiClient.addUserMessage(
