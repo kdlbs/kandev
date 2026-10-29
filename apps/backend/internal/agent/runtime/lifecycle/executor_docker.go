@@ -673,6 +673,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
 		if path, err := durableJournalContainerPath(req); err == nil {

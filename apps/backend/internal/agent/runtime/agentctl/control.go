@@ -124,6 +124,10 @@ type CreateInstanceRequest struct {
 	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
 	// DeliveryHarnessGeneration fences events to one native harness conversation.
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off for non-OpenCode launches.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

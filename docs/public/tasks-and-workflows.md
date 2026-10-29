@@ -673,11 +673,19 @@ What a job row can show depends on the agent runtime:
   zero. A failed row keeps its exit status and retained output when the runtime
   reports them.
 
+For OpenCode v2 2.2.0, the optional **OpenCode integration plugin** can settle a
+detached shell job from the native exit event. A job can therefore move from
+unknown to completed, failed, or interrupted after the foreground prompt ends.
+The plugin is off by default; see
+[Agents and profiles](agents-and-profiles.md#opencode-terminal-outcomes) for
+activation and compatibility. Without the plugin, or on an unsupported runtime,
+the job keeps the unknown fallback.
+
 Controls appear only when the runtime advertises them and the job is currently
 actionable. Runs that provide observation only, such as a detached OpenCode
-shell launch on a runtime without continuous delivery, show no Stop, Interrupt,
-or input controls, and their output is labeled unavailable rather than shown as
-live logs. The launch banner in the original tool message is not live command
+shell launch without the integration plugin, show no Stop, Interrupt, or input
+controls, and their output is labeled unavailable rather than shown as live
+logs. The launch banner in the original tool message is not live command
 output.
 
 ### Prevent auto-start on open

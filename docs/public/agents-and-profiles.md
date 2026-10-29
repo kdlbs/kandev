@@ -59,10 +59,39 @@ Agents that report background shell commands, subagents, or monitors feed the sh
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
 - **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
-- **OpenCode ACP** reports a detached shell launch with its native shell identity. The supported OpenCode versions end their ACP subscription with the foreground prompt, so Kandev keeps the launch inspectable but marks its later activity unknown instead of promising completion, live output, or controls. The original launch banner stays in the tool message.
+- **OpenCode ACP** reports a detached shell launch with its native shell identity. With the optional integration plugin enabled on a supported OpenCode v2 2.2.0 runtime, Kandev can settle that job when the native shell exits. Without the plugin, or on any other runtime, the job stays inspectable and its later activity remains unknown. Neither path provides live output or process controls, and the original launch banner stays in the tool message.
 - **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
 
 A bounded probe or reconnect can also leave a job unknown. Unknown activity is neither a successful completion nor a verified running job, and retained history stays reachable after the active count reaches zero.
+
+#### OpenCode terminal outcomes
+
+Kandev can supply a small integration plugin to supported OpenCode v2 task
+launches. The plugin observes native shell terminal events through a private
+loopback callback, so an owned job can move from unknown to completed, failed,
+or interrupted after the foreground prompt ends.
+
+This integration is opt-in. Enable **OpenCode integration plugin** in
+**Settings > System > Feature Toggles**, or set
+`KANDEV_FEATURES_OPENCODE_PLUGIN=true`, and restart Kandev. An environment value
+wins over a stored toggle. The integration is off in every shipped profile.
+
+Requirements and behavior:
+
+- The runtime must be OpenCode v2 2.2.0. Other versions and OpenCode v1 keep the
+  existing ACP behavior and the unknown-job fallback.
+- Kandev supplies the plugin automatically. Do not install an npm package or
+  add a project plugin.
+- Existing `opencode.json`, inline configuration, user plugins, credentials,
+  and MCP settings keep their meaning. A malformed or conflicting inline
+  configuration disables only this integration for that launch.
+- The shared **Agent background work** feature must also be on. Turning it off
+  prevents shell claims and workload observations.
+- A terminal result can arrive after the foreground prompt. Intermediate
+  activity can still show unknown. Output streaming, process controls, and
+  automatic assistant follow-ups remain unavailable.
+- A job with no terminal evidence stays unknown. The plugin does not replay
+  events lost while OpenCode or the executor was stopped.
 
 Codex questions sent through Kandev's `ask_user_question_kandev` MCP tool or through the native app-server `item/tool/requestUserInput` method use the normal clarification UI. Native options and permitted free-text answers map back to Codex's answer format. Secret questions fail closed because Kandev's clarification flow stores answers in the conversation. If Codex resolves a pending request, Kandev closes the corresponding clarification.
 

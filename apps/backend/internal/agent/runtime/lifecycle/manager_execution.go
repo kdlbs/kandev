@@ -1208,6 +1208,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			ManagedRuntimeFamily:           managedRuntimeOptions.ManagedRuntimeFamily,
 			ManagedRuntimeSource:           managedRuntimeOptions.ManagedRuntimeSource,
 			NativeRuntimeVersion:           managedRuntimeOptions.NativeRuntimeVersion,
+			OpenCodePluginRuntime:          openCodePluginRuntimeFor(agentConfig, managedRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
 			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,

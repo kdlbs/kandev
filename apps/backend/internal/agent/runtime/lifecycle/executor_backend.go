@@ -712,6 +712,9 @@ type ExecutorCreateRequest struct {
 	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
 	ManagedRuntimeSource  managedruntime.OpenCodeSource
 	NativeRuntimeVersion  string
+	// OpenCodePluginRuntime is the typed resolved runtime evidence for the
+	// Kandev integration plugin. Nil keeps the integration off.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	PromptSuggestions     bool     // Ask a native-suggestion agent to emit next-prompt suggestions

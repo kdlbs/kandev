@@ -234,6 +234,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.opencodePlugin",
+			EnvVar:          "KANDEV_FEATURES_OPENCODE_PLUGIN",
+			Kind:            KindFeature,
+			Label:           "OpenCode integration plugin",
+			Description:     "Supplies the Kandev integration plugin to supported OpenCode v2 task launches so native background shell outcomes can settle existing jobs.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "The plugin observes native shell terminal facts through a private loopback callback. Enable it only for OpenCode v2 2.2.0 sessions; unsupported versions keep ordinary ACP behavior.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OpenCodePlugin },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OpenCodePlugin = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,

@@ -205,6 +205,11 @@ type AgentEvent struct {
 	// when agentctl can establish that association.
 	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
 
+	// DeliveryEventID is a stable producer identity for an observation that
+	// can be retried after a lost acknowledgement. The journal stores it
+	// beside the committed event so a retry cannot project twice.
+	DeliveryEventID string `json:"delivery_event_id,omitempty"`
+
 	// OperationID identifies an operation when the agent exposes an operation ID.
 	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`

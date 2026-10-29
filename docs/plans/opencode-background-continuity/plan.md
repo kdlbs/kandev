@@ -46,6 +46,26 @@ The missing producer events are a delivery dependency, not a frontend defect.
 Task 01 can deliver honest launch inspection independently. Full continuity
 cannot complete until Task 02 proves and packages the upstream change.
 
+## Related v2 compatibility package
+
+The user authorized the
+[Kandev OpenCode plugin design package](../opencode-kandev-plugin/plan.md) on
+2026-10-28. It supplies one extensible v2 server plugin at launch. Its first
+module reports actual terminal outcomes for ACP-confirmed background shells.
+
+That package can satisfy the new shell-outcome criteria in
+REQ-AGENTS-BACKGROUND-WORK-007. It does not satisfy Tasks 02, 03, or 04 here.
+Those tasks remain blocked on upstream automatic-turn and live-activity
+evidence. Existing completed work and recorded test results remain historical
+evidence for the legacy path. The new package adds separate enabled-path tests
+and preserves the existing plugin-disabled scenarios.
+
+The [integration decision](../../decisions/2026-10-28-opencode-integration-plugin.md)
+permits this declared plugin callback channel. The exclusions below still
+apply to native HTTP conversation transport, private database readers, and
+output-file polling. The separate package adds its own restart-required toggle;
+this continuity package's task statuses are unchanged.
+
 ## Scope
 
 ### In scope
