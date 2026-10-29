@@ -38,14 +38,17 @@ func TestLaunchCleanupWaitsForABusyClaimAndDestroysTheResource(t *testing.T) {
 }
 
 // A claim that stays busy and a checkpoint that is rejected leave the launch
-// as the only holder of the resource handle, so it destroys the resource
-// itself and says the resource was never recorded.
-func TestLaunchCleanupThatCannotRetainRetryInformationDestroysAndSaysSo(t *testing.T) {
-	_, operations, _, err := launchCleanupRuntime(t, 1<<20, errors.New("claim held elsewhere"))
-	if operations.destroyRequest == nil {
-		t.Fatal("the unrecorded resource was dropped without a destroy")
+// as the only holder of the resource handle. It hands the handle to the
+// environment cleanup instead of mutating the provider without a claim.
+func TestLaunchCleanupThatCannotRetainRetryInformationHandsTheResourceOff(t *testing.T) {
+	runtime, operations, _, err := launchCleanupRuntime(t, 1<<20, errors.New("claim held elsewhere"))
+	if operations.destroyRequest != nil {
+		t.Fatal("the launch destroyed a resource without holding a persisted claim")
 	}
-	if err == nil || !strings.Contains(err.Error(), "not recorded and was removed") {
-		t.Fatalf("error = %v, want the unrecorded resource to be reported as removed", err)
+	if err == nil || !strings.Contains(err.Error(), "not recorded") {
+		t.Fatalf("error = %v, want the unrecorded resource to be reported", err)
+	}
+	if _, ok := runtime.unrecorded.Load("execution-plugin-1"); !ok {
+		t.Fatal("the resource handle was dropped instead of handed to the environment cleanup")
 	}
 }

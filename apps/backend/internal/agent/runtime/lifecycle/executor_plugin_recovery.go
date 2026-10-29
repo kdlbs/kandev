@@ -528,9 +528,16 @@ func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, envir
 		return fmt.Errorf("read plugin executor cleanup inventory: %w", err)
 	}
 	var cleanupErrors []error
+	seen := make(map[string]bool, len(records))
 	for _, record := range records {
+		seen[record.AgentExecutionID] = true
 		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record); err != nil {
 			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+	for _, executionID := range r.unrecordedResourceExecutions(environment) {
+		if !seen[executionID] {
+			cleanupErrors = append(cleanupErrors, errors.New("plugin executor launch provisioned a resource that has no inventory record; cleanup cannot settle"))
 		}
 	}
 	return errors.Join(cleanupErrors...)
@@ -561,6 +568,9 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx contex
 	profile, err := r.pluginExecutorCleanupProfile(ctx, record, inventory)
 	if err != nil {
 		return err
+	}
+	if held, ok := r.unrecorded.Load(record.AgentExecutionID); ok {
+		return r.destroyHandedOffPluginExecutorResource(ctx, record, inventory, held.(*unrecordedPluginResource), profile)
 	}
 	resource, shouldDestroy, err := r.recoverPluginExecutorCleanupResource(ctx, record, inventory, profile)
 	if err != nil || !shouldDestroy {
