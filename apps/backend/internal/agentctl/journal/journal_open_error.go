@@ -139,7 +139,7 @@ func journalErrorLabelForOpenReason(reason OpenReason) string {
 	case OpenReasonIOFailure:
 		return "io_failure"
 	default:
-		return "unknown"
+		return journalErrorUnknownLabel
 	}
 }
 
