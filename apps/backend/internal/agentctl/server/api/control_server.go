@@ -135,6 +135,7 @@ func (m *ControlServer) setupRoutes() {
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
 	api.GET("/instances", m.handleListInstances)
+	api.POST("/inference/inventory", m.handleInferenceInventory)
 	api.POST("/delivery/retained", m.handleRetainedDelivery)
 	api.POST("/delivery/retained/evidence", m.handleRetainedReconstructionEvidence)
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
@@ -223,6 +224,22 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+func (m *ControlServer) handleInferenceInventory(c *gin.Context) {
+	var request struct {
+		Required *bool `json:"required"`
+	}
+	if c.ShouldBindJSON(&request) != nil || request.Required == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "capacity mode is required"})
+		return
+	}
+	instances, err := m.instMgr.InferenceInventory(*request.Required)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "inference inventory unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"version": 1, "required": *request.Required, "instances": instances})
 }
 
 func (m *ControlServer) handleListInstances(c *gin.Context) {

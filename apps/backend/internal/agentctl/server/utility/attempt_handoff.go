@@ -95,10 +95,10 @@ func validOwnership(ownership *inferenceOwnership) bool {
 	return false
 }
 
-func completeOwnerState(state inferenceOwnerState) bool {
-	if !state.ContinuityKnown {
-		return false
-	}
+// settledCurrentOwnerState proves closure of concrete current claims without
+// inventing historical continuity. A handoff still needs the closed phase and
+// matching session identity, followed by the journal's owner CAS.
+func settledCurrentOwnerState(state inferenceOwnerState) bool {
 	for _, a := range state.Attempts {
 		if !a.Status.Known || !a.Status.Settled || a.Status.Retained {
 			return false
@@ -122,7 +122,7 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 		return
 	}
 	next := ownershipFor(o.cfg, o.id, prior.Revision, ownerBorn)
-	complete := completeOwnerState(saved) && (prior.Phase == ownerClosed || unadmittedClaim(saved))
+	complete := settledCurrentOwnerState(saved) && (prior.Phase == ownerClosed || unadmittedClaim(saved))
 	identity := matchingHandoffIdentity(prior, next)
 	if !complete || !identity || prior.Revision == math.MaxUint64 {
 		o.state.ContinuityKnown = false
@@ -162,7 +162,7 @@ func (o *attemptOwner) closeClaimLocked() {
 	if o.state.Ownership == nil || o.state.Ownership.OwnerID != o.id {
 		return
 	}
-	if completeOwnerState(o.state) {
+	if settledCurrentOwnerState(o.state) {
 		o.state.Ownership.Phase = ownerClosed
 	} else {
 		o.state.Ownership.Phase = ownerUnproven
@@ -171,7 +171,7 @@ func (o *attemptOwner) closeClaimLocked() {
 
 func (o *attemptOwner) historicalSettled(a *ownedAttempt) bool {
 	claim := o.state.Ownership
-	return o.state.ContinuityKnown && claim != nil && claim.PredecessorOwnerID != "" && a.Status.OwnerID != o.id && a.Status.Known && a.Status.Settled && !a.Status.Retained
+	return claim != nil && claim.PredecessorOwnerID != "" && a.Status.OwnerID != o.id && a.Status.Known && a.Status.Settled && !a.Status.Retained
 }
 
 func (o *attemptOwner) writeClaim(data []byte, terminal bool) error {

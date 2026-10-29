@@ -33,6 +33,10 @@ func (m *Manager) executeOwnedInference(ctx context.Context, inst *instance, req
 // InferenceClients reads native instance inventory, including pre-policy children
 // whose earlier backend worker is no longer in this manager's process map.
 func (m *Manager) InferenceClients(ctx context.Context) ([]agentruntime.InferenceClientRef, error) {
+	return m.InferenceCapacityClients(ctx, false)
+}
+
+func (m *Manager) InferenceCapacityClients(ctx context.Context, required bool) ([]agentruntime.InferenceClientRef, error) {
 	if m.runtimeOwner == nil {
 		return m.cachedInferenceClients(), fmt.Errorf("inference inventory owner unavailable")
 	}
@@ -43,14 +47,17 @@ func (m *Manager) InferenceClients(ctx context.Context) ([]agentruntime.Inferenc
 	defer lease.Close()
 	control := lease.NewControlClient(m.log)
 	defer control.Close()
-	instances, err := control.ListInstances(lease.Context())
+	instances, err := control.InferenceInventory(lease.Context(), required)
 	if err != nil {
 		return nil, err
 	}
 	var refs []agentruntime.InferenceClientRef
 	for _, info := range instances {
 		if info == nil || info.ID == "" || info.Port <= 0 {
-			continue
+			for _, ref := range refs {
+				ref.Release()
+			}
+			return nil, fmt.Errorf("inference instance locator unavailable")
 		}
 		client := lease.NewBoundInstanceClient(info.Port, m.log, agentruntime.WithInferenceExecutionID(info.ID))
 		kind := inferenceOwnerHost

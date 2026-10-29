@@ -85,6 +85,7 @@ type inferenceChildDiagnostic struct {
 }
 
 type inferenceSnapshotDiagnostic struct {
+	Current                any                        `json:"current"`
 	OwnerID                string                     `json:"owner_id,omitempty"`
 	Known                  bool                       `json:"known"`
 	AttemptCount           int                        `json:"attempt_count"`
@@ -135,8 +136,17 @@ func sanitizedOwnerDiagnostic(raw *utility.AttemptDiagnostics) any {
 	return d
 }
 
+func sanitizedCurrentInventory(raw *utility.CurrentAttemptInventory) any {
+	if raw == nil || raw.Version != 1 {
+		return inferenceDiagnosticUnavailable
+	}
+	current := *raw
+	current.Reason = inferenceDiagnosticEnum(raw.Reason, "complete", "owner_unavailable", "attempt_unknown")
+	return current
+}
+
 func inferenceSnapshotDiagnosticFields(snapshot *utility.AttemptSnapshot) []zap.Field {
-	d := inferenceSnapshotDiagnostic{OwnerID: inferenceDiagnosticUUID(snapshot.OwnerID), Known: snapshot.Known,
+	d := inferenceSnapshotDiagnostic{Current: sanitizedCurrentInventory(snapshot.Current), OwnerID: inferenceDiagnosticUUID(snapshot.OwnerID), Known: snapshot.Known,
 		AttemptCount: len(snapshot.Attempts), OwnerDiagnostics: sanitizedOwnerDiagnostic(snapshot.Diagnostics), Children: []inferenceChildDiagnostic{}}
 	for _, a := range snapshot.Attempts {
 		if !a.Known {

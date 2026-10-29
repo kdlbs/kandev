@@ -19,6 +19,7 @@ var errAttemptExists = errors.New("inference attempt already exists")
 var errAttemptUnavailable = errors.New("inference attempt token is unavailable")
 
 type attemptOwner struct {
+	capacityRequired   bool
 	mu                 sync.Mutex
 	id                 string
 	cfg                *config.InstanceConfig
@@ -114,7 +115,7 @@ func (o *attemptOwner) snapshot() AttemptSnapshot {
 	defer o.mu.Unlock()
 	o.reconcileLocked()
 	result := AttemptSnapshot{OwnerID: o.id, InstanceID: o.cfg.InstanceID,
-		Known: o.state.ContinuityKnown, Attempts: make([]AttemptStatus, 0, len(o.state.Attempts)), Diagnostics: o.diagnosticSnapshot()}
+		Current: o.currentInventoryLocked(), Known: o.state.ContinuityKnown, Attempts: make([]AttemptStatus, 0, len(o.state.Attempts)), Diagnostics: o.diagnosticSnapshot()}
 	for _, a := range o.state.Attempts {
 		if o.historicalSettled(a) {
 			continue

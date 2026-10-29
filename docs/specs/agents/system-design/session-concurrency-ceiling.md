@@ -332,6 +332,35 @@ a replacement start.
 
 ## Persistence
 
+### Current inference population and historical continuity
+
+Finite `all` capacity includes native inference reservations and children in the
+same total and grade limits as task launches. Agentctl's attempt snapshot keeps
+historical `known` separate from versioned `current` evidence. Missing historical
+owner metadata alone does not make an otherwise complete current registry unknown.
+Concrete unknown children, unavailable owner storage, missing bindings or failed
+provider settlement still block admission; an empty list alone proves nothing.
+
+The authenticated control inventory applies the reservation requirement under the
+instance-publication lock to existing and future instances. Token consumption uses
+the same owner lock as this mode change. The backend prepares a retained token,
+persists its exact capacity binding, validates provider settlement authority, then
+admits that token before starting the child. Admission permission is process-local.
+A tokenless direct start either precedes the gate and appears in the inventory or
+is rejected. Runtime leases fence replaced control servers and malformed lists
+fail closed. Finite `all` mode requires the new control API and gated current
+snapshots; unsupported runtimes cannot certify a free seat. Optional capacity modes
+can observe the current registry without requiring this gate.
+
+After real teardown, an owner closes only when every concrete attempt is known,
+settled and acknowledged. A same-session successor still needs matching
+incarnation/generation and the existing journal owner CAS. Settled, acknowledged
+predecessor entries stay in history but leave the current snapshot. Historical
+`known` remains false throughout. Terminal observation, provider settlement,
+binding removal and retained-token ACK retain their existing order. This changes
+no SQL schema and adds no background poller; backend and agentctl must be updated
+together for the new gated inventory path.
+
 `deferred_launch` is updated with a read-compare-write retry loop. The ceiling
 keys share the task record with other launch intents and are removed as a group
 after replay or a terminal drop. A prompt edit preserves unrelated keys and

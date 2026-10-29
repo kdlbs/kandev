@@ -39,6 +39,7 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup) {
 	aux.POST("/attempts", h.handlePrepareAttempt)
 	aux.GET("/attempts/:id", h.handleAttempt)
 	aux.POST("/attempts/:id/cancel", h.handleCancelPreparedAttempt)
+	aux.POST("/attempts/:id/admit", h.handleAdmitCapacityAttempt)
 	aux.POST("/attempts/:id/release", h.handleReleaseRetainedAttempt)
 	aux.POST("/preparations/:id/cancel", h.handleCancelPreparation)
 }

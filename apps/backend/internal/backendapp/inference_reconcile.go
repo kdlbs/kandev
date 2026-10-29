@@ -51,8 +51,9 @@ func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentrun
 func (b *sharedInferenceConsumer) inferenceRefs(ctx context.Context, extra []agentruntime.InferenceClientRef) ([]agentruntime.InferenceClientRef, bool) {
 	known := true
 	refs := append([]agentruntime.InferenceClientRef{}, extra...)
+	all, finite := b.capacity.InferenceCapacityPolicy()
 	for index, source := range b.sources {
-		clients, err := source.InferenceClients(ctx)
+		clients, err := inferenceSourceClients(ctx, source, all && finite)
 		if err != nil {
 			b.logPopulationUnknown("inference_inventory_"+strconv.Itoa(index), inferencePopulationReadFailure(err), sessioncapacity.InferenceBinding{})
 			known = false
@@ -60,6 +61,22 @@ func (b *sharedInferenceConsumer) inferenceRefs(ctx context.Context, extra []age
 		refs = append(refs, clients...)
 	}
 	return refs, known
+}
+
+func inferenceSourceClients(ctx context.Context, source inferenceClientSource, required bool) ([]agentruntime.InferenceClientRef, error) {
+	if current, ok := source.(interface {
+		InferenceCapacityClients(context.Context, bool) ([]agentruntime.InferenceClientRef, error)
+	}); ok {
+		return current.InferenceCapacityClients(ctx, required)
+	}
+	return source.InferenceClients(ctx)
+}
+
+func currentInferencePopulationKnown(snapshot *utility.AttemptSnapshot, required bool) bool {
+	if snapshot.Current == nil {
+		return snapshot.Known
+	}
+	return snapshot.Current.Version == 1 && snapshot.Current.Known && (!required || snapshot.Current.CapacityManaged)
 }
 
 func releaseInferenceRefs(refs []agentruntime.InferenceClientRef) {
@@ -72,6 +89,7 @@ func releaseInferenceRefs(refs []agentruntime.InferenceClientRef) {
 
 func (b *sharedInferenceConsumer) observeInferenceRefs(ctx context.Context, refs []agentruntime.InferenceClientRef) (map[string]inferenceObservation, bool) {
 	known := true
+	all, finite := b.capacity.InferenceCapacityPolicy()
 	observations := make(map[string]inferenceObservation)
 	seen := make(map[string]bool)
 	for _, ref := range refs {
@@ -92,7 +110,7 @@ func (b *sharedInferenceConsumer) observeInferenceRefs(ctx context.Context, refs
 			known = false
 			continue
 		}
-		if !snapshot.Known || snapshot.InstanceID != instance {
+		if !currentInferencePopulationKnown(snapshot, all && finite) || snapshot.InstanceID != instance {
 			reason := "snapshot_unknown"
 			if snapshot.InstanceID != instance {
 				reason = "instance_mismatch"

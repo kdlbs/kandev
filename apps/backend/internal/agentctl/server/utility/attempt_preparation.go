@@ -49,6 +49,19 @@ func validPreparationRequest(request PrepareAttemptRequest) bool {
 	return true
 }
 
+func (h *Handler) handleAdmitCapacityAttempt(c *gin.Context) {
+	if h.attempts == nil {
+		c.JSON(http.StatusServiceUnavailable, AttemptStatus{State: AttemptUnknown})
+		return
+	}
+	status, err := h.attempts.admitCapacity(c.Param("id"))
+	code := http.StatusOK
+	if err != nil {
+		code = promptErrorStatus(err)
+	}
+	c.JSON(code, status)
+}
+
 func (h *Handler) handleCancelPreparedAttempt(c *gin.Context) {
 	h.cancelPrepared(c, c.Param("id"), "")
 }

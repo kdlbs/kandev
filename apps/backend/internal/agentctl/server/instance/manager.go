@@ -67,9 +67,10 @@ type Manager struct {
 	// observe activeCreations at zero and a creation could then Add(1) behind
 	// it: admission checks the flag and adds under m.mu, so every creation
 	// either is counted before the flag is set or sees the flag and refuses.
-	abandonWG       sync.WaitGroup
-	activeCreations sync.WaitGroup
-	shuttingDown    bool
+	abandonWG                 sync.WaitGroup
+	activeCreations           sync.WaitGroup
+	shuttingDown              bool
+	inferenceCapacityRequired bool
 
 	// afterTrackerStart runs immediately after StartAllWorkspaceTrackers and is
 	// nil in production. It exists so a test can cancel the caller's context at
@@ -353,6 +354,9 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("create instance abandoned before publication: %w", err)
 	}
+	if err := requireInstanceCapacity(inst, m.inferenceCapacityRequired); err != nil {
+		return err
+	}
 	inst.server = m.startHTTPServer(inst, bundle.listener, handler)
 	m.instances[inst.ID] = inst
 	delete(m.provisional, inst.ID)
@@ -623,6 +627,40 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 		result = append(result, inst.Info())
 	}
 	return result
+}
+
+// InferenceInventory closes unreserved starts before returning the current list.
+// Publication takes the same mutex and applies the mode to future instances.
+func (m *Manager) InferenceInventory(required bool) ([]*InstanceInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shuttingDown {
+		return nil, ErrManagerShuttingDown
+	}
+	m.inferenceCapacityRequired = required
+	result := make([]*InstanceInfo, 0, len(m.instances))
+	for _, inst := range m.instances {
+		if inst == nil || inst.manager == nil {
+			return nil, errors.New("inference instance owner unavailable")
+		}
+		if err := requireInstanceCapacity(inst, required); err != nil {
+			return nil, err
+		}
+		result = append(result, inst.Info())
+	}
+	return result, nil
+}
+
+func requireInstanceCapacity(inst *Instance, required bool) error {
+	owner, ok := inst.manager.(interface{ RequireInferenceCapacity(bool) })
+	if !ok {
+		if required {
+			return errors.New("inference capacity owner unavailable")
+		}
+		return nil
+	}
+	owner.RequireInferenceCapacity(required)
+	return nil
 }
 
 // StopInstance stops and removes an instance by ID.

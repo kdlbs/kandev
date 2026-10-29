@@ -33,14 +33,23 @@ type AttemptStatus struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// AttemptSnapshot.Known attests inventory continuity, not just this process map.
-// A false value with an empty list must never be interpreted as zero population.
+// CurrentAttemptInventory describes the live owner separately from retained history.
+type CurrentAttemptInventory struct {
+	Version         int    `json:"version"`
+	Known           bool   `json:"known"`
+	CapacityManaged bool   `json:"capacity_managed"`
+	Reason          string `json:"reason"`
+}
+
+// AttemptSnapshot.Known retains historical continuity. An empty list is not proof
+// of zero population without either legacy Known or a gated, known Current scope.
 type AttemptSnapshot struct {
-	OwnerID     string              `json:"owner_id"`
-	InstanceID  string              `json:"instance_id,omitempty"`
-	Known       bool                `json:"known"`
-	Attempts    []AttemptStatus     `json:"attempts"`
-	Diagnostics *AttemptDiagnostics `json:"diagnostics,omitempty"`
+	Current     *CurrentAttemptInventory `json:"current,omitempty"`
+	OwnerID     string                   `json:"owner_id"`
+	InstanceID  string                   `json:"instance_id,omitempty"`
+	Known       bool                     `json:"known"`
+	Attempts    []AttemptStatus          `json:"attempts"`
+	Diagnostics *AttemptDiagnostics      `json:"diagnostics,omitempty"`
 }
 
 // AttemptDiagnostics records owner observations without changing inventory trust.
@@ -62,9 +71,10 @@ type AttemptDiagnostics struct {
 }
 
 type ownedAttempt struct {
-	Status   AttemptStatus `json:"status"`
-	PID      int           `json:"pid,omitempty"`
-	Consumed bool          `json:"consumed,omitempty"`
+	Status           AttemptStatus `json:"status"`
+	PID              int           `json:"pid,omitempty"`
+	Consumed         bool          `json:"consumed,omitempty"`
+	CapacityAdmitted bool          `json:"-"`
 }
 
 // PrepareAttemptRequest correlates token preparation without inference content.
@@ -86,6 +96,7 @@ func (s *AttemptSnapshot) UnmarshalJSON(data []byte) error {
 	type observation AttemptSnapshot
 	decoded := observation(*s)
 	decoded.Diagnostics = nil
+	decoded.Current = nil
 	wire := struct {
 		*observation
 		Diagnostics json.RawMessage `json:"diagnostics"`
