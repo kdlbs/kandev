@@ -481,6 +481,9 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
 			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
 		}
+		if m.deliveryJournalErr != nil {
+			logDeliveryJournalOpenFailure(m.logger, cfg.InstanceID, cfg.SessionID, cfg.DurableJournalPath, m.deliveryJournalErr)
+		}
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named

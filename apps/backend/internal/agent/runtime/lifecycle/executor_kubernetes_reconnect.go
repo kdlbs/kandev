@@ -62,7 +62,8 @@ func (r *KubernetesExecutor) reconnect(
 	return &ExecutorInstance{
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		RuntimeName: r.Name(), Client: client, WorkspacePath: kubernetesWorkspacePath,
-		Metadata: metadata, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
+		ReusedWorkspace: true,
+		Metadata:        metadata, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
 	}, nil
 }
 

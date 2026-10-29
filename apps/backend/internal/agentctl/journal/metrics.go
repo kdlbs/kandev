@@ -38,6 +38,11 @@ var boundedDeliveryLabels = map[string]struct{}{
 	"event_too_large":       {},
 	"replay_page_too_large": {},
 	"storage_unavailable":   {},
+	"lock_timeout":          {},
+	"permission_denied":     {},
+	"filesystem_full":       {},
+	"disk_quota_exceeded":   {},
+	"io_failure":            {},
 	"unknown":               {},
 }
 
@@ -81,6 +86,9 @@ func boundedDeliveryLabel(value string) string {
 }
 
 func classifyJournalError(err error) string {
+	if reason, ok := openErrorReason(err); ok {
+		return journalErrorLabelForOpenReason(reason)
+	}
 	switch {
 	case err == nil:
 		return "unknown"

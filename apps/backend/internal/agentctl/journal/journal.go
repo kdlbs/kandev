@@ -181,6 +181,7 @@ type Journal struct {
 }
 
 func Open(config Config) (journal *Journal, err error) {
+	started := time.Now()
 	defer func() {
 		if err != nil {
 			RecordJournalError(classifyJournalError(err))
@@ -194,10 +195,10 @@ func Open(config Config) (journal *Journal, err error) {
 		config.ExistingOnly = true
 	} else {
 		if err := os.MkdirAll(filepath.Dir(config.Path), 0o700); err != nil {
-			return nil, fmt.Errorf("create journal directory: %w", err)
+			return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("create journal directory: %w", err))
 		}
 		if err := os.Chmod(filepath.Dir(config.Path), 0o700); err != nil {
-			return nil, fmt.Errorf("secure journal directory: %w", err)
+			return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("secure journal directory: %w", err))
 		}
 	}
 	options := &bolt.Options{Timeout: config.OpenTimeout, NoSync: false, ReadOnly: config.ReadOnly}
@@ -208,7 +209,7 @@ func Open(config Config) (journal *Journal, err error) {
 	}
 	db, err := bolt.Open(config.Path, 0o600, options)
 	if err != nil {
-		return nil, fmt.Errorf("open delivery journal: %w", err)
+		return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("open delivery journal: %w", err))
 	}
 	// Page size is immutable; Info also reads the mapping, so capture it before concurrent writes.
 	journal = &Journal{db: db, pageSize: int64(db.Info().PageSize), config: config}
@@ -219,7 +220,7 @@ func Open(config Config) (journal *Journal, err error) {
 	}
 	if err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), err)
 	}
 	journal.refreshMetrics()
 	return journal, nil

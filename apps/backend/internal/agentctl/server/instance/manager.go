@@ -301,6 +301,14 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 	procMgr := process.NewManager(instanceCfg, m.logger)
 	procMgr.SetDiskCapacitySampler(m.diskSampler)
 	bundle.setProcessManager(procMgr)
+	// A configured but unusable journal is an admission error. Reject it
+	// before publishing the instance or starting workspace trackers, so no
+	// caller can observe an instance whose delivery storage cannot work.
+	if instanceCfg.DurableJournalPath != "" {
+		if _, journalErr := procMgr.DeliveryJournal(); journalErr != nil {
+			return nil, nil, nil, fmt.Errorf("instance %s delivery journal unavailable: %w", id, journalErr)
+		}
+	}
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
 	// process.TurnOutcomeRecorder via RetainTurnOutcome, and nothing can start

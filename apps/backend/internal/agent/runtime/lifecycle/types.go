@@ -303,6 +303,12 @@ type AgentExecution struct {
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
 	// to ResumePassthroughSession instead of startPassthroughSession.
 	isResumedSession bool
+	// attachedExistingCompute records that this attempt attached to runtime
+	// storage that already existed instead of allocating it. Recovery retention
+	// reads it so a reused workspace is not destroyed with the failed attempt.
+	// Conversation-resume intent is a separate fact and never authorizes or
+	// prevents destructive cleanup.
+	attachedExistingCompute bool
 	// suppressBootStatusMessage is set only for silent restart restore, where a
 	// boot status would otherwise create a synthetic completed transcript turn.
 	suppressBootStatusMessage bool

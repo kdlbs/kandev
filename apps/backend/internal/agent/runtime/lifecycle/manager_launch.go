@@ -2243,7 +2243,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
 		}
 		if projectionErr != nil {
-			rollbackErr := m.stopWorkspaceRuntimeAndRelease(context.WithoutCancel(ctx), rt, execInstance, true)
+			rollbackErr := m.stopLaunchRuntimeOnRollback(context.WithoutCancel(ctx), rt, execInstance, nil)
 			err = errors.Join(
 				fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr),
 				rollbackErr,
@@ -2272,7 +2272,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// instance directly to avoid leaking it, then fail closed.
 		if rt != nil && execInstance != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if stopErr := m.stopWorkspaceRuntimeAndRelease(cleanupCtx, rt, execInstance, true); stopErr != nil {
+			if stopErr := m.stopLaunchRuntimeOnRollback(cleanupCtx, rt, execInstance, nil); stopErr != nil {
 				m.logger.Warn("failed to stop runtime instance after command resolution error",
 					zap.Error(stopErr))
 			}
@@ -2773,15 +2773,21 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 	defer execution.agentctlLifecycleMu.Unlock()
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		retainedKubernetesResume := execution.RuntimeName == agentruntime.RuntimeKubernetes && execution.isResumedSession
+		retainedRuntime := retainsRuntimeOnLaunchRollback(execution)
 		if !execution.isResumedSession && execInstance.StopReason == "" {
 			execInstance.StopReason = StopReasonLaunchRollback
 		}
-		err := m.stopWorkspaceRuntime(cleanupCtx, rt, execInstance, !retainedKubernetesResume)
-		if err == nil && execution.RuntimeName == agentruntime.RuntimeKubernetes && !retainedKubernetesResume {
+		// A reused remote-Docker workspace keeps the reason that means
+		// "preserve". Rollback and empty reasons would make the executor treat
+		// the retained container as fresh allocation cleanup.
+		if retainedRuntime && execution.RuntimeName == agentruntime.RuntimeRemoteDocker {
+			execInstance.StopReason = StopReasonAgentBootstrapFailed
+		}
+		err := m.stopWorkspaceRuntime(cleanupCtx, rt, execInstance, !retainedRuntime)
+		if err == nil && execution.RuntimeName == agentruntime.RuntimeKubernetes && !retainedRuntime {
 			err = m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
 		}
-		if err == nil && !retainedKubernetesResume {
+		if err == nil && !retainedRuntime {
 			err = releaseExecutorInstanceRuntimeInventory(cleanupCtx, execInstance)
 			if err != nil {
 				err = fmt.Errorf("release stopped runtime inventory: %w", err)
@@ -2800,10 +2806,10 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 }
 
 func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, taskCleanupActive, discardDurable bool) {
-	if execution.RuntimeName == agentruntime.RuntimeKubernetes && execution.isResumedSession {
-		// A failed resume only owns the newly opened local client and forward. The
-		// recorded Pod/PVC inventory remains the authority for a later retry or
-		// terminal cleanup, so never discard its durable row here.
+	if retainsRuntimeOnLaunchRollback(execution) {
+		// A failed resume only owns the newly opened local client and forward.
+		// The recorded runtime inventory remains the authority for a later retry
+		// or terminal cleanup, so never discard its durable row here.
 		m.cleanupPassthroughMCPConfig(execution)
 		m.executionStore.Remove(execution.ID)
 		return
@@ -2840,7 +2846,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if stopErr := m.stopWorkspaceRuntimeAndRelease(cleanupCtx, rt, execInstance, true); stopErr != nil {
+		if stopErr := m.stopLaunchRuntimeOnRollback(cleanupCtx, rt, execInstance, execution); stopErr != nil {
 			m.logger.Warn("failed to stop runtime instance during launch rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))

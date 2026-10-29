@@ -1386,7 +1386,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 	backendForce := force
 	stopCtx := ctx
-	if shouldPreserveRecoverableRuntime(execution, reason) {
+	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
+	if preserveRuntime {
 		backendForce = false
 		var cancelStop context.CancelFunc
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
@@ -1436,6 +1437,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
 	}
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
+	// A preserved runtime must not fall through to the executor's
+	// AgentStopFailed cleanup, which stops the container and can turn a
+	// recoverable failure into loss of the workspace. Keep the execution and
+	// its cleanup ownership tracked so a later attempt can finish the stop.
+	if agentStopFailed && preserveRuntime {
+		return fmt.Errorf("stop agent process for execution %q: %w", executionID, errRecoverableStopUnconfirmed)
+	}
 	// Backend shutdown retains interrupted delivery outcomes. Its terminal
 	// checkpoint follows confirmed process termination, before runtime cleanup.
 	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
