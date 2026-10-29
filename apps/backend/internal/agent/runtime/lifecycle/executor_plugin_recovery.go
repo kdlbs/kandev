@@ -536,9 +536,17 @@ func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, envir
 	return errors.Join(cleanupErrors...)
 }
 
+// errPluginExecutorLaunchInProgress defers an environment cleanup while this
+// process is still provisioning the launch: the provider has not published the
+// resource yet, so an "absent" answer would not be a settled outcome.
+var errPluginExecutorLaunchInProgress = errors.New("plugin executor launch is still in progress; cleanup is deferred")
+
 func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx context.Context, environment *models.TaskEnvironment, record *models.ExecutorRunning) error {
 	if !pluginExecutorRecordMatchesEnvironment(environment, record) {
 		return nil
+	}
+	if _, launching := r.launching.Load(record.AgentExecutionID); launching {
+		return errPluginExecutorLaunchInProgress
 	}
 	inventory, err := decodePluginExecutorInventory(record.Metadata)
 	if err != nil {
