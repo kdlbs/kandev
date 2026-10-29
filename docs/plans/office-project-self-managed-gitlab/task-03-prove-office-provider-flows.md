@@ -118,9 +118,9 @@ Task 02 must pass before final E2E verification. Its service regressions supply 
 
 ## Results
 
-Completed. Desktop and phone Office suites now save a self-managed GitLab URL and an installed-plugin URL through the real project custom-entry picker, reload the project, and create an unassigned task through the New Task form. Each success asserts the returned and persisted attachment and the exact repository identity: provider, host, scope, immutable ID, owner, name, clone URL, and default branch.
+Completed. Desktop and phone Office suites now save a self-managed GitLab URL and an installed-plugin URL through the real project custom-entry picker, reload the project, and create an unassigned task through the New Task form. Every success asserts the returned and persisted task attachment. Identity assertions are per provider: the GitLab cases assert provider, host, owner, name, and clone URL; the desktop plugin case also asserts the immutable repository ID and default branch, and the phone plugin case asserts provider, immutable repository ID, and clone URL.
 
-Two refusal cases per viewport submit a project source after the connection is mismatched or the plugin is disabled. Both assert the existing visible error, the dialog staying open, no created task, and no new repository row. The existing explicit-plugin desktop and phone suites still pass.
+Refusal coverage differs by viewport. Desktop submits a mismatched GitLab origin and a disabled plugin; phone submits a disabled plugin. Each refusal asserts the existing visible error, the dialog staying open, and no created task. The disabled-plugin cases on both viewports also assert that the submission added no plugin repository row, and the phone case compares the exact repository IDs against a pre-submission baseline. The desktop mismatched-origin case does not inspect repository rows. The existing explicit-plugin desktop and phone suites still pass.
 
 Implemented files:
 

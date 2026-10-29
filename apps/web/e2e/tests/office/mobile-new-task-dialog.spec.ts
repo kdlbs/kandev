@@ -254,6 +254,12 @@ test.describe("mobile provider-neutral project sources", () => {
     await dialog.getByPlaceholder("Task title").fill(title);
     await dialog.getByRole("button", { name: "Project" }).tap();
     await testPage.getByRole("button", { name: project.name, exact: true }).tap();
+    // officeSeed is worker-scoped and cleanup is best-effort, so compare the
+    // exact repository identities rather than assuming an empty workspace.
+    const beforeRepositoryIds = (await listWorkspaceRepositories(apiClient, officeSeed.workspaceId))
+      .filter((repository) => repository.provider === PLUGIN_PROJECT_PROVIDER)
+      .map((repository) => repository.id)
+      .sort();
     await dialog.getByTestId("new-task-create-button").tap();
 
     await expect(
@@ -263,8 +269,11 @@ test.describe("mobile provider-neutral project sources", () => {
     const tasks = await apiClient.listTasks(officeSeed.workspaceId);
     expect(tasks.tasks.some((task) => task.title === title)).toBe(false);
     const repositories = await listWorkspaceRepositories(apiClient, officeSeed.workspaceId);
-    expect(repositories.some((repository) => repository.provider === PLUGIN_PROJECT_PROVIDER)).toBe(
-      false,
-    );
+    expect(
+      repositories
+        .filter((repository) => repository.provider === PLUGIN_PROJECT_PROVIDER)
+        .map((repository) => repository.id)
+        .sort(),
+    ).toEqual(beforeRepositoryIds);
   });
 });

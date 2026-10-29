@@ -6,13 +6,8 @@ import (
 )
 
 // contextRWMutex is a reader/writer lock whose reader admission honors a caller
-// context. Writers keep exclusive access, and a waiting writer blocks new
-// readers so a lifecycle replacement cannot be starved by steady dispatch
-// traffic.
-//
-// Go's sync.RWMutex cannot interrupt RLock, so a dispatch that waited behind an
-// in-flight config restart would outlive its own deadline. This lock lets a
-// caller abandon the wait while the write side keeps its existing exclusion.
+// context. Writers keep exclusive access, a waiting writer blocks new readers,
+// and a reader that abandons its context never holds or acquires the lease.
 type contextRWMutex struct {
 	mu             sync.Mutex
 	readers        int

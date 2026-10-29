@@ -139,7 +139,10 @@ func (s *Service) runRepositoryProviderInspection(
 ) repositoryInspectionOutcome {
 	body, err := json.Marshal(map[string]string{"url": request.URL})
 	if err != nil || action.MaxBodyBytes <= 0 || len(body) > action.MaxBodyBytes {
-		return repositoryInspectionOutcome{err: newRepositoryProviderError(RepositoryProviderErrorInvalid, err)}
+		return repositoryInspectionOutcome{
+			responseShape: repositoryProviderInspectionNotSent,
+			err:           newRepositoryProviderError(RepositoryProviderErrorInvalid, err),
+		}
 	}
 	invokeCtx, cancel := context.WithTimeout(ctx, repositoryInspectActionTimeout)
 	defer cancel()

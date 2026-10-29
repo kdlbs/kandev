@@ -271,6 +271,8 @@ func TestDiscoverRepositoryProviders(t *testing.T) {
 			}
 		}
 		var inFlight, peak atomic.Int32
+		release := make(chan struct{})
+		reached := make(chan struct{}, len(providers))
 		base, _ := discoveryInvoker(t, responses)
 		invoke := func(ctx context.Context, id string, generation pluginDispatchGeneration, action *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
 			current := inFlight.Add(1)
@@ -281,16 +283,60 @@ func TestDiscoverRepositoryProviders(t *testing.T) {
 					break
 				}
 			}
-			time.Sleep(5 * time.Millisecond)
+			reached <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 			return base(ctx, id, generation, action)
 		}
-		result, err := svc.discoverRepositoryProviders(t.Context(), "workspace-1",
-			RepositoryProviderDiscoveryRequest{URL: discoveryTestURL}, invoke)
-		if err != nil {
-			t.Fatalf("discoverRepositoryProviders: %v", err)
+
+		type discoveryResult struct {
+			result *RepositoryProviderDiscoveryResult
+			err    error
 		}
-		if len(result.Candidates) != len(providers) {
-			t.Fatalf("candidates = %d, want %d", len(result.Candidates), len(providers))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan discoveryResult, 1)
+		go func() {
+			result, err := svc.discoverRepositoryProviders(ctx, "workspace-1",
+				RepositoryProviderDiscoveryRequest{URL: discoveryTestURL}, invoke)
+			done <- discoveryResult{result: result, err: err}
+		}()
+
+		// Wait for the bound to fill before releasing any inspection, so a
+		// serialized implementation cannot pass on a peak of one.
+		filled := time.NewTimer(5 * time.Second)
+		defer filled.Stop()
+		for range maxRepositoryDiscoveryConcurrency {
+			select {
+			case <-reached:
+			case <-filled.C:
+				cancel()
+				close(release)
+				<-done
+				t.Fatal("fewer than four inspections ran concurrently")
+			}
+		}
+		if got := inFlight.Load(); got != maxRepositoryDiscoveryConcurrency {
+			t.Fatalf("in-flight inspections = %d, want %d", got, maxRepositoryDiscoveryConcurrency)
+		}
+		if got := peak.Load(); got != maxRepositoryDiscoveryConcurrency {
+			t.Fatalf("peak concurrency = %d, want %d", got, maxRepositoryDiscoveryConcurrency)
+		}
+
+		close(release)
+		select {
+		case outcome := <-done:
+			if outcome.err != nil {
+				t.Fatalf("discoverRepositoryProviders: %v", outcome.err)
+			}
+			if len(outcome.result.Candidates) != len(providers) {
+				t.Fatalf("candidates = %d, want %d", len(outcome.result.Candidates), len(providers))
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("discovery did not finish after releasing the inspections")
 		}
 		if peak.Load() > maxRepositoryDiscoveryConcurrency {
 			t.Fatalf("peak concurrency = %d, want at most %d", peak.Load(), maxRepositoryDiscoveryConcurrency)
