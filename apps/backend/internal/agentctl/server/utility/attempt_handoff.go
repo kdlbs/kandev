@@ -136,6 +136,12 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 		o.storageUnavailable = true // Preserve the unclaimed predecessor bytes.
 		return
 	}
+	if prior.Phase == ownerActive && len(saved.Attempts) == 0 {
+		o.admissionFailureReason = "retained_claim_active"
+		o.state.ContinuityKnown = false
+		o.storageUnavailable = true // Preserve the unclaimed predecessor bytes.
+		return
+	}
 	// A new owner only opens after the predecessor process is gone, so its
 	// exited or never-started children are settled here instead of waiting for
 	// a settler that no longer exists.
@@ -148,6 +154,7 @@ func (o *attemptOwner) adoptRetainedClaim(saved inferenceOwnerState) {
 	}
 	next.Revision = prior.Revision + 1
 	next.PredecessorOwnerID = prior.OwnerID
+	o.state.ContinuityKnown = false
 	o.state.Ownership = next
 	// The following constructor write compares the predecessor identity in the
 	// same journal transaction. A competing claimant cannot also succeed.
