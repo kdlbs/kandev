@@ -6,39 +6,11 @@ import type {
 } from "@/lib/types/tool-payload-retention";
 import { sameAge } from "@/hooks/domains/system/use-tool-payload-retention-draft";
 import { formatBytes } from "@/lib/utils/format-bytes";
-import { formatDateTime } from "@/lib/i18n/formats";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import { RetentionSkippedItems, retentionDate, skippedTotal } from "./retention-shared";
 
-export function retentionDate(value?: string) {
-  return value && parseTurnTimestamp(value) !== null ? formatDateTime(value) : "";
-}
-const skipReasons = new Set([
-  "eligibility_budget",
-  "protected_tasks",
-  "oversize",
-  "already_removed",
-  "no_payload",
-  "unsupported",
-  "malformed",
-  "invalid_message",
-]);
-function SkippedItems({ skipped }: { skipped: Record<string, number> }) {
-  const { t } = useTranslation();
-  return (
-    <dl className="space-y-1 text-xs text-muted-foreground">
-      {Object.entries(skipped)
-        .filter(([, count]) => count > 0)
-        .map(([reason, count]) => (
-          <div key={reason} className="flex flex-wrap gap-2">
-            <dt>
-              {t(`system:toolPayload.skipReason.${skipReasons.has(reason) ? reason : "other"}`)}
-            </dt>
-            <dd>{count}</dd>
-          </div>
-        ))}
-    </dl>
-  );
-}
+export { retentionDate };
+
 function OperationOutcome({ operation }: { operation: ToolPayloadOperation }) {
   const { t } = useTranslation();
   if (operation.kind === "analysis") {
@@ -61,7 +33,7 @@ function OperationResult({ operation }: { operation: ToolPayloadOperation }) {
   const { t } = useTranslation();
   if (operation.kind === "backup")
     return <p className="text-sm">{t("system:toolPayload.preparing")}</p>;
-  const skipped = Object.values(operation.skipped ?? {}).reduce((sum, value) => sum + value, 0);
+  const skipped = skippedTotal(operation.skipped);
   return (
     <div className="space-y-1 break-words text-sm">
       <p className="text-xs text-muted-foreground">
@@ -87,7 +59,10 @@ function OperationResult({ operation }: { operation: ToolPayloadOperation }) {
         {skipped > 0 && (
           <>
             <p>{t("system:toolPayload.skipped", { count: skipped })}</p>
-            <SkippedItems skipped={operation.skipped} />
+            <RetentionSkippedItems
+              skipped={operation.skipped}
+              labelKey="system:toolPayload.skipReason"
+            />
           </>
         )}
         <p className="text-xs text-muted-foreground">
