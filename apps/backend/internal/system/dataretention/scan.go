@@ -64,6 +64,14 @@ func (s *Service) stepScan(ctx context.Context, r record) error {
 // stepAnalysis measures the same candidates a cleanup pass would touch without
 // writing anything, so the settings surface can show the effect before it runs.
 func (s *Service) stepAnalysis(ctx context.Context, r record) error {
+	current, err := readRecord(ctx, s.pool.Reader())
+	if err != nil {
+		return err
+	}
+	if !activeOperation(&current, r.Operation.ID) {
+		// A cancel committed after the tick read; do not start a new batch.
+		return nil
+	}
 	if _, err := s.scanBatch(ctx, s.pool.Reader(), &r, false); err != nil {
 		return err
 	}
