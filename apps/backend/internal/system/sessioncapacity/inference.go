@@ -13,6 +13,8 @@ const maxInferenceBindings = 10000
 // InferenceBinding is the active ownership half of the existing capacity row.
 // It contains no prompt, environment, credential or transport address.
 type InferenceBinding struct {
+	// Empty means legacy/unknown applicability, never proof of no provider claim.
+	SettlementKind         string `json:"settlement_kind,omitempty"`
 	Key                    string `json:"key"`
 	InstanceID             string `json:"instance_id"`
 	OwnerID                string `json:"owner_id"`
