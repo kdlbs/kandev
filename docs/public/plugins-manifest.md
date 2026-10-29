@@ -522,6 +522,15 @@ In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.
 
+A secret field is saved as its plain value. Kandev stores the value in its
+vault and keeps only an internal reference to it in the profile, so a client
+never sends a `$kandev-secret:` reference and the API refuses one, for secret
+and non-secret fields alike. The provider receives the plain value in
+`secret_values`, keyed by property, for the duration of each operation that
+carries the profile. With the `secret_references` capability it also receives
+the vault ID of each stored secret in `secret_refs`. That ID is not a value and
+cannot be resolved by the provider.
+
 Provider capability declarations are upper bounds. Profile validation and
 environment provisioning can reduce the effective capabilities. `bounded`
 retention requires a maximum lifetime from 1 second through 365 days. Each

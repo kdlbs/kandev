@@ -25,6 +25,7 @@ const (
 type PluginExecutorRuntimeSecrets interface {
 	Create(context.Context, *secrets.SecretWithValue) error
 	Get(context.Context, string) (*secrets.Secret, error)
+	Reveal(context.Context, string) (string, error)
 	Update(context.Context, string, *secrets.UpdateSecretRequest) error
 	Delete(context.Context, string) error
 }
@@ -57,6 +58,38 @@ func (r *PluginRemoteExecutor) putPluginRuntimeSecret(ctx context.Context, execu
 		return "", errors.New("plugin executor runtime secret could not be stored")
 	}
 	return id, nil
+}
+
+// loadPluginExecutorCleanupToken fills the agentctl credential a cleanup needs
+// to drain the recorded runtime. The inventory store never returns the token,
+// so it comes from the live instance when there is one and otherwise from the
+// runtime secret the record references. A missing credential leaves the record
+// without one, which the drain reports as not_attempted.
+func (r *PluginRemoteExecutor) loadPluginExecutorCleanupToken(ctx context.Context, record *models.ExecutorRunning, instanceToken string) {
+	if record.TransientAuthToken != "" {
+		return
+	}
+	if instanceToken != "" {
+		record.TransientAuthToken = instanceToken
+		return
+	}
+	id := getMetadataString(record.Metadata, MetadataKeyAuthTokenSecret)
+	if id == "" || r.runtimeSecrets == nil {
+		return
+	}
+	value, err := revealPluginRuntimeSecret(ctx, r.runtimeSecrets, id)
+	if err != nil {
+		r.logger.Warn("plugin executor cleanup could not load the agentctl credential", zap.String("execution_id", record.AgentExecutionID))
+		return
+	}
+	record.TransientAuthToken = value
+}
+
+func revealPluginRuntimeSecret(ctx context.Context, store PluginExecutorRuntimeSecrets, id string) (string, error) {
+	if scoped, ok := store.(secrets.ScopedSecretStore); ok {
+		return scoped.RevealGlobal(ctx, id)
+	}
+	return store.Reveal(ctx, id)
 }
 
 // settlePluginExecutorSecrets deletes the durable-bootstrap secrets of an

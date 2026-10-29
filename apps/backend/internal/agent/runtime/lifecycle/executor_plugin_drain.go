@@ -27,6 +27,10 @@ const (
 	pluginDrainOutcomeNotAttempted = "not_attempted"
 
 	pluginExecutorDrainDeadline = 60 * time.Second
+	// pluginExecutorCleanupClaimWait bounds how long a failed launch waits for a
+	// concurrent cleanup to release the environment's cleanup claim.
+	pluginExecutorCleanupClaimWait  = 20 * time.Second
+	pluginExecutorCleanupClaimRetry = 250 * time.Millisecond
 	// pluginExecutorPersistGrace is the time left for inventory writes after
 	// the provider calls of a cleanup have used their deadlines.
 	pluginExecutorPersistGrace = 30 * time.Second

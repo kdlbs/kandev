@@ -72,6 +72,14 @@ func (f *runtimeSecretsFake) Get(_ context.Context, id string) (*secrets.Secret,
 	return &secrets.Secret{ID: id}, nil
 }
 
+func (f *runtimeSecretsFake) Reveal(_ context.Context, id string) (string, error) {
+	value, ok := f.values[id]
+	if !ok {
+		return "", secrets.ErrNotFound
+	}
+	return value, nil
+}
+
 func (f *runtimeSecretsFake) Update(_ context.Context, id string, req *secrets.UpdateSecretRequest) error {
 	f.values[id] = *req.Value
 	f.log.add("secret:update:" + id)
