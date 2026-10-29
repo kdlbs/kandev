@@ -125,7 +125,7 @@ func (r *PluginRemoteExecutor) destroyHandedOffPluginExecutorResource(
 		}
 		resource = handed.Resource
 	}
-	if err := r.destroyPluginExecutorRecord(ctx, record, inventory, resource, "launch_unrecorded", profile); err != nil {
+	if err := r.destroyPluginExecutorRecord(ctx, record, inventory, resource, pluginExecutorCleanupReasonLaunch, profile); err != nil {
 		return err
 	}
 	return r.settleUnrecordedPluginExecutor(ctx, handoff)

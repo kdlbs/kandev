@@ -138,7 +138,11 @@ func TestArchiveDuringProvisionIsCleanedUpUnderItsOwnClaimAfterARestart(t *testi
 		t.Fatalf("destroy request = %v, want the provisioned handle", operations.destroyRequest)
 	}
 	// No runtime ever started for a handed-off launch: the destroy carries the
-	// same not_attempted outcome, with no receipt, that a launch rollback sends.
+	// same launch cleanup reason and not_attempted outcome, with no receipt,
+	// that a launch rollback sends, so a provider can treat it as no-runtime proof.
+	if got := operations.destroyRequest.GetCleanupReason(); got != pluginExecutorCleanupReasonLaunch {
+		t.Fatalf("destroy cleanup_reason = %q, want %q", got, pluginExecutorCleanupReasonLaunch)
+	}
 	if got := operations.destroyRequest.GetDrainOutcome(); got != pluginDrainOutcomeNotAttempted || operations.destroyRequest.GetDrainReceipt() != nil {
 		t.Fatalf("destroy drain = (%q, %v), want (%q, no receipt)", got, operations.destroyRequest.GetDrainReceipt(), pluginDrainOutcomeNotAttempted)
 	}
