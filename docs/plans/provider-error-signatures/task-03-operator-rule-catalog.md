@@ -1,7 +1,18 @@
 ---
+id: "03-operator-rule-catalog"
+title: "Load an operator provider-error rule catalog"
 status: in_progress
+wave: 2
+depends_on: ["02-keyword-context"]
+plan: "plan.md"
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003
+acceptance_criteria:
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.1
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.2
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.3
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.4
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.5
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 ---
