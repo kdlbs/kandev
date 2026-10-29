@@ -224,7 +224,7 @@ func (s *Service) validatePluginExecutorRequestCompatibility(ctx context.Context
 }
 
 func (s *Service) validatePluginExecutorRepositoryCompatibility(ctx context.Context, repository TaskRepositoryInput) error {
-	if repository.LocalPath != "" || isLocalRepositoryURL(repository.RemoteURL) {
+	if repository.LocalPath != "" || (isLocalRepositoryURL(repository.RemoteURL) && !isE2ELocalRemote(repository.RemoteURL)) {
 		return fmt.Errorf("%w: plugin executor requires cloneable repositories", ErrInvalidExecutorConfig)
 	}
 	if repository.RepositoryID == "" {
@@ -237,7 +237,7 @@ func (s *Service) validatePluginExecutorRepositoryCompatibility(ctx context.Cont
 	if err != nil {
 		return fmt.Errorf("%w: repository cloneability cannot be verified", ErrInvalidExecutorConfig)
 	}
-	if entity == nil || entity.SourceType == sourceTypeLocal || entity.RemoteURL == "" || isLocalRepositoryURL(entity.RemoteURL) {
+	if entity == nil || entity.SourceType == sourceTypeLocal || entity.RemoteURL == "" || (isLocalRepositoryURL(entity.RemoteURL) && !isE2ELocalRemote(entity.RemoteURL)) {
 		return fmt.Errorf("%w: plugin executor requires cloneable repositories", ErrInvalidExecutorConfig)
 	}
 	return nil
