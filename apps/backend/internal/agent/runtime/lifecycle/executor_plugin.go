@@ -960,7 +960,9 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	inventory.Resource = retained
 	inventory.Phase = pluginExecutorPhaseCleanupPending
 	if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
-		return fmt.Errorf("remote launch failed and cleanup inventory checkpoint failed: %w", checkpointErr)
+		r.logger.Error("plugin executor resource is unrecorded and could not be removed",
+			zap.String("execution_id", req.InstanceID), zap.String("stage", stage), zap.Error(checkpointErr))
+		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; allocated resource was not recorded and was not removed"))
 	}
 	r.logger.Warn("plugin executor cleanup remains pending", zap.String("execution_id", req.InstanceID))
 	return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; resource cleanup remains pending"))

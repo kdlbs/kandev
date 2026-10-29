@@ -138,6 +138,19 @@ and `drain_outcome`. Outcome mapping: a receipt is `drained`; a refused connecti
 `destroy_timeout_seconds`. For declaring providers the bootstrap's `idle_timeout_seconds` is 0, mapped to
 `KANDEV_ACP_IDLE_TIMEOUT` disabled in the agentctl startup config.
 
+Cleanup ownership: `StopInstance` for archive and delete reasons only stops agentctl; the task-environment cleanup
+job calls `DestroyTaskEnvironment`, the single authority that drains and destroys from the stored record, with the
+agentctl credential revealed from the runtime secret the record references. Only a failed-launch rollback cleans up
+inside `StopInstance`. `DestroyTaskEnvironment` returns a retryable error while the same process still has the
+record's launch in flight (an in-memory set keyed by execution ID), so it cannot settle "absent" before the provider
+publishes the resource. Recover results for `found` resources must carry `state_version`, on the launch-recovery
+and the cleanup path. When a failed launch can neither take the cleanup claim nor checkpoint the resource it
+provisioned, the launch destroys that resource directly (claim operation ID, `not_attempted` drain) and reports
+whether it was removed. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
+reveal recorded secrets on each call; none is persisted or logged. Under the e2e mock profile only, a `file://` or
+loopback-host remote parses as the synthetic `e2e-local` provider so a local rig can use a repository; production
+keeps the provider allowlist.
+
 ## Destroy and recover checkpoints
 
 `pluginExecutorCallbackRequest` today matches only an active launch. It gains a claim-scoped path: the request context
@@ -211,6 +224,7 @@ Each test is written first, fails against current main, and names its AC with `@
 | Crash before nonce persist vs before provision (007.1) | no provision without a persisted nonce | lifecycle unit ordering |
 | Crash before ready publication (007.3) | recovery publishes once; repeat is a no-op | barrier e2e; sqlite and PostgreSQL |
 | Archive racing recovery (007.6) | one claim, loser no-ops | sqlite and PostgreSQL race |
+| Archive during provisioning (005.4) | cleanup defers; a resource the launch cannot record is destroyed by the launch | lifecycle unit with slow-provision and rotated-checkpoint fakes |
 | Plugin restart with open tunnel (004.7) | streams close, new lease, same environment | fixture over the process boundary |
 | Duplicate or late acknowledgement, data before acknowledgement, 65th open (004.3, 004.8) | stream closed as unavailable; 65th open `rate_limited`, others unaffected | tunnel unit with fake provider |
 | Cancel during stream open (004.3, 004.6) | no bytes before ack, stream closed, count zero | tunnel unit with fake provider |
