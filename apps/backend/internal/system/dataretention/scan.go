@@ -381,6 +381,17 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	if bytes > 0 && *used > 0 && bytes > batchBytes-*used {
 		return true, nil
 	}
+	// Re-check eligibility before crediting either target, so a job that left the
+	// succeeded state between batches is counted as skipped instead of eligible.
+	eligible, err := tasksqlite.SucceededCleanupJobEligible(ctx, q, s.driverName(), jobID, r.Operation.CleanupCutoff)
+	if err != nil {
+		return false, err
+	}
+	if !eligible {
+		r.Operation.CleanupJobs.Skipped[skipProtectedTasks]++
+		finishCleanupJob(&r.Progress)
+		return false, nil
+	}
 	target.Rows++
 	target.TotalBytes += bytes
 	*used += bytes
@@ -401,10 +412,6 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	tx, ok := q.(*sqlx.Tx)
 	if !ok {
 		return false, errWriterRequired
-	}
-	eligible, err := tasksqlite.SucceededCleanupJobEligible(ctx, tx, s.driverName(), jobID, r.Operation.CleanupCutoff)
-	if err != nil || !eligible {
-		return false, err
 	}
 	if err := tasksqlite.WriteReducedCleanupSnapshot(ctx, tx, jobID, snapshot, reduced.Snapshot); err != nil {
 		return false, err
