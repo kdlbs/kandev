@@ -103,6 +103,30 @@ func pluginExecutorClaimDigest(phase string, resource *pluginsdk.ExecutorResourc
 // (invalid_config), claim identity (not_found), then sequence and revision in
 // the repository transaction.
 func (m *Manager) checkpointPluginExecutorClaim(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest, phase string) error {
+	return m.acceptPluginExecutorClaimCheckpoint(ctx, request, phase)
+}
+
+// logPluginExecutorCheckpointRefusal records why a provider checkpoint was
+// refused, with the claim the host holds for the environment and the claim the
+// provider echoed. Claim ids are not secret.
+func (m *Manager) logPluginExecutorCheckpointRefusal(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest, phase string, cause error) {
+	expected := ""
+	if store := m.pluginExecutorClaimStore; store != nil {
+		if claim, err := store.GetTaskEnvironmentRecoveryClaim(ctx, request.GetContext().GetEnvironmentId()); err == nil && claim != nil {
+			expected = claim.OperationID
+		}
+	}
+	m.logger.Warn("plugin executor checkpoint refused",
+		zap.String("phase", phase),
+		zap.Uint64("sequence", request.GetSequence()),
+		zap.String("environment_id", request.GetContext().GetEnvironmentId()),
+		zap.String("execution_id", request.GetContext().GetExecutionId()),
+		zap.String("expected_claim", expected),
+		zap.String("received_claim", request.GetClaim()),
+		zap.Error(cause))
+}
+
+func (m *Manager) acceptPluginExecutorClaimCheckpoint(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest, phase string) error {
 	if err := validatePluginExecutorCallbackLease(request.GetContext()); err != nil || request.GetSequence() < 1 || request.GetResource() == nil {
 		return fmt.Errorf("%w: a claim checkpoint needs a lease, a resource and a sequence of at least 1", models.ErrExecutorInvalidConfig)
 	}
@@ -168,15 +192,7 @@ func (m *Manager) activePluginExecutorClaim(
 		return nil, pluginExecutorInventory{}, nil, notFound
 	}
 	kind := pluginExecutorClaimKind(inventory.OperationID, claim)
-	if kind == "" || callback == nil {
-		return nil, pluginExecutorInventory{}, nil, notFound
-	}
-	if claimEcho != claim.OperationID {
-		m.logger.Warn("plugin executor checkpoint refused: claim mismatch",
-			zap.String("phase", phase),
-			zap.String("environment_id", inventory.EnvironmentID),
-			zap.String("expected_claim", claim.OperationID),
-			zap.String("received_claim", claimEcho))
+	if kind == "" || callback == nil || claimEcho == "" || claimEcho != claim.OperationID {
 		return nil, pluginExecutorInventory{}, nil, notFound
 	}
 	if kind != pluginExecutorClaimPhaseKind(phase) {
@@ -215,7 +231,7 @@ func nextPluginExecutorClaimInventory(
 	resource *pluginsdk.ExecutorResourceDescriptor,
 	phase string,
 ) (pluginExecutorInventory, error) {
-	descriptor, err := resolvePluginExecutorWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, resource)
+	descriptor, err := resolvePluginExecutorEarlyWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, resource)
 	if err != nil {
 		return pluginExecutorInventory{}, err
 	}

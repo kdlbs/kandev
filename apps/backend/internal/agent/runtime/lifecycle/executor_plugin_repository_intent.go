@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 
@@ -29,6 +30,11 @@ var pluginAgentEnvAllowlist = []string{
 	"KANDEV_TASK_ID", "KANDEV_SESSION_ID", "KANDEV_INSTANCE_ID", "KANDEV_TASK_ENVIRONMENT_ID",
 	"KANDEV_AGENT_PROFILE_ID", "KANDEV_EXECUTION_PROFILE_ID", "LANG", "LC_ALL", "TZ",
 }
+
+// pluginAgentEnvE2EProfile is the profile selector the host forwards to the
+// provider's agentctl under the e2e profile, so the remote materializer accepts
+// e2e-local repository locators.
+const pluginAgentEnvE2EProfile = "KANDEV_E2E_MOCK"
 
 // pluginAgentEnvSecretFragments classify a name as secret-like, case-insensitively.
 var pluginAgentEnvSecretFragments = []string{"TOKEN", "SECRET", "PASSWORD", "KEY", "CREDENTIAL"}
@@ -132,6 +138,9 @@ func buildPluginAgentEnv(instanceEnv, plainProfileEnv map[string]string) (map[st
 	}
 	for name, value := range plainProfileEnv {
 		selected[name] = value
+	}
+	if os.Getenv(pluginAgentEnvE2EProfile) == boolStringTrue {
+		selected[pluginAgentEnvE2EProfile] = boolStringTrue
 	}
 	size := 0
 	for name, value := range selected {
