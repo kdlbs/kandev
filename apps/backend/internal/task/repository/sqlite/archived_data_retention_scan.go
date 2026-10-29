@@ -258,22 +258,25 @@ func SucceededCleanupUpperJobID(ctx context.Context, q sqlx.QueryerContext) (str
 	return id, err
 }
 
-// CleanupJobSnapshotRow reads a job's stored snapshot size and value.
-func CleanupJobSnapshotRow(ctx context.Context, q sqlx.QueryerContext, id string) (int64, string, error) {
-	var bytes int64
+// CleanupJobSnapshotBytes reads only the stored snapshot length, so a caller can
+// apply the oversize and byte-budget bounds before loading the body.
+func CleanupJobSnapshotBytes(ctx context.Context, q sqlx.QueryerContext, id string) (int64, error) {
+	var size int64
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &size, `SELECT COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)
+	 FROM task_resource_cleanup_jobs WHERE id=?`, id)
+	return size, err
+}
+
+// CleanupJobSnapshotBody reads the stored snapshot value for a job already
+// sized and admitted by the batch budget.
+func CleanupJobSnapshotBody(ctx context.Context, q sqlx.QueryerContext, id string) (string, error) {
 	var snapshot string
-	sizeCtx, sizeCancel := budgetedStatementCtx(ctx)
-	defer sizeCancel()
-	if err := sqlx.GetContext(sizeCtx, q, &bytes, `SELECT COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)
-	 FROM task_resource_cleanup_jobs WHERE id=?`, id); err != nil {
-		return 0, "", err
-	}
-	bodyCtx, bodyCancel := budgetedStatementCtx(ctx)
-	defer bodyCancel()
-	if err := sqlx.GetContext(bodyCtx, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id=?`, id); err != nil {
-		return 0, "", err
-	}
-	return bytes, snapshot, nil
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id=?`, id)
+	return snapshot, err
 }
 
 // WriteReducedCleanupSnapshot replaces a succeeded job's snapshot only while it

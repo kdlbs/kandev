@@ -311,8 +311,17 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 		return "", errWriterRequired
 	}
 	eligible, err := tasksqlite.HistoryTaskEligible(ctx, tx, s.driverName(), r.Progress.Task, r.Operation.ArchivedCutoff)
-	if err != nil || !eligible {
+	if err != nil {
+		if errors.Is(err, tasksqlite.ErrArchivedTaskEligibilityBudget) || errors.Is(err, tasksqlite.ErrPayloadEligibilityBudget) {
+			// A budget timeout is a skip, not a failed batch: the row stays and
+			// the pass ends partial.
+			r.Operation.Messages.Skipped[skipEligibilityBudget]++
+			return "", nil
+		}
 		return "", err
+	}
+	if !eligible {
+		return "", nil
 	}
 	if err := tasksqlite.WriteReducedMessageMetadata(ctx, tx, row.ID, raw, string(reduced.Metadata)); err != nil {
 		return "", err
@@ -363,13 +372,13 @@ func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *re
 // succeeded job still serves through GetTaskSourceManifest after task deletion.
 func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64) (bool, error) {
 	jobID := r.Progress.Job
-	bytes, snapshot, err := tasksqlite.CleanupJobSnapshotRow(ctx, q, jobID)
+	bytes, err := tasksqlite.CleanupJobSnapshotBytes(ctx, q, jobID)
 	if err != nil {
 		return false, err
 	}
 	target := &r.Operation.CleanupJobs
-	// A row deferred by the byte budget keeps its cursor, so it must not be
-	// counted until it is actually processed; otherwise the next batch recounts it.
+	// Only the size is read yet; a row deferred by the byte budget keeps its
+	// cursor and must not be counted until it is actually processed.
 	if bytes > models.ToolPayloadMaxBytes {
 		target.Rows++
 		target.TotalBytes += bytes
@@ -381,8 +390,15 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	if bytes > 0 && *used > 0 && bytes > batchBytes-*used {
 		return true, nil
 	}
-	// Re-check eligibility before crediting either target, so a job that left the
-	// succeeded state between batches is counted as skipped instead of eligible.
+	// The row counts as scanned and is charged to the shared byte budget before
+	// the body is fetched, so a timeout or ineligible row cannot grow the batch.
+	target.Rows++
+	target.TotalBytes += bytes
+	*used += bytes
+	snapshot, err := tasksqlite.CleanupJobSnapshotBody(ctx, q, jobID)
+	if err != nil {
+		return false, err
+	}
 	eligible, err := tasksqlite.SucceededCleanupJobEligible(ctx, q, s.driverName(), jobID, r.Operation.CleanupCutoff)
 	if err != nil {
 		if errors.Is(err, tasksqlite.ErrCleanupSnapshotEligibilityBudget) {
@@ -392,12 +408,6 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 		}
 		return false, err
 	}
-	// The row was read either way, so it counts as scanned and is charged to the
-	// shared batch byte budget before eligibility decides whether it is credited
-	// or skipped.
-	target.Rows++
-	target.TotalBytes += bytes
-	*used += bytes
 	if !eligible {
 		r.Operation.CleanupJobs.Skipped[skipProtectedTasks]++
 		finishCleanupJob(&r.Progress)
