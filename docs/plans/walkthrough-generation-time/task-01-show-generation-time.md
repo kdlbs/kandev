@@ -188,3 +188,9 @@ CodeRabbit requested an exact saved-value assertion for live replacement. The re
 The focused replacement test passed with retries disabled (`--grep "a re-emitted walkthrough" --retries=0`). Log: `/tmp/kandev-run.e2e.OP1gToHE.log`. Targeted ESLint and formatting passed. Production behavior and the existing requirements are unchanged.
 
 The follow-up review aligned the replacement event wait with the existing 45-second agent-turn budget, keeping the pre-armed wait and task filter. The focused replacement test passed again with retries disabled (`/tmp/kandev-run.e2e.dAR9YB9b.log`), and targeted lint and formatting passed.
+
+## CI follow-up
+
+E2E shard 16 exposed an existing mobile cancellation test race. The trace showed the command drawer still moving when the test tapped Cancel Turn, so Configuration Chat moved under the tap position. The test now uses the existing finite-animation helper before interacting with the drawer.
+
+Validation used a clean merge of PR head `91b9bcf4cea9` and main `da9ff6332863`, plus this test change. Both cancellation tests passed three times with retries disabled (6 passes; `/tmp/kandev-run.e2e.8JqUQlMd.log`). All seven mobile spec files from the affected CI process then passed with retries disabled (22 passes; `/tmp/kandev-run.e2e.i9AN6CZb.log`). Targeted ESLint and Prettier passed. This correction changes test synchronization only.
