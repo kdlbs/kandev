@@ -21,6 +21,13 @@ var ErrCleanupSnapshotEligibilityBudget = errors.New("cleanup snapshot eligibili
 
 const archivedEligibilityBudget = 200 * time.Millisecond
 
+// budgetedStatementCtx bounds one cursor or snapshot statement by the
+// per-statement budget, so an unbounded read cannot stall a pass. The
+// eligibility decisions share the same budget.
+func budgetedStatementCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, archivedEligibilityBudget)
+}
+
 // ArchivedTaskEligible reports whether a task may have its archived transcript
 // reduced. The archived timestamp is the age basis, and the task must still be
 // archived at the moment of the call, so an unarchive before the write protects
@@ -147,7 +154,9 @@ type ArchivedMessageRow struct {
 // one keyset.
 func NextHistoryTaskID(ctx context.Context, q sqlx.QueryerContext, after, upper string) (string, error) {
 	var id string
-	err := sqlx.GetContext(ctx, q, &id, `SELECT id FROM tasks
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &id, `SELECT id FROM tasks
 	 WHERE (archived_at IS NOT NULL OR state IN ('COMPLETED','FAILED','CANCELLED'))
 	 AND id>? AND id<=? ORDER BY id LIMIT 1`, after, upper)
 	return id, err
@@ -156,7 +165,9 @@ func NextHistoryTaskID(ctx context.Context, q sqlx.QueryerContext, after, upper 
 // HistoryUpperTaskID captures the highest candidate task id for this pass.
 func HistoryUpperTaskID(ctx context.Context, q sqlx.QueryerContext) (string, error) {
 	var id string
-	err := sqlx.GetContext(ctx, q, &id, `SELECT COALESCE(MAX(id),'') FROM tasks
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &id, `SELECT COALESCE(MAX(id),'') FROM tasks
 	 WHERE archived_at IS NOT NULL OR state IN ('COMPLETED','FAILED','CANCELLED')`)
 	return id, err
 }
@@ -164,7 +175,9 @@ func HistoryUpperTaskID(ctx context.Context, q sqlx.QueryerContext) (string, err
 // NextSessionID returns the next session of a task for the archived scan.
 func NextSessionID(ctx context.Context, q sqlx.QueryerContext, taskID, after string) (string, error) {
 	var id string
-	err := sqlx.GetContext(ctx, q, &id, `SELECT id FROM task_sessions WHERE task_id=? AND id>? ORDER BY id LIMIT 1`, taskID, after)
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &id, `SELECT id FROM task_sessions WHERE task_id=? AND id>? ORDER BY id LIMIT 1`, taskID, after)
 	return id, err
 }
 
@@ -172,14 +185,18 @@ func NextSessionID(ctx context.Context, q sqlx.QueryerContext, taskID, after str
 // never walks rows appended after it started.
 func SessionUpperMessageRowID(ctx context.Context, q sqlx.QueryerContext, sessionID string) (int64, error) {
 	var rowID int64
-	err := sqlx.GetContext(ctx, q, &rowID, `SELECT COALESCE(MAX(rowid),0) FROM task_session_messages WHERE task_session_id=?`, sessionID)
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &rowID, `SELECT COALESCE(MAX(rowid),0) FROM task_session_messages WHERE task_session_id=?`, sessionID)
 	return rowID, err
 }
 
 // NextArchivedMessageRows lists the next page of one archived session's messages.
 func NextArchivedMessageRows(ctx context.Context, q sqlx.QueryerContext, sessionID string, afterRowID, upperRowID int64, limit int) ([]ArchivedMessageRow, error) {
 	rows := []ArchivedMessageRow{}
-	err := sqlx.SelectContext(ctx, q, &rows, `SELECT rowid AS row_id,id,type,
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.SelectContext(stmt, q, &rows, `SELECT rowid AS row_id,id,type,
 	 COALESCE(LENGTH(CAST(metadata AS BLOB)),0) AS bytes
 	 FROM task_session_messages
 	 WHERE task_session_id=? AND rowid>? AND rowid<=? ORDER BY rowid LIMIT ?`,
@@ -190,7 +207,9 @@ func NextArchivedMessageRows(ctx context.Context, q sqlx.QueryerContext, session
 // ArchivedMessageMetadata reads one candidate message's metadata body.
 func ArchivedMessageMetadata(ctx context.Context, q sqlx.QueryerContext, rowID int64, id string) (string, error) {
 	var raw string
-	err := sqlx.GetContext(ctx, q, &raw, `SELECT COALESCE(metadata,'') FROM task_session_messages WHERE rowid=? AND id=?`, rowID, id)
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &raw, `SELECT COALESCE(metadata,'') FROM task_session_messages WHERE rowid=? AND id=?`, rowID, id)
 	return raw, err
 }
 
@@ -218,7 +237,9 @@ func WriteReducedMessageMetadata(ctx context.Context, tx *sqlx.Tx, id, expected,
 // job is never counted as a scanned row or charged to the batch byte budget.
 func NextSucceededCleanupJobID(ctx context.Context, q sqlx.QueryerContext, after, upper string, cutoff time.Time) (string, error) {
 	var id string
-	err := sqlx.GetContext(ctx, q, &id, `SELECT id FROM task_resource_cleanup_jobs
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &id, `SELECT id FROM task_resource_cleanup_jobs
 	 WHERE state=? AND id>? AND id<=? AND completed_at IS NOT NULL
 	 AND julianday(completed_at)<=julianday(?) ORDER BY id LIMIT 1`,
 		models.TaskResourceCleanupStateSucceeded, after, upper, cutoff.UTC().Format(time.RFC3339Nano))
@@ -228,7 +249,9 @@ func NextSucceededCleanupJobID(ctx context.Context, q sqlx.QueryerContext, after
 // SucceededCleanupUpperJobID captures the highest succeeded job id for a pass.
 func SucceededCleanupUpperJobID(ctx context.Context, q sqlx.QueryerContext) (string, error) {
 	var id string
-	err := sqlx.GetContext(ctx, q, &id, `SELECT COALESCE(MAX(id),'') FROM task_resource_cleanup_jobs WHERE state=?`,
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &id, `SELECT COALESCE(MAX(id),'') FROM task_resource_cleanup_jobs WHERE state=?`,
 		models.TaskResourceCleanupStateSucceeded)
 	return id, err
 }
@@ -237,11 +260,15 @@ func SucceededCleanupUpperJobID(ctx context.Context, q sqlx.QueryerContext) (str
 func CleanupJobSnapshotRow(ctx context.Context, q sqlx.QueryerContext, id string) (int64, string, error) {
 	var bytes int64
 	var snapshot string
-	if err := sqlx.GetContext(ctx, q, &bytes, `SELECT COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)
+	sizeCtx, sizeCancel := budgetedStatementCtx(ctx)
+	defer sizeCancel()
+	if err := sqlx.GetContext(sizeCtx, q, &bytes, `SELECT COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)
 	 FROM task_resource_cleanup_jobs WHERE id=?`, id); err != nil {
 		return 0, "", err
 	}
-	if err := sqlx.GetContext(ctx, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id=?`, id); err != nil {
+	bodyCtx, bodyCancel := budgetedStatementCtx(ctx)
+	defer bodyCancel()
+	if err := sqlx.GetContext(bodyCtx, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id=?`, id); err != nil {
 		return 0, "", err
 	}
 	return bytes, snapshot, nil

@@ -184,7 +184,7 @@ function RetentionContent({
         {(remote.pending || remote.acceptedId) && (
           <p className="text-sm">{t("system:archivedData.pending")}</p>
         )}
-        <ArchivedDataAnalysis status={status} />
+        <ArchivedDataAnalysis status={status} draft={draft} />
       </div>
       <ArchivedDataAutomation model={model} pending={remote.pending} />
       <ArchivedDataBackupReview model={model} pending={remote.pending} />

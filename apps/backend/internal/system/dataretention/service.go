@@ -256,6 +256,12 @@ func operationMatches(r *record, id string) bool {
 	return r.Operation != nil && r.Operation.ID == id
 }
 
+// activeOperation reports whether id still names the running operation. A cancel
+// that committed between the tick's read and this check must still stop a batch.
+func activeOperation(r *record, id string) bool {
+	return operationMatches(r, id) && r.Operation.State == stateRunning
+}
+
 func finishOperation(r *record, state, code string, now time.Time) {
 	if r.Operation == nil {
 		return

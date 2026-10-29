@@ -36,6 +36,15 @@ func scanGet(ctx context.Context, q sqlx.QueryerContext, dest any, query string,
 	return sqlx.GetContext(stmt, q, dest, query, args...)
 }
 
+// scannedRows is the rows both targets have already charged to this batch. The
+// row budget is shared, so the message and job phases read it together.
+func scannedRows(r *record) int64 {
+	if r.Operation == nil {
+		return 0
+	}
+	return r.Operation.Messages.Rows + r.Operation.CleanupJobs.Rows
+}
+
 func (s *Service) stepScan(ctx context.Context, r record) error {
 	if r.Operation == nil || r.Operation.State != stateRunning || r.Operation.Kind == choiceBackup {
 		return nil
@@ -111,6 +120,10 @@ func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r
 		if i > 0 && time.Since(started) >= statementBudget {
 			break
 		}
+		remaining := int64(batchRows) - scannedRows(r)
+		if remaining <= 0 {
+			break
+		}
 		ready, err := s.advanceMessageCursor(ctx, q, r, &validated)
 		if err != nil {
 			return nil, err
@@ -121,7 +134,7 @@ func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r
 		if !ready {
 			continue
 		}
-		full, err := s.consumeMessagePage(ctx, q, r, mutate, used, &changed, batchRows-i)
+		full, err := s.consumeMessagePage(ctx, q, r, mutate, used, &changed, int(remaining))
 		if err != nil {
 			return nil, err
 		}
@@ -300,6 +313,9 @@ func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *re
 		if i > 0 && time.Since(started) >= statementBudget {
 			break
 		}
+		if scannedRows(r) >= int64(batchRows) {
+			break
+		}
 		p := &r.Progress
 		if p.Job == "" {
 			id, err := tasksqlite.NextSucceededCleanupJobID(ctx, q, p.JobAfter, p.UpperJob, r.Operation.CleanupCutoff)
@@ -332,9 +348,11 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 		return false, err
 	}
 	target := &r.Operation.CleanupJobs
-	target.Rows++
-	target.TotalBytes += bytes
+	// A row deferred by the byte budget keeps its cursor, so it must not be
+	// counted until it is actually processed; otherwise the next batch recounts it.
 	if bytes > models.ToolPayloadMaxBytes {
+		target.Rows++
+		target.TotalBytes += bytes
 		target.Oversized++
 		r.Operation.Skipped["oversize"]++
 		finishCleanupJob(&r.Progress)
@@ -343,6 +361,8 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	if bytes > 0 && *used > 0 && bytes > batchBytes-*used {
 		return true, nil
 	}
+	target.Rows++
+	target.TotalBytes += bytes
 	*used += bytes
 	reduced, err := models.ReduceCleanupSnapshot(snapshot, r.Operation.StartedAt)
 	if err != nil {

@@ -24,7 +24,7 @@ func (s *Service) stepCleanup(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if !operationMatches(&before, id) {
+	if !activeOperation(&before, id) {
 		return nil
 	}
 	if !approved(&before) {
@@ -36,7 +36,7 @@ func (s *Service) stepCleanup(ctx context.Context, id string) error {
 	}
 	var changed []string
 	_, err = s.change(ctx, func(r *record, tx *sqlx.Tx) error {
-		if !operationMatches(r, id) {
+		if !activeOperation(r, id) {
 			return nil
 		}
 		if !approved(r) || r.Policy.Revision != r.Progress.Revision {

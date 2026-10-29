@@ -1,12 +1,16 @@
 import { useTranslation } from "react-i18next";
 import type {
   ArchivedDataOperation,
+  ArchivedDataPolicy,
   ArchivedDataRetentionStatus,
   ArchivedDataTarget,
 } from "@/lib/types/archived-data-retention";
+import { cutoff } from "@/hooks/domains/system/use-archived-data-retention-draft";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { RetentionSkippedItems, retentionDate, skippedTotal } from "./retention-shared";
+
+const dayMilliseconds = 24 * 60 * 60 * 1000;
 
 const targetLabel = {
   messages: "system:archivedData.targetMessages",
@@ -47,14 +51,16 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
   if (operation.kind === "backup")
     return <p className="text-sm">{t("system:archivedData.preparing")}</p>;
   const skipped = skippedTotal(operation.skipped);
-  const reduced = operation.messages.reduced + operation.cleanup_jobs.reduced;
+  // A completed pass with no scanned rows found nothing. An analysis never
+  // reduces rows, so its zero reduced count must not hide the per-target report.
+  const scanned = operation.messages.rows + operation.cleanup_jobs.rows;
   return (
     <div className="space-y-2 break-words text-sm">
       <p className="text-xs text-muted-foreground">
         {t(`system:archivedData.${operation.kind}`)}: {t(`system:archivedData.${operation.state}`)}
         {operation.finished_at && <> · {retentionDate(operation.finished_at)}</>}
       </p>
-      {reduced === 0 && operation.state === "succeeded" ? (
+      {operation.state === "succeeded" && scanned === 0 ? (
         <p>{t("system:archivedData.empty")}</p>
       ) : (
         <>
@@ -94,24 +100,46 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
   );
 }
 
-// An estimate is stale once the policy it measured has been edited. The cutoffs
-// alone cannot decide this: they are recomputed from the wall clock, so they
-// differ from the stored value on every render.
+// An estimate is stale once the policy it measured has been edited, or once a
+// day has passed. The saved revision only moves when the policy is saved, so the
+// current draft windows are compared at day granularity: recomputing a cutoff
+// from the wall clock differs from the stored value by milliseconds, not days.
+function windowEdited(storedCutoff: string, days: number, now: Date): boolean {
+  const stored = parseTurnTimestamp(storedCutoff);
+  if (stored === null) return true;
+  const day = BigInt(dayMilliseconds);
+  const expected = BigInt(Math.trunc(cutoff(now, days)));
+  return stored / day !== expected / day;
+}
+
 function analysisIsStale(
   operation: ArchivedDataOperation | undefined,
   status: ArchivedDataRetentionStatus,
+  draft: ArchivedDataPolicy | null,
 ) {
   if (!operation) return false;
   if (operation.policy_revision !== status.policy.revision) return true;
   const finished = operation.finished_at;
   if (!finished || parseTurnTimestamp(finished) === null) return true;
-  return Date.now() - Date.parse(finished) > 86400000;
+  if (Date.now() - Date.parse(finished) > dayMilliseconds) return true;
+  if (!draft) return true;
+  const now = new Date();
+  return (
+    windowEdited(operation.archived_cutoff, draft.archived_age.days, now) ||
+    windowEdited(operation.cleanup_cutoff, draft.cleanup_age.days, now)
+  );
 }
 
-export function ArchivedDataAnalysis({ status }: { status: ArchivedDataRetentionStatus }) {
+export function ArchivedDataAnalysis({
+  status,
+  draft,
+}: {
+  status: ArchivedDataRetentionStatus;
+  draft: ArchivedDataPolicy | null;
+}) {
   const { t } = useTranslation();
   const analysis = status.last_analysis;
-  const stale = analysisIsStale(analysis, status);
+  const stale = analysisIsStale(analysis, status, draft);
   return (
     <div className="space-y-3" data-testid="archived-data-results">
       <div data-testid="archived-data-estimate">

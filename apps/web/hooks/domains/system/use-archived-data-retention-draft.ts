@@ -13,8 +13,9 @@ export function validArchivedDays(age: ArchivedDataPolicy["archived_age"]) {
 }
 const serialize = (value: unknown) => JSON.stringify(value);
 // A shorter window brings the cutoff forward, so it removes data sooner than the
-// administrator already approved.
-function cutoff(now: Date, days: number) {
+// administrator already approved. The cutoff moves later as the window shrinks,
+// so a draft cutoff after the saved one is the review trigger.
+export function cutoff(now: Date, days: number) {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).getTime();
 }
 export function needsArchivedBackupReview(
@@ -25,8 +26,8 @@ export function needsArchivedBackupReview(
   if (!draft?.enabled || !saved) return false;
   if (!saved.enabled) return true;
   return (
-    cutoff(now, draft.archived_age.days) < cutoff(now, saved.archived_age.days) ||
-    cutoff(now, draft.cleanup_age.days) < cutoff(now, saved.cleanup_age.days)
+    cutoff(now, draft.archived_age.days) > cutoff(now, saved.archived_age.days) ||
+    cutoff(now, draft.cleanup_age.days) > cutoff(now, saved.cleanup_age.days)
   );
 }
 function invalidAges(draft: ArchivedDataPolicy | null) {
