@@ -134,17 +134,18 @@ type sessionCeilingController struct {
 	inferenceWakeMu  sync.Mutex
 	inferenceWake    chan struct{}
 
-	policy       string
-	gradeLimits  map[string]int
-	resolveGrade func(context.Context, admissionRequest) (string, error)
-	persistGrade func(context.Context, string, string) error
-	mu           sync.Mutex
-	ceiling      int
-	reservations map[string]*ceilingReservation
-	lister       admittedSessionLister
-	logger       *zap.Logger
-	now          func() time.Time
-	newKey       func() string
+	policy           string
+	gradeLimits      map[string]int
+	resolveGrade     func(context.Context, admissionRequest) (string, error)
+	persistGrade     func(context.Context, string, string) error
+	mu               sync.Mutex
+	ceiling          int
+	reservations     map[string]*ceilingReservation
+	lister           admittedSessionLister
+	logger           *zap.Logger
+	populationLogger *zap.Logger
+	now              func() time.Time
+	newKey           func() string
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -152,12 +153,13 @@ func newSessionCeilingController(ceiling int, lister admittedSessionLister, logg
 		logger = zap.NewNop()
 	}
 	return &sessionCeilingController{
-		ceiling:      ceiling,
-		reservations: make(map[string]*ceilingReservation),
-		lister:       lister,
-		logger:       logger,
-		now:          time.Now,
-		newKey:       func() string { return "launch-" + uuid.NewString() },
+		ceiling:          ceiling,
+		reservations:     make(map[string]*ceilingReservation),
+		lister:           lister,
+		logger:           logger,
+		populationLogger: newPopulationDiagnosticLogger(logger),
+		now:              time.Now,
+		newKey:           func() string { return "launch-" + uuid.NewString() },
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
+	"go.uber.org/zap"
 )
 
 const inferenceStateUnknown = "unknown"
@@ -26,12 +27,13 @@ type inferenceClientSource interface {
 }
 
 type sharedInferenceConsumer struct {
-	capacity  *orchestrator.Service
-	settler   inferenceClaimSettler
-	sources   []inferenceClientSource
-	refreshMu sync.Mutex
-	workerMu  sync.Mutex
-	workers   map[string]struct{}
+	populationLogger *zap.Logger
+	capacity         *orchestrator.Service
+	settler          inferenceClaimSettler
+	sources          []inferenceClientSource
+	refreshMu        sync.Mutex
+	workerMu         sync.Mutex
+	workers          map[string]struct{}
 }
 
 func inferenceBindingKey(owner, attempt string) string { return "inference:" + owner + ":" + attempt }

@@ -48,13 +48,18 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 	}
 	lister, ok := c.lister.(admittedExecutionLister)
 	if !ok {
+		c.logPopulationUnknown("task_sessions", "reader_unavailable", "", "")
 		return population, errors.New("admitted execution grades unavailable")
 	}
 	rows, err := lister.ListAdmittedExecutions(ctx)
 	if err != nil {
+		c.logPopulationUnknown("task_sessions", populationReadFailure(err), "", "")
 		return population, err
 	}
 	for _, row := range rows {
+		if !row.GradeKnown {
+			c.logPopulationUnknown("task_sessions", "grade_unknown", "session_id", row.ID)
+		}
 		population.counted[row.ID] = struct{}{}
 		c.observeGradeLocked(&population, row.Grade, row.GradeKnown, grade)
 	}
@@ -62,9 +67,16 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 		return population, err
 	}
 	population.total = c.populationLocked(population.counted)
-	for _, held := range c.reservations {
+	for key, held := range c.reservations {
 		if _, counted := population.counted[held.sessionID]; held.sessionID != "" && counted {
 			continue
+		}
+		if !held.gradeKnown {
+			id := held.sessionID
+			if id == "" {
+				id = key
+			}
+			c.logPopulationUnknown("reservations", "grade_unknown", "reservation_id", id)
 		}
 		c.observeGradeLocked(&population, held.grade, held.gradeKnown, grade)
 	}
@@ -120,7 +132,11 @@ func (c *sessionCeilingController) allAdmissionRejection(p gradedPopulation, req
 	if !configured || (req.gradeKnown && p.missing) {
 		return ceilingReasonNeedsConfiguration
 	}
-	if !req.gradeKnown || !populationKnown {
+	if !req.gradeKnown {
+		c.logPopulationUnknown("admission_grade", "grade_unknown", "session_id", req.sessionID)
+		return ceilingReasonUnknownPopulation
+	}
+	if !populationKnown {
 		return ceilingReasonUnknownPopulation
 	}
 	return ""

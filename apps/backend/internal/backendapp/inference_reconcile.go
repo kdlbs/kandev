@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"maps"
+	"strconv"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -25,10 +26,11 @@ func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentrun
 	defer b.refreshMu.Unlock()
 	refs, known := b.inferenceRefs(ctx, extra)
 	defer releaseInferenceRefs(refs)
-	observations, observedKnown := observeInferenceRefs(ctx, refs)
+	observations, observedKnown := b.observeInferenceRefs(ctx, refs)
 	known = known && observedKnown
 	bindings, err := b.capacity.InferenceCapacityBindings(ctx)
 	if err != nil {
+		b.logPopulationUnknown("inference_bindings", inferencePopulationReadFailure(err), sessioncapacity.InferenceBinding{})
 		_ = b.capacity.SyncInferenceCapacity(ctx, false, func(map[string]sessioncapacity.InferenceBinding) error { return nil })
 		return
 	}
@@ -46,9 +48,10 @@ func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentrun
 func (b *sharedInferenceConsumer) inferenceRefs(ctx context.Context, extra []agentruntime.InferenceClientRef) ([]agentruntime.InferenceClientRef, bool) {
 	known := true
 	refs := append([]agentruntime.InferenceClientRef{}, extra...)
-	for _, source := range b.sources {
+	for index, source := range b.sources {
 		clients, err := source.InferenceClients(ctx)
 		if err != nil {
+			b.logPopulationUnknown("inference_inventory_"+strconv.Itoa(index), inferencePopulationReadFailure(err), sessioncapacity.InferenceBinding{})
 			known = false
 		}
 		refs = append(refs, clients...)
@@ -64,12 +67,14 @@ func releaseInferenceRefs(refs []agentruntime.InferenceClientRef) {
 	}
 }
 
-func observeInferenceRefs(ctx context.Context, refs []agentruntime.InferenceClientRef) (map[string]inferenceObservation, bool) {
+func (b *sharedInferenceConsumer) observeInferenceRefs(ctx context.Context, refs []agentruntime.InferenceClientRef) (map[string]inferenceObservation, bool) {
 	known := true
 	observations := make(map[string]inferenceObservation)
 	seen := make(map[string]bool)
 	for _, ref := range refs {
+		locator := inferencePopulationLocator(ref, nil)
 		if ref.Client == nil {
+			b.logPopulationUnknown("inference_snapshot", "client_missing", locator)
 			known = false
 			continue
 		}
@@ -80,14 +85,21 @@ func observeInferenceRefs(ctx context.Context, refs []agentruntime.InferenceClie
 		seen[instance] = true
 		snapshot, err := ref.Client.InferenceAttempts(ctx)
 		if err != nil {
+			b.logPopulationUnknown("inference_snapshot", inferencePopulationReadFailure(err), locator)
 			known = false
 			continue
 		}
 		if !snapshot.Known || snapshot.InstanceID != instance {
+			reason := "snapshot_unknown"
+			if snapshot.InstanceID != instance {
+				reason = "instance_mismatch"
+			}
+			b.logPopulationUnknown("inference_snapshot", reason, locator)
 			known = false
 		}
 		for _, status := range snapshot.Attempts {
 			if status.OwnerID == "" || status.InstanceID != instance {
+				b.logPopulationUnknown("inference_snapshot", "attempt_identity_unavailable", inferencePopulationLocator(ref, &status))
 				known = false
 				continue
 			}
@@ -105,12 +117,14 @@ func (b *sharedInferenceConsumer) reconcileHeldInference(ctx context.Context, bi
 			if b.finishRetainedInferenceStop(ctx, held) {
 				delete(bindings, key)
 			} else {
+				b.logPopulationUnknown("inference_settlement", "retained_settlement_unconfirmed", held)
 				known = false
 			}
 			continue
 		}
 		observed, found := observations[key]
 		if !found || observed.status.InstanceID != held.InstanceID {
+			b.logPopulationUnknown("inference_owner", "observation_unavailable", held)
 			known = false
 			held.State = inferenceStateUnknown
 			bindings[key] = held
@@ -131,6 +145,7 @@ func (b *sharedInferenceConsumer) reconcileHeldInference(ctx context.Context, bi
 				bindings[key] = held
 			}
 			if !b.settleLocked(ctx, held, status) {
+				b.logPopulationUnknown("inference_settlement", "settlement_unconfirmed", held)
 				known = false
 				continue
 			}
@@ -138,6 +153,7 @@ func (b *sharedInferenceConsumer) reconcileHeldInference(ctx context.Context, bi
 			continue
 		}
 		if !status.Known || status.State == utility.AttemptUnknown {
+			b.logPopulationUnknown("inference_attempt", "state_unknown", held)
 			known = false
 			held.State = inferenceStateUnknown
 		} else if status.State != utility.AttemptPrepared {
@@ -165,6 +181,7 @@ func (b *sharedInferenceConsumer) importUnboundInference(ctx context.Context, bi
 			continue
 		}
 		if !status.Known {
+			b.logPopulationUnknown("inference_attempt", "unbound_state_unknown", inferencePopulationLocator(observed.ref, &status))
 			known = false
 		}
 		identity := observed.ref.Identity

@@ -44,13 +44,18 @@ func (c *sessionCeilingController) appendInferenceGradesLocked(ctx context.Conte
 		return nil
 	}
 	if !c.inferenceKnown {
+		c.logPopulationUnknown("inference_inventory", "unknown", "", "")
 		return fmt.Errorf("inference population is unknown")
 	}
 	bindings, err := c.inferenceStore.LoadInferenceBindings(ctx)
 	if err != nil {
+		c.logPopulationUnknown("inference_bindings", populationReadFailure(err), "", "")
 		return err
 	}
 	for key, binding := range bindings {
+		if !binding.GradeKnown {
+			c.logPopulationUnknown("inference_bindings", "grade_unknown", "attempt_id", binding.AttemptID)
+		}
 		p.counted[key] = struct{}{}
 		c.observeGradeLocked(p, binding.Grade, binding.GradeKnown, grade)
 	}
@@ -148,6 +153,9 @@ func (s *Service) syncInferenceCapacity(ctx context.Context, known *bool, update
 		changed = changed || !maps.Equal(before, active)
 		return nil
 	})
+	if err != nil {
+		c.logPopulationUnknown("inference_bindings", "update_failed", "", "")
+	}
 	if known != nil {
 		c.inferenceKnown = *known && err == nil
 	} else if err != nil {
