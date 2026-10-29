@@ -20,20 +20,16 @@ type inferenceObservation struct {
 func (b *sharedInferenceConsumer) Refresh(ctx context.Context) { b.refresh(ctx) }
 
 // Reuse native recovered clients and the existing ceiling sweep. An absent owner,
-// failed snapshot or missing retained token never proves an empty population.
+// failed inventory/snapshot or missing retained token never proves an empty
+// population.
 //
-// Under the finite all-mode gate every child holds a backend binding before it
-// starts, so held bindings already count every possible occupant. An unreadable
-// execution or an unsettled binding then stays counted instead of turning the
-// whole population unknown, which would stop every automatic start and Office
-// claim until that one execution left tracking.
+// A failed source or per-execution snapshot marks the population unknown so new
+// admission fails closed, while held bindings remain in the store and stay
+// counted. One unreadable execution therefore never erases the known bindings.
 func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentruntime.InferenceClientRef) {
 	b.refreshMu.Lock()
 	defer b.refreshMu.Unlock()
-	all, finite := b.capacity.InferenceCapacityPolicy()
-	gated := all && finite
 	refs, known := b.inferenceRefs(ctx, extra)
-	known = known || gated
 	defer releaseInferenceRefs(refs)
 	observations, observedKnown := b.observeInferenceRefs(ctx, refs)
 	known = known && observedKnown
@@ -47,7 +43,7 @@ func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentrun
 		b.logPopulationUnknown("inference_bindings", "snapshot_unknown_context", sessioncapacity.InferenceBinding{}, inferenceBindingDiagnosticFields(bindings)...)
 	}
 	original := maps.Clone(bindings)
-	known = (b.reconcileHeldInference(ctx, bindings, observations) || gated) && known
+	known = b.reconcileHeldInference(ctx, bindings, observations) && known
 	known = b.importUnboundInference(ctx, bindings, observations) && known
 	err = b.capacity.SyncInferenceCapacity(ctx, known, func(active map[string]sessioncapacity.InferenceBinding) error {
 		return mergeObservedInference(active, original, bindings)
@@ -99,14 +95,13 @@ func releaseInferenceRefs(refs []agentruntime.InferenceClientRef) {
 func (b *sharedInferenceConsumer) observeInferenceRefs(ctx context.Context, refs []agentruntime.InferenceClientRef) (map[string]inferenceObservation, bool) {
 	known := true
 	all, finite := b.capacity.InferenceCapacityPolicy()
-	gated := all && finite
 	observations := make(map[string]inferenceObservation)
 	seen := make(map[string]bool)
 	for _, ref := range refs {
 		locator := inferencePopulationLocator(ref, nil)
 		if ref.Client == nil {
 			b.logPopulationUnknown("inference_snapshot", "client_missing", locator)
-			known = known && gated
+			known = false
 			continue
 		}
 		instance := ref.Client.InferenceInstanceID()
@@ -117,7 +112,7 @@ func (b *sharedInferenceConsumer) observeInferenceRefs(ctx context.Context, refs
 		snapshot, err := ref.Client.InferenceAttempts(ctx)
 		if err != nil {
 			b.logPopulationUnknown("inference_snapshot", inferencePopulationReadFailure(err), locator)
-			known = known && gated
+			known = false
 			continue
 		}
 		if !currentInferencePopulationKnown(snapshot, all && finite) || snapshot.InstanceID != instance {
@@ -126,7 +121,7 @@ func (b *sharedInferenceConsumer) observeInferenceRefs(ctx context.Context, refs
 				reason = "instance_mismatch"
 			}
 			b.logPopulationUnknown("inference_snapshot", reason, locator, inferenceSnapshotDiagnosticFields(snapshot)...)
-			known = known && gated
+			known = false
 		}
 		known = b.collectSnapshotAttempts(observations, ref, snapshot, instance) && known
 	}
