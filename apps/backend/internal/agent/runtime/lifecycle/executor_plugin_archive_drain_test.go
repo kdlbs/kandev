@@ -73,14 +73,14 @@ func TestCascadeCleanupLoadsTheStoredAgentctlToken(t *testing.T) {
 	}
 }
 
-func TestCascadeWithoutAnyRecordedTokenStillDestroysWithNotAttempted(t *testing.T) {
+func TestCascadeWithoutAnyRecordedTokenStillDestroysWithUnreachable(t *testing.T) {
 	runtime, operations, _, drainer, secretsFake := archiveDrainFixture(t, nil)
 	delete(secretsFake.values, archiveAuthSecretID)
 	if err := destroyClaimEnvironment(runtime); err != nil {
 		t.Fatalf("cascade: %v", err)
 	}
-	if len(drainer.calls) != 0 || operations.destroyRequest.GetDrainOutcome() != pluginDrainOutcomeNotAttempted {
-		t.Fatalf("drain calls = %d, outcome = %q", len(drainer.calls), operations.destroyRequest.GetDrainOutcome())
+	if len(drainer.calls) != 0 || operations.destroyRequest.GetDrainOutcome() != pluginDrainOutcomeUnreachable {
+		t.Fatalf("drain calls = %d, outcome = %q, want unreachable: a handshake happened and no credential is left", len(drainer.calls), operations.destroyRequest.GetDrainOutcome())
 	}
 }
 

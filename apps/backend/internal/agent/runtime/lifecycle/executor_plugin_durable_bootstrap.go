@@ -147,8 +147,9 @@ func (r *PluginRemoteExecutor) acquirePluginExecutorClaim(
 	request := models.TaskEnvironmentRecoveryClaimRequest{
 		TaskEnvironmentID: inventory.EnvironmentID, OwnerTaskID: taskID,
 		OwnershipGeneration: inventory.EnvironmentGeneration, SessionID: sessionID,
-		OperationID: pluginExecutorClaimOperationID(inventory.OperationID, kind), ExecutorType: string(models.ExecutorTypePluginRemote),
+		OperationID: r.newPluginExecutorClaimOperationID(inventory.OperationID, kind), ExecutorType: string(models.ExecutorTypePluginRemote),
 		AllowCurrentSessionRuntime: true,
+		SupersedeOperationPrefix:   pluginExecutorClaimPrefix(inventory.OperationID, kind), LiveOperationMarker: r.claimEpoch,
 	}
 	if job, ok := recoveryclaim.TaskCleanupJobFromContext(ctx); ok && job.TaskID == taskID {
 		request.CleanupJobID = job.ID
@@ -189,7 +190,14 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 	if err := r.checkpointPluginExecutorRecord(claimedCtx, record, state.inventory); err != nil {
 		return nil, false, err
 	}
-	control, token, err := r.newAgentctlControlClient(claimedCtx, r.connectionResolver(state.operationContext, state.resource, pluginExecutorRuntimePort, state.snapshot), r.logger, record.TransientBootstrapNonce)
+	resolver := r.connectionResolver(state.operationContext, state.resource, pluginExecutorRuntimePort, state.snapshot)
+	var control *agentctl.ControlClient
+	token := record.TransientAuthToken
+	if token != "" {
+		control, err = r.newTokenControlClient(claimedCtx, resolver, r.logger, token)
+	} else {
+		control, token, err = r.newAgentctlControlClient(claimedCtx, resolver, r.logger, record.TransientBootstrapNonce)
+	}
 	if errors.Is(err, agentctl.ErrHandshakeRejected) {
 		return nil, true, nil
 	}
@@ -198,6 +206,9 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 	}
 	defer control.Close()
 	r.reachCrashBarrier(claimedCtx, BarrierAfterHandshake)
+	if err := r.followRecoveryClaimCheckpoints(claimedCtx, record, state); err != nil {
+		return nil, false, err
+	}
 	instance, err := r.adoptDurableBootstrap(claimedCtx, record, state, control, token)
 	if err != nil {
 		return nil, false, err
@@ -208,6 +219,31 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 	}
 	r.clearPublishPending(claimedCtx, record, state)
 	return instance, false, nil
+}
+
+// followRecoveryClaimCheckpoints adopts the revision and claim state a
+// provider's recovery_progress checkpoint left in the stored envelope while the
+// host held the recovery claim. The claim holder is the only other writer, so
+// following the stored envelope cannot overwrite a competing host write.
+func (r *PluginRemoteExecutor) followRecoveryClaimCheckpoints(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) error {
+	current, err := r.currentPluginExecutorRecord(ctx, record.SessionID, record.AgentExecutionID)
+	if err != nil {
+		return err
+	}
+	stored, err := decodePluginExecutorInventory(current.Metadata)
+	if err != nil {
+		return err
+	}
+	local, err := decodePluginExecutorInventory(record.Metadata)
+	if err != nil {
+		return err
+	}
+	local.Revision = stored.Revision
+	metadata := clonePluginExecutorMetadata(record.Metadata)
+	metadata[MetadataKeyPluginExecutor] = local
+	record.Metadata = metadata
+	state.inventory.Revision, state.inventory.Claim = stored.Revision, stored.Claim
+	return nil
 }
 
 // adoptDurableBootstrap stores the token, creates or adopts the session's
@@ -235,6 +271,9 @@ func (r *PluginRemoteExecutor) adoptDurableBootstrap(
 		return nil, err
 	}
 	state.inventory.InstancePort = port
+	if err := r.followRecoveryClaimCheckpoints(ctx, record, state); err != nil {
+		return nil, err
+	}
 	instance, err := r.newRecoveredPluginExecutorInstance(ctx, record, state)
 	if err != nil {
 		return nil, err

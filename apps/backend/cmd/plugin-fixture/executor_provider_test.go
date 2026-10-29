@@ -99,6 +99,7 @@ func TestPluginExecutorFixtureContract(t *testing.T) {
 
 	destroyed, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: provisioned.GetResource(),
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.True(t, destroyed.GetConfirmedAbsent())
@@ -179,6 +180,7 @@ func TestPluginExecutorFixtureFailureBarriersAreRetryable(t *testing.T) {
 	t.Setenv(fixtureExecutorBarrierEnv, fixtureBarrierUnconfirmedCleanupOnce)
 	delayed, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: provisioned.GetResource(),
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.False(t, delayed.GetConfirmedAbsent())
@@ -186,6 +188,7 @@ func TestPluginExecutorFixtureFailureBarriersAreRetryable(t *testing.T) {
 
 	cleaned, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: provisioned.GetResource(),
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.True(t, cleaned.GetConfirmedAbsent())

@@ -133,7 +133,14 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 			claim.SessionID == req.SessionID && claim.OperationID == req.OperationID && claim.ExecutorType == req.ExecutorType {
 			return claim, tx.Commit()
 		}
-		return nil, fmt.Errorf("%w: environment %s is claimed by operation %s", ErrBusy, req.TaskEnvironmentID, claim.OperationID)
+		if !supersedableClaim(claim, req) {
+			return nil, fmt.Errorf("%w: environment %s is claimed by operation %s", ErrBusy, req.TaskEnvironmentID, claim.OperationID)
+		}
+		if _, err := tx.ExecContext(ctx, db.Rebind(`
+			DELETE FROM task_environment_recovery_claims WHERE task_environment_id = ? AND operation_id = ?
+		`), claim.TaskEnvironmentID, claim.OperationID); err != nil {
+			return nil, err
+		}
 	}
 
 	if busy, err := environmentHasConsumers(ctx, db, tx, req.TaskEnvironmentID, req.SessionID, req.AllowCurrentSessionRuntime); err != nil {
@@ -525,6 +532,17 @@ func ValidateAcquisitionTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, claim 
 		return fmt.Errorf("%w: operation %s was acquired again", ErrClaimMismatch, claim.OperationID)
 	}
 	return nil
+}
+
+// supersedableClaim reports whether claim is a stale hold of the operation req
+// names: same owner, generation and session, the operation's id prefix, and no
+// marker of a live holder.
+func supersedableClaim(claim *models.TaskEnvironmentRecoveryClaim, req models.TaskEnvironmentRecoveryClaimRequest) bool {
+	return req.SupersedeOperationPrefix != "" && req.LiveOperationMarker != "" &&
+		claim.OwnerTaskID == req.OwnerTaskID && claim.OwnershipGeneration == req.OwnershipGeneration &&
+		claim.SessionID == req.SessionID && claim.ExecutorType == req.ExecutorType &&
+		strings.HasPrefix(claim.OperationID, req.SupersedeOperationPrefix) &&
+		!strings.Contains(claim.OperationID, req.LiveOperationMarker)
 }
 
 func sameClaim(left, right *models.TaskEnvironmentRecoveryClaim) bool {

@@ -22,6 +22,16 @@ func E2ELocalRemote(provider, raw string) (name string, ok bool) {
 	if !IsE2ELocalProvider(provider) {
 		return "", false
 	}
+	return ParseE2ELocalRemote(raw)
+}
+
+// ParseE2ELocalRemote is E2ELocalRemote for a caller that has no provider yet
+// and derives it from the remote itself. It answers only under the e2e mock
+// profile.
+func ParseE2ELocalRemote(raw string) (name string, ok bool) {
+	if os.Getenv(e2eMockEnv) != "true" {
+		return "", false
+	}
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || !isE2ELocalHost(parsed) {
 		return "", false

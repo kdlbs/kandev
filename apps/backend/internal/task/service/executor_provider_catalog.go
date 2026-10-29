@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/repoclone"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -237,10 +238,24 @@ func (s *Service) validatePluginExecutorRepositoryCompatibility(ctx context.Cont
 	if err != nil {
 		return fmt.Errorf("%w: repository cloneability cannot be verified", ErrInvalidExecutorConfig)
 	}
-	if entity == nil || entity.SourceType == sourceTypeLocal || entity.RemoteURL == "" || (isLocalRepositoryURL(entity.RemoteURL) && !isE2ELocalRemote(entity.RemoteURL)) {
+	if entity == nil || entity.SourceType == sourceTypeLocal || entity.RemoteURL == "" || (isLocalRepositoryURL(entity.RemoteURL) && !isE2ELocalStoredRemote(entity.Provider, entity.RemoteURL)) {
 		return fmt.Errorf("%w: plugin executor requires cloneable repositories", ErrInvalidExecutorConfig)
 	}
 	return nil
+}
+
+// isE2ELocalRemote reports whether a remote that carries no provider is an
+// e2e-local one.
+func isE2ELocalRemote(raw string) bool {
+	_, _, ok := parseE2ELocalRemote(raw)
+	return ok
+}
+
+// isE2ELocalStoredRemote is the same check for a stored repository, whose
+// provider must also be the synthetic one.
+func isE2ELocalStoredRemote(provider, raw string) bool {
+	_, ok := repoclone.E2ELocalRemote(provider, raw)
+	return ok
 }
 
 func isLocalRepositoryURL(raw string) bool {

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -25,6 +27,7 @@ const (
 type pluginExecutorClaimState struct {
 	Kind        string `json:"kind"`
 	OperationID string `json:"operation_id"`
+	AcquiredAt  string `json:"acquired_at"`
 	Sequence    uint64 `json:"sequence"`
 	Digest      string `json:"digest"`
 }
@@ -43,20 +46,33 @@ func (m *Manager) SetPluginExecutorClaimStore(store PluginExecutorClaimStore) {
 	m.pluginExecutorClaimStore = store
 }
 
-// pluginExecutorClaimOperationID names the claim of one kind for an operation.
-// The kind is the suffix, so a checkpoint's claim kind is read from the claim
-// row and no claim token is carried.
-func pluginExecutorClaimOperationID(operationID, kind string) string {
-	return operationID + pluginExecutorClaimSuffixSeparator + kind
+// pluginExecutorClaimPrefix is the part of a claim id shared by every
+// acquisition of one kind for an operation. The kind sits in the prefix, so a
+// checkpoint's claim kind is read from the claim row.
+func pluginExecutorClaimPrefix(operationID, kind string) string {
+	return operationID + pluginExecutorClaimSuffixSeparator + kind + pluginExecutorClaimSuffixSeparator
+}
+
+// newPluginExecutorClaimOperationID names one acquisition: the process epoch
+// marks a live holder, and the nonce makes the id unique, so a callback or
+// drain of an earlier acquisition can never be mistaken for this one.
+func (r *PluginRemoteExecutor) newPluginExecutorClaimOperationID(operationID, kind string) string {
+	return pluginExecutorClaimPrefix(operationID, kind) + r.claimEpoch + pluginExecutorClaimSuffixSeparator + uuid.NewString()
 }
 
 func pluginExecutorClaimKind(operationID string, claim *models.TaskEnvironmentRecoveryClaim) string {
 	for _, kind := range []string{models.PluginClaimKindCleanup, models.PluginClaimKindRecovery} {
-		if claim.OperationID == pluginExecutorClaimOperationID(operationID, kind) {
+		if strings.HasPrefix(claim.OperationID, pluginExecutorClaimPrefix(operationID, kind)) {
 			return kind
 		}
 	}
 	return ""
+}
+
+// pluginExecutorClaimAcquiredAt is the acquisition stamp the repository keeps
+// in the envelope's claim state.
+func pluginExecutorClaimAcquiredAt(claim *models.TaskEnvironmentRecoveryClaim) string {
+	return claim.CreatedAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
 }
 
 func pluginExecutorClaimPhaseKind(phase string) string {
@@ -93,7 +109,7 @@ func (m *Manager) checkpointPluginExecutorClaim(ctx context.Context, request *pl
 	if store == nil || m.pluginExecutorProfileLoader == nil {
 		return errors.New("plugin executor claim checkpoints are unavailable")
 	}
-	record, inventory, claim, err := m.activePluginExecutorClaim(ctx, store, request.GetContext(), phase)
+	record, inventory, claim, err := m.activePluginExecutorClaim(ctx, store, request.GetContext(), phase, request.GetClaim())
 	if err != nil {
 		return err
 	}
@@ -132,7 +148,7 @@ func (m *Manager) activePluginExecutorClaim(
 	ctx context.Context,
 	store PluginExecutorClaimStore,
 	callback *pluginsdk.ExecutorProviderRequestContext,
-	phase string,
+	phase, claimEcho string,
 ) (*models.ExecutorRunning, pluginExecutorInventory, *models.TaskEnvironmentRecoveryClaim, error) {
 	notFound := fmt.Errorf("%w: no active claim matches this checkpoint", models.ErrExecutorClaimNotFound)
 	record, err := store.GetExecutorRunningBySessionID(ctx, callback.GetSessionId())
@@ -147,18 +163,22 @@ func (m *Manager) activePluginExecutorClaim(
 		return nil, pluginExecutorInventory{}, nil, fmt.Errorf("%w: the provider did not declare destroy_checkpoints", models.ErrExecutorConflict)
 	}
 	claim, err := store.GetTaskEnvironmentRecoveryClaim(ctx, inventory.EnvironmentID)
-	if err != nil || claim == nil || claim.SessionID != record.SessionID || claim.OwnerTaskID != record.TaskID ||
-		claim.OwnershipGeneration != inventory.EnvironmentGeneration {
+	if err != nil || !pluginExecutorClaimBelongsTo(claim, record, inventory) {
 		return nil, pluginExecutorInventory{}, nil, notFound
 	}
 	kind := pluginExecutorClaimKind(inventory.OperationID, claim)
-	if kind == "" {
+	if kind == "" || callback == nil || claimEcho == "" || claimEcho != claim.OperationID {
 		return nil, pluginExecutorInventory{}, nil, notFound
 	}
 	if kind != pluginExecutorClaimPhaseKind(phase) {
 		return nil, pluginExecutorInventory{}, nil, fmt.Errorf("%w: a %s claim does not accept the %s phase", models.ErrExecutorInvalidConfig, kind, phase)
 	}
 	return record, inventory, claim, nil
+}
+
+func pluginExecutorClaimBelongsTo(claim *models.TaskEnvironmentRecoveryClaim, record *models.ExecutorRunning, inventory pluginExecutorInventory) bool {
+	return claim != nil && claim.SessionID == record.SessionID && claim.OwnerTaskID == record.TaskID &&
+		claim.OwnershipGeneration == inventory.EnvironmentGeneration
 }
 
 func pluginExecutorClaimCallbackMatches(record *models.ExecutorRunning, inventory pluginExecutorInventory, callback *pluginsdk.ExecutorProviderRequestContext) bool {

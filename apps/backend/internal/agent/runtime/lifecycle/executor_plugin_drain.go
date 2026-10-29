@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kdlbs/kandev/pluginsdk"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -122,6 +123,7 @@ func (r *PluginRemoteExecutor) drainBeforePluginDestroy(
 	provider models.ExecutorProvider,
 	snapshot *pluginsdk.ExecutorProfileSnapshot,
 	claim *models.TaskEnvironmentRecoveryClaim,
+	reason string,
 ) (*models.ExecutorRunning, pluginExecutorInventory, pluginDrainDecision, error) {
 	if !negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
 		return record, inventory, pluginDrainDecision{}, nil
@@ -129,7 +131,11 @@ func (r *PluginRemoteExecutor) drainBeforePluginDestroy(
 	if decision, ok := storedPluginDrainDecision(inventory, claim.OperationID); ok {
 		return record, inventory, decision, nil
 	}
-	decision := r.drainRecordedRuntime(ctx, record, inventory, resource, provider, snapshot, claim.OperationID)
+	operationContext := pluginExecutorRequestContextForRecord(record, inventory, models.ExecutorProviderLaunchProfile{
+		Provider:            models.ExecutorProvider{PluginID: inventory.PluginID, InstallationID: inventory.InstallationID, Key: inventory.ProviderKey, ContractVersion: inventory.ContractVersion},
+		OwnershipGeneration: inventory.EnvironmentGeneration,
+	})
+	decision := r.drainPluginRuntime(ctx, record.TransientAuthToken, operationContext, inventory, resource, snapshot, claim.OperationID, reason)
 	inventory.DrainClaim = claim.OperationID
 	inventory.DrainOutcome = decision.outcome
 	inventory.DrainReceiptID = ""
@@ -166,28 +172,40 @@ func storedPluginDrainDecision(inventory pluginExecutorInventory, claimOperation
 	}}, true
 }
 
-func (r *PluginRemoteExecutor) drainRecordedRuntime(
+// drainPluginRuntime seals and drains the recorded runtime and returns the
+// drain evidence a destroy carries. The outcome follows one table:
+//
+//	credential known, drain answered     -> drained (with a receipt)
+//	credential known, drain not answered -> unreachable or uncertain
+//	no credential, a handshake happened  -> unreachable
+//	no credential, no handshake ever, launch_failed -> not_attempted
+//	no credential, no handshake ever, any other reason -> unreachable
+//
+// not_attempted is the provider's proof that no runtime ever existed, so it is
+// sent only when no agentctl handshake was ever started.
+func (r *PluginRemoteExecutor) drainPluginRuntime(
 	ctx context.Context,
-	record *models.ExecutorRunning,
+	token string,
+	operationContext *pluginsdk.ExecutorProviderRequestContext,
 	inventory pluginExecutorInventory,
 	resource *pluginsdk.ExecutorResourceDescriptor,
-	provider models.ExecutorProvider,
 	snapshot *pluginsdk.ExecutorProfileSnapshot,
 	claimOperationID string,
+	reason string,
 ) pluginDrainDecision {
-	if inventory.InstancePort == 0 || record.TransientAuthToken == "" || r.drainRuntime == nil {
-		return pluginDrainDecision{outcome: pluginDrainOutcomeNotAttempted}
+	if token == "" || r.drainRuntime == nil {
+		if reason == pluginExecutorCleanupReasonLaunch && !inventory.HandshakeStarted {
+			return pluginDrainDecision{outcome: pluginDrainOutcomeNotAttempted}
+		}
+		return pluginDrainDecision{outcome: pluginDrainOutcomeUnreachable}
 	}
-	operationContext := pluginExecutorRequestContextForRecord(record, inventory, models.ExecutorProviderLaunchProfile{
-		Provider:            models.ExecutorProvider{PluginID: inventory.PluginID, InstallationID: inventory.InstallationID, Key: inventory.ProviderKey, ContractVersion: inventory.ContractVersion},
-		OwnershipGeneration: inventory.EnvironmentGeneration,
-	})
+	operationContext = proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	drainCtx, cancel := context.WithTimeout(ctx, pluginExecutorDrainDeadline)
 	defer cancel()
 	operationContext.Deadline = time.Now().Add(pluginExecutorDrainDeadline).UTC().Format(time.RFC3339Nano)
 	receipt, err := r.drainRuntime(
 		drainCtx, r.connectionResolver(operationContext, resource, pluginExecutorRuntimePort, snapshot), r.logger,
-		record.TransientAuthToken, claimOperationID, pluginExecutorDrainDeadline,
+		token, claimOperationID, pluginExecutorDrainDeadline,
 	)
 	if err != nil || receipt == nil {
 		return pluginDrainDecision{outcome: classifyPluginDrainFailure(err)}

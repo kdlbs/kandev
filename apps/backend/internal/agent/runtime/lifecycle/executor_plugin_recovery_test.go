@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
@@ -51,13 +53,16 @@ func (f *pluginExecutorRecoveryProfileLoaderFake) ExecutorProviderProfileForReco
 }
 
 type pluginExecutorInventoryStoreFake struct {
-	record        *models.ExecutorRunning
-	session       *models.TaskSession
-	checkpoints   int
-	claimRequest  models.TaskEnvironmentRecoveryClaimRequest
-	claimErr      error
-	claim         *models.TaskEnvironmentRecoveryClaim
-	deleted       bool
+	record       *models.ExecutorRunning
+	session      *models.TaskSession
+	checkpoints  int
+	claimRequest models.TaskEnvironmentRecoveryClaimRequest
+	claimErr     error
+	claim        *models.TaskEnvironmentRecoveryClaim
+	deleted      bool
+	// onAcquire runs when a claim is granted, as a provider's checkpoints
+	// under that claim would change the stored record.
+	onAcquire     func(*models.ExecutorRunning, *models.TaskEnvironmentRecoveryClaim)
 	releaseCount  int
 	checkpointErr error
 	onCheckpoint  func(*models.ExecutorRunning)
@@ -76,6 +81,9 @@ func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ c
 		current, err := decodePluginExecutorInventory(f.record.Metadata)
 		if err != nil || f.record.AgentExecutionID != record.AgentExecutionID || record.ExpectedPluginExecutorRevision != current.Revision {
 			return models.ErrExecutionRotated
+		}
+		if next, err := decodePluginExecutorInventory(record.Metadata); err != nil || !sqlite.PluginExecutorInventoryPhaseMayFollow(current.Phase, next.Phase) {
+			return fmt.Errorf("plugin executor inventory phase transition is invalid: %w", models.ErrExecutionRotated)
 		}
 	} else if record.ExpectedPluginExecutorRevision != 0 {
 		return models.ErrExecutionRotated
@@ -157,9 +165,12 @@ func (f *pluginExecutorInventoryStoreFake) AcquireTaskEnvironmentRecoveryClaim(_
 	claim := &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID: request.TaskEnvironmentID, OwnerTaskID: request.OwnerTaskID,
 		OwnershipGeneration: request.OwnershipGeneration, SessionID: request.SessionID,
-		OperationID: request.OperationID, ExecutorType: request.ExecutorType,
+		OperationID: request.OperationID, ExecutorType: request.ExecutorType, CreatedAt: time.Now().UTC(),
 	}
 	f.claim = claim
+	if f.onAcquire != nil && f.record != nil {
+		f.onAcquire(f.record, claim)
+	}
 	return claim, nil
 }
 
@@ -192,6 +203,10 @@ func (f *pluginExecutorInventoryStoreFake) ListUnrecordedPluginExecutors(_ conte
 		}
 	}
 	return listed, nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) ListAllUnrecordedPluginExecutors(context.Context) ([]*models.UnrecordedPluginExecutor, error) {
+	return append([]*models.UnrecordedPluginExecutor(nil), f.unrecorded...), nil
 }
 
 func (f *pluginExecutorInventoryStoreFake) DeleteUnrecordedPluginExecutor(_ context.Context, executionID string) error {

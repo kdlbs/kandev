@@ -313,6 +313,10 @@ func newDurableRecoveryFixture(t *testing.T, phase string) *durableRecoveryFixtu
 		}
 		return agentctl.NewControlClient(controlURL.Hostname(), controlPort, log), durableToken, nil
 	}
+	fixture.runtime.newTokenControlClient = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, log *logger.Logger, token string) (*agentctl.ControlClient, error) {
+		fixture.log.add("token_client:" + token)
+		return agentctl.NewControlClient(controlURL.Hostname(), controlPort, log, agentctl.WithControlAuthToken(token)), nil
+	}
 	fixture.runtime.newAgentctlClient = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		return agentctl.NewClient("unused", 0, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token)), nil
 	}
@@ -340,7 +344,8 @@ func TestRepeatedHandshakeAcceptedContinuesToReadinessAndPublishes(t *testing.T)
 			defer instances[0].Client.Close()
 
 			require.Nil(t, fixture.operations.provisionRequest, "recovery allocated a second environment")
-			require.Equal(t, pluginExecutorClaimOperationID("operation-plugin-recovery", models.PluginClaimKindRecovery), fixture.store.claimRequest.OperationID)
+			require.True(t, strings.HasPrefix(fixture.store.claimRequest.OperationID, pluginExecutorClaimPrefix("operation-plugin-recovery", models.PluginClaimKindRecovery)))
+			require.Contains(t, fixture.store.claimRequest.OperationID, fixture.runtime.claimEpoch)
 			require.Equal(t, 1, fixture.store.releaseCount, "the recovery claim was not released")
 			require.Len(t, fixture.store.published, 1)
 			published := fixture.store.published[0]
@@ -372,7 +377,7 @@ func TestRepeatedHandshakeRejectedRunsBootstrapConsumedCleanup(t *testing.T) {
 	require.Nil(t, fixture.operations.provisionRequest, "a replacement was allocated")
 	require.Empty(t, fixture.store.published, "ready was published for a spent nonce")
 	require.Equal(t, 2, fixture.store.releaseCount, "the recovery claim must be released before the cleanup claim is taken")
-	require.Equal(t, pluginExecutorClaimOperationID("operation-plugin-recovery", models.PluginClaimKindCleanup), fixture.store.claimRequest.OperationID)
+	require.True(t, strings.HasPrefix(fixture.store.claimRequest.OperationID, pluginExecutorClaimPrefix("operation-plugin-recovery", models.PluginClaimKindCleanup)))
 }
 
 func TestCanceledOrUnreachableRecoveryStaysCreatingAndRetryable(t *testing.T) {

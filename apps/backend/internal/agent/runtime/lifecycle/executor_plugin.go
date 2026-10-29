@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -94,8 +95,11 @@ type PluginExecutorInventoryStore interface {
 	GetTaskSession(context.Context, string) (*models.TaskSession, error)
 	ListExecutorsRunningPluginRemote(context.Context) ([]*models.ExecutorRunning, error)
 	ListUnrecordedPluginExecutors(context.Context, string, string) ([]*models.UnrecordedPluginExecutor, error)
+	ListAllUnrecordedPluginExecutors(context.Context) ([]*models.UnrecordedPluginExecutor, error)
 	DeleteUnrecordedPluginExecutor(context.Context, string) error
 }
+
+type pluginTokenControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, error)
 
 type pluginControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error)
 type pluginAgentctlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error)
@@ -108,6 +112,7 @@ type PluginRemoteExecutor struct {
 	profileLoader               PluginExecutorProfileLoader
 	inventoryStore              PluginExecutorInventoryStore
 	newAgentctlControlClient    pluginControlClientFactory
+	newTokenControlClient       pluginTokenControlClientFactory
 	newAgentctlClient           pluginAgentctlClientFactory
 	recoveredAgentctlInfoReader pluginRecoveredAgentctlInstanceReader
 	ready                       pluginAgentctlReadinessCheck
@@ -119,6 +124,9 @@ type PluginRemoteExecutor struct {
 	cleanupClaimWait            time.Duration
 	launching                   sync.Map
 	cleanupClaimRetry           time.Duration
+	claimEpoch                  string
+	cleanupSweepInterval        time.Duration
+	cleanupSweep                pluginExecutorCleanupSweep
 }
 
 func (r *PluginRemoteExecutor) SetRecoveryDependencies(loader PluginExecutorProfileLoader, inventory PluginExecutorInventoryStore) {
@@ -170,8 +178,11 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 		log = logger.Default()
 	}
 	runtime := &PluginRemoteExecutor{operations: operations, logger: log.WithFields(zap.String("runtime", string(executor.NamePluginRemote)))}
+	runtime.claimEpoch = uuid.NewString()
+	runtime.cleanupSweepInterval = pluginExecutorCleanupSweepInterval
 	runtime.cleanupClaimWait, runtime.cleanupClaimRetry = pluginExecutorCleanupClaimWait, pluginExecutorCleanupClaimRetry
 	runtime.newAgentctlControlClient = createPluginEndpointControlClient
+	runtime.newTokenControlClient = createPluginEndpointTokenControlClient
 	runtime.drainRuntime = defaultPluginRuntimeDrainer
 	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		return agentctl.NewEndpointClient(ctx, resolver, log,
@@ -198,6 +209,17 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 
 // createPluginEndpointControlClient performs the bootstrap handshake with agentctl's
 // control server and returns the credential its instances accept.
+// createPluginEndpointTokenControlClient opens the control server with a
+// credential an earlier handshake produced, without handshaking again.
+func createPluginEndpointTokenControlClient(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, token string) (*agentctl.ControlClient, error) {
+	control, err := agentctl.NewEndpointControlClient(ctx, resolver, log)
+	if err != nil {
+		return nil, err
+	}
+	control.SetAuthToken(token)
+	return control, nil
+}
+
 func createPluginEndpointControlClient(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, nonce string) (*agentctl.ControlClient, string, error) {
 	control, err := agentctl.NewEndpointControlClient(ctx, resolver, log)
 	if err != nil {
@@ -411,16 +433,15 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 		return nil, "", r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource, stage, err)
 	}
 	durable := pluginExecutorDurableBootstrap(launch.inventory)
-	if durable {
-		launch.inventory.HandshakeStarted = true
-		if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
-			return fail("handshake_checkpoint", err)
-		}
+	launch.inventory.HandshakeStarted = true
+	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
+		return fail("handshake_checkpoint", err)
 	}
 	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort, launch.snapshot), r.logger, launch.nonce)
 	if err != nil {
 		return fail("control_handshake", err)
 	}
+	launch.request.rollbackToken = token
 	if durable {
 		r.reachCrashBarrier(ctx, BarrierAfterHandshake)
 		if err := r.persistDurableToken(ctx, launch.request, token); err != nil {
@@ -444,6 +465,9 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 		return fail("instance_create", err)
 	}
 	launch.inventory.InstancePort = instancePort
+	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
+		return fail("instance_checkpoint", err)
+	}
 	client, err := r.newAgentctlClient(ctx, r.connectionResolver(launch.operationContext, resource, instancePort, launch.snapshot), r.logger,
 		launch.request.InstanceID, token)
 	if err != nil {
@@ -840,19 +864,21 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 	var recovery *pluginsdk.RecoverExecutorOperationResponse
 	err := snapshotErr
 	if snapshotErr == nil {
-		recovery, err = r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{Context: operationContext, Profile: snapshot})
+		// An archive cancels the launch context; the recovery that decides
+		// whether a resource exists must not be cancelled with it.
+		recoverCtx, cancelRecover := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		recovery, err = r.operations.RecoverExecutorOperation(recoverCtx, &pluginsdk.RecoverExecutorOperationRequest{Context: operationContext, Profile: snapshot})
+		cancelRecover()
 	}
 	if err != nil || recovery == nil || recovery.GetOutcome() == pluginExecutorStateUnknown {
-		inventory.Phase = pluginExecutorPhaseCleanupPending
-		_ = checkpointPluginExecutor(ctx, req, inventory)
-		return withPluginExecutorProviderRefusal(provisionErr, errors.New("plugin executor allocation outcome is unknown; cleanup inventory was retained"))
+		return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, nil, "provision_recover_unknown", provisionErr,
+			"plugin executor allocation outcome is unknown; cleanup inventory was retained"))
 	}
 	if recovery.GetOutcome() == pluginExecutorPhaseAbsent {
 		claim, claimErr := r.acquirePluginExecutorCleanupClaim(ctx, req.TaskID, req.SessionID, inventory)
 		if claimErr != nil {
-			inventory.Phase = pluginExecutorPhaseCleanupPending
-			_ = checkpointPluginExecutor(ctx, req, inventory)
-			return withPluginExecutorProviderRefusal(provisionErr, errors.New("plugin executor allocation is absent but inventory cleanup is fenced"))
+			return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, nil, "provision_absent_fenced", provisionErr,
+				"plugin executor allocation is absent but inventory cleanup is fenced"))
 		}
 		defer r.releasePluginExecutorCleanupClaim(claim)
 		claimedCtx := recoveryclaim.WithClaim(ctx, claim)
@@ -868,16 +894,44 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 	}
 	resource := recovery.GetResource()
 	if resource == nil || resource.GetResourceHandle() == "" {
-		inventory.Phase = pluginExecutorPhaseCleanupPending
-		_ = checkpointPluginExecutor(ctx, req, inventory)
-		return withPluginExecutorProviderRefusal(provisionErr, errors.New("plugin executor allocation outcome is unknown; cleanup inventory was retained"))
+		return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, nil, "provision_recover_no_handle", provisionErr,
+			"plugin executor allocation outcome is unknown; cleanup inventory was retained"))
 	}
 	if err := validatePluginExecutorResourceForProvider(profile.Provider, resource); err != nil {
-		inventory.Phase = pluginExecutorPhaseCleanupPending
-		_ = checkpointPluginExecutor(ctx, req, inventory)
-		return withPluginExecutorProviderRefusal(provisionErr, fmt.Errorf("plugin executor recovered resource was rejected and cleanup was retained: %w", err))
+		return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, fixedSizePluginExecutorResource(resource), "provision_recovered_rejected", provisionErr,
+			fmt.Sprintf("plugin executor recovered resource was rejected and cleanup was retained: %v", err)))
 	}
 	return r.cleanupAfterPluginExecutorFailure(ctx, req, operationContext, inventory, resource, "provision_recovered", provisionErr)
+}
+
+// retainPendingLaunchCleanup records the retry information of a failed launch as
+// cleanup_pending and returns the error that says so. When the record cannot be
+// written and a resource handle is known, the handle goes to the durable
+// hand-off so the environment cleanup still removes it; without a handle the
+// failure is logged because there is nothing left to hand off.
+func (r *PluginRemoteExecutor) retainPendingLaunchCleanup(
+	ctx context.Context,
+	req *ExecutorCreateRequest,
+	inventory pluginExecutorInventory,
+	resource *pluginsdk.ExecutorResourceDescriptor,
+	stage string,
+	cause error,
+	message string,
+) error {
+	inventory.Phase = pluginExecutorPhaseCleanupPending
+	if resource != nil {
+		inventory.Resource = resource
+	}
+	checkpointErr := checkpointPluginExecutor(ctx, req, inventory)
+	if checkpointErr == nil {
+		return errors.New(message)
+	}
+	if resource.GetResourceHandle() != "" {
+		return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, resource, stage, cause)
+	}
+	r.logger.Error("plugin executor cleanup retry information was not retained",
+		zap.String("execution_id", req.InstanceID), zap.String("stage", stage), zap.Error(checkpointErr))
+	return errors.New(message + "; the retry information could not be recorded")
 }
 
 // cleanupAfterPluginExecutorFailure logs the failed launch stage and removes the
@@ -922,19 +976,18 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	r.closePluginExecutorTunnels(cleanupContext)
 	snapshot, snapshotErr := pluginExecutorProfileSnapshot(req.PluginExecutor.Profile, inventory.NegotiatedCapabilities)
 	if snapshotErr != nil {
-		inventory.Resource = retained
-		inventory.Phase = pluginExecutorPhaseCleanupPending
-		_ = checkpointPluginExecutor(cleanupCtx, req, inventory)
-		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; recorded profile is unavailable and cleanup remains pending"))
+		return withPluginExecutorLaunchCode(cause, r.retainPendingLaunchCleanup(cleanupCtx, req, inventory, retained, stage, cause,
+			"plugin executor launch failed; recorded profile is unavailable and cleanup remains pending"))
 	}
 	request := &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: cleanupContext, Resource: resource, CleanupReason: launchCleanupReason(stage), CleanupClaim: claim.OperationID,
 		Profile: snapshot,
 	}
 	if negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
+		decision := r.drainPluginRuntime(cleanupCtx, req.rollbackToken, cleanupContext, inventory, resource, snapshot, claim.OperationID, request.CleanupReason)
 		inventory.DrainClaim = claim.OperationID
-		inventory.DrainOutcome = pluginDrainOutcomeNotAttempted
-		inventory.DrainReceiptID = ""
+		inventory.DrainOutcome = decision.outcome
+		inventory.DrainReceiptID = decision.receipt.GetReceiptId()
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
 			inventory.Resource = retained
 			inventory.Phase = pluginExecutorPhaseCleanupPending
@@ -943,10 +996,11 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 			}
 			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; drain outcome was not persisted and cleanup remains pending"))
 		}
-		pluginDrainDecision{outcome: pluginDrainOutcomeNotAttempted}.applyTo(request)
+		decision.applyTo(request)
 	}
 	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, request)
-	if err == nil && response != nil && response.GetConfirmedAbsent() {
+	_, inventory, retained = r.refreshAfterClaimCheckpoints(cleanupCtx, &models.ExecutorRunning{SessionID: req.SessionID, AgentExecutionID: req.InstanceID}, inventory, retained)
+	if err == nil && response != nil && response.GetError() == nil && response.GetConfirmedAbsent() && latestPluginExecutorClaimCheckpointPersisted(inventory, claim) {
 		inventory.Resource = retained
 		inventory.Phase = pluginExecutorPhaseAbsent
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {

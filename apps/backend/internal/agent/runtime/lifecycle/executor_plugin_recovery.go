@@ -146,7 +146,9 @@ func (r *PluginRemoteExecutor) acceptRecoveredPluginExecutorResource(
 	if err != nil {
 		return nil, false, err
 	}
-	state.inventory.Phase = pluginExecutorPhaseProvisioned
+	if state.inventory.Phase != pluginExecutorPhaseCleanupPending {
+		state.inventory.Phase = pluginExecutorPhaseProvisioned
+	}
 	if err := r.checkpointPluginExecutorRecord(ctx, record, state.inventory); err != nil {
 		return nil, false, err
 	}
@@ -171,7 +173,11 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 	if _, err := resolvePluginExecutorWorkspace(state.inventory.NegotiatedCapabilities, state.inventory.WorkspaceDescriptor, state.resource); err != nil {
 		return nil, err
 	}
-	if record.TransientAuthToken == "" && pluginExecutorDurableBootstrap(state.inventory) && state.inventory.Phase != pluginExecutorPhaseReady && record.TransientBootstrapNonce != "" {
+	if err := pluginExecutorRecordedCredentialsReadable(record); err != nil {
+		return nil, err
+	}
+	if pluginExecutorDurableBootstrap(state.inventory) && state.inventory.Phase != pluginExecutorPhaseReady &&
+		(record.TransientAuthToken != "" || record.TransientBootstrapNonce != "") {
 		return r.resumeDurableBootstrap(ctx, record, state)
 	}
 	if record.TransientAuthToken == "" {
@@ -213,6 +219,22 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 	}
 	return instance, nil
 }
+
+// pluginExecutorRecordedCredentialsReadable fails a recovery whose record names
+// an agentctl credential or bootstrap nonce that could not be read. A secret
+// store that is briefly unavailable must defer recovery; only the absence of
+// the recorded reference classifies a bootstrap as consumed or incomplete.
+func pluginExecutorRecordedCredentialsReadable(record *models.ExecutorRunning) error {
+	if getMetadataString(record.Metadata, MetadataKeyAuthTokenSecret) != "" && record.TransientAuthToken == "" {
+		return errPluginExecutorCredentialUnreadable
+	}
+	if getMetadataString(record.Metadata, MetadataKeyBootstrapNonceSecret) != "" && record.TransientBootstrapNonce == "" && record.TransientAuthToken == "" {
+		return errPluginExecutorCredentialUnreadable
+	}
+	return nil
+}
+
+var errPluginExecutorCredentialUnreadable = errors.New("plugin executor agentctl credential is recorded but could not be read; recovery is deferred")
 
 func pluginExecutorPhaseCanAttach(phase string) bool {
 	switch phase {
@@ -529,14 +551,12 @@ func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, envir
 	if err != nil {
 		return errors.Join(append(cleanupErrors, fmt.Errorf("read plugin executor cleanup inventory: %w", err))...)
 	}
-	seen := make(map[string]bool, len(records))
 	for _, record := range records {
-		seen[record.AgentExecutionID] = true
 		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record, adopted[record.AgentExecutionID]); err != nil {
 			cleanupErrors = append(cleanupErrors, err)
 		}
 	}
-	return errors.Join(append(cleanupErrors, unsettledUnrecordedPluginExecutors(adopted, seen)...)...)
+	return errors.Join(append(cleanupErrors, r.remainingUnrecordedPluginExecutors(ctx, environment)...)...)
 }
 
 // errPluginExecutorLaunchInProgress defers an environment cleanup while this
@@ -555,11 +575,17 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx contex
 	if err != nil {
 		return err
 	}
-	if inventory.EnvironmentID != environment.ID || inventory.EnvironmentGeneration != environment.OwnershipGeneration || inventory.Phase == pluginExecutorPhaseAbsent {
+	if inventory.EnvironmentID != environment.ID || inventory.EnvironmentGeneration != environment.OwnershipGeneration {
 		return nil
 	}
-	if inventory.Phase == pluginExecutorPhaseExpired {
-		return r.settleAbsentPluginExecutor(ctx, record, inventory, nil)
+	switch inventory.Phase {
+	case pluginExecutorPhaseAbsent:
+		return r.settleUnrecordedPluginExecutor(ctx, handoff)
+	case pluginExecutorPhaseExpired:
+		if err := r.settleAbsentPluginExecutor(ctx, record, inventory, nil); err != nil {
+			return err
+		}
+		return r.settleUnrecordedPluginExecutor(ctx, handoff)
 	}
 	profile, err := r.pluginExecutorCleanupProfile(ctx, record, inventory)
 	if err != nil {
@@ -573,10 +599,6 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx contex
 		return err
 	}
 	return r.destroyPluginExecutorRecord(ctx, record, inventory, resource, "task_environment_reset", profile)
-}
-
-func pluginExecutorRecordMatchesEnvironment(environment *models.TaskEnvironment, record *models.ExecutorRunning) bool {
-	return record != nil && record.TaskID == environment.TaskID && record.Runtime == agentruntime.RuntimePluginRemote
 }
 
 func (r *PluginRemoteExecutor) pluginExecutorCleanupProfile(ctx context.Context, record *models.ExecutorRunning, inventory pluginExecutorInventory) (*models.ExecutorProviderLaunchProfile, error) {
@@ -654,7 +676,9 @@ func (r *PluginRemoteExecutor) recordRecoveredCleanupResource(
 	if err != nil {
 		return nil, false, err
 	}
-	inventory.Phase = pluginExecutorPhaseProvisioned
+	if inventory.Phase != pluginExecutorPhaseCleanupPending {
+		inventory.Phase = pluginExecutorPhaseProvisioned
+	}
 	if err := r.checkpointPluginExecutorRecord(ctx, record, inventory); err != nil {
 		return nil, false, err
 	}
@@ -731,7 +755,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 	defer cancel()
 	claimedCtx := recoveryclaim.WithClaim(cleanupCtx, claim)
-	record, inventory, drain, err := r.drainBeforePluginDestroy(claimedCtx, record, inventory, resource, provider, snapshot, claim)
+	record, inventory, drain, err := r.drainBeforePluginDestroy(claimedCtx, record, inventory, resource, provider, snapshot, claim, reason)
 	if err != nil {
 		return err
 	}
@@ -777,19 +801,7 @@ func (r *PluginRemoteExecutor) acquirePluginExecutorCleanupClaim(
 	taskID, sessionID string,
 	inventory pluginExecutorInventory,
 ) (*models.TaskEnvironmentRecoveryClaim, error) {
-	if r.inventoryStore == nil {
-		return nil, errors.New("plugin executor inventory store is unavailable")
-	}
-	request := models.TaskEnvironmentRecoveryClaimRequest{
-		TaskEnvironmentID: inventory.EnvironmentID, OwnerTaskID: taskID,
-		OwnershipGeneration: inventory.EnvironmentGeneration, SessionID: sessionID,
-		OperationID: pluginExecutorClaimOperationID(inventory.OperationID, models.PluginClaimKindCleanup), ExecutorType: string(models.ExecutorTypePluginRemote),
-		AllowCurrentSessionRuntime: true,
-	}
-	if job, ok := recoveryclaim.TaskCleanupJobFromContext(ctx); ok && job.TaskID == taskID {
-		request.CleanupJobID = job.ID
-	}
-	return r.inventoryStore.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	return r.acquirePluginExecutorClaim(ctx, taskID, sessionID, inventory, models.PluginClaimKindCleanup)
 }
 
 func (r *PluginRemoteExecutor) releasePluginExecutorCleanupClaim(claim *models.TaskEnvironmentRecoveryClaim) {
@@ -837,5 +849,6 @@ func latestPluginExecutorClaimCheckpointPersisted(inventory pluginExecutorInvent
 	if !negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDestroyCheckpoints) {
 		return true
 	}
-	return inventory.Claim != nil && inventory.Claim.OperationID == claim.OperationID && inventory.Claim.Sequence >= 1
+	return inventory.Claim != nil && inventory.Claim.OperationID == claim.OperationID &&
+		inventory.Claim.AcquiredAt == pluginExecutorClaimAcquiredAt(claim) && inventory.Claim.Sequence >= 1
 }

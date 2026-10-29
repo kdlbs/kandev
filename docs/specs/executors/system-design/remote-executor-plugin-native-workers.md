@@ -134,7 +134,25 @@ runtime identity and claim) stops accepting work, stops managed process groups, 
 same claim returns the stored receipt; a call under another claim during a drain is `conflict`, and a drain that stops only some groups or hits the deadline returns no receipt. Lifecycle adds **new** `drainBeforePluginDestroy` ahead of
 `destroyPluginExecutorRecord`: under the cleanup claim it calls drain with a 60 s deadline, writes the host-only
 `drain_receipt` checkpoint (CAS), then calls destroy with **new** `DestroyExecutorEnvironmentRequest.drain_receipt`
-and `drain_outcome`. Outcome mapping: a receipt is `drained`; a refused connection or identity mismatch is `unreachable`; a lost reply or the 60 s deadline is `uncertain`; a failed-launch rollback before a runtime exists is `not_attempted`. A provider may treat `not_attempted` as positive no-runtime evidence only under the cleanup reason `launch_failed` (or a launch-specific reason such as `api_unreachable`); the host sends that pair for a failed-launch rollback and for the destroy of a handed-off unrecorded resource, whose environment never recorded a session runtime. Under any other reason (`task_cleanup`, `task_environment_reset`, `recovery_cleanup`) `not_attempted` means the host did not drain, and a provider that cannot rule out a running agent retains. A successor claim re-runs the drain (agentctl returns a fresh receipt for an already sealed runtime) and a replayed destroy under the same claim carries the stored outcome. The destroy deadline is
+and `drain_outcome`. The (cleanup reason, drain outcome) pairs a provider may rely on:
+
+| Host state when the destroy is sent | Outcome | Meaning for the provider |
+|---|---|---|
+| The drain answered with a receipt | `drained` | The runtime was sealed under this claim; the receipt names the runtime identity and this acquisition's claim. |
+| The agentctl credential is known, the connection was refused or the runtime identity no longer matches | `unreachable` | The runtime that was drained is gone. |
+| The credential is known, the reply was lost or the 60 s deadline passed | `uncertain` | Retain unless the provider can prove the runtime is stopped. |
+| An agentctl handshake was started and no usable credential remains (secret lost or unreadable) | `unreachable` | The host cannot drain; it makes no claim about a runtime. |
+| No handshake was ever started, reason `launch_failed` | `not_attempted` | Positive proof that no runtime ever existed. |
+| No handshake was ever started, any other reason (`task_cleanup`, `task_environment_reset`, `recovery_cleanup`, `bootstrap_consumed`, `incomplete_bootstrap`) | `unreachable` | `not_attempted` is never sent: the host did not drain and a runtime may exist. |
+
+`not_attempted` is therefore sent only with `launch_failed`, and only when no handshake was ever started. The host records
+`HandshakeStarted` in the envelope before every handshake, so a crash between the provider's ready and the host's
+provision response still counts as a handshake. A runtime core that was never recorded (a hand-off, or a crash between
+provider ready and the provision response) is destroyed under `launch_failed` only when no handshake happened;
+otherwise it follows the rows above. A failed-launch rollback after a handshake drains with the in-memory token, or the persisted one, or sends
+`uncertain`. A successor claim re-runs the drain (agentctl returns a fresh receipt for an already sealed runtime) and a replayed destroy under the same claim carries the stored outcome.
+
+Claim identity: every claim acquisition has a unique operation id (the operation prefix, a per-process epoch and a nonce). A crashed process's claim is superseded by a successor with the same prefix and another epoch; a claim of a live epoch is never superseded. `cleanup_claim` in the destroy request and the drain `RequestID` carry that id, a provider echoes it as `claim` in `CheckpointExecutorResourceRequest`, and the host compares the echo with the active claim, so a late write from an earlier acquisition is refused. Each attempt produces a fresh drain receipt. The envelope keeps the claim's acquisition stamp across host writes. At most one provider operation is live for one (environment, generation): the core bumps the generation before it provisions the environment again, so a provider can fence on that pair. The destroy deadline is
 `destroy_timeout_seconds`. For declaring providers the bootstrap's `idle_timeout_seconds` is 0, mapped to
 `KANDEV_ACP_IDLE_TIMEOUT` disabled in the agentctl startup config.
 
@@ -143,7 +161,7 @@ job calls `DestroyTaskEnvironment`, the single authority that drains and destroy
 agentctl credential revealed from the runtime secret the record references. Only a failed-launch rollback cleans up
 inside `StopInstance`. `DestroyTaskEnvironment` returns a retryable error while the same process still has the
 record's launch in flight (an in-memory set keyed by execution ID), so it cannot settle "absent" before the provider
-publishes the resource. Recover results for `found` resources must carry `state_version`, on the launch-recovery
+publishes the resource. Recover `absent` means the provider proves the operation's resource is gone and its worker cleaned; the host then deletes the row, so a provider that cannot prove this answers `found` or `unknown`, and fences the operation id so that `absent` means the resource will never exist. Recover results for `found` resources must carry `state_version`, on the launch-recovery
 and the cleanup path. When a failed launch can neither take the cleanup claim nor checkpoint the resource it
 provisioned, the launch records the resource durably in `unrecorded_plugin_executors` (keyed by execution ID, no foreign key,
 written through `RecordUnrecordedRuntimeInventory` without the environment claim), logs the launch cause and a
@@ -151,13 +169,14 @@ written through `RecordUnrecordedRuntimeInventory` without the environment claim
 `cleanup_progress` under a persisted claim before it mutates, so a destroy under a claim that has no row would
 fail closed. `DestroyTaskEnvironment` lists the environment's records, inserts the `allocating` inventory row a
 record needs when none exists (so claim checkpoints are accepted), destroys the resource under its own claim, and
-deletes the record only after a confirmed destroy. A record whose execution has no inventory record to destroy
-through, or whose destroy is unconfirmed, stays and fails the cleanup. Records survive a restart. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
+deletes the record only after a confirmed destroy. A record whose destroy is unconfirmed stays and fails the cleanup; the cleanup re-lists the environment's records after its loop and fails while any remains, a record whose inventory is already `absent` is settled, and a transfer or delete of the environment row is refused while a record remains. A bounded periodic sweep (every 5 minutes, at most 16 targets per pass, owned by `StartCleanupSweep` and `StopCleanupSweep`) retries the records and the retained `cleanup_pending` rows under the cleanup claim by the same path. Records survive a restart. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
 resolve recorded secrets on each call; the host does not write them into the inventory and rejects provider state that echoes one. Under the e2e mock profile only, a `file://` or
 loopback-host remote parses as the synthetic `e2e-local` provider so a local rig can use a repository, passes the
 managed Git credential identity check, is cloned on the host without credentials (`repoclone.E2ELocalRemote`), and
 may use a loopback http Git credential broker URL (`repoclone.IsE2ELocalProvider`);
 production keeps the provider allowlist and the credentialed HTTPS clone.
+
+Known limits of slice 1. The drain receipt names the runtime identity the host recorded, so it proves the host's claim and not the provider's view of the runtime; a binding that does not start from the host's own record needs a provider-signed runtime identity and is left to a later slice. A quarantine decision of a provider has no operator release path in this slice, so it is permanent until someone acts by hand; a readmit path belongs to the maintenance work (slice 3).
 
 ## Destroy and recover checkpoints
 

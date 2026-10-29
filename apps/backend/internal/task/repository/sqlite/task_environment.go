@@ -990,6 +990,9 @@ func (r *Repository) transferTaskEnvironmentOwnershipWithDeletion(ctx context.Co
 	if currentTaskID == taskID {
 		return tx.Commit()
 	}
+	if err := r.ensureNoUnrecordedPluginExecutorsTx(ctx, tx, envID); err != nil {
+		return err
+	}
 	if err := r.validateEnvironmentTransferCleanupTx(ctx, tx, currentTaskID, claim); err != nil {
 		return err
 	}
@@ -1111,6 +1114,9 @@ func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error
 	if err := r.ensureKubernetesInventoryAbsent(ctx, tx, id); err != nil {
 		return err
 	}
+	if err := r.ensureNoUnrecordedPluginExecutorsTx(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, id); err != nil {
 		return err
 	}
@@ -1162,6 +1168,9 @@ func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID st
 		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 			return err
 		}
+	}
+	if err := r.ensureNoUnrecordedPluginExecutorsTx(ctx, tx, environmentIDs...); err != nil {
+		return err
 	}
 	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, environmentIDs...); err != nil {
 		return err
