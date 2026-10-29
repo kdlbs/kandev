@@ -773,7 +773,9 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	response, err := r.operations.DestroyExecutorEnvironment(destroyCtx, request)
 	cancelDestroy()
 	record, inventory, resource = r.refreshAfterClaimCheckpoints(claimedCtx, record, inventory, resource)
-	if err != nil || response == nil || response.GetError() != nil || !response.GetConfirmedAbsent() || !latestPluginExecutorClaimCheckpointPersisted(inventory, claim) {
+	condition := pluginDestroyUnconfirmedCondition(response, err, latestPluginExecutorClaimCheckpointPersisted(inventory, claim))
+	r.logPluginExecutorDestroy(record, claim, request, response, err, condition)
+	if condition != "" {
 		inventory.Resource = resource
 		inventory.Phase = pluginExecutorPhaseCleanupPending
 		if checkpointErr := r.checkpointPluginExecutorRecord(claimedCtx, record, inventory); checkpointErr != nil {

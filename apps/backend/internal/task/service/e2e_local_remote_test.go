@@ -92,3 +92,23 @@ func TestPluginExecutorRepositoryCompatibilityChecksTheStoredProvider(t *testing
 		}
 	}
 }
+
+// An e2e-local repository is cloneable as a workspace source under the e2e
+// profile, where a file:// or loopback locator is its only origin; production
+// and every other provider keep refusing a file locator.
+func TestWorkspaceRepositoryLocatorAcceptsE2ELocalOnlyUnderE2E(t *testing.T) {
+	repo := &models.Repository{Provider: providerE2ELocal, RemoteURL: "file:///tmp/repos/widgets.git"}
+	other := &models.Repository{Provider: "github", RemoteURL: "file:///tmp/repos/widgets.git"}
+
+	t.Setenv(e2eMockEnv, "")
+	if hasCloneableWorkspaceRepositoryLocator(repo) {
+		t.Fatal("production accepted a file locator for an e2e-local repository")
+	}
+	t.Setenv(e2eMockEnv, "true")
+	if !hasCloneableWorkspaceRepositoryLocator(repo) {
+		t.Fatal("e2e profile refused the file locator of an e2e-local repository")
+	}
+	if hasCloneableWorkspaceRepositoryLocator(other) {
+		t.Fatal("e2e profile accepted a file locator for a non-e2e-local repository")
+	}
+}

@@ -247,6 +247,9 @@ func remoteRepositoryLocator(repository *models.Repository) string {
 	if locator == "" {
 		locator = providerRepositoryLocator(repository)
 	}
+	if _, ok := repoclone.E2ELocalRemote(repository.Provider, locator); ok {
+		return locator
+	}
 	if locator == "" || strings.HasPrefix(locator, "/") || strings.HasPrefix(locator, "file:") {
 		return ""
 	}

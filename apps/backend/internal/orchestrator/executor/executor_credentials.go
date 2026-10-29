@@ -643,7 +643,7 @@ func (e *Executor) issueGitCredentialScopeWithProfileEnv(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateGitCredentialBrokerURLForProvider(e.gitCredentialBrokerURL, req.ExecutorType, repository.Provider); err != nil {
+	if err := validateGitHubCredentialBrokerURL(e.gitCredentialBrokerURL, req.ExecutorType); err != nil {
 		return nil, err
 	}
 	scope := gitcredentials.Scope{
@@ -823,6 +823,11 @@ func managedGitCredentialProviderForProfile(
 	if repository.SourceType == sourceTypeLocal && strings.TrimSpace(repository.Provider) == "" {
 		return ""
 	}
+	// A repository of the synthetic e2e-local provider carries no credential
+	// under the e2e profile, so it never takes a lease.
+	if repoclone.IsE2ELocalProvider(repository.Provider) {
+		return ""
+	}
 	providerID := strings.ToLower(strings.TrimSpace(repository.Provider))
 	if providerID == "" {
 		providerID = gitHubProviderID
@@ -912,19 +917,6 @@ func validateGitHubCredentialBrokerURL(raw, executorType string) error {
 		return fmt.Errorf("%w: HTTPS is required for non-local executors", ErrGitHubCredentialBrokerURL)
 	}
 	return nil
-}
-
-// validateGitCredentialBrokerURLForProvider accepts a loopback http broker for
-// a repository of the e2e-local provider under the e2e profile, where the rig's
-// runtime shares the host; every other repository keeps the HTTPS rule.
-func validateGitCredentialBrokerURLForProvider(raw, executorType, provider string) error {
-	if repoclone.IsE2ELocalProvider(provider) {
-		if parsed, err := url.ParseRequestURI(strings.TrimSpace(raw)); err == nil && parsed.Host != "" &&
-			parsed.User == nil && parsed.Fragment == "" && parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()) {
-			return nil
-		}
-	}
-	return validateGitHubCredentialBrokerURL(raw, executorType)
 }
 
 func isLoopbackHost(host string) bool {

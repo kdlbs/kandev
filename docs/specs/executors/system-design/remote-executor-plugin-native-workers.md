@@ -172,9 +172,10 @@ record needs when none exists (so claim checkpoints are accepted), destroys the 
 deletes the record only after a confirmed destroy. A record whose destroy is unconfirmed stays and fails the cleanup; the cleanup re-lists the environment's records after its loop and fails while any remains, a record whose inventory is already `absent` is settled, and a transfer or delete of the environment row is refused while a record remains. A bounded periodic sweep (every 5 minutes, at most 16 targets per pass, owned by `StartCleanupSweep` and `StopCleanupSweep`) retries the records and the retained `cleanup_pending` rows under the cleanup claim by the same path. Records survive a restart. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
 resolve recorded secrets on each call; the host does not write them into the inventory and rejects provider state that echoes one. Under the e2e mock profile only, a `file://` or
 loopback-host remote parses as the synthetic `e2e-local` provider so a local rig can use a repository, passes the
-managed Git credential identity check, is cloned on the host without credentials (`repoclone.E2ELocalRemote`), and
-may use a loopback http Git credential broker URL (`repoclone.IsE2ELocalProvider`);
-production keeps the provider allowlist and the credentialed HTTPS clone.
+managed Git credential identity check, is cloned on the host without credentials (`repoclone.E2ELocalRemote`), is
+accepted as a cloneable workspace-source locator, and takes no Git credential lease: the launch issues none and adds no
+broker environment (`repoclone.IsE2ELocalProvider`). Production keeps the provider allowlist, the credentialed HTTPS
+clone and the HTTPS-only broker URL.
 
 Known limits of slice 1. The drain receipt names the runtime identity the host recorded, so it proves the host's claim and not the provider's view of the runtime; a binding that does not start from the host's own record needs a provider-signed runtime identity and is left to a later slice. A quarantine decision of a provider has no operator release path in this slice, so it is permanent until someone acts by hand; a readmit path belongs to the maintenance work (slice 3).
 
@@ -267,7 +268,7 @@ agent env filtering), the unchanged fixture conformance test (001.3), and an `-r
 Closed-label counters join the existing executor-plugin metrics: `executor_plugin_capability_rejected_total`
 (`capability`, `phase`: install, upgrade, enable, allocate, echo; one metric, defined in the [versioning design](remote-executor-plugin-capability-versioning.md#observability)), `executor_plugin_tunnel_open` gauge and `executor_plugin_tunnel_closed_total` (`reason`: cancel, restart,
 limit, ack_timeout, provider_error), `executor_plugin_drain_total` (`outcome`), and `executor_plugin_publish_total`
-(`outcome`). Barrier firings log with the barrier name. Plugin, task, environment, and execution IDs are never labels.
+(`outcome`). Barrier firings log with the barrier name. Every destroy call logs one `plugin executor destroy` line, on the cleanup, launch-rollback and hand-off paths, with the cleanup reason, the drain outcome sent, whether a receipt was attached, the cleanup claim, the provider's `confirmed_absent`, error code and message ID, and which unconfirmed condition fired (`call_error`, `error_response`, `not_confirmed_absent`, `claim_checkpoint_missing`); it carries no secret value. Plugin, task, environment, and execution IDs are never labels.
 
 ## Security
 
