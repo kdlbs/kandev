@@ -544,6 +544,7 @@ test.describe("Code walkthrough", () => {
       seedData,
     }) => {
       test.setTimeout(180_000);
+      const ws = watchWs(testPage);
       const walkthroughStep = await apiClient.createWorkflowStep(
         seedData.workflowId,
         "Walkthrough Re-emission",
@@ -621,15 +622,21 @@ test.describe("Code walkthrough", () => {
         await expect(card.getByTestId("walkthrough-comment")).toHaveCount(1);
         await expect(generatedAt).toHaveAttribute("datetime", firstGeneration!);
 
+        const replacementSaved = ws.waitForEvent("task.walkthrough.updated", {
+          where: (payload) => payload.task_id === task.id,
+        });
         await apiClient.addUserMessage(
           task.id,
           primarySession.id,
           "/e2e:walkthrough-reemit-second",
         );
+        const replacementTimestamp = (await replacementSaved).payload.updated_at;
+        expect(typeof replacementTimestamp).toBe("string");
         await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
         await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
         await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
         await expect(generatedAt).not.toHaveAttribute("datetime", firstGeneration!);
+        await expect(generatedAt).toHaveAttribute("datetime", replacementTimestamp as string);
         await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
         await expect(card.getByTestId("walkthrough-comment")).toHaveCount(0);
         await expect(card.getByTestId("walkthrough-comment-trigger")).toContainText("(0)");

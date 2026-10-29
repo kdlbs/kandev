@@ -180,3 +180,9 @@ The user clarified that the timestamp must align with the text inside the badge,
 - Targeted ESLint, Prettier, specification validation, and whitespace checks passed.
 - Both focused phone tests passed, including English, Portuguese, and landscape containment. Log: `/tmp/kandev-run.e2e.0RStFgud.log`.
 - Inspected updated desktop and phone screenshots. The timestamp begins at the badge text, and navigation remains visible.
+
+## PR review follow-up
+
+CodeRabbit requested an exact saved-value assertion for live replacement. The replacement E2E now captures the task-scoped `task.walkthrough.updated` event before the second emission and compares its `updated_at` with the rendered `datetime`, while retaining the changed-value assertion.
+
+The focused replacement test passed with retries disabled (`--grep "a re-emitted walkthrough" --retries=0`). Log: `/tmp/kandev-run.e2e.OP1gToHE.log`. Targeted ESLint and formatting passed. Production behavior and the existing requirements are unchanged.
