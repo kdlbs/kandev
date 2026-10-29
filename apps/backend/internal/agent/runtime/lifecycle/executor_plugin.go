@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/runtimeprobe"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -909,6 +910,9 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if err := checkpointPluginExecutor(cleanupCtx, req, inventory); err != nil {
 			r.logger.Warn("plugin executor launch cleanup is fenced and its retry information was not retained",
 				zap.String("execution_id", req.InstanceID), zap.Error(err))
+			if errors.Is(claimErr, repoerrors.ErrTaskEnvironmentOwnershipChanged) {
+				return r.destroyUnrecordedPluginExecutorResource(ctx, req, operationContext, inventory, resource, stage, cause)
+			}
 			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information could not be retained"))
 		}
 		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained"))
@@ -936,7 +940,9 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
 			inventory.Resource = retained
 			inventory.Phase = pluginExecutorPhaseCleanupPending
-			_ = checkpointPluginExecutor(cleanupCtx, req, inventory)
+			if retainErr := checkpointPluginExecutor(cleanupCtx, req, inventory); retainErr != nil {
+				return r.destroyUnrecordedPluginExecutorResource(ctx, req, operationContext, inventory, resource, stage, cause)
+			}
 			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; drain outcome was not persisted and cleanup remains pending"))
 		}
 		pluginDrainDecision{outcome: pluginDrainOutcomeNotAttempted}.applyTo(request)
@@ -992,6 +998,46 @@ func (r *PluginRemoteExecutor) acquireLaunchCleanupClaim(ctx context.Context, re
 		case <-timer.C:
 		}
 	}
+}
+
+// destroyUnrecordedPluginExecutorResource removes a resource that has neither a
+// durable inventory row nor a cleanup claim to hold it, as when an archive
+// rotated the execution after the provider returned. The launch is the only
+// holder of the handle, so dropping it would leak the resource.
+func (r *PluginRemoteExecutor) destroyUnrecordedPluginExecutorResource(
+	ctx context.Context,
+	req *ExecutorCreateRequest,
+	operationContext *pluginsdk.ExecutorProviderRequestContext,
+	inventory pluginExecutorInventory,
+	resource *pluginsdk.ExecutorResourceDescriptor,
+	stage string,
+	cause error,
+) error {
+	notRemoved := withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; allocated resource was not recorded and was not removed"))
+	snapshot, err := pluginExecutorProfileSnapshot(req.PluginExecutor.Profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		r.logger.Error("plugin executor resource is unrecorded and its profile is unavailable", zap.String("execution_id", req.InstanceID))
+		return notRemoved
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	cleanupContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
+	cleanupContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
+	r.closePluginExecutorTunnels(cleanupContext)
+	request := &pluginsdk.DestroyExecutorEnvironmentRequest{
+		Context: cleanupContext, Resource: resource, CleanupReason: launchCleanupReason(stage),
+		CleanupClaim: pluginExecutorClaimOperationID(inventory.OperationID, models.PluginClaimKindCleanup), Profile: snapshot,
+	}
+	if negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
+		pluginDrainDecision{outcome: pluginDrainOutcomeNotAttempted}.applyTo(request)
+	}
+	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, request)
+	if err != nil || response == nil || !response.GetConfirmedAbsent() {
+		r.logger.Error("plugin executor resource is unrecorded and could not be removed", zap.String("execution_id", req.InstanceID), zap.String("stage", stage))
+		return notRemoved
+	}
+	r.settlePluginExecutorSecrets(ctx, inventory, req.InstanceID)
+	return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; allocated resource was not recorded and was removed"))
 }
 
 func pluginExecutorProviderError(providerErr *pluginsdk.ExecutorProviderError) error {
