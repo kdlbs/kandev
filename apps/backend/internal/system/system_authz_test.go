@@ -543,12 +543,14 @@ func TestArchivedDataAnalyzeRejectsWhilePreparationPending(t *testing.T) {
 	}
 
 	// An analysis is refused while the preparation is pending, and starts no
-	// operation that could displace it.
+	// operation that could displace it. The exact API classification (respond
+	// maps err.Error() to a code), not just any non-nil error, so an unrelated
+	// failure cannot pass this case.
 	if _, err := service.Analyze(ctx, dataretention.Update{
 		ArchivedAge: dataretention.Age{Days: 14},
 		CleanupAge:  dataretention.Age{Days: 7},
-	}); err == nil {
-		t.Fatal("analysis was accepted while a preparation was pending")
+	}); err == nil || err.Error() != "busy" {
+		t.Fatalf("analyze error = %v, want busy", err)
 	}
 	after, err := service.Get(ctx)
 	if err != nil {
@@ -559,8 +561,10 @@ func TestArchivedDataAnalyzeRejectsWhilePreparationPending(t *testing.T) {
 			after.Preparation.State, after.Operation)
 	}
 
-	// The approval gate is untouched: the policy still cannot run a pass.
-	if _, err := service.Run(ctx, after.Policy.Revision); err == nil {
-		t.Fatal("cleanup ran without an approved preparation")
+	// The approval gate is untouched: the policy still cannot run a pass, and it
+	// fails with the API's preparation_required classification rather than any
+	// unrelated error.
+	if _, err := service.Run(ctx, after.Policy.Revision); err == nil || err.Error() != "preparation_required" {
+		t.Fatalf("run error = %v, want preparation_required", err)
 	}
 }
