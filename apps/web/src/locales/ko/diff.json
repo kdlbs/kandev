@@ -44,6 +44,7 @@
   "undo": "되돌리기",
   "update": "업데이트",
   "walkthrough": "워크스루",
+  "walkthroughGeneratedAt": "생성 일시: {{date}}",
   "walkthroughNoteAdded": "워크스루 노트 추가됨",
   "walkthroughNoteQueued": "워크스루 노트 대기열에 추가됨",
   "walkthroughNoteSent": "워크스루 노트 전송됨",

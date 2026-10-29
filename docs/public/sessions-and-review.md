@@ -684,6 +684,8 @@ Select **Walkthrough** from Changes or Review. Kandev sends the built-in `change
   caption="A guided walkthrough moves from an explanation to the exact file and lines it describes."
 />
 
+The walkthrough shows when the agent last published it, using your selected language and local time. Hover over the timestamp to see its timezone. Publishing a replacement updates this timestamp.
+
 When the agent publishes the walkthrough:
 
 1. Open the fixed walkthrough launcher.

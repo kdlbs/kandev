@@ -22,6 +22,7 @@ import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
 import type { WalkthroughComment } from "@/lib/state/slices/comments";
 import { WalkthroughCommentList, WalkthroughStepFeedback } from "./walkthrough-step-feedback";
 import { WalkthroughStepPicker } from "./walkthrough-step-picker";
+import { WalkthroughGenerationTime } from "./walkthrough-generation-time";
 import { useWalkthroughTap } from "./use-walkthrough-tap";
 import { getWalkthroughComments } from "@/lib/walkthrough-comments";
 import { cn } from "@kandev/ui/lib/utils";
@@ -82,27 +83,37 @@ function StepBody({
 function StepHeader({
   activeStep,
   stepCount,
-  lineLabel,
+  step,
+  updatedAt,
   onClose,
 }: {
   activeStep: number;
   stepCount: number;
-  lineLabel: string;
+  step: WalkthroughStep;
+  updatedAt: string;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const lineLabel = step.line_end
+    ? t("diff:lineRangeLabel", { start: step.line, end: step.line_end })
+    : t("diff:lineLabel", { line: step.line });
   return (
-    <div
-      className="flex shrink-0 cursor-move touch-none items-center gap-2 border-b border-border px-3 pt-2 pb-1.5"
-      data-testid="walkthrough-drag-handle"
-      data-walkthrough-drag-handle
-    >
-      <Badge variant="secondary" data-testid="walkthrough-badge">
-        {t("diff:walkthrough")}
-      </Badge>
-      <span className="text-xs text-muted-foreground" data-testid="walkthrough-step-header">
-        {t("diff:stepProgress", { current: activeStep + 1, total: stepCount, lineLabel })}
-      </span>
+    <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 pt-2 pb-1.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div
+          className="flex cursor-move touch-none flex-wrap items-center gap-x-2"
+          data-testid="walkthrough-drag-handle"
+          data-walkthrough-drag-handle
+        >
+          <Badge variant="secondary" data-testid="walkthrough-badge">
+            {t("diff:walkthrough")}
+          </Badge>
+          <span className="text-xs text-muted-foreground" data-testid="walkthrough-step-header">
+            {t("diff:stepProgress", { current: activeStep + 1, total: stepCount, lineLabel })}
+          </span>
+        </div>
+        <WalkthroughGenerationTime updatedAt={updatedAt} />
+      </div>
       <Button
         variant="ghost"
         size="icon"
@@ -247,7 +258,6 @@ export function WalkthroughStepInner({
   onSelectFile?: OpenFileFn;
   layout?: "inline" | "floating";
 }) {
-  const { t } = useTranslation();
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const walkthrough = useAppStore((s) =>
@@ -288,13 +298,6 @@ export function WalkthroughStepInner({
     if (activeTaskId && walkthrough) markSeen(activeTaskId);
   }, [activeTaskId, walkthrough, markSeen]);
   if (!activeTaskId || !walkthrough || !step) return null;
-  const isFloating = layout === "floating";
-  // Two keys rather than one plural: a range and a single line are structurally
-  // different messages, not two counts of the same one. Left English, this fed
-  // the translated `stepProgress` header as a hardcoded "Line"/"Lines".
-  const lineLabel = step.line_end
-    ? t("diff:lineRangeLabel", { start: step.line, end: step.line_end })
-    : t("diff:lineLabel", { line: step.line });
   const navigation = (
     <StepNavigation
       activeStep={activeStep}
@@ -308,14 +311,15 @@ export function WalkthroughStepInner({
     <div
       className={cn(
         "flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border border-border border-l-2 border-primary/60 bg-card shadow-lg md:max-h-[min(78vh,720px)]",
-        isFloating &&
+        layout === "floating" &&
           "max-h-[calc(100dvh-1rem-var(--app-status-bar-height)-env(safe-area-inset-bottom,0px))] overflow-hidden md:max-h-[min(78dvh,720px)]",
       )}
     >
       <StepHeader
         activeStep={activeStep}
         stepCount={stepCount}
-        lineLabel={lineLabel}
+        step={step}
+        updatedAt={walkthrough.updated_at}
         onClose={onClose}
       />
       <WalkthroughStepPicker
