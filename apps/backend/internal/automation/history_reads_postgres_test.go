@@ -125,11 +125,16 @@ func TestAutomationHistoryPostgres(t *testing.T) {
 	if len(runList.Items) != 3 {
 		t.Fatalf("postgres workspace runs = %+v", runList.Items)
 	}
-	statuses := map[RunStatus]RunStatus{}
+	statuses := map[string]RunStatus{}
 	for _, item := range runList.Items {
-		statuses[item.SourceStatus] = item.Status
+		if item.SourceStatus != RunStatusTaskCreated {
+			t.Fatalf("postgres source status = %q for run %s", item.SourceStatus, item.ID)
+		}
+		statuses[item.ID] = item.Status
 	}
-	if statuses[RunStatusTaskCreated] != RunStatusTaskCreated {
+	if statuses[runs[0].ID] != RunStatusTaskCreated ||
+		statuses[runs[1].ID] != RunStatusArchived ||
+		statuses[runs[2].ID] != RunStatusCancelled {
 		t.Fatalf("postgres projected statuses = %+v", statuses)
 	}
 	if runList.Items[0].ID != runs[2].ID || runList.Items[2].ID != runs[0].ID {

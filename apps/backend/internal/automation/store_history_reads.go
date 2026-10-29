@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/db"
 )
@@ -204,10 +206,76 @@ func applyHistoryRunFilter(query string, args []any, filter HistoryRunFilter) (s
 	return query, args
 }
 
+type historyTaskSummaryRow struct {
+	TaskID  string         `db:"task_id"`
+	Summary sql.NullString `db:"summary"`
+}
+
 func (s *Store) hydrateHistoryRunSummaries(ctx context.Context, rows []*historyRunRow) error {
 	plain := make([]*AutomationRun, len(rows))
 	for i := range rows {
 		plain[i] = &rows[i].AutomationRun
 	}
-	return s.hydrateRunSummariesWithPrefix(ctx, plain, historyRunSummaryPrefixBytes)
+	if err := s.hydrateRunSummariesWithPrefix(ctx, plain, historyRunSummaryPrefixBytes); err != nil {
+		return err
+	}
+
+	// Runs created before turn binding have no turn identity. Preserve the
+	// existing feed's task-level fallback for those rows only.
+	taskIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.TurnID == "" && row.TaskID != "" {
+			taskIDs = append(taskIDs, row.TaskID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	summaries, err := s.latestTaskSummaries(ctx, taskIDs)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.TurnID != "" {
+			continue
+		}
+		if summary, ok := summaries[row.TaskID]; ok {
+			row.Summary = summary
+		}
+	}
+	return nil
+}
+
+func (s *Store) latestTaskSummaries(ctx context.Context, taskIDs []string) (map[string]string, error) {
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(taskIDs)), ",")
+	args := make([]any, len(taskIDs))
+	for i, taskID := range taskIDs {
+		args[i] = taskID
+	}
+	var summaries []historyTaskSummaryRow
+	err := s.ro.SelectContext(ctx, &summaries, s.ro.Rebind(fmt.Sprintf(`
+		SELECT m.task_id, substr(m.content, 1, %d) AS summary
+		FROM task_session_messages m
+		WHERE m.task_id IN (`+placeholders+`)
+		  AND m.author_type = 'agent' AND m.type = 'message'
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_session_messages newer
+			WHERE newer.task_id = m.task_id
+			  AND newer.author_type = 'agent' AND newer.type = 'message'
+			  AND (newer.created_at > m.created_at OR
+				(newer.created_at = m.created_at AND newer.id > m.id))
+			)`, historyRunSummaryPrefixBytes)), args...)
+	if db.IsMissingTableError(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(summaries))
+	for _, summary := range summaries {
+		if summary.Summary.Valid {
+			result[summary.TaskID] = summary.Summary.String
+		}
+	}
+	return result, nil
 }

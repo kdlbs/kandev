@@ -128,7 +128,9 @@ select trigger bodies, retry launch or prompt snapshots, claim state, or other
 private payload columns, so a bounded history request cannot materialize large
 excluded payloads before the public snapshot is measured. History summary
 hydration reads a bounded 4,096-character prefix; the adapter strips system
-content before its final credential-redacted cut.
+content before its final credential-redacted cut. Runs created before turn
+binding retain the existing task-level summary fallback, while turn-bound runs
+use only their exact turn message.
 
 Verification:
 
@@ -138,6 +140,7 @@ Verification:
 - `git diff --check`: passed.
 - Added regressions for empty recorded sessions with a live primary session,
   primary-session replacement, retained task identity after linked-task
-  deletion, and runs carrying large excluded trigger and retry payloads.
+  deletion, legacy runs without a turn binding using the task-level summary
+  fallback, and runs carrying large excluded trigger and retry payloads.
 - `TestAutomationHistoryPostgres`: skipped locally because
   `KANDEV_TEST_POSTGRES_DSN` is unset.

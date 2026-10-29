@@ -1773,6 +1773,11 @@ definitions, err := history.ListAutomations(ctx, pluginsdk.AutomationDefinitionQ
 if err != nil {
     return err
 }
+if len(definitions.Items) == 0 {
+    return nil // successful empty query: this workspace has no automations
+}
+// definitions.PageInfo.HasMore reports more pages: repeat the call with Cursor
+// and SnapshotVersion until it is false before treating the inventory as complete.
 runs, err := history.ListRuns(ctx, pluginsdk.AutomationRunQuery{
     RequestID: "automation-runs-01", WorkspaceID: workspaceID,
     Filter: pluginsdk.AutomationRunFilter{AutomationID: definitions.Items[0].ID},
@@ -1780,6 +1785,9 @@ runs, err := history.ListRuns(ctx, pluginsdk.AutomationRunQuery{
 })
 if err != nil {
     return err
+}
+if len(runs.Items) == 0 {
+    return nil // successful empty query: this automation has no retained runs
 }
 refreshed, receipt, err := history.GetRun(ctx, pluginsdk.AutomationRunGetQuery{
     RequestID: "automation-refresh-01", WorkspaceID: workspaceID, RunID: runs.Items[0].ID,

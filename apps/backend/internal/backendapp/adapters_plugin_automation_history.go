@@ -116,7 +116,60 @@ func sanitizeAutomationHistoryExcerpt(value string) string {
 	if cut := firstSystemTagIndex(stripped); cut >= 0 {
 		stripped = stripped[:cut]
 	}
-	return securityutil.SanitizeCredentials(stripped)
+	return maskTruncatedCredentialTail(securityutil.SanitizeCredentials(stripped))
+}
+
+type truncatedCredentialPrefix struct {
+	prefix    string
+	minimum   int
+	allowPunc bool
+}
+
+var truncatedCredentialPrefixes = []truncatedCredentialPrefix{
+	{prefix: "github_pat_", minimum: 50},
+	{prefix: "ghp_", minimum: 30},
+	{prefix: "sk-", minimum: 12, allowPunc: true},
+	{prefix: "Bearer ", minimum: 20, allowPunc: true},
+}
+
+// maskTruncatedCredentialTail closes the one gap left by a bounded source
+// prefix: a credential can be cut before it is long enough for the normal
+// redaction pattern to match. Complete credentials were already removed, so
+// only a short credential-shaped suffix is replaced here.
+func maskTruncatedCredentialTail(value string) string {
+	lower := strings.ToLower(value)
+	for _, candidate := range truncatedCredentialPrefixes {
+		index := strings.LastIndex(lower, strings.ToLower(candidate.prefix))
+		if index < 0 {
+			continue
+		}
+		if index > 0 && isCredentialTailByte(value[index-1], candidate.allowPunc) {
+			continue
+		}
+		tail := value[index+len(candidate.prefix):]
+		if len(tail) >= candidate.minimum {
+			continue
+		}
+		valid := true
+		for i := 0; i < len(tail); i++ {
+			if !isCredentialTailByte(tail[i], candidate.allowPunc) {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		return value[:index] + candidate.prefix + "[redacted]"
+	}
+	return value
+}
+
+func isCredentialTailByte(value byte, allowPunc bool) bool {
+	if value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9' || value == '_' {
+		return true
+	}
+	return allowPunc && (value == '-' || value == '.' || value == '+' || value == '/')
 }
 
 func firstSystemTagIndex(value string) int {

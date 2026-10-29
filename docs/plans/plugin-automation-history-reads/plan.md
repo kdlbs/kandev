@@ -19,7 +19,7 @@ Host/SDK slice, then independent consumer evidence and author documentation.
 The source work has an independent verification boundary: it reconciles raw
 and projected run state without changing execution readers. The Host work
 depends on that shared observation contract. All work orders run sequentially.
-This package ends at the design handoff. Runtime implementation remains pending.
+Implementation is complete for the current version. The stable-version backport remains separate scope.
 
 ## Scope
 
@@ -160,8 +160,9 @@ Implementation checks passed on 2026-10-29:
 - `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`: passed.
 - Added source regressions for recorded task/session/turn identities, primary
   session replacement, linked-task deletion, and large excluded payloads.
-- Added adapter regressions for a system block crossing the old summary prefix
-  and for an unterminated system block failing closed.
+- Added adapter regressions for a system block crossing the old summary prefix,
+  an unterminated system block failing closed, and a truncated credential tail.
+- Added a legacy-run regression for the preserved task-level summary fallback.
 - `bash scripts/lint-go-changed ...`: 0 issues.
 - `git diff --check`: passed.
 
@@ -169,7 +170,7 @@ Implementation checks passed on 2026-10-29:
 `KANDEV_TEST_POSTGRES_DSN` was not set. That is not PostgreSQL coverage.
 
 The independent consumer fixture under
-`pluginsdk/testdata/automation-history-consumer/` compiles and runs with only
+`testdata/pluginsdk/automation-history-consumer/` compiles and runs with only
 public SDK imports. It uses a local module replacement, so it is candidate-SDK
 evidence, not registry-installation or published-release evidence.
 

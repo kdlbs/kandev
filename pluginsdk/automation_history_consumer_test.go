@@ -21,7 +21,7 @@ func TestAutomationHistoryConsumerFixture(t *testing.T) {
 	if err != nil {
 		t.Skip("go toolchain is unavailable")
 	}
-	fixture, err := filepath.Abs(filepath.Join("testdata", "automation-history-consumer"))
+	fixture, err := filepath.Abs(filepath.Join("..", "testdata", "pluginsdk", "automation-history-consumer"))
 	if err != nil {
 		t.Fatal(err)
 	}

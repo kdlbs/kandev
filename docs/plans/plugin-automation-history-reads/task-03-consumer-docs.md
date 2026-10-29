@@ -77,7 +77,7 @@ an existing supported call successfully.
 ## Files likely touched
 
 - `pluginsdk/automation_history_consumer_test.go` (new harness).
-- `pluginsdk/testdata/automation-history-consumer/` (new public consumer
+- `testdata/pluginsdk/automation-history-consumer/` (new public consumer
   fixture, including its own module file).
 - `docs/public/plugins-authoring.md` reader table and focused API reference.
 - `docs/public/plugins-manifest.md` automation read resource semantics.
@@ -112,7 +112,7 @@ an existing supported call successfully.
 Status: done.
 
 Added an independently compiled consumer module under
-`pluginsdk/testdata/automation-history-consumer/` that uses only public SDK
+`testdata/pluginsdk/automation-history-consumer/` that uses only public SDK
 imports. It exercises capability discovery, definition and run snapshots, exact
 refresh after a missed event, revocation, oversized results, and an older Host
 returning `Unimplemented` while an existing call still succeeds. Updated the

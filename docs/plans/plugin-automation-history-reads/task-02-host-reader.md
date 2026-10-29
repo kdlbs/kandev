@@ -139,8 +139,10 @@ and capability discovery. `backendapp` wires a safe adapter that maps source
 observations without exposing automation models. The excerpt pipeline strips
 system content before its final credential-redacted bound and cuts at any
 remaining system tag, so an excerpt that ends inside a hidden block fails
-closed instead of returning the hidden prefix. Dependencies are read through a
-live getter, so hosts created before automation wiring observe it later.
+closed instead of returning the hidden prefix. A credential-shaped suffix cut
+before the normal redaction minimum is also masked. Dependencies are read
+through a live getter, so hosts created before automation wiring observe it
+later.
 
 Verification:
 
@@ -150,6 +152,7 @@ Verification:
 - `go -C apps/backend test -trimpath -race ./internal/backendapp -run '^TestPluginAutomationHistory' -count=1`: passed.
 - `go -C apps/backend build ./...`: passed.
 - Added regressions for a system block crossing the old 280-character summary
-  boundary and for an unterminated system block that must produce no excerpt.
+  boundary, an unterminated system block that must produce no excerpt, and a
+  credential-shaped suffix cut before the normal redaction minimum.
 - `bash scripts/lint-go-changed <changed-go-files>`: 0 issues.
 - `git diff --check`: passed.

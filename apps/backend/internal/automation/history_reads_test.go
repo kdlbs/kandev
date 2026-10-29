@@ -474,3 +474,49 @@ func TestAutomationHistoryExcludesLargePrivatePayloads(t *testing.T) {
 		t.Fatalf("exact history projection materialized private payloads: %+v, err=%v", exactRow, err)
 	}
 }
+
+func TestAutomationHistoryFallsBackToTaskSummaryForLegacyRun(t *testing.T) {
+	store := setupTestStore(t)
+	createTasksTable(t, store)
+	ctx := context.Background()
+	base := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+
+	a := createHistoryAutomation(t, store, "ws-1", "sweep", base)
+	legacy := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, TaskID: "task-legacy",
+		Status: RunStatusSucceeded, TriggerData: json.RawMessage(`{}`),
+	}
+	bound := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, TaskID: "task-legacy",
+		TurnID: "missing-turn", Status: RunStatusSucceeded, TriggerData: json.RawMessage(`{}`),
+	}
+	for _, run := range []*AutomationRun{legacy, bound} {
+		if err := store.CreateRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.Exec(`INSERT INTO task_session_messages
+		(id, task_id, turn_id, author_type, content, type, created_at)
+		VALUES ('message-legacy', 'task-legacy', 'turn-old', 'agent', 'legacy task result', 'message', ?)`, base); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, nil, nil)
+	list, err := service.ListHistoryRuns(ctx, HistoryRunFilter{WorkspaceID: "ws-1", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]HistoryRun{}
+	for _, item := range list.Items {
+		byID[item.ID] = item
+	}
+	if byID[legacy.ID].Summary != "legacy task result" {
+		t.Fatalf("legacy run summary = %q, want task-level fallback", byID[legacy.ID].Summary)
+	}
+	if byID[bound.ID].Summary != "" {
+		t.Fatalf("turn-bound run must not use the task-level fallback: %q", byID[bound.ID].Summary)
+	}
+	exact, err := service.GetHistoryRun(ctx, "ws-1", legacy.ID)
+	if err != nil || exact.Summary != "legacy task result" {
+		t.Fatalf("exact legacy run summary = %q, err=%v", exact.Summary, err)
+	}
+}

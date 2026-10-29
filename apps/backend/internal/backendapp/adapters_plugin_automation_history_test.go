@@ -209,3 +209,45 @@ func TestPluginAutomationHistoryTruncatedSystemBlockFailsClosed(t *testing.T) {
 		t.Fatalf("an unterminated system block must fail closed, got %q", observed.Summary)
 	}
 }
+
+func TestPluginAutomationHistoryMasksTruncatedCredentialTail(t *testing.T) {
+	service, database, adapter := newAutomationHistoryAdapterTest(t)
+	ctx := context.Background()
+	definition := &automation.Automation{
+		WorkspaceID: "ws-1", Name: "nightly", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true,
+	}
+	if err := service.Store().CreateAutomation(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE task_session_messages (
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL DEFAULT '', turn_id TEXT NOT NULL DEFAULT '',
+		author_type TEXT NOT NULL DEFAULT 'user', content TEXT NOT NULL DEFAULT '',
+		type TEXT NOT NULL DEFAULT 'message', created_at TIMESTAMP NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	run := &automation.AutomationRun{
+		AutomationID: definition.ID, TriggerType: automation.TriggerTypeScheduled,
+		Status: automation.RunStatusSucceeded, TaskID: "task-secret", TurnID: "turn-secret",
+		TriggerData: json.RawMessage(`{}`),
+	}
+	if err := service.Store().CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	partialToken := strings.Repeat("a", 4072) + " ghp_" + strings.Repeat("b", 19)
+	if _, err := database.Exec(`INSERT INTO task_session_messages
+		(id, task_id, turn_id, author_type, content, type, created_at)
+		VALUES ('message-secret', 'task-secret', 'turn-secret', 'agent', ?, 'message', ?)`,
+		partialToken, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := adapter.GetAutomationHistoryRun(ctx, "ws-1", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(observed.Summary, "ghp_b") || strings.Contains(observed.Summary, strings.Repeat("b", 19)) {
+		t.Fatalf("truncated credential tail leaked: %q", observed.Summary)
+	}
+	if !strings.Contains(observed.Summary, "ghp_[redacted]") {
+		t.Fatalf("truncated credential tail was not masked: %q", observed.Summary)
+	}
+}

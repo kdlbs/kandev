@@ -225,9 +225,10 @@ Document excerpts as excerpts, not full transcripts or raw provider errors.
 History summary hydration reads a bounded 4,096-character source prefix so a
 complete system block is normally removed before the final excerpt bound; if a
 prefix still contains an opening or closing system tag, the excerpt is cut at
-that tag and fails closed. Sanitize text before the final bound so truncation
-cannot expose a credential fragment. Preserve opaque IDs outside the text
-sanitizer.
+that tag and fails closed. A credential-shaped suffix that a bounded prefix cut
+before the normal redaction minimum is masked. Sanitize text before the final
+bound so truncation cannot expose a credential fragment. Preserve opaque IDs
+outside the text sanitizer.
 
 Foreign keys remain identity links, not authority. Do not fetch transcripts,
 secrets, provider resources, or task details while building the projection.
