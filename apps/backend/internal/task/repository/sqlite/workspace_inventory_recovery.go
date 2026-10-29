@@ -51,6 +51,9 @@ func (r *Repository) RepairWorkspaceInventory(
 		return nil, err
 	}
 
+	if err := r.validateInventoryFenceTx(ctx, tx, repair); err != nil {
+		return nil, err
+	}
 	existing, err := r.loadWorkspaceInventoryReceiptTx(ctx, tx, repair.TaskID, repair.IdempotencyKey)
 	if err != nil {
 		return nil, err

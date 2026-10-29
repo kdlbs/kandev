@@ -323,6 +323,7 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
+	WorkspaceOnly     bool                          `json:"workspace_only,omitempty"`
 	InterruptedResume json.RawMessage               `json:"interrupted_resume,omitempty"`
 	TaskID            string                        `json:"task_id"`
 	SessionID         string                        `json:"session_id"`
@@ -502,6 +503,7 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	resp, err := h.service.RecoverSessionWithOptions(ctx, req.TaskID, req.SessionID, req.Action, orchestrator.RecoverSessionOptions{
+		WorkspaceOnly:  req.WorkspaceOnly,
 		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		SettingsPolicy: req.SettingsPolicy,
 		ErrorStamp:     req.ErrorStamp,

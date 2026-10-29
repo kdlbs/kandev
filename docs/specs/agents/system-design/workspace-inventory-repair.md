@@ -283,3 +283,22 @@ repairs or launches cleanly.
 ## Related decisions
 
 - [Preserve checkouts during inventory repair](../../../decisions/2026-09-01-preserve-checkouts-during-inventory-repair.md)
+
+
+## Explicit local metadata-only repair
+
+The optional `workspace_only` request follows existing task/session authorization
+and returns before recovery actions, dynamic launch admission or agent dispatch.
+Only one server-owned local repository attachment in an existing owner-bound
+worktree environment is initially supported. No caller path, ref or repository
+identity is accepted. Pure repository-slot planning and the existing preservation
+inspector are reused; clone/update/materialization helpers are never invoked.
+The original automatic local-source guard remains in force.
+
+A server-read task/session/route-generation fence is added to the existing JSON
+preservation receipt. The original repair transaction checks that fence before
+writing; existing idempotent receipts and the post-repair observation must match
+it. The existing environment recovery claim excludes the current session runtime
+as well as borrowers. No new schema, ledger, signature or retry scheduler is
+introduced. A changed entry/generation conflicts, and no repair result itself
+authorizes a later launch.
