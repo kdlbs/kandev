@@ -184,10 +184,24 @@ func (s *Service) resolveApprovalNextStep(ctx context.Context, step *wfmodels.Wo
 // UpdateTaskState updates the state of a task, moves it to the matching column,
 // and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
-		return nil, err
+	return s.updateTaskState(ctx, id, state, false)
+}
+
+func (s *Service) UpdateTaskStateAsHuman(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
+	return s.updateTaskState(ctx, id, state, true)
+}
+
+func (s *Service) updateTaskState(ctx context.Context, id string, state v1.TaskState, human bool) (*models.Task, error) {
+	var task *models.Task
+	var err error
+	if human {
+		task, err = s.officeHumanCompletionTaskSnapshot(ctx, id)
+	} else {
+		if err = s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+			return nil, err
+		}
+		task, err = s.tasks.GetTask(ctx, id)
 	}
-	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -199,10 +213,18 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 		return task, nil
 	}
 
-	if err := s.tasks.UpdateTaskState(ctx, id, state); err != nil {
-		s.logger.Error("failed to update task state", zap.String("task_id", id), zap.Error(err))
-		return nil, err
+	if human {
+		ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{TaskID: id, ExpectedWorkspaceID: task.WorkspaceID, ExpectedWorkflowID: task.WorkflowID, ExpectedStepID: task.WorkflowStepID, Kind: "set_state"})
+		err = s.persistHumanTaskState(ctx, task, state)
+	} else {
+		err = s.tasks.UpdateTaskState(ctx, id, state)
 	}
+	if err != nil {
+		s.logger.Error("failed to update task state", zap.String("task_id", id), zap.Error(err))
+		return nil, s.translateOfficeCompletionError(ctx, err)
+	}
+
+	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
 
 	// Reload task to get updated state
 	task, err = s.tasks.GetTask(ctx, id)
@@ -584,12 +606,29 @@ func (s *Service) MoveTaskWithOptions(
 	if opts.ExactOperation != nil && opts.AlreadyApplied == nil {
 		opts.AlreadyApplied = new(bool)
 	}
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
-		return nil, err
+	var task *models.Task
+	var err error
+	if opts.StepHistoryActor == wfmodels.StepTransitionActorHuman {
+		task, err = s.officeHumanCompletionTaskSnapshot(ctx, id)
+	} else {
+		if err = s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+			return nil, err
+		}
+		task, err = s.tasks.GetTask(ctx, id)
 	}
-	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if opts.StepHistoryActor == wfmodels.StepTransitionActorHuman {
+		inherited, present := models.OfficeHumanCompletionIntentFromContext(ctx)
+		if present && inherited.TaskID != task.ID {
+			return nil, repoerrors.ErrWorkflowChangeConflict
+		}
+		if !present || inherited.Kind != "office_done" {
+			ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{TaskID: task.ID, ExpectedWorkspaceID: task.WorkspaceID, ExpectedWorkflowID: task.WorkflowID, ExpectedStepID: task.WorkflowStepID, ExpectedTaskState: string(task.State), Kind: "move"})
+		}
+	} else {
+		ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
 	}
 	if opts.ExpectedWorkflowID != nil && task.WorkflowID != *opts.ExpectedWorkflowID {
 		// Cheap fast-fail only: this GetTask is not inside a lock, so it
@@ -683,6 +722,9 @@ func (s *Service) MoveTaskWithOptions(
 		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID, opts); err != nil {
 			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
 		}
+	}
+	if err := s.guardOfficeHumanCompletion(ctx, task, workflowStepID, stateAfterAdmission.State, opts); err != nil {
+		return nil, err
 	}
 
 	task.WorkflowID = workflowID
@@ -791,6 +833,8 @@ func (s *Service) MoveTaskWithOptions(
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
+
+	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
 
 	// Captured now, before the post-commit GetTask refresh below replaces
 	// task with a plain read that carries neither transient field (see
@@ -1379,9 +1423,11 @@ func (s *Service) updateMovedTask(
 	opts MoveTaskOptions,
 ) (bool, error) {
 	if targetStep == nil || oldStepID == targetStep.ID {
-		return s.updateMovedTaskSameStep(ctx, task, opts)
+		admitted, err := s.updateMovedTaskSameStep(ctx, task, opts)
+		return admitted, s.translateOfficeCompletionError(ctx, err)
 	}
-	return s.updateMovedTaskCrossStep(ctx, task, oldStepID, targetStep, admittedState, opts)
+	admitted, err := s.updateMovedTaskCrossStep(ctx, task, oldStepID, targetStep, admittedState, opts)
+	return admitted, s.translateOfficeCompletionError(ctx, err)
 }
 
 // updateMovedTaskSameStep handles the no-step-change branch of updateMovedTask
@@ -1695,7 +1741,7 @@ type BulkMoveTasksResult struct {
 // target step are skipped. Validation reads tasks one at a time because the UI
 // sends small selected batches; the move is not transactional if task state
 // changes between pre-validation and an individual MoveTask call.
-func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string, actors ...wfmodels.StepTransitionActor) (*BulkMoveTasksResult, error) {
 	ids := uniqueTaskIDs(taskIDs)
 	if len(ids) == 0 {
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
@@ -1760,7 +1806,11 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 		if task.WorkflowID == targetWorkflowID && task.WorkflowStepID == targetStepID {
 			continue
 		}
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
+		actor := wfmodels.StepTransitionActor("")
+		if len(actors) > 0 {
+			actor = actors[0]
+		}
+		if _, err := s.MoveTaskWithOptions(ctx, task.ID, targetWorkflowID, targetStepID, 0, MoveTaskOptions{StepHistoryActor: actor}); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
 		}
 		movedCount++
@@ -1991,7 +2041,7 @@ func (s *Service) validateSelectedMoveBatch(ctx context.Context, taskIDs []strin
 
 // BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.
 // If sourceStepID is empty, all tasks in the source workflow are moved.
-func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string, actors ...wfmodels.StepTransitionActor) (*BulkMoveTasksResult, error) {
 	bulkActorKind, bulkActorID := steptelemetry.HumanOrSystemActor(ctx)
 	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
 		Trigger: steptelemetry.TriggerBulkMove, ActorKind: bulkActorKind, ActorID: bulkActorID,
@@ -2044,7 +2094,11 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	}
 
 	for _, task := range orderedTasks {
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
+		actor := wfmodels.StepTransitionActor("")
+		if len(actors) > 0 {
+			actor = actors[0]
+		}
+		if _, err := s.MoveTaskWithOptions(ctx, task.ID, targetWorkflowID, targetStepID, 0, MoveTaskOptions{StepHistoryActor: actor}); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
 		}
 		if s.bulkMoveAfterTaskForTest != nil {

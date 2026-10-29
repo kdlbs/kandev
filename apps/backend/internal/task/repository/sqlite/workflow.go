@@ -325,11 +325,14 @@ func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *mo
 // DeleteWorkflowsByWorkspace deletes all workflows for a workspace except the excluded IDs (E2E cleanup).
 // Relies on CASCADE foreign keys to remove workflow_steps.
 func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID string, excludeIDs []string) (int64, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{workspaceID}, nil); err != nil {
+		return 0, err
+	}
 
 	var query string
 	var args []interface{}
@@ -362,11 +365,14 @@ func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID
 
 // DeleteWorkflow deletes a workflow by ID
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockWorkflowCompletionPolicyTx(ctx, tx, id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?
 	`), id); err != nil {

@@ -365,7 +365,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		description = &trimmed
 	}
 
-	task, err := h.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
+	task, err := h.service.UpdateTaskAsHuman(ctx, req.ID, &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
 		Priority:       req.Priority,
@@ -377,6 +377,9 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		AssigneeUserID: req.AssigneeUserID,
 	})
 	if err != nil {
+		if response, responseErr := humanCompletionWSError(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		h.logger.Error("failed to update task", zap.Error(err))
 		if code, ok := repositorySelectionWSCode(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
@@ -540,6 +543,12 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		},
 	)
 	if err != nil {
+		var approvalsErr *service.ApprovalsPendingMoveError
+		if errors.As(err, &approvalsErr) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, approvalsErr.Error(), map[string]interface{}{
+				"error_code": "task_approvals_pending", "pending_approvers": pendingApproversBody(approvalsErr.Pending),
+			})
+		}
 		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) || errors.Is(err, repoerrors.ErrTaskCompletionCriteriaConflict) ||
 			errors.Is(err, repoerrors.ErrTaskCompletionHumanConfirmationRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements changed or are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
@@ -624,8 +633,11 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "state is required", nil)
 	}
 
-	task, err := h.service.UpdateTaskState(ctx, req.ID, v1.TaskState(req.State))
+	task, err := h.service.UpdateTaskStateAsHuman(ctx, req.ID, v1.TaskState(req.State))
 	if err != nil {
+		if response, responseErr := humanCompletionWSError(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
 		}

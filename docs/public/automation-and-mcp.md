@@ -1051,6 +1051,12 @@ Every attempt writes a redacted audit row. A successful receipt includes the ope
 
 Configuration access is derived from the calling session's stored purpose. Office CEO authority requires an enabled, active profile. Lane equivalence also checks session start/end policy, session target, completion on entry, and the unclassified fallback veto. An unmapped workspace-owned record blocks its task's transfer; empty tables and records for other tasks do not. After a denied or failed attempt, that caller must supply a fresh idempotency key.
 
+A busy PostgreSQL transfer reservation returns a conflict and leaves the task
+unchanged. This can happen while another task's related rows are being written.
+After that operation finishes, manually retry the same unchanged request and
+idempotency key. Kandev does not automatically retry this conflict. Denied or
+failed attempts still require a fresh key as described above.
+
 The database migration is additive. Rolling back the application binary leaves transfer receipts and audit rows intact for a later upgrade; do not drop the transfer ledger tables during an application rollback.
 
 <details>

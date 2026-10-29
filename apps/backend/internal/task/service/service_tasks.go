@@ -2190,6 +2190,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
+	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
 	task = result.Task
 	oldWorkflowStepID := result.PriorWorkflowStepID
 	oldState := result.PriorState

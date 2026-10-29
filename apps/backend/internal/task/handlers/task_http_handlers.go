@@ -967,8 +967,14 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		c.Request.Context(),
 		body.SourceWorkflowID, body.SourceStepID,
 		body.TargetWorkflowID, body.TargetStepID,
+		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
+		var approvals *service.ApprovalsPendingMoveError
+		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+			handleSelectedMoveError(c, h.logger, err)
+			return
+		}
 		h.logger.Error("failed to bulk move tasks", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
 		return
@@ -982,6 +988,7 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 		body.TaskIDs,
 		body.TargetWorkflowID,
 		body.TargetStepID,
+		wfmodels.StepTransitionActorHuman,
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -2004,7 +2011,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		description = &trimmed
 	}
 
-	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
+	task, err := h.service.UpdateTaskAsHuman(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
 		Priority:       body.Priority,

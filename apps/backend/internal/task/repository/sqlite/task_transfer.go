@@ -108,14 +108,18 @@ func (r *Repository) TransferTask(
 		return nil, errors.Join(err, r.RecordTaskTransferAttempt(ctx, command, taskTransferResultFailed))
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return nil, errors.Join(err, r.RecordTaskTransferAttempt(ctx, command, taskTransferResultFailed))
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskTransferWorkspaces(ctx, tx, command); err != nil {
+		_ = tx.Rollback()
+		return r.handleTaskTransferApplyError(ctx, command, requestDigest, err)
+	}
 	if err := r.lockTaskTransferRelations(ctx, tx, projections, counts, inventory); err != nil {
 		_ = tx.Rollback()
-		return nil, errors.Join(err, r.RecordTaskTransferAttempt(ctx, command, taskTransferResultFailed))
+		return r.handleTaskTransferApplyError(ctx, command, requestDigest, err)
 	}
 	receipt, err := r.applyTaskTransfer(ctx, tx, command, requestDigest, projections, counts, inventory)
 	if err != nil {
@@ -803,4 +807,23 @@ func (r *Repository) updateTaskTransferPlacement(
 		return 0, err
 	}
 	return transitionID, nil
+}
+
+// lockTaskTransferWorkspaces acquires the complete authorized set before the
+// exceptional relation reservation. The source is rechecked again under its
+// row lock after reservation, so a stale locator never grows a held lock set.
+func (r *Repository) lockTaskTransferWorkspaces(ctx context.Context, tx *sqlx.Tx, command models.TaskTransferCommand) error {
+	if err := r.lockTaskHierarchy(ctx, tx, []string{command.ExpectedSourceWorkspaceID, command.DestinationWorkspaceID}, nil); err != nil {
+		return err
+	}
+	var workspace, workflow, step string
+	var version time.Time
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id,workflow_id,workflow_step_id,updated_at FROM tasks WHERE id=?`), command.TaskID).Scan(&workspace, &workflow, &step, &version)
+	if err != nil {
+		return taskTransferConflict(err, "source predicate changed")
+	}
+	if workspace != command.ExpectedSourceWorkspaceID || workflow != command.ExpectedSourceWorkflowID || step != command.ExpectedSourceStepID || !version.Equal(command.ExpectedTaskUpdatedAt) {
+		return repoerrors.ErrTaskTransferConflict
+	}
+	return nil
 }

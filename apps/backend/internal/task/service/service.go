@@ -618,6 +618,9 @@ type Service struct {
 	// task.updated events. Optional — unset omits the field's live update path
 	// and task.updated payloads read false/0/0, matching D9's defaults.
 	taskParkedProvider TaskParkedProvider
+	// officeApprovalGuard blocks a human move from completing an Office
+	// task with pending approvers. Optional; see SetOfficeApprovalGuard.
+	officeApprovalGuard OfficeApprovalGuard
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
