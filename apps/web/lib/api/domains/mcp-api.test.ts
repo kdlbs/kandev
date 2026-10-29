@@ -7,8 +7,9 @@ afterEach(() => vi.unstubAllGlobals());
 it.each([
   ["repository", { expected_definition_ids: [] }],
   ["task_session", { expected_revision: 0 }],
+  ["task_session", { expected_revision: 2, excluded_definition_ids: [] }],
 ] satisfies Array<["repository" | "task_session", import("./mcp-api").MCPSelectionWriteOptions]>)(
-  "serializes a known-empty %s precondition and omits exclusions",
+  "serializes a known-empty %s condition and only explicit exclusions",
   async (scope, condition) => {
     const fetcher = vi
       .fn()

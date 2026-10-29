@@ -7,6 +7,10 @@ type rule struct {
 	pattern    *regexp.Regexp
 	code       Code
 	confidence Confidence
+	// rawText matches the raw diagnostic instead of the sanitized excerpt. It is
+	// only for bounded signatures whose distinguishing text the sanitizer masks;
+	// the stored/displayed excerpt remains sanitized.
+	rawText bool
 }
 
 // Provider rules match provider error signatures, never a bare topic word.
@@ -93,6 +97,16 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
+		// Keep this provider-scoped rule limited to OpenCode's unlabelled opening line only.
+		mustRule("opencode.stderr.free_usage_unlabelled.v1", `(?im)^\s*free\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		// OpenRouter daily notices state their cadence in reason tokens that the
+		// shared sanitizer redacts. Match the raw diagnostic, but keep this
+		// signature after credit/subscription/quota rules in the existing order.
+		mustRawRule("opencode.rate.free_models_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
+		mustRawRule("opencode.rate.model_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
+		// OpenCode Zen's retry-later line states no daily/minute cadence. Keep it
+		// a generic rate limit and do not derive a reset from "try again later".
+		mustRule("opencode.rate.try_later.v1", `(?im)^\s*(?:AI_APICallError:\s*)?(?:Error\s+from\s+provider\s+\([^)\n]{1,64}\):\s*)?rate\s+limit\s+exceeded\.?\s+please\s+try\s+again\s+later\b`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
 	},
@@ -112,6 +126,10 @@ func mustRule(id, pat string, code Code, conf Confidence) rule {
 	return rule{id: id, pattern: regexp.MustCompile(pat), code: code, confidence: conf}
 }
 
+func mustRawRule(id, pat string, code Code, conf Confidence) rule {
+	return rule{id: id, pattern: regexp.MustCompile(pat), code: code, confidence: conf, rawText: true}
+}
+
 // HasProviderRules reports whether providerID is a rules catalogue key (an
 // agent ID such as "opencode-acp"). Diagnostics can carry a different
 // provider identity, e.g. OpenCode's model-provider ID "opencode-go", which
@@ -121,13 +139,17 @@ func HasProviderRules(providerID string) bool {
 	return ok
 }
 
-func matchProviderRules(providerID, text string) (*Error, bool) {
+func matchProviderRules(providerID, excerpt, rawText string) (*Error, bool) {
 	rules, ok := providerRules[providerID]
-	if !ok || text == "" {
+	if !ok || (excerpt == "" && rawText == "") {
 		return nil, false
 	}
 	for _, r := range rules {
-		if r.pattern.MatchString(text) {
+		text := excerpt
+		if r.rawText {
+			text = rawText
+		}
+		if text != "" && r.pattern.MatchString(text) {
 			return &Error{
 				Code:           r.code,
 				Confidence:     r.confidence,

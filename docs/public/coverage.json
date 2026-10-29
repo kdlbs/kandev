@@ -979,11 +979,15 @@
       ],
       "sources": [
         "apps/backend/internal/plugins/handlers.go",
-        "apps/backend/pkg/pluginsdk/host.go",
+        "pluginsdk/host.go",
+        "pluginsdk/cmd/kandev-sdk-check/main.go",
+        "scripts/release/publish-plugin-sdk.mjs",
         "apps/web/lib/plugins/host-api.ts"
       ],
       "tests": [
         "apps/backend/internal/plugins/service_test.go",
+        "pluginsdk/internal/compatibility/release_test.go",
+        "scripts/release/publish-plugin-sdk.test.mjs",
         "apps/backend/internal/plugins/manifest/manifest_test.go",
         "apps/web/lib/plugins/host-api.test.ts"
       ]

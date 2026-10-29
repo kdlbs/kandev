@@ -41,6 +41,7 @@ export type MessageListProps = {
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   sessionId: string | null;
+  detailActive?: boolean;
   messagesLoading: boolean;
   /** Latest-session history is still reconciling while cached rows remain visible. */
   historyRefreshPending?: boolean;
@@ -90,7 +91,6 @@ export type MessageListProps = {
    * remain mounted while inactive and use this transition to recover missed
    * oldest-page sentinel observations. */
   isVisible?: boolean;
-  detailActive?: boolean;
   /** The task-owned launch card renders the matching failure. */
   launchErrorOwned?: boolean;
   /** Stamp used to distinguish a matching last-agent-error notice. */

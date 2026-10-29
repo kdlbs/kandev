@@ -197,6 +197,8 @@ Open **Settings > Preferences > Task Behavior > Runtime** to manage install-wide
 
 **Automatically merge consecutive messages** is on by default. It is the fallback for every session that has not changed its compact **Auto-merge** queue pill. Untouched sessions follow later global changes. The first per-session change creates an explicit override that survives empty queues and restarts and remains independent for that session's lifetime. An eligible direct admission may fold into the immediate pending predecessor even at capacity because it does not create another row; staged-attachment admissions cannot use this path. Both rows must have the same strict source and compatible task, model, mode, metadata, attachments, and references. Any mismatch or combined limit leaves the new row separate when capacity permits. The earlier row survives and its ID is returned. Turning either setting on does not compact existing rows. This behavior is independent from **Enable queued message merging**, which controls the manual queue action.
 
+Each queued message shows a timestamp using your message-time display setting. Merged messages show the latest queued time among their contributing messages.
+
 To recover capacity in one session, expand its queue chip in the task workbench. The compact header contains **Auto-run** and **Auto-merge** pills beside the count. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
 
 ## State and storage
@@ -279,7 +281,7 @@ manual database compaction are separate maintenance operations.
 <summary>Storage maintenance details</summary>
 
 Open **Settings > System > Storage > Host** to inspect Kandev-managed disk usage and
-configure cleanup. Open **Storage > Office retention** for Office history policy and status.
+configure cleanup. When Office is enabled, open **Storage > Office retention** for Office history policy and status.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while another maintenance run owns the cleanup gate. Cleanup normally waits for active task
 resources to become idle. If they are active, the page names the work and offers **Run anyway**
@@ -494,7 +496,8 @@ the Kandev service first provides the clearest maintenance boundary.
 ## Office run history retention
 
 Open **Settings > System > Storage > Office retention** to manage automatic deletion of old
-Office run history. Deletion is enabled by default. The first sweep starts five
+Office run history. This tab is available only when the Office feature is enabled.
+Deletion is enabled by default. The first sweep starts five
 minutes after the backend starts or after you enable deletion.
 
 The first sweep for each history table is a preview. It reports the rows that
@@ -973,6 +976,8 @@ not move npm `latest` and do not create Homebrew, Scoop, Desktop, GHCR, Git tag,
 artifacts.
 
 Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. Notification routing is independent of the Stable/Nightly release selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence. Returning from Nightly to a Stable version is an explicit action and does not produce a normal upgrade notification.
+
+Local versioned Kandev release messages follow the application language, including their browser or native desktop notifications.
 
 Before any update, finish or stop active sessions, create and export a database backup plus its master key, preserve unpushed Git work, and read release notes.
 

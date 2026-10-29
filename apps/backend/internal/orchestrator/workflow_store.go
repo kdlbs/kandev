@@ -853,6 +853,12 @@ func (s *workflowStore) pullOneFeederTask(
 		fromStepID := candidate.WorkflowStepID
 		candidate.WorkflowID = vacatedStep.WorkflowID
 		candidate.WorkflowStepID = vacatedStep.ID
+		// A pulled task leaves the queued band: an admitted task carrying a
+		// stale queue marker would hold a WIP slot while entry effects skip it.
+		// The promotion predicate still matches the stored marker.
+		candidate.WIPAdmitted = true
+		candidate.QueuedForStepID = ""
+		candidate.QueuedAt = nil
 		if candidate.Metadata == nil {
 			candidate.Metadata = make(map[string]interface{})
 		}

@@ -1013,7 +1013,7 @@
   "mcpSessionStateAppliedDescription": "A configuração guardada foi aplicada a este agente. Consulte o estado das ligações em Ligações.",
   "mcpSessionStatePendingDescription": "A configuração atual continua em utilização. As alterações guardadas são aplicadas quando o agente estiver inativo.",
   "mcpSessionStateDeferredDescription": "A configuração atual continua em utilização. As alterações guardadas são aplicadas quando o agente voltar a arrancar.",
-  "mcpSessionStateFailedDescription": "A configuração anterior continua em utilização. Tente novamente ou aplique as alterações no próximo arranque do agente.",
+  "mcpSessionStateFailedDescription": "A última configuração aceite é mantida para comparação. Tente novamente ou aplique as alterações no próximo arranque do agente.",
   "mcpSessionRetry": "Tentar aplicação MCP novamente",
   "deleting": "A eliminar...",
   "mcpSessionAdditions": "Adicionar a esta sessão",
@@ -1105,5 +1105,16 @@
   "mcpAssignmentChooseTask": "Escolher uma tarefa existente",
   "mcpAssignmentSearch": "Pesquisar destinos",
   "mcpAssignmentDisabled": "Ative este servidor antes de escolher onde o usar.",
-  "mcpAssignmentPrevious": "Anterior"
+  "mcpAssignmentPrevious": "Anterior",
+  "mcpExcludeForSession": "Excluir desta sessão",
+  "mcpRestoreInheritance": "Restaurar herança",
+  "mcpSessionExcluded": "Guardado: excluído desta sessão",
+  "mcpSessionInherited": "Guardado: incluído por herança",
+  "mcpSessionExclusionsDescription": "As exclusões aplicam-se apenas a esta sessão e mantêm-se até serem restauradas. Desativar um servidor nas definições do espaço de trabalho afeta outras sessões.",
+  "mcpRequiredToolsSeparate": "As ferramentas obrigatórias do Kandev são geridas separadamente. Os servidores configurados diretamente no fornecedor não são controlados aqui.",
+  "mcpSavedExclusions": "Exclusões guardadas",
+  "mcpDormantExclusionsDescription": "Estes servidores já não contribuem para esta sessão. Restaurar a herança não os adiciona.",
+  "mcpNoLongerInherited": "Já não é herdado",
+  "mcpRestoreDisabledDescription": "Restaurar a herança não ativa um servidor desativado.",
+  "mcpExclusionCount": "Exclusões guardadas nesta sessão: {{total}}"
 }

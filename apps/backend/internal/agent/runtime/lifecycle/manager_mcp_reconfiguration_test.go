@@ -295,7 +295,7 @@ func newSessionMCPClient(t *testing.T, failResume, supportsResume, supportsLoad 
 	return newSessionMCPClientWithHooks(t, failResume, supportsResume, supportsLoad, beforeRequest)
 }
 
-func newSessionMCPClientWithHooks(t *testing.T, failResume, supportsResume, supportsLoad bool, beforeRequest func(string)) (*agentctl.Client, <-chan string, func()) {
+func newSessionMCPClientWithHooks(t *testing.T, failResume, supportsResume, supportsLoad bool, beforeRequest func(string), observe ...func(ws.Message)) (*agentctl.Client, <-chan string, func()) {
 	t.Helper()
 	actions := make(chan string, 8)
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -315,6 +315,9 @@ func newSessionMCPClientWithHooks(t *testing.T, failResume, supportsResume, supp
 				continue
 			}
 			actions <- msg.Action
+			for _, observer := range observe {
+				observer(msg)
+			}
 			if beforeRequest != nil {
 				beforeRequest(msg.Action)
 			}

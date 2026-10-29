@@ -6,15 +6,17 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"strings"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	LegacyExportVersion = 1
-	ExportVersion       = 2
-	ExportType          = "kandev_workflow"
+	LegacyExportVersion         = 1
+	ExportVersion               = 2
+	ProfileOptionsExportVersion = 3
+	ExportType                  = "kandev_workflow"
 )
 
 // WorkflowExport is the portable format for sharing workflows.
@@ -26,9 +28,71 @@ type WorkflowExport struct {
 
 // AgentProfilePortable stores enough agent profile info for cross-workspace matching.
 type AgentProfilePortable struct {
-	AgentName string `json:"agent_name" yaml:"agent_name"`
-	Model     string `json:"model,omitempty" yaml:"model,omitempty"`
-	Mode      string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	AgentName      string             `json:"agent_name" yaml:"agent_name"`
+	Model          string             `json:"model,omitempty" yaml:"model,omitempty"`
+	Mode           string             `json:"mode,omitempty" yaml:"mode,omitempty"`
+	ConfigOptions  *map[string]string `json:"config_options,omitempty" yaml:"config_options,omitempty"`
+	optionsPresent bool               `json:"-" yaml:"-"`
+}
+
+func (p *AgentProfilePortable) UnmarshalJSON(data []byte) error {
+	type plain AgentProfilePortable
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	var result plain
+	if err := json.Unmarshal(data, &result); err != nil {
+		return err
+	}
+	*p = AgentProfilePortable(result)
+	_, p.optionsPresent = fields["config_options"]
+	return nil
+}
+
+func (p *AgentProfilePortable) UnmarshalYAML(node *yaml.Node) error {
+	type plain AgentProfilePortable
+	var result plain
+	if err := node.Decode(&result); err != nil {
+		return err
+	}
+	*p = AgentProfilePortable(result)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value != "config_options" {
+			continue
+		}
+		p.optionsPresent = true
+		value := node.Content[i+1]
+		if value.Kind == yaml.MappingNode {
+			for j := 0; j+1 < len(value.Content); j += 2 {
+				if value.Content[j].Tag != "!!str" || value.Content[j+1].Tag != "!!str" {
+					return fmt.Errorf("config_options must contain string keys and values")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validatePortableProfile(p *AgentProfilePortable, version int) error {
+	if p == nil {
+		return nil
+	}
+	if version < ProfileOptionsExportVersion {
+		if p.optionsPresent || p.ConfigOptions != nil {
+			return fmt.Errorf("config_options requires export version 3")
+		}
+		return nil
+	}
+	if p.ConfigOptions == nil {
+		return fmt.Errorf("config_options must be an object")
+	}
+	for key, value := range *p.ConfigOptions {
+		if key == "" || value == "" || strings.TrimSpace(key) != key || strings.TrimSpace(value) != value || key == "model" || key == "mode" {
+			return fmt.Errorf("config_options contains invalid key or value")
+		}
+	}
+	return nil
 }
 
 // AgentProfileResolver resolves an agent profile ID to its portable representation.
@@ -41,6 +105,14 @@ type AgentProfileResolver func(profileID string) *AgentProfilePortable
 // disabling only hides a profile from new selection, it doesn't touch
 // existing bindings (docs/specs/agents/requirements/profile-disable.md).
 type AgentProfileMatcher func(agentName, model, mode, currentID string) string
+
+// AgentProfileLookup reports candidate ambiguity and storage failure to sync.
+type AgentProfileLookup func(profile *AgentProfilePortable, currentID string) ProfileMatch
+
+type ProfileMatch struct {
+	ID     string
+	Reason string
+}
 
 // WorkflowSessionTargetPortable stores a target with a position instead of a
 // workflow-local step ID so an export can be imported into another workflow.
@@ -176,13 +248,16 @@ func BuildWorkflowExportWithError(workflows []*taskmodels.Workflow, stepsByWorkf
 	for _, wf := range workflows {
 		steps := stepsByWorkflow[wf.ID]
 		for _, step := range steps {
-			if step != nil && (step.SessionTarget != nil || step.CompleteTaskOnEnter) {
+			if version < ExportVersion && step != nil && (step.SessionTarget != nil || step.CompleteTaskOnEnter) {
 				version = ExportVersion
 			}
 		}
 		workflow, err := buildWorkflowPortable(wf, steps, resolveProfile)
 		if err != nil {
 			return nil, err
+		}
+		if workflowHasProfiles(&workflow) {
+			version = ProfileOptionsExportVersion
 		}
 		portable = append(portable, workflow)
 	}
@@ -191,6 +266,33 @@ func BuildWorkflowExportWithError(workflows []*taskmodels.Workflow, stepsByWorkf
 		Type:      ExportType,
 		Workflows: portable,
 	}, nil
+}
+
+func workflowHasProfiles(workflow *WorkflowPortable) bool {
+	if workflow.AgentProfile != nil {
+		return true
+	}
+	for _, step := range workflow.Steps {
+		if step.AgentProfile != nil {
+			return true
+		}
+		for _, action := range step.Events.OnEnter {
+			if action.Type == OnEnterRunCodeReview && action.Config[ReviewAgentProfilePortableKey] != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exportProfileOptions(profile *AgentProfilePortable) *AgentProfilePortable {
+	if profile != nil && profile.ConfigOptions == nil {
+		copy := *profile
+		options := map[string]string{}
+		copy.ConfigOptions = &options
+		return &copy
+	}
+	return profile
 }
 
 func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resolveProfile AgentProfileResolver) (WorkflowPortable, error) {
@@ -228,7 +330,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			sp.PullFromStepPosition = &pos
 		}
 		if resolveProfile != nil && s.AgentProfileID != "" {
-			sp.AgentProfile = resolveProfile(s.AgentProfileID)
+			sp.AgentProfile = exportProfileOptions(resolveProfile(s.AgentProfileID))
 		}
 		portableSteps = append(portableSteps, sp)
 	}
@@ -240,7 +342,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 		Steps:       portableSteps,
 	}
 	if resolveProfile != nil && wf.AgentProfileID != "" {
-		wp.AgentProfile = resolveProfile(wf.AgentProfileID)
+		wp.AgentProfile = exportProfileOptions(resolveProfile(wf.AgentProfileID))
 	}
 	return wp, nil
 }
@@ -265,8 +367,8 @@ func buildPortableSessionTarget(target *WorkflowSessionTarget, idToPos map[strin
 
 // Validate checks that the export data is well-formed.
 func (e *WorkflowExport) Validate() error {
-	if e.Version != LegacyExportVersion && e.Version != ExportVersion {
-		return fmt.Errorf("unsupported export version: %d (expected %d or %d)", e.Version, LegacyExportVersion, ExportVersion)
+	if e.Version != LegacyExportVersion && e.Version != ExportVersion && e.Version != ProfileOptionsExportVersion {
+		return fmt.Errorf("unsupported export version: %d (expected 1, 2 or 3)", e.Version)
 	}
 	if e.Type != ExportType {
 		return fmt.Errorf("unsupported export type: %q (expected %q)", e.Type, ExportType)
@@ -281,8 +383,30 @@ func (e *WorkflowExport) Validate() error {
 		if wf.Name == "" {
 			return fmt.Errorf("workflow %d: name is required", i)
 		}
+		if err := validatePortableProfile(wf.AgentProfile, e.Version); err != nil {
+			return fmt.Errorf("workflow %d agent profile: %w", i, err)
+		}
 		positions := make(map[int]bool, len(wf.Steps))
 		for j, step := range wf.Steps {
+			if err := validatePortableProfile(step.AgentProfile, e.Version); err != nil {
+				return fmt.Errorf("workflow %d step %d agent profile: %w", i, j, err)
+			}
+			for _, action := range step.Events.OnEnter {
+				if action.Type != OnEnterRunCodeReview {
+					continue
+				}
+				value, ok := action.Config[ReviewAgentProfilePortableKey]
+				if !ok {
+					continue
+				}
+				descriptor, err := ParsePortableProfile(value)
+				if err != nil {
+					return fmt.Errorf("workflow %d step %d review profile: %w", i, j, err)
+				}
+				if err := validatePortableProfile(descriptor, e.Version); err != nil {
+					return fmt.Errorf("workflow %d step %d review profile: %w", i, j, err)
+				}
+			}
 			if step.Name == "" {
 				return fmt.Errorf("workflow %d step %d: name is required", i, j)
 			}
@@ -290,7 +414,7 @@ func (e *WorkflowExport) Validate() error {
 				return fmt.Errorf("workflow %d: duplicate step position %d", i, step.Position)
 			}
 			positions[step.Position] = true
-			if e.Version == ExportVersion && !step.completionTaskOnEnterIsExplicit() {
+			if e.Version >= ExportVersion && !step.completionTaskOnEnterIsExplicit() {
 				return fmt.Errorf("workflow %d step %d: complete_task_on_enter must be explicitly set", i, j)
 			}
 			if err := validateOnEnterActions(step); err != nil {
@@ -590,15 +714,39 @@ func ConvertReviewProfileToPortable(events StepEvents, resolveProfile AgentProfi
 		if !ok || profileID == "" || resolveProfile == nil {
 			return nil, false
 		}
-		portable := resolveProfile(profileID)
+		portable := exportProfileOptions(resolveProfile(profileID))
 		if portable == nil {
 			return nil, false
 		}
 		return map[string]any{
-			"agent_name": portable.AgentName,
-			"model":      portable.Model,
-			"mode":       portable.Mode,
+			"agent_name":     portable.AgentName,
+			"model":          portable.Model,
+			"mode":           portable.Mode,
+			"config_options": *portable.ConfigOptions,
 		}, true
+	})
+}
+
+func ParsePortableProfile(value any) (*AgentProfilePortable, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid profile descriptor")
+	}
+	var profile AgentProfilePortable
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return nil, fmt.Errorf("invalid profile descriptor")
+	}
+	return &profile, nil
+}
+
+func ConvertReviewProfileToIDWithLookup(events StepEvents, match func(*AgentProfilePortable) string) StepEvents {
+	return remapReviewProfile(events, ReviewAgentProfilePortableKey, ReviewAgentProfileConfigKey, func(v any) (any, bool) {
+		profile, err := ParsePortableProfile(v)
+		if err != nil || match == nil {
+			return nil, false
+		}
+		id := match(profile)
+		return id, id != ""
 	})
 }
 

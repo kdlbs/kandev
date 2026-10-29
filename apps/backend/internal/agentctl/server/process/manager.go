@@ -35,6 +35,7 @@ import (
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
@@ -149,6 +150,15 @@ type Manager struct {
 	deliveryCancellationFailed  bool
 	deliveryPromptMu            sync.Mutex
 	deliveryPromptByGeneration  map[uint64]string
+
+	// diskSampler is the process-wide advisory capacity cache shared by every
+	// instance. Nil falls back to a direct bounded read on the advisory route.
+	diskSampler   *systemmetrics.DiskCapacitySampler
+	diskSamplerMu sync.RWMutex
+	// runtimeStorageCache is the last advisory snapshot produced by the
+	// dedicated route. Ordinary status reads it without filesystem I/O.
+	runtimeStorageCacheMu sync.RWMutex
+	runtimeStorageCache   *streams.RuntimeStorageSnapshot
 
 	// Process state
 	cmd                *exec.Cmd
@@ -2723,12 +2733,16 @@ func (m *Manager) SendErrorEventWithProviderError(
 	errorMessage string,
 	promptGeneration uint64,
 	providerError *streams.ProviderError,
+	storage ...*streams.DeliveryStorageDiagnostic,
 ) {
 	event := adapter.AgentEvent{
 		Type:             adapter.EventTypeError,
 		Error:            errorMessage,
 		PromptGeneration: promptGeneration,
 		ProviderError:    providerError,
+	}
+	if len(storage) > 0 && storage[0] != nil {
+		event.Storage = storage[0]
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
 		m.logger.Error("failed to commit durable error event", zap.Error(err))

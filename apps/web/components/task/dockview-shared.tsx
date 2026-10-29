@@ -249,6 +249,7 @@ function DiffViewerContent({
   panelId: string;
   params: Record<string, unknown>;
 }) {
+  const detailActive = usePanelActive(panelId);
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
@@ -271,6 +272,7 @@ function DiffViewerContent({
 
   return (
     <TaskChangesPanel
+      detailActive={detailActive}
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}

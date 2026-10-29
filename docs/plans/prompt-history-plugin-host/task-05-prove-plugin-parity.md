@@ -29,7 +29,7 @@ The replacement work orders preserve public behavior and provide new source-reco
 
 ## Scope
 
-Add a test-only external-style fixture plugin that implements prompt history through `@kandev/plugin-sdk` and the published Host APIs only. Use it to prove the prerequisite boundary; do not ship it as the production plugin or delete core code.
+Add a test-only external-style fixture plugin that implements prompt history through `@kdlbs/plugin-sdk` and the published Host APIs only. Use it to prove the prerequisite boundary; do not ship it as the production plugin or delete core code.
 
 ## Acceptance
 

@@ -209,6 +209,14 @@ func (r *sqliteRepository) initSchema() error {
 		FOREIGN KEY (mcp_server_id) REFERENCES mcp_server_definitions(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS task_session_mcp_exclusions (
+		workspace_id TEXT NOT NULL,
+		task_session_id TEXT NOT NULL,
+		mcp_server_id TEXT NOT NULL REFERENCES mcp_server_definitions(id) ON DELETE CASCADE,
+		PRIMARY KEY (workspace_id, task_session_id, mcp_server_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_session_mcp_exclusions_definition
+		ON task_session_mcp_exclusions(mcp_server_id);
 	CREATE TABLE IF NOT EXISTS mcp_task_session_apply_state (
 		task_session_id TEXT PRIMARY KEY,
 		desired_revision INTEGER NOT NULL DEFAULT 0,

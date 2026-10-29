@@ -63,6 +63,7 @@ async function scrollReview(page: Page, root: Locator, mobile: boolean, directio
 
 export function reviewViewedTogglingScenario(mobile: boolean) {
   test.setTimeout(120_000);
+  test.use({ trace: "retain-on-failure" });
   // @covers AC-UI-REVIEW-VIEWED-001.1, AC-UI-REVIEW-VIEWED-001.2, AC-UI-REVIEW-VIEWED-001.5
   test("keeps a file unchecked until scrolling back and passing it again", async ({
     testPage,
@@ -109,7 +110,11 @@ export function reviewViewedTogglingScenario(mobile: boolean) {
     git.createFile(TRAILING, "export const trailing = true;\n".repeat(80));
     git.stageFile(TARGET);
     git.stageFile(TRAILING);
-    await filesPublished;
+    const published = await filesPublished;
+    expect(Object.keys((published.payload.status as GitStatusData).files ?? {}).sort()).toEqual([
+      TARGET,
+      TRAILING,
+    ]);
     if (mobile) {
       await testPage
         .getByRole("navigation")

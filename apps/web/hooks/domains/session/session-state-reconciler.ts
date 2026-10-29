@@ -3,7 +3,7 @@ import { fetchTaskSessionConditional } from "@/lib/api";
 import { buildSessionModelsState } from "@/lib/state/slices/session-runtime/model-hydration";
 import type { AppState } from "@/lib/state/store";
 import { captureTaskSessionHydrationEpoch } from "@/lib/state/slices/session/hydration-epochs";
-import { isStaleSessionStateEvent } from "@/lib/ws/handlers/agent-session";
+import { isStaleSessionStateEvent } from "@/lib/session-state";
 
 const BUSY_SESSION_STATES = new Set(["STARTING", "RUNNING", "CREATED"]);
 const RECONCILE_POLL_INTERVAL_MS = 750;

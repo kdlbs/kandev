@@ -54,6 +54,12 @@ type StreamManager struct {
 	deliveryHealthProbeInterval    time.Duration
 	deliveryHealthProbeTimeout     time.Duration
 	deliveryHealthRecoveryCooldown time.Duration
+	runtimeStorageProbeInterval    time.Duration
+	runtimeStorageSlots            chan struct{}
+	runtimeStorageAdvisories       sync.Map
+	onRuntimeStorageProbe          func(context.Context, *AgentExecution, RuntimeStorageProbeResult)
+	onRuntimeStoragePressure       func(context.Context, *AgentExecution, RuntimeStoragePressure)
+	onRuntimeStorageDetached       func(*AgentExecution, *deliveryStreamAttachment)
 	deliveryAttachments            sync.Map
 	isExecutionCurrent             func(*AgentExecution) bool
 	onDeliveryReconciliationPhase  func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
@@ -194,6 +200,7 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler 
 		deliveryHealthProbeInterval:    defaultDeliveryHealthProbeInterval,
 		deliveryHealthProbeTimeout:     defaultDeliveryHealthProbeTimeout,
 		deliveryHealthRecoveryCooldown: defaultDeliveryHealthCooldown,
+		runtimeStorageSlots:            make(chan struct{}, defaultRuntimeStorageConcurrency),
 	}
 }
 
@@ -1124,6 +1131,9 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 
 		// Signal that workspace stream is ready
 		signalReady()
+		advisoryCtx, advisoryCancel := context.WithCancel(ctx)
+		sm.startRuntimeStorageAdvisoryWithContext(advisoryCtx, execution)
+		defer advisoryCancel()
 
 		// Wait for the stream to close. Also exits on Manager shutdown / Wait
 		// so the goroutine drains when the remote end keeps the connection

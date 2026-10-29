@@ -89,10 +89,15 @@ func (s *Service) ApplySyncedWorkflows(ctx context.Context, workspaceID string, 
 				continue
 			}
 			desired[key] = true
+			bindings, warning := s.preflightSyncProfiles(ctx, f.Path, synced[key], pw)
+			if warning != "" {
+				result.Warnings = append(result.Warnings, warning)
+				continue
+			}
 			if wf, ok := synced[key]; ok {
-				s.updateSyncedWorkflow(ctx, wf, pw, result)
+				s.updateSyncedWorkflow(ctx, wf, pw, result, bindings)
 			} else {
-				s.createSyncedWorkflow(ctx, workspaceID, pw, f.Path, result)
+				s.createSyncedWorkflow(ctx, workspaceID, pw, f.Path, result, bindings)
 			}
 		}
 	}
@@ -110,8 +115,8 @@ func (s *Service) ApplySyncedWorkflows(ctx context.Context, workspaceID string, 
 	return result, nil
 }
 
-func (s *Service) createSyncedWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable, path string, result *SyncApplyResult) {
-	wf, err := s.importSingleWorkflow(ctx, workspaceID, pw)
+func (s *Service) createSyncedWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable, path string, result *SyncApplyResult, bindings *syncProfileBindings) {
+	wf, err := s.importSingleWorkflowWithBindings(ctx, workspaceID, pw, bindings)
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s: failed to create workflow %q: %v", path, pw.Name, err))
 		return
@@ -135,7 +140,7 @@ func (s *Service) createSyncedWorkflow(ctx context.Context, workspaceID string, 
 // the definition are left untouched so a no-drift sync writes (and
 // broadcasts) nothing. The workflow is skipped with a warning when steps
 // can't be matched unambiguously or when a removed step still holds tasks.
-func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, result *SyncApplyResult) {
+func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, result *SyncApplyResult, bindings *syncProfileBindings) {
 	steps, err := s.repo.ListStepsByWorkflow(ctx, wf.ID)
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to list steps: %v", wf.Name, err))
@@ -161,7 +166,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	// untouched so the next sync can retry after the source is fixed.
 	desiredSteps := make([]*models.WorkflowStep, 0, len(pw.Steps))
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existingByName[sp.Name])
+		step := s.syncedStepWithBindings(wf.ID, sp, posToID, existingByName[sp.Name], bindings)
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err))
 			return
@@ -173,37 +178,18 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		return
 	}
 
-	changed, err := s.applyWorkflowFields(ctx, wf, pw)
+	changed, err := s.applyWorkflowFields(ctx, wf, pw, bindings)
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to update: %v", wf.Name, err))
 		return
 	}
-	for _, sp := range pw.Steps {
-		existing := existingByName[sp.Name]
-		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existing)
-		var rebinding bool
-		var oldProfileID, existingID string
-		var reviewRebindings []profileRebinding
-		if existing != nil {
-			step.CreatedAt = existing.CreatedAt
-			step.StageType = existing.StageType // not carried by the portable format
-			if stepMatchesDefinition(existing, step) {
-				continue
-			}
-			rebinding = existing.AgentProfileID != "" && existing.AgentProfileID != step.AgentProfileID
-			oldProfileID = existing.AgentProfileID
-			existingID = existing.ID
-			reviewRebindings = findReviewProfileRebindings(existing.Events, step.Events)
-			err = s.repo.UpdateStep(ctx, step)
-		} else {
-			err = s.repo.CreateStep(ctx, step)
-		}
+	for index, sp := range pw.Steps {
+		stepChanged, err := s.applySyncedStep(ctx, wf, desiredSteps[index], existingByName[sp.Name])
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to apply step %q: %v", wf.Name, sp.Name, err))
 			return
 		}
-		s.logStepProfileRebindings(wf, sp.Name, existingID, rebinding, oldProfileID, step.AgentProfileID, reviewRebindings)
-		changed = true
+		changed = changed || stepChanged
 	}
 	for _, st := range toDelete {
 		if err := s.DeleteStep(ctx, st.ID); err != nil {
@@ -215,6 +201,32 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	if changed {
 		result.Updated = append(result.Updated, wf.Name)
 	}
+}
+
+func (s *Service) applySyncedStep(ctx context.Context, wf *taskmodels.Workflow, step, existing *models.WorkflowStep) (bool, error) {
+	if existing == nil {
+		return true, s.repo.CreateStep(ctx, step)
+	}
+	step.CreatedAt = existing.CreatedAt
+	step.StageType = existing.StageType
+	if stepMatchesDefinition(existing, step) {
+		return false, nil
+	}
+	if err := s.repo.UpdateStep(ctx, step); err != nil {
+		return false, err
+	}
+	rebinding := existing.AgentProfileID != "" && existing.AgentProfileID != step.AgentProfileID
+	s.logStepProfileRebindings(wf, step.Name, existing.ID, rebinding, existing.AgentProfileID, step.AgentProfileID, findReviewProfileRebindings(existing.Events, step.Events))
+	return true, nil
+}
+
+func (s *Service) syncedStepWithBindings(workflowID string, sp models.StepPortable, positions map[int]string, existing *models.WorkflowStep, bindings *syncProfileBindings) *models.WorkflowStep {
+	if bindings == nil {
+		return s.stepFromPortableForSync(workflowID, sp, positions, existing)
+	}
+	step := s.stepFromPortableWithMatcherOptions(workflowID, sp, positions, nil, "", false, true)
+	bindings.applyStep(step, sp)
+	return step
 }
 
 func (s *Service) logStepProfileRebindings(wf *taskmodels.Workflow, stepName, stepID string, rebinding bool, oldProfileID, newProfileID string, reviewRebindings []profileRebinding) {
@@ -421,10 +433,14 @@ func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, 
 	return existingByName, toDelete, ""
 }
 
-func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable) (bool, error) {
+func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, bindings *syncProfileBindings) (bool, error) {
 	profileID := ""
-	if pw.AgentProfile != nil && s.matchProfile != nil {
-		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, wf.AgentProfileID)
+	if pw.AgentProfile != nil && (s.matchProfile != nil || s.lookupProfile != nil) {
+		if bindings != nil {
+			profileID = bindings.workflow
+		} else {
+			profileID = s.matchPortableProfile(pw.AgentProfile, wf.AgentProfileID)
+		}
 	}
 	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID {
 		return false, nil

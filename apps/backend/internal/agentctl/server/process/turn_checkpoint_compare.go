@@ -39,7 +39,46 @@ func (g *GitOperator) compareTurnCheckpointLocked(
 	if err != nil {
 		return turnchanges.CheckpointComparison{}, err
 	}
-	view, cleanup, err := g.newTurnCheckpointDiffView(ctx, end.TreeOID, hashAlgorithm)
+	if request.ComparisonVersion == turnchanges.ComparisonVersionLegacy {
+		return g.compareTurnCheckpointRaw(ctx, request, start, end)
+	}
+	if request.ComparisonVersion != turnchanges.ComparisonVersion2 {
+		return turnchanges.CheckpointComparison{}, turnCheckpointFailure(
+			turnchanges.ReasonHistoryUnsupported, errors.New("unsupported comparison version"))
+	}
+	selection, err := g.resolveTurnCheckpointComparison(ctx, start, end, hashAlgorithm)
+	if err != nil {
+		return turnchanges.CheckpointComparison{}, err
+	}
+	if selection.basis == turnchanges.ComparisonHistoryUnavailable {
+		return unavailableTurnCheckpointComparison(request, selection), nil
+	}
+	view, cleanup, err := g.newTurnCheckpointDiffView(ctx, selection.endTreeOID, hashAlgorithm)
+	if err != nil {
+		return turnchanges.CheckpointComparison{}, checkpointCompareFailure(err)
+	}
+	defer cleanup()
+	files, err := view.compareTurnCheckpointTrees(ctx, selection.startTreeOID)
+	if err != nil {
+		return turnchanges.CheckpointComparison{}, err
+	}
+	comparison := summarizeTurnCheckpointComparison(request, files)
+	comparison.ComparisonVersion = turnchanges.ComparisonVersion2
+	comparison.ComparisonBasis = selection.basis
+	comparison.EffectiveStartCommitOID = selection.startCommitOID
+	comparison.EffectiveStartTreeOID = selection.startTreeOID
+	comparison.EffectiveEndCommitOID = selection.endCommitOID
+	comparison.EffectiveEndTreeOID = selection.endTreeOID
+	comparison.ComparisonRef = selection.comparisonRef
+	return comparison, nil
+}
+
+func (g *GitOperator) compareTurnCheckpointRaw(
+	ctx context.Context,
+	request turnchanges.CompareRequest,
+	start, end turnchanges.CheckpointResult,
+) (turnchanges.CheckpointComparison, error) {
+	view, cleanup, err := g.newTurnCheckpointDiffView(ctx, end.TreeOID, request.HashAlgorithm)
 	if err != nil {
 		return turnchanges.CheckpointComparison{}, checkpointCompareFailure(err)
 	}
@@ -48,7 +87,29 @@ func (g *GitOperator) compareTurnCheckpointLocked(
 	if err != nil {
 		return turnchanges.CheckpointComparison{}, err
 	}
-	return summarizeTurnCheckpointComparison(request, files), nil
+	comparison := summarizeTurnCheckpointComparison(request, files)
+	comparison.ComparisonVersion = turnchanges.ComparisonVersionLegacy
+	comparison.ComparisonBasis = turnchanges.ComparisonLegacyRaw
+	comparison.EffectiveStartCommitOID = start.CommitOID
+	comparison.EffectiveStartTreeOID = start.TreeOID
+	comparison.EffectiveEndCommitOID = end.CommitOID
+	comparison.EffectiveEndTreeOID = end.TreeOID
+	return comparison, nil
+}
+
+func unavailableTurnCheckpointComparison(
+	request turnchanges.CompareRequest,
+	selection turnCheckpointComparisonSelection,
+) turnchanges.CheckpointComparison {
+	return turnchanges.CheckpointComparison{
+		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID,
+		HashAlgorithm: request.HashAlgorithm, StartCommitOID: request.StartCommitOID,
+		StartTreeOID: request.StartTreeOID, EndCommitOID: request.EndCommitOID, EndTreeOID: request.EndTreeOID,
+		Files: []turnchanges.CheckpointFile{}, Complete: false,
+		ComparisonVersion: turnchanges.ComparisonVersion2,
+		ComparisonBasis:   turnchanges.ComparisonHistoryUnavailable,
+		ComparisonReason:  selection.reason, Reason: selection.reason,
+	}
 }
 
 func (g *GitOperator) turnCheckpointPair(
@@ -91,10 +152,14 @@ func (g *GitOperator) checkpointResultForAcceptedOID(
 			turnchanges.ReasonUnsafeGitState, errors.New("accepted checkpoint commit and tree do not match"),
 		)
 	}
+	provenance, err := g.readTurnCheckpointProvenance(ctx, commitOID)
+	if err != nil {
+		return turnchanges.CheckpointResult{}, err
+	}
 	return turnchanges.CheckpointResult{
 		ChangeSetID: changeSetID, CheckoutID: checkoutID, Boundary: boundary,
 		CommitOID: commitOID, TreeOID: treeOID, HashAlgorithm: hashAlgorithm,
-		ReachabilityRef: turnCheckpointRef(changeSetID, checkoutID, boundary),
+		ReachabilityRef: turnCheckpointRef(changeSetID, checkoutID, boundary), Provenance: provenance,
 	}, nil
 }
 

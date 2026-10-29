@@ -101,7 +101,7 @@ Configuration Chat does not use repository selections. Its existing workspace pe
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
 
-Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
+Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. When you switch conversations or terminals, the selected tab is brought into view; you can scroll the tab row to browse others. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
@@ -112,7 +112,9 @@ instruction through their existing first-turn path. The new title appears on eve
 and survives reload. Configuration Chat and Quick Terminal are excluded. If you disable the setting,
 or rename the chat first, the provisional or user-selected title remains authoritative.
 
-Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
+Closing a real chat tab permanently deletes its conversation and hidden backing task data. By default, it also removes the associated worktree. If the worktree has local changes, select **Permanently discard tracked and untracked changes** to remove it, or select **Keep workspace files** to retain the files. There is no undo for the conversation or task.
+
+Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
 
 If **Send** stays disabled, complete these steps:
 
@@ -165,7 +167,11 @@ Utility calls run as ephemeral processes on the Kandev backend host. Kandev reso
 
 Turn on **Suggest next prompt** in **Settings > Task behavior > Conversation** to see the reply you are most likely to send next as dimmed text in the empty chat composer of a task or Quick Chat. Press **Tab** (or tap **Use reply** on a phone) to fill it in for editing, press your submit shortcut to send it as is, or press **Escape** to dismiss it. Typing hides the suggestion; clearing the composer shows it again until the next turn.
 
-Suggestions come only from agents with native support. Today that means sessions that run Claude Code, whether the Claude agent or a custom ACP agent that wraps Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache. Kandev detects Claude Code from the agent's ACP handshake, so the model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a Claude session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
+Suggestions come only from agents whose adapter establishes native support. Today the only implemented source is Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache.
+
+Kandev recognizes the official Claude ACP bridge it pins (`@agentclientprotocol/claude-agent-acp` version 0.81.2) when it reports the expected package identity and metadata shape. This includes a custom Kandev agent definition that launches that bridge. A bridge with any other name or version qualifies only when it explicitly declares the vendor extension `agentCapabilities._meta.claudeCode.promptSuggestions: true` and implements the matching suggestion options and raw-message forwarding. That declaration is a Kandev opt-in contract, not a standard ACP capability, and upstream bridges do not advertise it yet.
+
+The model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a supported session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
 
 Kandev never generates a suggestion of its own. For agents without native support, and for turns where Claude Code stays silent, the composer works as usual.
 
@@ -188,7 +194,7 @@ If the session is broken, choose **Restart session** in the Settings panel heade
 <details>
 <summary>Saved prompt details</summary>
 
-Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
+Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content. Use search to find prompts by name or saved content.
 
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
@@ -304,7 +310,7 @@ availability is unknown. The repository picker is also unavailable in that case.
 
 For an idle, non-archived task with a prepared workspace, **Files → + → Add repositories or folders** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Local sources stay linked to the established workspace root; remote executors clone repository sources in their executor workspace and require a cloneable origin for local Git rows. Host folders are unavailable remotely, while **Upload folder** remains a separate copy flow when supported. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
-The task **Files** panel browses, searches, opens, and edits task-worktree files. In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+The task **Files** panel browses, searches, opens, and edits task-worktree files. Directories appear before files, with numbered names in natural order (for example, `step2` before `step10`). In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
 
 On desktop and tablet, renaming or moving a file or its containing folder in **Files** keeps an open editor's unsaved text attached to the new path. Save writes that text to the renamed file. The editor's undo history may reset after a rename. If the destination is already open in a different editor, close that editor and retry. Renames made outside **Files** are not tracked by this behavior. The phone file viewer is read-only.
 

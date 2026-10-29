@@ -328,3 +328,9 @@ func (s *Service) QueueTaskAssignedRunForTest(
 ) error {
 	return s.queueTaskAssignedRun(ctx, taskID, agentProfileID, assignmentGeneration, false)
 }
+
+// SetTasklessPermissionRetryDelaysForTest shortens the waits between attempts
+// to answer a taskless permission request.
+func (s *Service) SetTasklessPermissionRetryDelaysForTest(delays []time.Duration) {
+	s.permissionRetryDelays = delays
+}

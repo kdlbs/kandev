@@ -33,5 +33,10 @@ func acceptedTurnCheckpointPair(t testing.TB, operator *GitOperator, changeSetID
 }
 
 func exportRequestForPair(request turnchanges.CompareRequest) turnchanges.ExportRequest {
-	return turnchanges.ExportRequest(request)
+	return turnchanges.ExportRequest{
+		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Repo: request.Repo,
+		HashAlgorithm: request.HashAlgorithm, StartCommitOID: request.StartCommitOID,
+		StartTreeOID: request.StartTreeOID, EndCommitOID: request.EndCommitOID, EndTreeOID: request.EndTreeOID,
+		ComparisonVersion: request.ComparisonVersion,
+	}
 }

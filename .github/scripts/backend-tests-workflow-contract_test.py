@@ -165,7 +165,8 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         for suite in ("settings", "persistence"):
             warmup = step_block(self.workflow, "Compile Windows " + suite + " test packages")
             self.assertIn("if: matrix.suite == '" + suite + "'", warmup)
-            self.assertIn("timeout-minutes: 10", warmup)
+            compile_budget = 20 if suite == "persistence" else 10
+            self.assertIn(f"timeout-minutes: {compile_budget}", warmup)
             self.assertIn("GOMAXPROCS: '2'", warmup)
             self.assertIn("GOMEMLIMIT: 2GiB", warmup)
             self.assertIn("go test -trimpath -tags fts5 -race -p=2 -run '^$' -count=1 -timeout=30s", warmup)
@@ -458,7 +459,10 @@ func TestSidebarQueryPoolMemoryPlateau(t *testing.T) {
 
     def test_ordinary_linux_shards_keep_the_ten_minute_package_budget(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
-        self.assertIn("-timeout=10m", test_step)
+        # The process package can approach the old 10m ceiling under race and
+        # coverage after additional delivery-storage tests land.
+        self.assertIn("-timeout=15m", test_step)
+        self.assertNotIn("-timeout=20m", test_step)
         self.assertNotIn("-timeout=120m", test_step)
 
     def test_base_image_mirrors_postgres_18_at_the_same_digest(self) -> None:

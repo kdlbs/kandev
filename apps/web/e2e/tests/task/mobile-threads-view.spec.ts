@@ -299,14 +299,34 @@ test.describe("Mobile Threads view", () => {
     const selectedIndex = columnIds.indexOf(tasks[2].id);
     expect(selectedIndex).toBeGreaterThanOrEqual(0);
     const hasNextThread = selectedIndex < columnIds.length - 1;
-    const neighborId = columnIds[selectedIndex + (hasNextThread ? 1 : -1)];
-    expect(neighborId).toBeTruthy();
-    if (hasNextThread) await swipeDeckLeft(testPage);
-    else await swipeDeckRight(testPage);
+    const scrollEnd = await board.evaluateHandle((element) => {
+      const state = { complete: false };
+      element.addEventListener(
+        "scrollend",
+        () => {
+          state.complete = true;
+        },
+        { once: true },
+      );
+      return state;
+    });
+    try {
+      if (hasNextThread) await swipeDeckLeft(testPage);
+      else await swipeDeckRight(testPage);
+      await expect.poll(() => scrollEnd.evaluate((state) => state.complete)).toBe(true);
+    } finally {
+      await scrollEnd.dispose();
+    }
+    const settledIndex = await board.evaluate((element) =>
+      Math.round(element.scrollLeft / element.clientWidth),
+    );
+    if (hasNextThread) expect(settledIndex).toBeGreaterThan(selectedIndex);
+    else expect(settledIndex).toBeLessThan(selectedIndex);
+    const settledTaskId = columnIds[settledIndex];
+    expect(settledTaskId).toBeTruthy();
+    const activeColumn = board.getByTestId(`thread-column-${settledTaskId}`);
     await expect(selected.getByTestId("session-chat")).toHaveCount(0);
-    await expect(
-      board.getByTestId(`thread-column-${neighborId}`).getByTestId("session-chat"),
-    ).toHaveCount(1);
+    await expect(activeColumn.getByTestId("session-chat")).toHaveCount(1);
     await expect(board.getByTestId("session-chat")).toHaveCount(1);
     await expect
       .poll(() =>
@@ -316,14 +336,12 @@ test.describe("Mobile Threads view", () => {
         }),
       )
       .toBeLessThanOrEqual(0.01);
-    const activeColumn = board.getByTestId(/^thread-column-/).filter({
-      has: testPage.getByTestId("session-chat"),
-    });
     await expectSwipeCue(testPage, activeColumn, 3);
     await testPage.setViewportSize({ width: 820, height: 1180 });
     await expect(testPage.getByTestId("thread-swipe-cue")).toHaveCount(0);
     await testPage.setViewportSize({ width: 360, height: 740 });
-    await expect(activeColumn).toHaveCount(1);
+    await expect(activeColumn.getByTestId("session-chat")).toHaveCount(1);
+    await expect(board.getByTestId("session-chat")).toHaveCount(1);
     await expectSwipeCue(testPage, activeColumn, 3);
   });
 

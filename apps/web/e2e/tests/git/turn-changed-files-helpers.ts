@@ -2,6 +2,8 @@ import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator } from "@playwright/test";
 import type { SessionPage } from "../../pages/session-page";
+import { seedTaskWithScenario } from "./diff-update-helpers";
+import { dwell } from "../../helpers/causal-waits";
 
 type TurnChangeHistoryResponse = {
   total: number;
@@ -13,6 +15,21 @@ type TurnChangeHistoryResponse = {
     reason?: string;
     terminal_at?: string | null;
     terminal_outcome?: string | null;
+    file_count?: number;
+    comparison_basis?: string;
+    overlap_intervals?: Array<{
+      change_set_id: string;
+      checkout_id: string;
+      started_at: string;
+      ended_at?: string;
+    }>;
+    repositories?: Array<{
+      id: string;
+      availability: string;
+      comparison_basis?: string;
+      export_state?: string;
+      content_complete?: boolean;
+    }>;
   }>;
 };
 
@@ -25,6 +42,17 @@ export async function enableTurnChangedFiles(apiClient: ApiClient): Promise<() =
     show_turn_changed_files: true,
   });
   expect(enabled.ok).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const current = await apiClient.rawRequest("GET", "/api/v1/user/settings");
+        if (!current.ok) return false;
+        return ((await current.json()) as { settings: { show_turn_changed_files?: boolean } })
+          .settings.show_turn_changed_files;
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
   return async () => {
     const restore = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       show_turn_changed_files: original ?? false,
@@ -153,4 +181,33 @@ export async function assertTurnCardMessageGap(card: Locator) {
 
   expect(gap).not.toBeNull();
   expect(gap!).toBeGreaterThanOrEqual(16);
+}
+
+export function seedTurnHistoryConflictTask(
+  testPage: Parameters<typeof seedUntrackedFileTask>[0],
+  apiClient: Parameters<typeof seedUntrackedFileTask>[1],
+  seedData: Parameters<typeof seedUntrackedFileTask>[2],
+) {
+  return seedTaskWithScenario(testPage, apiClient, seedData, {
+    title: "Turn History Conflict E2E",
+    scenarioCommand: "/e2e:turn-history-conflict-setup",
+    completionText: "turn-history-conflict-setup complete",
+  });
+}
+
+export async function reloadUntilTurnCard(
+  testPage: import("@playwright/test").Page,
+  session: SessionPage,
+  timeout = 20_000,
+) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    const card = session.activeChat().getByTestId("turn-changed-files-card").first();
+    if (await card.isVisible().catch(() => false)) return card;
+    await dwell(250, "unverified", "reload retry before the turn-change card is projected");
+  }
+  return session.activeChat().getByTestId("turn-changed-files-card").first();
 }

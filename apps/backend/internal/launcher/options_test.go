@@ -2,6 +2,20 @@ package launcher
 
 import "testing"
 
+func TestParseArgsVersionJSON(t *testing.T) {
+	for _, args := range [][]string{{"--version", "--json"}, {"--json", "-V"}} {
+		opts, err := parseArgs(args)
+		if err != nil || !opts.ShowVersion || !opts.VersionJSON {
+			t.Fatalf("parseArgs(%v) = %+v, %v", args, opts, err)
+		}
+	}
+	for _, args := range [][]string{{"--json"}, {"--json", "--help"}, {"run", "--json"}} {
+		if _, err := parseArgs(args); err == nil {
+			t.Fatalf("parseArgs(%v) accepted standalone JSON", args)
+		}
+	}
+}
+
 func TestParseArgsStartPortsAndHeadless(t *testing.T) {
 	opts, err := parseArgs([]string{"start", "--port", "1234", "--headless"})
 	if err != nil {

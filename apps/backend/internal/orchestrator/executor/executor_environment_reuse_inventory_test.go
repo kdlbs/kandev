@@ -84,6 +84,89 @@ func TestValidateReuseEnvironmentInventory_MismatchedRowsStillRefused(t *testing
 	}
 }
 
+func TestCheckoutBranchCanonicalSlotIgnoresDeletedHistoricalHolder(t *testing.T) {
+	active := &models.TaskEnvironmentRepo{
+		ID: "active-slot", RepositoryID: "repo-1", BranchSlug: "assigned-slot",
+		WorktreeID: "active-worktree", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}
+	deleted := *active
+	deleted.ID = "deleted-slot"
+	deleted.BranchSlug = "historical-slot"
+	deleted.WorktreeID = "deleted-worktree"
+	deleted.Status = taskEnvironmentRepoStatusDeleted
+
+	slug, ok := checkoutBranchCanonicalSlot(
+		RepoSpec{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}, nil,
+		[]*models.TaskEnvironmentRepo{active, &deleted},
+	)
+	if !ok || slug != active.BranchSlug {
+		t.Fatalf("checkoutBranchCanonicalSlot() = %q, %t; want active slot %q", slug, ok, active.BranchSlug)
+	}
+}
+
+func TestAdoptCheckoutBranchCanonicalSlotsForTopLevelLaunch(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{{
+		ID: "assigned-slot", RepositoryID: "repo-1", BranchSlug: "retained-slot",
+		WorktreeID: "worktree-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}}
+	req := &LaunchAgentRequest{UseWorktree: true, RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}
+
+	if !adoptCheckoutBranchCanonicalSlots(req, rows) {
+		t.Fatal("adoptCheckoutBranchCanonicalSlots() = false, want top-level slot adoption")
+	}
+	if req.BranchIdentitySlug != "retained-slot" {
+		t.Fatalf("top-level branch identity = %q, want retained-slot", req.BranchIdentitySlug)
+	}
+}
+
+func TestAdoptCheckoutBranchCanonicalSlotsForMultipleRepositories(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{
+		{ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "slot-one", WorktreeID: "wt-1", WorktreeBranch: "feature/one", Status: taskEnvironmentRepoStatusActive},
+		{ID: "slot-2", RepositoryID: "repo-2", BranchSlug: "slot-two", WorktreeID: "wt-2", WorktreeBranch: "feature/two", Status: taskEnvironmentRepoStatusActive},
+	}
+	req := &LaunchAgentRequest{UseWorktree: true, Repositories: []RepoSpec{
+		{RepositoryID: "repo-1", CheckoutBranch: "feature/one"},
+		{RepositoryID: "repo-2", CheckoutBranch: "feature/two"},
+	}}
+
+	if !adoptCheckoutBranchCanonicalSlots(req, rows) {
+		t.Fatal("adoptCheckoutBranchCanonicalSlots() = false, want multi-repository slot adoption")
+	}
+	if req.Repositories[0].BranchIdentitySlug != "slot-one" || req.Repositories[1].BranchIdentitySlug != "slot-two" {
+		t.Fatalf("multi-repository branch identities = %q, %q; want slot-one, slot-two", req.Repositories[0].BranchIdentitySlug, req.Repositories[1].BranchIdentitySlug)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotRejectsAmbiguousActiveHolders(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{
+		{ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "slot-one", WorktreeID: "wt-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive},
+		{ID: "slot-2", RepositoryID: "repo-1", BranchSlug: "slot-two", WorktreeID: "wt-2", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive},
+	}
+	spec := RepoSpec{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}
+
+	if slug, ok := checkoutBranchCanonicalSlot(spec, nil, rows); ok || slug != "" {
+		t.Fatalf("ambiguous checkout slot = %q, %t; want no adoption", slug, ok)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotRejectsSiblingCollision(t *testing.T) {
+	row := &models.TaskEnvironmentRepo{
+		ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "retained-slot",
+		WorktreeID: "wt-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}
+	req := &LaunchAgentRequest{UseWorktree: true, Repositories: []RepoSpec{
+		{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"},
+		{RepositoryID: "repo-1", BranchIdentitySlug: "retained-slot"},
+	}}
+
+	if adoptCheckoutBranchCanonicalSlots(req, []*models.TaskEnvironmentRepo{row}) {
+		t.Fatal("sibling selection of the same canonical row must prevent slot adoption")
+	}
+	if req.Repositories[0].BranchIdentitySlug != "" {
+		t.Fatalf("ambiguous sibling launch changed branch identity to %q", req.Repositories[0].BranchIdentitySlug)
+	}
+}
+
 // TestValidateReuseEnvironmentInventory_StagingPy3MismatchReproducesFailClosedError
 // reproduces the exact fail-closed error observed in the field for task
 // 96cfb14c-62f4-4048-bc03-813f1f123875 / session be3a413d-0891-4982-a563-b631028c36c6

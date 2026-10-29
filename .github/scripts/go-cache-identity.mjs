@@ -131,7 +131,12 @@ function main() {
       saveMode: process.env.CACHE_SAVE_MODE ?? "all",
       day: new Date().toISOString().slice(0, 10),
       runner: `${required(process.env.RUNNER_OS)}-${required(process.env.RUNNER_ARCH)}`,
-      dependencies: filesHash(["apps/backend/go.mod", "apps/backend/go.sum"]),
+      dependencies: filesHash([
+        "apps/backend/go.mod",
+        "apps/backend/go.sum",
+        "pluginsdk/go.mod",
+        "pluginsdk/go.sum",
+      ]),
       recipe: filesHash([
         ".github/docker/ci-base/Dockerfile",
         ".github/actions/cache-go/action.yml",

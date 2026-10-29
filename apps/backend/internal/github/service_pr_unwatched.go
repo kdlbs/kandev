@@ -273,7 +273,7 @@ func (s *Service) fetchUnwatchedTaskPRs(
 }
 
 // batchedUnwatchedFetch runs the batched query under the same service-level
-// singleflight the watch path uses (see fetchBatchedWatchStatuses). Without it
+// singleflight the watch path uses (see fetchBatchedNumberedPhase). Without it
 // the on-demand sync, the workspace background refresh, and a second tab all
 // issue their own identical GraphQL call — the storm that singleflight exists
 // to damp. Keyed on the sorted ref set so equivalent callers share one flight,

@@ -43,6 +43,7 @@ import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { HistoricalTurnDiffViewer } from "./historical-turn-diff-viewer";
 
 type TaskChangesPanelProps = {
+  detailActive?: boolean;
   mode?: "all" | "file";
   filePath?: string;
   fileRepositoryName?: string;
@@ -529,6 +530,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel(props: TaskChangesPanelP
     return (
       <HistoricalTurnDiffViewer
         target={props.selectedDiff.historical}
+        detailActive={props.detailActive}
         onClose={props.onClearSelected}
       />
     );

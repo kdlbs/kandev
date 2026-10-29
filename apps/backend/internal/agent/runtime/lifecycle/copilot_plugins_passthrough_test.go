@@ -11,8 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 )
 
-func TestCopilotPluginPassthrough(t *testing.T) {
-	_, configDir, runner := copilotPluginFixture(t)
+func TestCopilotPluginSupportedPassthroughPreparation(t *testing.T) {
+	root, configDir, runner := copilotPluginFixture(t)
 	profile := copilotLaunchProfile()
 	mgr := newCopilotLifecycleManager(t, profile, &copilotSelectionReader{version: "1.0.104"})
 	mgr.SetCopilotPluginRunner(runner)
@@ -36,13 +36,19 @@ func TestCopilotPluginPassthrough(t *testing.T) {
 
 	cmd := passthroughCommand{Command: base.With().Flag("--continue").Build()}
 	env := map[string]string{"COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")}
-	err = mgr.applyPassthroughCopilotPlugins(context.Background(), copilotExecution("profile-1"), profile, &cmd, env)
-	var pluginErr *copilotplugins.Error
-	if !errors.As(err, &pluginErr) || pluginErr.Reason != copilotplugins.ReasonPolicyUnverified {
-		t.Fatalf("passthrough policy error = %#v", err)
+	execution := copilotExecution(t, "profile-1")
+	err = mgr.applyPassthroughCopilotPlugins(context.Background(), execution, profile, &cmd, env)
+	if err != nil {
+		t.Fatalf("applyPassthroughCopilotPlugins: %v", err)
 	}
-	if strings.Contains(strings.Join(cmd.Args(), " "), "--plugin-dir") {
-		t.Fatalf("policy-unqualified passthrough mounted plugins: %#v", cmd.Args())
+	if !containsSequence(cmd.Args(), "--plugin-dir", canonicalCopilotPluginRootForTest(t, root)) {
+		t.Fatalf("passthrough argv = %#v, want a separate plugin directory argument", cmd.Args())
+	}
+	if len(runner.calls) != 1 || runner.dirs[0] != execution.WorkspacePath {
+		t.Fatalf("inventory calls=%d workdirs=%#v, want one call in %q", len(runner.calls), runner.dirs, execution.WorkspacePath)
+	}
+	if !containsSequence(runner.calls[0], "@github/copilot@1.0.104", "plugin", "list") {
+		t.Fatalf("inventory argv = %#v, want selected managed runtime", runner.calls[0])
 	}
 }
 
@@ -55,9 +61,8 @@ func TestCopilotPluginPassthroughRejectsWrapper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("copilotPassthroughBaseCommand: %v", err)
 	}
-	execution := copilotExecution("profile-1")
-	execution.LaunchWrapper = copilotWrapperForTest()
-	cmd := passthroughCommand{Command: base}
+	execution := copilotExecution(t, "profile-1")
+	cmd := passthroughCommand{Command: base, wrapper: copilotWrapperForTest()}
 	err = mgr.applyPassthroughCopilotPlugins(context.Background(), execution, profile, &cmd,
 		map[string]string{"COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")})
 	var pluginErr *copilotplugins.Error

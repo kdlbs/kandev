@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"time"
 
@@ -109,7 +110,13 @@ var (
 )
 
 func samePortableProfile(a, b *models.AgentProfilePortable) bool {
-	return a != nil && b != nil && a.AgentName == b.AgentName && a.Model == b.Model && a.Mode == b.Mode
+	if a == nil || b == nil || a.AgentName != b.AgentName || a.Model != b.Model || a.Mode != b.Mode {
+		return false
+	}
+	if a.ConfigOptions == nil || b.ConfigOptions == nil {
+		return a.ConfigOptions == nil && b.ConfigOptions == nil
+	}
+	return maps.Equal(*a.ConfigOptions, *b.ConfigOptions)
 }
 
 func importProfileKey(workflowIndex, stepPosition int) string {
@@ -185,7 +192,7 @@ func (s *Service) importProfileCandidates(ctx context.Context) ([]ImportProfileC
 }
 
 func (s *Service) matchImportProfileSteps(preview *ImportProfilePreview) {
-	if s.matchProfile == nil {
+	if s.matchProfile == nil && s.lookupProfile == nil {
 		return
 	}
 	byID := make(map[string]ImportProfileCandidate, len(preview.Profiles))
@@ -194,7 +201,7 @@ func (s *Service) matchImportProfileSteps(preview *ImportProfilePreview) {
 	}
 	for index := range preview.Steps {
 		requested := preview.Steps[index].RequestedProfile
-		id := s.matchProfile(requested.AgentName, requested.Model, requested.Mode, "")
+		id := s.matchPortableProfile(&requested, "")
 		profile, ok := byID[id]
 		if !ok {
 			continue
@@ -241,7 +248,7 @@ func (s *Service) prepareImportedWorkflow(
 	steps := make([]*models.WorkflowStep, 0, len(pw.Steps))
 	for _, sp := range pw.Steps {
 		step := s.stepFromPortableWithMatcherOptions(
-			"pending-workflow", sp, posToID, s.matchProfile, "", false,
+			"pending-workflow", sp, posToID, s.matchProfile, "", false, false,
 		)
 		if profileID := directProfileIDs[sp.Position]; profileID != "" {
 			step.AgentProfileID = profileID
@@ -259,13 +266,8 @@ func (s *Service) prepareImportedWorkflow(
 	}
 
 	workflowProfileID := ""
-	if pw.AgentProfile != nil && s.matchProfile != nil {
-		workflowProfileID = s.matchProfile(
-			pw.AgentProfile.AgentName,
-			pw.AgentProfile.Model,
-			pw.AgentProfile.Mode,
-			"",
-		)
+	if pw.AgentProfile != nil && (s.matchProfile != nil || s.lookupProfile != nil) {
+		workflowProfileID = s.matchPortableProfile(pw.AgentProfile, "")
 	}
 	return preparedImportedWorkflow{
 		portable:          pw,

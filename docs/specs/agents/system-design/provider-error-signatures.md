@@ -12,8 +12,10 @@ requirements:
 
 The Agents system owns provider-error classification. This design describes
 how the provider rule table separates provider limit signatures from agent
-prose. It does not change rule order, confidence, classification flags, the
-provider-neutral rules, or how dynamic routing acts on a classified failure.
+prose. It preserves existing rule order, confidence, classification flags,
+unrelated provider-neutral rules, and how dynamic routing acts on a classified
+failure. The bounded additions below add exact signatures while preserving
+the established higher-priority signals and sanitized excerpt contract.
 
 ## Requirement mapping
 
@@ -60,9 +62,33 @@ active (paid) Claude [Pro|Max|Team|Enterprise] subscription", "subscription
 expired / is required / is inactive / not active", and "no active
 subscription".
 
-Rule order and confidence are unchanged, so a provider signature that matched
-before still yields the same code, confidence, and flags. Text that matched
-only through a topic word now falls through to the next rule, the
+Additional bounded signatures:
+
+- OpenCode's unlabelled opening `free usage limit reached` line is an
+  OpenCode-scoped quota rule. The label-wrapped form is outside this follow-up
+  and remains separate catalogue work.
+- OpenCode daily rate-limit wording (`free-models-per-day` and
+  `limit_rpd/<model>`) is matched against raw diagnostic text only because the
+  shared sanitizer masks its distinguishing token. `RawExcerpt` remains the
+  sanitized excerpt, and existing structured, payment, credit, and quota
+  precedence is preserved.
+  At the shared ACP message projection, recognized daily reasons that would be
+  redacted are reduced to fixed public labels before credential redaction.
+  Opaque suffixes are discarded; already-safe text and its complete diagnostic
+  identity remain unchanged. The JSON envelope carries the sanitized message
+  through the existing fields, so the routing reader can retain the specific
+  rule without receiving raw error Data or a new wire field.
+- OpenCode Zen's opening `Rate limit exceeded. Please try again later` is a
+  generic rate limit; it carries no inferred reset period.
+- A labeled opening JSON envelope containing the exact field
+  `"error_type":"provider_unavailable"` is a shared provider-neutral
+  signature, independent of field order. The existing optional Agent encountered
+  an error status prefix is preserved. Bare JSON and quoted prose remain
+  unmatched by this rule.
+
+Previously matching higher-priority signatures retain their precedence, code,
+confidence, and flags. Text that matched only through a topic word falls
+through to the next rule, the
 provider-neutral rules, or the phase default.
 
 ## Observability

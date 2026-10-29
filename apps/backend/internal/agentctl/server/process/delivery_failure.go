@@ -40,6 +40,7 @@ func (m *Manager) recordDeliveryWriteFailure(err error, update adapter.AgentEven
 	revision := m.deliveryFailureRevision.Add(1)
 	snapshot := &agenttypes.DeliveryFailureSnapshot{
 		Reason:            classifyDeliveryFailure(err),
+		Storage:           streams.DeliveryStorageDiagnosticFromError(err),
 		ProcessGeneration: m.ProcessGeneration(),
 		SessionID:         sessionID,
 		IncarnationID:     incarnationID,
@@ -163,6 +164,7 @@ func (m *Manager) drainAfterDeliveryFailure(
 }
 
 func (m *Manager) commitDrainedTerminal(update adapter.AgentEvent) bool {
+	update = m.attachDeliveryFailureStorage(update)
 	persisted, err := m.persistDeliveryEvent(update)
 	if err != nil {
 		m.logger.Error("failed to commit the actual terminal after delivery failure",
@@ -176,4 +178,22 @@ func (m *Manager) commitDrainedTerminal(update adapter.AgentEvent) bool {
 		zap.String("submission_id", update.DeliverySubmissionID),
 		zap.Uint64("sequence", persisted.DeliverySequence))
 	return true
+}
+
+// attachDeliveryFailureStorage carries the matching typed storage cause onto
+// a terminal committed after a failed write. It never changes the outcome or
+// clears the failure early.
+func (m *Manager) attachDeliveryFailureStorage(update adapter.AgentEvent) adapter.AgentEvent {
+	m.deliveryActiveMu.RLock()
+	failure := m.deliveryHealth.Failure
+	m.deliveryActiveMu.RUnlock()
+	if update.Storage != nil || failure == nil || failure.Storage == nil {
+		return update
+	}
+	if failure.SubmissionID != "" && update.DeliverySubmissionID != "" &&
+		failure.SubmissionID != update.DeliverySubmissionID {
+		return update
+	}
+	update.Storage = failure.Storage
+	return update
 }

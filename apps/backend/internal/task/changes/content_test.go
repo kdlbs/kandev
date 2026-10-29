@@ -59,7 +59,7 @@ func TestContentServiceReturnsStorageCompletenessAndPersistsFileSummaries(t *tes
 	}
 	if len(repository.files) != 1 || repository.files[0].File.Path != "src/large.go" ||
 		repository.files[0].File.OldPath == nil || *repository.files[0].File.OldPath != "src/old.go" ||
-		repository.files[0].File.ContentAvailability != models.TurnChangeAvailabilityUnavailable {
+		repository.files[0].File.ContentAvailability != models.TurnChangeAvailabilityPending {
 		t.Fatalf("stored comparison summary = %+v", repository.files)
 	}
 	repository.files = nil

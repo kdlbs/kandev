@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
-import type { PluginManagedConversationInstance } from "@kandev/plugin-sdk";
+import type { PluginManagedConversationInstance } from "@kdlbs/plugin-sdk";
 
 export function WorkspaceAgentChatInstancePicker({
   instances,

@@ -3059,6 +3059,14 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution) (string, error) {
+	return m.configureAndStartAgentWithPreparedArgs(ctx, execution, nil)
+}
+
+func (m *Manager) configureAndStartAgentWithPreparedArgs(
+	ctx context.Context,
+	execution *AgentExecution,
+	preparedArgs []string,
+) (string, error) {
 	runtimeSnapshot := execution.RuntimeEnvironment()
 	metadata := execution.MetadataSnapshot()
 	metadataEnv := runtimeEnvFromMetadata(metadata)
@@ -3103,10 +3111,16 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
-	agentArgs, err := m.prepareCopilotPluginArgs(ctx, execution, configureEnv, execution.AgentArgs)
-	if err != nil {
-		m.updateExecutionError(execution.ID, "failed to prepare copilot profile plugins: "+err.Error())
-		return "", err
+	agentArgs := preparedArgs
+	if agentArgs == nil {
+		var err error
+		agentArgs, err = m.prepareCopilotPluginArgs(ctx, execution, configureEnv, execution.AgentArgs)
+		if err != nil {
+			m.updateExecutionError(execution.ID, "failed to prepare copilot profile plugins: "+err.Error())
+			return "", err
+		}
+	} else {
+		agentArgs = append([]string{}, preparedArgs...)
 	}
 
 	// Starting with stale agent configuration could expose an old credential

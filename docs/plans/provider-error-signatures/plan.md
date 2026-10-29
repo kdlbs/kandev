@@ -20,20 +20,29 @@ another session's error, for example a coordinator reporting that a child hit
 "Rate limit exceeded", was classified as the reporting agent's own provider
 limit and suspended a healthy account.
 
-One work order replaces the topic-word patterns with provider error
-signatures. See [task 01](task-01-match-provider-signatures.md).
+The original [task 01](task-01-match-provider-signatures.md) replaced the
+topic-word patterns with provider error signatures. A bounded follow-up now
+([task 02](task-02-provider-catalogue-followup.md)) covers remaining provider
+text forms and one labeled JSON error envelope; it
+does not reopen task 01's completed prose-safety change.
 
 ## Scope
 
 ### In scope
 
 - The provider rule patterns in `apps/backend/internal/agent/runtime/routingerr/rules.go`.
-- Table tests for prose that must not classify and signatures that must.
+- Narrow coverage of the remaining signatures, using existing tests and
+  disposable overlays outside the repository's automatic test collection.
+- The `provider-neutral` labeled JSON signature in
+  `apps/backend/internal/agent/runtime/routingerr/provider_neutral_rules.go`.
+- Passing raw diagnostic text to the provider matcher only for explicitly
+  marked signatures; the stored `RawExcerpt` remains sanitized.
 
 ### Out of scope
 
-- Rule order, confidence, and classification flags.
-- Provider-neutral and runtime-environment rules.
+- Changes to prior rule order, confidence, or classification flags; new rules
+  retain established higher-priority matches.
+- Unrelated provider-neutral and all runtime-environment rules.
 - How classified failures are attributed or acted on by dynamic routing.
 
 ## Verification
@@ -45,3 +54,14 @@ signatures. See [task 01](task-01-match-provider-signatures.md).
   packages on the base revision.
 - `golangci-lint run ./internal/agent/runtime/routingerr/...`
 - `make -C apps/backend build`
+
+## Bounded catalogue follow-up
+
+Add only the remaining OpenCode signatures: unlabelled `free usage limit
+reached`, raw-text daily reasons `free-models-per-day` and `limit_rpd/<model>`,
+and the generic Zen retry-later rate-limit wording. Add the shared labeled JSON
+`error_type=provider_unavailable` opening signature. Keep provider-specific
+scope, line-opening evidence, sanitized excerpts, typed/normalized precedence,
+and existing credit/payment/quota ordering. Do not duplicate the already
+submitted shared catalogue or context-length work. The original-source reproduction and focused candidate race result are recorded
+in task 02; hosted CI and combined unmerged-source validation remain separate.

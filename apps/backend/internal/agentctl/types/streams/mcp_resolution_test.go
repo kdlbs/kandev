@@ -25,3 +25,13 @@ func TestMCPResolutionProjectionIsBoundedAndFrozen(t *testing.T) {
 		t.Fatal("unbounded identity or unknown reason was accepted")
 	}
 }
+
+// @covers AC-AGENTS-SESSION-MCP-EXCLUSIONS-002.6
+func TestMCPResolutionSessionExclusionEvidence(t *testing.T) {
+	entries := []MCPResolutionEntry{{RuntimeName: "docs", DefinitionID: "definition", ReasonCode: "session_excluded", Origins: []MCPSelectionOrigin{{Scope: "repository", WorkspaceID: "workspace", OwnerID: "repo"}}}}
+	frozen := MCPResolutionFromContext(WithMCPResolution(context.Background(), entries))
+	evidence := MCPResolutionEvidence("attempt", frozen, time.Now())
+	if len(evidence) != 1 || evidence[0].ReasonCode != "session_excluded" || evidence[0].Kind != MCPAttachmentEvidenceFiltered || len(evidence[0].Origins) != 1 {
+		t.Fatalf("session exclusion evidence was lost: %#v", evidence)
+	}
+}

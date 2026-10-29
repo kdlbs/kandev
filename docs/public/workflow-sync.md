@@ -93,7 +93,7 @@ Saving the configuration clears its retry and suspension schedule. **Sync now** 
 
 Sync reads only immediate files in the configured directory. It does not recurse. Extensions are case-insensitive: `.yml` and `.yaml` use YAML decoding, while `.json` uses JSON decoding; other files and directory entries are ignored. Paths are processed in sorted order.
 
-Every file must use the version 1 or version 2 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). New exports use version 2, which carries explicit completion booleans and supports explicit session targets; version 1 remains accepted for compatibility. A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
+Every file must use a version 1, 2, or 3 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). Version 3 carries profile options; versions 1 and 2 remain supported. A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
 
 ```yaml
 version: 2
@@ -135,6 +135,7 @@ These rules matter when editing definitions:
 - Renaming or moving a workflow definition changes its `(source path, name)` key. Kandev creates the new workflow and treats the old one as removed. If the old workflow still has tasks, both remain and a warning explains why.
 - A removed step is deleted only when it has no tasks. A removed workflow is deleted only when the entire workflow has no tasks.
 - Duplicate step names in either the desired definition or the existing synced workflow make name matching unsafe; Kandev skips that workflow update and warns.
+- A missing or ambiguous profile reference skips the affected workflow and reports a warning. Correct the source descriptor or local profiles and sync again. Other workflows continue. Version 3 can distinguish profiles by configuration options; older files do not constrain those options.
 - Manual workflows are never matched, updated, or removed by sync, even when their name is identical.
 - Synced workflows are read-only in normal workflow mutation paths. Edit the repository and sync again. Every run performs a full reconciliation, so it also repairs drift; the stored content hash is for status/observability, not a skip condition.
 

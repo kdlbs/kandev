@@ -71,3 +71,24 @@ revision. Desktop E2E passed (1); the mobile spec passed (3), without retries.
 The full web suite passed (3,113 files, 28,285 tests, 4 skipped); the added
 error-recovery test passed in the subsequent focused run. Lint, typecheck,
 and specification validation passed.
+
+### SDK branch integration (2026-10-27)
+
+Combine reactive WebSocket client ownership with the branch's background-only
+refresh and post-await consumer guards. Client installation or replacement
+while connection status stays connected must release the old lease, acquire
+the new lease, and reconcile after its readiness acknowledgment. A real-store
+regression fails with the previous singleton-only lookup (zero subscriptions)
+and covers installation, replacement, revision refresh and balanced release.
+Retain the incoming readiness/reconnect cases, existing session-switch guards,
+active-detail gating and historical-viewer visibility propagation. Remove
+only duplicate prop declarations introduced by automatic merge. No read demand
+or product interaction changes are intended. Fresh combined tests and builds
+are required before delivery.
+
+The merged 125-test selection, full typecheck and scoped lint pass. The phone
+historical-capture case passes on a fresh combined build with retries disabled.
+Desktop integration and fresh current-head CI remain delivery gates.
+
+Desktop historical-capture validation also passes against the combined source
+with retries disabled. Fresh remote CI remains the delivery gate.

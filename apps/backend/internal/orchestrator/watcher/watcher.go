@@ -75,12 +75,13 @@ type AgentEventData struct {
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
-	DynamicRouteAttempt         bool   `json:"dynamic_route_attempt,omitempty"`
-	EvidenceKnown               bool   `json:"evidence_known,omitempty"`
-	OutputObserved              bool   `json:"output_observed,omitempty"`
-	EffectObserved              bool   `json:"effect_observed,omitempty"`
-	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
-	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
+	DynamicRouteAttempt         bool                      `json:"dynamic_route_attempt,omitempty"`
+	EvidenceKnown               bool                      `json:"evidence_known,omitempty"`
+	OutputObserved              bool                      `json:"output_observed,omitempty"`
+	EffectObserved              bool                      `json:"effect_observed,omitempty"`
+	ProviderDiagnosticCandidate bool                      `json:"provider_diagnostic_candidate,omitempty"`
+	ProviderDiagnosticText      string                    `json:"provider_diagnostic_text,omitempty"`
+	Storage                     *models.AgentErrorStorage `json:"storage,omitempty"`
 	// UserInitiated marks a failure event raised by an explicit user action
 	// (cancelling the transient retry loop) rather than the agent itself
 	// failing. Set only at CancelTransientRetry's call site; every other
@@ -108,9 +109,12 @@ type ACPSessionEventData struct {
 
 // PermissionRequestData contains data from permission_request events
 type PermissionRequestData struct {
-	TaskID        string                   `json:"task_id"`
-	TaskSessionID string                   `json:"session_id"`
-	AgentID       string                   `json:"agent_id"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	// OwnerKind is "run" for a run-owned Office execution, which Office
+	// answers; the task permission path ignores it.
+	OwnerKind     string                   `json:"owner_kind,omitempty"`
 	RequestID     string                   `json:"request_id"`
 	PendingID     string                   `json:"pending_id"`
 	ToolCallID    string                   `json:"tool_call_id"`
@@ -537,6 +541,7 @@ func (w *Watcher) createAgentEventHandler(handler func(ctx context.Context, data
 			return nil // Don't return error to continue processing other events
 		}
 
+		data = withDeliveryStorageCause(data)
 		w.logger.Debug("Handling agent event",
 			zap.String("event_type", event.Type),
 			zap.String("task_id", data.TaskID),

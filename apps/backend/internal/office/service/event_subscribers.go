@@ -319,6 +319,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.OfficeCommentCreated, s.handleCommentCreated},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
 		{events.AgentReady, maybeAsync(s.handleTasklessAgentReady)},
+		{events.BuildPermissionRequestWildcardSubject(), maybeAsync(s.handleTasklessPermissionRequest)},
 		// AgentStopped fires when StopAgent is called (e.g. office
 		// fire-and-forget turn-complete teardown). Same handler — both
 		// signal "the agent is no longer running on this task and the

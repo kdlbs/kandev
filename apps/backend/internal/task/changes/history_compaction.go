@@ -253,30 +253,40 @@ func (s *HistoryService) cleanupOwnedRefs(ctx context.Context, result *HistoryCl
 		return err
 	}
 	var failures []error
-	sourceIDs := make(map[string]struct{})
-	clearIDs := make([]string, 0)
+	seen := make(map[string]struct{})
 	for page := 0; page < 50; page++ {
 		rows, err := s.repository.ListExpiredTurnHistoryRepositories(ctx, 100)
 		if err != nil {
 			return err
 		}
-		if len(rows) == 0 {
+		pending := make([]*models.TurnRepositoryChangeSet, 0, len(rows))
+		for _, row := range rows {
+			if row == nil {
+				continue
+			}
+			if _, done := seen[row.ID]; done {
+				continue
+			}
+			pending = append(pending, row)
+		}
+		if len(pending) == 0 {
 			break
 		}
-		progress, pageFailures, pageClearIDs := s.cleanupExpiredRefPage(ctx, rows, result, sourceIDs)
+		sourceIDs := make(map[string]struct{})
+		progress, pageFailures, clearIDs := s.cleanupExpiredRefPage(ctx, pending, result, sourceIDs)
 		failures = append(failures, pageFailures...)
-		clearIDs = append(clearIDs, pageClearIDs...)
 		if progress == 0 {
 			break
 		}
-	}
-	if reclaimErr := s.reclaimExpiredSources(ctx, result, sourceIDs); reclaimErr != nil {
-		return errors.Join(append(failures, reclaimErr)...)
-	}
-	for _, id := range clearIDs {
-		if err := s.repository.ClearTurnRepositoryPreservationReceipt(ctx, id); err != nil {
-			failures = append(failures, err)
-			result.ArchiveFailures++
+		if reclaimErr := s.reclaimExpiredSources(ctx, result, sourceIDs); reclaimErr != nil {
+			return errors.Join(append(failures, reclaimErr)...)
+		}
+		for _, id := range clearIDs {
+			seen[id] = struct{}{}
+			if err := s.repository.ClearTurnRepositoryPreservationReceipt(ctx, id); err != nil {
+				failures = append(failures, err)
+				result.ArchiveFailures++
+			}
 		}
 	}
 	return errors.Join(failures...)

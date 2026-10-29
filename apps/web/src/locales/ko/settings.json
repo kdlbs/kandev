@@ -1013,7 +1013,7 @@
   "mcpSessionStateAppliedDescription": "저장된 설정이 이 에이전트에 적용되었습니다. 연결 상태는 연결 탭에서 확인하세요.",
   "mcpSessionStatePendingDescription": "현재 설정을 계속 사용합니다. 에이전트가 유휴 상태가 되면 저장된 변경 사항이 적용됩니다.",
   "mcpSessionStateDeferredDescription": "현재 설정을 계속 사용합니다. 에이전트가 다시 시작되면 저장된 변경 사항이 적용됩니다.",
-  "mcpSessionStateFailedDescription": "이전 설정을 계속 사용합니다. 지금 다시 시도하거나 다음 에이전트 시작 시 변경 사항을 적용하세요.",
+  "mcpSessionStateFailedDescription": "마지막으로 수락된 설정은 비교를 위해 유지됩니다. 지금 다시 시도하거나 다음 에이전트 시작 시 변경 사항을 적용하세요.",
   "mcpSessionRetry": "MCP 적용 다시 시도",
   "deleting": "삭제 중...",
   "mcpSessionAdditions": "이 세션에 추가",
@@ -1105,5 +1105,16 @@
   "mcpAssignmentChooseTask": "기존 작업 선택",
   "mcpAssignmentSearch": "대상 검색",
   "mcpAssignmentDisabled": "사용 위치를 선택하기 전에 이 서버를 활성화하세요.",
-  "mcpAssignmentPrevious": "이전"
+  "mcpAssignmentPrevious": "이전",
+  "mcpExcludeForSession": "이 세션에서 제외",
+  "mcpRestoreInheritance": "상속 복원",
+  "mcpSessionExcluded": "저장됨: 이 세션에서 제외됨",
+  "mcpSessionInherited": "저장됨: 상속으로 포함됨",
+  "mcpSessionExclusionsDescription": "제외는 이 세션에만 적용되며 복원할 때까지 유지됩니다. 작업 공간 설정에서 서버를 비활성화하면 다른 세션에도 영향을 줍니다.",
+  "mcpRequiredToolsSeparate": "필수 Kandev 도구는 별도로 관리됩니다. 공급자에서 독립적으로 구성한 서버는 여기서 제어할 수 없습니다.",
+  "mcpSavedExclusions": "저장된 제외 항목",
+  "mcpDormantExclusionsDescription": "이 서버들은 더 이상 이 세션에 상속되지 않습니다. 상속을 복원해도 추가되지 않습니다.",
+  "mcpNoLongerInherited": "더 이상 상속되지 않음",
+  "mcpRestoreDisabledDescription": "상속을 복원해도 비활성화된 서버가 활성화되지는 않습니다.",
+  "mcpExclusionCount": "저장된 세션 제외 항목: {{total}}"
 }

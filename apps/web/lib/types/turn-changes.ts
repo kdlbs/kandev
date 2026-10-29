@@ -26,6 +26,10 @@ export type TurnRepositoryChange = {
   comparison_complete: boolean;
   content_complete: boolean;
   preservation_pending?: boolean;
+  comparison_basis?: "direct" | "upstream_adjusted" | "history_unavailable" | "legacy_raw";
+  comparison_reason?: string;
+  export_state?: "queued" | "running" | "retrying" | "complete" | "unavailable";
+  export_reason?: string;
   overlap_intervals?: TurnChangeOverlap[];
 };
 
@@ -54,6 +58,8 @@ export type TurnChangeSetSummary = {
   retain_until?: string;
   expiry_reason?: string;
   overlap_intervals?: TurnChangeOverlap[];
+  counts_available?: boolean;
+  legacy_counts?: boolean;
   repositories: TurnRepositoryChange[];
 };
 
@@ -73,6 +79,8 @@ export type TurnFileChange = {
   content_availability: TurnChangeAvailability;
   content_reason?: string;
   content_truncated?: boolean;
+  /** Client-only placeholder for a selected target outside the loaded file page. */
+  synthetic?: boolean;
 };
 
 export type TurnChangeHistoryPage = {

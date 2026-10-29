@@ -576,6 +576,9 @@ func (c *Client) prompt(
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return fmt.Errorf("prompt failed: unable to parse error")
 		}
+		if storageErr := promptStorageError(errPayload); storageErr != nil {
+			return storageErr
+		}
 		return fmt.Errorf("prompt failed: %s", errPayload.Message)
 	}
 

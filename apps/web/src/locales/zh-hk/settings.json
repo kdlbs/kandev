@@ -1013,7 +1013,7 @@
   "mcpSessionStateAppliedDescription": "已將儲存的設定應用到此代理。連接狀態顯示在「連接」中。",
   "mcpSessionStatePendingDescription": "目前設定仍在使用。代理空閒時將應用已儲存的更改。",
   "mcpSessionStateDeferredDescription": "目前設定仍在使用。代理再次啓動時將應用已儲存的更改。",
-  "mcpSessionStateFailedDescription": "之前的設定仍在使用。請立即重試，或在代理下次啓動時應用更改。",
+  "mcpSessionStateFailedDescription": "保留上次接受的設定以供比較。請立即重試，或在代理下次啓動時應用更改。",
   "mcpSessionRetry": "重試應用 MCP",
   "deleting": "正在刪除...",
   "mcpSessionAdditions": "新增到此工作階段",
@@ -1105,5 +1105,16 @@
   "mcpAssignmentChooseTask": "選擇現有任務",
   "mcpAssignmentSearch": "搜尋目標",
   "mcpAssignmentDisabled": "請先啓用此伺服器，再選擇使用位置。",
-  "mcpAssignmentPrevious": "上一頁"
+  "mcpAssignmentPrevious": "上一頁",
+  "mcpExcludeForSession": "僅對此工作階段排除",
+  "mcpRestoreInheritance": "恢復繼承",
+  "mcpSessionExcluded": "已儲存：已從此工作階段排除",
+  "mcpSessionInherited": "已儲存：通過繼承包含",
+  "mcpSessionExclusionsDescription": "排除僅適用於此工作階段，並持續到恢復為止。在工作區設定中停用伺服器會影響其他工作階段。",
+  "mcpRequiredToolsSeparate": "必需的 Kandev 工具單獨管理。此處無法控制在提供者中獨立設定的伺服器。",
+  "mcpSavedExclusions": "已儲存的排除項",
+  "mcpDormantExclusionsDescription": "這些伺服器已不再由此工作階段繼承。恢復繼承不會新增它們。",
+  "mcpNoLongerInherited": "不再繼承",
+  "mcpRestoreDisabledDescription": "恢復繼承不會啓用已停用的伺服器。",
+  "mcpExclusionCount": "已儲存的工作階段排除項：{{total}}"
 }

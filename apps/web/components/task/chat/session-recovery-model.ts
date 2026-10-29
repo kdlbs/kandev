@@ -23,6 +23,8 @@ import {
 import { interruptionRecoveryKey } from "./messages/interruption-recovery-feedback";
 import { managedRuntimeStartupCopy } from "./managed-runtime-startup-copy";
 import { useOptionalAppStore } from "@/components/state-provider";
+import { storageCauseFromError } from "@/lib/session-delivery-storage";
+import { storageFailureCopy, storageRecoveryDetailFields } from "./session-storage-recovery";
 
 type RecoveryCopy = { title: string; summary: string; showSummary: boolean };
 
@@ -63,6 +65,8 @@ export function recoveryCopy(
   model: ActiveSessionRecovery,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
+  const storageCause = storageCauseFromError(model.error);
+  if (storageCause) return storageFailureCopy(storageCause, model.error, t);
   if (model.kind === "delivery_history_gap")
     return {
       title: t("task:deliveryHistoryGapTitle"),
@@ -311,7 +315,10 @@ export function useRecoveryPresentation(
   const { busy, busyAction } = recoveryPresentationBusy(model, automatic, actions);
   const causes = recoveryPresentationCauses(model, bootstrap, automatic, t);
   const details = recoveryPresentationDetails(model, bootstrap, causes, actions, t);
-  const detailFields = bootstrap?.detailFields ?? [];
+  const detailFields = [
+    ...(bootstrap?.detailFields ?? []),
+    ...storageRecoveryDetailFields(storageCauseFromError(model.error), t),
+  ];
   const failure = recoveryFailureCopy(actions, t);
   return {
     copy: withAutomaticNotice(copy, automatic, actions),

@@ -10,7 +10,7 @@
 // apps/backend/Makefile).
 package main
 
-import "github.com/kandev/kandev/pkg/pluginsdk"
+import "github.com/kdlbs/kandev/pluginsdk"
 
 func main() {
 	pluginsdk.Serve(newFixturePlugin())

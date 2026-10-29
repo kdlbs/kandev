@@ -58,17 +58,29 @@ func (h *runtimeTurnChangeCaptureHandler) ProcessTurnChanges(
 	terminal agentruntime.TurnChangeTerminal,
 	client agentruntime.TurnChangeCheckpointClient,
 ) error {
-	if err := h.coordinator.ProcessTerminal(ctx, coordinatorTurnChangeTerminal(terminal), client); err != nil {
+	coordinatorTerminal := coordinatorTurnChangeTerminal(terminal)
+	if err := h.coordinator.ProcessTerminalComparison(ctx, coordinatorTerminal, client); err != nil {
 		return err
 	}
-	if h.publisher != nil {
-		err := h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
-		// Uncaptured or removed turns have no summary to publish.
-		if !errors.Is(err, repoerrors.ErrTurnChangeSetNotFound) {
-			return err
-		}
+	if err := h.publishTurnChangeSummary(ctx, terminal); err != nil {
+		return err
 	}
-	return nil
+	if err := h.coordinator.ProcessTerminalContent(ctx, coordinatorTerminal, client); err != nil {
+		return err
+	}
+	return h.publishTurnChangeSummary(ctx, terminal)
+}
+
+func (h *runtimeTurnChangeCaptureHandler) publishTurnChangeSummary(ctx context.Context, terminal agentruntime.TurnChangeTerminal) error {
+	if h.publisher == nil {
+		return nil
+	}
+	err := h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
+	// Uncaptured or removed turns have no summary to publish.
+	if errors.Is(err, repoerrors.ErrTurnChangeSetNotFound) {
+		return nil
+	}
+	return err
 }
 
 func coordinatorTurnChangeTerminal(terminal agentruntime.TurnChangeTerminal) changes.Terminal {

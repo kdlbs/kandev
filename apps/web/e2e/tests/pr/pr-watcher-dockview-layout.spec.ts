@@ -1,8 +1,8 @@
-import { execSync } from "node:child_process";
-import path from "node:path";
+import { execFileSync } from "node:child_process";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { makeGitEnv } from "../../helpers/git-helper";
+import { GitHelper, publishSeedCommit } from "../../helpers/git-helper";
+import { createEmptyRemoteRepository } from "../../helpers/empty-remote-repository";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -144,192 +144,274 @@ test.describe("PR watcher dockview layout stability", () => {
     // navigations, can outlast the default budget — give the whole flow headroom.
     test.setTimeout(180_000);
 
-    // --- Register the GitHub repo so the PR watcher can resolve it to a real
-    // local path (the seed repo created in test-base.ts has no provider info,
-    // and clone-from-real-GitHub fails for the mocked testorg/testrepo). ---
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
-      name: "GitHub Test Repo",
-      provider: "github",
-      provider_owner: "testorg",
-      provider_name: "testrepo",
-    });
+    const { settings: baselineSettings } = await apiClient.getUserSettings();
+    const fixture = createEmptyRemoteRepository(backend.tmpDir, "pr-watcher-layout");
+    const git = new GitHelper(fixture.localPath, fixture.gitEnv);
+    const errors: unknown[] = [];
+    let repositoryId: string | undefined;
+    let workflowId: string | undefined;
+    let watchId: string | undefined;
+    try {
+      git.createFile("README.md", "PR watcher layout fixture");
+      git.stageAll();
+      git.commit("seed PR watcher layout");
+      publishSeedCommit(git, fixture.remoteURL);
+      repositoryId = (
+        await apiClient.createRepository(seedData.workspaceId, fixture.localPath, "main", {
+          name: "GitHub Test Repo",
+          provider: "github",
+          provider_owner: "testorg",
+          provider_name: "testrepo",
+        })
+      ).id;
+      // Each isolated worktree fetches the provider's PR head from the offline origin.
+      for (const [number, branch] of [
+        [101, "fix/auth"],
+        [202, "feat/dashboard"],
+        [303, "docs/update"],
+      ] as const) {
+        execFileSync("git", ["branch", branch, "main"], {
+          cwd: fixture.localPath,
+          env: fixture.gitEnv,
+        });
+        execFileSync(
+          "git",
+          [
+            "push",
+            "origin",
+            `${branch}:refs/heads/${branch}`,
+            `${branch}:refs/pull/${number}/head`,
+          ],
+          { cwd: fixture.localPath, env: fixture.gitEnv },
+        );
+      }
 
-    // Each review workspace fetches its branch and PR head from the fixture remote.
-    const gitEnv = makeGitEnv(backend.tmpDir);
-    for (const branch of ["fix/auth", "feat/dashboard", "docs/update"]) {
-      execSync(`git branch -f ${branch} main`, { cwd: repoDir, env: gitEnv });
+      // --- Seed workflow ---
+      const workflow = await apiClient.createWorkflow(
+        seedData.workspaceId,
+        "PR Watcher Layout Workflow",
+      );
+      workflowId = workflow.id;
+
+      const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0);
+
+      // Configure auto-start so the review watcher immediately launches mock agents
+      // for all 3 PR tasks. By the time the test reaches the sidebar navigation
+      // steps, tasks 2 and 3 already have a primarySessionId in kanbanMulti.snapshots
+      // → handleSelectTask takes the fast (synchronous) path instead of the slow
+      // HTTP + WS round-trip that times out in CI.
+      await apiClient.updateWorkflowStep(reviewStep.id, {
+        events: { on_enter: [{ type: "auto_start_agent" }] },
+      });
+
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: workflow.id,
+        enable_preview_on_click: false,
+      });
+
+      // --- Seed mock GitHub data ---
+      await apiClient.mockGitHubReset();
+      await apiClient.mockGitHubSetUser("test-user");
+
+      // Add 3 PRs with requested_reviewers so the review watcher picks them up
+      await apiClient.mockGitHubAddPRs([
+        {
+          number: 101,
+          title: "Fix auth bug",
+          state: "open",
+          head_branch: "fix/auth",
+          base_branch: "main",
+          author_login: "alice",
+          repo_owner: "testorg",
+          repo_name: "testrepo",
+          additions: 10,
+          deletions: 2,
+          requested_reviewers: [{ login: "test-user", type: "User" }],
+        },
+        {
+          number: 202,
+          title: "Add dashboard",
+          state: "open",
+          head_branch: "feat/dashboard",
+          base_branch: "main",
+          author_login: "bob",
+          repo_owner: "testorg",
+          repo_name: "testrepo",
+          additions: 80,
+          deletions: 5,
+          requested_reviewers: [{ login: "test-user", type: "User" }],
+        },
+        {
+          number: 303,
+          title: "Update docs",
+          state: "open",
+          head_branch: "docs/update",
+          base_branch: "main",
+          author_login: "charlie",
+          repo_owner: "testorg",
+          repo_name: "testrepo",
+          additions: 30,
+          deletions: 10,
+          requested_reviewers: [{ login: "test-user", type: "User" }],
+        },
+      ]);
+
+      // Navigate to kanban BEFORE creating the review watch so the WS is
+      // subscribed when task.created/task.updated events fire.
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+
+      // --- Create review watch (triggers initial poll → auto-creates 3 tasks) ---
+      const watch = await apiClient.createReviewWatch(
+        seedData.workspaceId,
+        workflow.id,
+        reviewStep.id,
+        seedData.agentProfileId,
+        {
+          repos: [{ owner: "testorg", name: "testrepo" }],
+          prompt: "Review {{pr.link}}",
+          executor_profile_id: seedData.worktreeExecutorProfileId,
+        },
+      );
+      watchId = watch.id;
+
+      // --- Wait for all 3 PR tasks to appear in the Review column ---
+      const prTask1Title = "PR #101: Fix auth bug";
+      const prTask2Title = "PR #202: Add dashboard";
+      const prTask3Title = "PR #303: Update docs";
+
+      // Poll for all 3 cards together in one shared budget rather than three
+      // independent per-card waits. The cards are created concurrently and render
+      // out of order under load; waiting for the whole set at once avoids
+      // cumulative per-card timeout pressure and settles as soon as all 3 appear.
+      const prTaskTitles = [prTask1Title, prTask2Title, prTask3Title];
+      await waitForReviewTasksInBackend(
+        apiClient,
+        seedData.workspaceId,
+        reviewStep.id,
+        prTaskTitles,
+      );
+      await waitForReviewTaskCards(testPage, kanban, reviewStep.id, prTaskTitles);
+
+      // --- Click PR task 1 to enter session view ---
+      await kanban.taskCardInColumn(prTask1Title, reviewStep.id).click();
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+
+      // Verify initial default layout for task 1
+      await expect(session.chat).toBeVisible({ timeout: 10_000 });
+      await expect(session.sidebar).toBeVisible();
+
+      // Wait until the session has either become promptable or reported its
+      // recoverable startup state. Both states have a settled dockview layout;
+      // requiring promptability would make this layout test fail when an agent
+      // startup is the part that is under contention.
+      await waitForLayoutReady(session);
+      await ensurePlanModeAvailable(session);
+
+      // --- Toggle plan mode on task 1 ---
+      await session.togglePlanMode();
+      await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
+      await expect(session.chat).toBeVisible();
+      await expect(session.sidebar).toBeVisible();
+
+      // --- Switch to PR task 2 via sidebar ---
+      await session.clickTaskInSidebar(prTask2Title);
+      // With auto_start_agent configured, task 2 already has a primarySessionId in
+      // kanbanMulti.snapshots → handleSelectTask takes the synchronous fast path
+      // and setActiveSession is called immediately.
+      await expect(
+        testPage
+          .getByRole("navigation", { name: "breadcrumb" })
+          .getByText(prTask2Title, { exact: false }),
+      ).toBeVisible({ timeout: 30_000 });
+
+      // Task 2: full layout intact — sidebar, chat accessible, changes panel visible,
+      // plan panel must NOT leak from task 1, and layout fills the viewport
+      await expect(session.sidebar).toBeVisible({ timeout: 15_000 });
+      await session.expectNoLayoutGap();
+      await expect(session.planPanel).not.toBeVisible({ timeout: 10_000 });
+      // Changes panel verifies the right column rendered
+      await session.clickTab("Changes");
+      await expect(session.changes).toBeVisible({ timeout: 10_000 });
+      // Chat tab may be renamed (e.g. "#1 Mock • Mock Default") — use stable testid
+      await session.clickSessionChatTab();
+      await expect(session.chat).toBeVisible({ timeout: 10_000 });
+
+      // --- Switch to PR task 3 via sidebar ---
+      await session.clickTaskInSidebar(prTask3Title);
+      // Same fast-path navigation as task 2
+      await expect(
+        testPage
+          .getByRole("navigation", { name: "breadcrumb" })
+          .getByText(prTask3Title, { exact: false }),
+      ).toBeVisible({ timeout: 30_000 });
+
+      // Task 3: same layout checks
+      await expect(session.sidebar).toBeVisible({ timeout: 15_000 });
+      await session.expectNoLayoutGap();
+      await expect(session.planPanel).not.toBeVisible({ timeout: 10_000 });
+      await session.clickTab("Changes");
+      await expect(session.changes).toBeVisible({ timeout: 10_000 });
+      // Chat tab may be renamed (e.g. "#1 Mock • Mock Default") — use stable testid
+      await session.clickSessionChatTab();
+      await expect(session.chat).toBeVisible({ timeout: 10_000 });
+
+      const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+      const reviewTasks = tasks.filter((task) => prTaskTitles.includes(task.title));
+      expect(reviewTasks).toHaveLength(3);
+      const environments = await Promise.all(
+        reviewTasks.map((task) => apiClient.getTaskEnvironment(task.id)),
+      );
+      const workspacePaths = environments.map((environment) => environment?.workspace_path);
+      expect(workspacePaths.every(Boolean)).toBe(true);
+      expect(new Set(workspacePaths).size).toBe(3);
+    } catch (error) {
+      errors.push(error);
+    } finally {
+      const cleanup = [
+        () =>
+          apiClient.saveUserSettings({
+            workspace_id: baselineSettings.workspace_id ?? "",
+            workflow_filter_id: baselineSettings.workflow_filter_id ?? "",
+            enable_preview_on_click: baselineSettings.enable_preview_on_click === true,
+          }),
+        async () => {
+          if (watchId) await apiClient.deleteReviewWatch(watchId, seedData.workspaceId);
+        },
+        async () => {
+          if (!workflowId) return;
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          const results = await Promise.allSettled(
+            tasks
+              .filter((task) => task.workflow_id === workflowId)
+              .map((task) => apiClient.deleteTask(task.id, { discardWorktreeChanges: true })),
+          );
+          for (const result of results) {
+            if (result.status === "rejected") errors.push(result.reason);
+          }
+        },
+        async () => {
+          if (workflowId) await apiClient.deleteWorkflow(workflowId);
+        },
+        async () => {
+          if (repositoryId) await apiClient.deleteRepository(repositoryId);
+        },
+        fixture.cleanup,
+      ];
+      for (const action of cleanup) {
+        try {
+          await action();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
     }
-    execSync(
-      "git push origin fix/auth feat/dashboard docs/update fix/auth:refs/pull/101/head feat/dashboard:refs/pull/202/head docs/update:refs/pull/303/head",
-      { cwd: repoDir, env: gitEnv },
-    );
-
-    // --- Seed workflow ---
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "PR Watcher Layout Workflow",
-    );
-
-    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0);
-
-    // Configure auto-start so the review watcher immediately launches mock agents
-    // for all 3 PR tasks. By the time the test reaches the sidebar navigation
-    // steps, tasks 2 and 3 already have a primarySessionId in kanbanMulti.snapshots
-    // → handleSelectTask takes the fast (synchronous) path instead of the slow
-    // HTTP + WS round-trip that times out in CI.
-    await apiClient.updateWorkflowStep(reviewStep.id, {
-      events: { on_enter: [{ type: "auto_start_agent" }] },
-    });
-
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
-    // --- Seed mock GitHub data ---
-    await apiClient.mockGitHubReset();
-    await apiClient.mockGitHubSetUser("test-user");
-
-    // Add 3 PRs with requested_reviewers so the review watcher picks them up
-    await apiClient.mockGitHubAddPRs([
-      {
-        number: 101,
-        title: "Fix auth bug",
-        state: "open",
-        head_branch: "fix/auth",
-        base_branch: "main",
-        author_login: "alice",
-        repo_owner: "testorg",
-        repo_name: "testrepo",
-        additions: 10,
-        deletions: 2,
-        requested_reviewers: [{ login: "test-user", type: "User" }],
-      },
-      {
-        number: 202,
-        title: "Add dashboard",
-        state: "open",
-        head_branch: "feat/dashboard",
-        base_branch: "main",
-        author_login: "bob",
-        repo_owner: "testorg",
-        repo_name: "testrepo",
-        additions: 80,
-        deletions: 5,
-        requested_reviewers: [{ login: "test-user", type: "User" }],
-      },
-      {
-        number: 303,
-        title: "Update docs",
-        state: "open",
-        head_branch: "docs/update",
-        base_branch: "main",
-        author_login: "charlie",
-        repo_owner: "testorg",
-        repo_name: "testrepo",
-        additions: 30,
-        deletions: 10,
-        requested_reviewers: [{ login: "test-user", type: "User" }],
-      },
-    ]);
-
-    // Navigate to kanban BEFORE creating the review watch so the WS is
-    // subscribed when task.created/task.updated events fire.
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    // --- Create review watch (triggers initial poll → auto-creates 3 tasks) ---
-    await apiClient.createReviewWatch(
-      seedData.workspaceId,
-      workflow.id,
-      reviewStep.id,
-      seedData.agentProfileId,
-      {
-        executor_profile_id: seedData.worktreeExecutorProfileId,
-        repos: [{ owner: "testorg", name: "testrepo" }],
-        prompt: "Review {{pr.link}}",
-      },
-    );
-
-    // --- Wait for all 3 PR tasks to appear in the Review column ---
-    const prTask1Title = "PR #101: Fix auth bug";
-    const prTask2Title = "PR #202: Add dashboard";
-    const prTask3Title = "PR #303: Update docs";
-
-    // Poll for all 3 cards together in one shared budget rather than three
-    // independent per-card waits. The cards are created concurrently and render
-    // out of order under load; waiting for the whole set at once avoids
-    // cumulative per-card timeout pressure and settles as soon as all 3 appear.
-    const prTaskTitles = [prTask1Title, prTask2Title, prTask3Title];
-    await waitForReviewTasksInBackend(apiClient, seedData.workspaceId, reviewStep.id, prTaskTitles);
-    await waitForReviewTaskCards(testPage, kanban, reviewStep.id, prTaskTitles);
-
-    // --- Click PR task 1 to enter session view ---
-    await kanban.taskCardInColumn(prTask1Title, reviewStep.id).click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    // Verify initial default layout for task 1
-    await expect(session.chat).toBeVisible({ timeout: 10_000 });
-    await expect(session.sidebar).toBeVisible();
-
-    // Wait until the session has either become promptable or reported its
-    // recoverable startup state. Both states have a settled dockview layout;
-    // requiring promptability would make this layout test fail when an agent
-    // startup is the part that is under contention.
-    await waitForLayoutReady(session);
-    await ensurePlanModeAvailable(session);
-
-    // --- Toggle plan mode on task 1 ---
-    await session.togglePlanMode();
-    await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
-    await expect(session.chat).toBeVisible();
-    await expect(session.sidebar).toBeVisible();
-
-    // --- Switch to PR task 2 via sidebar ---
-    await session.clickTaskInSidebar(prTask2Title);
-    // With auto_start_agent configured, task 2 already has a primarySessionId in
-    // kanbanMulti.snapshots → handleSelectTask takes the synchronous fast path
-    // and setActiveSession is called immediately.
-    await expect(
-      testPage
-        .getByRole("navigation", { name: "breadcrumb" })
-        .getByText(prTask2Title, { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
-
-    // Task 2: full layout intact — sidebar, chat accessible, changes panel visible,
-    // plan panel must NOT leak from task 1, and layout fills the viewport
-    await expect(session.sidebar).toBeVisible({ timeout: 15_000 });
-    await session.expectNoLayoutGap();
-    await expect(session.planPanel).not.toBeVisible({ timeout: 10_000 });
-    // Changes panel verifies the right column rendered
-    await session.clickTab("Changes");
-    await expect(session.changes).toBeVisible({ timeout: 10_000 });
-    // Chat tab may be renamed (e.g. "#1 Mock • Mock Default") — use stable testid
-    await session.clickSessionChatTab();
-    await expect(session.chat).toBeVisible({ timeout: 10_000 });
-
-    // --- Switch to PR task 3 via sidebar ---
-    await session.clickTaskInSidebar(prTask3Title);
-    // Same fast-path navigation as task 2
-    await expect(
-      testPage
-        .getByRole("navigation", { name: "breadcrumb" })
-        .getByText(prTask3Title, { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
-
-    // Task 3: same layout checks
-    await expect(session.sidebar).toBeVisible({ timeout: 15_000 });
-    await session.expectNoLayoutGap();
-    await expect(session.planPanel).not.toBeVisible({ timeout: 10_000 });
-    await session.clickTab("Changes");
-    await expect(session.changes).toBeVisible({ timeout: 10_000 });
-    // Chat tab may be renamed (e.g. "#1 Mock • Mock Default") — use stable testid
-    await session.clickSessionChatTab();
-    await expect(session.chat).toBeVisible({ timeout: 10_000 });
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1)
+      throw new AggregateError(errors, "PR watcher layout and cleanup failures");
   });
 });

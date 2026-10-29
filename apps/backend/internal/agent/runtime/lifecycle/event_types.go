@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
@@ -66,6 +67,9 @@ type AgentEventPayload struct {
 	// correlate the diagnostic even when the stream subscription is delayed.
 	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
 	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
+	// Storage is the immutable host-owned storage evidence captured at the
+	// terminal failure boundary. It never contains provider prose.
+	Storage *models.AgentErrorStorage `json:"storage,omitempty"`
 }
 
 // PromptAttemptEvidence is the immutable lifecycle snapshot attached to a
@@ -295,12 +299,16 @@ type AgentStreamEventData struct {
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
 
 	// Agent capabilities (from "agent_capabilities" event)
-	SupportsImage             bool                     `json:"supports_image"`
-	SupportsAudio             bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
-	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
-	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
+	SupportsImage             bool `json:"supports_image"`
+	SupportsAudio             bool `json:"supports_audio"`
+	SupportsEmbeddedContext   bool `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
+	// NativePromptSuggestionsSupported is provider support only, independent of
+	// the user preference. Nil means an older producer or another transport did
+	// not report it; it must never be treated as effective enablement.
+	NativePromptSuggestionsSupported *bool                    `json:"native_prompt_suggestions_supported,omitempty"`
+	AuthMethods                      []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)
 	CurrentModelID string                     `json:"current_model_id,omitempty"`
@@ -541,17 +549,26 @@ type PermissionOption struct {
 
 // PermissionRequestEventPayload is the payload when an agent requests permission.
 type PermissionRequestEventPayload struct {
-	Type       string             `json:"type"` // Always "permission_request"
-	Timestamp  string             `json:"timestamp"`
-	AgentID    string             `json:"agent_id"`
-	TaskID     string             `json:"task_id"`
-	SessionID  string             `json:"session_id"`
-	RequestID  string             `json:"request_id"`
-	PendingID  string             `json:"pending_id"`
-	ToolCallID string             `json:"tool_call_id"`
-	Title      string             `json:"title"`
-	Options    []PermissionOption `json:"options"`
-	ActionType string             `json:"action_type"`
+	Type      string `json:"type"` // Always "permission_request"
+	Timestamp string `json:"timestamp"`
+	AgentID   string `json:"agent_id"`
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	// Owner identity routes and admits a run-owned request, which has no
+	// task session.
+	AgentExecutionID string             `json:"agent_execution_id"`
+	OwnerKind        ExecutionOwnerKind `json:"owner_kind,omitempty"`
+	WorkspaceID      string             `json:"workspace_id,omitempty"`
+	RunID            string             `json:"run_id,omitempty"`
+	RunSessionID     string             `json:"run_session_id,omitempty"`
+	RunAttempt       int                `json:"run_attempt,omitempty"`
+	AgentProfileID   string             `json:"agent_profile_id,omitempty"`
+	RequestID        string             `json:"request_id"`
+	PendingID        string             `json:"pending_id"`
+	ToolCallID       string             `json:"tool_call_id"`
+	Title            string             `json:"title"`
+	Options          []PermissionOption `json:"options"`
+	ActionType       string             `json:"action_type"`
 	// AutoApprovedOptionID names the option agentctl already selected. A
 	// nonempty value makes this payload an audit record of an answered
 	// request rather than a prompt awaiting a person.
@@ -679,16 +696,20 @@ func (p SessionModeEventPayload) GetSessionID() string {
 
 // AgentCapabilitiesEventPayload is the payload for agent capabilities events.
 type AgentCapabilitiesEventPayload struct {
-	TaskID                    string                   `json:"task_id"`
-	SessionID                 string                   `json:"session_id"`
-	AgentID                   string                   `json:"agent_id"`
-	SupportsImage             bool                     `json:"supports_image"`
-	SupportsAudio             bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
-	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
-	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods"`
-	Timestamp                 string                   `json:"timestamp"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentID                   string `json:"agent_id"`
+	SupportsImage             bool   `json:"supports_image"`
+	SupportsAudio             bool   `json:"supports_audio"`
+	SupportsEmbeddedContext   bool   `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool   `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool   `json:"supports_prompt_suggestions,omitempty"`
+	// NativePromptSuggestionsSupported carries provider support only. It is
+	// forwarded unchanged so consumers can distinguish it from effective
+	// enablement; nil means the producer did not report it.
+	NativePromptSuggestionsSupported *bool                    `json:"native_prompt_suggestions_supported,omitempty"`
+	AuthMethods                      []streams.AuthMethodInfo `json:"auth_methods"`
+	Timestamp                        string                   `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

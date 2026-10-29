@@ -4246,6 +4246,17 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 	if sessionID == "" {
 		return
 	}
+	// A capability event from an obsolete execution or resume attempt must not
+	// restore a native suggestion source. The stream dispatcher filters this
+	// too; the check stays here because recording is admission state, not only
+	// a broadcast.
+	if !s.resumeAttemptAllowsExecution(sessionID, payload.ExecutionID, payload.AttemptID) {
+		s.logger.Debug("ignoring agent capabilities from a stale resume attempt",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", payload.ExecutionID),
+			zap.String("attempt_id", payload.AttemptID))
+		return
+	}
 	// Record the negotiated prompt-queueing advertisement before the event-bus
 	// guard. It gates prompt handoff and mid-turn steering, so it must land as
 	// soon as the agent advertises it — recording is admission state, whereas the
@@ -4257,16 +4268,17 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 		return
 	}
 	eventPayload := lifecycle.AgentCapabilitiesEventPayload{
-		TaskID:                    payload.TaskID,
-		SessionID:                 sessionID,
-		AgentID:                   payload.AgentID,
-		SupportsImage:             payload.Data.SupportsImage,
-		SupportsAudio:             payload.Data.SupportsAudio,
-		SupportsEmbeddedContext:   payload.Data.SupportsEmbeddedContext,
-		SupportsPromptQueueing:    payload.Data.SupportsPromptQueueing,
-		SupportsPromptSuggestions: payload.Data.SupportsPromptSuggestions,
-		AuthMethods:               payload.Data.AuthMethods,
-		Timestamp:                 time.Now().UTC().Format(time.RFC3339),
+		TaskID:                           payload.TaskID,
+		SessionID:                        sessionID,
+		AgentID:                          payload.AgentID,
+		SupportsImage:                    payload.Data.SupportsImage,
+		SupportsAudio:                    payload.Data.SupportsAudio,
+		SupportsEmbeddedContext:          payload.Data.SupportsEmbeddedContext,
+		SupportsPromptQueueing:           payload.Data.SupportsPromptQueueing,
+		SupportsPromptSuggestions:        payload.Data.SupportsPromptSuggestions,
+		NativePromptSuggestionsSupported: payload.Data.NativePromptSuggestionsSupported,
+		AuthMethods:                      payload.Data.AuthMethods,
+		Timestamp:                        time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildAgentCapabilitiesSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.AgentCapabilitiesUpdated, "orchestrator", eventPayload))

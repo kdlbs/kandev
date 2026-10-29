@@ -21,6 +21,8 @@ function commandDialog(page: Page) {
   return page.locator('[role="dialog"]:has([cmdk-input])').last();
 }
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe.serial("Mobile Quick Chat cancellation", () => {
   test.describe.configure({ retries: 0 });
 

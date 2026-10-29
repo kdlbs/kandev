@@ -44,5 +44,11 @@ func (g *GitOperator) DeleteTurnCheckpoint(ctx context.Context, request turnchan
 	if _, err := g.turnCheckpointOutput(operationCtx, "", "update-ref", "-d", ref, request.CommitOID); err != nil {
 		return turnCheckpointFailure(turnchanges.ReasonCaptureFailed, err)
 	}
+	if request.Boundary == turnchanges.CheckpointEnd {
+		comparisonRef := turnCheckpointComparisonRefFor(request.ChangeSetID, request.CheckoutID)
+		if _, err := g.turnCheckpointOutput(operationCtx, "", "update-ref", "-d", comparisonRef); err != nil {
+			return turnCheckpointFailure(turnchanges.ReasonCaptureFailed, err)
+		}
+	}
 	return nil
 }

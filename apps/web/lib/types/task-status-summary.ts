@@ -12,6 +12,17 @@ export type AgentErrorCause = {
   requested_mode?: string;
   effective_mode?: string;
   prompt_not_sent?: boolean;
+  storage?: {
+    reason?: string;
+    location?: string;
+    executor_label?: string;
+    observed_at?: string;
+    disk_available_bytes?: number;
+    disk_required_bytes?: number;
+    retained_bytes?: number;
+    limit_bytes?: number;
+    event_bytes?: number;
+  };
 };
 
 export type TaskStatusSummaryActiveError = {

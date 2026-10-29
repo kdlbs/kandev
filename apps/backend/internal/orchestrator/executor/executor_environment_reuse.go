@@ -48,6 +48,7 @@ func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
 	// Reuse setup below consumes this same inventory, avoiding a second query
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
+	adoptCheckoutBranchCanonicalSlots(req, rows)
 	if preserveCanonicalIdentity {
 		pinCanonicalWorktreeIdentities(req, env)
 		e.pinCanonicalCloneURLBaseIdentity(req, env)
@@ -64,6 +65,83 @@ func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
 		}
 	}
 	return nil
+}
+
+// adoptCheckoutBranchCanonicalSlots binds a worktree launch whose requested
+// checkout branch is already held by a preserved canonical worktree to that
+// row's branch slot. Git admits a branch in only one worktree, so the row is
+// the only checkout the request can name. A slot is adopted only when the
+// spec has no exact canonical match, exactly one active row of the same
+// repository holds the branch, the adopted identity matches that row alone,
+// and no other spec of the launch already matches it. Returns whether any
+// identity changed.
+func adoptCheckoutBranchCanonicalSlots(req *LaunchAgentRequest, rows []*models.TaskEnvironmentRepo) bool {
+	if !req.UseWorktree {
+		return false
+	}
+	if len(req.Repositories) == 0 {
+		spec, ok := topLevelLaunchRepoSpec(req)
+		if !ok {
+			return false
+		}
+		slug, ok := checkoutBranchCanonicalSlot(spec, nil, rows)
+		if ok {
+			req.BranchIdentitySlug = slug
+		}
+		return ok
+	}
+	changed := false
+	for index := range req.Repositories {
+		slug, ok := checkoutBranchCanonicalSlot(req.Repositories[index], siblingRepoSpecs(req.Repositories, index), rows)
+		if ok {
+			req.Repositories[index].BranchIdentitySlug = slug
+			changed = true
+		}
+	}
+	return changed
+}
+
+func siblingRepoSpecs(specs []RepoSpec, index int) []RepoSpec {
+	siblings := make([]RepoSpec, 0, len(specs)-1)
+	siblings = append(siblings, specs[:index]...)
+	return append(siblings, specs[index+1:]...)
+}
+
+func checkoutBranchCanonicalSlot(spec RepoSpec, siblings []RepoSpec, rows []*models.TaskEnvironmentRepo) (string, bool) {
+	if spec.CheckoutBranch == "" || len(matchingCanonicalEnvironmentRepoRows(spec, rows, true)) != 0 {
+		return "", false
+	}
+	var holder *models.TaskEnvironmentRepo
+	for _, row := range rows {
+		if !checkoutBranchHolderMatches(row, spec) {
+			continue
+		}
+		if holder != nil {
+			return "", false
+		}
+		holder = row
+	}
+	if holder == nil || worktree.SanitizeBranchSlug(holder.BranchSlug) == "" {
+		return "", false
+	}
+	adopted := spec
+	adopted.BranchIdentitySlug = holder.BranchSlug
+	if matched := matchingCanonicalEnvironmentRepoRows(adopted, rows, true); len(matched) != 1 || matched[0] != holder {
+		return "", false
+	}
+	for _, sibling := range siblings {
+		for _, row := range matchingCanonicalEnvironmentRepoRows(sibling, rows, true) {
+			if row == holder {
+				return "", false
+			}
+		}
+	}
+	return holder.BranchSlug, true
+}
+
+func checkoutBranchHolderMatches(row *models.TaskEnvironmentRepo, spec RepoSpec) bool {
+	return canonicalEnvironmentRepoRowEligible(row, true) && row.RepositoryID == spec.RepositoryID &&
+		row.WorktreeBranch == spec.CheckoutBranch && row.WorkspaceRelativePath == spec.WorkspaceRelativePath
 }
 
 // claimSharedTaskEnvironmentTaskDirName records the first stable task-root
@@ -138,15 +216,17 @@ func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvi
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
 			continue
 		}
-		if row.WorkspaceRelativePath != spec.WorkspaceRelativePath {
-			continue
-		}
-		if row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed || row.Status == taskEnvironmentRepoStatusDeleted || (useWorktree && row.WorktreeID == "") {
+		if row.WorkspaceRelativePath != spec.WorkspaceRelativePath || !canonicalEnvironmentRepoRowEligible(row, useWorktree) {
 			continue
 		}
 		matched = append(matched, row)
 	}
 	return matched
+}
+
+func canonicalEnvironmentRepoRowEligible(row *models.TaskEnvironmentRepo, useWorktree bool) bool {
+	return row != nil && row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed &&
+		row.Status != taskEnvironmentRepoStatusDeleted && (!useWorktree || row.WorktreeID != "")
 }
 
 // pinDirtyCloneRelocationToSelectedWorktrees keeps an explicitly relocated

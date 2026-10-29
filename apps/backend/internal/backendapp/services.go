@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflowsync"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -550,6 +551,7 @@ func wireTaskWorkflowCrossReferences(
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetAgentProfileLookup(buildAgentProfileLookup(repos))
 	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 }
 
@@ -2528,10 +2530,15 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 		if err != nil || profile == nil {
 			return nil
 		}
+		options := maps.Clone(profile.ConfigOptions)
+		if options == nil {
+			options = map[string]string{}
+		}
 		return &wfmodels.AgentProfilePortable{
-			AgentName: profile.AgentDisplayName,
-			Model:     profile.Model,
-			Mode:      profile.Mode,
+			AgentName:     profile.AgentDisplayName,
+			Model:         profile.Model,
+			Mode:          profile.Mode,
+			ConfigOptions: &options,
 		}
 	}
 }

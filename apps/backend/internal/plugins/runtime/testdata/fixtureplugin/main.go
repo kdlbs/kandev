@@ -10,7 +10,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // fixturePlugin embeds UnimplementedPlugin (for Host injection via

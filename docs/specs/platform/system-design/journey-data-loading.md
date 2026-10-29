@@ -84,6 +84,13 @@ A visible preview has `detailActive=true` independently of unread/read tracking.
 Hidden sibling tabs have no session/conversation registration, session snapshot polling, transcript loading, MCP/model hydration, usage reads, or task-level CI/repository fetches.
 Retained cache and local composer state remain available without active effects.
 
+Changed-files history readiness leases use the same explicit detail demand.
+Transcript cards receive the parent chat's `detailActive`, independently of
+scroll/read visibility. Persistent historical diff tabs receive their group's
+visibility; mobile diff surfaces release the lease when closed. Hidden retained
+surfaces cannot keep a rich stream alive through the history hook. Existing
+initial HTTP history reads and pagination remain independent of that lease.
+
 Keep the WebSocket client's reference counting. Same-session duplicate views share transport membership.
 On reveal, acquire readiness once, reconcile the newest message window and relevant detail, then resume live delivery.
 A retained transcript can remain visible with existing refresh state. It is not newly verified until recovery succeeds.

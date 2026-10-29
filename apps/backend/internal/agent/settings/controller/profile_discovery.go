@@ -61,6 +61,7 @@ func (c *Controller) FetchProfileDynamicModels(
 	resp.Status = string(caps.Status)
 	resp.ContextRevision = result.ContextRevision
 	resp.RuntimeInfo = caps.RuntimeInfo
+	resp.ReasonCode = profileProbeReasonCode(agentName, &profileContext, caps.Status, result.ReasonCode)
 	if caps.Error != "" {
 		message := profileFailureMessage(caps.Status)
 		resp.Error = &message
@@ -80,6 +81,20 @@ func (c *Controller) FetchProfileDynamicModels(
 		resp.Commands = append(resp.Commands, dto.CommandEntryDTO{Name: command.Name, Description: command.Description})
 	}
 	return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
+}
+
+func profileProbeReasonCode(
+	agentName string,
+	profileContext *hostutility.ProfileProbeContext,
+	status hostutility.Status,
+	reasonCode string,
+) string {
+	if agentName != agents.CopilotACPAgentID || profileContext == nil ||
+		len(profileContext.CopilotSelectedPlugins) == 0 || status != hostutility.StatusUnsupported ||
+		reasonCode != string(copilotplugins.ReasonPolicyUnverified) {
+		return ""
+	}
+	return reasonCode
 }
 
 func (c *Controller) resolveProfileProbeContext(

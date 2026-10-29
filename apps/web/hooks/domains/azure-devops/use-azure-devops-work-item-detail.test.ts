@@ -1,4 +1,4 @@
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AzureDevOpsTaskWorkItem, AzureDevOpsWorkItem } from "@/lib/types/azure-devops";
 
@@ -164,4 +164,92 @@ describe("mergeAzureDevOpsComments", () => {
       3, 2, 1,
     ]);
   });
+});
+
+describe("detail mutation ownership", () => {
+  it.each(["close", "replace", "reopen", "workspace"])(
+    "rejects an older opening's completion after %s",
+    async (change) => {
+      apiMocks.detail.mockImplementation(async (_workspace, _project, id) => ({
+        ...workItem,
+        id,
+        planningFields: [],
+      }));
+      const { result, rerender } = renderHook(
+        ({ enabled, item, workspace }) =>
+          useAzureDevOpsWorkItemDetail(workspace, project.id, item, enabled),
+        { initialProps: { enabled: true, item: workItem, workspace: workspaceId } },
+      );
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const mutation = result.current.beginMutation();
+      if (change === "close" || change === "reopen") {
+        rerender({ enabled: false, item: workItem, workspace: workspaceId });
+        if (change === "reopen")
+          rerender({ enabled: true, item: workItem, workspace: workspaceId });
+      } else if (change === "replace") {
+        rerender({ enabled: true, item: { ...workItem, id: 508 }, workspace: workspaceId });
+      } else {
+        rerender({ enabled: true, item: workItem, workspace: "workspace-other" });
+      }
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      const current = result.current.item;
+      expect(mutation.isCurrent()).toBe(false);
+      act(() => mutation.mergeItem({ ...workItem, revision: 99, title: "Late update" }));
+      expect(result.current.item).toEqual(current);
+    },
+  );
+
+  it("keeps an opening across a refresh and accepts its current mutation", async () => {
+    const { result } = renderHook(() =>
+      useAzureDevOpsWorkItemDetail(workspaceId, project.id, workItem, true),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const mutation = result.current.beginMutation();
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(mutation.isCurrent()).toBe(true);
+    act(() => mutation.mergeItem({ ...workItem, revision: 5, title: "Committed update" }));
+    expect(result.current.item?.title).toBe("Committed update");
+  });
+});
+
+it("keeps an assignment receipt without merging it into a closed opening", async () => {
+  let finish!: (value: typeof workItem) => void;
+  apiMocks.assignment.mockReturnValue(
+    new Promise<typeof workItem>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const { result, rerender } = renderHook(
+    ({ enabled }) => useAzureDevOpsWorkItemDetail(workspaceId, project.id, workItem, enabled),
+    { initialProps: { enabled: true } },
+  );
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  const pending = result.current.updateAssignee("assign_current_user");
+  rerender({ enabled: false });
+  await act(async () => {
+    finish({ ...workItem, revision: 5 });
+    await expect(pending).resolves.toMatchObject({ revision: 5 });
+  });
+  expect(result.current.item).toBeNull();
+});
+
+it("retires mutation ownership on unmount", async () => {
+  const { result, unmount } = renderHook(() =>
+    useAzureDevOpsWorkItemDetail(workspaceId, project.id, workItem, true),
+  );
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  const mutation = result.current.beginMutation();
+  unmount();
+  expect(mutation.isCurrent()).toBe(false);
+});
+
+it("reestablishes opening ownership after StrictMode's lifecycle check", async () => {
+  const { result } = renderHook(
+    () => useAzureDevOpsWorkItemDetail(workspaceId, project.id, workItem, true),
+    { reactStrictMode: true },
+  );
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.beginMutation().isCurrent()).toBe(true);
 });

@@ -13,7 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"go.uber.org/zap"
 )

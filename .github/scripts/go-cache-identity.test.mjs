@@ -212,6 +212,7 @@ test("static CLI uses the configured linter cache without unsupported subcommand
     for (const subdir of [
       "bin",
       "apps/backend",
+      "pluginsdk",
       ".github/docker/ci-base",
       ".github/actions/cache-go",
       ".github/scripts",
@@ -220,6 +221,8 @@ test("static CLI uses the configured linter cache without unsupported subcommand
     for (const file of [
       "apps/backend/go.mod",
       "apps/backend/go.sum",
+      "pluginsdk/go.mod",
+      "pluginsdk/go.sum",
       "apps/backend/.golangci.yml",
       ".github/docker/ci-base/Dockerfile",
       ".github/actions/cache-go/action.yml",
@@ -266,6 +269,34 @@ test("static CLI uses the configured linter cache without unsupported subcommand
     assert.match(output, /moduleSave=false/);
     assert.match(output, /buildSave=true/);
     assert.match(output, /lintSave=false/);
+    for (const file of ["pluginsdk/go.mod", "pluginsdk/go.sum"]) {
+      writeFileSync(`${directory}/${file}`, "changed SDK dependency");
+      const changed = spawnSync(
+        process.execPath,
+        [`${directory}/.github/scripts/go-cache-identity.mjs`],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${directory}/bin:${process.env.PATH}`,
+            GITHUB_WORKSPACE: directory,
+            GITHUB_OUTPUT: `${directory}/changed-output`,
+            CACHE_FAMILY: "static",
+            RUNNER_OS: "Linux",
+            RUNNER_ARCH: "X64",
+            GOLANGCI_LINT_CACHE: "/tmp/lint cache",
+          },
+        },
+      );
+      assert.equal(changed.status, 0, changed.stderr);
+      const next = JSON.parse(changed.stdout);
+      assert.notEqual(
+        next.moduleKey,
+        JSON.parse(result.stdout).moduleKey,
+        file,
+      );
+      writeFileSync(`${directory}/${file}`, "fixture");
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -16,23 +16,23 @@ export function useReviewDiffScrollInteraction(args: {
     suppressAutoMark: suppressAutoMarkRef,
   });
   const allowAutoMark = useCallback(() => {
-    suppressAutoMarkRef.current = false;
     handleUserInput();
+    suppressAutoMarkRef.current = false;
   }, [handleUserInput]);
   const handlePointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
+      handleUserInput();
       if (event.target === event.currentTarget || event.pointerType === "touch") {
         suppressAutoMarkRef.current = false;
       }
-      handleUserInput();
     },
     [handleUserInput],
   );
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (!SCROLL_KEYS.has(event.key)) return;
-      suppressAutoMarkRef.current = false;
       handleUserInput();
+      suppressAutoMarkRef.current = false;
     },
     [handleUserInput],
   );

@@ -1013,7 +1013,7 @@
   "mcpSessionStateAppliedDescription": "已将保存的配置应用到此代理。连接状态显示在“连接”中。",
   "mcpSessionStatePendingDescription": "当前配置仍在使用。代理空闲时将应用已保存的更改。",
   "mcpSessionStateDeferredDescription": "当前配置仍在使用。代理再次启动时将应用已保存的更改。",
-  "mcpSessionStateFailedDescription": "之前的配置仍在使用。请立即重试，或在代理下次启动时应用更改。",
+  "mcpSessionStateFailedDescription": "保留上次接受的配置以供比较。请立即重试，或在代理下次启动时应用更改。",
   "mcpSessionRetry": "重试应用 MCP",
   "deleting": "正在删除...",
   "mcpSessionAdditions": "添加到此会话",
@@ -1105,5 +1105,16 @@
   "mcpAssignmentChooseTask": "选择现有任务",
   "mcpAssignmentSearch": "搜索目标",
   "mcpAssignmentDisabled": "请先启用此服务器，再选择使用位置。",
-  "mcpAssignmentPrevious": "上一页"
+  "mcpAssignmentPrevious": "上一页",
+  "mcpExcludeForSession": "仅对此会话排除",
+  "mcpRestoreInheritance": "恢复继承",
+  "mcpSessionExcluded": "已保存：已从此会话排除",
+  "mcpSessionInherited": "已保存：通过继承包含",
+  "mcpSessionExclusionsDescription": "排除仅适用于此会话，并持续到恢复为止。在工作区设置中禁用服务器会影响其他会话。",
+  "mcpRequiredToolsSeparate": "必需的 Kandev 工具单独管理。此处无法控制在提供商中独立配置的服务器。",
+  "mcpSavedExclusions": "已保存的排除项",
+  "mcpDormantExclusionsDescription": "这些服务器已不再由此会话继承。恢复继承不会添加它们。",
+  "mcpNoLongerInherited": "不再继承",
+  "mcpRestoreDisabledDescription": "恢复继承不会启用已禁用的服务器。",
+  "mcpExclusionCount": "已保存的会话排除项：{{total}}"
 }

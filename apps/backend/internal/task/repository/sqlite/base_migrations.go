@@ -686,6 +686,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''")
 	_ = r.migrate.Apply("workflows.created_by_user_id", "ALTER TABLE workflows ADD COLUMN created_by_user_id TEXT NOT NULL DEFAULT ''")
 
+	if err := r.migrateTurnChangeHistorySchema(); err != nil {
+		return err
+	}
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.

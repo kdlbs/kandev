@@ -1013,7 +1013,7 @@
   "mcpSessionStateAppliedDescription": "Ŷōũŕ śàvēď śēţũƥ ĥàś ƀēēń àƥƥĺĩēď ţō ţĥĩś àĝēńţ. Ćōńńēćţĩōń śţàţũś ĩś śĥōŵń ĩń Ćōńńēćţĩōńś.",
   "mcpSessionStatePendingDescription": "Ŷōũŕ ćũŕŕēńţ śēţũƥ śţàŷś ĩń ũśē. Śàvēď ćĥàńĝēś àƥƥĺŷ ŵĥēń ţĥē àĝēńţ ĩś ĩďĺē.",
   "mcpSessionStateDeferredDescription": "Ŷōũŕ ćũŕŕēńţ śēţũƥ śţàŷś ĩń ũśē. Śàvēď ćĥàńĝēś àƥƥĺŷ ŵĥēń ţĥē àĝēńţ śţàŕţś àĝàĩń.",
-  "mcpSessionStateFailedDescription": "Ŷōũŕ ƥŕēvĩōũś śēţũƥ śţàŷś ĩń ũśē. Ŕēţŕŷ ńōŵ ōŕ àƥƥĺŷ ţĥē ćĥàńĝēś ōń ţĥē ńēxţ àĝēńţ śţàŕţ.",
+  "mcpSessionStateFailedDescription": "Ţĥē ĺàśţ àććēƥţēď śēţũƥ ĩś ķēƥţ ƒōŕ ćōḿƥàŕĩśōń. Ŕēţŕŷ ńōŵ ōŕ àƥƥĺŷ ţĥē ćĥàńĝēś ōń ţĥē ńēxţ àĝēńţ śţàŕţ.",
   "mcpSessionRetry": "Ŕēţŕŷ ḾĆƤ àƥƥĺĩćàţĩōń",
   "deleting": "Ďēĺēţĩńĝ...",
   "mcpSessionAdditions": "Àďď ţō ţĥĩś śēśśĩōń",
@@ -1105,5 +1105,16 @@
   "mcpAssignmentChooseTask": "Ćĥōōśē àń ēxĩśţĩńĝ ţàśķ",
   "mcpAssignmentSearch": "Śēàŕćĥ ōŵńēŕś",
   "mcpAssignmentDisabled": "Ēńàƀĺē ţĥĩś śēŕvēŕ ƀēƒōŕē ćĥōōśĩńĝ ŵĥēŕē ţō ũśē ĩţ.",
-  "mcpAssignmentPrevious": "Ƥŕēvĩōũś"
+  "mcpAssignmentPrevious": "Ƥŕēvĩōũś",
+  "mcpExcludeForSession": "Ēxćĺũďē ƒōŕ ţĥĩś śēśśĩōń",
+  "mcpRestoreInheritance": "Ŕēśţōŕē ĩńĥēŕĩţàńćē",
+  "mcpSessionExcluded": "Śàvēď: ēxćĺũďēď ƒŕōḿ ţĥĩś śēśśĩōń",
+  "mcpSessionInherited": "Śàvēď: ĩńćĺũďēď ƀŷ ĩńĥēŕĩţàńćē",
+  "mcpSessionExclusionsDescription": "Ēxćĺũśĩōńś àƥƥĺŷ ōńĺŷ ţō ţĥĩś śēśśĩōń àńď ŕēḿàĩń ũńţĩĺ ŕēśţōŕēď. Ďĩśàƀĺĩńĝ à śēŕvēŕ ĩń ŵōŕķśƥàćē śēţţĩńĝś àƒƒēćţś ōţĥēŕ śēśśĩōńś.",
+  "mcpRequiredToolsSeparate": "Ŕēqũĩŕēď Ķàńďēv ţōōĺś àŕē ḿàńàĝēď śēƥàŕàţēĺŷ. Ĩńďēƥēńďēńţĺŷ ćōńƒĩĝũŕēď ƥŕōvĩďēŕ śēŕvēŕś àŕē ńōţ ćōńţŕōĺĺēď ĥēŕē.",
+  "mcpSavedExclusions": "Śàvēď ēxćĺũśĩōńś",
+  "mcpDormantExclusionsDescription": "Ţĥēśē śēŕvēŕś ńō ĺōńĝēŕ ćōńţŕĩƀũţē ţō ţĥĩś śēśśĩōń. Ŕēśţōŕĩńĝ ĩńĥēŕĩţàńćē ďōēś ńōţ àďď ţĥēḿ.",
+  "mcpNoLongerInherited": "Ńō ĺōńĝēŕ ĩńĥēŕĩţēď",
+  "mcpRestoreDisabledDescription": "Ŕēśţōŕĩńĝ ĩńĥēŕĩţàńćē ďōēś ńōţ ēńàƀĺē à ďĩśàƀĺēď śēŕvēŕ.",
+  "mcpExclusionCount": "Śàvēď śēśśĩōń ēxćĺũśĩōńś: {{total}}"
 }

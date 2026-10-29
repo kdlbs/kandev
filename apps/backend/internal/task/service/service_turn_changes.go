@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/turnchanges"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/changes"
@@ -155,6 +156,8 @@ type turnChangeSummaryEvent struct {
 	RetainUntil             *time.Time                         `json:"retain_until,omitempty"`
 	ExpiryReason            string                             `json:"expiry_reason,omitempty"`
 	OverlapIntervals        []models.TurnChangeOverlap         `json:"overlap_intervals,omitempty"`
+	CountsAvailable         bool                               `json:"counts_available"`
+	LegacyCounts            bool                               `json:"legacy_counts"`
 	Repositories            []turnRepositoryChangeSummaryEvent `json:"repositories"`
 }
 
@@ -171,6 +174,10 @@ type turnRepositoryChangeSummaryEvent struct {
 	ComparisonComplete  bool                          `json:"comparison_complete"`
 	ContentComplete     bool                          `json:"content_complete"`
 	PreservationPending bool                          `json:"preservation_pending,omitempty"`
+	ComparisonBasis     turnchanges.ComparisonBasis   `json:"comparison_basis,omitempty"`
+	ComparisonReason    models.TurnChangeReason       `json:"comparison_reason,omitempty"`
+	ExportState         models.TurnChangeExportState  `json:"export_state,omitempty"`
+	ExportReason        models.TurnChangeReason       `json:"export_reason,omitempty"`
 	OverlapIntervals    []models.TurnChangeOverlap    `json:"overlap_intervals,omitempty"`
 }
 
@@ -188,6 +195,8 @@ func projectTurnChangeSummaryEvent(changeSet *models.TurnChangeSet, repositories
 		BinaryFileCount: changeSet.BinaryFileCount, UnknownCountFileCount: changeSet.UnknownCountFileCount,
 		RepositoryCount: changeSet.RepositoryCount, RetainUntil: changeSet.RetainUntil, ExpiryReason: changeSet.ExpiryReason,
 		OverlapIntervals: changeSet.OverlapIntervals, Repositories: make([]turnRepositoryChangeSummaryEvent, 0, len(repositories)),
+		CountsAvailable: turnChangeCountsAvailable(repositories),
+		LegacyCounts:    turnChangeLegacyCounts(repositories),
 	}
 	for _, repository := range repositories {
 		if repository == nil {
@@ -200,7 +209,9 @@ func projectTurnChangeSummaryEvent(changeSet *models.TurnChangeSet, repositories
 			Reason: repository.Reason, EnumerationComplete: repository.EnumerationComplete,
 			ComparisonComplete: repository.ComparisonComplete, ContentComplete: repository.ContentComplete,
 			PreservationPending: repository.PreservationState == models.TurnChangePreservationPending,
-			OverlapIntervals:    repository.OverlapIntervals,
+			ComparisonBasis:     repository.ComparisonBasis, ComparisonReason: repository.ComparisonReason,
+			ExportState: repository.ExportState, ExportReason: repository.ExportReason,
+			OverlapIntervals: repository.OverlapIntervals,
 		})
 	}
 	return projected
@@ -232,4 +243,23 @@ func (s *Service) runTurnChangeRetentionSweep(ctx context.Context, now time.Time
 			zap.Int64("content_objects", result.DeletedContents),
 			zap.Int64("freed_payload_bytes", result.FreedPayloadBytes))
 	}
+}
+
+func turnChangeCountsAvailable(repositories []*models.TurnRepositoryChangeSet) bool {
+	for _, repository := range repositories {
+		if repository != nil && repository.Availability == models.TurnChangeAvailabilityReady {
+			return true
+		}
+	}
+	return false
+}
+
+func turnChangeLegacyCounts(repositories []*models.TurnRepositoryChangeSet) bool {
+	for _, repository := range repositories {
+		if repository != nil && repository.Availability == models.TurnChangeAvailabilityReady &&
+			repository.ComparisonBasis == turnchanges.ComparisonLegacyRaw {
+			return true
+		}
+	}
+	return false
 }

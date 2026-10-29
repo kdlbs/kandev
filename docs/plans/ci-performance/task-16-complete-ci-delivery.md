@@ -1117,3 +1117,22 @@ changes. The worker-image fixture owns existing shard six in both plans, and
 container catalog hashes/checksum are identical to the fifth candidate.
 Documentation validation passes 382 decisions and 1,610 specifications. The next
 hosted full set, current review and merge remain the delivery gates.
+
+
+### 2026-10-28 Windows persistence compilation allowance
+
+PR #4534 head `60f315d5370857ff89824b1ff950bb3a326d9571`, backend run
+`40675821815`, job `122779656390` fails at the ten-minute compilation-step
+limit. Both module and compiled-package caches miss. Five of the six package
+binaries finish; the task/service compiler receives cancellation at the step
+limit. No compiler diagnostic or selected test failure precedes cancellation.
+The previous successful head compiled the same package selection in 6m53s;
+all seven sibling Windows suites pass at this head.
+
+Increase only the persistence compilation allowance from ten to twenty
+minutes. Retain the zero-match selector, exact package union, race/fts5 flags,
+parallelism, memory limit, test deadlines, required backend gate and overall
+ninety-minute job limit. Settings compilation retains its existing allowance.
+The existing workflow contract first fails against the old allowance and then
+passes with the correction. Actual Windows completion requires fresh hosted
+CI; Linux contract validation does not prove Windows compilation timing.

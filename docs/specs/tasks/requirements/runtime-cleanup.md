@@ -155,11 +155,11 @@ Task cleanup preserves reusable workspaces and durable retry evidence.
   A deleted workspace's group with foreign members is rehomed with shared
   resources to a deterministic surviving owner, retaining foreign edges with
   valid FKs and ownership-generation evidence for later reconciliation.
-- **AC-TASKS-RUNTIME-CLEANUP-001.42:** After archive preparation, every
-  request-owned rollback, recovery, finalization, vacancy, activation, and
-  compensation context shall use the earlier of the original absolute deadline
-  and its step budget; an expired request shall persist retry/wakeup rather than
-  extending work with a fresh context.
+- **AC-TASKS-RUNTIME-CLEANUP-001.42:** After preparation, all request-owned
+  rollback, recovery, finalization, vacancy, activation, and compensation shall
+  use the earlier original deadline or step budget. Expiry persists retry/wakeup
+  without extending work. HTTP response writes shall have a bounded allowance
+  beyond the work deadline.
 - **AC-TASKS-RUNTIME-CLEANUP-001.43:** When a snapshotted group is missing,
   immutable proof shall contain every group and ordered membership field
   required to reconstruct the exact row set, protected by canonical encoding,

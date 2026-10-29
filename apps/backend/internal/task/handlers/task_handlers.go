@@ -42,6 +42,7 @@ type TaskHandlers struct {
 	movePreviewer                 WorkflowMovePreviewer
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
+	runtimeStorageHealth          dto.RuntimeStorageHealthProvider
 	parkedProjection              dto.ParkedProvider
 	taskParkedProjection          dto.TaskParkedProvider
 	repo                          handlerRepo
@@ -226,6 +227,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	}
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		h.cancellationPending = cancellation
+	}
+	if runtimeStorage, ok := orchestrator.(dto.RuntimeStorageHealthProvider); ok {
+		h.runtimeStorageHealth = runtimeStorage
 	}
 	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
 		h.parkedProjection = parked

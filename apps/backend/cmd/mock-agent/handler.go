@@ -456,6 +456,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 	}
 	if scenario, ok := parseSavedPromptDeliveryScenario(prompt); ok {
 		cmd = "/e2e:" + scenario
+	} else if scenario, ok := parseOfficeScenarioDirective(prompt); ok {
+		cmd = "/e2e:" + scenario
 	}
 	if handleAutopilotParentQuestion(e, cmd) {
 		return

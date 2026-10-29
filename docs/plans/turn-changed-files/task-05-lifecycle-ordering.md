@@ -84,6 +84,9 @@ The completed [preservation retry package](../turn-change-preservation-retry/pla
 Its runtime work order separates the accepted-end prompt fence from preservation before source destruction.
 The results below remain historical validation of the original implementation.
 
+The [history integrity attribution work order](../turn-change-history-integrity/task-03-writer-attribution.md)
+implements canonical writer intervals. Historical validation below remains unchanged.
+
 Implemented generation-bound admission, terminal capture fences, checkout-manifest refresh, overlap attribution, and nonblocking failure persistence. The full backend suite passed. Race-enabled dispatch-completion, prompt-steer, cancellation, turn-change, and settlement tests passed; `internal/task/changes` passed its complete race suite, and the new launch/admission checkout-manifest lifecycle tests passed under `-race`.
 
 ### Review follow-up (2026-10-08)

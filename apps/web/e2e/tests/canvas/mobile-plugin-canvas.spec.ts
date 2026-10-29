@@ -271,15 +271,13 @@ test.describe("Plugin-backed canvases on mobile", () => {
       const startAgent = dialog.getByTestId("submit-start-agent");
       await expect(startAgent).toBeEnabled();
       await startAgent.tap();
-      await expect(
-        testPage
-          .locator('[data-testid="toast-message"]')
-          .filter({ hasText: "Failed to create task" }),
-      ).toBeVisible();
+      await expect(dialog.getByTestId("task-create-recovery-status")).toContainText(
+        "Task creation is unconfirmed.",
+      );
       await expectTaskDescription(dialog.getByTestId("task-description-input"), description);
 
       const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
-      await startAgent.tap();
+      await dialog.getByTestId("task-create-recovery-retry").tap();
       const response = await responsePromise;
       const responseBody = await response.text();
       expect(response.status(), responseBody).toBe(200);

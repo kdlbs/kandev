@@ -10,6 +10,8 @@ import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-
 import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 
+test.use({ trace: "retain-on-failure" });
+
 // DnD in file-browser.tsx uses native HTML5 drag events (dragstart, dragover,
 // drop) keyed off React's onDragStart/Over/Drop. Playwright's locator.dragTo()
 // does not trigger native HTML5 DnD reliably in Chromium - the drop target
@@ -332,6 +334,7 @@ test.describe("File tree drag and drop", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible();
     await expect(session.changesFileRow("dest/src/a.txt")).toBeVisible();
+    await expect(session.changesFileRow("dest/src/sub/keep.txt")).toBeVisible();
     await session.clickTab("Files");
     await session.fileTreeNode("dest").click();
     await session.fileTree.waitForFileTreeNode("dest/src");

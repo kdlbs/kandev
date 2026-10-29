@@ -4,6 +4,8 @@ import pseudoSettings from "../../../src/locales/pseudo/settings.json";
 import { test, expect } from "../../fixtures/test-base";
 import { installRuntimeUpdateFixture } from "../settings/agent-runtime-update-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 /**
  * Pseudo-locale coverage oracle.
  *
@@ -499,15 +501,17 @@ const ALLOWED = [
 const ACCENTED = /[À-ɏ]/;
 
 async function activatePseudo(page: Page, url: string, frontendUrl: string) {
-  // Seed the locale before the first document request: the Go shell reads this
-  // cookie to set <html lang> and the boot payload.
+  // The shell reads this cookie for both the HTML language and boot locale.
   await page
     .context()
     .addCookies([{ name: "kandev_locale", value: "pseudo", url: frontendUrl, sameSite: "Lax" }]);
-  const initialResponse = await page.goto(url);
-  if (!initialResponse) throw new Error("Pseudo-locale navigation returned no response");
-  expect(initialResponse.ok()).toBe(true);
-  const initialHeaders = await initialResponse.request().allHeaders();
+  const assignedCookie = (await page.context().cookies(frontendUrl)).find(
+    (cookie) => cookie.name === "kandev_locale",
+  )?.value;
+  const response = await page.goto(new URL(url, frontendUrl).href);
+  if (!response) throw new Error("Pseudo-locale navigation returned no response");
+  expect(response.ok()).toBe(true);
+  const initialHeaders = await response.request().allHeaders();
   expect(initialHeaders.cookie ?? "").toMatch(/(?:^|;\s*)kandev_locale=pseudo(?:;|$)/);
   // `<html lang>` proves the SHELL is on the pseudo locale and nothing more: the
   // Go shell writes it from the cookie, so it is already correct in the HTML the
@@ -515,7 +519,31 @@ async function activatePseudo(page: Page, url: string, frontendUrl: string) {
   // rendered, and the catalog reached its copy — is `waitForScreen`'s job, and
   // it is per-screen precisely because anything generic enough to assert here is
   // something the app shell alone satisfies.
-  await expect(page.locator("html")).toHaveAttribute("lang", "pseudo", { timeout: 15_000 });
+  try {
+    await expect(page.locator("html")).toHaveAttribute("lang", "pseudo", { timeout: 15_000 });
+  } catch (error) {
+    const html = response ? await response.text().catch(() => null) : null;
+    const actualLanguage = await page
+      .locator("html")
+      .getAttribute("lang")
+      .catch(() => null);
+    await test
+      .info()
+      .attach("pseudo-locale-navigation", {
+        body: JSON.stringify({
+          requestedUrl: url,
+          currentUrl: page.url(),
+          assignedCookie,
+          navigationUrl: response?.url(),
+          navigationStatus: response?.status(),
+          serverLanguage: html?.match(/<html\b[^>]*\blang=["']([^"']+)["']/i)?.[1] ?? null,
+          actualLanguage,
+        }),
+        contentType: "application/json",
+      })
+      .catch(() => undefined);
+    throw error;
+  }
 }
 
 /**

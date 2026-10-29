@@ -4,6 +4,7 @@ import {
   type TaskLaunchRecoveryAction,
 } from "@/lib/types/task-launch-error";
 import type { AgentErrorCause } from "@/lib/types/task-status-summary";
+import { normalizeAgentErrorStorage, storageEvidenceToWire } from "@/lib/session-delivery-storage";
 
 export type LastAgentError = {
   message: string;
@@ -187,6 +188,8 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     ...(boundedString(record.detail, 1024) ? { detail: boundedString(record.detail, 1024) } : {}),
   };
   readCleanupPromptEvidence(cause, record);
+  const storage = readStorageCauseValue(record.storage);
+  if (storage) cause.storage = storage;
   const reason = typeof record.reason === "string" ? record.reason : "";
   if (!isKnownSelectionReason(cause.code, reason)) return cause;
   cause.reason = reason;
@@ -207,6 +210,11 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     cause.prompt_not_sent = record.prompt_not_sent;
   }
   return cause;
+}
+
+function readStorageCauseValue(value: unknown): AgentErrorCause["storage"] | undefined {
+  const storage = normalizeAgentErrorStorage(value);
+  return storage ? storageEvidenceToWire(storage) : undefined;
 }
 
 function boundedString(value: unknown, maxLength: number): string | undefined {

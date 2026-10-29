@@ -1013,7 +1013,7 @@
   "mcpSessionStateAppliedDescription": "保存した設定をこのエージェントに適用しました。接続状態は「接続」で確認できます。",
   "mcpSessionStatePendingDescription": "現在の設定を引き続き使用します。保存した変更はエージェントがアイドル状態になったときに適用します。",
   "mcpSessionStateDeferredDescription": "現在の設定を引き続き使用します。保存した変更はエージェントの次回起動時に適用します。",
-  "mcpSessionStateFailedDescription": "以前の設定を引き続き使用します。今すぐ再試行するか、エージェントの次回起動時に変更を適用してください。",
+  "mcpSessionStateFailedDescription": "最後に受け入れられた設定を比較用に保持します。今すぐ再試行するか、エージェントの次回起動時に変更を適用してください。",
   "mcpSessionRetry": "MCP の適用を再試行",
   "deleting": "削除中...",
   "mcpSessionAdditions": "このセッションに追加",
@@ -1105,5 +1105,16 @@
   "mcpAssignmentChooseTask": "既存のタスクを選択",
   "mcpAssignmentSearch": "対象を検索",
   "mcpAssignmentDisabled": "使用先を選択する前にこのサーバーを有効にしてください。",
-  "mcpAssignmentPrevious": "前へ"
+  "mcpAssignmentPrevious": "前へ",
+  "mcpExcludeForSession": "このセッションから除外",
+  "mcpRestoreInheritance": "継承を復元",
+  "mcpSessionExcluded": "保存済み：このセッションから除外",
+  "mcpSessionInherited": "保存済み：継承により含まれています",
+  "mcpSessionExclusionsDescription": "除外はこのセッションにのみ適用され、復元するまで保持されます。ワークスペース設定でサーバーを無効にすると、他のセッションにも影響します。",
+  "mcpRequiredToolsSeparate": "必須の Kandev ツールは別途管理されます。プロバイダーで個別に設定されたサーバーはここでは制御できません。",
+  "mcpSavedExclusions": "保存された除外",
+  "mcpDormantExclusionsDescription": "これらのサーバーはこのセッションに継承されなくなりました。継承を復元しても追加されません。",
+  "mcpNoLongerInherited": "継承されていません",
+  "mcpRestoreDisabledDescription": "継承を復元しても、無効なサーバーは有効になりません。",
+  "mcpExclusionCount": "保存されたセッションの除外：{{total}}"
 }

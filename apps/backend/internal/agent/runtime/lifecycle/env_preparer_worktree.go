@@ -86,7 +86,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	stepIdx++
 
 	// Steps 2 (and optional sync): Create worktree (with optional pre-sync).
-	wt, steps, stepIdx, err := p.createWorktreeWithSync(ctx, req, stepIdx, totalSteps, onProgress, steps)
+	wt, _, steps, stepIdx, err := p.createWorktreeWithSync(ctx, req, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
 	}
@@ -220,14 +220,15 @@ func (p *WorktreePreparer) validateWorktreeRequest(
 }
 
 // createWorktreeWithSync creates the worktree (with optional sync-base-branch step).
-// Returns the created worktree, updated steps, the next step index after creation, and any error.
+// Returns the worktree, whether this request created its directory, updated steps,
+// the next step index after creation, and any error.
 func (p *WorktreePreparer) createWorktreeWithSync(
 	ctx context.Context,
 	req *EnvPrepareRequest,
 	stepIdx, totalSteps int,
 	onProgress PrepareProgressCallback,
 	steps []PrepareStep,
-) (*worktree.Worktree, []PrepareStep, int, error) {
+) (*worktree.Worktree, bool, []PrepareStep, int, error) {
 	var syncStep *PrepareStep
 	syncStepIndex := -1
 	if req.PullBeforeWorktree {
@@ -257,10 +258,10 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	// Complete the "Create worktree" step the moment the worktree dir is ready,
 	// before the per-repo setup script runs inside Create() — the setup script
 	// streams its own step, so this keeps the two from overlapping in the UI.
-	stepCompleted := false
+	var createdWorktree *worktree.Worktree
 	createReq.OnWorktreeCreated = func(wt *worktree.Worktree) {
+		createdWorktree = wt
 		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
-		stepCompleted = true
 	}
 
 	wt, err := p.worktreeMgr.Create(ctx, createReq)
@@ -270,18 +271,18 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 		// but a later phase like the setup script failed), leave it green — the
 		// failing phase owns its own step. Only attribute the error to "Create
 		// worktree" when it never completed (the creation itself failed).
-		if !stepCompleted {
+		if createdWorktree == nil {
 			completeStepError(&step, err.Error())
 			reportProgress(onProgress, step, stepIdx, totalSteps)
 		}
 		steps = append(steps, step)
 		p.logger.Error("worktree creation failed", zap.String("task_id", req.TaskID), zap.Error(err))
-		return nil, steps, stepIdx, err
+		return createdWorktree, createdWorktree != nil, steps, stepIdx, err
 	}
 
 	// Reuse of an existing worktree skips OnWorktreeCreated, so complete the
 	// step here when the callback did not fire.
-	if !stepCompleted {
+	if createdWorktree == nil {
 		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
 	}
 	// A failed repository setup script is non-fatal: worktree.Manager.Create
@@ -306,7 +307,7 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	// req.CheckoutBranch != "" (it is set inside fetchBranchToLocal), so the
 	// two warnings always co-occur and FetchWarning is never silently dropped.
 	steps = append(steps, step)
-	return wt, steps, stepIdx + 1, nil
+	return wt, createdWorktree != nil, steps, stepIdx + 1, nil
 }
 
 // buildWorktreeCreateRequest maps an EnvPrepareRequest onto the worktree
@@ -489,10 +490,13 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	createdIDs := make([]string, 0, len(specs))
 
 	for _, spec := range specs {
-		wt, newSteps, nextIdx, err := p.prepareOneRepo(ctx, req, spec, stepIdx, totalSteps, onProgress, steps)
+		wt, createdByRequest, newSteps, nextIdx, err := p.prepareOneRepo(ctx, req, spec, stepIdx, totalSteps, onProgress, steps)
 		steps = newSteps
 		stepIdx = nextIdx
 		if err != nil {
+			if createdByRequest && wt != nil {
+				createdIDs = append(createdIDs, wt.ID)
+			}
 			err = &RepositoryPreparationError{
 				RepositoryID:     spec.RepositoryID,
 				TaskRepositoryID: spec.TaskRepositoryID,
@@ -508,7 +512,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 				Duration:     time.Since(start),
 			}, nil
 		}
-		if spec.WorktreeID == "" || wt.ID != spec.WorktreeID {
+		if createdByRequest {
 			createdIDs = append(createdIDs, wt.ID)
 		}
 		worktrees = append(worktrees, RepoWorktreeResult{
@@ -574,8 +578,8 @@ func worktreeMainRepoGitDir(wt *worktree.Worktree, registeredPath string) string
 // prepareOneRepo runs the validate → create-worktree → fetch-PR sequence for
 // a single repo within a multi-repo preparation. The per-repo setup script
 // is executed by the worktree manager during Create() and is not re-run
-// here. Returns the created worktree, updated steps, the next step index,
-// and any error.
+// here. Returns the worktree, whether this request created its directory,
+// updated steps, the next step index, and any error.
 func (p *WorktreePreparer) prepareOneRepo(
 	ctx context.Context,
 	req *EnvPrepareRequest,
@@ -583,7 +587,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	stepIdx, totalSteps int,
 	onProgress PrepareProgressCallback,
 	steps []PrepareStep,
-) (*worktree.Worktree, []PrepareStep, int, error) {
+) (*worktree.Worktree, bool, []PrepareStep, int, error) {
 	repoLabel := spec.RepoName
 	if repoLabel == "" {
 		repoLabel = spec.RepositoryID
@@ -596,14 +600,14 @@ func (p *WorktreePreparer) prepareOneRepo(
 		completeStepError(&validateStep, "no repository path provided")
 		steps = append(steps, validateStep)
 		reportProgress(onProgress, validateStep, stepIdx, totalSteps)
-		return nil, steps, stepIdx + 1, fmt.Errorf("repo %q: no repository path", repoLabel)
+		return nil, false, steps, stepIdx + 1, fmt.Errorf("repo %q: no repository path", repoLabel)
 	}
 	if !isGitRepoPath(spec.RepositoryPath) {
 		errMsg := fmt.Sprintf("repository path is not a git repository: %s", spec.RepositoryPath)
 		completeStepError(&validateStep, errMsg)
 		steps = append(steps, validateStep)
 		reportProgress(onProgress, validateStep, stepIdx, totalSteps)
-		return nil, steps, stepIdx + 1, fmt.Errorf("repo %q: %s", repoLabel, errMsg)
+		return nil, false, steps, stepIdx + 1, fmt.Errorf("repo %q: %s", repoLabel, errMsg)
 	}
 	completeStepSuccess(&validateStep)
 	steps = append(steps, validateStep)
@@ -642,12 +646,12 @@ func (p *WorktreePreparer) prepareOneRepo(
 	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
 	subReq.Repositories = nil
 
-	wt, steps, stepIdx, err := p.createWorktreeWithSync(ctx, &subReq, stepIdx, totalSteps, onProgress, steps)
+	wt, createdByRequest, steps, stepIdx, err := p.createWorktreeWithSync(ctx, &subReq, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
-		return nil, steps, stepIdx, err
+		return wt, createdByRequest, steps, stepIdx, err
 	}
 	if subReq.WorkspaceReuseRequired {
-		return wt, steps, stepIdx, nil
+		return wt, createdByRequest, steps, stepIdx, nil
 	}
 
 	// PR fetch step (mirrors single-repo path).
@@ -678,7 +682,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	// "script_execution" chat message. Running it here as well caused the
 	// script to execute twice per repo and broke non-idempotent setups.
 
-	return wt, steps, stepIdx, nil
+	return wt, createdByRequest, steps, stepIdx, nil
 }
 
 func repoBranchIdentitySlug(spec RepoPrepareSpec) string {

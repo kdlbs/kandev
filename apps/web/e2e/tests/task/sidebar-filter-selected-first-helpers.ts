@@ -120,7 +120,10 @@ export async function openSelectedFilters(
   await new SessionPage(page).waitForLoad();
   if (mobile) {
     await page.getByTestId("mobile-task-picker-trigger").tap();
-    await page.getByRole("dialog", { name: "Tasks" }).getByTestId("sidebar-filter-gear").tap();
+    const tasks = page.getByRole("dialog", { name: "Tasks", exact: true });
+    await expect(tasks).toBeVisible();
+    await waitForFiniteAnimations(tasks);
+    await tasks.getByTestId("sidebar-filter-gear").tap();
     await expect(page.getByTestId("sidebar-filter-drawer")).toBeVisible();
   } else {
     await new SidebarFilterPopoverPage(page).open();

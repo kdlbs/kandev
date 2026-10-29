@@ -856,20 +856,26 @@ func sameAgentDeliveryEventIdentity(stored, incoming *models.AgentDeliveryEvent)
 }
 
 func sameAgentDeliveryEventPayload(stored, incoming *models.AgentDeliveryEvent) (bool, error) {
+	matchesIncoming := func(hash string) bool {
+		return hash == agentDeliveryEventHash(incoming) ||
+			hash == agentDeliveryEventHashWithoutToolOutputBytes(incoming)
+	}
 	if stored.PayloadPrunedAt != nil {
 		if stored.HashVersion != agentDeliveryPayloadHashVersion || stored.ContentHash == "" {
 			return false, repoerrors.ErrAgentDeliveryReceiptCorrupt
 		}
-		return stored.ContentHash == agentDeliveryEventHash(incoming), nil
+		return matchesIncoming(stored.ContentHash), nil
 	}
 	if stored.HashVersion == agentDeliveryPayloadHashVersion {
-		if stored.ContentHash == "" || stored.ContentHash != agentDeliveryEventHash(stored) {
+		storedHashMatches := stored.ContentHash == agentDeliveryEventHash(stored) ||
+			stored.ContentHash == agentDeliveryEventHashWithoutToolOutputBytes(stored)
+		if stored.ContentHash == "" || !storedHashMatches {
 			return false, repoerrors.ErrAgentDeliveryReceiptCorrupt
 		}
 		if bytes.Equal(stored.Payload, incoming.Payload) {
 			return true, nil
 		}
-		return stored.ContentHash == agentDeliveryEventHash(incoming), nil
+		return matchesIncoming(stored.ContentHash), nil
 	}
 	return sameAgentDeliveryPayload(stored.Payload, incoming.Payload), nil
 }

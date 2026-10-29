@@ -1306,6 +1306,12 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 				cause.PromptNotSent = &promptNotSent
 			}
 		}
+		if value, ok := fields["storage"]; ok {
+			var storage AgentErrorStorage
+			if json.Unmarshal(value, &storage) == nil {
+				cause.Storage = &storage
+			}
+		}
 		causes = append(causes, cause)
 	}
 	return causes

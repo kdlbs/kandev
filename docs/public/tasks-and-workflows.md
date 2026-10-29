@@ -294,6 +294,23 @@ existing local checkout's origin no longer matches the selected remote,
 Kandev reports a validation error. Correct its origin or select it explicitly
 as a local repository.
 
+### Recover an uncertain task creation
+
+A connection interruption can hide the result of **Start task**, **Start task in plan mode**, or **Create without starting agent**. The task can exist even when the dialog reports an error. Do not submit the same work again.
+
+When the dialog reports that creation is unconfirmed:
+
+1. Select **Check status**. Kandev checks the earlier submission and reports whether the task exists.
+2. If the task exists, select **Open task**. Review the task and its conversation.
+3. If no task exists and **Retry submission** is available, select it. Kandev sends the earlier values and keeps newer edits in the draft.
+4. Select **Close** to keep the unconfirmed submission for later. Closing does not cancel the agent or delete a task.
+
+An unconfirmed submission keeps its earlier values and start mode. A later error or an empty status check does not create a second task. After you open a recovered task, a new submission creates a new task.
+
+If **Check status** reports that creation is still in progress, open the task and wait. Recovery does not start or repair the task. If the task is no longer available, select **Close** and create a new task only when the work is still required.
+
+Phones show the same actions in the dialog footer. The status and actions stay above the safe area while the draft scrolls.
+
 ### Reduce downloads for a large remote repository
 
 In **New Task → Remote**, select a repository and open its gear (**Repository options**).
@@ -614,7 +631,13 @@ Each card uses retained data for that turn. Later edits, commits, or branch chan
 
 The diff shows the selected file’s full path and its previous path after a rename. If a file list fails to load, select **Retry**.
 
-Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+For a new capture, Kandev compares the turn with its captured history. If the branch integrates upstream commits during the turn, for example with a rebase or merge onto the configured comparison target, the card excludes those upstream changes. Starting local edits stay in the baseline, so a later revert still appears as a turn change. If Kandev cannot separate the history safely, the affected repository reports an unavailable comparison and does not show whole-repository totals as turn edits. Other repositories in the same turn remain usable.
+
+Older captures keep their original files and counts with repository-change wording. Kandev does not reconstruct missing history from the current checkout.
+
+Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. An unavailable history comparison is the exception and uses the normal unavailable status. Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+
+Saved files stay available while the remaining content is preserved. A selected file whose content is still pending shows the usual loading state. If preservation stops, the missing files report an explicit unavailable reason.
 
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
@@ -833,9 +856,10 @@ own and never quietly drops the link.
 Three things clear it, all of them deliberate: retry the predecessor until it
 succeeds, remove the link over MCP, or start the dependent manually.
 
-An **archived** predecessor is treated as unfinished, not as failed and not as
-resolved, so archiving a task does not release the work waiting on it.
-**Deleting** a task does remove its links in both directions, and any dependent
+An **archived** predecessor keeps its outcome: **Completed** resolves the
+dependency, **Failed** or **Cancelled** keeps the dependent blocked, and
+unfinished work stays pending. Archiving does not remove the link.
+**Deleting** a task removes its links in both directions, and any dependent
 that was waiting only on it becomes unblocked. That dependent is not started:
 deletion is not success.
 

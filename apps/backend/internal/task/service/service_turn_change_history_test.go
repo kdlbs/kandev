@@ -39,6 +39,14 @@ func TestTurnChangeSummaryProjectionOmitsPrivateCaptureIdentityAndContent(t *tes
 	if !strings.Contains(body, `"fallback_anchor":"turn-changes:turn-1"`) || !strings.Contains(body, `"display_name":"app"`) {
 		t.Fatalf("summary projection is missing safe navigation metadata: %s", body)
 	}
+	if !strings.Contains(body, `"counts_available":true`) || strings.Contains(body, `"legacy_counts":true`) {
+		t.Fatalf("summary availability projection = %s", body)
+	}
+	repositories[0].ComparisonBasis = "legacy_raw"
+	payload, err = json.Marshal(projectTurnChangeSummaryEvent(changeSet, repositories))
+	if err != nil || !strings.Contains(string(payload), `"legacy_counts":true`) {
+		t.Fatalf("legacy comparison projection = %s, %v", payload, err)
+	}
 }
 
 func TestTurnChangeHistoryReadsEnforceSessionOwnershipAndRelationships(t *testing.T) {

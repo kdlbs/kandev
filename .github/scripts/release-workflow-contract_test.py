@@ -296,7 +296,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         job = job_block("notify-contributors")
         condition = job_condition("notify-contributors")
         self.assertIn(
-            "needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]",
+            "needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket, publish-plugin-sdk, stable-complete]",
             job,
         )
         success_gates = (
@@ -1812,6 +1812,48 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("scripts/release/retry-ghcr-command.test.sh", LINT_WORKFLOW)
         makefile = (REPO_ROOT / "Makefile").read_text()
         self.assertIn("bash scripts/release/retry-ghcr-command.test.sh", makefile)
+
+
+class PluginSDKReleaseTests(unittest.TestCase):
+    def test_sdk_signing_and_oidc_are_separate_required_jobs(self):
+        prepare = job_block("prepare-plugin-sdk")
+        publish = job_block("publish-plugin-sdk")
+        self.assertIn("needs: [prepare, publish-release]", prepare)
+        self.assertIn("environment: release", prepare)
+        self.assertIn("contents: write", prepare)
+        self.assertIn("RELEASE_GPG_PRIVATE_KEY", prepare)
+        self.assertNotIn("id-token: write", prepare)
+        self.assertNotIn("gh auth setup-git", prepare)
+        self.assertIn("id-token: write", publish)
+        self.assertIn("contents: read", publish)
+        self.assertNotIn("RELEASE_GPG_PRIVATE_KEY", publish)
+        for name in ("prepare-plugin-sdk", "publish-plugin-sdk"):
+            block = job_block(name)
+            self.assertIn("runs-on: ubuntu-latest", block)
+            self.assertIn("!inputs.dry_run", block)
+            self.assertIn("!inputs.desktop_validation_only", block)
+            self.assertIn("inputs.channel == 'stable'", block)
+            self.assertNotIn("inputs.backfill_tag == ''", block)
+            self.assertIn("SDK_WORKFLOW_SHA: ${{ github.workflow_sha }}", block)
+            self.assertIn('git checkout "$SDK_WORKFLOW_SHA" --', block)
+            self.assertIn("--mode tools", block)
+            self.assertIn("steps.sdk_tools.outputs.node", block)
+            self.assertIn("steps.sdk_tools.outputs.npm", block)
+            self.assertNotIn("NODE_AUTH_TOKEN", block)
+            self.assertNotIn("NPM_TOKEN", block)
+    def test_sdk_failure_blocks_completion_and_notices_but_not_sibling_channels(self):
+        for name in ("stable-complete", "notify-contributors", "announce-discord", "discord-recovery-notice"):
+            self.assertIn("needs.publish-plugin-sdk.result == 'success'", job_block(name))
+        for name in ("publish-npm", "update-homebrew-tap", "update-scoop-bucket"):
+            self.assertNotIn("publish-plugin-sdk", job_block(name))
+    def test_sdk_metadata_is_preflighted_stamped_and_staged(self):
+        block = step_block("Validate plugin SDK release intent")
+        self.assertIn("--preflight", block)
+        self.assertIn("BACKFILL_TAG", block)
+        self.assertIn("--ref", block)
+        self.assertIn("--stamp", step_block("Bump version + generate CHANGELOG (in working tree)"))
+        for path in ("pluginsdk/sdk-release.json", "apps/packages/plugin-sdk/sdk-release.json"):
+            self.assertIn(path, step_block("Create release PR"))
 
 
 if __name__ == "__main__":

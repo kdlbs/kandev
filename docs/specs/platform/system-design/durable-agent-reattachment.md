@@ -172,6 +172,9 @@ The earlier explicit continuation implementation remains historical evidence in 
 The orchestrator owns one bounded startup recovery worker after lifecycle adoption and startup reconciliation complete.
 It uses durable recovery records, not browser state or the count of disconnected streams.
 Each candidate passes existing authorization, route, archive, process-identity, native-state, and execution admission checks.
+Pinned silent-restore candidates share infrastructure serialization with workspace reads.
+If a workspace reader rejects unresolved recovery, the candidate runs its own launch admission.
+It does not inherit that rejection or change the recovery action; unrelated errors remain failures.
 Recover the authenticated owner from authoritative persisted ownership; do not synthesize an administrator identity or bypass session scopes.
 Auth-disabled installations can have an empty stored workspace owner. The auth resolver permits that existing unscoped mode, while the checkpoint still pins the exact empty owner and organization.
 Enabled authentication requires a current eligible identity and rejects an empty or disabled owner.

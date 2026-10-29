@@ -53,3 +53,29 @@ Throttle this production batched path with `last_checked_at` and `PRSyncFreshnes
 
 For lookup changes, run `service_pr_watch_batched_budget_test.go` coverage.
 Retain call-count assertions: a correct final `PRStatus` cannot detect duplicate API requests.
+
+## Batched phase progress and continuation
+
+`fetchBatchedWatchStatuses` runs a numbered phase and then a searching phase.
+Each phase owns its singleflight and progress key (`batched-pr:` /
+`batched-branch:`), so a changing search set never discards numbered chunk
+progress. The numbered phase is fetched, applied, and published before the
+searching read starts; searching latency or its context deadline cannot withhold
+a finished known-PR update. `apply*BatchGroups` is the only apply seam; keep
+review-thread pagination complete before publication and keep
+`applyPRWatchStatusResult` as the writer.
+
+`prWatchSyncOutcome` carries applied results plus the unfinished phase and a
+typed `AdmissionDeferredError`. Local deferral must not enter REST fallback or
+auth circuits; only unfinished watches may fall back, and the passive per-task
+sync path must return the deferral instead of retrying it over REST.
+`poller_pr_continuation.go` retains that unfinished work per workspace, keyed by
+provider target with every live watch consumer and one deadline per target, and
+resumes it from `prMonitorLoop`'s timer at its admission boundary (future
+`RetryAt`, then positive `Delay`, then a one-second floor). A retried target
+always replaces its own deadline; untouched targets keep theirs. Pruning drops
+consumers whose watch lifetime disappeared or whose target changed, and drops a
+workspace entry when its credential fingerprint changed, so a new principal or a
+retire/resume lifetime is admitted at the next normal attempt. Timer wakes
+recheck admission, never run the transport fallback, and do not suppress a
+replacement lifetime. Do not add a second scheduler or a per-watch goroutine.

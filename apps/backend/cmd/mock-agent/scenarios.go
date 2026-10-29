@@ -67,6 +67,9 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"large-search-overflow":            scenarioLargeSearchOverflow,
 	"oversized-output":                 scenarioOversizedOutput,
 	"oversized-output-hold":            scenarioOversizedOutputHold,
+	"turn-history-integrity":           scenarioTurnHistoryIntegrity,
+	"turn-history-conflict":            scenarioTurnHistoryConflict,
+	"turn-history-conflict-setup":      scenarioTurnHistoryConflictSetup,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup

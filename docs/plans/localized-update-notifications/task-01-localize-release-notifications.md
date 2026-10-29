@@ -83,3 +83,26 @@ repeated locally under the repository's resource guard.
 After merging the latest base, the selected frontend suites passed 54 tests and
 the rebuilt Chromium run of this spec and the deleted-task spec passed all 25
 tests with retries disabled.
+
+## SDK integration reconciliation
+
+PR #4534 retains the landed version guard and legacy no-version fallback.
+Its browser/native hook matrix switches locale after mounting and before
+delivering populated backend copy. This subsumes the earlier native-only
+locale case; the legacy unit control and controlled WebSocket pseudo-locale
+scenario remain intact. No SDK, payload identity or transport policy changes
+are introduced. The public operations guide clarifies Local release language.
+
+A controlled two-release WebSocket case reproduces an ambiguous title-only
+selector. Selecting the intended version fixes that fixture while retaining
+both localized title and body assertions. It fails before the selector change
+and passes afterward, with retries disabled. The production hook matches main
+exactly; the backend producer includes the version for standard release notices.
+
+Focused rebase verification passed 126 frontend tests across ten files, the
+selected backend session/Git race checks, all 29 rebuilt Chromium cases
+(pseudo-locale, deleted-task recovery and executor keyboard access), and both
+phone cases (executor navigation and release-toast/composer containment).
+Browser retries were disabled. Typecheck, scoped zero-warning lint, i18n,
+docs/spec lint and direct documentation coverage passed. SDK and release
+files are byte-identical to the prior published green head.

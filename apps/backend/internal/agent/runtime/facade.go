@@ -28,6 +28,22 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound)
 }
 
+// IsTerminalPermissionError reports whether a permission operation returned a
+// result that cannot be changed by retrying the same request.
+func IsTerminalPermissionError(err error) bool {
+	type permissionError interface{ PermissionCode() string }
+	var coded permissionError
+	if !errors.As(err, &coded) {
+		return false
+	}
+	switch coded.PermissionCode() {
+	case streams.PermissionErrorAlreadyResolved, streams.PermissionErrorStale, streams.PermissionErrorNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
 // facade is the default Runtime implementation: a thin adapter over
 // the lifecycle Manager (or any Backend).
 type facade struct {
@@ -202,6 +218,42 @@ func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID st
 		}, nil
 	}
 	return f.backend.ExecuteBackgroundWorkAction(ctx, executionID, req)
+}
+
+type runPermissionBackend interface {
+	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
+	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
+}
+
+func (f *facade) runPermissionBackend(executionID string) (runPermissionBackend, error) {
+	if executionID == "" {
+		return nil, fmt.Errorf("runtime: executionID is required")
+	}
+	backend, ok := f.backend.(runPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend, nil
+}
+
+// ResolveRunPermission delegates to a backend that can address permissions
+// by execution.
+func (f *facade) ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error {
+	backend, err := f.runPermissionBackend(executionID)
+	if err != nil {
+		return err
+	}
+	return backend.ResolveRunPermission(ctx, executionID, requestID, pendingID, optionID)
+}
+
+// CancelRunPermission delegates to a backend that can address permissions
+// by execution.
+func (f *facade) CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error {
+	backend, err := f.runPermissionBackend(executionID)
+	if err != nil {
+		return err
+	}
+	return backend.CancelRunPermission(ctx, executionID, requestID, pendingID)
 }
 
 // launchRequestFromSpec builds the lifecycle.LaunchRequest the backend

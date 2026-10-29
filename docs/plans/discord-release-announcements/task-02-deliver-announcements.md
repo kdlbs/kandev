@@ -112,3 +112,9 @@ Validation:
 - The production helper previewed published `v0.98.0` through real GitHub reads: 385 total changes, six highlights, correct category counts, and no unresolved credits. No Discord message was sent. An isolated temporary bare repository supplied release history because this shared checkout has an unrelated broken branch reference that prevents tag fetches.
 
 Public setup and recovery docs and the release skill are updated. Prepared for PR review; no workflow was dispatched or release published. Existing workflow-security findings are tracked in Kandev subtask `4bb81949-c018-421a-9f85-8a10674a7695`, created after checking open PRs for overlap.
+
+
+SDK integration adds `publish-plugin-sdk` and `stable-complete` to automatic
+delivery and recovery-notice prerequisites. This preserves the requirement that
+announcements describe complete Stable publication after the SDK work lands.
+The workflow contract tests cover failed, skipped, and cancelled prerequisites.

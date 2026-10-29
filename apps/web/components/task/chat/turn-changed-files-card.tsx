@@ -12,7 +12,12 @@ import type { TurnChangeSetSummary, TurnFileChange } from "@/lib/types/turn-chan
 import type { TurnChangeTreeFolder } from "@/lib/turn-changes/tree";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import { readTurnChangeViewState, updateTurnChangeViewState } from "@/lib/turn-changes/view-state";
-import { projectTurnRepositoryAvailability } from "@/lib/turn-changes/projection";
+import {
+  isTurnChangePartial,
+  projectTurnRepositoryAvailability,
+} from "@/lib/turn-changes/projection";
+import { repositoryCountText, summaryCountText } from "@/lib/turn-changes/counts";
+import { CardNotice, LoadMoreButton, RetryFilesButton } from "./turn-changed-files-card-parts";
 
 type TurnChangedFilesCardProps = {
   sessionId: string;
@@ -404,7 +409,7 @@ function TurnChangesCardSummary({
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
       <TurnChangesCardCounts summary={summary} isUnavailable={isUnavailable} />
-      {isPartial(summary) && (
+      {!isUnavailable && isTurnChangePartial(summary) && (
         <span className="text-amber-700 dark:text-amber-400">{t("task:turnChangesPartial")}</span>
       )}
       {isExpired && <span className="text-muted-foreground">{t("task:turnChangesExpired")}</span>}
@@ -421,17 +426,12 @@ function TurnChangesCardCounts({
 }) {
   const { t } = useTranslation();
   if (isUnavailable) {
-    return (
-      <span className="font-medium text-amber-700 dark:text-amber-400">
-        {t("task:turnChangesUnavailable")}
-      </span>
-    );
+    return null;
   }
+  const countText = summaryCountText(summary, t);
   return (
     <>
-      <span className="font-medium">
-        {t("task:turnChangesFileCount", { count: summary.file_count })}
-      </span>
+      <span className="font-medium">{countText}</span>
       {(summary.added_lines != null || summary.deleted_lines != null) && (
         <LineStat added={summary.added_lines} removed={summary.deleted_lines} />
       )}
@@ -447,10 +447,6 @@ function TurnChangesCardCounts({
       )}
     </>
   );
-}
-
-function isPartial(summary: TurnChangeSetSummary): boolean {
-  return summary.availability === "failed" || !summary.complete || !summary.summary_complete;
 }
 
 function TurnChangesAvailability({
@@ -478,21 +474,6 @@ function TurnChangesAvailability({
   return null;
 }
 
-function CardNotice({ text, role }: { text: string; role?: "status" | "alert" }) {
-  return (
-    <p
-      className={
-        role === "alert"
-          ? "px-3 py-2 text-xs text-destructive"
-          : "px-3 py-2 text-xs text-muted-foreground"
-      }
-      role={role}
-    >
-      {text}
-    </p>
-  );
-}
-
 function RepositoryRows({
   sessionId,
   summary,
@@ -518,12 +499,12 @@ function RepositoryRows({
     const files = filesByRepository[repository.id] ?? [];
     const repo = summary.repositories.find((item) => item.id === repository.id);
     const repositoryState = repo ? projectTurnRepositoryAvailability(repo) : null;
-    const repositoryCount =
-      repo?.enumeration_complete === false
-        ? t("task:turnChangesLoadedFileCount", { count: files.length })
-        : t("task:turnChangesFileCount", {
-            count: fileTotalsByRepository[repository.id] ?? files.length,
-          });
+    const repositoryCount = repositoryCountText(
+      repo,
+      files.length,
+      fileTotalsByRepository[repository.id],
+      t,
+    );
     return (
       <div key={repository.id} className="border-b border-border/40 last:border-b-0">
         <button
@@ -538,7 +519,9 @@ function RepositoryRows({
             <IconChevronRight className="size-3.5" />
           )}
           <span className="min-w-0 flex-1 truncate">{repository.label}</span>
-          <span className="ml-auto shrink-0 text-muted-foreground">{repositoryCount}</span>
+          {repositoryCount && (
+            <span className="ml-auto shrink-0 text-muted-foreground">{repositoryCount}</span>
+          )}
           {repositoryState && repositoryState !== "ready" && (
             <span className="text-amber-700 dark:text-amber-400">
               {t("task:turnChangesRepositoryStatus", {
@@ -577,38 +560,4 @@ function RepositoryRows({
       </div>
     );
   });
-}
-
-function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div className="px-3 py-2">
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="h-7 min-h-7 cursor-pointer px-2 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-        disabled={loading}
-        onClick={onClick}
-      >
-        {loading ? t("task:turnChangesLoading") : t("task:turnChangesLoadMore")}
-      </Button>
-    </div>
-  );
-}
-
-function RetryFilesButton({ onClick }: { onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div className="px-3 pb-2">
-      <Button
-        size="sm"
-        variant="ghost"
-        className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-        onClick={onClick}
-      >
-        {t("task:turnChangesRetry")}
-      </Button>
-    </div>
-  );
 }

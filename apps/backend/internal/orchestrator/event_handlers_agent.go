@@ -1591,10 +1591,7 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 		metaMap = make(map[string]interface{})
 	}
 	metaMap[plancomments.MetadataClientMessageFingerprint] = fingerprint
-	messageID := uuid.NewSHA1(
-		uuid.NameSpaceOID,
-		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
-	).String()
+	messageID := queuedTranscriptMessageID(queuedMsg, sourceIDs)
 	if err := s.messageCreator.CreateUserMessageIdempotent(
 		ctx, messageID, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap,
 	); err != nil {
@@ -1606,6 +1603,13 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 	}
 	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
 	return nil
+}
+
+func queuedTranscriptMessageID(queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) string {
+	return uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
+	).String()
 }
 
 func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {

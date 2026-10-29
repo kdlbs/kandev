@@ -647,6 +647,10 @@ func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, 
 	if err != nil {
 		return fmt.Errorf("load conversation for dynamic continuation: %w", err)
 	}
+	held, err := s.queuedTranscriptMessageIDs(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load queue ownership for dynamic continuation: %w", err)
+	}
 	conversation := make([]string, 0, len(messages))
 	toolSummary := make([]string, 0)
 	for _, message := range messages {
@@ -655,6 +659,9 @@ func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, 
 		}
 		content := strings.TrimSpace(message.Content)
 		if message.AuthorType == models.MessageAuthorUser {
+			if _, queued := held[message.ID]; queued {
+				continue
+			}
 			input.UserMessages = append(input.UserMessages, content)
 			continue
 		}
@@ -1891,10 +1898,18 @@ func (s *Service) dynamicRelaunchPrompt(ctx context.Context, sessionID string) (
 	if err != nil {
 		return capturedPrompt{}, false
 	}
+	held, err := s.queuedTranscriptMessageIDs(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("cannot reconstruct dynamic relaunch prompt from unreadable queue", zap.String("session_id", sessionID), zap.Error(err))
+		return capturedPrompt{}, false
+	}
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
 		if message == nil || message.AuthorType != models.MessageAuthorUser ||
 			strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		if _, queued := held[message.ID]; queued {
 			continue
 		}
 		return capturedPrompt{text: message.Content}, true

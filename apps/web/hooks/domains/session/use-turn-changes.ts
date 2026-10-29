@@ -55,32 +55,33 @@ export function clearTurnChangeRequestsForTest(): void {
   inFlightPages.clear();
 }
 
-function useTurnChangeReconciliation(
+function useTurnChangeSubscription(
   sessionId: string | null,
-  detailActive: boolean,
-  load: (offset: number) => Promise<void>,
+  store: ReturnType<typeof useAppStoreApi>,
   setError: (error: unknown) => void,
 ) {
   const client = useWebSocketClient();
   const connectionStatus = useAppStore((state) => state.connection.status);
   useEffect(() => {
-    if (!detailActive || !sessionId || !client || connectionStatus !== "connected") return;
-    let disposed = false;
+    if (!sessionId || !client || connectionStatus !== "connected") return;
     const subscription = client.subscribeSessionWithReady(sessionId);
+    let active = true;
     void subscription.ready
       .then(async () => {
-        const earlier = inFlightPages.get(`${sessionId}:0`);
-        if (earlier) await earlier.catch(() => undefined);
-        if (!disposed) await load(0);
+        // The new snapshot must not join a read started before the subscription was ready.
+        await inFlightPages.get(`${sessionId}:0`)?.catch(() => undefined);
+        if (!active) return;
+        await loadPage(sessionId, 0, store);
+        if (active) setError(null);
       })
-      .catch((err: unknown) => {
-        if (!disposed) setError(err);
+      .catch((error) => {
+        if (active) setError(error);
       });
     return () => {
-      disposed = true;
+      active = false;
       subscription.unsubscribe();
     };
-  }, [client, connectionStatus, detailActive, sessionId, load, setError]);
+  }, [sessionId, client, connectionStatus, store, setError]);
 }
 
 export function useSessionTurnChanges(
@@ -117,7 +118,8 @@ export function useSessionTurnChanges(
   useEffect(() => {
     if (sessionId && !loaded) void load(0);
   }, [sessionId, loaded, load]);
-  useTurnChangeReconciliation(sessionId, detailActive, load, setError);
+
+  useTurnChangeSubscription(detailActive ? sessionId : null, store, setError);
 
   const loadMore = useCallback(() => {
     if (nextOffset !== null) void load(nextOffset);

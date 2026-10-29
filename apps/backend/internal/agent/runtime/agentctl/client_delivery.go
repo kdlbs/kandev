@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // DeliveryStatus is the authenticated recovery descriptor returned by an
@@ -25,6 +26,8 @@ type DeliveryStatus = journal.RecoveryDescriptor
 type DeliveryHTTPError struct {
 	StatusCode int
 	Body       string
+	// Storage carries validated source evidence when the peer supplied it.
+	Storage *streams.DeliveryStorageDiagnostic
 }
 
 func (e *DeliveryHTTPError) Error() string {
@@ -282,7 +285,9 @@ func (c *Client) doDeliveryRequestLimited(
 		return fmt.Errorf("read durable delivery response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return &DeliveryHTTPError{StatusCode: resp.StatusCode, Body: truncateBody(responseBody)}
+		httpErr := &DeliveryHTTPError{StatusCode: resp.StatusCode, Body: truncateBody(responseBody)}
+		httpErr.Storage = deliveryResponseStorage(responseBody)
+		return httpErr
 	}
 	if output == nil || len(responseBody) == 0 {
 		return nil
@@ -314,4 +319,16 @@ func (c *Client) RetireInterruptedDeliverySubmission(ctx context.Context, id, st
 		StreamID   string `json:"stream_id"`
 		Generation uint64 `json:"harness_generation"`
 	}{StreamID: streamID, Generation: generation}, nil)
+}
+
+// deliveryResponseStorage accepts only the closed storage diagnostic from an
+// authenticated error body. Other fields and malformed values stay absent.
+func deliveryResponseStorage(body []byte) *streams.DeliveryStorageDiagnostic {
+	var response struct {
+		Storage *streams.DeliveryStorageDiagnostic `json:"storage"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil || response.Storage == nil {
+		return nil
+	}
+	return response.Storage.Normalize()
 }

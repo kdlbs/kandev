@@ -3,6 +3,7 @@ status: draft
 system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
+  - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
 updated: 2026-10-12
 owners:
@@ -19,6 +20,7 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001` | [Failure modes](#failure-modes) |
 
 ## Migrated source detail
 
@@ -97,6 +99,18 @@ require the current exclusive probe lease.
 
 ## Failure modes
 
+- Before adding transcript-derived user rows to a new continuation or choosing
+  a durable relaunch prompt, the orchestrator reads the complete session queue
+  snapshot and, when supported, ordinary pending dispatch claims under the same
+  session admission gate. A concurrent restore cannot move a claim into the
+  queue between these ownership reads. Owned entries
+  and same-session unaccepted claims exclude existing rows by their explicit
+  transcript ID and the existing deterministic queued-message ID. The recorded
+  marker may predate the writer in durable claims and is not required for an
+  exact row-ID match. An absent transcript row has no context to exclude. Read errors
+  stop reconstruction before launch. These reads do not ACK, restore, delete,
+  or dispatch queued work. Saved continuation data and cached retry prompts
+  keep their existing precedence.
 - Invalid or deleted candidate references make that candidate ineligible and
   surface a profile configuration error. They never fall through to a workspace
   default profile.

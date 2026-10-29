@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: agents
 created: 2026-10-27
 requirements:
@@ -18,9 +18,10 @@ requirements:
 
 Agents owns concrete profile selection and native process preparation.
 This design includes storage, settings contracts, discovery, runtime loading, and responsive settings UI.
-Discovery, profile state, and settings are implemented. Native mount permission
-is fail-closed with `policy_unverified`: authenticated evidence that explicit
-mounts preserve MCP disables and managed prohibitions is still missing. See the
+Discovery, profile state, settings, and supported process loading are implemented.
+The artificial `policy_unverified` gate was removed under the user's
+[native-authority decision](../../../decisions/2026-10-28-copilot-native-policy-authority.md).
+Enterprise-policy evidence is diagnostic, not launch admission. See the
 [compatibility evidence](../../../plans/copilot-profile-plugins/compatibility-evidence.md).
 The [requirements](../requirements/copilot-profile-plugins.md) distinguish confirmed intent from recommendations.
 
@@ -35,8 +36,9 @@ Related contracts:
 - [Portable configuration](../requirements/portable-agent-configuration.md): no implied plugin or credential portability.
 - [Context reset decision](../../../decisions/2026-08-18-context-reset-preserves-runtime-configuration.md): retained sessions and replacement processes differ.
 - [Native MCP preparation decision](../../../decisions/2026-09-28-profile-authorized-mcp-preparation.md): native policy remains authoritative, without adopting Cursor preparation here.
+- [Native authority](copilot-profile-plugins-native-qualification.md): version-bounded preparation, diagnostic evidence, and failure recovery.
 
-This provider-specific design records local tradeoffs. It adds no repository-wide ADR rule.
+The linked native-authority ADR records the policy-ownership trade-off.
 
 ## Requirement mapping
 
@@ -159,7 +161,7 @@ Version and root never enter the identity.
 Preserve case and source values. Do not merge equal names across marketplaces.
 
 Decode segments once for validation. Reject noncanonical encodings, invalid UTF-8, controls, separators, traversal segments, and empty names.
-Only `installed` identities can become new saved selections in this initial adapter.
+Only qualified `installed` and `live` identities can become new saved selections.
 Built-in and unfamiliar source rows can have display identities but remain unselectable.
 Duplicate inventory identities yield one unavailable row with `ambiguous_identity`, never an arbitrary winner.
 
@@ -286,8 +288,9 @@ Extract a neutral runner only if both callers can retain their existing behavior
 Use a 20-second command deadline, 2 MiB stdout, 32 KiB stderr, 1024 inventory rows, and bounded descendant cleanup.
 Include runtime startup in the deadline. Do not return partial buffers as valid JSON.
 Propagate request cancellation and close pipes on every exit path.
-Inventory uses a disposable working directory and sends no model prompt.
-Actual launches use their trusted task directory so native policy resolves there.
+Settings inventory uses a disposable working directory and sends no model prompt.
+New-process resolution uses the trusted final child working directory, including
+host utility calls, so discovery and launch agree on relative inputs.
 
 Use a separate bounded inventory cache: at most 256 entries, 30-second TTL for successful snapshots only.
 Cache safe DTOs, not roots, raw metadata, or secret values.
@@ -304,7 +307,7 @@ At each new process boundary:
 
 1. Gate provider and executor. Return immediately for an empty selection.
 2. Resolve the authoritative final environment and selected runtime.
-3. Require a qualified runtime/policy adapter and obtain the current inventory.
+3. Require a supported inventory/metadata adapter and obtain the current inventory.
 4. Resolve every selected ID. Any missing or unsupported plugin fails the whole preparation.
 5. Inspect enabled manual `--plugin-dir PATH` and `--plugin-dir=PATH` flags without changing their order.
 6. Deduplicate equal canonical roots. Fail if the same plugin identity resolves to conflicting manual and selected roots.
@@ -345,6 +348,20 @@ Empty selections and other agents retain current passthrough command selection.
 Profile saves affect the next newly started process. A retained process keeps its original set even after save.
 Use the normal authorized profile snapshot for a later fresh start, including explicit resume settings where existing policy supplies them.
 Do not mix one profile revision's IDs with another revision's launch environment within a single preparation.
+Capture the profile before composing its command and environment. A concurrent
+edit cannot replace only the selected IDs inside that admitted snapshot.
+The next preparation must capture the updated profile as a whole.
+Passthrough command selection and mounts use that same captured profile,
+including an explicit empty selection. Plugin admission checks the replacement
+command's wrapper. Stored ACP base arguments exclude generated plugin mounts
+so a later retry resolves current roots without retaining an earlier mount.
+
+Preflight Copilot plugin admission, roots, and arguments before stopping a live
+passthrough process for replacement. Reject isolated Copilot selections before
+the SSH stop path. Preserve the existing remote MCP stop-before-file-retirement
+ordering for providers that use it; this is not a generic reset reorder.
+An error before handoff preserves process identity and releases only preparation
+resources owned by the failed attempt.
 
 ## Executor boundary
 
@@ -420,18 +437,12 @@ Preview never invokes inventory or policy discovery.
 
 ## Native authority
 
-Selection authorizes only the explicit native mount, not a policy exception or credential operation.
-Native MCP disables, tool permissions, hooks policy, and organizational restrictions remain authoritative.
-Do not run plugin enable/disable/install/update or transplant approval/configuration state.
-
-Inventory `enabled` is not a managed-policy allow or deny result.
-Policy support therefore requires versioned evidence that explicit mounts preserve native vetoes.
-If a runtime bypasses a veto, that runtime is unsupported for nonempty selections.
-Do not implement a partial re-creation of GitHub policy evaluation.
-Unqualified policy returns `policy_unverified` and retains selections.
-
-Authentication works only when the child has the same native identity, home, and credential facilities.
-Directory availability proves neither connectivity nor exclusivity. Both supplied CLI modes fetched managed policy.
+The [native qualification design](copilot-profile-plugins-native-qualification.md#native-authority)
+owns explicit-mount policy and authentication boundaries. Selection grants no
+policy exception, credential operation, or global activation write.
+Native vetoes remain authoritative. Do not reject a supported launch merely
+because enterprise-policy evidence or exact-platform certification is absent.
+The legacy `policy_unverified` response remains understood by existing clients.
 
 ## Privacy and diagnostics
 
@@ -447,27 +458,13 @@ They do not expose filesystem paths or raw provider errors.
 
 ## Compatibility qualification
 
-| Runtime | Evidence today | Implemented handling |
-| --- | --- | --- |
-| Managed default `1.0.88` | Reproduced inventory, metadata, and ACP startup | Discovery is available. Nonempty starts return `policy_unverified` until native veto evidence exists. |
-| `1.0.103/1.0.104` | `1.0.104` reproduced inventory/metadata/startup; `1.0.103` supplied only | `1.0.104` discovery is available with the same policy gate. `1.0.103` returns unsupported. |
-| Other selected versions | No version-specific evidence | Return typed `runtime_unsupported`. Never fall back globally. |
-| Current official schema | Documentation plus parser fixtures | Shape handling is qualified; authenticated runtime veto behavior is not. |
-
-Work order 00 records package identity, reported binary version, platform, inventory shape, metadata mapping, and manifest precedence.
-It records repeated mount acceptance. Authenticated native MCP disables and managed prohibitions remain open.
-An advertised different version does not qualify the requested package version.
-Hermetic tests use fake executables, isolated homes, JSONC metadata, manifests, and a sentinel MCP server.
-No test relies on the original `harness`, Atlassian, or developer authentication.
-
-`ResolveLaunchSelection` separates inventory qualification from mount permission.
-`policyVerifiedVersions` is empty, so any nonempty start fails with `policy_unverified` before native inventory or process creation.
-Adding a version to that set requires authenticated evidence for the exact version, platform, and managed-veto behavior.
-Wrappers fail closed, and Windows/macOS execution remains unverified.
-
-These gates limit runtime/source support. Discovery shows unavailable reasons for the remainder; starts stay fail-closed.
-Changing the managed default or relaxing the policy gate requires a separate user decision.
+The [admission contract](copilot-profile-plugins-native-qualification.md#qualification-and-admission)
+keeps inventory/metadata versions bounded while delegating policy to Copilot.
+Remove the separate policy-only allowlist; do not replace it with an
+OS/architecture certification gate. Diagnostic evidence records its actual
+platform without claiming unobserved enterprise enforcement.
 
 ## Implementation plans
 
 - [Copilot profile plugins](../../../plans/copilot-profile-plugins/plan.md).
+- [Copilot profile plugin completion](../../../plans/copilot-profile-plugin-completion/plan.md).

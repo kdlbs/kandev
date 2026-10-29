@@ -1,6 +1,6 @@
 ---
 created: 2026-10-27
-status: draft
+status: implemented
 requirements:
   - REQ-AGENTS-COPILOT-PLUGINS-001
   - REQ-AGENTS-COPILOT-PLUGINS-002
@@ -11,6 +11,7 @@ requirements:
   - REQ-AGENTS-COPILOT-PLUGINS-007
 system_design:
   - ../../specs/agents/system-design/copilot-profile-plugins.md
+  - ../../specs/agents/system-design/copilot-profile-plugins-native-qualification.md
 legacy_specs: []
 ---
 
@@ -22,7 +23,31 @@ Add explicit whole-plugin selection to concrete Copilot profiles using native pl
 The [requirements](../../specs/agents/requirements/copilot-profile-plugins.md) distinguish user requirements from proposed decisions.
 The [design](../../specs/agents/system-design/copilot-profile-plugins.md) owns the runtime, API, security, and UI contracts.
 
-Implementation was authorized on 2026-10-27. Discovery, profile state, UI, and process preparation are implemented, but nonempty process starts are fail-closed with `policy_unverified` until native policy evidence exists. [compatibility-evidence.md](compatibility-evidence.md) records the reproduced inventory/mount work and the missing authenticated veto evidence. WO-00, WO-03, WO-04, and WO-06 remain pending; WO-01, WO-02, and WO-05 are completed. WO-05's browser acceptance ran with a disposable E2E Copilot identity, and its completed scope is the settings UI only.
+Implementation was authorized on 2026-10-27. Discovery, profile state, UI,
+and supported native process loading are implemented. The user chose
+[native Copilot policy authority](../../decisions/2026-10-28-copilot-native-policy-authority.md)
+instead of privileged certification. WO-03/04 are now done through completion
+WO-04. WO-00 is done as diagnostic delivery, not policy certification;
+WO-01/02/05 stay done. WO-06's final support verification is complete.
+
+The [completion package](../copilot-profile-plugin-completion/plan.md) now
+owns follow-up execution for native loading/settings and PR #4882 review
+repairs. Its companion synchronization table maps the work orders back here.
+Existing results remain historical evidence; the new plan alone does not
+enable loading or certify native policy.
+
+Completion WO-01 and WO-02 are complete: portable fixture-root expectations and
+the reported blocked-selection/model-probe feedback are repaired. Bounded reason
+metadata, localized recovery, desktop/phone regressions, and the public recovery
+how-to are implemented. Completion WO-03 delivered eight native attempts,
+real 1.0.104 coexistence, and explicit limitations. The user declined privileged
+system-policy setup and selected the revised gate. No administrator rights,
+system/MDM/enterprise-policy changes, or bypasses are authorized.
+Completion WO-04 delivered loading and caller-boundary coverage, including
+inventory rejection without another runtime/profile attempt. Its extended
+race check retains a proven pristine-HEAD macOS SSH teardown exception, not
+a Copilot startup failure. Completion WO-05 finished settings/support
+verification. Missing enterprise certification is not a launch gate.
 
 ## Scope
 
@@ -43,7 +68,9 @@ Implementation was authorized on 2026-10-27. Discovery, profile state, UI, and p
 
 ## Assumption check and design decisions
 
-No unanswered product question blocks drafting. The choices below are proposals for the package review, not additional confirmed user requirements.
+No unanswered product question blocks the amended package. The ADR records
+the user's settled policy-authority choice; unchanged implementation choices
+below remain grounded in the requirement/design pair.
 
 | Topic | Decision |
 | --- | --- |
@@ -57,7 +84,7 @@ No unanswered product question blocks drafting. The choices below are proposals 
 | Execution paths | ACP fresh/promotion/replacement/new-process recovery, passthrough, profile utility and profile probes |
 | Existing process | Keep original mounts until another process starts |
 | Preview | Base command plus a deferred-mount notice, without exposing host directories |
-| Compatibility | Qualify selected packages without falling back to a global CLI or changing the pin |
+| Compatibility | Bound supported inventory/metadata versions; delegate native policy without a privileged certification gate, global CLI fallback, or pin change |
 
 ## Technical approach
 
@@ -66,7 +93,9 @@ No unanswered product question blocks drafting. The choices below are proposals 
 Planning inspected clean commit `a6144c3cb8ef586b7e56f904fae9acaf38569113`.
 The selected default package is `@github/copilot@1.0.88`.
 The handoff's successful `1.0.103/1.0.104` observations came from another machine.
-No native runtime compatibility was exercised during planning.
+No native runtime compatibility was exercised during the original planning.
+Later Linux inventory evidence and macOS native diagnostics are recorded in
+the shared ledger, not inferred from that initial planning baseline.
 Agents owns this capability because concrete profiles and provider process configuration are its durable contracts.
 No system README change is needed because ownership remains unchanged.
 
@@ -78,6 +107,7 @@ Add authorized `POST /api/v1/agents/:id/plugin-discovery`, safe DTOs, and scoped
 Never return roots or raw native state to the browser.
 
 Work order 00 qualifies supported package/schema combinations before production adapters rely on them.
+It does not certify enterprise policy or block loading for lack of that test.
 The `cache_path` field is a candidate compatibility mapping, not a promised upstream schema.
 Unknown sources stay visible and unavailable. Native `enabled: false` is not an exclusion rule.
 
@@ -280,7 +310,7 @@ Test names can gain table-driven subcases without changing the mapped acceptance
 
 | Criteria | Planned evidence | Work order |
 | --- | --- | --- |
-| 001.1, 004.1, 005.4, 007.2 | `compatibility-evidence.md`: actual package/binary, format, repeated mounts, native veto matrix | 00 |
+| 001.1, 004.1, 005.4, 007.6 | `compatibility-evidence.md`: actual package/binary, format, repeated mounts, diagnostic policy limitations | 00 |
 | 001.1/001.2/001.4, 003.1 | `copilotplugins/inventory_test.go`: `TestInventoryFormats`, `TestInventoryIdentities`, `TestInventoryRejectsInvalidOutput` | 01 |
 | 001.3/001.5/001.6 | Controller/handler `copilot_plugin_discovery_test.go`: `TestCopilotPluginDiscoveryAuthority`, `TestCopilotPluginDiscoveryContext`; package `TestInventoryCommandFailures`, `TestInventoryContextFence` | 01 |
 | 003.2 through 003.6, 007.4 | `copilotplugins/installation_test.go`: `TestInstallationMetadata`, `TestPluginRootValidation`, `TestPluginMetadataPrivacy` | 01 |
@@ -292,12 +322,14 @@ Test names can gain table-driven subcases without changing the mapped acceptance
 | 006.1 through 006.4/006.6, 007.5 | `copilot-plugin-selection.test.ts`, hook `.test.tsx`, selector `.test.tsx`, preview and existing profile-page tests | 05 |
 | 006.5/006.7 | Mobile browser geometry, pseudo-locale, complete catalogs, i18n gates | 05 |
 | 007.1/007.3 | `TestPluginReadOnlyOperations` in package fixtures and profile mutation tests with command/state spies | 01/02/03 |
+| 005.8, 007.6 | Completion WO-04 `TestCopilotPluginNativeAuthorityAdmission`, `TestCopilotPluginDiscoveryMountPermission`, supported caller tests and no-bypass/no-retry controls | 03/04 |
 
 All numeric criteria in this table use prefix `AC-AGENTS-COPILOT-PLUGINS-`.
 Work-order frontmatter uses complete IDs for machine traceability.
 Tests use isolated homes, fake commands, JSONC, manifests, and sentinel MCP fixtures.
 They must run without Copilot, `harness`, Atlassian, or a signed-in developer.
-Native qualification complements hermetic tests. A skipped native test does not establish runtime compatibility.
+Native diagnostics complement hermetic tests. A skipped native case is not
+passed compatibility evidence or a production policy-certification gate.
 
 ## E2E tests
 
@@ -306,6 +338,7 @@ Native qualification complements hermetic tests. A skipped native test does not 
 | Select installed plugin, Save, reload, Reset, clear; native-disabled built-in cannot be selected | `tests/settings/copilot-profile-plugins.spec.ts`, `chromium` | 001.2, 002.1 through 002.4, 006.1 |
 | Saved draft context with `refresh: true`; failed refresh keeps retained rows removable; missing saved selection stays visible | Same desktop file with isolated inventory fixtures | 001.4/001.6, 003.4/003.5, 006.2/006.3 |
 | Phone route, selection, Save/Reset/clear, long metadata, rendered row height at least 44px, no horizontal overflow | `tests/settings/mobile-copilot-profile-plugins.spec.ts`, `mobile-chrome` | 002.4, 006.5 through 006.7 |
+| Supported preparation has no artificial warning; unsupported/legacy states remain removable on desktop/phone | Same two specs, completion WO-05 | 005.7/005.8, 006.8, 007.6 |
 
 The settings E2E fixture intercepts only inventory responses and seeds a concrete Copilot profile through existing APIs.
 The new-draft environment, duplicate, save-conflict, delayed-response, width-sweep, coarse-tablet, and deferred-preview flows are covered by component or integration tests, not by these browser specs.
@@ -318,13 +351,13 @@ Run project commands sequentially through the guarded runner. Do not overlap ful
 
 | Order | Work order | Depends on | Status |
 | --- | --- | --- | --- |
-| 0 | [Task 00: Qualify native compatibility](task-00-native-compatibility.md) | None | pending |
+| 0 | [Task 00: Record native diagnostics](task-00-native-compatibility.md) | None | completed |
 | 1 | [Task 01: Discover and resolve installed plugins](task-01-inventory-discovery.md) | 00 | completed |
 | 2 | [Task 02: Persist profile selections](task-02-profile-state.md) | 01 identity contract | completed |
-| 3 | [Task 03: Prepare ACP process mounts](task-03-acp-process-loading.md) | 01, 02 | pending |
-| 4 | [Task 04: Cover other profile process paths](task-04-profile-process-parity.md) | 03 | pending |
+| 3 | [Task 03: Prepare ACP process mounts](task-03-acp-process-loading.md) | 01, 02 | done |
+| 4 | [Task 04: Cover other profile process paths](task-04-profile-process-parity.md) | 03 | done |
 | 5 | [Task 05: Deliver the profile UI](task-05-profile-ui.md) | 01, 02, 04 preview contract | completed |
-| 6 | [Task 06: Document native plugin behavior](task-06-public-docs.md) | 03, 04, 05 | pending |
+| 6 | [Task 06: Document native plugin behavior](task-06-public-docs.md) | 03, 04, 05 | done |
 
 Work orders are sequential. Waves express dependencies and do not authorize subagents or persistent tasks.
 No generic QA, code-review, simplify, or broad verify phase is added.
@@ -357,34 +390,71 @@ Implementation verification on 2026-10-27 and 2026-10-28:
 - Mobile Playwright: 1 passed with rendered row height and horizontal-overflow assertions.
 - Public and internal documentation validators passed.
 - Native inventory/installation and repeated mount startup were reproduced for 1.0.88 and 1.0.104.
-- Authenticated plugin loading, managed-veto observation, and Windows/macOS execution remain unverified; see [compatibility-evidence.md](compatibility-evidence.md).
-- Nonempty profile starts are intentionally fail-closed with `policy_unverified`. Inventory discovery, profile save/reset, and UI selection remain available. WO-00 and dependent work orders remain pending.
+- At that baseline, authenticated plugin loading, managed-veto observation, and
+  Windows/macOS execution were unverified. The later macOS observations below
+  and in [compatibility-evidence.md](compatibility-evidence.md) supersede only
+  the cases actually exercised.
+- At that baseline, starts still failed with `policy_unverified`; the later
+  completion WO-04 removed this gate under the new ADR without managed-policy
+  certification. Its results supersede the earlier rejection-only coverage.
 
-Fresh implementation worktrees need `(cd apps && pnpm install --frozen-lockfile)` before the first package command.
+Completion follow-up:
+
+- WO-00's diagnostic scope is complete: eight actual native attempts, corrected
+  1.0.104 coexistence, native-disable observations without authoritative denial,
+  1.0.88 endpoint calls, and no managed-policy test.
+- Completion WO-03 records final offline/race/lint/cleanup results and exact
+  commands. This does not claim that its full native diagnostic command passed.
+- Completion WO-04 removed the artificial gate and completed positive
+  configure/start, passthrough, utility/probe, snapshot, and no-fallback controls.
+  Its Results contain exact non-race/race/lint counts and the SSH teardown
+  exception reproduced on pristine HEAD. This does not claim an entirely
+  green extended race run.
+- Final amendment checks passed: 414 decisions/1790 specifications, 36 linter
+  regression tests, all-spec lint, actual-diff PR-documentation coverage
+  (nine changed work orders/13 design references/zero errors), 94 relative
+  links across 20 Markdown files, and tracked/untracked whitespace. The
+  completion plan records exact commands; files were left unstaged/uncommitted
+  at that amendment checkpoint.
+- Completion WO-05 passed 67 focused Vitest tests, 16-path ESLint, desktop 7/7
+  and phone 5/5 with fresh host builds, and public-doc checks (63 tests,
+  54 pages). Its final successful runs followed corrected test-only request
+  and removed-row assertions; the initial failures are retained in its Results.
+
+Reuse installed workspace dependencies; run `(cd apps && pnpm install --frozen-lockfile)`
+only after a targeted command fails for missing dependencies.
 Direct Go commands include `-trimpath`. Persistence changes include SQL guard and store conformance.
 Run changed-file Go lint sequentially after the applicable targeted tests.
 
-Package completion requires all work orders to pass and every AC to retain linked evidence.
-Then reconcile actual behavior before promoting draft requirements to `active`, design to `current`, and plan to `implemented`.
-Do not promote records because a compatibility check was skipped or because time expired.
+The approved work orders are complete and retain linked evidence; requirements
+are `active`, designs `current`, and plans `implemented`. This uses the revised
+native-authority criteria, not skipped enterprise certification. The extended
+SSH race failure remains explicitly documented as reproduced on pristine HEAD,
+not silently reclassified as passing.
 
 ## Risks and unresolved evidence
 
-- Reproduced `1.0.88` and `1.0.104` inventory, live/installed metadata, manifest checks, and repeated ACP startup. Authenticated plugin loading and managed-veto enforcement remain unverified.
+- Reproduced `1.0.88` and `1.0.104` inventory/metadata/startup. Later macOS
+  diagnostics establish real 1.0.104 coexistence, not managed-veto certification.
 - A requested npm version can advertise another binary version. Record both before claiming compatibility.
 - Internal metadata and manifest precedence can change. Unsupported shapes remain visible and fail closed for selected starts.
-- Explicit directory mounts may interact with managed policy differently across versions/platforms. WO-00 remains the support gate.
+- Native directory mounts may interact with policy differently across versions/
+  platforms. Copilot is authoritative; Kandev does not independently certify
+  each enterprise control, and must not hide a demonstrated incompatibility.
 - Wrapper or child environment mismatches can resolve another home. Nonempty selections must fail instead of falling back.
-- Native authentication was unavailable on this machine. No credentials were copied and no login was initiated.
+- Authentication was unavailable for the original Linux fixtures. Later macOS
+  diagnostics reused an authorized identity without copying credentials/login.
 - Omission-preserving profile updates use a storage-level selection-intent write; shared fakes without that extension retain read/modify/write snapshots.
 - Remote selection rejection is a deliberate initial limitation. Empty selections keep every executor's behavior.
 - E2E registration is gated by the test-only `KANDEV_E2E_MOCK_COPILOT` profile flag. The standard browser suite executes the flows; it does not require a native Copilot install or authentication.
 
 ## Public documentation impact
 
-WO-06 added the **Load Copilot plugins for a profile** section to
+The earlier WO-06 work added the **Load Copilot plugins for a profile** section to
 `docs/public/agents-and-profiles.md`. It covers discovery, save/reset, missing
-plugins, the current `policy_unverified` startup gate, local/worktree scope,
+plugins, the then-current `policy_unverified` startup gate, local/worktree scope,
 next-process timing, runtime qualification, native policy ownership, and the
 deferred command preview. `README.md` and `docs/screenshots.md` had no conflicting
 claim, so neither changed.
+Completion WO-05 updated that how-to for implemented native-authority
+preparation and verified supported versus legacy settings on desktop/phone.

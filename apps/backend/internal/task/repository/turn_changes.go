@@ -12,8 +12,11 @@ import (
 type TurnChangesRepository interface {
 	CreateTurnChangeSet(ctx context.Context, changeSet *models.TurnChangeSet) error
 	GetTurnChangeSet(ctx context.Context, taskID, sessionID, changeSetID string) (*models.TurnChangeSet, error)
+	GetTurnChangeSetByID(ctx context.Context, changeSetID string) (*models.TurnChangeSet, error)
 	ListTurnChangeSets(ctx context.Context, taskID, sessionID string, offset, limit int) ([]*models.TurnChangeSet, int, error)
 	ListUnfinishedTurnChangeSets(ctx context.Context, limit int) ([]*models.TurnChangeSet, error)
+	ListUnfinishedTurnChangeSetsAfter(ctx context.Context, afterID string, limit int) ([]*models.TurnChangeSet, error)
+	ListResumableTurnChangeSets(ctx context.Context, afterID string, limit int) ([]*models.TurnChangeSet, error)
 	ListTurnRepositoryChanges(ctx context.Context, changeSetID string) ([]*models.TurnRepositoryChangeSet, error)
 	ListTurnRepositoryChangesForSets(ctx context.Context, changeSetIDs []string) (map[string][]*models.TurnRepositoryChangeSet, error)
 	GetTurnRepositoryChange(ctx context.Context, changeSetID, repositoryChangeID string) (*models.TurnRepositoryChangeSet, error)
@@ -40,6 +43,16 @@ type TurnChangesRepository interface {
 	ListTurnRepositoryPreservationReadyPage(ctx context.Context, afterID string, limit int) ([]*models.TurnRepositoryChangeSet, string, error)
 	ClearTurnRepositoryPreservationReceipt(ctx context.Context, repositoryChangeID string) error
 	UpdateTurnChangeSetOverlaps(ctx context.Context, changeSetID string, overlaps []models.TurnChangeOverlap) error
+	UpdateTurnChangeSetOverlapsIfRevision(ctx context.Context, changeSetID string, expectedRevision int64, overlaps []models.TurnChangeOverlap) (bool, error)
+	AcceptTurnRepositoryComparison(ctx context.Context, changeSetID, repositoryChangeID string, comparison models.TurnRepositoryComparison) (bool, error)
+	MarkTurnRepositoryComparisonReady(ctx context.Context, changeSetID, repositoryChangeID string, complete bool, reason models.TurnChangeReason) (bool, error)
+	ListTurnChangeWriterIntervals(ctx context.Context, identity models.TurnChangeCheckoutIdentity, after string, limit int) ([]models.TurnChangeWriterInterval, error)
+	BeginTurnChangeExportAttempt(ctx context.Context, repositoryChangeID string, now time.Time, lease time.Duration, maxAttempts int64) (*models.TurnChangeExportClaim, bool, error)
+	StoreTurnChangeExportPage(ctx context.Context, claim models.TurnChangeExportClaim, files []models.TurnChangeFileContent, page models.TurnChangeExportPage) (models.TurnChangeContentStoreReceipt, bool, error)
+	ReleaseTurnChangeExportClaim(ctx context.Context, claim models.TurnChangeExportClaim) error
+	SettleTurnChangeContentProgress(ctx context.Context, changeSetID string) error
+	SettleTurnRepositoryExportFailure(ctx context.Context, repositoryChangeID string, claimToken int64, reason models.TurnChangeReason) error
+	ListTurnChangeExportCandidates(ctx context.Context, now time.Time, limit int) ([]*models.TurnRepositoryChangeSet, error)
 	FinalizeTurnChangeSet(ctx context.Context, changeSetID string, expectedRevision int64, finalization models.TurnChangeSetFinalization) (bool, error)
 	StoreTurnChangeFiles(ctx context.Context, repositoryChangeID string, files []models.TurnChangeFileContent) error
 	StoreTurnChangeFilesWithReceipt(ctx context.Context, repositoryChangeID string, files []models.TurnChangeFileContent) (models.TurnChangeContentStoreReceipt, error)

@@ -324,6 +324,7 @@ export function AzureDevOpsBoard({
   const [editing, setEditing] = useState<AzureDevOpsBoardWorkItem | null>(null);
   const [dragged, setDragged] = useState<AzureDevOpsBoardWorkItem | null>(null);
   const presentation = useBoardPresentation(board, initialPreference, onPreferenceChange);
+  const selectedItem = board.snapshot?.items.find((item) => item.id === editing?.id) ?? editing;
   if (!projectId) return <BoardEmptyState />;
   return (
     <section
@@ -405,17 +406,16 @@ export function AzureDevOpsBoard({
             open={!!editing}
             workspaceId={workspaceId}
             projectId={projectId}
-            initialItem={editing}
+            initialItem={selectedItem}
             onOpenChange={(open) => !open && setEditing(null)}
             boardContext={
-              editing
+              selectedItem
                 ? {
                     board: board.snapshot.board,
-                    item: editing,
+                    item: selectedItem,
                     onMove: board.moveItem,
-                    onItemUpdated: (item) => {
-                      board.mergeItem(item);
-                      setEditing((current) => (current?.id === item.id ? item : current));
+                    onItemUpdated: board.mergeItem,
+                    onMoveCompleted: (item) => {
                       if (isMobile) {
                         presentation.columnPreference.setSelectedColumn(item.columnId);
                       }

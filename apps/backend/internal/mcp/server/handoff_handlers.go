@@ -13,13 +13,18 @@ import (
 // agent discover parent / child / sibling / blocker task IDs. Useful in both
 // kanban (ModeTask) and office (ModeOffice) modes — kanban agents commonly use
 // it to find a sibling task to send a follow-up to via message_task_kandev.
+//
+// The advertised boundary mirrors ListRelatedForCaller: any target other than
+// the bound task must pass the same relation/workspace guard the document
+// tools use. verbose only controls descriptions and never widens access.
 func (s *Server) registerRelatedTasksTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_related_tasks_kandev",
-			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests; Office entries also include document keys. Descriptions are omitted unless verbose=true. task_id defaults to the current task and may inspect another task in the same workspace.`),
-			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
+			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks, with IDs, states, PRs, and Office document keys. task_id defaults to self. Another target must be an ancestor, descendant, sibling with a shared non-empty parent, or blocker of the caller, in the same workspace. Unrelated tasks are denied. Descriptions require verbose=true. verbose changes output only, never access.`),
+			mcp.WithString("task_id", mcp.Description(
+				"Target task to inspect. Defaults to the current task; another target must be a permitted relation in the same workspace.")),
 			mcp.WithBoolean("verbose", mcp.Description(
-				"Include each related task's full description. Defaults to false, which returns the compact projection.")),
+				"Include each related task's full description. Defaults to false, which returns the compact projection. verbose changes output only and never grants access.")),
 		),
 		s.wrapHandler("list_related_tasks_kandev", s.listRelatedTasksHandler()),
 	)

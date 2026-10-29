@@ -196,7 +196,14 @@ kandev service <action> [service options]
 | `--verbose`, `-v`            | Show backend info output.                                                                                                                           |
 | `--debug`                    | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
 | `--version`, `-V`            | Print the native runtime version.                                                                                                                   |
+| `--json`                     | With `--version` or `-V`, print build identity as JSON.                                                                                            |
 | `--help`, `-h`, `help`       | Print help.                                                                                                                                         |
+
+Use `kandev --version --json` to print one JSON object: `version` matches plain
+`--version`, `commit` identifies the source revision, and `build_time` is the
+build timestamp. An unstamped build uses `dev` for an empty version and
+`unknown` for missing commit or build time stamps. This command does not start
+Kandev.
 
 These commands and options describe the installed native launcher. Unknown arguments fail with exit status 2. In particular, the npm and Homebrew release entrypoints currently invoke that native launcher, which does **not** support `dev`, `--dev`, `--runtime-version`, `--web-internal-port`, or the removed `--web-port` spelling. The source-checkout development launcher has a separate contract described below.
 
@@ -252,9 +259,13 @@ The native CLI can install and manage a systemd user/system unit on Linux or a l
 kandev service install
 kandev service status
 kandev service logs --follow
+kandev service logs --lines 1000
+kandev service logs -n 0 --follow
 ```
 
 Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`.
+
+For `service logs`, use `--lines N`, `--lines=N`, or `-n N` to select a decimal count from 0 to 1000000. The default is 200; `-n 0 --follow` follows new output without history. On macOS, the count applies separately to the output and error log files.
 
 On macOS, a user service can opt into non-interactive Bash or Zsh login initialization with `--shell bash`, `--shell zsh`, or an absolute shell path. New installs keep direct startup by default. An existing selection survives reinstall without the flag and supported Apply updates; pass `--shell=none` to reset it. This option is not available for system services. See [Run as a service](run-as-a-service.md#optional-macos-login-initialization) for startup-file behavior and recovery.
 

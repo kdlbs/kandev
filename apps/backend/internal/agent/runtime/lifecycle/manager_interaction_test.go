@@ -44,6 +44,9 @@ type restartMockAgentctlServer struct {
 
 	mu                 sync.Mutex
 	httpActions        []string
+	configuredCommand  string
+	configuredArgs     []string
+	configuredEnv      map[string]string
 	repairPackageSpecs []string
 	updateStreamCount  int
 	updateStreams      []*websocket.Conn
@@ -230,10 +233,22 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
-	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("configure")
+		var request struct {
+			Command   string            `json:"command"`
+			AgentArgs []string          `json:"agent_args"`
+			Env       map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid configure request", http.StatusBadRequest)
+			return
+		}
 		m.mu.Lock()
 		configureError := m.configureError
+		m.configuredCommand = request.Command
+		m.configuredArgs = append([]string(nil), request.AgentArgs...)
+		m.configuredEnv = cloneStringMap(request.Env)
 		m.mu.Unlock()
 		if configureError != "" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": configureError})
@@ -509,6 +524,12 @@ func (m *restartMockAgentctlServer) getHTTPActions() []string {
 	out := make([]string, len(m.httpActions))
 	copy(out, m.httpActions)
 	return out
+}
+
+func (m *restartMockAgentctlServer) getConfiguredProcess() (string, []string, map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.configuredCommand, append([]string(nil), m.configuredArgs...), cloneStringMap(m.configuredEnv)
 }
 
 func (m *restartMockAgentctlServer) getUpdateStreamCount() int {

@@ -153,6 +153,10 @@ func TestInventoryRejectsInvalidOutput(t *testing.T) {
 func TestInstallationMetadata(t *testing.T) {
 	root := t.TempDir()
 	writePlugin(t, root, "plugin.json", "spark", "1.0.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	configDir := t.TempDir()
 	writeFile(t, filepath.Join(configDir, "config.json"), `// User settings belong in settings.json.
 {
@@ -166,8 +170,8 @@ func TestInstallationMetadata(t *testing.T) {
 	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Availability != AvailabilityAvailable {
 		t.Fatalf("installed snapshot = %#v", snapshot)
 	}
-	if snapshot.Rows[0].root != root {
-		t.Fatalf("root = %q, want %q", snapshot.Rows[0].root, root)
+	if snapshot.Rows[0].root != wantRoot {
+		t.Fatalf("root = %q, want %q", snapshot.Rows[0].root, wantRoot)
 	}
 
 	launch104 := launchFor(t, configDir)
@@ -189,6 +193,10 @@ func TestPluginRootValidation(t *testing.T) {
 	configDir := t.TempDir()
 	root := t.TempDir()
 	writePlugin(t, root, "plugin.json", "spark", "1.0.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	writeConfig := func(cachePath string) {
 		t.Helper()
@@ -222,8 +230,8 @@ func TestPluginRootValidation(t *testing.T) {
 	if snapshot.Rows[0].Availability != AvailabilityAvailable {
 		t.Fatalf("symlink root = %#v", snapshot.Rows[0])
 	}
-	if snapshot.Rows[0].root != root {
-		t.Fatalf("symlink root canonical = %q, want %q", snapshot.Rows[0].root, root)
+	if snapshot.Rows[0].root != wantRoot {
+		t.Fatalf("symlink root canonical = %q, want %q", snapshot.Rows[0].root, wantRoot)
 	}
 
 	writePlugin(t, root, "plugin.json", "other", "1.0.0")
@@ -255,13 +263,17 @@ func TestLivePluginRoot(t *testing.T) {
 }`)
 	root := filepath.Join(marketplaceRoot, "plugins", "harness")
 	writePlugin(t, root, ".github/plugin/plugin.json", "harness", "1.2.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	encoded := []byte(`[{"name":"harness","marketplace":"fixture-market","version":"1.2.0","enabled":true,"source":"live","installedFrom":` + quote(marketplaceRoot) + `}]`)
 	snapshot := Discover(context.Background(), &fakeRunner{result: CommandResult{Stdout: encoded}}, launchFor(t, t.TempDir()))
 	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Availability != AvailabilityAvailable {
 		t.Fatalf("live snapshot = %#v", snapshot)
 	}
-	if snapshot.Rows[0].root != root {
-		t.Fatalf("live root = %q, want %q", snapshot.Rows[0].root, root)
+	if snapshot.Rows[0].root != wantRoot {
+		t.Fatalf("live root = %q, want %q", snapshot.Rows[0].root, wantRoot)
 	}
 
 	// A relative marketplace source that escapes the marketplace root is not
@@ -552,22 +564,42 @@ func TestSelectionTimeoutUsesRequestDeadline(t *testing.T) {
 	Discover(context.Background(), runner, launchFor(t, t.TempDir()))
 }
 
-func TestPolicyUnverifiedBlocksLaunchSelection(t *testing.T) {
-	runner := &fakeRunner{result: CommandResult{Stdout: []byte(`[]`)}}
-	launch := launchFor(t, t.TempDir())
-	_, err := ResolveLaunchSelection(context.Background(), runner, launch, []string{"installed:m/p"})
-	var pluginErr *Error
-	if !errors.As(err, &pluginErr) || pluginErr.Reason != ReasonPolicyUnverified {
-		t.Fatalf("launch policy error = %#v", err)
-	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("policy-unqualified launch ran %d native inventory commands", len(runner.calls))
-	}
-	if !RuntimeSupported("1.0.88") {
-		t.Fatal("inventory qualification was lost")
-	}
-	if MountsPermitted("1.0.88") {
-		t.Fatal("mounts must remain unqualified without native veto evidence")
+func TestCopilotPluginNativeAuthorityAdmission(t *testing.T) {
+	for _, version := range []string{"1.0.88", "1.0.104"} {
+		t.Run(version, func(t *testing.T) {
+			root := t.TempDir()
+			writePlugin(t, root, "plugin.json", "spark", "1.0.0")
+			wantRoot, err := filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configDir := t.TempDir()
+			writeFile(t, filepath.Join(configDir, "config.json"),
+				`{"installedPlugins":[{"name":"spark","marketplace":"m","version":"1.0.0","cache_path":`+quote(root)+`}]}`)
+			runner := &fakeRunner{result: CommandResult{Stdout: []byte(
+				`[{"name":"spark","marketplace":"m","version":"1.0.0","enabled":true,"source":"installed"}]`,
+			)}}
+			launch := launchFor(t, configDir)
+			launch.RuntimeVersion = version
+			launch.RuntimeCommand = []string{"npx", "--yes", "@github/copilot@" + version}
+
+			prepared, err := ResolveLaunchSelection(context.Background(), runner, launch, []string{"installed:m/spark"})
+			if err != nil {
+				t.Fatalf("supported native preparation: %v", err)
+			}
+			if !RuntimeSupported(version) || !MountsPermitted(version) {
+				t.Fatalf("version %s is not consistently eligible for discovery and mounting", version)
+			}
+			if len(prepared.Plugins) != 1 || prepared.Plugins[0].Root != wantRoot {
+				t.Fatalf("prepared plugins = %#v, want verified root %q", prepared.Plugins, wantRoot)
+			}
+			if len(runner.calls) != 1 || runner.dirs[0] != launch.WorkDir {
+				t.Fatalf("inventory calls=%d workdir=%q, want one call in %q", len(runner.calls), runner.dirs, launch.WorkDir)
+			}
+			if !containsSequence(runner.calls[0], "@github/copilot@"+version, "plugin", "list") {
+				t.Fatalf("inventory argv = %#v, want selected runtime %s", runner.calls[0], version)
+			}
+		})
 	}
 }
 

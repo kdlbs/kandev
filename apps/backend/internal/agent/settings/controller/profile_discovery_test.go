@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -17,12 +19,18 @@ import (
 )
 
 type recordingProfileDiscoveryUtility struct {
-	request     hostutility.ProfileCapabilityRequest
-	called      bool
-	runtimeInfo *agents.RuntimeInfo
+	request           hostutility.ProfileCapabilityRequest
+	called            bool
+	runtimeInfo       *agents.RuntimeInfo
+	capabilityResult  *hostutility.ProfileCapabilityResult
+	modelResolution   hostutility.ModelConfigResolution
+	agentCapabilities hostutility.AgentCapabilities
 }
 
 func (f *recordingProfileDiscoveryUtility) Get(string) (hostutility.AgentCapabilities, bool) {
+	if f.agentCapabilities.Status != "" {
+		return f.agentCapabilities, true
+	}
 	return hostutility.AgentCapabilities{Status: hostutility.StatusOK}, true
 }
 
@@ -35,6 +43,9 @@ func (f *recordingProfileDiscoveryUtility) ResolveModelConfig(
 	string,
 	hostutility.ModelConfigResolutionRequest,
 ) (hostutility.ModelConfigResolution, error) {
+	if f.modelResolution.Status != "" {
+		return f.modelResolution, nil
+	}
 	return hostutility.ModelConfigResolution{Status: hostutility.StatusOK}, nil
 }
 
@@ -45,6 +56,9 @@ func (f *recordingProfileDiscoveryUtility) ProbeProfileCapabilities(
 ) (hostutility.ProfileCapabilityResult, error) {
 	f.called = true
 	f.request = request
+	if f.capabilityResult != nil {
+		return *f.capabilityResult, nil
+	}
 	return hostutility.ProfileCapabilityResult{
 		ContextRevision: "revision-1",
 		Capabilities: hostutility.AgentCapabilities{
@@ -57,6 +71,184 @@ func (f *recordingProfileDiscoveryUtility) ProbeProfileCapabilities(
 			Commands:       []hostutility.Command{{Name: "init", Description: "Initialize"}},
 		},
 	}, nil
+}
+
+func TestCopilotPluginProfileProbeFailureReason(t *testing.T) {
+	tests := []struct {
+		name         string
+		agentName    string
+		status       hostutility.Status
+		reasonCode   string
+		selectPlugin bool
+		wantReason   bool
+	}{
+		{
+			name:         "policy-unverified Copilot profile",
+			agentName:    agents.CopilotACPAgentID,
+			status:       hostutility.StatusUnsupported,
+			reasonCode:   string(copilotplugins.ReasonPolicyUnverified),
+			selectPlugin: true,
+			wantReason:   true,
+		},
+		{
+			name:         "missing reason",
+			agentName:    agents.CopilotACPAgentID,
+			status:       hostutility.StatusUnsupported,
+			selectPlugin: true,
+		},
+		{
+			name:         "unknown reason",
+			agentName:    agents.CopilotACPAgentID,
+			status:       hostutility.StatusUnsupported,
+			reasonCode:   "native_output",
+			selectPlugin: true,
+		},
+		{
+			name:         "successful response",
+			agentName:    agents.CopilotACPAgentID,
+			status:       hostutility.StatusOK,
+			reasonCode:   string(copilotplugins.ReasonPolicyUnverified),
+			selectPlugin: true,
+		},
+		{
+			name:         "authentication failure",
+			agentName:    agents.CopilotACPAgentID,
+			status:       hostutility.StatusAuthRequired,
+			reasonCode:   string(copilotplugins.ReasonPolicyUnverified),
+			selectPlugin: true,
+		},
+		{
+			name:       "foreign provider",
+			agentName:  "codex-acp",
+			status:     hostutility.StatusUnsupported,
+			reasonCode: string(copilotplugins.ReasonPolicyUnverified),
+		},
+		{
+			name:       "empty plugin selection",
+			agentName:  agents.CopilotACPAgentID,
+			status:     hostutility.StatusUnsupported,
+			reasonCode: string(copilotplugins.ReasonPolicyUnverified),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl, repo, ctx, codexID, _ := newProviderTestController(t)
+			agentID := codexID
+			if tt.agentName == agents.CopilotACPAgentID {
+				copilot := &models.Agent{Name: agents.CopilotACPAgentID}
+				if err := repo.CreateAgent(ctx, copilot); err != nil {
+					t.Fatalf("seed Copilot agent: %v", err)
+				}
+				agentID = copilot.ID
+			}
+			var selectedPlugins []string
+			if tt.selectPlugin {
+				selectedPlugins = []string{"installed:m/spark"}
+			}
+			profile := &models.AgentProfile{
+				AgentID: agentID, Name: "Profile", Model: "model-a",
+				CopilotSelectedPlugins: selectedPlugins,
+			}
+			if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+				t.Fatalf("seed profile: %v", err)
+			}
+
+			utility := &recordingProfileDiscoveryUtility{
+				capabilityResult: &hostutility.ProfileCapabilityResult{
+					ContextRevision: "revision-1",
+					ReasonCode:      tt.reasonCode,
+					Capabilities: hostutility.AgentCapabilities{
+						Status: tt.status,
+						Error:  "provider output includes TOKEN=secret-value at /private/native/path",
+					},
+				},
+				modelResolution: hostutility.ModelConfigResolution{
+					Status:          tt.status,
+					Error:           "provider output includes TOKEN=secret-value at /private/native/path",
+					ContextRevision: "revision-2",
+					ReasonCode:      tt.reasonCode,
+				},
+				agentCapabilities: hostutility.AgentCapabilities{
+					Status: hostutility.StatusUnsupported,
+					Error:  "agent-wide agent failure",
+				},
+			}
+			ctrl.hostUtility = utility
+
+			capability, err := ctrl.FetchProfileDynamicModels(ctx, tt.agentName, dto.ProfileCapabilityRequest{
+				ProfileID: profile.ID, AuthorizationScope: "user-1",
+			})
+			if err != nil {
+				t.Fatalf("FetchProfileDynamicModels: %v", err)
+			}
+			if capability.Status != string(tt.status) {
+				t.Fatalf("capability status = %q, want %q", capability.Status, tt.status)
+			}
+			if capability.Error == nil || *capability.Error != profileFailureMessage(tt.status) ||
+				strings.Contains(*capability.Error, "secret-value") || strings.Contains(*capability.Error, "/private/native/path") {
+				t.Fatalf("capability error = %v, want sanitized status message", capability.Error)
+			}
+			requireProfileReasonCode(t, capability, tt.wantReason)
+
+			modelOptions, err := ctrl.ResolveAgentModelConfig(ctx, tt.agentName, dto.ResolveAgentModelConfigRequest{
+				Model: "model-a", ProfileID: profile.ID, AuthorizationScope: "user-1",
+			})
+			if err != nil {
+				t.Fatalf("ResolveAgentModelConfig: %v", err)
+			}
+			if modelOptions.Status != string(tt.status) {
+				t.Fatalf("model option status = %q, want %q", modelOptions.Status, tt.status)
+			}
+			wantModelError := "model option resolution failed"
+			if tt.status == hostutility.StatusAuthRequired {
+				wantModelError = agentAuthenticationRequiredMessage
+			}
+			if modelOptions.Error == nil || *modelOptions.Error != wantModelError ||
+				strings.Contains(*modelOptions.Error, "secret-value") || strings.Contains(*modelOptions.Error, "/private/native/path") {
+				t.Fatalf("model option error = %v, want %q", modelOptions.Error, wantModelError)
+			}
+			requireProfileReasonCode(t, modelOptions, tt.wantReason)
+
+			if tt.name == "policy-unverified Copilot profile" {
+				agentWide, err := ctrl.FetchDynamicModels(ctx, tt.agentName, false)
+				if err != nil {
+					t.Fatalf("FetchDynamicModels: %v", err)
+				}
+				requireProfileReasonCode(t, agentWide, false)
+				if agentWide.Status != string(hostutility.StatusUnsupported) ||
+					agentWide.Error == nil || *agentWide.Error != "agent-wide agent failure" {
+					t.Fatalf("agent-wide discovery changed its existing projection: %#v", agentWide)
+				}
+			}
+		})
+	}
+}
+
+func requireProfileReasonCode(t *testing.T, response any, want bool) {
+	t.Helper()
+	payload, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	raw, present := fields["reason_code"]
+	if present != want {
+		t.Fatalf("reason_code presence = %t, want %t in %s", present, want, payload)
+	}
+	if !present {
+		return
+	}
+	var got string
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode reason_code: %v", err)
+	}
+	if got != string(copilotplugins.ReasonPolicyUnverified) {
+		t.Fatalf("reason_code = %q, want policy_unverified", got)
+	}
 }
 
 // @covers AC-AGENTS-RUNTIME-UPDATES-004.1

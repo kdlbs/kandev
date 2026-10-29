@@ -15,6 +15,8 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func newDeliveryHealthTestManager() *StreamManager {
@@ -309,6 +311,11 @@ func TestDeliveryHealthMonitorSurvivesSuccessfulStreamSetup(t *testing.T) {
 			status.DeliveryHealth.State = deliveryFailedHealthState
 			status.DeliveryHealth.Failure = failure
 			_ = json.NewEncoder(w).Encode(status)
+		case "/api/v1/runtime/storage":
+			_ = json.NewEncoder(w).Encode(streams.RuntimeStorageSnapshot{
+				Version: streams.RuntimeStorageSnapshotVersion, StorageKind: streams.RuntimeStorageKindWorkspace,
+				Filesystem: &streams.RuntimeStorageFilesystem{TotalBytes: 1000, AvailableBytes: 900},
+			})
 		case "/api/v1/agent/delivery":
 			_ = json.NewEncoder(w).Encode(agentctl.DeliveryStatus{
 				StorageCapability: journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
@@ -561,4 +568,42 @@ func TestDeliveryHealthStateOnlyFailureUsesReconciler(t *testing.T) {
 		t.Fatalf("published phases = %v, want reconnecting and uncertain", seen)
 	}
 	sm.Wait()
+}
+
+func TestDeliveryStoragePressureStatusProjectsQuotaBelowUsageThreshold(t *testing.T) {
+	execution := &AgentExecution{
+		ID: "execution", TaskID: "task", SessionID: "session",
+		DeliveryStreamID: "stream", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 3,
+	}
+	failure := &types.DeliveryFailureSnapshot{
+		Reason: types.DeliveryFailureStorageFull, Revision: 1,
+		SessionID: execution.SessionID, IncarnationID: execution.DeliveryIncarnationID,
+		HarnessGeneration: execution.DeliveryHarnessGeneration, StreamID: execution.DeliveryStreamID,
+		SubmissionID: "submission", PromptGeneration: 2,
+		Storage: &streams.DeliveryStorageDiagnostic{
+			Version: streams.DeliveryStorageDiagnosticVersion,
+			Reason:  streams.DeliveryStorageReasonDiskQuotaExceeded,
+		},
+	}
+	status := &agentctl.StatusResponse{AgentStatus: "running"}
+	status.DeliveryHealth.State = "delivery_failed"
+	status.DeliveryHealth.Failure = failure
+	status.DeliveryHealth.Capacity.DiskAvailableBytes = 10
+	status.DeliveryHealth.Capacity.DiskCapacityKnown = true
+	owner := deliveryHealthOwner{
+		execution:        execution,
+		submission:       func() string { return "submission" },
+		promptGeneration: func() uint64 { return 2 },
+	}
+	pressure := runtimeStoragePressureFromStatus(owner, status, "submission", 2)
+	if !pressure.WritePressure || pressure.DeliveryState != "delivery_failed" {
+		t.Fatalf("pressure = %+v", pressure)
+	}
+	if pressure.FailureStorage == nil || pressure.FailureStorage.Reason != models.AgentStorageReasonDiskQuotaExceeded {
+		t.Fatalf("failure storage = %+v", pressure.FailureStorage)
+	}
+	uncorrelated := runtimeStoragePressureFromStatus(owner, status, "other-submission", 2)
+	if uncorrelated.FailureStorage != nil {
+		t.Fatalf("uncorrelated failure attached storage: %+v", uncorrelated.FailureStorage)
+	}
 }

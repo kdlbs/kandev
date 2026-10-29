@@ -32,6 +32,7 @@ type sessionRequestCaptureAgent struct {
 	closeStartedOnce        sync.Once
 	sessionCounter          int
 	failNewSessionOnAttempt int
+	loadErr                 error
 	closeRequests           []acpsdk.CloseSessionRequest
 	closeErr                error
 }
@@ -140,6 +141,9 @@ func (a *sessionRequestCaptureAgent) LoadSession(_ context.Context, request acps
 	a.loadRequest = request
 	if a.loadStarted != nil {
 		close(a.loadStarted)
+	}
+	if a.loadErr != nil {
+		return acpsdk.LoadSessionResponse{}, a.loadErr
 	}
 	if a.loadResponse != nil {
 		return *a.loadResponse, nil

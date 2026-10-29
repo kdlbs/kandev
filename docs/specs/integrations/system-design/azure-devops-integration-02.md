@@ -101,9 +101,7 @@ team or board context. Detail opened from a board may additionally show the
 board column/split controls. Detail opened from search does not guess a board
 and therefore exposes assignment only.
 
-A completed board-detail mutation updates the board snapshot. It updates the
-open detail selection only when the same work item is still selected. A late
-response must not reopen a closed detail or replace a newer selection.
+Mutation completion follows the opening/scope ownership rules below.
 
 Work-item detail exposes sanitized description plus normalized planning fields
 when Azure returns any of Effort, Story Points, Size, Remaining Work, Original
@@ -450,3 +448,17 @@ AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.18. Deferred hook tests prove reque
 order, confirmed-baseline recovery, read settlement, normalization, and retry.
 Desktop and mobile browser tests exercise the actual confirmation and failure
 feedback, and query the backend to prove the final stored list.
+
+## Mutation completion ownership
+
+For AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.19, capture an opening owner
+before mutation. Close, reopen, item/scope change and unmount retire it;
+background refresh does not. Only the current owner can merge detail, update
+selection/focus, return Move data, or settle busy/error state.
+
+Assignment retains its direct endpoint. Its receipt merges into the board
+through the board hook's workspace/project/team/board owner; Move uses that
+owner too. Success can update that board after Close, but cannot publish data,
+rollback or error into a newer context. Higher confirmed revisions win.
+Selection and canonical data remain separate. Provider payloads, permissions,
+gestures and layout remain unchanged.

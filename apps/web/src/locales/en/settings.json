@@ -1013,7 +1013,7 @@
   "mcpSessionStateAppliedDescription": "Your saved setup has been applied to this agent. Connection status is shown in Connections.",
   "mcpSessionStatePendingDescription": "Your current setup stays in use. Saved changes apply when the agent is idle.",
   "mcpSessionStateDeferredDescription": "Your current setup stays in use. Saved changes apply when the agent starts again.",
-  "mcpSessionStateFailedDescription": "Your previous setup stays in use. Retry now or apply the changes on the next agent start.",
+  "mcpSessionStateFailedDescription": "The last accepted setup is kept for comparison. Retry now or apply the changes on the next agent start.",
   "mcpSessionRetry": "Retry MCP application",
   "deleting": "Deleting...",
   "mcpSessionAdditions": "Add to this session",
@@ -1105,5 +1105,16 @@
   "mcpAssignmentChooseTask": "Choose an existing task",
   "mcpAssignmentSearch": "Search owners",
   "mcpAssignmentDisabled": "Enable this server before choosing where to use it.",
-  "mcpAssignmentPrevious": "Previous"
+  "mcpAssignmentPrevious": "Previous",
+  "mcpExcludeForSession": "Exclude for this session",
+  "mcpRestoreInheritance": "Restore inheritance",
+  "mcpSessionExcluded": "Saved: excluded from this session",
+  "mcpSessionInherited": "Saved: included by inheritance",
+  "mcpSessionExclusionsDescription": "Exclusions apply only to this session and remain until restored. Disabling a server in workspace settings affects other sessions.",
+  "mcpRequiredToolsSeparate": "Required Kandev tools are managed separately. Independently configured provider servers are not controlled here.",
+  "mcpSavedExclusions": "Saved exclusions",
+  "mcpDormantExclusionsDescription": "These servers no longer contribute to this session. Restoring inheritance does not add them.",
+  "mcpNoLongerInherited": "No longer inherited",
+  "mcpRestoreDisabledDescription": "Restoring inheritance does not enable a disabled server.",
+  "mcpExclusionCount": "Saved session exclusions: {{total}}"
 }

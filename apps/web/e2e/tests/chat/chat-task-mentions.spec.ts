@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
 import { TASK_TITLE, sendTaskMentions } from "./task-mention-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 // @covers AC-UI-CHAT-TASK-MENTION-001.1
 // @covers AC-UI-CHAT-TASK-MENTION-001.2
 // @covers AC-UI-CHAT-TASK-MENTION-001.3

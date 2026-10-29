@@ -130,6 +130,10 @@ const (
 	// error message itself is projected into the task summary rather than
 	// streamed to task-list subscribers.
 	TaskSessionErrorChanged = "task_session.error_changed"
+	// TaskSessionRuntimeStorageChanged carries an owner-verified advisory
+	// capacity observation. It is independent of journal writes and transcript
+	// persistence.
+	TaskSessionRuntimeStorageChanged = "task_session.runtime_storage_changed"
 )
 
 // TaskStatusSummaryUpdated is a complete replacement projection for one
@@ -655,6 +659,16 @@ func BuildSessionTodosSubject(sessionID string) string {
 // BuildSessionTodosWildcardSubject creates a wildcard subscription for all session todos events
 func BuildSessionTodosWildcardSubject() string {
 	return SessionTodosUpdated + ".*"
+}
+
+// BuildSessionRuntimeStorageSubject creates one session's advisory storage subject.
+func BuildSessionRuntimeStorageSubject(sessionID string) string {
+	return TaskSessionRuntimeStorageChanged + "." + sessionID
+}
+
+// BuildSessionRuntimeStorageWildcardSubject subscribes to every advisory storage event.
+func BuildSessionRuntimeStorageWildcardSubject() string {
+	return TaskSessionRuntimeStorageChanged + ".*"
 }
 
 // BuildSessionPromptUsageSubject creates a prompt usage subject for a specific session

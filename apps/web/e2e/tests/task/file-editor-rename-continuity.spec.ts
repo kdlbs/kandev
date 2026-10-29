@@ -5,6 +5,8 @@ import { createStandardProfile, GitHelper, makeGitEnv } from "../../helpers/git-
 import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 // @covers AC-UI-FILE-EDITOR-MUTATION-002.1
 // An editor open before a Files rename must save its retained dirty content to
 // the renamed file. The first save proves the editor and fixture are writable.
@@ -105,8 +107,13 @@ test("saves an open dirty editor after renaming its file in Files", async ({
     expect(fs.existsSync(source)).toBe(false);
     expect(fs.readFileSync(destination, "utf8")).toBe(control);
     await expect(editor.locator(".view-lines")).toContainText(edited);
+    const finalSave = ws.waitForResponse("workspace.file.update", {
+      requestWhere: (payload) => payload.path === renamed && payload.session_id === task.session_id,
+      timeout: 5_000,
+    });
     await testPage.getByRole("button", { name: /^Save \(/ }).click();
-    await expect.poll(() => fs.readFileSync(destination, "utf8")).toBe(edited);
+    expect((await finalSave).payload).toMatchObject({ success: true });
+    expect(fs.readFileSync(destination, "utf8")).toBe(edited);
     expect(fs.existsSync(source)).toBe(false);
     await expect(testPage.locator(".dv-default-tab").filter({ hasText: renamed })).toHaveCount(1);
     await prCapture.screenshot("desktop-renamed-file", {

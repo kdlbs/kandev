@@ -19,6 +19,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/netutil"
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -85,6 +86,10 @@ type Manager struct {
 	// instance the control server supervises for as long as that control
 	// server runs" -- deliberately NOT reset per instance.
 	turnIDSeq atomic.Int64
+
+	// diskSampler is shared by every instance so concurrent tasks on the same
+	// proven filesystem reuse one advisory capacity read per interval.
+	diskSampler *systemmetrics.DiskCapacitySampler
 }
 
 type provisionalInstance struct {
@@ -115,6 +120,7 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 		provisional: make(map[string]*provisionalInstance),
 		portAlloc:   NewPortAllocator(cfg.Ports.Base, cfg.Ports.Max),
 		reaperStop:  make(chan struct{}),
+		diskSampler: systemmetrics.NewDiskCapacitySampler(),
 	}
 
 	if cfg.IdleTimeout > 0 {
@@ -293,6 +299,7 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
+	procMgr.SetDiskCapacitySampler(m.diskSampler)
 	bundle.setProcessManager(procMgr)
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
