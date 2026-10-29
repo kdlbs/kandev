@@ -31,8 +31,9 @@ child, admits the binding, and settles it in a fixed order.
 Finite `all` capacity counts task-launch rows and owned inference bindings in the
 same overall and grade limits. Existing ownership keeps its slot across settings
 changes; unknown population still refuses new admission. The current inventory is
-kept separate from retained historical continuity, and one unreadable execution
-does not blank the whole population.
+kept separate from retained historical continuity. One unreadable execution
+makes the population unknown for new admission while held bindings remain
+counted; it never blanks them.
 
 Teardown forwards the owner's stop observation through the retained workspace
 stop path. Only a proven no-start or observed owned-process termination settles an
@@ -76,7 +77,7 @@ agentctl utility: TestAttempt* (6 cases incl. Windows Job proof, 2.881s)
 backendapp: TestNativeInferenceRoot* and TestNativeInferenceStop* (2.283s)
 hostutility: TestInferenceConsumerHost* (0.157s)
 lifecycle: TestInferenceConsumer*, TestInferenceStop* (0.132s)
-backendapp: TestOneOffInferenceReadFailureIsolation (read failure isolation)
+backendapp: TestOneOffReadFailureFailsClosedButKeepsBindings and TestOneOffInventoryFailureIsNotMaskedByGatedMode
 ```
 
 The full api and lifecycle suites still hit pre-existing Windows environment

@@ -97,9 +97,10 @@ A binding enters the counted population with its stable key. The deferred
 settlement order is terminal observation, provider settlement, binding removal,
 then retained-token acknowledgement. Worker leases keep a settled-but-not-yet
 released binding counted; refresh never invents a zero from a failed snapshot.
-The gated current inventory is separate from retained historical continuity, and
-a single unreadable execution is isolated instead of replacing the whole
-population with unknown.
+The gated current inventory is separate from retained historical continuity. A
+single unreadable execution makes the population unknown for new admission while
+held bindings remain in the store and stay counted; it never erases the known
+bindings or turns them into a zero.
 
 Host utility and lifecycle inference callers route through the shared consumer.
 Teardown forwards the owner's stop observation through the retained workspace
