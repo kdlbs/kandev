@@ -925,10 +925,13 @@ func TestArchivedRetentionMessageTargetProtectsLiveAndUnknown(t *testing.T) {
 		}
 		return raw
 	}
-	for _, id := range []string{"m-agg-1", "m-agg-2"} {
-		if got := metadata(id); got == reducible || strings.Contains(got, strings.Repeat("payload", 400)) {
-			t.Fatalf("eligible message %s was not reduced: %s", id, got)
-		}
+	first, second := metadata("m-agg-1"), metadata("m-agg-2")
+	var marker map[string]any
+	if first != second || first == reducible || json.Unmarshal([]byte(first), &marker) != nil || strings.Contains(first, strings.Repeat("secret", 400)) {
+		t.Fatalf("eligible messages were not reduced consistently: %q / %q", first, second)
+	}
+	if _, ok := marker["payload_retention"]; !ok {
+		t.Fatalf("reduced metadata %s lacks the removal marker", first)
 	}
 	if got := metadata("m-live"); got != reducible {
 		t.Fatalf("live task message changed: %s", got)
