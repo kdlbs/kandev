@@ -21,6 +21,7 @@ type pluginExecutorRecoveryState struct {
 	inventory        pluginExecutorInventory
 	profile          *models.ExecutorProviderLaunchProfile
 	operationContext *pluginsdk.ExecutorProviderRequestContext
+	snapshot         *pluginsdk.ExecutorProfileSnapshot
 	resource         *pluginsdk.ExecutorResourceDescriptor
 	wasAllocating    bool
 	cleanupPending   bool
@@ -42,7 +43,7 @@ func (r *PluginRemoteExecutor) recoverPluginExecutor(ctx context.Context, record
 		if state.resource == nil {
 			return nil, errors.New("plugin executor cleanup inventory has no resource handle")
 		}
-		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "recovery_cleanup", state.profile.Provider); err != nil {
+		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "recovery_cleanup", state.profile); err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -74,8 +75,12 @@ func (r *PluginRemoteExecutor) loadPluginExecutorRecoveryState(ctx context.Conte
 	if profile == nil || !pluginExecutorProviderMatchesInventory(profile.Provider, inventory) {
 		return nil, errors.New("recorded plugin executor provider is unavailable or incompatible")
 	}
+	snapshot, err := pluginExecutorProfileSnapshot(*profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		return nil, errors.New("plugin executor recorded profile is unavailable")
+	}
 	return &pluginExecutorRecoveryState{
-		inventory: inventory, profile: profile, resource: inventory.Resource,
+		inventory: inventory, profile: profile, resource: inventory.Resource, snapshot: snapshot,
 		operationContext: pluginExecutorRequestContextForRecord(record, inventory, *profile),
 		wasAllocating:    inventory.Phase == pluginExecutorPhaseAllocating,
 		cleanupPending:   inventory.Phase == pluginExecutorPhaseCleanupPending,
@@ -96,11 +101,7 @@ func (r *PluginRemoteExecutor) recoverPluginExecutorAllocation(
 	record *models.ExecutorRunning,
 	state *pluginExecutorRecoveryState,
 ) (*pluginsdk.ExecutorResourceDescriptor, bool, error) {
-	snapshot, err := pluginExecutorProfileSnapshot(*state.profile, state.inventory.NegotiatedCapabilities)
-	if err != nil {
-		return nil, false, errors.New("plugin executor operation recovery is unavailable")
-	}
-	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{Context: state.operationContext, Profile: snapshot})
+	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{Context: state.operationContext, Profile: state.snapshot})
 	if err != nil || recovery == nil || recovery.GetError() != nil {
 		return nil, false, errors.New("plugin executor operation recovery is unavailable")
 	}
@@ -177,7 +178,7 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 		if state.inventory.Phase == pluginExecutorPhaseReady {
 			return nil, errors.New("established plugin executor cannot be attached without its saved agentctl credential")
 		}
-		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "incomplete_bootstrap", state.profile.Provider); err != nil {
+		if err := r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, "incomplete_bootstrap", state.profile); err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -229,7 +230,7 @@ func (r *PluginRemoteExecutor) inspectPluginExecutorBeforeAttach(
 	resource *pluginsdk.ExecutorResourceDescriptor,
 ) (*pluginsdk.ExecutorResourceDescriptor, *pluginsdk.InspectExecutorEnvironmentResponse, bool, error) {
 	inspection, err := r.operations.InspectExecutorEnvironment(ctx, &pluginsdk.InspectExecutorEnvironmentRequest{
-		Context: state.operationContext, Resource: resource,
+		Context: state.operationContext, Resource: resource, Profile: state.snapshot,
 	})
 	if err != nil || inspection == nil || inspection.GetError() != nil {
 		return nil, nil, false, errors.New("plugin executor environment inspection is unavailable")
@@ -257,7 +258,7 @@ func (r *PluginRemoteExecutor) attachAndVerifyRecoveredPluginExecutor(
 	resource *pluginsdk.ExecutorResourceDescriptor,
 ) (*pluginsdk.ExecutorResourceDescriptor, *pluginsdk.InspectExecutorEnvironmentResponse, bool, error) {
 	attached, err := r.operations.AttachExecutorEnvironment(ctx, &pluginsdk.AttachExecutorEnvironmentRequest{
-		Context: state.operationContext, Resource: resource,
+		Context: state.operationContext, Resource: resource, Profile: state.snapshot,
 		ExpectedRuntimeIdentity: pluginExecutorRuntimeIdentity(state.inventory, record.AgentExecutionID),
 	})
 	if err != nil || attached == nil || attached.GetError() != nil {
@@ -265,6 +266,9 @@ func (r *PluginRemoteExecutor) attachAndVerifyRecoveredPluginExecutor(
 	}
 	attachedResource := attached.GetResource()
 	if err := validatePluginExecutorResourceForProvider(state.profile.Provider, attachedResource); err != nil {
+		return nil, nil, false, err
+	}
+	if err := rejectSecretInProviderState(state.profile.SecretValues, attachedResource); err != nil {
 		return nil, nil, false, err
 	}
 	if _, err := resolvePluginExecutorWorkspace(state.inventory.NegotiatedCapabilities, state.inventory.WorkspaceDescriptor, attachedResource); err != nil {
@@ -277,7 +281,7 @@ func (r *PluginRemoteExecutor) attachAndVerifyRecoveredPluginExecutor(
 		return nil, nil, false, errors.New("provider attachment changed the recorded resource identity")
 	}
 	inspection, err := r.operations.InspectExecutorEnvironment(ctx, &pluginsdk.InspectExecutorEnvironmentRequest{
-		Context: state.operationContext, Resource: attachedResource,
+		Context: state.operationContext, Resource: attachedResource, Profile: state.snapshot,
 	})
 	if err != nil || inspection == nil || inspection.GetError() != nil {
 		return nil, nil, false, errors.New("plugin executor environment inspection is unavailable after attachment")
@@ -303,7 +307,7 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 		return nil, errors.New("plugin executor inventory has no agentctl instance port")
 	}
 	client, err := r.newAgentctlClient(
-		ctx, r.connectionResolver(state.operationContext, state.inventory.Resource, state.inventory.InstancePort), r.logger,
+		ctx, r.connectionResolver(state.operationContext, state.inventory.Resource, state.inventory.InstancePort, state.snapshot), r.logger,
 		record.AgentExecutionID, record.TransientAuthToken,
 	)
 	if err != nil {
@@ -338,7 +342,7 @@ func (r *PluginRemoteExecutor) readRecoveredAgentctlInstance(
 	}
 	info, err := r.recoveredAgentctlInfoReader(
 		ctx,
-		r.connectionResolver(state.operationContext, state.inventory.Resource, pluginExecutorRuntimePort),
+		r.connectionResolver(state.operationContext, state.inventory.Resource, pluginExecutorRuntimePort, state.snapshot),
 		r.logger,
 		record.AgentExecutionID,
 		record.TransientAuthToken,
@@ -506,7 +510,7 @@ func (r *PluginRemoteExecutor) cleanupPluginExecutorInstance(ctx context.Context
 	if instance.StopReason == StopReasonLaunchRollback {
 		reason = pluginExecutorCleanupReasonLaunch
 	}
-	return r.destroyPluginExecutorRecord(ctx, record, inventory, inventory.Resource, reason, profile.Provider)
+	return r.destroyPluginExecutorRecord(ctx, record, inventory, inventory.Resource, reason, profile)
 }
 
 func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, environment *models.TaskEnvironment) error {
@@ -551,7 +555,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorEnvironmentRecord(ctx contex
 	if err != nil || !shouldDestroy {
 		return err
 	}
-	return r.destroyPluginExecutorRecord(ctx, record, inventory, resource, "task_environment_reset", profile.Provider)
+	return r.destroyPluginExecutorRecord(ctx, record, inventory, resource, "task_environment_reset", profile)
 }
 
 func pluginExecutorRecordMatchesEnvironment(environment *models.TaskEnvironment, record *models.ExecutorRunning) bool {
@@ -686,8 +690,13 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	inventory pluginExecutorInventory,
 	resource *pluginsdk.ExecutorResourceDescriptor,
 	reason string,
-	provider models.ExecutorProvider,
+	profile *models.ExecutorProviderLaunchProfile,
 ) error {
+	provider := profile.Provider
+	snapshot, err := pluginExecutorProfileSnapshot(*profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		return errors.New("plugin executor recorded profile is unavailable for cleanup")
+	}
 	claim, err := r.acquirePluginExecutorCleanupClaim(ctx, record.TaskID, record.SessionID, inventory)
 	if errors.Is(err, recoveryclaim.ErrBusy) {
 		r.recordCleanupRequested(ctx, record)
@@ -704,7 +713,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 	defer cancel()
 	claimedCtx := recoveryclaim.WithClaim(cleanupCtx, claim)
-	record, inventory, drain, err := r.drainBeforePluginDestroy(claimedCtx, record, inventory, resource, provider, claim)
+	record, inventory, drain, err := r.drainBeforePluginDestroy(claimedCtx, record, inventory, resource, provider, snapshot, claim)
 	if err != nil {
 		return err
 	}
@@ -715,7 +724,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	operationContext.Deadline = time.Now().Add(destroyTimeout).UTC().Format(time.RFC3339Nano)
 	destroyCtx, cancelDestroy := context.WithTimeout(claimedCtx, destroyTimeout)
 	request := &pluginsdk.DestroyExecutorEnvironmentRequest{
-		Context: operationContext, Resource: resource, CleanupReason: reason, CleanupClaim: claim.OperationID,
+		Context: operationContext, Resource: resource, CleanupReason: reason, CleanupClaim: claim.OperationID, Profile: snapshot,
 	}
 	drain.applyTo(request)
 	r.closePluginExecutorTunnels(operationContext)

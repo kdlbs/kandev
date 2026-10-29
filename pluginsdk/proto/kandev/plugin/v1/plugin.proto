@@ -1991,6 +1991,10 @@ message AttachExecutorEnvironmentRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorResourceDescriptor resource = 2;
   string expected_runtime_identity = 3;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 4;
 }
 
 message AttachExecutorEnvironmentResponse {
@@ -2001,6 +2005,10 @@ message AttachExecutorEnvironmentResponse {
 message InspectExecutorEnvironmentRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorResourceDescriptor resource = 2;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 3;
 }
 
 message InspectExecutorEnvironmentResponse {
@@ -2016,6 +2024,10 @@ message ResolveExecutorConnectionRequest {
   string purpose = 3;
   // agentctl control port, or an instance port agentctl assigned to a session.
   uint32 runtime_port = 4;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 5;
 }
 
 message ExecutorConnectionLease {
@@ -2050,6 +2062,10 @@ message ExecutorTunnelHeader {
   uint32 port = 3;
   // binding_nonce identifies this stream binding; the provider echoes it in the ack.
   string binding_nonce = 4;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 5;
 }
 
 message ExecutorTunnelAck {
@@ -2076,6 +2092,10 @@ message DestroyExecutorEnvironmentRequest {
   string drain_outcome = 5;
   // drain_receipt is present only when drain_outcome is drained.
   ExecutorDrainReceipt drain_receipt = 6;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 7;
 }
 
 // ExecutorDrainReceipt is the host's record that the recorded runtime stopped

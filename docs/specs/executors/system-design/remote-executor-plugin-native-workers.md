@@ -81,6 +81,7 @@ The envelope gains `workspace_path`, `workspace_identity`, and `workspace_prepar
 `finishPluginExecutorLaunch`, and the recovery builder read the recorded path from the envelope.
 The path is normalized and checked for uniqueness among the installation's non-terminal environments inside the descriptor write (AC 002.7). Descriptor immutability is enforced in the same envelope-revision CAS that guards checkpoints: a candidate whose path
 or identity differs from a non-empty recorded value for that generation fails before the write.
+A launch-phase checkpoint (`provisioned`, `bootstrapping`) arriving while no descriptor is recorded may omit the descriptor (`resolvePluginExecutorEarlyWorkspace`); a descriptor it does carry is validated and recorded, and the provision response and every later use stay strict.
 
 ## Repository intent
 

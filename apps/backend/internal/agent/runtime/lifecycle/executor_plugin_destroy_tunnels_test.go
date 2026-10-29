@@ -15,7 +15,7 @@ type orderedTunnelOperations struct {
 	events *[]string
 }
 
-func (o orderedTunnelOperations) OpenExecutorTunnel(context.Context, *pluginsdk.ExecutorProviderRequestContext, *pluginsdk.ExecutorResourceDescriptor, uint32, []uint32) (net.Conn, error) {
+func (o orderedTunnelOperations) OpenExecutorTunnel(context.Context, *pluginsdk.ExecutorProviderRequestContext, *pluginsdk.ExecutorResourceDescriptor, uint32, []uint32, *pluginsdk.ExecutorProfileSnapshot) (net.Conn, error) {
 	return nil, net.ErrClosed
 }
 

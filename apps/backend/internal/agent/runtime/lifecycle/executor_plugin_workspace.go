@@ -45,6 +45,20 @@ func resolvePluginExecutorWorkspace(negotiated []string, recorded *workspacedesc
 	return next, nil
 }
 
+// resolvePluginExecutorEarlyWorkspace is resolvePluginExecutorWorkspace for a
+// launch checkpoint, which a provider may send before it has bound a node. A
+// resource that carries neither descriptor field and has no recorded descriptor
+// leaves the descriptor unset; a half-supplied descriptor, or an empty one after
+// a descriptor was recorded, is still rejected. The provision response and every
+// later use keep the strict check.
+func resolvePluginExecutorEarlyWorkspace(negotiated []string, recorded *workspacedescriptor.Descriptor, resource *pluginsdk.ExecutorResourceDescriptor) (*workspacedescriptor.Descriptor, error) {
+	if recorded == nil && resource.GetWorkspacePath() == "" && resource.GetWorkspaceIdentity() == "" &&
+		negotiatedDeclares(negotiated, pluginExecutorCapabilityWorkspaceDescriptor) {
+		return nil, nil
+	}
+	return resolvePluginExecutorWorkspace(negotiated, recorded, resource)
+}
+
 // workspacePath is the recorded workspace path, or the fixed path of a
 // provider that declares no descriptor.
 func (i pluginExecutorInventory) workspacePath() string {

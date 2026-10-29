@@ -134,7 +134,7 @@ func (r *PluginRemoteExecutor) resumeDurableBootstrap(ctx context.Context, recor
 		return nil, err
 	}
 	if consumed {
-		return nil, r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, pluginExecutorCleanupReasonBootstrapConsumed, state.profile.Provider)
+		return nil, r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, pluginExecutorCleanupReasonBootstrapConsumed, state.profile)
 	}
 	if instance == nil {
 		return nil, nil
@@ -156,7 +156,7 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 	if err := r.checkpointPluginExecutorRecord(claimedCtx, record, state.inventory); err != nil {
 		return nil, false, err
 	}
-	control, token, err := r.newAgentctlControlClient(claimedCtx, r.connectionResolver(state.operationContext, state.resource, pluginExecutorRuntimePort), r.logger, record.TransientBootstrapNonce)
+	control, token, err := r.newAgentctlControlClient(claimedCtx, r.connectionResolver(state.operationContext, state.resource, pluginExecutorRuntimePort, state.snapshot), r.logger, record.TransientBootstrapNonce)
 	if errors.Is(err, agentctl.ErrHandshakeRejected) {
 		return nil, true, nil
 	}
@@ -303,7 +303,7 @@ func (r *PluginRemoteExecutor) honorCleanupRequestedAfterRecovery(ctx context.Co
 		return instance, nil
 	}
 	instance.Client.Close()
-	return nil, r.destroyPluginExecutorRecord(ctx, current, inventory, inventory.Resource, pluginExecutorCleanupReasonTask, state.profile.Provider)
+	return nil, r.destroyPluginExecutorRecord(ctx, current, inventory, inventory.Resource, pluginExecutorCleanupReasonTask, state.profile)
 }
 
 // recordCleanupRequested persists that a cleanup lost the claim race, so the
