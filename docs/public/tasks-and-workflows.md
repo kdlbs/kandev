@@ -1149,6 +1149,7 @@ to review an action and return to your list.
 
 - Kandev removes archived tasks from active views. Saved views that include archived tasks still show them.
 - While the request is pending, the task stays visible with a spinner and an **Archiving in progress** toast. On failure, it returns to its normal state.
+- Several archives can be pending at once. Each row keeps its own spinner and ignores repeated archive requests until its own request settles, and Kandev does not switch you to a task that is also being archived.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
 For Git worktrees, archive deletes Kandev-owned checkouts and their local

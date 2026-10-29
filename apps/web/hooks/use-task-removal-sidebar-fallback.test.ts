@@ -166,3 +166,61 @@ describe("useTaskRemoval bounded fallback pagination", () => {
     expect(querySidebarTasksMock).not.toHaveBeenCalled();
   });
 });
+
+describe("useTaskRemoval bounded fallback pagination — pending removals", () => {
+  it("keeps paging past a server candidate captured by another removal", async () => {
+    const pendingServerTask: Task = {
+      ...makeFallbackTask("Pending server candidate"),
+      id: "task-pending-server",
+      primary_session_id: "sess-pending-server",
+    } as Task;
+    const eligibleServerTask: Task = {
+      ...makeFallbackTask("Eligible server candidate"),
+      id: "task-eligible-server",
+      primary_session_id: "sess-eligible-server",
+    } as Task;
+    const store = makeTaskRemovalStore({
+      activeTaskId: TASK_A_ID,
+      activeSessionId: "sess-A",
+      remainingTasks: [{ id: TASK_A_ID, primarySessionId: "sess-A", workspaceId: WORKSPACE_ID }],
+      taskRemoval: {
+        navigationRevision: 0,
+        operationsByToken: {
+          "other-removal": {
+            token: "other-removal",
+            action: "archive",
+            workspaceId: WORKSPACE_ID,
+            taskIds: [pendingServerTask.id],
+            requestIds: [pendingServerTask.id],
+            outcomesByTaskId: { [pendingServerTask.id]: "pending" },
+            departure: null,
+          },
+        },
+        pendingTokenByTaskId: { [pendingServerTask.id]: "other-removal" },
+      },
+    });
+    querySidebarTasksMock
+      .mockResolvedValueOnce({
+        entries: [{ kind: "task", task_id: pendingServerTask.id, task: pendingServerTask }],
+        has_next: true,
+      } as unknown as SidebarTaskPageResponse)
+      .mockResolvedValueOnce({
+        entries: [{ kind: "task", task_id: eligibleServerTask.id, task: eligibleServerTask }],
+        has_next: false,
+      } as unknown as SidebarTaskPageResponse);
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+
+    const removal = await result.current.removeTaskFromBoard(TASK_A_ID, {
+      wasActiveTaskId: TASK_A_ID,
+      wasActiveSessionId: "sess-A",
+      workspaceId: WORKSPACE_ID,
+    });
+
+    expect(removal.switchedTaskId).toBe(eligibleServerTask.id);
+    expect(
+      querySidebarTasksMock.mock.calls.map((call) => (call[1] as { page: number }).page),
+    ).toEqual([1, 2]);
+  });
+});

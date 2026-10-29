@@ -127,8 +127,6 @@ export type TaskSwitcherProps = {
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
-  archivingTaskId?: string | null;
-  isArchiving?: boolean;
   isLoading?: boolean;
   loadError?: string | null;
   onRetryLoad?: () => void;

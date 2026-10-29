@@ -120,6 +120,47 @@ export function ownsTaskRemovalDeparture(
   );
 }
 
+/**
+ * Resolves the accepted action for one task from the token map and its matching
+ * operation. A stale token or a captured workspace mismatch is not membership.
+ */
+export function pendingTaskRemovalAction(
+  state: TaskRemovalState | undefined,
+  taskId: string,
+  workspaceId: string | null,
+): TaskRemovalAction | null {
+  const token = state?.pendingTokenByTaskId[taskId];
+  if (!state || !token) return null;
+  const operation = state.operationsByToken[token];
+  if (!operation) return null;
+  if (operation.workspaceId !== workspaceId) return null;
+  return operation.action;
+}
+
+export function isTaskRemovalPending(
+  state: TaskRemovalState | undefined,
+  taskId: string,
+  workspaceId: string | null,
+  actions?: readonly TaskRemovalAction[],
+): boolean {
+  const action = pendingTaskRemovalAction(state, taskId, workspaceId);
+  if (action === null) return false;
+  return actions === undefined || actions.includes(action);
+}
+
+/** Every task under an accepted removal in one captured workspace. */
+export function pendingTaskRemovalTaskIds(
+  state: TaskRemovalState | undefined,
+  workspaceId: string | null,
+): Set<string> {
+  const pending = new Set<string>();
+  if (!state) return pending;
+  for (const taskId of Object.keys(state.pendingTokenByTaskId)) {
+    if (pendingTaskRemovalAction(state, taskId, workspaceId) !== null) pending.add(taskId);
+  }
+  return pending;
+}
+
 export function taskRemovalCoversTask(state: TaskRemovalState, taskId: string): boolean {
   return Object.values(state.operationsByToken).some((operation) =>
     operation.taskIds.includes(taskId),
