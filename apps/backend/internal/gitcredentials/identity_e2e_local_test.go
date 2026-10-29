@@ -35,7 +35,7 @@ func TestE2ELocalExceptionIsLimitedToTheSyntheticProviderAndLoopback(t *testing.
 	if _, err := ResolveRepositoryIdentity(github); err == nil {
 		t.Fatal("a file remote resolved for a real provider")
 	}
-	for _, remote := range []string{"http://example.com/local/repo.git", "http://10.0.0.5/local/repo.git", "file://host/tmp/repo.git"} {
+	for _, remote := range []string{"http://example.com/local/repo.git", "http://intranet.example/local/repo.git", "file://host/tmp/repo.git"} {
 		if _, err := ResolveRepositoryIdentity(e2eLocalInput(remote)); err == nil {
 			t.Fatalf("ResolveRepositoryIdentity(%q) accepted a non-loopback remote", remote)
 		}
