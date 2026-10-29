@@ -4,8 +4,9 @@ package streams
 type CapacityContinuationSupport string
 
 const (
-	CapacityContinuationCodexLiveSessionV1 CapacityContinuationSupport = "codex_live_session_v1"
-	CapacityContinuationMockLiveSessionV1  CapacityContinuationSupport = "mock_live_session_v1"
+	CapacityContinuationCodexLiveSessionV1    CapacityContinuationSupport = "codex_live_session_v1"
+	CapacityContinuationOpenCodeLiveSessionV1 CapacityContinuationSupport = "opencode_live_session_v1"
+	CapacityContinuationMockLiveSessionV1     CapacityContinuationSupport = "mock_live_session_v1"
 )
 
 // CapacityContinuationSnapshot contains only bounded outcome evidence for one prompt.
@@ -29,7 +30,8 @@ func (s *CapacityContinuationSnapshot) SafeFor(generation uint64) bool {
 		return false
 	}
 	switch s.Support {
-	case CapacityContinuationCodexLiveSessionV1, CapacityContinuationMockLiveSessionV1:
+	case CapacityContinuationCodexLiveSessionV1, CapacityContinuationOpenCodeLiveSessionV1,
+		CapacityContinuationMockLiveSessionV1:
 		return true
 	default:
 		return false

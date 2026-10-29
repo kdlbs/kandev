@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-03
-updated: 2026-10-21
+updated: 2026-10-28
 requirements:
   - REQ-PLATFORM-TURN-CONTINUITY-001
   - REQ-PLATFORM-TURN-CONTINUITY-002
@@ -216,6 +216,57 @@ The [capacity plan](../../../plans/model-capacity-continuation/plan.md) owns exa
 Public guidance changes with implementation in `docs/public/tasks-and-workflows.md`.
 The design turn changes internal artifacts only.
 
+## OpenCode capacity support
+
+This amendment extends `REQ-PLATFORM-TURN-CONTINUITY-003` without another recovery owner.
+The [Agents signature contract](../../agents/system-design/provider-error-signatures.md#opencode-admission-refusal)
+maps the tested admission refusal to `CodeModelCapacity` and a bounded short reset hint.
+The [implementation package](../../../plans/opencode-capacity-retry/plan.md) owns delivery and compatibility evidence.
+
+Add `newOpenCodeACPDialect` in `dialect_opencode.go` and select it in `newACPDialect`.
+Add `CapacityContinuationOpenCodeLiveSessionV1` with wire value `opencode_live_session_v1`.
+Recognize it in `CapacityContinuationSnapshot.SafeFor` and `supportsCapacityContinuation`.
+Keep unknown support values ineligible.
+This value identifies a tested live-conversation contract, not a CLI release or provider assertion.
+Do not add OpenCode support to transport-loss restoration.
+
+Extend `Adapter.retainableACPApplicationError` for the tested OpenCode capacity application error.
+Keep its high-confidence semantic gate and the existing `promptFailureDisposition` liveness check.
+Generic internal errors, cancellation, auth, hard quota, Data-only signatures, and broken transport do not qualify.
+Capture capacity evidence after the notification queue drains and before synthetic tool cleanup.
+Use the existing bounded ledger for authoritative completed outcomes.
+OpenCode child-session, background, and subagent work must block continuation unless the current evidence accounts for its completion.
+A completed detached execute launch is not completed workload evidence: the ledger stays unresolved until terminal evidence for the same native shell, independent of the background-work inspection feature.
+Missing, malformed, or contradictory launch metadata fails closed.
+Never infer that completion from a title or a null native retry update.
+
+Forward the existing typed failure and snapshot through process outcomes, lifecycle, and watcher conversion.
+The ordinary `AgentTurnFailed` owner settles the failed turn and retains the usable runtime.
+`handleTransientFailure` selects replay before output or continuation after known completed effects.
+`retryRetainedRuntimeContinuation` sends the existing internal instruction without original text or attachments.
+An eligible clean continuation can fail again before another tool completes.
+Keep its accepted generation and original episode under the existing successor-entry rules.
+
+OpenCode's native retry updates remain advisory while its prompt is active.
+Do not arm host recovery until the terminal prompt result settles and runtime ownership is validated.
+Native attempts do not consume the host's eleven additional dispatches.
+Do not reconstruct native retry metadata after the final null update.
+Duplicate terminal delivery must select the same host owner.
+
+For a capacity episode's first five slots, select the greater of the nominal delay and a valid short reset hint.
+Use the nominal delay when the hint is absent, stale, or more than one minute away.
+Later capacity slots and the fixed admission deadline retain their existing policy.
+Non-capacity reset-hint behavior remains unchanged.
+The first pictured retry therefore waits at least 21 seconds if the terminal hint remains current.
+Success, cancellation, supersession, runtime loss, exhaustion, and restart use existing cleanup owners.
+
+Task Chat reuses `TransientRetryNotice` and its localized capacity labels on desktop and phone.
+No markup, copy, layout, setting, feature flag, or migration is necessary.
+Focused E2E tests must prove the existing notice replaces the session-recovery failure for eligible OpenCode evidence.
+Retain the existing phone wrapping, transcript scroll owner, composer safe area, and reachable Cancel action.
+Native compatibility evidence shows a subsequent prompt on the same initialized OpenCode conversation after a controlled capacity error.
+Recorded notifications alone do not establish post-error liveness.
+
 ## Capacity episode timing
 
 The October 21 timing amendment is specified here and delivered by the
@@ -231,7 +282,7 @@ the global `transientMaxAttempts` or the generic short ladder. A non-capacity
 episode cannot gain a fresh capacity budget halfway through recovery.
 
 For a capacity episode use nominal delays of 5/10/20/40/60/120/240/300/300/300/300
-seconds. Preserve validated short reset hints only within the first five slots;
+seconds. Apply validated short reset hints as a minimum only within the first five slots;
 later slots use the slower ladder. No jitter is introduced in this amendment.
 The first failure starts a fixed thirty-minute window. Each next wait starts
 after the current failure settles, so prompt durations consume window time.

@@ -755,17 +755,24 @@ or a backend restart stops pending automatic recovery.
 
 ### Model capacity
 
-For interactive tasks, Kandev retries a model-capacity error when the runtime
-supports live continuation and at least one tool has a confirmed result. Kandev
-keeps confirmed actions in the conversation. It asks the agent to continue
-without repeating those actions. This does not guarantee exactly-once effects.
+Kandev supports live model-capacity recovery for tested Codex and OpenCode ACP
+profiles in interactive tasks. OpenCode can run its own short retries first. A
+native retry does not start a Kandev retry and does not use the Kandev attempt
+budget. When OpenCode ends those retries with a capacity refusal, Kandev keeps
+the same runtime and continues the unfinished turn there.
+
+Kandev retries a model-capacity error when the runtime supports live
+continuation and at least one tool has a confirmed result. Kandev keeps
+confirmed actions in the conversation. It asks the agent to continue without
+repeating those actions. This does not guarantee exactly-once effects.
 
 Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
-from 5 seconds to a maximum of 5 minutes. The inline notice shows the attempt
-count, next retry, deadline, and **Cancel** action. A new message, a session
-configuration change, or **Cancel** stops pending recovery. A backend restart
-also stops automatic recovery. It does not restore the retry schedule. The
-deadline does not stop a turn that is already running.
+from 5 seconds to a maximum of 5 minutes. A short provider wait hint can raise
+one of the first five waits. It never shortens a wait. The inline notice shows
+the attempt count, next retry, deadline, and **Cancel** action. A new message, a
+session configuration change, or **Cancel** stops pending recovery. A backend
+restart also stops automatic recovery. It does not restore the retry schedule.
+The deadline does not stop a turn that is already running.
 
 Kandev leaves a model-capacity error for you to handle when a tool or permission
 is pending, an outcome is uncertain, background work is unaccounted for, the

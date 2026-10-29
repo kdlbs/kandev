@@ -42,6 +42,16 @@ Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — 
 
 `/overloaded[:N]` is the reference example (`handler.go: handleOverloaded`): it returns the production `529 Overloaded` error for the first `N` prompts of a session (default 1), then recovers with a normal text response. The orchestrator's backoff retry tears the agent process down and relaunches it between attempts, so the fail-count is persisted in a **temp file** keyed by the session id (`overloadedCounterPath`) rather than an in-memory map — it survives the relaunch (and is cleaned up on recovery and in `CloseSession`). Use `/overloaded` to demo the yellow retry status, or a large `N` like `/overloaded:9` to keep failing so the retry loop stays visible / exhausts to the red recovery banner.
 
+`/opencode-capacity-after-tools`, `/opencode-capacity-completed-tools`,
+`/opencode-capacity-retry[:N]`, `/opencode-capacity-cancel[:N]`, and
+`/opencode-capacity-exhaust[:N]` (`opencode_capacity.go`) are the OpenCode-shaped
+counterpart. They emit advisory `_meta["opencode/retry"]` updates and the exact
+captured `Upstream request failed: [ttft_admission_refused] ...` terminal error
+without a `kandevMock` marker, so a run under the real `opencode-acp` identity
+(`KANDEV_MOCK_PROVIDERS=opencode-acp`) exercises the production OpenCode dialect
+and classifier. The continuation marker is shared with the Codex-shaped
+scenarios.
+
 `/capacity-after-tools`, `/capacity-completed-tools`, `/capacity-retry[:N]`, `/capacity-cancel[:N]`, and `/capacity-exhaust[:N]` (`capacity_continuity.go`) return a marked ACP application error with the selected-model capacity message. They model a provider turn failure whose ACP runtime remains usable: Kandev settles the turn without stopping that runtime. `/capacity-after-tools` emits assistant text, a completed read, and an unresolved tool to keep automatic continuation refused. `/capacity-completed-tools` emits one completed edit so browser tests can verify that same-conversation continuation does not repeat its side effect. `/capacity-retry:N` fails the first `N` prompts and then succeeds; `/capacity-cancel` and `/capacity-exhaust` default to nine failures so browser tests can exercise idle cancellation and the five-attempt retry limit. Continuation prompts use the stored scenario and never replay the original tool. Counters and active scenario state are stored in temp files keyed by native ACP session ID; `CloseSession` clears them.
 
 When `E2E_MOCK_AGENT_ACP_TRACE_FILE` is set, ACP trace rows include `process_id` and `connection_id` alongside the native `session_id`. Initialize, load, resume, and model-selection requests are recorded so E2E tests can distinguish a retained runtime from a restored one; the trace is opt-in and is not written during ordinary runs.

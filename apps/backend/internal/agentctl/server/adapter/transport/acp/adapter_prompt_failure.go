@@ -61,7 +61,8 @@ func (a *Adapter) promptFailureConnectionUsable(conn *sdk.ClientSideConnection, 
 
 func (a *Adapter) retainableACPApplicationError(err error) (*streams.ProviderError, bool) {
 	mockRetainedError := a.dialect.retainedApplicationErr != nil && a.dialect.retainedApplicationErr(err)
-	if a.agentID != claudeAgentID && a.agentID != codexAgentID && !mockRetainedError {
+	openCodeCapacity := a.agentID == openCodeAgentID
+	if a.agentID != claudeAgentID && a.agentID != codexAgentID && !openCodeCapacity && !mockRetainedError {
 		return nil, false
 	}
 	var requestErr *sdk.RequestError
@@ -79,6 +80,12 @@ func (a *Adapter) retainableACPApplicationError(err error) (*streams.ProviderErr
 	switch classified.Code {
 	case routingerr.CodeProviderOverloaded, routingerr.CodeModelCapacity, routingerr.CodeRateLimited:
 	default:
+		return nil, false
+	}
+	// OpenCode retention covers only the tested admission refusal. A broad
+	// capacity phrase or another high-confidence provider error keeps the
+	// existing recovery path.
+	if openCodeCapacity && classified.ClassifierRule != routingerr.RuleOpenCodeCapacityAdmission {
 		return nil, false
 	}
 	providerError := ProviderErrorFromError(err, a.agentID, "")

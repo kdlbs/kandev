@@ -512,6 +512,12 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleRetainedCapacity(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// The real OpenCode agent identity returns the captured admission refusal
+	// after advisory native retry metadata. KANDEV_MOCK_PROVIDERS selects this
+	// identity, so the production OpenCode dialect and classifier both run.
+	if resp, err, handled := a.handleOpenCodeCapacity(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.

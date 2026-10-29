@@ -494,6 +494,7 @@ func completeEventStopReason(event *agentctl.AgentEvent) string {
 
 const claudeACPAgentID = "claude-acp"
 const codexACPAgentID = "codex-acp"
+const openCodeACPAgentID = "opencode-acp"
 
 func (m *Manager) retainPromptFailureRuntime(
 	execution *AgentExecution,
@@ -582,7 +583,7 @@ func retainedTurnTaskOwnerMatches(execution *AgentExecution) bool {
 
 func isRetainableACPAgent(agentID string) bool {
 	switch agentID {
-	case claudeACPAgentID, codexACPAgentID, acpcompat.CursorAgentID, "mock-agent":
+	case claudeACPAgentID, codexACPAgentID, openCodeACPAgentID, acpcompat.CursorAgentID, "mock-agent":
 		return true
 	default:
 		return false

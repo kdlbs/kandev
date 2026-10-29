@@ -254,7 +254,7 @@ func TestTransientTurnFailureRequiresCurrentEligibleRuntime(t *testing.T) {
 		{name: "automation scope", change: func(e *AgentExecution) { e.TaskScope = TaskLaunchScopeAutomation }},
 		{name: "unknown scope", change: func(e *AgentExecution) { e.TaskScope = TaskLaunchScopeUnknown }},
 		{name: "passthrough", change: func(e *AgentExecution) { e.IsPassthrough = true }},
-		{name: "unsupported provider", change: func(e *AgentExecution) { e.AgentID = "opencode-acp" }},
+		{name: "unproven provider", change: func(e *AgentExecution) { e.AgentID = "unproven-acp" }},
 		{name: "utility execution", change: func(e *AgentExecution) { e.TaskID = "" }},
 		{name: "closed stream", change: func(e *AgentExecution) {
 			e.agentctlLifecycleMu.Lock()

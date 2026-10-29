@@ -51,3 +51,15 @@ func TestCapacityContinuationSnapshotSafeForFailsClosed(t *testing.T) {
 	require.False(t, base.SafeFor(0))
 	require.False(t, (*CapacityContinuationSnapshot)(nil).SafeFor(7))
 }
+
+// @covers AC-PLATFORM-TURN-CONTINUITY-003.6
+func TestCapacityContinuationSnapshotOpenCodeSupport(t *testing.T) {
+	snapshot := CapacityContinuationSnapshot{
+		Support: CapacityContinuationOpenCodeLiveSessionV1, PromptGeneration: 3, EvidenceComplete: true,
+		CompletedTools: 1,
+	}
+	require.True(t, snapshot.SafeFor(3))
+	require.False(t, snapshot.SafeFor(4))
+	snapshot.UnaccountedBackground = true
+	require.False(t, snapshot.SafeFor(3))
+}

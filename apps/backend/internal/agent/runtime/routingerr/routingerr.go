@@ -187,14 +187,14 @@ const statusOverloaded = 529
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
 	e := classify(in)
+	observedAt := in.OccurredAt
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
 	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
 		// Providers such as codex state the retry time only in the human
 		// notice, not in a structured field. Deriving it here lets every
 		// consumer (short retry, circuit breaker) honor it uniformly.
-		observedAt := in.OccurredAt
-		if observedAt.IsZero() {
-			observedAt = time.Now()
-		}
 		text := in.Stderr + "\n" + in.Stdout
 		hint := parseResetHintAt(text, observedAt)
 		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
@@ -203,6 +203,11 @@ func Classify(in Input) *Error {
 		if hint != nil {
 			e.ResetHint = hint
 		}
+	}
+	if e.ResetHint == nil && e.ClassifierRule == RuleOpenCodeCapacityAdmission {
+		// A capacity hint is a floor for the host's nominal delay, never a
+		// replacement. Only the line that matched the signature can supply it.
+		e.ResetHint = parseOpenCodeCapacityResetHintAt(in.Stderr+"\n"+in.Stdout, observedAt)
 	}
 	return e
 }
