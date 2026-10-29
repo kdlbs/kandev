@@ -485,7 +485,13 @@ func (r *PluginRemoteExecutor) settleAbsentPluginExecutor(
 }
 
 func (r *PluginRemoteExecutor) cleanupPluginExecutorInstance(ctx context.Context, instance *ExecutorInstance) error {
-	inventory, err := decodePluginExecutorInventory(instance.Metadata)
+	record, err := r.currentPluginExecutorRecord(ctx, instance.SessionID, instance.InstanceID)
+	if err != nil {
+		return err
+	}
+	// The instance snapshot predates any earlier cleanup attempt; the stored
+	// record is the authority for the phase, revision and resource.
+	inventory, err := decodePluginExecutorInventory(record.Metadata)
 	if err != nil {
 		return err
 	}
@@ -499,10 +505,7 @@ func (r *PluginRemoteExecutor) cleanupPluginExecutorInstance(ctx context.Context
 	if err != nil {
 		return err
 	}
-	record, err := r.currentPluginExecutorRecord(ctx, instance.SessionID, instance.InstanceID)
-	if err != nil {
-		return err
-	}
+	r.loadPluginExecutorCleanupToken(ctx, record, instance.AuthToken)
 	if profile.Provider.Identity != inventory.ProviderIdentity || profile.Provider.InstallationID != inventory.InstallationID {
 		return errors.New("recorded plugin executor provider is unavailable")
 	}
@@ -697,6 +700,7 @@ func (r *PluginRemoteExecutor) destroyPluginExecutorRecord(
 	if err != nil {
 		return errors.New("plugin executor recorded profile is unavailable for cleanup")
 	}
+	r.loadPluginExecutorCleanupToken(ctx, record, "")
 	claim, err := r.acquirePluginExecutorCleanupClaim(ctx, record.TaskID, record.SessionID, inventory)
 	if errors.Is(err, recoveryclaim.ErrBusy) {
 		r.recordCleanupRequested(ctx, record)

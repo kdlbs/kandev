@@ -60,11 +60,16 @@ type pluginExecutorInventoryStoreFake struct {
 	deleted       bool
 	releaseCount  int
 	checkpointErr error
+	onCheckpoint  func(*models.ExecutorRunning)
+	claimBusy     int
 }
 
 func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ context.Context, record *models.ExecutorRunning) error {
 	if f.checkpointErr != nil {
 		return f.checkpointErr
+	}
+	if f.onCheckpoint != nil {
+		f.onCheckpoint(record)
 	}
 	if f.record != nil {
 		current, err := decodePluginExecutorInventory(f.record.Metadata)
@@ -141,6 +146,10 @@ func (f *pluginExecutorInventoryStoreFake) DeletePluginExecutorInventoryIfCurren
 
 func (f *pluginExecutorInventoryStoreFake) AcquireTaskEnvironmentRecoveryClaim(_ context.Context, request models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error) {
 	f.claimRequest = request
+	if f.claimBusy > 0 {
+		f.claimBusy--
+		return nil, recoveryclaim.ErrBusy
+	}
 	if f.claimErr != nil {
 		return nil, f.claimErr
 	}
