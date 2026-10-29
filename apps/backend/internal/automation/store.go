@@ -2061,7 +2061,16 @@ type runSummaryRow struct {
 // earlier run. Runs without a turn binding retain the legacy task-level query.
 // Bound runs are hydrated in one set-based query because these lists are also
 // used by live polling and can contain hundreds of runs.
+const (
+	runSummaryPrefixBytes        = 280
+	historyRunSummaryPrefixBytes = 4096
+)
+
 func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) error {
+	return s.hydrateRunSummariesWithPrefix(ctx, runs, runSummaryPrefixBytes)
+}
+
+func (s *Store) hydrateRunSummariesWithPrefix(ctx context.Context, runs []*AutomationRun, prefixBytes int) error {
 	turnIDs := make([]string, 0, len(runs))
 	for _, run := range runs {
 		if run.TurnID != "" {
@@ -2078,8 +2087,8 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 		args[i] = turnID
 	}
 	var summaries []runSummaryRow
-	err := s.ro.SelectContext(ctx, &summaries, s.ro.Rebind(`
-		SELECT m.turn_id, substr(m.content, 1, 280) AS summary
+	err := s.ro.SelectContext(ctx, &summaries, s.ro.Rebind(fmt.Sprintf(`
+		SELECT m.turn_id, substr(m.content, 1, %d) AS summary
 		FROM task_session_messages m
 		WHERE m.turn_id IN (`+placeholders+`)
 		  AND m.author_type = 'agent' AND m.type = 'message'
@@ -2089,7 +2098,7 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 			  AND newer.author_type = 'agent' AND newer.type = 'message'
 				AND (newer.created_at > m.created_at OR
 					(newer.created_at = m.created_at AND newer.id > m.id))
-			)`), args...)
+			)`, prefixBytes)), args...)
 	if db.IsMissingTableError(err) {
 		return nil
 	}
@@ -2151,12 +2160,10 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 // than a LEFT JOIN) keeps the query correct even if the "at most one
 // is_primary=1 row per task" invariant is ever violated — a join would fan
 // out and duplicate the run.
-const runTaskStateColumnsSQL = `
-		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
-		-- A run keeps its task_id after the task row is deleted, which reads as a
-		-- transcript that can still be opened. Report no task rather than a link
-		-- that dead-ends; the derived cancelled status below already says why.
-		CASE WHEN t.id IS NULL THEN '' ELSE ar.task_id END AS task_id,
+// runObservedStatusSQL is the shared read-time status projection. It assumes
+// the caller aliases automation_runs as ar and LEFT JOINs tasks as t, and
+// binds runTaskStateArgs() ahead of its own parameters.
+const runObservedStatusSQL = `
 		CASE
 			WHEN ar.retry_state = ? THEN ?
 			WHEN ar.status = ? AND t.id IS NULL THEN ?
@@ -2166,7 +2173,15 @@ const runTaskStateColumnsSQL = `
 				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
 			) THEN ?
 			ELSE ar.status
-		END AS status,
+		END AS status`
+
+const runTaskStateColumnsSQL = `
+		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
+		-- A run keeps its task_id after the task row is deleted, which reads as a
+		-- transcript that can still be opened. Report no task rather than a link
+		-- that dead-ends; the derived cancelled status below already says why.
+		CASE WHEN t.id IS NULL THEN '' ELSE ar.task_id END AS task_id,` +
+	runObservedStatusSQL + `,
 		ar.dedup_key, ar.trigger_data, ar.error_message,
 		ar.session_id, ar.turn_id, ar.thread_action, ar.thread_reason, ar.display_title,
 		ar.dedup_reason, ar.repository_reason,

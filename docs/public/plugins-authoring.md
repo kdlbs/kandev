@@ -1046,6 +1046,7 @@ subscription vocabulary and wildcard rules are in the
 | Interactions               | Interactions().ListPending, Interactions().Get                                                                                   | api_read: interactions                                                                                                                            | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                                                                                                                |
 | Exact interaction responses | `HostExactInteractionCommands(host)`: `RespondPermission`, `AnswerClarification`                                                | `api_write: interactions` plus `host.v2.write:interactions` and a Host-issued human response receipt                                              | The authenticated native UI issues a short-lived receipt for one interaction revision and exact response; legacy v1 response methods return `PermissionDenied`                                                                                                                             |
 | Exact observations         | `pluginsdk.HostExactQueries(host)`                                                                                               | Resource declaration plus matching `host.v2.read:<resource>` workspace grant                                                                      | Snapshot-bound workspace, task, session, interaction, message, inbox, relation, pending-transition, PR-evidence, and usage reads; use capability discovery for per-host support                                                                                                           |
+| Automation history         | `pluginsdk.HostAutomationHistory(host)`: `ListAutomations`, `ListRuns`, `GetRun`                                                   | `api_read: automations` plus `host.v2.read:automations`                                                                                           | Workspace-authorized definition and retained-run observations; list reads use the shared bounded snapshot, and `GetRun` refreshes one known run through current authority                                                                                                                 |
 | Linked issue writeback      | `pluginsdk.HostSourceIssueWriteback(host)`: `GetCapabilities`, `Comment`, `Transition`                                          | `api_read: source_issues` and `host.v2.read:source_issues` for reads; `api_write: source_issues` and `host.v2.write:source_issues` for writes          | Resolves the task's existing Jira/Linear link and uses workspace credentials; commands carry task/source versions and durable receipts, and ambiguous outcomes return `UNCERTAIN` without automatic resend                                                                                     |
 | Agent invocation           | InvokeUtilityAgent(ctx, prompt, options...)                                                                                      | agent_invoke: true                                                                                                                                | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
 | Agent conversations        | AgentConversations(host): Ensure, Dispatch, Delete                                                                               | agent_conversation: true                                                                                                                          | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin                                                                                     |
@@ -1751,6 +1752,70 @@ mean a measured zero-cost run.
 workflow moves. Directive reads stay unsupported until the Host advertises a
 durable directive source. Read `GetCapabilityContext` and use each method's
 `Supported` and `Authorized` values before depending on an optional operation.
+
+### Automation history
+
+Use `pluginsdk.HostAutomationHistory(host)` for supported automation
+definitions, retained run history, and exact run refresh. Declare
+`api_read: [automations]` and obtain the workspace grant
+`host.v2.read:automations`. The manifest declaration alone does not authorize a
+read.
+
+```go
+history, ok := pluginsdk.HostAutomationHistory(host)
+if !ok {
+    return errors.New("automation history is unsupported")
+}
+definitions, err := history.ListAutomations(ctx, pluginsdk.AutomationDefinitionQuery{
+    RequestID: "automation-inventory-01", WorkspaceID: workspaceID,
+    Page: pluginsdk.ExactReadPage{Limit: 100},
+})
+if err != nil {
+    return err
+}
+runs, err := history.ListRuns(ctx, pluginsdk.AutomationRunQuery{
+    RequestID: "automation-runs-01", WorkspaceID: workspaceID,
+    Filter: pluginsdk.AutomationRunFilter{AutomationID: definitions.Items[0].ID},
+    Page:   pluginsdk.ExactReadPage{Limit: 100},
+})
+if err != nil {
+    return err
+}
+refreshed, receipt, err := history.GetRun(ctx, pluginsdk.AutomationRunGetQuery{
+    RequestID: "automation-refresh-01", WorkspaceID: workspaceID, RunID: runs.Items[0].ID,
+})
+if err != nil {
+    return err
+}
+_ = refreshed.Status      // current observed status
+_ = refreshed.SourceStatus // stored run status
+_ = receipt.ObservedAt
+```
+
+Definition observations include automation identity, name, enabled state, and
+safe trigger identities. Scheduled triggers expose `cron_expression` and the
+configured timezone only when `schedule_available` is true; other trigger kinds
+keep their identity without configuration. Malformed schedule data leaves the
+automation visible with an unavailable schedule.
+
+Run observations keep `source_status` (what the run recorded) separate from
+`status` (the automation service's current task-aware projection). Retry state
+and delivery state are independent, and absent timestamps and unknown status
+strings remain absent rather than becoming success. `attempt_number` is absent
+when the source did not record one. Summary and error fields are bounded,
+credential-sanitized excerpts, not transcripts.
+
+Lists use the same bounded immutable snapshots as other exact reads: pages are
+at most 200 rows, one snapshot is limited to 5,000 rows and 8 MiB, and
+continuations expire after five minutes. Cursors bind to the installation,
+workspace, method, normalized filters, and approval revision. An oversized
+filtered result fails with `ResourceExhausted`; narrow the automation or
+creation-time filter instead of treating the error as an empty workspace.
+Creation-time bounds are UTC RFC3339 strings; `created_from` is inclusive and
+`created_before` is exclusive. `GetRun` is independent of list snapshots and
+always uses current authorization, so use it to reconcile a missed completion
+event. Optional-method discovery reports support and current authority; an
+older Host returns `Unimplemented` from the new calls.
 
 ## Remote executor providers
 

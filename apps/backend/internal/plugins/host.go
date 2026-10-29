@@ -122,6 +122,7 @@ type pluginHost struct {
 	agentConversations         func() AgentConversationService
 	managedConversations       func() ManagedAgentConversationService
 	managedAutomationSchedules func() ManagedConversationScheduleService
+	automationHistoryDataDep   func() AutomationHistoryDataSource
 
 	// log receives the dependency-derivation-failure diagnostic emitted by
 	// attachDependencies (see host_data_dependencies.go). nil on a bare test

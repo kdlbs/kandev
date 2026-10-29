@@ -314,6 +314,14 @@ func newHostClient(conn *grpc.ClientConn) Host {
 	return &grpcHostClient{client: pluginv1.NewHostClient(conn)}
 }
 
+// NewHostClient returns the SDK Host handle for an existing gRPC connection to
+// a Kandev Host service. Normal plugins receive this handle from Serve; this
+// constructor supports integration tests and embedders that manage their own
+// connection.
+func NewHostClient(conn *grpc.ClientConn) Host {
+	return newHostClient(conn)
+}
+
 type grpcHostClient struct {
 	client pluginv1.HostClient
 }
@@ -864,6 +872,7 @@ func (r grpcMessageReader) Send(ctx context.Context, taskID, sessionID, text str
 func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
 	exact, _ := impl.(ExactHost)
 	exactQueries, _ := impl.(ExactQueryHost)
+	automationHistory, _ := impl.(AutomationHistoryHost)
 	taskCommands, _ := impl.(ExactTaskCommandHost)
 	claimCommands, _ := impl.(ExactTaskManagementClaimCommandHost)
 	completionGateCommands, _ := impl.(ExactTaskCompletionGateCommandHost)
@@ -872,8 +881,8 @@ func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
 	executionCommands, _ := impl.(ExactExecutionCommandHost)
 	interactionCommands, _ := impl.(ExactInteractionCommandHost)
 	pluginv1.RegisterHostServer(s, &grpcHostServer{
-		impl: impl, exact: exact, exactQueries: exactQueries, taskCommands: taskCommands,
-		claimCommands: claimCommands, completionGateCommands: completionGateCommands,
+		impl: impl, exact: exact, exactQueries: exactQueries, automationHistory: automationHistory,
+		taskCommands: taskCommands, claimCommands: claimCommands, completionGateCommands: completionGateCommands,
 		workspaceAdminCommands:       workspaceAdminCommands,
 		sourceIssueWritebackCommands: sourceIssueWritebackCommands,
 		executionCommands:            executionCommands, interactionCommands: interactionCommands,
@@ -885,6 +894,7 @@ type grpcHostServer struct {
 	impl                         Host
 	exact                        ExactHost
 	exactQueries                 ExactQueryHost
+	automationHistory            AutomationHistoryHost
 	taskCommands                 ExactTaskCommandHost
 	claimCommands                ExactTaskManagementClaimCommandHost
 	completionGateCommands       ExactTaskCompletionGateCommandHost

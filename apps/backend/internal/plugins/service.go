@@ -113,6 +113,7 @@ type Service struct {
 	agentConvs                 AgentConversationService
 	managedConvs               ManagedAgentConversationService
 	managedAutomationSchedules ManagedConversationScheduleService
+	automationHistoryData      AutomationHistoryDataSource
 	eventBus                   bus.EventBus
 	conversationTokens         *conversationTokenManager
 	conversationEpoch          string
@@ -690,6 +691,21 @@ func (s *Service) managedConversationScheduleDeps() ManagedConversationScheduleS
 	return s.managedAutomationSchedules
 }
 
+// SetAutomationHistoryDataSource wires the automation-owned history reader.
+// It is read live by every Host instance so late wiring reaches hosts created
+// before the automation service existed.
+func (s *Service) SetAutomationHistoryDataSource(source AutomationHistoryDataSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.automationHistoryData = source
+}
+
+func (s *Service) automationHistoryDataDependency() AutomationHistoryDataSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.automationHistoryData
+}
+
 // writeDependencies returns the currently-wired task messenger and task
 // starter. Read live (not snapshotted at hostForPlugin time) so a plugin
 // spawned before SetWriteDeps still resolves them once it is called. Guarded by
@@ -915,6 +931,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentConversations:         s.agentConversationDeps,
 		managedConversations:       s.managedAgentConversationDeps,
 		managedAutomationSchedules: s.managedConversationScheduleDeps,
+		automationHistoryDataDep:   s.automationHistoryDataDependency,
 		log:                        s.log,
 	}
 }

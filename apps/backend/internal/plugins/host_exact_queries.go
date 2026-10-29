@@ -61,6 +61,9 @@ var exactReadMethods = []exactMethod{
 	{method: exactReadChangeEvidence, capability: "host.v2.read:change_requests", description: "Read linked change-request evidence"},
 	{method: exactReadTaskUsage, capability: "host.v2.read:usage", description: "Read task and session usage totals"},
 	{method: exactReadSourceIssueCapabilities, capability: "host.v2.read:source_issues", description: "Read operations for one task's linked Jira or Linear issue"},
+	{method: automationHistoryListDefinitionsMethod, capability: automationHistoryCapability, description: "Read a bounded workspace automation definition snapshot"},
+	{method: automationHistoryListRunsMethod, capability: automationHistoryCapability, description: "Read a bounded workspace automation run snapshot"},
+	{method: automationHistoryGetRunMethod, capability: automationHistoryCapability, description: "Refresh one workspace automation run observation"},
 }
 
 type exactTaskObservationSource interface {

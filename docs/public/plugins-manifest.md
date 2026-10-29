@@ -431,7 +431,11 @@ the matching `Host` accessor, the optional
 `pluginsdk.ExecutorProfiles(host)` extension, or the exact managed conversation
 reader. Exact workspace observations use `pluginsdk.HostExactQueries(host)` and
 also require a matching workspace grant such as `host.v2.read:tasks` or
-`host.v2.read:usage`. The Host advertises per-method support and authorization;
+`host.v2.read:usage`. Automation history reads use
+`pluginsdk.HostAutomationHistory(host)` and require the
+`host.v2.read:automations` grant; the `automations` resource covers definitions
+and retained run observations, not only managed-conversation schedules. The
+Host advertises per-method support and authorization;
 an RPC present in the protocol does not mean that every host has its data source.
 See [Authoring a plugin](plugins-authoring.md). Calling an accessor or exact
 manager without its resource declared returns gRPC `PermissionDenied`.
@@ -467,7 +471,10 @@ interaction response methods return `PermissionDenied` because they cannot
 carry that receipt or an observed revision. `managed_agent_conversations`
 enables exact lifecycle, enqueue, cancellation, and immediate-dispatch writes,
 subject to its workspace grant. `automations` enables exact managed-conversation
-schedule reads and mutations, subject to its separate workspace grant.
+schedule reads and mutations, and automation history reads, subject to their
+separate workspace grants. History reads require `api_read: automations` plus
+`host.v2.read:automations`; they expose safe definitions and retained run
+observations with bounded snapshots and exact run refresh.
 `managed_agent_tools` declares tools for the restricted managed-conversation
 surface, subject to its separate workspace grant and
 provider support gate. The host applies the same first-party task service and
