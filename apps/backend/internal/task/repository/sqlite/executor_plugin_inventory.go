@@ -367,7 +367,7 @@ func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface
 	if err := json.Unmarshal(encoded, &normalized); err != nil || normalized == nil {
 		return nil, errors.New("plugin executor checkpoint envelope is invalid")
 	}
-	merged["plugin_executor"] = keepPluginCleanupRequested(current, normalized)
+	merged["plugin_executor"] = keepPluginClaimState(current, keepPluginCleanupRequested(current, normalized))
 	if ref, ok := incoming[pluginAuthTokenSecretMetadataKey].(string); ok && ref != "" {
 		merged[pluginAuthTokenSecretMetadataKey] = ref
 	}
@@ -386,6 +386,30 @@ func keepPluginCleanupRequested(current map[string]interface{}, incoming interfa
 	return incoming
 }
 
+// keepPluginClaimState carries the recorded claim checkpoint state across a host
+// write that did not observe it, so the per-claim sequence and its acquisition
+// stamp are never dropped by a writer holding an older envelope.
+func keepPluginClaimState(current map[string]interface{}, incoming interface{}) interface{} {
+	stored, _ := current["plugin_executor"].(map[string]interface{})
+	next, ok := incoming.(map[string]interface{})
+	if !ok {
+		return incoming
+	}
+	if claim, has := stored["claim"]; has && claim != nil {
+		if _, carried := next["claim"]; !carried {
+			next["claim"] = claim
+		}
+	}
+	return incoming
+}
+
+// PluginExecutorInventoryPhaseMayFollow reports whether the inventory envelope
+// may move from one phase to another. Test doubles of the inventory store use
+// it to enforce the same transition table as the repository.
+func PluginExecutorInventoryPhaseMayFollow(from, to string) bool {
+	return slices.Contains(pluginExecutorPhaseTransitions[from], to)
+}
+
 func validPluginExecutorInventoryTransition(current, incoming map[string]interface{}) bool {
 	from, to := pluginExecutorInventoryPhase(current), pluginExecutorInventoryPhase(incoming)
 	return slices.Contains(pluginExecutorPhaseTransitions[from], to)
@@ -396,7 +420,7 @@ func validPluginExecutorInventoryTransition(current, incoming map[string]interfa
 // launch phase, except that recovery may complete into one.
 var pluginExecutorPhaseTransitions = map[string][]string{
 	pluginPhaseAllocating:       {pluginPhaseAllocating, pluginPhaseArtifactStaging, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
-	pluginPhaseArtifactStaging:  {pluginPhaseArtifactStaging, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
+	pluginPhaseArtifactStaging:  {pluginPhaseArtifactStaging, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
 	pluginPhaseBootstrapping:    {pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
 	pluginPhaseProvisioned:      {pluginPhaseProvisioned, pluginPhaseBootstrapping, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseExpired, pluginPhaseAbsent},
 	pluginPhaseReady:            {pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseExpired, pluginPhaseAbsent},

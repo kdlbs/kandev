@@ -19,7 +19,7 @@ import (
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
-const drainTestCleanupClaim = "operation-plugin-recovery:cleanup"
+const drainTestOtherClaim = "operation-plugin-recovery:other-acquisition"
 
 type pluginDrainerFake struct {
 	calls     []string
@@ -73,7 +73,7 @@ func TestDrainRunsBeforePersistenceAndPersistenceBeforeDestroy(t *testing.T) {
 	operations.beforeDestroy = func() {
 		events = append(events, "destroy")
 		inventory, err := decodePluginExecutorInventory(store.record.Metadata)
-		if err != nil || inventory.DrainOutcome != "drained" || inventory.DrainClaim != drainTestCleanupClaim {
+		if err != nil || inventory.DrainOutcome != "drained" || inventory.DrainClaim != store.claimRequest.OperationID {
 			t.Errorf("destroy ran before the drain outcome was persisted: %+v err=%v", inventory, err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestDrainRunsBeforePersistenceAndPersistenceBeforeDestroy(t *testing.T) {
 		t.Fatalf("destroy request = outcome %q receipt %#v, want drained with a receipt", request.GetDrainOutcome(), request.GetDrainReceipt())
 	}
 	receipt := request.GetDrainReceipt()
-	if receipt.GetCleanupClaim() != drainTestCleanupClaim || receipt.GetRuntimeIdentity() != "execution-plugin-recovery" {
+	if receipt.GetCleanupClaim() != store.claimRequest.OperationID || receipt.GetRuntimeIdentity() != "execution-plugin-recovery" {
 		t.Fatalf("receipt = %#v, want it bound to the cleanup claim and runtime identity", receipt)
 	}
 	if drainer.deadlines[0] != 60*time.Second {
@@ -112,8 +112,8 @@ func TestDrainOutcomeMapping(t *testing.T) {
 		{"lost reply", errors.New("EOF"), nil, "uncertain", true},
 		{"deadline", context.DeadlineExceeded, nil, "uncertain", true},
 		{"agentctl drain failed", &agentctl.RuntimeDrainRejectedError{StatusCode: http.StatusInternalServerError}, nil, "uncertain", true},
-		{"no instance recorded", nil, func(i *pluginExecutorInventory, _ *models.ExecutorRunning) { i.InstancePort = 0 }, "not_attempted", false},
-		{"no credential saved", nil, func(_ *pluginExecutorInventory, r *models.ExecutorRunning) { r.TransientAuthToken = "" }, "not_attempted", false},
+		{"no instance port recorded still drains the control port", nil, func(i *pluginExecutorInventory, _ *models.ExecutorRunning) { i.InstancePort = 0 }, "drained", true},
+		{"no credential saved", nil, func(_ *pluginExecutorInventory, r *models.ExecutorRunning) { r.TransientAuthToken = "" }, "unreachable", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,7 +125,7 @@ func TestDrainOutcomeMapping(t *testing.T) {
 			if got := operations.destroyRequest.GetDrainOutcome(); got != tc.want {
 				t.Fatalf("drain_outcome = %q, want %q", got, tc.want)
 			}
-			if operations.destroyRequest.GetDrainReceipt() != nil {
+			if tc.want != "drained" && operations.destroyRequest.GetDrainReceipt() != nil {
 				t.Fatalf("a %s outcome carried a receipt: %#v", tc.want, operations.destroyRequest.GetDrainReceipt())
 			}
 			if (len(drainer.calls) > 0) != tc.called {
@@ -164,36 +164,40 @@ func TestDrainReceiptIsNotAbsenceEvidence(t *testing.T) {
 }
 
 func TestSameClaimRetryReusesTheStoredOutcomeWithoutDrainingAgain(t *testing.T) {
-	runtime, operations, store, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, nil)
-	operations.destroyResponse = &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: false}
-	_ = destroyClaimEnvironment(runtime)
-	first := operations.destroyRequest.GetDrainReceipt().GetReceiptId()
-	_ = destroyClaimEnvironment(runtime)
-	if len(drainer.calls) != 1 {
-		t.Fatalf("drain calls = %d, want the stored outcome reused under the same claim", len(drainer.calls))
+	runtime, _, store, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, nil)
+	inventory, err := decodePluginExecutorInventory(store.record.Metadata)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-	if again := operations.destroyRequest.GetDrainReceipt().GetReceiptId(); again != first || first == "" {
-		t.Fatalf("replayed receipt id = %q, want %q", again, first)
+	claim := &models.TaskEnvironmentRecoveryClaim{OperationID: "operation-plugin-recovery:cleanup:epoch:nonce-1"}
+	inventory.DrainClaim = claim.OperationID
+	inventory.DrainOutcome = "drained"
+	inventory.DrainReceiptID = pluginDrainReceiptID(inventory, claim.OperationID)
+	_, _, decision, err := runtime.drainBeforePluginDestroy(context.Background(), store.record, inventory, nil, models.ExecutorProvider{}, nil, claim, "task_cleanup")
+	if err != nil {
+		t.Fatalf("drain: %v", err)
 	}
-	_ = store
+	if len(drainer.calls) != 0 || decision.receipt.GetReceiptId() != inventory.DrainReceiptID {
+		t.Fatalf("drain calls = %v receipt = %#v, want the stored outcome replayed", drainer.calls, decision.receipt)
+	}
 }
 
 func TestSuccessorClaimRunsAFreshDrain(t *testing.T) {
-	runtime, operations, store, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, func(i *pluginExecutorInventory, _ *models.ExecutorRunning) {
-		i.DrainClaim = "operation-plugin-recovery:recovery"
-		i.DrainOutcome = "drained"
-		i.DrainReceiptID = pluginDrainReceiptID(*i, "operation-plugin-recovery:recovery")
-	})
-	if err := destroyClaimEnvironment(runtime); err != nil {
-		t.Fatalf("destroy: %v", err)
+	runtime, operations, store, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, nil)
+	operations.destroyResponse = &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: false}
+	_ = destroyClaimEnvironment(runtime)
+	firstClaim := store.claimRequest.OperationID
+	_ = destroyClaimEnvironment(runtime)
+	secondClaim := store.claimRequest.OperationID
+	if firstClaim == secondClaim {
+		t.Fatalf("two acquisitions shared the claim id %q", firstClaim)
 	}
-	if len(drainer.calls) != 1 || drainer.calls[0] != drainTestCleanupClaim {
-		t.Fatalf("drain calls = %v, want one fresh drain under this claim", drainer.calls)
+	if len(drainer.calls) != 2 || drainer.calls[0] != firstClaim || drainer.calls[1] != secondClaim {
+		t.Fatalf("drain calls = %v, want one drain per acquisition (%q, %q)", drainer.calls, firstClaim, secondClaim)
 	}
-	if got := operations.destroyRequest.GetDrainReceipt().GetCleanupClaim(); got != drainTestCleanupClaim {
-		t.Fatalf("receipt claim = %q, want the active cleanup claim", got)
+	if got := operations.destroyRequest.GetDrainReceipt().GetCleanupClaim(); got != secondClaim {
+		t.Fatalf("receipt claim = %q, want the active cleanup claim %q", got, secondClaim)
 	}
-	_ = store
 }
 
 func TestReceiptWithAnotherBindingIsRejected(t *testing.T) {
@@ -202,7 +206,7 @@ func TestReceiptWithAnotherBindingIsRejected(t *testing.T) {
 		"another generation":  func(i *pluginExecutorInventory) { i.EnvironmentGeneration++ },
 		"another runtime":     func(i *pluginExecutorInventory) { i.RuntimeIdentity = "other-runtime" },
 		"an earlier claim's id": func(i *pluginExecutorInventory) {
-			i.DrainReceiptID = pluginDrainReceiptID(*i, "operation-plugin-recovery:recovery")
+			i.DrainReceiptID = pluginDrainReceiptID(*i, drainTestOtherClaim)
 		},
 		"an empty receipt id": func(i *pluginExecutorInventory) { i.DrainReceiptID = "" },
 	}
@@ -210,14 +214,14 @@ func TestReceiptWithAnotherBindingIsRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			inventory := pluginExecutorInventory{
 				EnvironmentID: "environment-plugin-recovery", EnvironmentGeneration: 7, RuntimeIdentity: "execution-plugin-recovery",
-				DrainClaim: drainTestCleanupClaim, DrainOutcome: "drained",
+				DrainClaim: "claim-a", DrainOutcome: "drained",
 			}
-			inventory.DrainReceiptID = pluginDrainReceiptID(inventory, drainTestCleanupClaim)
-			if _, ok := storedPluginDrainDecision(inventory, drainTestCleanupClaim); !ok {
+			inventory.DrainReceiptID = pluginDrainReceiptID(inventory, "claim-a")
+			if _, ok := storedPluginDrainDecision(inventory, "claim-a"); !ok {
 				t.Fatal("the untouched receipt was not trusted")
 			}
 			corrupt(&inventory)
-			if decision, ok := storedPluginDrainDecision(inventory, drainTestCleanupClaim); ok {
+			if decision, ok := storedPluginDrainDecision(inventory, "claim-a"); ok {
 				t.Fatalf("a receipt with another binding was trusted: %+v", decision)
 			}
 		})
@@ -375,5 +379,38 @@ func TestSameClaimRetryDrainsAgainAfterANonDrainedOutcome(t *testing.T) {
 	}
 	if got := operations.destroyRequest.GetDrainOutcome(); got != "drained" || operations.destroyRequest.GetDrainReceipt().GetReceiptId() == "" {
 		t.Fatalf("retry drain_outcome = %q receipt=%v, want a drained receipt", got, operations.destroyRequest.GetDrainReceipt())
+	}
+}
+
+// not_attempted is the provider's proof that no runtime ever existed, so it is
+// sent only under the launch reason and only when no handshake was started.
+func TestDrainEvidenceTable(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    string
+		handshake bool
+		token     string
+		want      string
+	}{
+		{"launch failure before any handshake", pluginExecutorCleanupReasonLaunch, false, "", pluginDrainOutcomeNotAttempted},
+		{"launch failure after a handshake without a credential", pluginExecutorCleanupReasonLaunch, true, "", pluginDrainOutcomeUnreachable},
+		{"task cleanup before any handshake", "task_cleanup", false, "", pluginDrainOutcomeUnreachable},
+		{"api unreachable always follows a handshake", cleanupReasonAPIUnreachable, true, "", pluginDrainOutcomeUnreachable},
+		{"launch failure after a handshake with a credential", pluginExecutorCleanupReasonLaunch, true, "token", pluginDrainOutcomeDrained},
+		{"task cleanup with a credential", "task_cleanup", true, "token", pluginDrainOutcomeDrained},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime, _, _, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, nil)
+			_ = drainer
+			decision := runtime.drainPluginRuntime(context.Background(), tc.token, &pluginsdk.ExecutorProviderRequestContext{},
+				pluginExecutorInventory{HandshakeStarted: tc.handshake, RuntimeIdentity: "runtime"}, nil, nil, "claim-1", tc.reason)
+			if decision.outcome != tc.want {
+				t.Fatalf("outcome = %q, want %q", decision.outcome, tc.want)
+			}
+			if (decision.outcome == pluginDrainOutcomeDrained) != (decision.receipt != nil) {
+				t.Fatalf("receipt %#v does not match outcome %q", decision.receipt, decision.outcome)
+			}
+		})
 	}
 }

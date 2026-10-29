@@ -92,7 +92,7 @@ func TestPluginExecutorStopMatrix(t *testing.T) {
 		t.Fatalf("task-environment cleanup: %v", err)
 	}
 	if operations.destroyRequest == nil || operations.destroyRequest.GetResource().GetResourceHandle() != "resource-recovery" ||
-		operations.destroyRequest.GetCleanupClaim() != "operation-plugin-recovery:cleanup" || operations.destroyRequest.GetCleanupReason() != "task_environment_reset" {
+		operations.destroyRequest.GetCleanupClaim() != store.claimRequest.OperationID || !strings.HasPrefix(operations.destroyRequest.GetCleanupClaim(), pluginExecutorClaimPrefix("operation-plugin-recovery", "cleanup")) || operations.destroyRequest.GetCleanupReason() != "task_environment_reset" {
 		t.Fatalf("destroy request = %#v", operations.destroyRequest)
 	}
 	if store.claimRequest.OwnerTaskID != "task-plugin-recovery" || store.claimRequest.OwnershipGeneration != 7 ||

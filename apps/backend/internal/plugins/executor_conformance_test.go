@@ -111,11 +111,12 @@ func TestPluginExecutorPackagedRecovery(t *testing.T) {
 	require.NotContains(t, string(state), "fixture-secret")
 
 	destroyed, err := restartedRemote.DestroyExecutorEnvironment(ctx, &pluginsdk.DestroyExecutorEnvironmentRequest{
-		Context: requestContext, Resource: reattached.GetResource(), CleanupReason: "test", CleanupClaim: "claim-1",
+		Context: requestContext, Resource: reattached.GetResource(), CleanupReason: "launch_failed", CleanupClaim: "claim-1", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.True(t, destroyed.GetConfirmedAbsent())
 	require.Equal(t, []string{"cleanup_progress"}, checkpointHost.phases(), "the destroy checkpoints before it mutates")
+	require.Equal(t, []string{"claim-1"}, checkpointHost.claims(), "the checkpoint echoes the destroy's cleanup claim")
 }
 
 // acceptingCheckpointHost stands in for the host side of a destroy under a
@@ -124,6 +125,7 @@ type acceptingCheckpointHost struct {
 	pluginsdk.Host
 	mu      sync.Mutex
 	checked []string
+	echoed  []string
 }
 
 func (h *acceptingCheckpointHost) ExecutorProvider() pluginsdk.ExecutorProviderHostAPI { return h }
@@ -132,6 +134,7 @@ func (h *acceptingCheckpointHost) CheckpointExecutorResource(_ context.Context, 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.checked = append(h.checked, req.GetPhase())
+	h.echoed = append(h.echoed, req.GetClaim())
 	return &pluginsdk.CheckpointExecutorResourceResponse{Accepted: true}, nil
 }
 
@@ -141,6 +144,12 @@ func (h *acceptingCheckpointHost) ReportExecutorProgress(context.Context, *plugi
 
 func (h *acceptingCheckpointHost) ReadExecutorRuntimeArtifact(context.Context, *pluginsdk.ReadExecutorRuntimeArtifactRequest, func(*pluginsdk.ExecutorRuntimeArtifactChunk) error) error {
 	return nil
+}
+
+func (h *acceptingCheckpointHost) claims() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.echoed...)
 }
 
 func (h *acceptingCheckpointHost) phases() []string {

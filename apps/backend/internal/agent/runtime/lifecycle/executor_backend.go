@@ -646,6 +646,9 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
+	// rollbackToken is the agentctl credential of a launch in progress, kept so
+	// a failed launch can drain the runtime it handshook with.
+	rollbackToken string
 	InstanceID    string
 	CausingRunID  string
 	IsPassthrough bool

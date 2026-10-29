@@ -95,14 +95,17 @@ func (r *PluginRemoteExecutor) settleUnrecordedPluginExecutor(ctx context.Contex
 	return r.inventoryStore.DeleteUnrecordedPluginExecutor(ctx, item.ExecutionID)
 }
 
-// unsettledUnrecordedPluginExecutors names the handoffs whose execution had no
-// inventory record to destroy them through.
-func unsettledUnrecordedPluginExecutors(adopted map[string]*models.UnrecordedPluginExecutor, seen map[string]bool) []error {
-	var unsettled []error
-	for executionID := range adopted {
-		if !seen[executionID] {
-			unsettled = append(unsettled, fmt.Errorf("plugin executor launch %s provisioned a resource that has no inventory record; cleanup cannot settle", executionID))
-		}
+// remainingUnrecordedPluginExecutors names the handoffs still recorded for the
+// environment after the cleanup ran: a resource nothing has confirmed destroyed
+// must keep the environment from being reported cleaned.
+func (r *PluginRemoteExecutor) remainingUnrecordedPluginExecutors(ctx context.Context, environment *models.TaskEnvironment) []error {
+	remaining, err := r.inventoryStore.ListUnrecordedPluginExecutors(ctx, environment.TaskID, environment.ID)
+	if err != nil {
+		return []error{fmt.Errorf("re-read unrecorded plugin executors: %w", err)}
+	}
+	unsettled := make([]error, 0, len(remaining))
+	for _, item := range remaining {
+		unsettled = append(unsettled, fmt.Errorf("plugin executor launch %s provisioned a resource that is not confirmed destroyed; cleanup cannot settle", item.ExecutionID))
 	}
 	return unsettled
 }

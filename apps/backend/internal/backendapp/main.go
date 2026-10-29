@@ -792,6 +792,8 @@ func startAgentInfrastructure(
 		pluginExecutor.SetRuntimeSecretStore(lifecycleMgr.RuntimeSecretStore())
 		pluginExecutor.SetHostAPIProbe(pluginHostAPIURL(cfg), services.RuntimeProbes)
 		lifecycleMgr.RegisterExecutorBackend(pluginExecutor)
+		startup.AfterReady(ctx, func() { pluginExecutor.StartCleanupSweep(ctx) })
+		addRuntimeCleanup(func() error { pluginExecutor.StopCleanupSweep(); return nil })
 		services.Plugins.SetExecutorProviderHostHandler(lifecycleMgr)
 	}
 

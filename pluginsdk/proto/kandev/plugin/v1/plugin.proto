@@ -2120,6 +2120,11 @@ message CheckpointExecutorResourceRequest {
   // sequence orders the checkpoints of one cleanup or recovery claim; it is
   // required (at least 1) for the cleanup_progress and recovery_progress phases.
   uint64 sequence = 4;
+  // claim echoes the destroy request's cleanup_claim (or the recovery claim
+  // the host named) for the cleanup_progress and recovery_progress phases. The
+  // host compares it with the claim currently held and refuses a checkpoint
+  // from an earlier acquisition.
+  string claim = 5;
 }
 
 message CheckpointExecutorResourceResponse {

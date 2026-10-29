@@ -67,6 +67,7 @@ func TestFixtureDestroyCheckpointsCleanupProgressBeforeMutating(t *testing.T) {
 
 	destroyed, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: resource, CleanupClaim: "operation-1:cleanup",
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.True(t, destroyed.GetConfirmedAbsent())
@@ -89,6 +90,7 @@ func TestFixtureDestroyFailsClosedWhenTheHostRefusesTheCheckpoint(t *testing.T) 
 
 	destroyed, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: resource, CleanupClaim: "operation-1:cleanup",
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.False(t, destroyed.GetConfirmedAbsent())

@@ -38,7 +38,7 @@ func crashAt(call func()) (crashed bool) {
 	return false
 }
 
-func TestCrashAfterDrainBeforeDestroyRecoversByReusingTheReceipt(t *testing.T) {
+func TestCrashAfterDrainBeforeDestroyRecoversWithAFreshDrainUnderTheNewAcquisition(t *testing.T) {
 	set := installCrashingBarriers(t)
 	runtime, operations, store, drainer := drainRuntimeFixture(t, []string{"drain_receipt@1"}, nil)
 	require.NoError(t, set.arm(BarrierAfterDrain, CrashBarrierModeTerminate))
@@ -49,8 +49,11 @@ func TestCrashAfterDrainBeforeDestroyRecoversByReusingTheReceipt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "drained", persisted.DrainOutcome, "the drain outcome must be durable before the barrier")
 
+	crashedClaim := persisted.DrainClaim
 	require.NoError(t, destroyClaimEnvironment(runtime))
-	require.Len(t, drainer.calls, 1, "recovery re-drained instead of reusing the receipt")
+	require.Len(t, drainer.calls, 2, "a new acquisition must drain under its own claim")
+	require.NotEqual(t, crashedClaim, store.claimRequest.OperationID)
+	require.Equal(t, store.claimRequest.OperationID, operations.destroyRequest.GetDrainReceipt().GetCleanupClaim())
 	require.NotNil(t, operations.destroyRequest)
 	require.Equal(t, "drained", operations.destroyRequest.GetDrainOutcome())
 }

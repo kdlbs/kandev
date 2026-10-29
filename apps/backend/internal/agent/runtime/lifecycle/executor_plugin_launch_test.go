@@ -34,6 +34,7 @@ type pluginExecutorOperationsFake struct {
 	recoverRequest     *pluginsdk.RecoverExecutorOperationRequest
 	recoverResponse    *pluginsdk.RecoverExecutorOperationResponse
 	recoverErr         error
+	recoverCtxErr      error
 	attachRequest      *pluginsdk.AttachExecutorEnvironmentRequest
 	attachResponse     *pluginsdk.AttachExecutorEnvironmentResponse
 	attachErr          error
@@ -61,8 +62,9 @@ func (f *pluginExecutorOperationsFake) ProvisionExecutorEnvironment(_ context.Co
 	return f.provisionResponse, f.provisionErr
 }
 
-func (f *pluginExecutorOperationsFake) RecoverExecutorOperation(_ context.Context, req *pluginsdk.RecoverExecutorOperationRequest) (*pluginsdk.RecoverExecutorOperationResponse, error) {
+func (f *pluginExecutorOperationsFake) RecoverExecutorOperation(ctx context.Context, req *pluginsdk.RecoverExecutorOperationRequest) (*pluginsdk.RecoverExecutorOperationResponse, error) {
 	f.recoverRequest = req
+	f.recoverCtxErr = ctx.Err()
 	return f.recoverResponse, f.recoverErr
 }
 
@@ -161,8 +163,8 @@ func TestPluginExecutorLaunch(t *testing.T) {
 	if ready, ok := checkpoints[len(checkpoints)-1][MetadataKeyPluginExecutor].(pluginExecutorInventory); !ok || ready.InstancePort != instancePort {
 		t.Fatalf("ready checkpoint = %#v, want instance port %d", checkpoints[len(checkpoints)-1], instancePort)
 	}
-	if len(checkpoints) != 3 {
-		t.Fatalf("checkpoint count = %d, want allocating, provisioned, and ready", len(checkpoints))
+	if len(checkpoints) != 5 {
+		t.Fatalf("checkpoint count = %d, want allocating, provisioned, handshake_started, instance port, and ready", len(checkpoints))
 	}
 	encoded, err := json.Marshal(checkpoints)
 	if err != nil {

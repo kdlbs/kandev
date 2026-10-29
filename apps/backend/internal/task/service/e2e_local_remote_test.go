@@ -4,7 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
+
+const e2eMockEnv = "KANDEV_E2E_MOCK"
 
 func TestParseRemoteRepositoryURLRefusesLoopbackOutsideE2E(t *testing.T) {
 	t.Setenv(e2eMockEnv, "")
@@ -60,5 +65,30 @@ func TestPluginExecutorRepositoryCompatibilityLoopbackRemote(t *testing.T) {
 	}
 	if err := svc.validatePluginExecutorRepositoryCompatibility(context.Background(), TaskRepositoryInput{RemoteURL: "/tmp/checkout"}); !errors.Is(err, ErrInvalidExecutorConfig) {
 		t.Fatalf("a bare filesystem path must stay refused under e2e, got %v", err)
+	}
+}
+
+type storedRepositoryFake struct {
+	repository.RepositoryEntityRepository
+	entity *models.Repository
+}
+
+func (f storedRepositoryFake) GetRepository(context.Context, string) (*models.Repository, error) {
+	return f.entity, nil
+}
+
+// A stored repository is e2e-local only when its provider says so: a
+// loopback remote under another provider is a host path in disguise.
+func TestPluginExecutorRepositoryCompatibilityChecksTheStoredProvider(t *testing.T) {
+	t.Setenv(e2eMockEnv, "true")
+	input := TaskRepositoryInput{RepositoryID: "repo-1"}
+	for provider, wantErr := range map[string]bool{"github": true, "e2e-local": false} {
+		svc := &Service{repoEntities: storedRepositoryFake{entity: &models.Repository{
+			ID: "repo-1", Provider: provider, RemoteURL: "file:///tmp/repos/widgets.git",
+		}}}
+		err := svc.validatePluginExecutorRepositoryCompatibility(context.Background(), input)
+		if gotErr := errors.Is(err, ErrInvalidExecutorConfig); gotErr != wantErr {
+			t.Errorf("provider %q: error = %v, want refusal %v", provider, err, wantErr)
+		}
 	}
 }

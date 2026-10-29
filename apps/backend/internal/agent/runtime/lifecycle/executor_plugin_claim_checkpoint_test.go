@@ -53,7 +53,7 @@ func claimCheckpointFixture(t *testing.T, negotiated []string) (*Manager, *plugi
 	record.Metadata = map[string]interface{}{MetadataKeyPluginExecutor: inventory}
 	store := &pluginExecutorClaimStoreFake{record: record, claim: &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID: "environment-plugin-recovery", OwnerTaskID: "task-plugin-recovery", OwnershipGeneration: 7,
-		SessionID: "session-plugin-recovery", OperationID: "operation-plugin-recovery:cleanup", ExecutorType: string(models.ExecutorTypePluginRemote),
+		SessionID: "session-plugin-recovery", OperationID: claimTestFirstAcquisition, ExecutorType: string(models.ExecutorTypePluginRemote),
 	}}
 	loader := &pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{Provider: provider, ProfileID: "profile-plugin-recovery"}}
 	manager := &Manager{logger: newTestLogger(), pluginExecutorProfileLoader: loader, pluginExecutorClaimStore: store}
@@ -63,10 +63,17 @@ func claimCheckpointFixture(t *testing.T, negotiated []string) (*Manager, *plugi
 			TaskId: "task-plugin-recovery", SessionId: "session-plugin-recovery", EnvironmentId: "environment-plugin-recovery",
 			ExecutionId: "execution-plugin-recovery", OperationId: "operation-plugin-recovery", EnvironmentGeneration: 7, DispatchGeneration: 3,
 		},
-		Resource: resource, Phase: "cleanup_progress", Sequence: 1,
+		Resource: resource, Phase: "cleanup_progress", Sequence: 1, Claim: claimTestFirstAcquisition,
 	}
 	return manager, store, request
 }
+
+// Two acquisitions of the same operation and kind: the second is a successor of
+// the first, not the same claim.
+const (
+	claimTestFirstAcquisition  = "operation-plugin-recovery:cleanup:epoch-test:nonce-1"
+	claimTestSecondAcquisition = "operation-plugin-recovery:cleanup:epoch-test:nonce-2"
+)
 
 var declaresDestroyCheckpoints = []string{"destroy_checkpoints@1"}
 
@@ -111,8 +118,14 @@ func TestClaimCheckpointRefusalsChangeNothing(t *testing.T) {
 			r.Phase = "recovery_progress"
 		}, declaresDestroyCheckpoints, models.ErrExecutorInvalidConfig},
 		{"released claim", func(s *pluginExecutorClaimStoreFake, _ *pluginsdk.CheckpointExecutorResourceRequest) { s.claim = nil }, declaresDestroyCheckpoints, models.ErrExecutorClaimNotFound},
+		{"callback of an earlier acquisition of the same operation", func(s *pluginExecutorClaimStoreFake, _ *pluginsdk.CheckpointExecutorResourceRequest) {
+			s.claim.OperationID = claimTestSecondAcquisition
+		}, declaresDestroyCheckpoints, models.ErrExecutorClaimNotFound},
+		{"callback that does not echo the claim", func(_ *pluginExecutorClaimStoreFake, r *pluginsdk.CheckpointExecutorResourceRequest) {
+			r.Claim = ""
+		}, declaresDestroyCheckpoints, models.ErrExecutorClaimNotFound},
 		{"successor claim of another operation", func(s *pluginExecutorClaimStoreFake, _ *pluginsdk.CheckpointExecutorResourceRequest) {
-			s.claim.OperationID = "operation-successor:cleanup"
+			s.claim.OperationID = "operation-successor:cleanup:epoch-test:nonce-1"
 		}, declaresDestroyCheckpoints, models.ErrExecutorClaimNotFound},
 		{"replaced generation", func(_ *pluginExecutorClaimStoreFake, r *pluginsdk.CheckpointExecutorResourceRequest) {
 			r.Context.EnvironmentGeneration = 8

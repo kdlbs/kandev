@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -56,12 +57,26 @@ func (r *Repository) RecordUnrecordedPluginExecutor(ctx context.Context, unrecor
 	return nil
 }
 
+const unrecordedPluginExecutorColumns = `execution_id, session_id, task_id, task_environment_id, running, created_at`
+
 // ListUnrecordedPluginExecutors returns the handoffs of one environment.
 func (r *Repository) ListUnrecordedPluginExecutors(ctx context.Context, taskID, environmentID string) ([]*models.UnrecordedPluginExecutor, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
-		SELECT execution_id, session_id, task_id, task_environment_id, running, created_at
+	return r.queryUnrecordedPluginExecutors(ctx, `
+		SELECT `+unrecordedPluginExecutorColumns+`
 		FROM unrecorded_plugin_executors WHERE task_id = ? AND task_environment_id = ? ORDER BY created_at, execution_id
-	`), taskID, environmentID)
+	`, taskID, environmentID)
+}
+
+// ListAllUnrecordedPluginExecutors returns every handoff, oldest first, for the
+// periodic cleanup sweep.
+func (r *Repository) ListAllUnrecordedPluginExecutors(ctx context.Context) ([]*models.UnrecordedPluginExecutor, error) {
+	return r.queryUnrecordedPluginExecutors(ctx, `
+		SELECT `+unrecordedPluginExecutorColumns+` FROM unrecorded_plugin_executors ORDER BY created_at, execution_id
+	`)
+}
+
+func (r *Repository) queryUnrecordedPluginExecutors(ctx context.Context, query string, args ...interface{}) ([]*models.UnrecordedPluginExecutor, error) {
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list unrecorded plugin executors: %w", err)
 	}
@@ -86,6 +101,22 @@ func (r *Repository) ListUnrecordedPluginExecutors(ctx context.Context, taskID, 
 func (r *Repository) DeleteUnrecordedPluginExecutor(ctx context.Context, executionID string) error {
 	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM unrecorded_plugin_executors WHERE execution_id = ?`), executionID); err != nil {
 		return fmt.Errorf("delete unrecorded plugin executor: %w", err)
+	}
+	return nil
+}
+
+// ensureNoUnrecordedPluginExecutorsTx refuses to move or delete an environment
+// while a handed-off resource still names it.
+func (r *Repository) ensureNoUnrecordedPluginExecutorsTx(ctx context.Context, tx *sqlx.Tx, environmentIDs ...string) error {
+	for _, environmentID := range environmentIDs {
+		var count int
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(
+			`SELECT COUNT(*) FROM unrecorded_plugin_executors WHERE task_environment_id = ?`), environmentID).Scan(&count); err != nil {
+			return fmt.Errorf("count unrecorded plugin executors: %w", err)
+		}
+		if count > 0 {
+			return fmt.Errorf("%w: environment %s", ErrUnrecordedPluginExecutorsRemain, environmentID)
+		}
 	}
 	return nil
 }

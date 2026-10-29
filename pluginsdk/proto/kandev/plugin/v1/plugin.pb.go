@@ -17061,7 +17061,12 @@ type CheckpointExecutorResourceRequest struct {
 	Phase    string                          `protobuf:"bytes,3,opt,name=phase,proto3" json:"phase,omitempty"`
 	// sequence orders the checkpoints of one cleanup or recovery claim; it is
 	// required (at least 1) for the cleanup_progress and recovery_progress phases.
-	Sequence      uint64 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Sequence uint64 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// claim echoes the destroy request's cleanup_claim (or the recovery claim
+	// the host named) for the cleanup_progress and recovery_progress phases. The
+	// host compares it with the claim currently held and refuses a checkpoint
+	// from an earlier acquisition.
+	Claim         string `protobuf:"bytes,5,opt,name=claim,proto3" json:"claim,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -17122,6 +17127,13 @@ func (x *CheckpointExecutorResourceRequest) GetSequence() uint64 {
 		return x.Sequence
 	}
 	return 0
+}
+
+func (x *CheckpointExecutorResourceRequest) GetClaim() string {
+	if x != nil {
+		return x.Claim
+	}
+	return ""
 }
 
 type CheckpointExecutorResourceResponse struct {
@@ -26465,12 +26477,13 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\fcompleted_at\x18\x04 \x01(\tR\vcompletedAt\"\x8e\x01\n" +
 	"\"DestroyExecutorEnvironmentResponse\x12)\n" +
 	"\x10confirmed_absent\x18\x01 \x01(\bR\x0fconfirmedAbsent\x12=\n" +
-	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\xeb\x01\n" +
+	"\x05error\x18\x02 \x01(\v2'.kandev.plugin.v1.ExecutorProviderErrorR\x05error\"\x81\x02\n" +
 	"!CheckpointExecutorResourceRequest\x12J\n" +
 	"\acontext\x18\x01 \x01(\v20.kandev.plugin.v1.ExecutorProviderRequestContextR\acontext\x12H\n" +
 	"\bresource\x18\x02 \x01(\v2,.kandev.plugin.v1.ExecutorResourceDescriptorR\bresource\x12\x14\n" +
 	"\x05phase\x18\x03 \x01(\tR\x05phase\x12\x1a\n" +
-	"\bsequence\x18\x04 \x01(\x04R\bsequence\"@\n" +
+	"\bsequence\x18\x04 \x01(\x04R\bsequence\x12\x14\n" +
+	"\x05claim\x18\x05 \x01(\tR\x05claim\"@\n" +
 	"\"CheckpointExecutorResourceResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\"\xb5\x01\n" +
 	"\x1dReportExecutorProgressRequest\x12J\n" +
