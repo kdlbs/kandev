@@ -109,12 +109,17 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
 // day has passed. The saved revision only moves when the policy is saved, so the
 // current draft windows are compared at day granularity: recomputing a cutoff
 // from the wall clock differs from the stored value by milliseconds, not days.
-function windowEdited(storedCutoff: string, days: number, now: Date): boolean {
+// The estimate was measured against the policy in force when it started, so the
+// current draft windows are composed against that base time, not the wall clock;
+// otherwise a midnight crossing would shift the cutoff without a policy edit.
+function windowEdited(storedCutoff: string, days: number, startedAt: string): boolean {
   const stored = parseTurnTimestamp(storedCutoff);
   if (stored === null) return true;
   if (!validArchivedDays({ days })) return true;
+  const base = parseTurnTimestamp(startedAt);
+  if (base === null) return true;
   const day = BigInt(dayMilliseconds);
-  const expected = BigInt(Math.trunc(cutoff(now, days)));
+  const expected = BigInt(Math.trunc(cutoff(new Date(Number(base)), days)));
   return stored / day !== expected / day;
 }
 
@@ -129,10 +134,9 @@ function analysisIsStale(
   if (!finished || parseTurnTimestamp(finished) === null) return true;
   if (Date.now() - Date.parse(finished) > dayMilliseconds) return true;
   if (!draft) return true;
-  const now = new Date();
   return (
-    windowEdited(operation.archived_cutoff, draft.archived_age.days, now) ||
-    windowEdited(operation.cleanup_cutoff, draft.cleanup_age.days, now)
+    windowEdited(operation.archived_cutoff, draft.archived_age.days, operation.started_at) ||
+    windowEdited(operation.cleanup_cutoff, draft.cleanup_age.days, operation.started_at)
   );
 }
 

@@ -128,7 +128,9 @@ func (s *Service) scanBatch(ctx context.Context, q sqlx.QueryerContext, r *recor
 
 func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used, rows *int64) ([]string, error) {
 	changed := []string{}
-	validated := r.Progress.Task
+	// Re-validate the open task at the start of every batch; a task can become
+	// ineligible between batches, and the batch must not keep crediting it.
+	validated := ""
 	started := time.Now()
 	for i := 0; i < batchRows && *used < batchBytes; i++ {
 		if i > 0 && time.Since(started) >= statementBudget {
