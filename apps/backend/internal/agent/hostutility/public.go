@@ -99,7 +99,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +457,7 @@ func (m *Manager) ExecutePromptWithMCP(
 		},
 		MCPServers: mcpServers,
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, "")
 	if err != nil {
 		return nil, err
 	}

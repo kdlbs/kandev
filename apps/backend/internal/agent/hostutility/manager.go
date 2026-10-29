@@ -45,14 +45,16 @@ import (
 //   - RefreshAgent: re-runs the probe against the existing instance.
 //   - Stop(ctx): deletes each instance from agentctl and removes the tmp parent.
 type Manager struct {
-	registry        *registry.Registry
-	controlHost     string
-	controlPort     int
-	controlClient   *agentctlclient.ControlClient
-	runtimeOwner    *agentctlclient.RuntimeOwner
-	authToken       string // per-launch auth token for instance clients
-	log             *logger.Logger
-	profileResolver interface {
+	// Installed before the manager starts; policy changes retain this owner.
+	inferenceConsumer agentctlclient.InferenceConsumer
+	registry          *registry.Registry
+	controlHost       string
+	controlPort       int
+	controlClient     *agentctlclient.ControlClient
+	runtimeOwner      *agentctlclient.RuntimeOwner
+	authToken         string // per-launch auth token for instance clients
+	log               *logger.Logger
+	profileResolver   interface {
 		Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
 	}
 	providerGatewayAuthResolver ProviderGatewayAuthResolver
