@@ -11,6 +11,7 @@ requirements:
 system_design:
   - ../../specs/agents/system-design/opencode-kandev-plugin.md
   - ../../specs/agents/system-design/background-work-opencode.md
+  - ../../specs/agents/system-design/opencode-v2-adoption.md
 legacy_specs: []
 ---
 

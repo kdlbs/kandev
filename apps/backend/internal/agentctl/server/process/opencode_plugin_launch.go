@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	commonopencodeplugin "github.com/kandev/kandev/internal/common/opencodeplugin"
 )
 
 const (
@@ -56,7 +57,7 @@ func (m *Manager) openCodePluginRuntime() (*agentctltypes.OpenCodePluginRuntime,
 	if !m.cfg.OpenCodePluginEnabled || runtime == nil || !m.cfg.AgentBackgroundWorkEnabled {
 		return nil, false
 	}
-	if runtime.Family != "v2" || runtime.Version != opencodeplugin.SupportedRuntimeVersion {
+	if runtime.Family != "v2" || runtime.Version != commonopencodeplugin.SupportedRuntimeVersion {
 		return nil, false
 	}
 	if m.cfg.AgentType != agents.OpenCodeACPAgentID {

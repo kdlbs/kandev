@@ -84,6 +84,11 @@ func (m *Manager) syncOpenCodePluginClaims(agentAdapter adapter.AgentAdapter) {
 	if host == nil || !ok {
 		return
 	}
+	// Read and publish one complete snapshot under a single lock. Without this,
+	// two syncs can read different generations and the older snapshot can land
+	// after the newer one.
+	m.openCodePluginSyncMu.Lock()
+	defer m.openCodePluginSyncMu.Unlock()
 	claims := source.OpenCodePluginClaims()
 	for index := range claims {
 		if claims[index].SubmissionID == "" {

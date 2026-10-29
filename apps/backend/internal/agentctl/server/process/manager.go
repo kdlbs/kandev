@@ -155,6 +155,7 @@ type Manager struct {
 	deliverySubmissionOrder     []uint64
 
 	openCodePluginMu        sync.Mutex
+	openCodePluginSyncMu    sync.Mutex
 	openCodePluginHost      *opencodeplugin.Host
 	openCodePluginValidator openCodePluginAdmissionValidator
 	openCodePluginGuard     openCodePluginAdmissionGuard

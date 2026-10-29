@@ -10,10 +10,6 @@ const (
 	BehaviorShellOutcomes = "shell-outcomes"
 	// ShellOutcomesVersion is the reviewed shell behavior version.
 	ShellOutcomesVersion = 1
-	// SupportedRuntimeVersion is the only OpenCode version proved by the
-	// packaged conformance harness. Additional versions join this manifest only
-	// after their own recorded proof.
-	SupportedRuntimeVersion = "2.2.0"
 
 	// MaxEventRequestBytes bounds one event batch body.
 	MaxEventRequestBytes = 64 << 10

@@ -76,8 +76,8 @@ type Host struct {
 	receipts        map[string]string
 	receiptOrder    []string
 	configWaiters   chan struct{}
-	configHashMu    sync.Mutex
-	configHashes    map[string]string
+	appliedConfig   map[string]uint64
+	nextConfigSeq   atomic.Uint64
 	admissionEpoch  atomic.Uint64
 
 	mu     sync.Mutex
@@ -117,7 +117,7 @@ func NewHost(options Options) (*Host, error) {
 		readyCh:         make(chan struct{}),
 		contactCh:       make(chan struct{}),
 		behaviorConfigs: make(map[string]behaviorConfigState),
-		configHashes:    make(map[string]string),
+		appliedConfig:   make(map[string]uint64),
 		receipts:        make(map[string]string),
 		configWaiters:   make(chan struct{}),
 	}, nil
@@ -236,6 +236,7 @@ func (h *Host) WaitReady(ctx context.Context) error {
 // behavior validates and normalizes its own shape. It returns true when the
 // configuration revision advanced.
 func (h *Host) SetBehaviorConfig(id string, raw json.RawMessage) bool {
+	sequence := h.nextConfigSeq.Add(1)
 	version, enabled := h.enabled[id]
 	if !enabled {
 		return false
@@ -254,17 +255,14 @@ func (h *Host) SetBehaviorConfig(id string, raw json.RawMessage) bool {
 		h.logger.Debug("opencode plugin config encode failed", zap.String("behavior", id), zap.Error(err))
 		return false
 	}
-	hash := configHash(normalized)
-	h.configHashMu.Lock()
-	if h.configHashes[id] == hash {
-		h.configHashMu.Unlock()
-		return false
-	}
-	h.configHashes[id] = hash
-	h.configHashMu.Unlock()
 	h.fence.Lock()
 	defer h.fence.Unlock()
-	if h.isClosed() {
+	if h.isClosed() || sequence <= h.appliedConfig[id] {
+		return false
+	}
+	h.appliedConfig[id] = sequence
+	current, exists := h.behaviorConfigs[id]
+	if exists && string(current.raw) == string(normalized) {
 		return false
 	}
 	h.behaviorConfigs[id] = behaviorConfigState{raw: normalized, state: state}
@@ -590,7 +588,11 @@ func (h *Host) commitOne(ctx context.Context, behavior Behavior, event Observati
 		return "", true
 	}
 	if next, changed := behavior.Retire(config.state, admission); changed {
-		if raw, encodeErr := behavior.EncodeConfig(next); encodeErr == nil {
+		raw, encodeErr := behavior.EncodeConfig(next)
+		if encodeErr != nil {
+			h.logger.Warn("opencode plugin claim retirement encode failed",
+				zap.String("behavior", event.BehaviorID), zap.Error(encodeErr))
+		} else {
 			h.behaviorConfigs[event.BehaviorID] = behaviorConfigState{raw: raw, state: next}
 			h.revision++
 			h.notifyConfigLocked()
@@ -608,11 +610,6 @@ func validEnvelope(event ObservationEnvelope) bool {
 	return event.EventID != "" && len(event.EventID) <= MaxIdentityBytes &&
 		event.BehaviorID != "" && event.BehaviorVersion > 0 &&
 		event.NativeSessionID != "" && event.NativeGeneration > 0
-}
-
-func configHash(raw json.RawMessage) string {
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
 }
 
 func observationHash(event ObservationEnvelope) string {

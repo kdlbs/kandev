@@ -579,3 +579,65 @@ func TestOpenCodePluginCommitBeforeRevocationIsAccepted(t *testing.T) {
 		t.Fatalf("commit count = %d, want 1", committer.count())
 	}
 }
+
+type delayedConfigBehavior struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (*delayedConfigBehavior) ID() string   { return "delayed-config" }
+func (*delayedConfigBehavior) Version() int { return 1 }
+
+func (b *delayedConfigBehavior) DecodeConfig(raw json.RawMessage) (any, error) {
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	if value == "slow" {
+		b.once.Do(func() { close(b.started) })
+		<-b.release
+	}
+	return value, nil
+}
+
+func (*delayedConfigBehavior) EncodeConfig(state any) (json.RawMessage, error) {
+	return json.Marshal(state)
+}
+
+func (*delayedConfigBehavior) Admit(any, ObservationEnvelope) (Admission, error) {
+	return Admission{}, nil
+}
+
+func (*delayedConfigBehavior) Retire(state any, _ Admission) (any, bool) {
+	return state, false
+}
+
+func TestOpenCodePluginConfigUpdatesAreOrderedByCallSequence(t *testing.T) {
+	behavior := &delayedConfigBehavior{started: make(chan struct{}), release: make(chan struct{})}
+	committer := &fakeCommitter{}
+	host, bootstrap, _ := startTestHostWithRegistry(t, committer, NewRegistry(behavior))
+	done := make(chan bool, 1)
+	go func() {
+		done <- host.SetBehaviorConfig("delayed-config", json.RawMessage(`"slow"`))
+	}()
+	<-behavior.started
+	if !host.SetBehaviorConfig("delayed-config", json.RawMessage(`"fast"`)) {
+		t.Fatal("newer config was rejected")
+	}
+	close(behavior.release)
+	if <-done {
+		t.Fatal("older config replaced a newer applied snapshot")
+	}
+	if host.SetBehaviorConfig("delayed-config", json.RawMessage(`"fast"`)) {
+		t.Fatal("re-sending the applied snapshot was not deduplicated")
+	}
+	status, config := doJSON(t, host, bootstrap, http.MethodGet, "/v1/config?lease="+bootstrap.LeaseID+"&revision=0", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("config status = %d", status)
+	}
+	data := config["behaviors"].(map[string]any)["delayed-config"].(map[string]any)["data"]
+	if data != "fast" {
+		t.Fatalf("applied config = %#v, want fast", data)
+	}
+}

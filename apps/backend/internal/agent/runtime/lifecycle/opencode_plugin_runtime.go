@@ -3,8 +3,8 @@ package lifecycle
 import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
-	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	commonopencodeplugin "github.com/kandev/kandev/internal/common/opencodeplugin"
 )
 
 // openCodePluginRuntimeFor resolves the typed evidence a supported launch
@@ -29,7 +29,7 @@ func openCodePluginRuntimeFor(
 	if options.ManagedRuntimeSource == managedruntime.OpenCodeSourceNative && options.NativeRuntimeVersion != "" {
 		version = options.NativeRuntimeVersion
 	}
-	if version != opencodeplugin.SupportedRuntimeVersion {
+	if version != commonopencodeplugin.SupportedRuntimeVersion {
 		return nil
 	}
 	return &agentctltypes.OpenCodePluginRuntime{
