@@ -369,6 +369,12 @@ continuity false. New process admission durably marks even legacy owners active;
 active predecessors, any retained attempt entry, unknown children, identity
 conflicts and storage failures do not qualify for this compatibility case.
 
+A successor handoff is not this compatibility case: it requires matching
+session/incarnation/generation and journal exclusivity, always records
+historical continuity as false, and refuses a stale active claim with no
+retained attempt. An active claim with retained attempts may only settle or reap
+them as unproven history.
+
 `deferred_launch` is updated with a read-compare-write retry loop. The ceiling
 keys share the task record with other launch intents and are removed as a group
 after replay or a terminal drop. A prompt edit preserves unrelated keys and
