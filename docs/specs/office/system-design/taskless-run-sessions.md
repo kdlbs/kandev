@@ -201,6 +201,16 @@ which is why run history reads the session table rather than that column.
 
 ## Launch flow
 
+For capacity-managed attempts, recovery of a still-tracked execution uses the
+normal lifecycle stop path after checking both its durable and in-memory run
+owner. Runtime termination and terminal inventory persistence must succeed
+before its census client is removed. A failed stop or persistence keeps the
+owner observable and capacity unknown. Recovery teardown does not publish
+`agent.stopped`: the Office caller owns failure/interruption settlement, while
+that event would otherwise classify the run as successfully processed.
+An untracked predecessor still requires the existing durable inventory and
+runtime stop proof; a missing client or a failed status alone never proves zero.
+
 1. Claim the existing run and apply admission/idle gates.
 2. Reserve a fresh attempt/session; build runtime context and scoped credentials.
 3. Resolve provider/executor, prepare the runtime with run ownership and register
