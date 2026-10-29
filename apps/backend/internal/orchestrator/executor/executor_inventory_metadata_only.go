@@ -42,6 +42,13 @@ func (e *Executor) RepairWorkspaceInventoryOnly(ctx context.Context, taskID, ses
 	if err != nil {
 		return nil, err
 	}
+	// The fence must describe the exact terminal session snapshot that was
+	// validated above; a state or timestamp drift between the two reads is a
+	// concurrent writer and conflicts instead of adopting the newer state as
+	// the repair baseline.
+	if fence.SessionState != string(session.State) || !fence.SessionUpdatedAt.Equal(session.UpdatedAt) {
+		return nil, models.ErrWorkspaceInventoryRecoveryConflict
+	}
 	req, infos, err := e.metadataInventoryInputs(ctx, task.ToAPI(), env)
 	if err != nil {
 		return nil, err
