@@ -889,7 +889,7 @@ func TestArchivedRetentionMessageTargetProtectsLiveAndUnknown(t *testing.T) {
 	readOrder := func() []string {
 		t.Helper()
 		var rows []string
-		if err := d.Select(&rows, `SELECT rowid||'/'||id||'/'||task_id||'/'||task_session_id||'/'||turn_id||'/'||type||'/'||content||'/'||created_at||'/'||updated_at FROM task_session_messages WHERE task_session_id = 's-agg' ORDER BY rowid`); err != nil {
+		if err := d.Select(&rows, `SELECT quote(rowid)||','||quote(id)||','||quote(task_id)||','||quote(task_session_id)||','||quote(turn_id)||','||quote(type)||','||quote(content)||','||quote(created_at)||','||quote(updated_at) FROM task_session_messages WHERE task_session_id = 's-agg' ORDER BY rowid`); err != nil {
 			t.Fatal(err)
 		}
 		return rows
