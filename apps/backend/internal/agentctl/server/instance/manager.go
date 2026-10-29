@@ -134,8 +134,9 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 // createAdmission is an admitted creation: its ID is reserved in m.provisional
 // and its port and listener are bound. The caller must publish or abandon it.
 type createAdmission struct {
-	bundle   *provisionalInstance
-	agentEnv []string
+	freshInferenceOwner bool
+	bundle              *provisionalInstance
+	agentEnv            []string
 }
 
 // CreateInstance creates a new agent instance.
@@ -264,7 +265,7 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
 	m.provisional[id] = bundle
 	m.activeCreations.Add(1)
-	return &createAdmission{bundle: bundle, agentEnv: agentEnv}, nil
+	return &createAdmission{bundle: bundle, agentEnv: agentEnv, freshInferenceOwner: req.ID == ""}, nil
 }
 
 // startInstance builds an admitted instance without holding m.mu: its process
@@ -287,6 +288,7 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 	// Create instance config using the unified method
 	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+	instanceCfg.InferenceOwnerFresh = admission.freshInferenceOwner
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))

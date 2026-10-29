@@ -261,7 +261,7 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Utility agent routes
-	auxHandler := utility.NewHandler(s.cfg.WorkDir, s.logger.Zap())
+	auxHandler := utility.NewOwnedHandler(s.cfg, s.procMgr, s.logger.Zap())
 	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
 	auxHandler.RegisterRoutes(api)
 

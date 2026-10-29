@@ -167,6 +167,7 @@ type Submission struct {
 }
 
 type Journal struct {
+	fresh                    bool
 	mu                       sync.RWMutex
 	db                       *bolt.DB
 	pageSize                 int64
@@ -236,7 +237,11 @@ func (j *Journal) initialize() error {
 			if j.config.ExistingOnly {
 				return ErrJournalCorrupt
 			}
-			return initializeFreshJournal(tx, meta)
+			if err := initializeFreshJournal(tx, meta); err != nil {
+				return err
+			}
+			j.fresh = true
+			return nil
 		}
 		return validateExistingJournal(tx, meta, version)
 	})
