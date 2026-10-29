@@ -697,3 +697,25 @@ func materializeRepositoryWithQualifiedPRBase(
 ) (bool, error) {
 	return (materializeGitRunner{}).materializeRepositoryWithQualifiedPRBase(ctx, locator, destination, baseBranch, checkoutBranch, prNumber, qualifiedPRBase, binding, contributionDestination, options)
 }
+
+func TestValidateRepositoryLocator_E2ELocalFileRemote(t *testing.T) {
+	const fileLocator = "file:///tmp/local-rig/file-main.git"
+
+	t.Setenv("KANDEV_E2E_MOCK", "")
+	if err := validateRepositoryLocator(fileLocator); err == nil {
+		t.Fatal("file:// locator must stay refused outside the e2e profile")
+	}
+
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	if err := validateRepositoryLocator(fileLocator); err != nil {
+		t.Fatalf("e2e profile must accept a file:// locator: %v", err)
+	}
+	if err := validateRepositoryLocator("http://127.0.0.1:41234/local-rig-http-main.git"); err != nil {
+		t.Fatalf("e2e profile must accept a loopback http locator: %v", err)
+	}
+	for _, locator := range []string{"/srv/repos/private.git", "file://remotehost/srv/x.git", "file://user@/x.git", "local-rig-file-main"} {
+		if err := validateRepositoryLocator(locator); err == nil {
+			t.Fatalf("%q must stay refused under the e2e profile", locator)
+		}
+	}
+}
