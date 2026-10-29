@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -91,12 +92,7 @@ func encodeSnapshotReduction(fields rawPayloadObject, removed []string, snapshot
 }
 
 func encodeWithMarker(fields rawPayloadObject, marker map[string]any, snapshot string) (string, int64, bool, error) {
-	markerJSON, err := json.Marshal(marker)
-	if err != nil {
-		return "", 0, false, err
-	}
-	fields[snapshotReducedKey] = markerJSON
-	encoded, err := json.Marshal(fields)
+	encoded, err := encodeRetainedObject(fields, marker)
 	if err != nil {
 		return "", 0, false, err
 	}
@@ -105,12 +101,7 @@ func encodeWithMarker(fields rawPayloadObject, marker map[string]any, snapshot s
 		return "", 0, false, nil
 	}
 	marker["removed_bytes"] = json.Number(strconv.FormatFloat(float64(removedBytes), 'e', 8, 64))
-	markerJSON, err = json.Marshal(marker)
-	if err != nil {
-		return "", 0, false, err
-	}
-	fields[snapshotReducedKey] = markerJSON
-	encoded, err = json.Marshal(fields)
+	encoded, err = encodeRetainedObject(fields, marker)
 	if err != nil {
 		return "", 0, false, err
 	}
@@ -119,4 +110,45 @@ func encodeWithMarker(fields rawPayloadObject, marker map[string]any, snapshot s
 		return "", 0, false, nil
 	}
 	return string(encoded), removedBytes, true, nil
+}
+
+// encodeRetainedObject rebuilds the reduced snapshot from the retained fields'
+// original bytes, so the archive source evidence survives byte-for-byte instead
+// of being re-marshaled and compacted.
+func encodeRetainedObject(fields rawPayloadObject, marker map[string]any) ([]byte, error) {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, key := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		encodedKey, err := json.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(encodedKey)
+		b.WriteByte(':')
+		b.Write(fields[key])
+	}
+	if len(keys) > 0 {
+		b.WriteByte(',')
+	}
+	encodedKey, err := json.Marshal(snapshotReducedKey)
+	if err != nil {
+		return nil, err
+	}
+	encodedMarker, err := json.Marshal(marker)
+	if err != nil {
+		return nil, err
+	}
+	b.Write(encodedKey)
+	b.WriteByte(':')
+	b.Write(encodedMarker)
+	b.WriteByte('}')
+	return []byte(b.String()), nil
 }

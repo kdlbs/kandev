@@ -5,7 +5,10 @@ import type {
   ArchivedDataRetentionStatus,
   ArchivedDataTarget,
 } from "@/lib/types/archived-data-retention";
-import { cutoff } from "@/hooks/domains/system/use-archived-data-retention-draft";
+import {
+  cutoff,
+  validArchivedDays,
+} from "@/hooks/domains/system/use-archived-data-retention-draft";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { RetentionSkippedItems, retentionDate, skippedTotal } from "./retention-shared";
@@ -107,6 +110,7 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
 function windowEdited(storedCutoff: string, days: number, now: Date): boolean {
   const stored = parseTurnTimestamp(storedCutoff);
   if (stored === null) return true;
+  if (!validArchivedDays({ days })) return true;
   const day = BigInt(dayMilliseconds);
   const expected = BigInt(Math.trunc(cutoff(now, days)));
   return stored / day !== expected / day;
